@@ -425,23 +425,10 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	return matches, acks, err
 }
 
-// processNomatch finds the specified trackedTrade and runs its nomatch method.
-func (dc *dexConnection) processNomatch(oid order.OrderID) error {
-	tracker, _, _ := dc.findOrder(oid)
-	if tracker == nil {
-		return newError(unknownOrderErr, "No order found for 'nomatch' request from %s with order id %s", dc.acct.host, oid)
-	}
-	err := tracker.nomatch(oid)
-	if err != nil {
-		return err
-	}
-	dc.refreshMarkets()
-	return nil
-}
-
 // runMatches runs the sorted matches returned from parseMatches.
-func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) error {
-	runMatch := func(sm *serverMatches) error {
+func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
+	runMatch := func(sm *serverMatches) (assetMap, error) {
+		updatedAssets := make(assetMap)
 		tracker := sm.tracker
 		oid := tracker.ID()
 
@@ -449,7 +436,7 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 		if sm.cancel != nil {
 			err := tracker.processCancelMatch(sm.cancel)
 			if err != nil {
-				return fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
+				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
 					sm.cancel.OrderID, oid, err)
 			}
 		}
@@ -458,39 +445,55 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 		if len(sm.msgMatches) > 0 {
 			err := tracker.negotiate(sm.msgMatches)
 			if err != nil {
-				return fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
 			}
+
+			// Coins may be returned for canceled orders.
+			tracker.mtx.RLock()
+			if tracker.metaData.Status == order.OrderStatusCanceled {
+				updatedAssets.count(tracker.fromAssetID)
+			}
+			tracker.mtx.RUnlock()
 
 			// Try to tick the trade now, but do not interrupt on error. The
 			// trade will tick again automatically.
-			_, err = tracker.tick()
+			tickUpdatedAssets, err := tracker.tick()
+			updatedAssets.merge(tickUpdatedAssets)
 			if err != nil {
-				return fmt.Errorf("tick of order %v failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("tick of order %v failed: %v", oid, err)
 			}
 		}
 
-		return nil
+		return updatedAssets, nil
 	}
 
 	// Process the trades concurrently.
-	errChan := make(chan error)
+	type runMatchResult struct {
+		updatedAssets assetMap
+		err           error
+	}
+	resultChan := make(chan *runMatchResult)
 	for _, trade := range tradeMatches {
 		go func(trade *serverMatches) {
-			errChan <- runMatch(trade)
+			assetsUpdated, err := runMatch(trade)
+			resultChan <- &runMatchResult{assetsUpdated, err}
 		}(trade)
 	}
 
 	errs := newErrorSet("runMatches - ")
+	assetsUpdated := make(assetMap)
 	for range tradeMatches {
-		if err := <-errChan; err != nil {
-			errs.addErr(err)
+		result := <-resultChan
+		assetsUpdated.merge(result.updatedAssets) // assets might be updated even if an error occurs
+		if result.err != nil {
+			errs.addErr(result.err)
 		}
 	}
 
 	// Update Market.Orders for each market.
 	dc.refreshMarkets()
 
-	return errs.ifAny()
+	return assetsUpdated, errs.ifAny()
 }
 
 type matchDiscreps struct {
@@ -870,24 +873,40 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 }
 
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	bal, err := wallet.Balance()
 	if err != nil {
 		return nil, err
 	}
-	dbBal := &db.Balance{
-		Balance: *bal,
-		Stamp:   time.Now(),
+	walletBal := &WalletBalance{
+		Balance: &db.Balance{
+			Balance: *bal,
+			Stamp:   time.Now(),
+		},
+		ContractLocked: c.unspentContractAmounts(wallet.AssetID),
 	}
-	wallet.setBalance(dbBal)
-	err = c.db.UpdateBalance(wallet.dbID, dbBal)
+	wallet.setBalance(walletBal)
+	err = c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
 	if err != nil {
 		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
 	}
-	c.notify(newBalanceNote(wallet.AssetID, dbBal))
-	return dbBal, nil
+	c.notify(newBalanceNote(wallet.AssetID, walletBal))
+	return walletBal, nil
+}
+
+// unspentContractAmounts returns the total amount locked in unspent swaps.
+// connMtx lock MUST be held for reads.
+func (c *Core) unspentContractAmounts(assetID uint32) (amount uint64) {
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			amount += tracker.unspentContractAmounts(assetID)
+		}
+		dc.tradeMtx.RUnlock()
+	}
+	return amount
 }
 
 // updateBalances updates the balance for every key in the counter map.
@@ -1065,8 +1084,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	log.Infof("Created %s wallet. Balance available = %d / "+
-		"locked = %d, Deposit address = %s",
-		symbol, balances.Available, balances.Locked, dbWallet.Address)
+		"locked = %d / locked in contracts = %d, Deposit address = %s",
+		symbol, balances.Available, balances.Locked, balances.ContractLocked,
+		dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -1083,9 +1103,14 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+	c.connMtx.RLock() // required to calculate contractlocked amount
+	defer c.connMtx.RUnlock()
 	wallet := &xcWallet{
 		AssetID: dbWallet.AssetID,
-		balance: dbWallet.Balance,
+		balance: &WalletBalance{
+			Balance:        dbWallet.Balance,
+			ContractLocked: c.unspentContractAmounts(dbWallet.AssetID),
+		},
 		encPW:   dbWallet.EncryptedPW,
 		address: dbWallet.Address,
 		dbID:    dbWallet.ID(),
@@ -1139,8 +1164,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		return err
 	}
 	log.Infof("Connected to and unlocked %s wallet. Balance available "+
-		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, balances.Available, balances.Locked, state.Address)
+		"= %d / locked = %d / locked in contracts = %d, Deposit address = %s",
+		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
+		state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1227,9 +1253,11 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	dbWallet := &db.Wallet{
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
-		Balance:     oldWallet.balance,
 		EncryptedPW: oldWallet.encPW,
 		Address:     oldWallet.address,
+	}
+	if oldWallet.balance != nil {
+		dbWallet.Balance = oldWallet.balance.Balance
 	}
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
@@ -2197,8 +2225,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
-		// Do NOT unlock the coins because the request may have actually reached
-		// the server.
+		unlockCoins()
 		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
 	}
 
@@ -2233,7 +2260,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
-		// Do NOT unlock the coins, they're already locked by server.
+		unlockCoins()
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
 		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
@@ -2392,6 +2419,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	exceptions := dc.compareServerMatches(matches)
+	updatedAssets := make(assetMap)
 	for oid, matchAnomalies := range exceptions {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
@@ -2417,7 +2445,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Also, check if the now-Revoked matches were the last set of matches that
 		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
-			trade.maybeReturnCoins()
+			if trade.maybeReturnCoins() {
+				updatedAssets.count(trade.wallets.fromAsset.ID)
+			}
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
@@ -2438,11 +2468,15 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		trade.mtx.Unlock()
 	}
 
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	}
+
 	return nil
 }
 
 // AssetBalance retrieves the current wallet balance.
-func (c *Core) AssetBalance(assetID uint32) (*db.Balance, error) {
+func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
@@ -2875,8 +2909,14 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
-			relocks.count(wallets.fromAsset.ID)
 			tracker.coins = mapifyCoins(coins)
+		}
+
+		// Active orders and orders with matches with unsent swaps need the funding
+		// coin(s).
+		// Orders with sent but unspent swaps need to recompute contract-locked amts.
+		if isActive || needsCoins || tracker.unspentContractAmounts(wallets.fromAsset.ID) > 0 {
+			relocks.count(wallets.fromAsset.ID)
 		}
 
 		dc.trades[tracker.ID()] = tracker
@@ -3202,6 +3242,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 		if !sp.Persist {
 			// Revoke all active orders of the suspended market for the dex.
+			updatedAssets := make(assetMap)
 			dc.tradeMtx.RLock()
 			for _, tracker := range dc.trades {
 
@@ -3210,9 +3251,13 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 					tracker.metaData.Host == dc.acct.host {
 
 					tracker.revoke()
+					updatedAssets.count(tracker.fromAssetID)
 				}
 			}
 			dc.tradeMtx.RUnlock()
+
+			dc.refreshMarkets()
+			c.updateBalances(updatedAssets)
 		}
 	})
 
@@ -3448,7 +3493,13 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 			break
 		}
 	}
-	return dc.runMatches(matches)
+
+	updatedAssets, err := dc.runMatches(matches)
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	}
+
+	return err
 }
 
 // handleNoMatchRoute handles the DEX-originating nomatch request, which is sent
@@ -3461,7 +3512,17 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	}
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
-	return dc.processNomatch(oid)
+
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
+	}
+	updatedAssets, err := tracker.nomatch(oid)
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	}
+	dc.refreshMarkets()
+	return err
 }
 
 // handleAuditRoute handles the DEX-originating audit request, which is sent

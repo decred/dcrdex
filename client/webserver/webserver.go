@@ -22,7 +22,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"github.com/go-chi/chi"
@@ -63,7 +62,7 @@ type clientCore interface {
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
-	AssetBalance(assetID uint32) (*db.Balance, error)
+	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
 	CloseWallet(assetID uint32) error

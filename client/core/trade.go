@@ -208,13 +208,14 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 }
 
 // nomatch sets the appropriate order status and returns funding coins.
-func (t *trackedTrade) nomatch(oid order.OrderID) error {
+func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
+	assets := make(assetMap)
 	// Check if this is the cancel order.
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	if t.ID() != oid {
 		if t.cancel == nil || t.cancel.ID() != oid {
-			return newError(unknownOrderErr, "nomatch order ID %s does not match trade or cancel order", oid)
+			return assets, newError(unknownOrderErr, "nomatch order ID %s does not match trade or cancel order", oid)
 		}
 		// This is a cancel order. Cancel status goes to executed, but the trade
 		// status will not be canceled. Remove the trackedCancel and remove the
@@ -232,12 +233,12 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
-		return t.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
+		return assets, t.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
 	}
 	// This is the trade. Return coins and set status based on whether this is
 	// a standing limit order or not.
 	if t.metaData.Status != order.OrderStatusEpoch {
-		return fmt.Errorf("nomatch sent for non-epoch order %s", oid)
+		return assets, fmt.Errorf("nomatch sent for non-epoch order %s", oid)
 	}
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 		log.Infof("Standing order %s did not match and is now booked.", t.token())
@@ -246,12 +247,13 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		t.notify(newOrderNote("Order booked", "", db.Data, corder))
 	} else {
 		t.returnCoins()
+		assets.count(t.wallets.fromAsset.ID)
 		log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("No match", "", db.Data, corder))
 	}
-	return t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
+	return assets, t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
 
 // negotiate creates and stores matchTrackers for the []*msgjson.Match, and
@@ -594,6 +596,35 @@ func (t *trackedTrade) activeMatches() []*matchTracker {
 	return actives
 }
 
+// unspentContractAmounts returns the total amount locked in unspent swaps.
+func (t *trackedTrade) unspentContractAmounts(assetID uint32) (amount uint64) {
+	if t.fromAssetID != assetID {
+		// Only swaps sent from the specified assetID should count.
+		return 0
+	}
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	swapSentFromQuoteAsset := t.fromAssetID == t.Quote()
+	for _, match := range t.matches {
+		side, status := match.Match.Side, match.Match.Status
+		if status >= order.MakerRedeemed || len(match.MetaData.Proof.RefundCoin) != 0 {
+			// Any redemption or own refund implies our swap is spent.
+			// Even if we're Maker and our swap has not been redeemed
+			// by Taker, we should consider it spent.
+			continue
+		}
+		if (side == order.Maker && status >= order.MakerSwapCast) ||
+			(side == order.Taker && status == order.TakerSwapCast) {
+			swapAmount := match.Match.Quantity
+			if swapSentFromQuoteAsset {
+				swapAmount = calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
+			}
+			amount += swapAmount
+		}
+	}
+	return
+}
+
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
 //
@@ -857,6 +888,7 @@ func (t *trackedTrade) tick() (assetMap, error) {
 	if len(redeems) > 0 {
 		toAsset := t.wallets.toAsset.ID
 		assets.count(toAsset)
+		assets.count(t.fromAssetID) // update the from wallet balance to reduce contractlocked balance
 		qty := received
 		if t.Trade().Sell {
 			qty = quoteReceived

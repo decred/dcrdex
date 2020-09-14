@@ -19,7 +19,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -66,7 +65,7 @@ func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return c.book, c.bookErr
 }
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
-func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
+func (c *TCore) AssetBalance(uint32) (*core.WalletBalance, error) {
 	return nil, c.balanceErr
 }
 func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
