@@ -727,9 +727,6 @@ func (tCoin) Value() uint64 {
 func (tCoin) Confirmations() (uint32, error) {
 	return 0, nil
 }
-func (tCoin) Redeem() dex.Bytes {
-	return nil
-}
 
 func TestHandleWithdraw(t *testing.T) {
 	pw := encode.PassBytes("password123")

@@ -402,10 +402,10 @@ func (tdb *TDB) Backup() error {
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
-	id, script []byte
-	confs      uint32
-	confsErr   error
-	val        uint64
+	id       []byte
+	confs    uint32
+	confsErr error
+	val      uint64
 }
 
 func (c *tCoin) ID() dex.Bytes {
@@ -424,17 +424,18 @@ func (c *tCoin) Confirmations() (uint32, error) {
 	return c.confs, c.confsErr
 }
 
-func (c *tCoin) Redeem() dex.Bytes {
-	return c.script
-}
-
 type tReceipt struct {
 	coin       *tCoin
+	contract   []byte
 	expiration time.Time
 }
 
 func (r *tReceipt) Coin() asset.Coin {
 	return r.coin
+}
+
+func (r *tReceipt) Contract() dex.Bytes {
+	return r.contract
 }
 
 func (r *tReceipt) Expiration() time.Time {
@@ -449,6 +450,7 @@ type tAuditInfo struct {
 	recipient  string
 	expiration time.Time
 	coin       *tCoin
+	contract   []byte
 	secretHash []byte
 }
 
@@ -464,37 +466,42 @@ func (ai *tAuditInfo) Coin() asset.Coin {
 	return ai.coin
 }
 
+func (ai *tAuditInfo) Contract() dex.Bytes {
+	return ai.contract
+}
+
 func (ai *tAuditInfo) SecretHash() dex.Bytes {
 	return ai.secretHash
 }
 
 type TXCWallet struct {
-	mtx            sync.RWMutex
-	payFeeCoin     *tCoin
-	payFeeErr      error
-	fundCoins      asset.Coins
-	fundErr        error
-	addrErr        error
-	signCoinErr    error
-	lastSwaps      *asset.Swaps
-	swapReceipts   []asset.Receipt
-	auditInfo      asset.AuditInfo
-	auditErr       error
-	refundCoin     dex.Bytes
-	refundErr      error
-	redeemCoins    []dex.Bytes
-	badSecret      bool
-	fundedVal      uint64
-	fundedSwaps    uint64
-	connectErr     error
-	unlockErr      error
-	balErr         error
-	bal            *asset.Balance
-	fundingCoins   asset.Coins
-	returnedCoins  asset.Coins
-	fundingCoinErr error
-	lockErr        error
-	changeCoin     *tCoin
+	mtx               sync.RWMutex
+	payFeeCoin        *tCoin
+	payFeeErr         error
+	fundCoins         asset.Coins
+	fundRedeemScripts []dex.Bytes
+	fundErr           error
+	addrErr           error
+	signCoinErr       error
+	lastSwaps         *asset.Swaps
+	swapReceipts      []asset.Receipt
+	auditInfo         asset.AuditInfo
+	auditErr          error
+	refundCoin        dex.Bytes
+	refundErr         error
+	redeemCoins       []dex.Bytes
+	badSecret         bool
+	fundedVal         uint64
+	fundedSwaps       uint64
+	connectErr        error
+	unlockErr         error
+	balErr            error
+	bal               *asset.Balance
+	fundingCoins      asset.Coins
+	returnedCoins     asset.Coins
+	fundingCoinErr    error
+	lockErr           error
+	changeCoin        *tCoin
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -535,10 +542,10 @@ func (w *TXCWallet) FeeRate() (uint64, error) {
 	return 24, nil
 }
 
-func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
+func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	w.fundedVal = ord.Value
 	w.fundedSwaps = ord.MaxSwapCount
-	return w.fundCoins, w.fundErr
+	return w.fundCoins, w.fundRedeemScripts, w.fundErr
 }
 
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
@@ -1822,6 +1829,7 @@ func TestTrade(t *testing.T) {
 		val: qty * 2,
 	}
 	tDcrWallet.fundCoins = asset.Coins{dcrCoin}
+	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	btcVal := calc.BaseToQuote(rate, qty*2)
 	btcCoin := &tCoin{
@@ -1829,6 +1837,7 @@ func TestTrade(t *testing.T) {
 		val: btcVal,
 	}
 	tBtcWallet.fundCoins = asset.Coins{btcCoin}
+	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	book := newBookie(func() {})
 	rig.dc.books[tDcrBtcMktName] = book
@@ -2796,7 +2805,7 @@ func TestRefunds(t *testing.T) {
 	}
 	swapID := encode.RandomBytes(36)
 	contract := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID, script: contract}}}
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}, contract: contract}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -2873,7 +2882,7 @@ func TestRefunds(t *testing.T) {
 	auditInfo.coin.confs = tBTC.SwapConf
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID, script: counterScript}}}
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	dc.tickAsset(tBTC.ID)
 
@@ -3391,6 +3400,7 @@ func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint6
 	auditInfo := &tAuditInfo{
 		recipient:  recipient,
 		coin:       auditCoin,
+		contract:   auditContract,
 		secretHash: secretHash,
 	}
 	return audit, auditInfo

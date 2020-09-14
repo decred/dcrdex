@@ -1135,11 +1135,11 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		match := matches[i]
 		coin := receipt.Coin()
 		log.Infof("Contract coin %v (%s), value = %d, refundable at %v (script = %v)",
-			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), coin.Redeem())
+			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.Contract())
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			log.Tracef("Contract coin %v secret = %x", coin, secret)
 		}
-		err := t.finalizeSwapAction(match, coin.ID(), coin.Redeem())
+		err := t.finalizeSwapAction(match, coin.ID(), receipt.Contract())
 		if err != nil {
 			errs.addErr(err)
 		}
