@@ -399,6 +399,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
+	// Ensure txWaitExpiration is not greater than broadcast timeout setting.
 	if sensible := swapper.bTimeout; txWaitExpiration > sensible {
 		txWaitExpiration = sensible
 	}
@@ -824,7 +825,8 @@ func (s *Swapper) rmLiveWaiter(user account.AccountID, msgID uint64) {
 	s.liveWaitersMtx.Unlock()
 }
 
-// Run is the main Swapper loop.
+// Run is the main Swapper loop. It's primary purpose is to update transaction
+// confirmations when new blocks are mined, and to trigger inaction checks.
 func (s *Swapper) Run(ctx context.Context) {
 	// Permit internal cancel on anomaly such as storage failure.
 	ctxMaster, cancel := context.WithCancel(ctx)
@@ -861,7 +863,7 @@ func (s *Swapper) Run(ctx context.Context) {
 
 	// Start a listen loop for each asset's block channel. Normal shutdown stops
 	// this before the main loop since this sends to the main loop.
-	blockNotes := make(chan *blockNotification, 128)
+	blockNotes := make(chan *blockNotification, 32*len(s.coins))
 	for assetID, lockable := range s.coins {
 		wgHelpers.Add(1)
 		go func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
@@ -902,53 +904,28 @@ func (s *Swapper) Run(ctx context.Context) {
 
 	log.Debugf("Swapper started with %v broadcast timeout.", s.bTimeout)
 
-	// Block-based inaction checks are started with Timers. Track them so that
-	// they may be stopped on shutdown.
-	var timerID uint32
-	var checkTimerMtx sync.Mutex
-	checkTimers := make(map[uint32]*time.Timer)
-
-	// On shutdown, stop any unfired check timers.
-	defer func() {
-		checkTimerMtx.Lock()
-		for id, t := range checkTimers {
-			t.Stop()
-			delete(checkTimers, id)
-		}
-		checkTimerMtx.Unlock()
-	}()
-
-	startCheckTimer := func(assetID uint32) {
-		id := timerID
-		timerID++
-		checkTimerMtx.Lock()
-		checkTimers[id] = time.AfterFunc(s.bTimeout, func() {
-			checkTimerMtx.Lock()
-			if _, ok := checkTimers[id]; !ok {
-				checkTimerMtx.Unlock()
-				return // shutdown removed us first
+	// Block-based inaction checks are started with Timers, and run in the main
+	// loop to avoid locks and WaitGroups.
+	bcastBlockTrigger := make(chan uint32, 32*len(s.coins))
+	scheduleInactionCheck := func(assetID uint32) {
+		time.AfterFunc(s.bTimeout, func() {
+			select {
+			case bcastBlockTrigger <- assetID: // all checks run in main loop
+			case <-ctxMaster.Done():
 			}
-			// Unregister the timer and start the check.
-			delete(checkTimers, id)
-			wgHelpers.Add(1) // while locked so none can start after the shutdown defer
-			checkTimerMtx.Unlock()
-			s.checkInactionBlockBased(assetID)
-			wgHelpers.Done()
 		})
-		checkTimerMtx.Unlock()
 	}
 
 	// On startup, schedule an inaction check for each asset. Ideally these
 	// would start bTimeout after the best block times.
 	for assetID := range s.coins {
-		startCheckTimer(assetID)
+		scheduleInactionCheck(assetID)
 	}
 
-	// For actions that are expected some time after other events, just have a
-	// ticker. Each event could make an AfterFunc, but this allows match checks
-	// to be batched, and it's simpler.
-	bcastEventTicker := time.NewTicker(s.bTimeout / 4)
-	defer bcastEventTicker.Stop()
+	// Event-based action checks are started with a single ticker. Each of the
+	// events, e.g. match request, could start a timer, but this is simpler and
+	// allows batching the match checks.
+	bcastEventTrigger := bufferedTicker(ctxMaster, s.bTimeout/4)
 
 	// Main loop can stop on internal error via cancel(), or when the caller
 	// cancels the parent context triggering graceful shutdown.
@@ -995,10 +972,15 @@ func (s *Swapper) Run(ctx context.Context) {
 				// Schedule an inaction check for matches that involve this
 				// asset, as they could be expecting user action within bTimeout
 				// of this event.
-				startCheckTimer(block.assetID)
+				scheduleInactionCheck(block.assetID)
 
-			case <-bcastEventTicker.C:
-				s.checkInactionEventsBased()
+			case assetID := <-bcastBlockTrigger:
+				// There was a new block for this asset bTimeout ago.
+				s.checkInactionBlockBased(assetID)
+
+			case <-bcastEventTrigger:
+				// Inaction checks that are not relative to blocks.
+				s.checkInactionEventBased()
 
 			case <-mainLoop:
 				return
@@ -1008,6 +990,26 @@ func (s *Swapper) Run(ctx context.Context) {
 
 	// Wait for caller cancel or anomalous return from main loop.
 	<-ctxMaster.Done()
+}
+
+// bufferedTicker creates a "ticker" that periodically sends on the returned
+// channel, which has a buffer of length 1 and thus suitable for use in a select
+// with other events that might cause a regular Ticker send to be dropped.
+func bufferedTicker(ctx context.Context, dur time.Duration) chan struct{} {
+	buffered := make(chan struct{}, 1) // only need 1 since back-to-back is pointless
+	go func() {
+		ticker := time.NewTicker(dur)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				buffered <- struct{}{}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return buffered
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) {
@@ -1214,7 +1216,7 @@ func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
 	s.revoke(match)
 }
 
-func (s *Swapper) checkInactionEventsBased() {
+func (s *Swapper) checkInactionEventBased() {
 	// If the DB is failing, do not penalize or attempt to start revocations.
 	if err := s.storage.LastErr(); err != nil {
 		log.Errorf("DB in failing state.")
@@ -1235,7 +1237,7 @@ func (s *Swapper) checkInactionEventsBased() {
 		match.mtx.RLock()
 		defer match.mtx.RUnlock()
 
-		log.Tracef("checkInactionEventsBased() => checkMatch(%v, %v)",
+		log.Tracef("checkInactionEventBased() => checkMatch(%v, %v)",
 			match.ID(), match.Status)
 
 		failMatch := func(makerFault bool) {
