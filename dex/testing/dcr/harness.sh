@@ -62,9 +62,11 @@ cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
   esac
   for i in \$(seq \$NUM) ; do
     dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf regentemplate
-    sleep 0.1
+    sleep 0.05
     dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
-    sleep 0.5
+    if [ $i != $NUM ]; then
+      sleep 0.5
+    fi
   done
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/mine-alpha"
@@ -79,9 +81,11 @@ NUM=1
   esac
   for i in \$(seq \$NUM) ; do
     dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf regentemplate
-    sleep 0.1
+    sleep 0.05
     dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
-    sleep 0.5
+    if [ $i != $NUM ]; then
+      sleep 0.5
+    fi
   done
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
@@ -221,10 +225,12 @@ sleep 5
 # Have alpha send some credits to the other wallets
 for i in 10 18 5 7 1 15 3 25
 do
-  tmux send-keys -t $SESSION:0 "./fund ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for donedcr
-  tmux send-keys -t $SESSION:0 "./fund ${TRADING_WALLET1_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
-  tmux send-keys -t $SESSION:0 "./fund ${TRADING_WALLET2_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
+  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for donedcr
+  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${TRADING_WALLET1_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
+  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${TRADING_WALLET2_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
 done
+sleep 0.5
+tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
