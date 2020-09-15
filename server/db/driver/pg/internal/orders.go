@@ -101,6 +101,11 @@ const (
 	// CancelOrderStatus.
 	OrderStatus = `SELECT type, status, filled FROM %s WHERE oid = $1;`
 
+	// OrderStatuses retrieves the order id, order status, and filled amount
+	// for orders with the given order IDs. This only applies to market and
+	// limit orders.
+	OrderStatuses = `SELECT oid, status, filled FROM %s WHERE account_id = $1 AND oid = ANY($2);`
+
 	// MoveOrder moves an order row from one table to another (e.g.
 	// orders_active to orders_archived), while updating the order's status and
 	// filled amounts.

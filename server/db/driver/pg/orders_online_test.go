@@ -889,6 +889,142 @@ func TestOrderStatus(t *testing.T) {
 	}
 }
 
+func TestOrderStatuses(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	var epochIdx, epochDur int64 = 13245678, 6000
+
+	// Do not use Stringers when dumping, and stop after 4 levels deep
+	spew.Config.MaxDepth = 4
+	spew.Config.DisableMethods = true
+
+	orderStatuses := []struct {
+		ord    order.Order
+		status order.OrderStatus
+	}{
+		{
+			newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
+			order.OrderStatusBooked, // active
+		},
+		{
+			newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
+			order.OrderStatusExecuted, // archived
+		},
+		{
+			newMarketSellOrder(2, 0),
+			order.OrderStatusEpoch, // active
+		},
+		{
+			newMarketSellOrder(1, 0),
+			order.OrderStatusExecuted, // archived
+		},
+		{
+			newMarketBuyOrder(2000000000, 0),
+			order.OrderStatusEpoch, // active
+		},
+		{
+			newMarketBuyOrder(2100000000, 0),
+			order.OrderStatusExecuted, // archived
+		},
+	}
+
+	unsavedOrder1 := newMarketBuyOrder(3000000000, 0)
+	unsavedOrder2 := newMarketSellOrder(4, 0)
+
+	orders := make([]order.Order, len(orderStatuses)+2)
+	orderIDs := make([]order.OrderID, len(orderStatuses)+2)
+
+	// Add unsaved orders
+	orders = append(orders, unsavedOrder1, unsavedOrder2)
+	orderIDs = append(orderIDs, unsavedOrder1.ID(), unsavedOrder2.ID())
+
+	accountID := randomAccountID()
+	for i := range orderStatuses {
+		ordIn := orderStatuses[i].ord
+		statusIn := orderStatuses[i].status
+		ordIn.Trade().AddFill(LotSize)
+		if lo, ok := ordIn.(*order.LimitOrder); ok {
+			lo.BaseAsset, lo.QuoteAsset = AssetBTC, AssetLTC // swap the assets to test across different mkts
+		}
+		ordIn.Prefix().AccountID = accountID
+		err := archie.StoreOrder(ordIn, epochIdx, epochDur, statusIn)
+		if err != nil {
+			t.Fatalf("StoreOrder failed: %v", err)
+		}
+		orders = append(orders, ordIn)
+		orderIDs = append(orderIDs, ordIn.ID())
+	}
+
+	// All orders except the 2 limit orders are DCR-BTC.
+	orderStatusesOut, err := archie.OrderStatuses(accountID, AssetDCR, AssetBTC, orderIDs)
+	if err != nil {
+		t.Fatalf("OrderStatuses failed: %v", err)
+	}
+	if len(orderStatusesOut) != len(orderStatuses)-2 /*the 2 limits*/ {
+		t.Fatalf("OrderStatuses returned %d orders instead of %d", len(orderStatusesOut), len(orderStatuses)-2)
+	}
+	outMap := make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
+	for _, orderStatus := range orderStatusesOut {
+		outMap[orderStatus.ID] = orderStatus
+	}
+	for i := range orderStatuses {
+		ordIn := orderStatuses[i].ord
+		orderOut, found := outMap[ordIn.ID()]
+		if !found {
+			continue
+		}
+		statusIn := orderStatuses[i].status
+		if orderOut.Status != statusIn {
+			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
+				orderOut.Status, statusIn)
+		}
+		if orderOut.Fill != int64(ordIn.Trade().Filled()) {
+			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
+				orderOut.Fill, ordIn.Trade().Filled())
+		}
+	}
+
+	// Check statuses for the 2 limit orders that are BTC-LTC.
+	orderStatusesOut, err = archie.OrderStatuses(accountID, AssetBTC, AssetLTC, orderIDs)
+	if err != nil {
+		t.Fatalf("OrderStatuses failed: %v", err)
+	}
+	if len(orderStatusesOut) != 2 /*the 2 limits*/ {
+		t.Fatalf("OrderStatuses returned %d orders instead of %d", len(orderStatusesOut), 2)
+	}
+	outMap = make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
+	for _, orderStatus := range orderStatusesOut {
+		outMap[orderStatus.ID] = orderStatus
+	}
+	for i := range orderStatuses {
+		ordIn := orderStatuses[i].ord
+		orderOut, found := outMap[ordIn.ID()]
+		if !found {
+			continue
+		}
+		statusIn := orderStatuses[i].status
+		if orderOut.Status != statusIn {
+			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
+				orderOut.Status, statusIn)
+		}
+		if orderOut.Fill != int64(ordIn.Trade().Filled()) {
+			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
+				orderOut.Fill, ordIn.Trade().Filled())
+		}
+	}
+
+	// Expect nothing for wrong user ID.
+	orderStatusesOut, err = archie.OrderStatuses(randomAccountID(), AssetDCR, AssetBTC, orderIDs)
+	if err != nil {
+		t.Fatalf("OrderStatuses failed: %v", err)
+	}
+	if len(orderStatusesOut) != 0 {
+		t.Fatalf("OrderStatuses returned %d orders for wrong account ID", len(orderStatusesOut))
+	}
+}
+
 func TestCancelOrderStatus(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)

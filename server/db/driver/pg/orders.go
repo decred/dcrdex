@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
+	"github.com/lib/pq"
 )
 
 // Wrap the CoinID slice to implement custom Scanner and Valuer.
@@ -774,6 +775,58 @@ func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType,
 	return a.orderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
+func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	// Search active orders first.
+	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	orderStatuses, orderFills, err := findOrders(ctx, a.db, aid, oids, fullTable)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+
+	orders := make([]*db.OrderStatus, 0, len(oids))
+	notFoundOids := make([]order.OrderID, 0, len(oids))
+	for _, oid := range oids {
+		if _, found := orderStatuses[oid]; found {
+			orders = append(orders, &db.OrderStatus{
+				ID:     oid,
+				Status: orderStatuses[oid],
+				Fill:   orderFills[oid],
+			})
+		} else {
+			notFoundOids = append(notFoundOids, oid)
+		}
+	}
+
+	if len(notFoundOids) == 0 {
+		return orders, nil
+	}
+
+	// Search archived orders.
+	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
+	ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
+	orderStatuses, orderFills, err = findOrders(ctx, a.db, aid, notFoundOids, fullTable)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	for oid := range orderStatuses {
+		orders = append(orders, &db.OrderStatus{
+			ID:     oid,
+			Status: orderStatuses[oid],
+			Fill:   orderFills[oid],
+		})
+	}
+
+	return orders, nil
+}
+
 // UpdateOrderStatusByID updates the status and filled amount of the order with
 // the given OrderID in the market specified by a base and quote asset. If
 // filled is -1, the filled amount is unchanged. For cancel orders, the filled
@@ -1129,6 +1182,41 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	default:
 		return false, orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
+}
+
+func findOrders(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []order.OrderID, fullTable string) (map[order.OrderID]order.OrderStatus, map[order.OrderID]int64, error) {
+	oidArr := make(pq.ByteaArray, 0, len(oids))
+	for i := range oids {
+		oidArr = append(oidArr, oids[i][:])
+	}
+
+	stmt := fmt.Sprintf(internal.OrderStatuses, fullTable)
+	var rows *sql.Rows
+	rows, err := dbe.QueryContext(ctx, stmt, aid, oidArr)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	orderStatuses := make(map[order.OrderID]order.OrderStatus, len(oids))
+	orderFills := make(map[order.OrderID]int64, len(oids))
+	for rows.Next() {
+		var oid order.OrderID
+		var status pgOrderStatus
+		var filled int64
+		err = rows.Scan(&oid, &status, &filled)
+		if err != nil {
+			return nil, nil, err
+		}
+		orderStatuses[oid] = pgToMarketStatus(status)
+		orderFills[oid] = filled
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return orderStatuses, orderFills, nil
 }
 
 // loadTrade does NOT set BaseAsset and QuoteAsset!

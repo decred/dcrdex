@@ -43,18 +43,19 @@ type ratioData struct {
 
 // TStorage satisfies the Storage interface
 type TStorage struct {
-	acct     *account.Account
-	matches  []*db.MatchData
-	closedID account.AccountID
-	statuses []*db.MatchStatus
-	acctAddr string
-	acctErr  error
-	regAddr  string
-	regErr   error
-	payErr   error
-	unpaid   bool
-	closed   bool
-	ratio    ratioData
+	acct          *account.Account
+	matches       []*db.MatchData
+	closedID      account.AccountID
+	matchStatuses []*db.MatchStatus
+	orderStatuses []*db.OrderStatus
+	acctAddr      string
+	acctErr       error
+	regAddr       string
+	regErr        error
+	payErr        error
+	unpaid        bool
+	closed        bool
+	ratio         ratioData
 }
 
 func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
@@ -71,7 +72,10 @@ func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, err
 	return s.matches, nil
 }
 func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
-	return s.statuses, nil
+	return s.matchStatuses, nil
+}
+func (s *TStorage) OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error) {
+	return s.orderStatuses, nil
 }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
@@ -1427,7 +1431,7 @@ func TestMatchStatus(t *testing.T) {
 	user := tNewUser(t)
 	connectUser(t, user)
 
-	rig.storage.statuses = []*db.MatchStatus{{}}
+	rig.storage.matchStatuses = []*db.MatchStatus{{}}
 
 	reqPayload := []msgjson.MatchRequest{
 		{
@@ -1460,5 +1464,46 @@ func TestMatchStatus(t *testing.T) {
 	err = rig.mgr.handleMatchStatus(user.conn, req)
 	if err == nil {
 		t.Fatalf("no error for bad match ID")
+	}
+}
+
+func TestOrderStatus(t *testing.T) {
+	resetStorage()
+	user := tNewUser(t)
+	connectUser(t, user)
+
+	rig.storage.orderStatuses = []*db.OrderStatus{{}}
+
+	reqPayload := []msgjson.OrderStatusRequest{
+		{
+			OrderID: encode.RandomBytes(order.OrderIDSize),
+		},
+	}
+
+	req, _ := msgjson.NewRequest(1, msgjson.OrderStatusRoute, reqPayload)
+
+	msgErr := rig.mgr.handleOrderStatus(user.conn, req)
+	if msgErr != nil {
+		t.Fatalf("handleOrderStatus error: %v", msgErr)
+	}
+
+	resp := user.conn.getSend()
+	if resp == nil {
+		t.Fatalf("no orders sent")
+	}
+
+	statuses := []msgjson.OrderStatusResult{}
+	err := resp.UnmarshalResult(&statuses)
+	if err != nil {
+		t.Fatalf("UnmarshalResult error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 order, got %d", len(statuses))
+	}
+
+	reqPayload[0].OrderID = []byte{}
+	err = rig.mgr.handleOrderStatus(user.conn, req)
+	if err == nil {
+		t.Fatalf("no error for bad order ID")
 	}
 }

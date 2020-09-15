@@ -92,6 +92,9 @@ func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) (oids
 func (ta *TArchivist) OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return order.OrderStatusUnknown, order.UnknownOrderType, -1, errors.New("boom")
 }
+func (ta *TArchivist) OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error) {
+	return nil, errors.New("not mocked")
+}
 func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()

@@ -82,6 +82,9 @@ const (
 	// MatchStatusRoute is the route of a client-originating request-type
 	// message to retrieve match data from the DEX.
 	MatchStatusRoute = "match_status"
+	// OrderStatusRoute is the route of a client-originating request-type
+	// message to retrieve order data from the DEX.
+	OrderStatusRoute = "order_status"
 	// InitRoute is the route of a client-originating request-type message
 	// notifying the DEX, and subsequently the match counter-party, of the details
 	// of a swap contract.
@@ -467,6 +470,21 @@ type MatchStatusResult struct {
 	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
 	Secret        Bytes `json:"secret,omitempty"`
 	Active        bool  `json:"active"`
+}
+
+// OrderStatusRequest details an order for the OrderStatusRoute request. The
+// actual payload is a []OrderStatusRequest.
+type OrderStatusRequest struct {
+	Base    uint32 `json:"base"`
+	Quote   uint32 `json:"quote"`
+	OrderID Bytes  `json:"orderid"`
+}
+
+// OrderStatusResult is the successful result for the OrderStatusRoute request.
+type OrderStatusResult struct {
+	OrderID Bytes
+	Status  uint16
+	Fill    int64
 }
 
 // Init is the payload for a client-originating InitRoute request.

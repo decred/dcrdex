@@ -46,6 +46,7 @@ type Storage interface {
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
+	OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error)
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
@@ -232,6 +233,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	comms.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
+	comms.Route(msgjson.OrderStatusRoute, auth.handleOrderStatus)
 	return auth
 }
 
@@ -1174,6 +1176,103 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	err = conn.Send(resp)
 	if err != nil {
 		log.Error("error sending match_status response: " + err.Error())
+	}
+	return nil
+}
+
+// marketOrders is an index of order IDs associated with a particular market.
+type marketOrders struct {
+	base     uint32
+	quote    uint32
+	orderIDs map[order.OrderID]bool
+}
+
+// add adds a match ID to the marketMatches.
+func (mo *marketOrders) add(oid order.OrderID) bool {
+	_, found := mo.orderIDs[oid]
+	mo.orderIDs[oid] = true
+	return !found
+}
+
+// idList generates a []order.OrderID from the currently indexed order IDs.
+func (mo *marketOrders) idList() []order.OrderID {
+	ids := make([]order.OrderID, 0, len(mo.orderIDs))
+	for oid := range mo.orderIDs {
+		ids = append(ids, oid)
+	}
+	return ids
+}
+
+// handleOrderStatus handles requests to the 'order_status' route.
+func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	client := auth.conn(conn)
+	if client == nil {
+		return msgjson.NewError(msgjson.UnauthorizedConnection,
+			"cannot use route 'order_status' on an unauthorized connection")
+	}
+
+	var orderReqs []msgjson.OrderStatusRequest
+	err := json.Unmarshal(msg.Payload, &orderReqs)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status: %v", err)
+	}
+
+	mkts := make(map[string]*marketOrders)
+	var uniqueReqsCount int
+	for _, req := range orderReqs {
+		mkt, err := dex.MarketName(req.Base, req.Quote)
+		if err != nil {
+			return msgjson.NewError(msgjson.InvalidRequestError, "market with base=%d, quote=%d is not known", req.Base, req.Quote)
+		}
+		if len(req.OrderID) != order.OrderIDSize {
+			return msgjson.NewError(msgjson.InvalidRequestError, "order ID is wrong length: %s", req.OrderID)
+		}
+		mktOrders, found := mkts[mkt]
+		if !found {
+			mktOrders = &marketOrders{
+				base:     req.Base,
+				quote:    req.Quote,
+				orderIDs: make(map[order.OrderID]bool),
+			}
+			mkts[mkt] = mktOrders
+		}
+		var oid order.OrderID
+		copy(oid[:], req.OrderID)
+		if mktOrders.add(oid) {
+			uniqueReqsCount++
+		}
+	}
+
+	results := make([]*msgjson.OrderStatusResult, 0, uniqueReqsCount)
+	for _, mm := range mkts {
+		orderStatuses, err := auth.storage.OrderStatuses(client.acct.ID, mm.base, mm.quote, mm.idList())
+		// no results is not an error
+		if err != nil {
+			log.Errorf("OrderStatuses error: acct = %s, base = %d, quote = %d, orderIDs = %v: %v",
+				client.acct.ID, mm.base, mm.quote, mm.orderIDs, err)
+			return msgjson.NewError(msgjson.RPCInternalError, "DB error")
+		}
+		for _, order := range orderStatuses {
+			results = append(results, &msgjson.OrderStatusResult{
+				OrderID: order.ID.Bytes(),
+				Status:  uint16(order.Status),
+				Fill:    order.Fill,
+			})
+		}
+	}
+
+	log.Tracef("%d results for %d requested order statuses, acct = %s",
+		len(results), uniqueReqsCount, client.acct.ID)
+
+	resp, err := msgjson.NewResponse(msg.ID, results, nil)
+	if err != nil {
+		log.Errorf("NewResponse error: %v", err)
+		return msgjson.NewError(msgjson.RPCInternalError, "Internal error")
+	}
+
+	err = conn.Send(resp)
+	if err != nil {
+		log.Error("error sending order_status response: " + err.Error())
 	}
 	return nil
 }
