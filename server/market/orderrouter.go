@@ -24,8 +24,6 @@ import (
 	"decred.org/dcrdex/server/matcher"
 )
 
-const maxClockOffset = 600_000 // milliseconds => 600 sec => 10 minutes
-
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
@@ -41,7 +39,11 @@ type AuthManager interface {
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
 
-const DefaultConnectTimeout = 10 * time.Minute
+const (
+	DefaultConnectTimeout = 10 * time.Minute
+	maxClockOffset        = 600_000 // milliseconds => 600 sec => 10 minutes
+	fundingTxWait         = time.Minute
+)
 
 // MarketTunnel is a connection to a market and information about existing
 // swaps.
@@ -317,7 +319,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	log.Tracef("Searching for %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
 	r.latencyQ.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(time.Minute),
+		Expiration: time.Now().Add(fundingTxWait),
 		TryFunc: func() bool {
 			tryAgain, msgErr := checkCoins()
 			if tryAgain {
@@ -503,7 +505,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 	log.Tracef("Searching for %s coins %v for new market order", fundingAsset.Symbol, coinStrs)
 	r.latencyQ.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(time.Minute),
+		Expiration: time.Now().Add(fundingTxWait),
 		TryFunc: func() bool {
 			tryAgain, msgErr := checkCoins()
 			if tryAgain {

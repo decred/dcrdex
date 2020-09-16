@@ -165,7 +165,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	httpServer := &http.Server{
 		Handler:      mux,
 		ReadTimeout:  httpConnTimeoutSeconds * time.Second, // slow requests should not hold connections opened
-		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
+		WriteTimeout: 2 * time.Minute,                      // request to response time, must be long enough for slow handlers
 	}
 
 	// Make the server here so its methods can be registered.
@@ -179,6 +179,9 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	}
 
 	// Middleware
+	if log.Level() == dex.LevelTrace {
+		mux.Use(middleware.Logger)
+	}
 	mux.Use(securityMiddleware)
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)

@@ -83,7 +83,10 @@ type dexConnection struct {
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
 // successfully sent.
-const DefaultResponseTimeout = comms.DefaultResponseTimeout
+const (
+	DefaultResponseTimeout = comms.DefaultResponseTimeout
+	fundingTxWait          = time.Minute
+)
 
 // suspended returns the suspended status of the provided market.
 func (dc *dexConnection) suspended(mkt string) bool {
@@ -2232,7 +2235,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	dc.submittingTrades.Add(1) // flag that we're waiting on an OrderResult
 	defer dc.submittingTrades.Done()
 	result := new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
+	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
 		unlockCoins()
 		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)

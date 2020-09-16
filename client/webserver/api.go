@@ -141,6 +141,8 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
+	r.Close = true
+	// log.Tracef("apiTrade: (%d-%d) sell = %v, quantity = %d", form.Order.Base, form.Order.Quote, form.Order.Sell, form.Order.Qty)
 	ord, err := s.core.Trade(form.Pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
@@ -153,6 +155,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		OK:    true,
 		Order: ord,
 	}
+	w.Header().Set("Connection", "close")
 	writeJSON(w, resp, s.indent)
 }
 
