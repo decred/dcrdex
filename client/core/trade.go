@@ -1153,10 +1153,10 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	} else {
 		t.coins[hex.EncodeToString(change.ID())] = change
 		t.metaData.ChangeCoin = []byte(change.ID())
+		log.Debugf("Saving change coin %v (%v) to DB for order %v",
+			coinIDString(fromAsset.ID, t.metaData.ChangeCoin), fromAsset.Symbol, t.ID())
 	}
 	t.change = change
-	log.Debugf("Saving change coin %v (%v) to DB for order %v",
-		coinIDString(fromAsset.ID, t.metaData.ChangeCoin), fromAsset.Symbol, t.ID())
 	t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 
 	// Process the swap for each match by sending the `init` request
