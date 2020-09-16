@@ -32,7 +32,7 @@ import (
 
 var (
 	// The coin waiter will query for transaction data every recheckInterval.
-	recheckInterval = time.Second * 5
+	recheckInterval = time.Second * 3
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = 2 * time.Minute
@@ -264,7 +264,6 @@ func (s *orderSwapTracker) canceled(ord order.Order) {
 	stat := s.orderMatches[oid]
 	if stat == nil {
 		// No active swaps for canceled order, OK.
-		log.Debugf("orderOffBook: untracked order %v", oid)
 		return
 	}
 
@@ -1547,6 +1546,9 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Remove the live acker from Swapper's tracking.
 	defer s.rmLiveAckers(msg.ID)
 
+	acker.match.mtx.Lock()
+	defer acker.match.mtx.Unlock()
+
 	// The time that the ack is received is stored for redeem acks to facilitate
 	// cancellation rate enforcement.
 	tAck := time.Now()
@@ -1573,9 +1575,6 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// actor.
 	mktMatch := db.MatchID(acker.match.Match)
 
-	acker.match.mtx.Lock()
-	defer acker.match.mtx.Unlock()
-
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
 		log.Infof("Received revoke_match ack for match %v, order %v, user %v",
 			rev.MatchID, rev.OrderID, acker.user)
@@ -1585,7 +1584,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 
 	// This is an ack of either contract audit or redemption receipt.
 	if acker.isAudit {
-		log.Debugf("Received contract audit acknowledgement from user %v (%s) for match %v (%v)",
+		log.Debugf("Received contract 'audit' acknowledgement from user %v (%s) for match %v (%v)",
 			acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
 		// It's a contract audit ack.
 		if acker.isMaker {
@@ -1599,8 +1598,10 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	}
 
 	// It's a redemption ack.
-	log.Debugf("Received redemption acknowledgement from user %v (%s) for match %v (%s)",
+	log.Debugf("Received 'redemption' acknowledgement from user %v (%s) for match %v (%s)",
 		acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
+
+	// TODO: Don't record it if the match is revoked.
 
 	// This is a redemption acknowledgement. Store the ack signature, and
 	// potentially record the order as complete with the auth manager and in
@@ -1739,7 +1740,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.matchMtx.RLock()
 	if _, found := s.matches[matchID]; !found {
 		s.matchMtx.RUnlock()
-		log.Errorf("contract txn found after match was revoked (match id=%v, maker=%v)",
+		log.Errorf("Contract txn located after match was revoked (match id=%v, maker=%v)",
 			matchID, actor.isMaker)
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, "match already revoked due to inaction")
 		return wait.DontTryAgain
@@ -1798,7 +1799,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		isAudit: true,
 	}
 	// Send the 'audit' request to the counter-party.
-	log.Debugf("processInit: sending contract 'audit' ack request to counterparty %v (%s) "+
+	log.Debugf("processInit: sending contract 'audit' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 
 	// Register that there is an outstanding ack request. This is unregistered
@@ -1808,8 +1809,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Expire function to unregister the outstanding request.
 	expireFunc := func() {
 		s.rmLiveAckers(notification.ID)
-		log.Infof("Timeout waiting for contract audit request from user %v (%s).",
-			ack.user, makerTaker(ack.isMaker))
+		log.Infof("Timeout waiting for contract 'audit' request from user %v (%s) for match %v",
+			ack.user, makerTaker(ack.isMaker), matchID)
 	}
 
 	// Send the ack request.
@@ -1841,6 +1842,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	counterParty.status.mtx.RLock()
 	cpContract := counterParty.status.swap.RedeemScript()
 	cpSwapCoin := counterParty.status.swap.ID()
+	cpSwapStr := counterParty.status.swap.String()
 	counterParty.status.mtx.RUnlock()
 
 	// Get the transaction.
@@ -1894,8 +1896,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// ensuring that checkInaction will not revoke the match as we respond.
 	s.matchMtx.RUnlock()
 
-	log.Debugf("processRedeem: valid redemption %v (%s) received at %v from %v (%s) for match %v, "+
-		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, redeemTime, actor.user,
+	log.Debugf("processRedeem: valid redemption %v (%s) spending contract %s received at %v from %v (%s) for match %v, "+
+		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, cpSwapStr, redeemTime, actor.user,
 		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
@@ -1952,7 +1954,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
 	}
-	log.Debugf("processRedeem: sending 'redeem' ack request to counterparty %v (%s)"+
+	log.Debugf("processRedeem: sending 'redemption' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 
 	// Register that there is an outstanding ack request. This is unregistered
@@ -1962,17 +1964,19 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Expire function to unregister the outstanding request.
 	expireFunc := func() {
 		s.rmLiveAckers(notification.ID)
-		log.Infof("Timeout waiting for redeem ack request from user %v (%s).",
-			ack.user, makerTaker(ack.isMaker))
+		log.Infof("Timeout waiting for 'redemption' request from user %v (%s) for match %v",
+			ack.user, makerTaker(ack.isMaker), matchID)
 	}
 
 	// Send the ack request.
 
-	// The counterparty does not need to actually locate the redemption on txn,
-	// so use the default request timeout.
+	// The counterparty does not need to actually locate the redemption txn, but
+	// they do need to author and broadcast their own redeem, so allow the
+	// request to wait for a response up until the inaction penalty.
 	s.authMgr.RequestWhenConnected(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
-	}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
+	}, s.bTimeout, auth.DefaultConnectTimeout, expireFunc)
+	// maybe: s.bTimeout-time.Since(redeemTime) or time.Until(redeemTime.Add(s.bTimeout))
 
 	return wait.DontTryAgain
 }
@@ -2027,19 +2031,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// init requests should only be sent when contracts are still required, in
 	// the correct sequence, and by the correct party.
 	switch stepInfo.match.Status {
-	// These cases can eventually reduced to:
-	// case order.NewlyMatched, order.MakerSwapCast: // just continue
-	// default: // respond with settlement sequence error
-	case order.NewlyMatched:
-		if !stepInfo.actor.isMaker {
-			// s.step should have returned an error of code SettlementSequenceError.
-			panic("handleInit: this stepInformation should be for the maker!")
-		}
-	case order.MakerSwapCast:
-		if stepInfo.actor.isMaker {
-			// s.step should have returned an error of code SettlementSequenceError.
-			panic("handleInit: this stepInformation should be for the taker!")
-		}
+	case order.NewlyMatched, order.MakerSwapCast:
 	default:
 		return &msgjson.Error{
 			Code:    msgjson.SettlementSequenceError,
@@ -2087,7 +2079,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
 		expireTime = deadline
 	}
-	log.Debugf("Waiting until %v (%v) to locate contract from %v (%v), match %v",
+	log.Debugf("Allowing until %v (%v) to locate contract from %v (%v), match %v",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID)
 
@@ -2186,7 +2178,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
 		expireTime = deadline
 	}
-	log.Debugf("Waiting until %v (%v) to locate redeem from %v (%v), match %v",
+	log.Debugf("Allowing until %v (%v) to locate redeem from %v (%v), match %v",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID)
 
