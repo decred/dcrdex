@@ -1418,6 +1418,9 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 				log.Debugf("swap %v at status %v missing MakerMatch signature(s) needed for NewlyMatched->MakerSwapCast",
 					match.ID(), match.Status)
 			}
+			// NOTE: Consider requiring TakerMatch too to prevent needless maker
+			// swap if taker bailed out, which should be OK if client retries
+			// the 'init' request.
 			reqSigs = [][]byte{match.Sigs.MakerMatch}
 		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
@@ -2287,22 +2290,6 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	// Remove the live acker from Swapper's tracking.
 	defer s.rmLiveAckers(msg.ID)
 
-	// Lock each matchTracker as early as possible to try to avoid 'init'
-	// requests for these matches failing because the ack signatures have not
-	// yet been stored. A better solution would be a response to the client so
-	// they know when it's OK to 'init', but we presently lack a response to a
-	// response mechanism.
-	uniqueTrackers := make(map[*matchTracker]bool, len(matches)/2)
-	for _, matchInfo := range matches {
-		mt := matchInfo.match
-		if uniqueTrackers[mt] {
-			continue
-		}
-		uniqueTrackers[mt] = true
-		mt.mtx.Lock()
-		defer mt.mtx.Unlock()
-	}
-
 	// NOTE: acks must be in same order as matches []*messageAcker.
 	var acks []msgjson.Acknowledgement
 	err := msg.UnmarshalResult(&acks)
@@ -2325,8 +2312,10 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	// either a MakerMatch or TakerMatch signature depending on whether the
 	// responding user is the maker or taker.
 	for i, matchInfo := range matches {
-		ack := acks[i]
-		matchID := matchInfo.match.ID()
+		ack := &acks[i]
+		match := matchInfo.match
+
+		matchID := match.ID()
 		if !bytes.Equal(ack.MatchID, matchID[:]) {
 			s.respondError(msg.ID, user, msgjson.IDMismatchError,
 				fmt.Sprintf("unexpected match ID at acknowledgment index %d", i))
@@ -2336,23 +2325,41 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		err = s.authMgr.Auth(user, sigMsg, ack.Sig)
 		if err != nil {
 			log.Warnf("processMatchAcks: 'match' ack for match %v from user %v, "+
-				" failed sig verification: %v", matchInfo.match.ID(), user, err)
+				" failed sig verification: %v", match.ID(), user, err)
 			s.respondError(msg.ID, user, msgjson.SignatureError,
 				fmt.Sprintf("signature validation error: %v", err))
 			return
 		}
 
-		// Store the signature in the DB.
+		// Store the signature in the matchTracker. These must be collected
+		// before the init steps begin and swap contracts are broadcasted.
+		match.mtx.Lock()
+		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
+			"for match %v (status %v)", user, matchInfo.isMaker, matchID, match.Status)
+		if matchInfo.isMaker {
+			match.Sigs.MakerMatch = ack.Sig
+		} else {
+			match.Sigs.TakerMatch = ack.Sig
+		}
+		match.mtx.Unlock()
+	}
+
+	// Store the signatures in the DB.
+	for i, matchInfo := range matches {
+		ackSig := acks[i].Sig
+		match := matchInfo.match
+
 		storFn := s.storage.SaveMatchAckSigB
 		if matchInfo.isMaker {
 			storFn = s.storage.SaveMatchAckSigA
 		}
+		matchID := match.ID()
 		mid := db.MarketMatchID{
 			MatchID: matchID,
-			Base:    matchInfo.match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
-			Quote:   matchInfo.match.Maker.QuoteAsset,
+			Base:    match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
+			Quote:   match.Maker.QuoteAsset,
 		}
-		err = storFn(mid, ack.Sig)
+		err = storFn(mid, ackSig)
 		if err != nil {
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
 				matchID, matchInfo.isMaker, err)
@@ -2360,16 +2367,6 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 				"internal server error")
 			// TODO: revoke the match without penalties?
 			return
-		}
-
-		// Store the signature in the matchTracker. These must be collected
-		// before the init steps begin and swap contracts are broadcasted.
-		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
-			"for match %v (status %v)", user, matchInfo.isMaker, matchID, matchInfo.match.Status)
-		if matchInfo.isMaker {
-			matchInfo.match.Sigs.MakerMatch = ack.Sig
-		} else {
-			matchInfo.match.Sigs.TakerMatch = ack.Sig
 		}
 	}
 }
