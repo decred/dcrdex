@@ -114,36 +114,36 @@ const (
 
 // details holds rule specific details.
 type details struct {
-	name, details string
-	duration      time.Duration
+	name, description string
+	duration          time.Duration
 }
 
 // ruleDetails maps rules to rule details.
 var ruleDetails = map[Rule]details{
 	NoRule: {
-		name:     "NoRule",
-		details:  "no rules have been broken",
-		duration: 0,
+		name:        "NoRule",
+		description: "no rules have been broken",
+		duration:    0,
 	},
 	PreimageReveal: {
-		name:     "PreimageReveal",
-		details:  "failed to respond with a valid preimage for an order during epoch processing",
-		duration: century,
+		name:        "PreimageReveal",
+		description: "failed to respond with a valid preimage for an order during epoch processing",
+		duration:    century,
 	},
 	FailureToAct: {
-		name:     "FailureToAct",
-		details:  "did not follow through on a swap negotiation step",
-		duration: century,
+		name:        "FailureToAct",
+		description: "did not follow through on a swap negotiation step",
+		duration:    century,
 	},
-	CancellationRatio: {
-		name:     "CancellationRatio",
-		details:  "cancellation rate dropped below the acceptable level",
-		duration: century,
+	CancellationRate: {
+		name:        "CancellationRate",
+		description: "cancellation rate dropped below the acceptable level",
+		duration:    century,
 	},
 	LowFees: {
-		name:     "LowFees",
-		details:  "did not pay transaction mining fees at the requisite level",
-		duration: century,
+		name:        "LowFees",
+		description: "did not pay transaction mining fees at the requisite level",
+		duration:    century,
 	},
 }
 
@@ -155,12 +155,12 @@ func (r Rule) String() string {
 	return "unknown rule"
 }
 
-// Details returns details about the rule.
-func (r Rule) Details() string {
+// Description returns a description of the rule.
+func (r Rule) Description() string {
 	if d, ok := ruleDetails[r]; ok {
-		return d.details
+		return d.description
 	}
-	return "details not specified"
+	return "description not specified"
 }
 
 // Duration returns the penalty duration of the rule being broken.

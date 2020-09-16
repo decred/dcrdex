@@ -698,7 +698,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	if auth.anarchy {
 		details = "You were penalized but the penalty will not be counted against you."
 	}
-	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Details(), extraDetails)
+	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
 		Rule:      rule,
 		Time:      uint64(unixMsNow().Unix()),
