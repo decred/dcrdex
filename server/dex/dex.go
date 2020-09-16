@@ -458,6 +458,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		AuthManager: authMgr,
 		Markets:     marketTunnels,
 	})
+	startSubSys("OrderRouter", orderRouter)
 
 	// Client comms RPC server.
 	server, err := comms.NewServer(cfg.CommsCfg)
