@@ -66,11 +66,6 @@ func timeOutMempool() {
 	time.Sleep(txWaitExpiration * 3 / 2)
 }
 
-func timeoutBroadcast() {
-	// swapper.bTimeout is 5*txWaitExpiration for testing
-	time.Sleep(txWaitExpiration * 6) // 200 ms txWaitExpiration => 1 sec bTimeout => 1.2 sec timeout sleep
-}
-
 func dirtyEncode(s string) []byte {
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -111,8 +106,10 @@ type TAuthManager struct {
 	authErr     error
 	privkey     *secp256k1.PrivateKey
 	reqs        map[account.AccountID][]*TRequest
+	newReq      chan struct{}
 	resps       map[account.AccountID][]*msgjson.Message
 	suspensions map[account.AccountID]account.Rule
+	newSuspend  chan struct{}
 }
 
 func newTAuthManager() *TAuthManager {
@@ -166,6 +163,9 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 		l = make([]*TRequest, 0, 1)
 	}
 	m.reqs[user] = append(l, tReq)
+	if m.newReq != nil {
+		m.newReq <- struct{}{}
+	}
 	return nil
 }
 func (m *TAuthManager) Sign(signables ...msgjson.Signable) error {
@@ -195,6 +195,9 @@ func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspensions[id] = rule
+	if m.newSuspend != nil {
+		m.newSuspend <- struct{}{}
+	}
 	return nil
 }
 
@@ -513,6 +516,7 @@ type testRig struct {
 func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 	var abcBackend, xyzBackend *TAsset
 	storage := &TStorage{}
+	authMgr := newTAuthManager()
 	var swapDataDir, statePath string
 	var ignoreState bool
 	manualMode := len(seed) > 0
@@ -524,6 +528,8 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		swapDataDir = seedRig.swapDataDir
 		statePath = seedRig.statePath
 		ignoreState = seedRig.ignoreState
+		authMgr.newReq = seedRig.auth.newReq
+		authMgr.newSuspend = seedRig.auth.newSuspend
 	} else {
 		abcBackend = newTAsset("abc")
 		xyzBackend = newTAsset("xyz")
@@ -539,8 +545,6 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 
 	xyzAsset := TNewAsset(xyzBackend)
 	xyzCoinLocker := coinlock.NewAssetCoinLocker()
-
-	authMgr := newTAuthManager()
 
 	swapper, err := NewSwapper(&Config{
 		DataDir: swapDataDir,
@@ -631,8 +635,13 @@ func (rig *testRig) ackMatch_taker(checkSig bool) error {
 }
 
 func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string) error {
-	// If the match is already acked, which might be the case for the taker when
-	// an order.MatchSet hash multiple makers, skip the this step without error.
+	if rig.auth.newReq != nil {
+		select {
+		case <-rig.auth.newReq:
+		default:
+			return fmt.Errorf("no match ntfn")
+		}
+	}
 	req := rig.auth.getReq(user.acct)
 	if req == nil {
 		return fmt.Errorf("failed to find match notification for %s", user.lbl)
@@ -751,10 +760,8 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
-		fmt.Println("xyz contract")
 		rig.xyzNode.setContract(swap.coin, false)
 	} else {
-		fmt.Println("abc contract")
 		rig.abcNode.setContract(swap.coin, false)
 	}
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
@@ -770,6 +777,13 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 // acknowledged separately with ackAudit_taker.
 func (rig *testRig) auditSwap_taker() error {
 	matchInfo := rig.matchInfo
+	if rig.auth.newReq != nil {
+		select {
+		case <-rig.auth.newReq:
+		default:
+			return fmt.Errorf("no match ntfn")
+		}
+	}
 	req := rig.auth.getReq(matchInfo.taker.acct)
 	matchInfo.db.takerAudit = req
 	if req == nil {
@@ -782,6 +796,13 @@ func (rig *testRig) auditSwap_taker() error {
 // acknowledged separately with ackAudit_maker.
 func (rig *testRig) auditSwap_maker() error {
 	matchInfo := rig.matchInfo
+	if rig.auth.newReq != nil {
+		select {
+		case <-rig.auth.newReq:
+		default:
+			return fmt.Errorf("no match ntfn")
+		}
+	}
 	req := rig.auth.getReq(matchInfo.maker.acct)
 	matchInfo.db.makerAudit = req
 	if req == nil {
@@ -960,6 +981,13 @@ func (rig *testRig) ackRedemption_maker(checkSig bool) error {
 func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedeem) error {
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")
+	}
+	if rig.auth.newReq != nil {
+		select {
+		case <-rig.auth.newReq:
+		default:
+			return fmt.Errorf("no match ntfn")
+		}
 	}
 	req := rig.auth.getReq(user.acct)
 	if req == nil {
@@ -1350,7 +1378,6 @@ func testSwap(t *testing.T, rig *testRig) {
 
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool()
 	}
 
 	// Step through the negotiation process. No errors should be generated.
@@ -1389,6 +1416,11 @@ func testSwap(t *testing.T, rig *testRig) {
 func TestSwaps(t *testing.T) {
 	rig, cleanup := tNewTestRig(nil)
 	defer cleanup()
+
+	// For N matches, Negotiate sends up to 2*N requests. The "three match set"
+	// sends 4: one for taker and 3 for makers.
+	rig.auth.newReq = make(chan struct{}, 4)
+
 	for _, makerSell := range []bool{true, false} {
 		sellStr := " buy"
 		if makerSell {
@@ -1423,6 +1455,7 @@ func TestSwaps(t *testing.T) {
 			t.Run("three match set"+sellStr+marketStr, func(t *testing.T) {
 				matchQtys := []uint64{uint64(1e8), uint64(9e8), uint64(3e8)}
 				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
+				// one taker, 3 makers => 4 'match' requests
 				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
 				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 				testSwap(t, rig)
@@ -1436,7 +1469,9 @@ func TestNoAck(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+
+	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+
 	ensureNilErr := makeEnsureNilErr(t)
 	mustBeError := makeMustBeError(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
@@ -1459,8 +1494,9 @@ func TestNoAck(t *testing.T) {
 
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool()
 	}
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 
 	// Don't acknowledge from either side yet. Have the maker broadcast their swap
 	// transaction
@@ -1504,14 +1540,17 @@ func TestTxWaiters(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+
+	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
 
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool()
 	}
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 
 	// Get the MatchNotifications that the swapper sent to the clients and check
 	// the match notification length, content, IDs, etc.
@@ -1521,6 +1560,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.ackMatch_taker(true); err != nil {
 		t.Fatal(err)
 	}
+
 	// Set a non-latency error.
 	rig.abcNode.setContractErr(dummyError)
 	rig.sendSwap_maker(false)
@@ -1528,6 +1568,7 @@ func TestTxWaiters(t *testing.T) {
 	if msg == nil {
 		t.Fatalf("no response for erroneous maker swap. err")
 	}
+
 	// Set an error for the maker's swap asset
 	rig.abcNode.setContractErr(asset.CoinNotFoundError)
 	// The error will be generated by the chainWaiter thread, so will need to
@@ -1644,16 +1685,29 @@ func TestTxWaiters(t *testing.T) {
 func TestBroadcastTimeouts(t *testing.T) {
 	rig, cleanup := tNewTestRig(nil)
 	defer cleanup()
+
+	rig.auth.newSuspend = make(chan struct{}, 1)
+	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+
 	ensureNilErr := makeEnsureNilErr(t)
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool()
 	}
+
+	reqTimeout := func(timeout time.Duration) {
+		t.Helper()
+		select {
+		case <-rig.auth.newReq:
+		case <-time.After(timeout):
+			t.Fatalf("no request received")
+		}
+	}
+
 	checkRevokeMatch := func(user *tUser, i int) {
 		t.Helper()
 		req := rig.auth.getReq(user.acct)
 		if req == nil {
-			t.Fatalf("no match_cancellation")
+			t.Fatalf("no revoke_match")
 		}
 		params := new(msgjson.RevokeMatch)
 		err := json.Unmarshal(req.req.Payload, &params)
@@ -1672,6 +1726,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 				user.lbl, i, msgjson.RevokeMatchRoute, req.req.Route)
 		}
 	}
+
 	// tryExpire will sleep for the duration of a BroadcastTimeout, and then
 	// check that a penalty was assigned to the appropriate user, and that a
 	// revoke_match message is sent to both users.
@@ -1683,7 +1738,11 @@ func TestBroadcastTimeouts(t *testing.T) {
 		// Sending a block through should schedule an inaction check after duration
 		// BroadcastTimeout.
 		sendBlock(node)
-		timeoutBroadcast()
+		select {
+		case <-rig.auth.newSuspend:
+		case <-time.After(rig.swapper.bTimeout * 2):
+			t.Fatalf("no penalization happened")
+		}
 		found, rule := rig.auth.flushPenalty(jerk.acct)
 		if !found {
 			t.Fatalf("failed to penalize user at step %d", i)
@@ -1692,6 +1751,8 @@ func TestBroadcastTimeouts(t *testing.T) {
 			t.Fatalf("no penalty at step %d (status %v)", i, step)
 		}
 		// Make sure the specified user has a cancellation for this order
+		reqTimeout(rig.swapper.bTimeout * 2) // wait for both revoke requests, no particular order
+		reqTimeout(rig.swapper.bTimeout * 2)
 		checkRevokeMatch(jerk, i)
 		checkRevokeMatch(victim, i)
 		return true
@@ -1942,7 +2003,6 @@ func TestCancel(t *testing.T) {
 func TestState(t *testing.T) {
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool() // look for another signal
 	}
 
 	var rig *testRig
@@ -1962,6 +2022,16 @@ func TestState(t *testing.T) {
 		return state, nil
 	}
 
+	// Wait for a request up to timeout.
+	reqTimeout := func(timeout time.Duration) {
+		t.Helper()
+		select {
+		case <-rig.auth.newReq:
+		case <-time.After(timeout):
+			t.Fatalf("no request received")
+		}
+	}
+
 	// Start a swap negotiation with two pending match acks, then shutdown.
 	// ABC is base, XYZ is quote
 	makerSell := true // maker: swap = ABC, redeem = XYZ / taker: swap = XYZ, redeem = ABC
@@ -1969,6 +2039,7 @@ func TestState(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, stop = tNewTestRig(matchInfo, nil)
 	defer os.RemoveAll(rig.swapDataDir)
+
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 
 	abc, xyz := rig.abcNode, rig.xyzNode
@@ -2041,6 +2112,7 @@ func TestState(t *testing.T) {
 	rig.storage.stateHash = ogHash
 
 	// Now load the state in the default way.
+	rig.auth.newReq = make(chan struct{}, 2) // 2 'match' request sent on start
 	rig, stop = tNewTestRig(matchInfo, rig)
 	defer os.RemoveAll(rig.swapDataDir)
 	defer stop()
@@ -2059,6 +2131,9 @@ func TestState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("maker failed to ack the match: %v", err)
 	}
+	// Swallow the taker's 'match' signal since we'll send it again and receive
+	// it in the next test after a state restore. The reqs slice is fresh.
+	reqTimeout(time.Second)
 
 	stop()
 
@@ -2162,6 +2237,7 @@ func TestState(t *testing.T) {
 	makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
 	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
 	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
+	reqTimeout(recheckInterval * 3 / 2) // 'audit' sent, but no ack resp yet
 
 	matchInfo.db.makerSwap = makerSwap // for taker's audit
 
@@ -2266,6 +2342,7 @@ func TestState(t *testing.T) {
 	takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
 	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
 	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
+	reqTimeout(recheckInterval * 3 / 2) // 'audit' sent, but no ack resp yet
 
 	matchInfo.db.takerSwap = takerSwap // for maker's audit
 
@@ -2367,6 +2444,7 @@ func TestState(t *testing.T) {
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
 	// processRedeem should have succeeded, requesting an ack from taker of the maker's redeem.
+	reqTimeout(recheckInterval * 3 / 2) // 'redemption' sent, but no ack resp yet
 
 	matchInfo.db.makerRedeem = makerRedeem // for taker's redeem ack
 
@@ -2462,6 +2540,7 @@ func TestState(t *testing.T) {
 	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
 	// processRedeem should have succeeded, requesting an ack from maker of the taker's redeem.
+	reqTimeout(recheckInterval * 3 / 2) // 'redemption' sent, but no ack resp yet
 
 	matchInfo.db.takerRedeem = takerRedeem // for maker's redeem ack
 
@@ -2519,6 +2598,7 @@ func TestState(t *testing.T) {
 	}
 
 	sendBlock(abc)
+	tickMempool() // processBlock -> match removed
 
 	// match should be gone now
 	if rig.getTracker() != nil {
