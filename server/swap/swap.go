@@ -101,6 +101,18 @@ type swapStatus struct {
 	redemption asset.Coin
 }
 
+func (ss *swapStatus) swapConfTime() time.Time {
+	ss.mtx.RLock()
+	defer ss.mtx.RUnlock()
+	return ss.swapConfirmed
+}
+
+func (ss *swapStatus) redeemSeenTime() time.Time {
+	ss.mtx.RLock()
+	defer ss.mtx.RUnlock()
+	return ss.redeemTime
+}
+
 // matchTracker embeds an order.Match and adds some data necessary for tracking
 // the match negotiation.
 type matchTracker struct {
@@ -1255,9 +1267,7 @@ func (s *Swapper) checkInactionEventBased() {
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
 			// maker's `redeem` request (and sent the taker's 'redemption').
-			match.makerStatus.mtx.RLock()
-			defer match.makerStatus.mtx.RUnlock()
-			if tooOld(match.makerStatus.redeemTime) {
+			if tooOld(match.makerStatus.redeemSeenTime()) {
 				failMatch(false) // taker should have redeemed
 			}
 		}
@@ -1313,15 +1323,11 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 
 		switch match.Status {
 		case order.MakerSwapCast:
-			match.makerStatus.mtx.RLock()
-			defer match.makerStatus.mtx.RUnlock()
-			if tooOld(match.makerStatus.swapConfirmed) {
+			if tooOld(match.makerStatus.swapConfTime()) {
 				failMatch(false) // taker should have swapped
 			}
 		case order.TakerSwapCast:
-			match.takerStatus.mtx.RLock()
-			defer match.takerStatus.mtx.RUnlock()
-			if tooOld(match.takerStatus.swapConfirmed) {
+			if tooOld(match.takerStatus.swapConfTime()) {
 				failMatch(true) // maker should have redeemed
 			}
 		}
@@ -2074,7 +2080,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// maker's swap reached swapConfs.
 	lastEvent := stepInfo.match.time // NewlyMatched - the match request time, not matchTime
 	if stepInfo.step == order.MakerSwapCast {
-		lastEvent = stepInfo.match.makerStatus.swapConfirmed
+		lastEvent = stepInfo.match.makerStatus.swapConfTime()
 	}
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
 	if lastEvent.IsZero() {
@@ -2171,9 +2177,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	// Do not search for the transaction past the inaction deadline. For maker,
 	// this is bTimeout after taker's swap reached swapConfs. For taker, this is
 	// bTimeout after maker's redeem cast (and redemption request time).
-	lastEvent := stepInfo.match.takerStatus.swapConfirmed // TakerSwapCast
+	lastEvent := stepInfo.match.takerStatus.swapConfTime() // TakerSwapCast
 	if stepInfo.step == order.MakerRedeemed {
-		lastEvent = stepInfo.match.makerStatus.redeemTime
+		lastEvent = stepInfo.match.makerStatus.redeemSeenTime()
 	}
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
 	if lastEvent.IsZero() {
