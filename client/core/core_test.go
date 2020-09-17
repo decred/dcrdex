@@ -2728,7 +2728,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 }
 
-func TestOrderStatusReconciliation(t *testing.T) {
+func TestReconcileTrades(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
 
@@ -2741,19 +2741,16 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	}
 
 	type orderSet struct {
-		epoch               *trackedTrade // preimage not yet revealed
-		epochPreimaged      *trackedTrade // preimage revealed
+		epoch               *trackedTrade
 		booked              *trackedTrade // standing limit orders only
 		bookedPendingCancel *trackedTrade // standing limit orders only
 		executed            *trackedTrade
 	}
 	makeOrderSet := func(force order.TimeInForce, nMatches int) *orderSet {
 		orders := &orderSet{
-			epoch:          makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
-			epochPreimaged: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
-			executed:       makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted, nMatches),
+			epoch:    makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
+			executed: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted, nMatches),
 		}
-		orders.epochPreimaged.metaData.Proof.PreimageRevealed = true
 		if force == order.StandingTiF {
 			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
 			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
@@ -2775,7 +2772,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		name                string
 		clientOrders        []*trackedTrade             // orders known to the client
 		serverOrders        []*msgjson.Order            // orders considered active by the server
-		orderStatuses       []msgjson.OrderStatusResult // server's response to order-status requests
+		orderStatuses       []msgjson.OrderStatusResult // server's response to order_status requests
 		expectOrderStatuses map[order.OrderID]order.OrderStatus
 	}{
 		{
@@ -2832,12 +2829,10 @@ func TestOrderStatusReconciliation(t *testing.T) {
 			name: "active becomes inactive",
 			clientOrders: []*trackedTrade{
 				standingOrders.epoch,
-				standingOrders.epochPreimaged,
 				standingOrders.booked,
 				standingOrders.bookedPendingCancel,
 				standingOrders.executed,
 				immediateOrders.epoch,
-				immediateOrders.epochPreimaged,
 				immediateOrders.executed,
 			},
 			serverOrders: []*msgjson.Order{}, // no active order reported by server
@@ -2845,10 +2840,6 @@ func TestOrderStatusReconciliation(t *testing.T) {
 				{
 					OrderID: standingOrders.epoch.ID().Bytes(),
 					Status:  uint16(order.OrderStatusRevoked),
-				},
-				{
-					OrderID: standingOrders.epochPreimaged.ID().Bytes(),
-					Status:  uint16(order.OrderStatusExecuted),
 				},
 				{
 					OrderID: standingOrders.booked.ID().Bytes(),
@@ -2860,21 +2851,15 @@ func TestOrderStatusReconciliation(t *testing.T) {
 				},
 				{
 					OrderID: immediateOrders.epoch.ID().Bytes(),
-					Status:  uint16(order.OrderStatusRevoked),
-				},
-				{
-					OrderID: immediateOrders.epochPreimaged.ID().Bytes(),
 					Status:  uint16(order.OrderStatusExecuted),
 				},
 			},
 			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
-				standingOrders.epoch.ID():               order.OrderStatusRevoked,  // preimage miss = revoked
-				standingOrders.epochPreimaged.ID():      order.OrderStatusExecuted, // preimage sent, not booked, not canceled = executed (maybe revoked)
-				standingOrders.booked.ID():              order.OrderStatusRevoked,  // booked, not canceled = revoked (maybe executed)
-				standingOrders.bookedPendingCancel.ID(): order.OrderStatusCanceled, // booked pending canceled = canceled (may actually be revoked or executed)
+				standingOrders.epoch.ID():               order.OrderStatusRevoked,  // preimage missed = revoked
+				standingOrders.booked.ID():              order.OrderStatusRevoked,  // booked, not canceled = assume revoked (may actually be executed)
+				standingOrders.bookedPendingCancel.ID(): order.OrderStatusCanceled, // booked pending canceled = assume canceled (may actually be revoked or executed)
 				standingOrders.executed.ID():            order.OrderStatusExecuted, // should not change
-				immediateOrders.epoch.ID():              order.OrderStatusRevoked,  // preimage miss = revoked
-				immediateOrders.epochPreimaged.ID():     order.OrderStatusExecuted, // preimage sent, not canceled = executed
+				immediateOrders.epoch.ID():              order.OrderStatusExecuted, // preimage sent, not canceled = executed
 				immediateOrders.executed.ID():           order.OrderStatusExecuted, // should not change
 			},
 		},
@@ -2905,7 +2890,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 
 		dc.tradeMtx.RLock()
 		if len(dc.trades) != len(tt.expectOrderStatuses) {
-			t.Fatalf("%s: post-connect order count mismatch. expected %d, got %d",
+			t.Fatalf("%s: post-reconcileTrades order count mismatch. expected %d, got %d",
 				tt.name, len(tt.expectOrderStatuses), len(dc.trades))
 		}
 		for oid, tracker := range dc.trades {

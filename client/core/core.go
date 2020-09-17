@@ -3625,9 +3625,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return fmt.Errorf("preimage send error: %v", err)
 	}
-
-	tracker.mtx.Lock()
-	corder, cancelOrder := tracker.coreOrderInternal()
+	corder, cancelOrder := tracker.coreOrder()
 	var details string
 	if isCancel {
 		corder = cancelOrder
@@ -3636,15 +3634,6 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		details = fmt.Sprintf("match cycle has begun for order %s", tracker.token())
 	}
 	c.notify(newOrderNote("Preimage sent", details, db.Poke, corder))
-
-	metaOrder := tracker.metaOrder()
-	metaOrder.MetaData.Proof.PreimageRevealed = true
-	err = tracker.db.UpdateOrder(metaOrder)
-	if err != nil {
-		log.Errorf("unable to update order with PreimageRevealed=true: %v", err)
-	}
-	tracker.mtx.Unlock()
-
 	return nil
 }
 

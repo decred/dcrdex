@@ -332,18 +332,13 @@ func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
 
 // OrderProof is information related to order authentication and matching.
 type OrderProof struct {
-	DEXSig           []byte
-	Preimage         []byte
-	PreimageRevealed bool
+	DEXSig   []byte
+	Preimage []byte
 }
 
 // Encode encodes the OrderProof to a versioned blob.
 func (p *OrderProof) Encode() []byte {
-	preimageRevealed := encode.ByteFalse
-	if p.PreimageRevealed {
-		preimageRevealed = encode.ByteTrue
-	}
-	return dbBytes{0}.AddData(p.DEXSig).AddData(p.Preimage).AddData(preimageRevealed)
+	return dbBytes{0}.AddData(p.DEXSig).AddData(p.Preimage)
 }
 
 // DecodeOrderProof decodes the versioned blob to an *OrderProof.
@@ -360,13 +355,12 @@ func DecodeOrderProof(b []byte) (*OrderProof, error) {
 }
 
 func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
-	if len(pushes) != 3 {
-		return nil, fmt.Errorf("decodeMatchProof: expected 3 push, got %d", len(pushes))
+	if len(pushes) != 2 {
+		return nil, fmt.Errorf("decodeOrderProof: expected 2 push, got %d", len(pushes))
 	}
 	return &OrderProof{
-		DEXSig:           pushes[0],
-		Preimage:         pushes[1],
-		PreimageRevealed: bytes.Equal(pushes[2], encode.ByteTrue),
+		DEXSig:   pushes[0],
+		Preimage: pushes[1],
 	}, nil
 }
 
