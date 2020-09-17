@@ -1050,6 +1050,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	contracts := make([]*asset.Contract, len(matches))
 	// These matches may have different fee rates, matched in different epochs.
 	var highestFeeRate uint64
+	var includesMakerSwap bool
 	for i, match := range matches {
 		dbMatch, _, proof, auth := match.parts()
 		value := dbMatch.Quantity
@@ -1063,6 +1064,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			secretHash := sha256.Sum256(proof.Secret)
 			proof.SecretHash = secretHash[:]
 			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
+			includesMakerSwap = true
 		}
 
 		contracts[i] = &asset.Contract{
@@ -1158,6 +1160,11 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	}
 	t.change = change
 	t.db.UpdateOrderMetaData(t.ID(), t.metaData)
+
+	// Workaround for server recording match ack sig, to avoid an 'init' retry.
+	if includesMakerSwap {
+		time.Sleep(250 * time.Millisecond)
+	}
 
 	// Process the swap for each match by sending the `init` request
 	// to the DEX and updating the match with swap details.

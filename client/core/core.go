@@ -602,15 +602,22 @@ func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
 	}
 	dc.tradeMtx.RUnlock()
 
-	updated := make(assetMap)
+	updateChan := make(chan assetMap)
 	for _, trade := range assetTrades {
-		newUpdates, err := trade.tick()
-		if err != nil {
-			log.Errorf("%s tick error: %v", dc.acct.host, err)
-		}
-		updated.merge(newUpdates)
+		trade := trade // bad go, bad
+		go func() {
+			newUpdates, err := trade.tick()
+			if err != nil {
+				log.Errorf("%s tick error: %v", dc.acct.host, err)
+			}
+			updateChan <- newUpdates
+		}()
 	}
 
+	updated := make(assetMap)
+	for range assetTrades {
+		updated.merge(<-updateChan)
+	}
 	return updated
 }
 
@@ -3347,12 +3354,12 @@ func (c *Core) listen(dc *dexConnection) {
 		var doneTrades, activeTrades []*trackedTrade
 		dc.tradeMtx.Lock()
 		for oid, trade := range dc.trades {
-			if !trade.isActive() {
-				doneTrades = append(doneTrades, trade)
-				delete(dc.trades, oid)
+			if trade.isActive() {
+				activeTrades = append(activeTrades, trade)
 				continue
 			}
-			activeTrades = append(activeTrades, trade)
+			doneTrades = append(doneTrades, trade)
+			delete(dc.trades, oid)
 		}
 		dc.tradeMtx.Unlock()
 
@@ -3529,25 +3536,12 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		// dc.addPendingSend(resp) // e.g.
 	}
 
-	defer c.refreshUser() // update WalletState
-
 	// Begin match negotiation.
-	//
-	// TODO: We need to know that the server has first recorded the ack
-	// signature, otherwise 'init' will fail. Until this is solved with a
-	// response to the ack, sleep for a moment if we are the maker on any of the
-	// orders. However, resendPendingRequests will retry the request when the
-	// trackedTrade ticks again when the timer fires in listen.
-	for _, m := range msgMatches {
-		if m.Side == uint8(order.Maker) {
-			time.Sleep(250 * time.Millisecond)
-			break
-		}
-	}
-
 	updatedAssets, err := dc.runMatches(matches)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
+	} else {
+		c.refreshUser() // would be called by updateBalances
 	}
 
 	return err
