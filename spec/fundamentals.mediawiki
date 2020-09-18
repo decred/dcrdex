@@ -96,7 +96,7 @@ respond with its current configuration.
 {|
 ! field          !! type  !! description
 |-
-| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_not_exceed_the_threshold|cancellation threshold]]
+| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|cancellation threshold]]
 |-
 | btimeout       || int   || the broadcast timeout
 |-
