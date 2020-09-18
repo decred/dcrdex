@@ -921,8 +921,8 @@ func TestServer(t *testing.T) {
 	asset.Register(141, &TDriver{}) // kmd
 	asset.Register(3, &TDriver{})   // doge
 
-	numBuys = 10
-	numSells = 10
+	numBuys = 0
+	numSells = 0
 	feedPeriod = 2000 * time.Millisecond
 	initialize := false
 	register := true
