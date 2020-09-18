@@ -591,7 +591,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
 	dataPushes, err := txscript.PushedData(sigScript)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sigScript PushedData(%x): %w", sigScript, err)
 	}
 	if len(dataPushes) == 0 {
 		return nil, fmt.Errorf("no data pushes in in the signature script")
