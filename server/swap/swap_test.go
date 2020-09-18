@@ -2234,10 +2234,11 @@ func TestState(t *testing.T) {
 
 	// "broadcast" the contract and signal a new block.
 	abc.setContract(makerSwap.coin, true)
+	// tickMempool() // latencyQ triggers processInit and audit request
 	makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
-	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
-	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
-	reqTimeout(recheckInterval * 3 / 2) // 'audit' sent, but no ack resp yet
+	sendBlock(abc) // trigger processBlock, tryConfirmSwap
+	// processInit should have succeeded, requesting an audit ack from taker of the maker's contract.
+	reqTimeout(recheckInterval * 2) // 'audit' sent, but no ack resp yet
 
 	matchInfo.db.makerSwap = makerSwap // for taker's audit
 
@@ -2339,10 +2340,11 @@ func TestState(t *testing.T) {
 
 	// "broadcast" the contract and signal a new block.
 	xyz.setContract(takerSwap.coin, true)
+	// tickMempool() // latencyQ triggers processInit and audit request
 	takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
-	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	sendBlock(xyz) // trigger processBlock, tryConfirmSwap
 	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
-	reqTimeout(recheckInterval * 3 / 2) // 'audit' sent, but no ack resp yet
+	reqTimeout(recheckInterval * 2) // 'audit' sent, but no ack resp yet
 
 	matchInfo.db.takerSwap = takerSwap // for maker's audit
 
@@ -2442,9 +2444,9 @@ func TestState(t *testing.T) {
 	// "broadcast" the redeem and signal a new block.
 	xyz.setRedemption(makerRedeem.coin, true)
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
-	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	sendBlock(xyz) // trigger processBlock, redeem status check (not needed!)
 	// processRedeem should have succeeded, requesting an ack from taker of the maker's redeem.
-	reqTimeout(recheckInterval * 3 / 2) // 'redemption' sent, but no ack resp yet
+	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
 
 	matchInfo.db.makerRedeem = makerRedeem // for taker's redeem ack
 
@@ -2538,9 +2540,9 @@ func TestState(t *testing.T) {
 	// "broadcast" the redeem and signal a new block.
 	abc.setRedemption(takerRedeem.coin, true)
 	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
-	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	sendBlock(abc) // trigger processBlock, redeem status check (not needed!)
 	// processRedeem should have succeeded, requesting an ack from maker of the taker's redeem.
-	reqTimeout(recheckInterval * 3 / 2) // 'redemption' sent, but no ack resp yet
+	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
 
 	matchInfo.db.takerRedeem = takerRedeem // for maker's redeem ack
 

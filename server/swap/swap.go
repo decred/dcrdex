@@ -949,8 +949,6 @@ func (s *Swapper) Run(ctx context.Context) {
 			case <-s.storage.Fatal():
 				return
 			case block := <-blockNotes:
-				// Schedule a check of matches with one side equal to this
-				// block's asset by appending the block to the bcastTriggers.
 				if block.err != nil {
 					var connectionErr asset.ConnectionError
 					if errors.As(block.err, &connectionErr) {
@@ -1182,8 +1180,8 @@ func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
 	s.storage.SetMatchInactive(db.MatchID(match.Match))
 
 	// If the at-fault order is a limit order, signal that if it is
-	// still on the book is should be unbooked, changed to revoked
-	// status, counted against the user's cancellation ratio, and a
+	// still on the book it should be unbooked, changed to revoked
+	// status, counted against the user's cancellation rate, and a
 	// server-generated cancel order recorded.
 	if lo, isLimit := orderAtFault.(*order.LimitOrder); isLimit {
 		if s.unbookHook(lo) {
@@ -1216,7 +1214,7 @@ func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
 	// Penalize for failure to act.
 	//
 	// TODO: Arguably, this obviates the RecordCancel above since this
-	// closes the account before the possibility of a cancellation ratio
+	// closes the account before the possibility of a cancellation rate
 	// penalty. I'm keeping it this way for now however since penalties
 	// may become less severe than account closure (e.g. temporary
 	// suspension, cool down, or order throttling), and restored
@@ -1227,6 +1225,13 @@ func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
 	s.revoke(match)
 }
 
+// checkInactionEventBased scans the swapStatus structures, checking for actions
+// that are expected in a time frame relative to another event that is not a
+// confirmation time. If a client is found to have not acted when required, a
+// match may be revoked and a penalty assigned to the user. This includes
+// matches in NewlyMatched that have not received a maker swap following the
+// match request, and in MakerRedeemed that have not received a taker redeem
+// following the redemption request triggered by the makers redeem.
 func (s *Swapper) checkInactionEventBased() {
 	// If the DB is failing, do not penalize or attempt to start revocations.
 	if err := s.storage.LastErr(); err != nil {
@@ -1248,8 +1253,7 @@ func (s *Swapper) checkInactionEventBased() {
 		match.mtx.RLock()
 		defer match.mtx.RUnlock()
 
-		log.Tracef("checkInactionEventBased() => checkMatch(%v, %v)",
-			match.ID(), match.Status)
+		log.Tracef("checkInactionEventBased: match %v (%v)", match.ID(), match.Status)
 
 		failMatch := func(makerFault bool) {
 			s.failMatch(match, makerFault)
@@ -1285,9 +1289,13 @@ func (s *Swapper) checkInactionEventBased() {
 	}
 }
 
-// checkInaction scans the swapStatus structures relevant to the specified
-// asset. If a client is found to have not acted when required, a match may be
-// revoked and a penalty assigned to the user.
+// checkInactionBlockBased scans the swapStatus structures relevant to the
+// specified asset. If a client is found to have not acted when required, a
+// match may be revoked and a penalty assigned to the user. This includes
+// matches in MakerSwapCast that have not received a taker swap after the
+// maker's swap reaches the required confirmation count, and in TakerSwapCast
+// that have not received a maker redeem after the taker's swap reaches the
+// required confirmation count.
 func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 	// If the DB is failing, do not penalize or attempt to start revocations.
 	if err := s.storage.LastErr(); err != nil {
@@ -1299,22 +1307,22 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 	// Do time.Since(event) with the same now time for each match.
 	now := time.Now()
 	tooOld := func(evt time.Time) bool {
+		// If the time is not set (zero), it has not happened yet (not too old).
 		return !evt.IsZero() && now.Sub(evt) >= s.bTimeout
 	}
 
 	checkMatch := func(match *matchTracker) {
+		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
+			return
+		}
+
 		// Lock entire matchTracker so the following is atomic with respect to
 		// Status.
 		match.mtx.RLock()
 		defer match.mtx.RUnlock()
 
-		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
-			return
-		}
-
-		log.Tracef("checkInactionBlockBased(%d) => checkMatch(%v, %v): assets %d / %d",
-			assetID, match.ID(), match.Status,
-			match.makerStatus.swapAsset, match.takerStatus.swapAsset)
+		log.Tracef("checkInactionBlockBased: asset %d, match %v (%v)",
+			assetID, match.ID(), match.Status)
 
 		failMatch := func(makerFault bool) {
 			s.failMatch(match, makerFault)
