@@ -1563,9 +1563,6 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Remove the live acker from Swapper's tracking.
 	defer s.rmLiveAckers(msg.ID)
 
-	acker.match.mtx.Lock()
-	defer acker.match.mtx.Unlock()
-
 	// The time that the ack is received is stored for redeem acks to facilitate
 	// cancellation rate enforcement.
 	tAck := time.Now()
@@ -1591,6 +1588,9 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Set and store the appropriate signature, based on the current step and
 	// actor.
 	mktMatch := db.MatchID(acker.match.Match)
+
+	acker.match.mtx.Lock()
+	defer acker.match.mtx.Unlock()
 
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
 		log.Infof("Received revoke_match ack for match %v, order %v, user %v",
@@ -2339,7 +2339,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		err = s.authMgr.Auth(user, sigMsg, ack.Sig)
 		if err != nil {
 			log.Warnf("processMatchAcks: 'match' ack for match %v from user %v, "+
-				" failed sig verification: %v", match.ID(), user, err)
+				" failed sig verification: %v", matchID, user, err)
 			s.respondError(msg.ID, user, msgjson.SignatureError,
 				fmt.Sprintf("signature validation error: %v", err))
 			return
