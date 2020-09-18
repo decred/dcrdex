@@ -78,10 +78,10 @@ func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []ord
 func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
 	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
 }
-func (s *TStorage) InsertPenalty(penalty *db.Penalty) int64 {
+func (s *TStorage) InsertPenalty(penalty *db.Penalty) (int64, error) {
 	s.closedID = penalty.AccountID
 	s.penalties = []*db.Penalty{penalty}
-	return 0
+	return 0, nil
 }
 func (s *TStorage) ForgivePenalty(id int64) error { return nil }
 func (s *TStorage) ForgivePenalties(aid account.AccountID) error {
@@ -89,11 +89,8 @@ func (s *TStorage) ForgivePenalties(aid account.AccountID) error {
 	s.penalties = nil
 	return nil
 }
-func (s *TStorage) Penalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
+func (s *TStorage) Penalties(aid account.AccountID, all bool) (penalties []*db.Penalty, err error) {
 	return s.penalties, nil
-}
-func (s *TStorage) AllPenalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
-	return nil, nil
 }
 
 // TSigner satisfies the Signer interface

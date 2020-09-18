@@ -137,10 +137,10 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	if paid {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
-			Message: "'notifyfee' send for paid account",
+			Message: "'notifyfee' sent for paid account",
 		}
 	}
-	penalties, err := auth.storage.Penalties(acctID)
+	penalties, err := auth.storage.Penalties(acctID, false)
 	if err != nil {
 		log.Errorf("Penalties(%x): %v", acctID, err)
 		return &msgjson.Error{
@@ -151,7 +151,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	if len(penalties) > 0 {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
-			Message: "account closed and cannot be reopen",
+			Message: "account closed and cannot be reopened",
 		}
 	}
 

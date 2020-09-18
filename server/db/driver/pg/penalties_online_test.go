@@ -64,11 +64,20 @@ func TestPenalties(t *testing.T) {
 		},
 	}
 	// Add penalties.
-	idTwoSec := archie.InsertPenalty(penaltyTwoSec)
-	idTenSec := archie.InsertPenalty(penaltyTenSec)
-	archie.InsertPenalty(penaltyTenSecDiffUser)
+	idTwoSec, err := archie.InsertPenalty(penaltyTwoSec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idTenSec, err := archie.InsertPenalty(penaltyTenSec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = archie.InsertPenalty(penaltyTenSecDiffUser)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Check penalties
-	penalties, err := archie.Penalties(acctID)
+	penalties, err := archie.Penalties(acctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +96,7 @@ func TestPenalties(t *testing.T) {
 	// Wait the duration of the first penalty.
 	time.Sleep(time.Second*2 + time.Millisecond)
 	// Check penalties. The expired penalty should not be returned.
-	penalties, err = archie.Penalties(acctID)
+	penalties, err = archie.Penalties(acctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,15 +112,15 @@ func TestPenalties(t *testing.T) {
 	}
 	// Check penalties. One is expired and the other forgiven, so none
 	// should be returned.
-	penalties, err = archie.Penalties(acctID)
+	penalties, err = archie.Penalties(acctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(penalties) != 0 {
 		t.Fatal("wrong number of penalties")
 	}
-	// They should still show up for AllPenalties.
-	penalties, err = archie.AllPenalties(acctID)
+	// They should still show up for all penalties.
+	penalties, err = archie.Penalties(acctID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,10 +128,16 @@ func TestPenalties(t *testing.T) {
 		t.Fatal("wrong number of penalties")
 	}
 	// Add two more.
-	archie.InsertPenalty(penaltyTenSec)
-	archie.InsertPenalty(penaltyTenSec)
+	_, err = archie.InsertPenalty(penaltyTenSec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = archie.InsertPenalty(penaltyTenSec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// They are currently in effect.
-	penalties, err = archie.Penalties(acctID)
+	penalties, err = archie.Penalties(acctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +149,7 @@ func TestPenalties(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check that they are forgiven.
-	penalties, err = archie.Penalties(acctID)
+	penalties, err = archie.Penalties(acctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +157,7 @@ func TestPenalties(t *testing.T) {
 		t.Fatal("wrong number of penalties")
 	}
 	// The other user's penalty is still in effect.
-	penalties, err = archie.Penalties(anotherAcctID)
+	penalties, err = archie.Penalties(anotherAcctID, false)
 	if err != nil {
 		t.Fatal(err)
 	}

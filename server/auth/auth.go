@@ -45,11 +45,10 @@ type Storage interface {
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
-	InsertPenalty(penalty *db.Penalty) (id int64)
+	InsertPenalty(penalty *db.Penalty) (id int64, err error)
 	ForgivePenalty(id int64) error
 	ForgivePenalties(aid account.AccountID) error
-	Penalties(aid account.AccountID) (penalties []*db.Penalty, err error)
-	AllPenalties(aid account.AccountID) (penalties []*db.Penalty, err error)
+	Penalties(aid account.AccountID, all bool) (penalties []*db.Penalty, err error)
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
@@ -736,7 +735,10 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	}
 
 	penalty := &db.Penalty{Penalty: penaltyMsg}
-	penalty.ID = auth.storage.InsertPenalty(penalty)
+	penalty.ID, err = auth.storage.InsertPenalty(penalty)
+	if err != nil {
+		return nil, fmt.Errorf("error inserting penalty: %v", err)
+	}
 
 	log.Debugf("user %v penalized for rule %v", user, rule)
 
@@ -831,7 +833,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "unpaid account",
 		}
 	}
-	penalties, err := auth.storage.Penalties(user)
+	penalties, err := auth.storage.Penalties(user, false)
 	if err != nil {
 		log.Errorf("Penalties(%x): %v", user, err)
 		return &msgjson.Error{

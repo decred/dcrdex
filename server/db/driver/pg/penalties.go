@@ -17,14 +17,15 @@ import (
 
 // InsertPenalty adds penalty to the penalties table. The passed ID and Forgiven
 // fields are ignored. The db decided id is returned.
-func (a *Archiver) InsertPenalty(penalty *db.Penalty) (id int64) {
+func (a *Archiver) InsertPenalty(penalty *db.Penalty) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertPenalty, penaltiesTableName)
-	if err := a.db.QueryRow(stmt, penalty.AccountID, penalty.BrokenRule,
-		int64(penalty.Time), penalty.Duration, penalty.Details).Scan(&id); err != nil {
-		a.fatalBackendErr(err)
-		return 0
+	var id int64
+	err := a.db.QueryRow(stmt, penalty.AccountID, penalty.BrokenRule,
+		int64(penalty.Time), penalty.Duration, penalty.Details).Scan(&id)
+	if err != nil {
+		return 0, err
 	}
-	return id
+	return id, nil
 }
 
 // ForgivePenalties forgives all penalties currenty held by a user.
@@ -42,17 +43,14 @@ func (a *Archiver) ForgivePenalty(id int64) error {
 }
 
 // Penalties returns penalties that are currently in effect for a user.
-// Forgiven and expired penalties are not included.
-func (a *Archiver) Penalties(aid account.AccountID) ([]*db.Penalty, error) {
+// Forgiven and expired penalties are not included unless all is true.
+func (a *Archiver) Penalties(aid account.AccountID, all bool) ([]*db.Penalty, error) {
+	if all {
+		stmt := fmt.Sprintf(internal.SelectAllPenalties, penaltiesTableName)
+		return penalties(a.db, stmt, aid)
+	}
 	stmt := fmt.Sprintf(internal.SelectPenalties, penaltiesTableName)
 	return penalties(a.db, stmt, aid, encode.UnixMilli(time.Now()))
-}
-
-// AllPenalties returns all penalties for a user, even those that are forgiven
-// or expired.
-func (a *Archiver) AllPenalties(aid account.AccountID) ([]*db.Penalty, error) {
-	stmt := fmt.Sprintf(internal.SelectAllPenalties, penaltiesTableName)
-	return penalties(a.db, stmt, aid)
 }
 
 // penalties returns a slice of penalties for a user, depending on the passed
