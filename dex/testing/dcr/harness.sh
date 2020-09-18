@@ -225,9 +225,8 @@ sleep 5
 # Have alpha send some credits to the other wallets
 for i in 10 18 5 7 1 15 3 25
 do
-  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for donedcr
-  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${TRADING_WALLET1_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
-  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${TRADING_WALLET2_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
+  RECIPIENTS="{\"${BETA_MINING_ADDR}\":${i},\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i}}"
+  tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
 done
 sleep 0.5
 tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
