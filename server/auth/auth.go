@@ -1187,7 +1187,7 @@ type marketOrders struct {
 	orderIDs map[order.OrderID]bool
 }
 
-// add adds a match ID to the marketMatches.
+// add adds a match ID to the marketOrders.
 func (mo *marketOrders) add(oid order.OrderID) bool {
 	_, found := mo.orderIDs[oid]
 	mo.orderIDs[oid] = true

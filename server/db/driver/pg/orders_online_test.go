@@ -980,7 +980,7 @@ func TestOrderStatuses(t *testing.T) {
 			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
 				orderOut.Status, statusIn)
 		}
-		if orderOut.Fill != int64(ordIn.Trade().Filled()) {
+		if orderOut.Fill != ordIn.Trade().Filled() {
 			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
 				orderOut.Fill, ordIn.Trade().Filled())
 		}
@@ -1009,7 +1009,7 @@ func TestOrderStatuses(t *testing.T) {
 			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
 				orderOut.Status, statusIn)
 		}
-		if orderOut.Fill != int64(ordIn.Trade().Filled()) {
+		if orderOut.Fill != ordIn.Trade().Filled() {
 			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
 				orderOut.Fill, ordIn.Trade().Filled())
 		}

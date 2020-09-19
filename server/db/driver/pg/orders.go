@@ -775,6 +775,12 @@ func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType,
 	return a.orderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
+// OrderStatuses gets the statuses and filled amounts of the orders with the
+// provided order IDs in the specified market and associated with the specified
+// account ID. The number and ordering of the returned order statuses is not
+// necessarily the same as the number and ordering of the provided order IDs.
+// It is not an error if any or all of the provided order IDs cannot be found
+// in the specified market against the specified account ID.
 func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
@@ -784,7 +790,7 @@ func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids
 	// Search active orders first.
 	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-	orderStatuses, orderFills, err := findOrders(ctx, a.db, aid, oids, fullTable)
+	activeOrders, err := orderStatuses(ctx, a.db, aid, oids, fullTable)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -793,12 +799,8 @@ func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids
 	orders := make([]*db.OrderStatus, 0, len(oids))
 	notFoundOids := make([]order.OrderID, 0, len(oids))
 	for _, oid := range oids {
-		if _, found := orderStatuses[oid]; found {
-			orders = append(orders, &db.OrderStatus{
-				ID:     oid,
-				Status: orderStatuses[oid],
-				Fill:   orderFills[oid],
-			})
+		if order, found := activeOrders[oid]; found {
+			orders = append(orders, order)
 		} else {
 			notFoundOids = append(notFoundOids, oid)
 		}
@@ -811,17 +813,13 @@ func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids
 	// Search archived orders.
 	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
 	ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
-	orderStatuses, orderFills, err = findOrders(ctx, a.db, aid, notFoundOids, fullTable)
+	archivedOrders, err := orderStatuses(ctx, a.db, aid, notFoundOids, fullTable)
 	cancel()
 	if err != nil {
 		return nil, err
 	}
-	for oid := range orderStatuses {
-		orders = append(orders, &db.OrderStatus{
-			ID:     oid,
-			Status: orderStatuses[oid],
-			Fill:   orderFills[oid],
-		})
+	for _, order := range archivedOrders {
+		orders = append(orders, order)
 	}
 
 	return orders, nil
@@ -1184,7 +1182,7 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	}
 }
 
-func findOrders(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []order.OrderID, fullTable string) (map[order.OrderID]order.OrderStatus, map[order.OrderID]int64, error) {
+func orderStatuses(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []order.OrderID, fullTable string) (map[order.OrderID]*db.OrderStatus, error) {
 	oidArr := make(pq.ByteaArray, 0, len(oids))
 	for i := range oids {
 		oidArr = append(oidArr, oids[i][:])
@@ -1194,29 +1192,31 @@ func findOrders(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []
 	var rows *sql.Rows
 	rows, err := dbe.QueryContext(ctx, stmt, aid, oidArr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	orderStatuses := make(map[order.OrderID]order.OrderStatus, len(oids))
-	orderFills := make(map[order.OrderID]int64, len(oids))
+	orderStatuses := make(map[order.OrderID]*db.OrderStatus, len(oids))
 	for rows.Next() {
 		var oid order.OrderID
 		var status pgOrderStatus
-		var filled int64
+		var filled uint64
 		err = rows.Scan(&oid, &status, &filled)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		orderStatuses[oid] = pgToMarketStatus(status)
-		orderFills[oid] = filled
+		orderStatuses[oid] = &db.OrderStatus{
+			ID:     oid,
+			Status: pgToMarketStatus(status),
+			Fill:   filled,
+		}
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return orderStatuses, orderFills, nil
+	return orderStatuses, nil
 }
 
 // loadTrade does NOT set BaseAsset and QuoteAsset!

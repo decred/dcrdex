@@ -56,7 +56,7 @@ type EpochResults struct {
 type OrderStatus struct {
 	ID     order.OrderID
 	Status order.OrderStatus
-	Fill   int64
+	Fill   uint64
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with
