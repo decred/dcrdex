@@ -715,10 +715,6 @@ func TestActiveOrderCoins(t *testing.T) {
 
 	var epochIdx, epochDur int64 = 13245678, 6000
 
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
-
 	multiCoinLO := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0)
 	multiCoinLO.Coins = append(multiCoinLO.Coins, order.CoinID{0x22, 0x23})
 
@@ -824,10 +820,6 @@ func TestOrderStatus(t *testing.T) {
 
 	var epochIdx, epochDur int64 = 13245678, 6000
 
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
-
 	orderStatuses := []struct {
 		ord    order.Order
 		status order.OrderStatus
@@ -896,10 +888,6 @@ func TestOrderStatuses(t *testing.T) {
 
 	var epochIdx, epochDur int64 = 13245678, 6000
 
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
-
 	orderStatuses := []struct {
 		ord    order.Order
 		status order.OrderStatus
@@ -933,8 +921,8 @@ func TestOrderStatuses(t *testing.T) {
 	unsavedOrder1 := newMarketBuyOrder(3000000000, 0)
 	unsavedOrder2 := newMarketSellOrder(4, 0)
 
-	orders := make([]order.Order, len(orderStatuses)+2)
-	orderIDs := make([]order.OrderID, len(orderStatuses)+2)
+	orders := make([]order.Order, 0, len(orderStatuses)+2)
+	orderIDs := make([]order.OrderID, 0, len(orderStatuses)+2)
 
 	// Add unsaved orders
 	orders = append(orders, unsavedOrder1, unsavedOrder2)
