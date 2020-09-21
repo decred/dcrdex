@@ -284,10 +284,15 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
 
+	var valSum uint64
+	var spendSize uint32
+	neededCoins := make(map[int]*msgjson.Coin, len(limit.Trade.Coins))
+	for i, coin := range limit.Trade.Coins {
+		neededCoins[i] = coin
+	}
+
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
-		var valSum uint64
-		var spendSize uint32
-		for _, coin := range limit.Trade.Coins {
+		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
 			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
 			if err != nil {
@@ -303,6 +308,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
 				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
 			}
+
+			delete(neededCoins, key) // don't check this coin again
 			valSum += dexCoin.Value()
 			spendSize += dexCoin.SpendSize()
 		}
@@ -442,10 +449,15 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		msgID: msg.ID,
 	}
 
+	var valSum uint64
+	var spendSize uint32
+	neededCoins := make(map[int]*msgjson.Coin, len(market.Trade.Coins))
+	for i, coin := range market.Trade.Coins {
+		neededCoins[i] = coin
+	}
+
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
-		var valSum uint64
-		var spendSize uint32
-		for _, coin := range market.Trade.Coins {
+		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
 			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
 			if err != nil {
@@ -461,6 +473,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
 				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
 			}
+
+			delete(neededCoins, key) // don't check this coin again
 			valSum += dexCoin.Value()
 			spendSize += dexCoin.SpendSize()
 		}
