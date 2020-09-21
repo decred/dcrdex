@@ -380,6 +380,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 }
 
 func mustMarshal(t *testing.T, thing interface{}) []byte {
+	t.Helper()
 	b, err := json.Marshal(thing)
 	if err != nil {
 		t.Fatalf("mustMarshal error: %v", err)
@@ -1358,8 +1359,19 @@ func (r *tReceipt) Coin() asset.Coin      { return r.coin }
 func (r *tReceipt) Contract() dex.Bytes   { return r.contract }
 
 func TestFindRedemption(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
-	defer shutdown()
+	node := newTRPCClient()
+	cfg := &BTCCloneCFG{
+		WalletCFG: &asset.WalletConfig{
+			TipChange: func(error) {},
+		},
+		Symbol:             "btc",
+		Logger:             tLogger,
+		ChainParams:        &chaincfg.MainNetParams,
+		WalletInfo:         WalletInfo,
+		DefaultFallbackFee: defaultFee,
+	}
+	wallet := newWallet(cfg, &dexbtc.Config{}, node)
+	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
 
 	contractHeight := node.GetBestBlockHeight() + 1
 	contractTxid := "e1b7c47df70d7d8f4c9c26f8ba9a59102c10885bd49024d32fdef08242f0c26c"
@@ -1414,8 +1426,11 @@ func TestFindRedemption(t *testing.T) {
 
 	// Now add the redemption.
 	inputs = append(inputs, makeRPCVin(contractTxid, contractVout, redemptionScript))
-	rawRedeem := makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs)
-	_, redeemBlock := node.addRawTx(contractHeight+2, rawRedeem)
+	_, redeemBlock := node.addRawTx(contractHeight+2, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
+	redeemVin := &redeemBlock.RawTx[0].Vin[1]
+
+	// Update currentTip from "RPC". Normally run() would do this.
+	wallet.checkForNewBlocks()
 
 	// Check find redemption result.
 	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
@@ -1434,16 +1449,16 @@ func TestFindRedemption(t *testing.T) {
 	}
 	node.rawErr[methodGetTransaction] = nil
 
-	// missing redemption
-	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
-	ctx, cancel := context.WithTimeout(tCtx, 2*time.Second)
-	defer cancel() // ctx should auto-cancel after 2 seconds, but this is apparently good practice to prevent leak
+	// timeout finding missing redemption
+	redeemVin.Txid = otherTxid
+	ctx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
+	defer cancel()
 	_, k, err := wallet.FindRedemption(ctx, coinID)
 	if ctx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
 	}
-	redeemBlock.RawTx[0].Vin[1].Txid = contractTxid
+	redeemVin.Txid = contractTxid
 
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
@@ -1455,18 +1470,21 @@ func TestFindRedemption(t *testing.T) {
 
 	// Expect FindRedemption to error because of bad input sig.
 	node.blockchainMtx.Lock()
-	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
+	redeemVin.ScriptSig.Hex = hex.EncodeToString(randBytes(100))
 	node.blockchainMtx.Unlock()
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
 	node.blockchainMtx.Lock()
-	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
+	redeemVin.ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 	node.blockchainMtx.Unlock()
 
-	// Wrong script type for output
-	getTxRes.Hex, _ = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	// Wrong script type for contract output
+	getTxRes.Hex, err = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	if err != nil {
+		t.Fatalf("makeTxHex: %v", err)
+	}
 	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {

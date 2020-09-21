@@ -1362,9 +1362,14 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// not found in this initial search attempt, the contract's find
 	// redemption request remains in the findRedemptionQueue to ensure
 	// continued search for redemption on new or re-orged blocks.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	if contractBlock == nil {
 		// Mempool contracts may only be spent by another mempool tx.
-		go dcr.findRedemptionsInMempool([]outPoint{contractOutpoint})
+		go func() {
+			defer wg.Done()
+			dcr.findRedemptionsInMempool([]outPoint{contractOutpoint})
+		}()
 	} else {
 		// Begin searching for redemption for this contract from the block
 		// in which this contract was mined up till the current best block.
@@ -1373,7 +1378,10 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		dcr.tipMtx.RLock()
 		bestBlock := dcr.currentTip
 		dcr.tipMtx.RUnlock()
-		go dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOutpoint})
+		go func() {
+			defer wg.Done()
+			dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOutpoint})
+		}()
 	}
 
 	var result *findRedemptionResult
@@ -1381,6 +1389,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	case result = <-resultChan:
 	case <-ctx.Done():
 	}
+
 	// If this contract is still in the findRedemptionQueue, close the result
 	// channel and remove from the queue to prevent further redemption search
 	// attempts for this contract.
@@ -1390,6 +1399,12 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		delete(dcr.findRedemptionQueue, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.Unlock()
+
+	// Don't abandon the goroutines even if context canceled.
+	// findRedemptionsInTx will return when it fails to find the assigned
+	// contract outpoint in the findRedemptionQueue.
+	wg.Wait()
+
 	// result would be nil if ctx is canceled or the result channel
 	// is closed without data, which would happen if the redemption
 	// search is aborted when this ExchangeWallet is shut down.
