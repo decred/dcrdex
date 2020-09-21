@@ -1475,8 +1475,6 @@ func TestFindRedemption(t *testing.T) {
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
-	} else {
-		t.Log("catch it:", err)
 	}
 	node.blockchainMtx.Lock()
 	redeemVin.ScriptSig.Hex = hex.EncodeToString(redemptionScript)
