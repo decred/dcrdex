@@ -605,8 +605,6 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 //   revoked (for trades with active matches), or when the trades are retired.
 func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknownOrdersCount, reconciledOrdersCount int) {
 	dc.tradeMtx.RLock()
-	defer dc.tradeMtx.RUnlock()
-
 	// Check for unknown orders reported as active by the server. If such
 	// exists, could be that they were known to the client but were thought
 	// to be inactive and thus were not loaded from db or were retired.
@@ -617,17 +615,97 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 		if _, tracked := dc.trades[oid]; tracked {
 			serverOrderStatuses[oid] = order.OrderStatus(msgOrder.Status)
 		} else {
-			log.Errorf("DEX %s reported order %v which is not known to be active", dc.acct.host, oid)
+			log.Errorf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
 			unknownOrdersCount++
 		}
 	}
+	knownActiveTrades := make(map[order.OrderID]*trackedTrade)
+	for oid, trade := range dc.trades {
+		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
+			knownActiveTrades[oid] = trade
+		} else if serverStatus, isServerActive := serverOrderStatuses[oid]; isServerActive {
+			log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
+				oid, trade.metaData.Status, dc.acct.host, serverStatus)
+		}
+	}
+	dc.tradeMtx.RUnlock()
 
-	// Compare server-reported status against currently recorded status for
-	// each trade in the dc.trades map.
-	for oid, t := range dc.trades {
+	updateOrderStatus := func(trade *trackedTrade, newStatus order.OrderStatus) {
+		oid := trade.ID()
+		previousStatus := trade.metaData.Status
+		trade.metaData.Status = newStatus
+		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
+			log.Errorf("Error updating status for order %v from %v to %v", oid, previousStatus, newStatus)
+			trade.metaData.Status = previousStatus
+			return
+		}
+		reconciledOrdersCount++
+		log.Debugf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+			oid, previousStatus, newStatus, dc.acct.host)
+	}
+
+	// Compare the status reported by the server for each known active trade. Orders
+	// for which the server did not return a status are no longer active (now Executed,
+	// Canceled or Revoked). Use the order_status route to determine the correct status
+	// for such orders and update accordingly.
+	var orderStatusRequests []*msgjson.OrderStatusRequest
+	for oid, trade := range knownActiveTrades {
 		serverStatus, isServerActive := serverOrderStatuses[oid]
-		if t.reconcile(serverStatus, isServerActive) {
-			reconciledOrdersCount++
+		if !isServerActive {
+			// Now inactive. Request correct status from the DEX.
+			orderStatusRequests = append(orderStatusRequests, &msgjson.OrderStatusRequest{
+				Base:    trade.Base(),
+				Quote:   trade.Quote(),
+				OrderID: oid[:],
+			})
+			continue
+		}
+
+		trade.mtx.Lock()
+		if trade.metaData.Status == serverStatus {
+			log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
+				oid, trade.metaData.Status, serverStatus)
+		} else if trade.metaData.Status == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
+			// Only standing orders can move from Epoch to Booked. This must have
+			// happened in the client's absence (maybe a missed nomatch message).
+			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+				updateOrderStatus(trade, order.OrderStatusBooked)
+			} else {
+				log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
+					serverStatus, oid, dc.acct.host, trade.metaData.Status)
+			}
+		} else {
+			log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
+				serverStatus, oid, dc.acct.host, trade.metaData.Status)
+		}
+		trade.mtx.Unlock()
+	}
+
+	if len(orderStatusRequests) > 0 {
+		log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
+
+		// Send the 'order_status' request.
+		orderStatuses := []*msgjson.OrderStatusResult{}
+		err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests, &orderStatuses, DefaultResponseTimeout)
+		if err != nil {
+			log.Errorf("Error retreiving order statuses from DEX %s: %v", dc.acct.host, err)
+			return
+		}
+
+		if len(orderStatuses) != len(orderStatusRequests) {
+			log.Errorf("Retreived statuses for %d out of %d orders from order_status route",
+				len(orderStatuses), len(orderStatusRequests))
+		}
+
+		// Update the orders with the statuses received.
+		for _, status := range orderStatuses {
+			var oid order.OrderID
+			copy(oid[:], status.OrderID)
+			trade := knownActiveTrades[oid] // no need to lock dc.tradeMtx
+			trade.mtx.Lock()
+			trade.Trade().SetFill(status.Fill)
+			updateOrderStatus(trade, order.OrderStatus(status.Status))
+			trade.mtx.Unlock()
 		}
 	}
 
@@ -2478,17 +2556,20 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	dc.acct.auth()
 
 	// Compare the server-returned active orders with tracked trades, updating
-	// the trade statuses where necessary.
-	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
-	if unknownOrdersCount > 0 {
-		details := fmt.Sprintf("%d active orders reported by %s were not found.",
-			unknownOrdersCount, dc.acct.host)
-		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
-	}
-	if reconciledOrdersCount > 0 {
-		details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
-		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
-	}
+	// the trade statuses where necessary. Perform reconciliation in goroutine,
+	// some orders might require sending an order_status request.
+	go func() {
+		unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
+		if unknownOrdersCount > 0 {
+			details := fmt.Sprintf("%d active orders reported by %s were not found.",
+				unknownOrdersCount, dc.acct.host)
+			c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
+		}
+		if reconciledOrdersCount > 0 {
+			details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
+			c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
+		}
+	}()
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.Matches, false)
@@ -3854,14 +3935,14 @@ func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) erro
 func sendRequest(conn comms.WsConn, route string, request, response interface{}, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
-		return fmt.Errorf("error encoding %s request: %v", route, err)
+		return fmt.Errorf("error encoding %q request: %v", route, err)
 	}
 
 	errChan := make(chan error, 1)
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for '%s' response", route)
+		errChan <- fmt.Errorf("timed out waiting for %q response", route)
 	})
 	// Check the request error.
 	if err != nil {

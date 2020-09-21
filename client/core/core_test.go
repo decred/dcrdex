@@ -2773,9 +2773,9 @@ func TestOrderStatusReconciliation(t *testing.T) {
 
 	tests := []struct {
 		name                string
-		clientOrders        []*trackedTrade  // orders known to the client
-		serverOrders        []*msgjson.Order // orders considered active by the server
-		serverMatches       []*msgjson.Match // matches considered active by the server
+		clientOrders        []*trackedTrade             // orders known to the client
+		serverOrders        []*msgjson.Order            // orders considered active by the server
+		orderStatuses       []msgjson.OrderStatusResult // server's response to order-status requests
 		expectOrderStatuses map[order.OrderID]order.OrderStatus
 	}{
 		{
@@ -2841,9 +2841,35 @@ func TestOrderStatusReconciliation(t *testing.T) {
 				immediateOrders.executed,
 			},
 			serverOrders: []*msgjson.Order{}, // no active order reported by server
+			orderStatuses: []msgjson.OrderStatusResult{
+				{
+					OrderID: standingOrders.epoch.ID().Bytes(),
+					Status:  uint16(order.OrderStatusRevoked),
+				},
+				{
+					OrderID: standingOrders.epochPreimaged.ID().Bytes(),
+					Status:  uint16(order.OrderStatusExecuted),
+				},
+				{
+					OrderID: standingOrders.booked.ID().Bytes(),
+					Status:  uint16(order.OrderStatusRevoked),
+				},
+				{
+					OrderID: standingOrders.bookedPendingCancel.ID().Bytes(),
+					Status:  uint16(order.OrderStatusCanceled),
+				},
+				{
+					OrderID: immediateOrders.epoch.ID().Bytes(),
+					Status:  uint16(order.OrderStatusRevoked),
+				},
+				{
+					OrderID: immediateOrders.epochPreimaged.ID().Bytes(),
+					Status:  uint16(order.OrderStatusExecuted),
+				},
+			},
 			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
 				standingOrders.epoch.ID():               order.OrderStatusRevoked,  // preimage miss = revoked
-				standingOrders.epochPreimaged.ID():      order.OrderStatusRevoked,  // preimage sent, not booked, not canceled = revoked (maybe executed)
+				standingOrders.epochPreimaged.ID():      order.OrderStatusExecuted, // preimage sent, not booked, not canceled = executed (maybe revoked)
 				standingOrders.booked.ID():              order.OrderStatusRevoked,  // booked, not canceled = revoked (maybe executed)
 				standingOrders.bookedPendingCancel.ID(): order.OrderStatusCanceled, // booked pending canceled = canceled (may actually be revoked or executed)
 				standingOrders.executed.ID():            order.OrderStatusExecuted, // should not change
@@ -2858,32 +2884,43 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		fmt.Printf("\n==== %s\n", tt.name) // makes reading log messages easier when testing with -v
 
 		// Track client orders in dc.trades.
+		dc.tradeMtx.Lock()
 		dc.trades = make(map[order.OrderID]*trackedTrade)
 		for _, tracker := range tt.clientOrders {
 			dc.trades[tracker.ID()] = tracker
 		}
+		dc.tradeMtx.Unlock()
 
-		// Queue connect response and send connect request.
-		rig.queueConnect(nil, tt.serverMatches, tt.serverOrders)
-		if err := rig.core.authDEX(dc); err != nil {
-			t.Fatalf("%s: unexpected authDEX error: %v", tt.name, err)
+		// Queue order_status response if required for reconciliation.
+		if len(tt.orderStatuses) > 0 {
+			rig.ws.queueResponse(msgjson.OrderStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
+				resp, _ := msgjson.NewResponse(msg.ID, tt.orderStatuses, nil)
+				f(resp)
+				return nil
+			})
 		}
 
+		// Reconcile tracked orders with server orders.
+		dc.reconcileTrades(tt.serverOrders)
+
+		dc.tradeMtx.RLock()
 		if len(dc.trades) != len(tt.expectOrderStatuses) {
 			t.Fatalf("%s: post-connect order count mismatch. expected %d, got %d",
 				tt.name, len(tt.expectOrderStatuses), len(dc.trades))
 		}
-
 		for oid, tracker := range dc.trades {
 			expectedStatus, expected := tt.expectOrderStatuses[oid]
 			if !expected {
 				t.Fatalf("%s: unexpected order %v tracked by client", tt.name, oid)
 			}
+			tracker.mtx.RLock()
 			if tracker.metaData.Status != expectedStatus {
 				t.Fatalf("%s: client reported wrong order status %v, expected %v",
 					tt.name, tracker.metaData.Status, expectedStatus)
 			}
+			tracker.mtx.RUnlock()
 		}
+		dc.tradeMtx.RUnlock()
 	}
 }
 
