@@ -78,6 +78,29 @@ export default class OrderBook {
   count () {
     return this.sells.length + this.buys.length
   }
+
+  /* bestGapOrder will return the best non-epoch order if one exists, or the
+   * best epoch order if there are only epoch orders, or null if there are no
+   * orders.
+   */
+  bestGapOrder (side) {
+    var best = null
+    for (const ord of side) {
+      if (!ord.epoch) return ord
+      if (!best) {
+        best = ord
+      }
+    }
+    return best
+  }
+
+  bestGapBuy () {
+    return this.bestGapOrder(this.buys)
+  }
+
+  bestGapSell () {
+    return this.bestGapOrder(this.sells)
+  }
 }
 
 /*

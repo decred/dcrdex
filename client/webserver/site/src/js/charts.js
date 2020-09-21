@@ -504,12 +504,12 @@ export class DepthChart {
   }
 
   gap () {
-    const [b, s] = [this.book.buys, this.book.sells]
-    if (!b.length) {
-      if (!s.length) return [1, 0]
-      return [s[0].rate, 0]
-    } else if (!s.length) return [b[0].rate, 0]
-    return [(s[0].rate + b[0].rate) / 2, s[0].rate - b[0].rate]
+    const [b, s] = [this.book.bestGapBuy(), this.book.bestGapSell()]
+    if (!b) {
+      if (!s) return [1, 0]
+      return [s.rate, 0]
+    } else if (!s) return [b.rate, 0]
+    return [(s.rate + b.rate) / 2, s.rate - b.rate]
   }
 }
 
