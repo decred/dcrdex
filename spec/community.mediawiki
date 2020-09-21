@@ -27,17 +27,27 @@ replace the order.
 In the event that the taker fails to respond to the maker's initialization
 transaction, the maker will incur no violation.
 
-===Rule 3: An account's cancellation ratio must remain below the threshold===
+===Rule 3: An account's cancellation rate must not exceed the threshold===
 
-The cancellation ratio is the ratio of the count of canceled orders to the
-count of completed orders.
-The cancellation threshold is set by the DEX operator.
-An order is considered completed when all matches have fully settled.
+The cancellation rate is the ratio of the count of canceled orders to the
+count of all completed orders.
+The completed order count is the sum of canceled orders and fully settled
+orders.
+An order is considered fully settled if it is no longer booked, had at least
+one match, and has completed all swaps from matches made with the order.
+Failed swaps where the counter-party is at fault do not count against the user.
 An order is considered canceled when a cancel order is matched to a standing
 limit order. The server may also cancel an order if the client's connection is
 dropped and the client fails to reconnect for more than 1 epoch duration.
 Cancellation of a partially filled order is counted as a full cancellation.
-The cancellation ratio is evaluated on a 25-order rolling window.
+The cancellation threshold is set by the DEX operator.
+The cancellation rate is evaluated on a 100-order rolling window.
+
+A new user is exempt from the cancellation rate requirement while their
+completed order count, <code>total</code>, is not greater than
+<code>threshold/(1-threshold)</code>. This follows from the possibility of the
+next completed order being fully-settled and just passing the required
+cancellation rate threshold: <code>total / (total + 1) <= threshold</code>
 
 ===Rule 4: Transaction outputs must be properly sized===
 
