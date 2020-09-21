@@ -117,7 +117,7 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	return ord, pgToMarketStatus(status), nil
 }
 
-type pgOrderStatus uint16
+type pgOrderStatus int16
 
 const (
 	orderStatusUnknown pgOrderStatus = iota
@@ -155,7 +155,7 @@ func pgToMarketStatus(status pgOrderStatus) order.OrderStatus {
 		return order.OrderStatusExecuted
 	case orderStatusCanceled:
 		return order.OrderStatusCanceled
-	case orderStatusRevoked:
+	case orderStatusRevoked, -orderStatusRevoked: // negative revoke status means forgiven preimage miss
 		return order.OrderStatusRevoked
 	}
 	return order.OrderStatusUnknown
@@ -174,8 +174,8 @@ func (status pgOrderStatus) active() bool {
 	switch status {
 	case orderStatusEpoch, orderStatusBooked:
 		return true
-	case orderStatusCanceled, orderStatusRevoked, orderStatusExecuted,
-		orderStatusFailed, orderStatusUnknown:
+	case orderStatusCanceled, orderStatusRevoked, -orderStatusRevoked,
+		orderStatusExecuted, orderStatusFailed, orderStatusUnknown:
 		return false
 	default:
 		panic("unknown order status!") // programmer error
@@ -735,6 +735,61 @@ func completedUserOrders(ctx context.Context, dbe *sql.DB, tableName string, aid
 	return
 }
 
+// PreimageStats retrieves results of the N most recent preimage requests for
+// the user across all markets.
+func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error) {
+	var outcomes []*db.PreimageResult
+
+	queryOutcomes := func(stmt string) error {
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		defer cancel()
+
+		rows, err := a.db.QueryContext(ctx, stmt, user, lastN, orderStatusRevoked)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var miss bool
+			var time int64
+			err = rows.Scan(&miss, &time)
+			if err != nil {
+				return err
+			}
+			outcomes = append(outcomes, &db.PreimageResult{
+				Miss: miss,
+				Time: time,
+			})
+		}
+
+		return rows.Err()
+	}
+
+	for m := range a.markets {
+		// archived trade orders
+		stmt := fmt.Sprintf(internal.PreimageResultsLastN, fullOrderTableName(a.dbName, m, false))
+		if err := queryOutcomes(stmt); err != nil {
+			return nil, err
+		}
+
+		// archived cancel orders
+		stmt = fmt.Sprintf(internal.CancelPreimageResultsLastN, fullCancelOrderTableName(a.dbName, m, false))
+		if err := queryOutcomes(stmt); err != nil {
+			return nil, err
+		}
+	}
+
+	sort.Slice(outcomes, func(i, j int) bool {
+		return outcomes[j].Time < outcomes[i].Time // descending
+	})
+	if len(outcomes) > lastN {
+		outcomes = outcomes[:lastN]
+	}
+
+	return outcomes, nil
+}
+
 // OrderStatusByID gets the status, type, and filled amount of the order with
 // the given OrderID in the market specified by a base and quote asset. See also
 // OrderStatus. If the order is not found, the error value is ErrUnknownOrder,
@@ -895,7 +950,6 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error {
 	// Locate the order.
 	status, orderType, initFilled, err := a.orderStatusByID(oid, base, quote)
-	//status, orderType, initFilled, err := orderStatus(a.db, oid, a.dbName, marketSchema) // only checks market and limit orders
 	if err != nil {
 		return err
 	}

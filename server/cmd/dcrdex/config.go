@@ -48,6 +48,8 @@ const (
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
+	defaultMaxUserCancels      = 2
+	defaultBanScore            = 20
 
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
@@ -80,6 +82,9 @@ type dexConf struct {
 	RegFeeAmount     uint64
 	CancelThreshold  float64
 	Anarchy          bool
+	FreeCancels      bool
+	MaxUserCancels   uint32
+	BanScore         uint32
 	DEXPrivKeyPath   string
 	RPCCert          string
 	RPCKey           string
@@ -121,6 +126,9 @@ type flagsData struct {
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
 	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
 	Anarchy          bool          `long:"anarchy" description:"Do not enforce any rules."`
+	FreeCancels      bool          `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders). Implied by --anarchy."`
+	MaxUserCancels   uint32        `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
+	BanScore         uint32        `long:"banscore" description:"The accumulated penalty score at which when an account gets closed."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
@@ -298,6 +306,8 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeAmount:     defaultRegFeeAmount,
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
+		MaxUserCancels:   defaultMaxUserCancels,
+		BanScore:         defaultBanScore,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
@@ -553,7 +563,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	}
 
 	// If using {netname} then replace it with the network name.
-	cfg.PGDBName = strings.Replace(cfg.PGDBName, "{netname}", network.String(), -1)
+	cfg.PGDBName = strings.ReplaceAll(cfg.PGDBName, "{netname}", network.String())
 
 	dexCfg := &dexConf{
 		DataDir:          cfg.DataDir,
@@ -569,7 +579,10 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		RegFeeXPub:       cfg.RegFeeXPub,
 		CancelThreshold:  cfg.CancelThreshold,
+		MaxUserCancels:   cfg.MaxUserCancels,
 		Anarchy:          cfg.Anarchy,
+		FreeCancels:      cfg.FreeCancels || cfg.Anarchy,
+		BanScore:         cfg.BanScore,
 		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
 		RPCCert:          cfg.RPCCert,
 		RPCKey:           cfg.RPCKey,

@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -57,7 +58,8 @@ type AuthManager interface {
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
-	Penalize(user account.AccountID, rule account.Rule, details string) error
+	SwapSuccess(user account.AccountID, refTime time.Time)
+	Inaction(user account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 	Unban(user account.AccountID) error
@@ -1009,7 +1011,32 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 	return
 }
 
-func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
+func (s *Swapper) failMatch(match *matchTracker) {
+	// From the match status, determine maker/taker fault and the corresponding
+	// auth.NoActionStep.
+	var makerFault bool
+	var misstep auth.NoActionStep
+	var refTime time.Time // a reference time found in the DB for reproducibly sorting outcomes
+	switch match.Status {
+	case order.NewlyMatched:
+		misstep = auth.NoSwapAsMaker
+		refTime = match.Epoch.End()
+		makerFault = true
+	case order.MakerSwapCast:
+		misstep = auth.NoSwapAsTaker
+		refTime = match.makerStatus.swapTime // swapConfirmed time is not in the DB
+	case order.TakerSwapCast:
+		misstep = auth.NoRedeemAsMaker
+		refTime = match.takerStatus.swapTime // swapConfirmed time is not in the DB
+		makerFault = true
+	case order.MakerRedeemed:
+		misstep = auth.NoRedeemAsTaker
+		refTime = match.makerStatus.redeemTime
+	default:
+		log.Errorf("Invalid failMatch status %v for match %v", match.Status, match.ID())
+		return
+	}
+
 	orderAtFault, otherOrder := match.Taker, order.Order(match.Maker) // an order.Order
 	if makerFault {
 		orderAtFault, otherOrder = match.Maker, match.Taker
@@ -1052,16 +1079,8 @@ func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
 		}
 	}
 
-	// Penalize for failure to act.
-	//
-	// TODO: Arguably, this obviates the RecordCancel above since this
-	// closes the account before the possibility of a cancellation rate
-	// penalty. I'm keeping it this way for now however since penalties
-	// may become less severe than account closure (e.g. temporary
-	// suspension, cool down, or order throttling), and restored
-	// accounts will still require a record of the revoked order.
-	details := fmt.Sprintf("Match ID: %s", match.ID())
-	s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct, details)
+	// Register the failure to act violation, adjusting the user's score.
+	s.authMgr.Inaction(orderAtFault.User(), misstep, refTime, orderAtFault.ID(), match.ID())
 
 	// Send the revoke_match messages, and solicit acks.
 	s.revoke(match)
@@ -1097,8 +1116,8 @@ func (s *Swapper) checkInactionEventBased() {
 
 		log.Tracef("checkInactionEventBased: match %v (%v)", match.ID(), match.Status)
 
-		failMatch := func(makerFault bool) {
-			s.failMatch(match, makerFault)
+		failMatch := func() {
+			s.failMatch(match)
 			deletions = append(deletions, match)
 		}
 
@@ -1107,14 +1126,14 @@ func (s *Swapper) checkInactionEventBased() {
 			// Maker has not broadcast their swap. They have until match time
 			// plus bTimeout.
 			if tooOld(match.time) {
-				failMatch(true) // maker should have swapped
+				failMatch()
 			}
 		case order.MakerRedeemed:
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
 			// maker's `redeem` request (and sent the taker's 'redemption').
 			if tooOld(match.makerStatus.redeemSeenTime()) {
-				failMatch(false) // taker should have redeemed
+				failMatch()
 			}
 		}
 	}
@@ -1166,19 +1185,19 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 		log.Tracef("checkInactionBlockBased: asset %d, match %v (%v)",
 			assetID, match.ID(), match.Status)
 
-		failMatch := func(makerFault bool) {
-			s.failMatch(match, makerFault)
+		failMatch := func() {
+			s.failMatch(match)
 			deletions = append(deletions, match)
 		}
 
 		switch match.Status {
 		case order.MakerSwapCast:
 			if tooOld(match.makerStatus.swapConfTime()) {
-				failMatch(false) // taker should have swapped
+				failMatch()
 			}
 		case order.TakerSwapCast:
 			if tooOld(match.takerStatus.swapConfTime()) {
-				failMatch(true) // maker should have redeemed
+				failMatch()
 			}
 		}
 	}
@@ -1711,7 +1730,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	actor.status.mtx.Unlock()
 
 	match.mtx.Lock()
-	match.Status = stepInfo.nextStep
+	newStatus := stepInfo.nextStep
+	match.Status = newStatus
 	match.mtx.Unlock()
 
 	// Only unlock match map after the statuses and txn times are stored,
@@ -1720,13 +1740,18 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	log.Debugf("processRedeem: valid redemption %v (%s) spending contract %s received at %v from %v (%s) for match %v, "+
 		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, cpSwapStr, redeemTime, actor.user,
-		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
+		makerTaker(actor.isMaker), matchID, stepInfo.step, newStatus)
+
+	// Credit the user for completing the swap, adjusting the user's score.
+	if actor.user != counterParty.user || newStatus == order.MatchComplete { // is user is both sides, only credit on MatchComplete (taker done too)
+		s.authMgr.SwapSuccess(actor.user, redeemTime)
+	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
 	// the secret. Taker is party B, the participant.
 	storFn := s.storage.SaveRedeemB // also sets match status to MatchComplete
-	if stepInfo.actor.isMaker {
+	if actor.isMaker {
 		// Maker redeem stores the secret too.
 		storFn = func(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 			return s.storage.SaveRedeemA(mid, coinID, params.Secret, timestamp) // also sets match status to MakerRedeemed

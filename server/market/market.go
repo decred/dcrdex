@@ -42,6 +42,7 @@ const (
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
+	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
 	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
@@ -750,7 +751,7 @@ func (m *Market) Run(ctx context.Context) {
 	go func() {
 		defer wgEpochs.Done()
 		for ep := range eq.ready {
-			// epochStart has completed preimage collection.
+			// prepEpoch has completed preimage collection.
 			m.processReadyEpoch(ep, notifyChan)
 		}
 		log.Debugf("epoch pump drained for market %s", m.marketInfo.Name)
@@ -997,6 +998,13 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			log.Debugf("Received cancel order %v targeting %v, but already have %v.",
 				co, co.TargetOrderID, eco)
 			errChan <- ErrDuplicateCancelOrder
+			return nil
+		}
+
+		if nc := epoch.UserCancels[co.AccountID]; nc >= m.marketInfo.MaxUserCancelsPerEpoch {
+			log.Debugf("Received cancel order %v targeting %v, but user already has %d cancel orders in this epoch.",
+				co, co.TargetOrderID, nc)
+			errChan <- ErrTooManyCancelOrders
 			return nil
 		}
 
@@ -1284,22 +1292,22 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) bool {
 		//
 		// Preimage collection for suspended users could be skipped, forcing
 		// them into the misses slice perhaps by passing user IDs to skip into
-		// epochStart, with a SPEC UPDATE noting that preimage requests are not
+		// prepEpoch, with a SPEC UPDATE noting that preimage requests are not
 		// sent to suspended accounts.
 	}
 	m.epochMtx.Unlock()
 
 	// Start preimage collection.
 	go func() {
-		rq.cSum, rq.ordersRevealed, rq.misses = m.epochStart(orders)
+		rq.cSum, rq.ordersRevealed, rq.misses = m.prepEpoch(orders, epoch.End)
 		close(rq.ready)
 	}()
 
 	return true
 }
 
-// epochStart collects order preimages, and penalizes users who fail to respond.
-func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
+// prepEpoch collects order preimages, and penalizes users who fail to respond.
+func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
 	// Solicit the preimages for each order.
 	cSum, ordersRevealed, misses = m.collectPreimages(orders)
 	if len(orders) > 0 {
@@ -1307,13 +1315,11 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 			len(ordersRevealed), len(misses), cSum)
 	}
 
-	// Penalize accounts with misses. TODO: consider if Penalize can be an async
-	// function call.
 	for _, ord := range misses {
-		log.Infof("No preimage received for order %v from user %v. Penalizing user and revoking order.",
+		log.Infof("No preimage received for order %v from user %v. Recording violation and revoking order.",
 			ord.ID(), ord.User())
-		details := fmt.Sprintf("Order ID: %s", ord.ID())
-		m.auth.Penalize(ord.User(), account.PreimageReveal, details)
+		// Register the preimage miss violation, adjusting the user's score.
+		m.auth.MissedPreimage(ord.User(), epochEnd, ord.ID())
 		// Unlock the order's coins locked in processOrder.
 		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
 		// Change the order status from orderStatusEpoch to orderStatusRevoked.
@@ -1324,6 +1330,12 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 				ord.UID(), err)
 		}
+	}
+
+	// Register the preimage collection successes, potentially evicting preimage
+	// miss violations for purposes of user scoring.
+	for _, ord := range ordersRevealed {
+		m.auth.PreimageSuccess(ord.Order.User(), epochEnd, ord.Order.ID())
 	}
 
 	return

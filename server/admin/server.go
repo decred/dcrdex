@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
@@ -34,8 +35,8 @@ const (
 
 	marketNameKey = "market"
 	accountIDKey  = "account"
+	matchIDKey    = "match"
 	ruleToken     = "rule"
-	messageToken  = "message"
 	timeoutToken  = "timeout"
 )
 
@@ -57,6 +58,7 @@ type SvrCore interface {
 	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
 	Penalize(aid account.AccountID, rule account.Rule, details string) error
 	Unban(aid account.AccountID) error
+	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
 }
 
 // Server is a multi-client https server.
@@ -137,6 +139,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/ban", s.apiBan)
 			rm.Get("/unban", s.apiUnban)
+			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})
 		r.Post("/notifyall", s.apiNotifyAll)

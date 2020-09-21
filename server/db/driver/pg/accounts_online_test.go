@@ -46,7 +46,6 @@ func TestAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating account: %v", err)
 	}
-	t.Logf("created registration address: %s", regAddr)
 
 	checkAddr, err := archie.AccountRegAddr(tAcctID)
 	if err != nil {

@@ -16,6 +16,14 @@ const (
 	metaTableName     = "meta"
 	feeKeysTableName  = "fee_keys"
 	accountsTableName = "accounts"
+
+	// market schema tables
+	matchesTableName         = "matches"
+	epochsTableName          = "epochs"
+	ordersArchivedTableName  = "orders_archived"
+	ordersActiveTableName    = "orders_active"
+	cancelsArchivedTableName = "cancels_archived"
+	cancelsActiveTableName   = "cancels_active"
 )
 
 type tableStmt struct {
@@ -34,12 +42,12 @@ var createAccountTableStatements = []tableStmt{
 }
 
 var createMarketTableStatements = []tableStmt{
-	{"orders_archived", internal.CreateOrdersTable},
-	{"orders_active", internal.CreateOrdersTable},
-	{"cancels_archived", internal.CreateCancelOrdersTable},
-	{"cancels_active", internal.CreateCancelOrdersTable},
-	{"matches", internal.CreateMatchesTable}, // just one matches table per market for now
-	{"epochs", internal.CreateEpochsTable},
+	{ordersArchivedTableName, internal.CreateOrdersTable},
+	{ordersActiveTableName, internal.CreateOrdersTable},
+	{cancelsArchivedTableName, internal.CreateCancelOrdersTable},
+	{cancelsActiveTableName, internal.CreateCancelOrdersTable},
+	{matchesTableName, internal.CreateMatchesTable}, // just one matches table per market for now
+	{epochsTableName, internal.CreateEpochsTable},
 }
 
 var tableMap = func() map[string]string {
@@ -60,9 +68,9 @@ var tableMap = func() map[string]string {
 func fullOrderTableName(dbName, marketSchema string, active bool) string {
 	var orderTable string
 	if active {
-		orderTable = "orders_active"
+		orderTable = ordersActiveTableName
 	} else {
-		orderTable = "orders_archived"
+		orderTable = ordersArchivedTableName
 	}
 
 	return fullTableName(dbName, marketSchema, orderTable)
@@ -71,20 +79,20 @@ func fullOrderTableName(dbName, marketSchema string, active bool) string {
 func fullCancelOrderTableName(dbName, marketSchema string, active bool) string {
 	var orderTable string
 	if active {
-		orderTable = "cancels_active"
+		orderTable = cancelsActiveTableName
 	} else {
-		orderTable = "cancels_archived"
+		orderTable = cancelsArchivedTableName
 	}
 
 	return fullTableName(dbName, marketSchema, orderTable)
 }
 
 func fullMatchesTableName(dbName, marketSchema string) string {
-	return dbName + "." + marketSchema + ".matches"
+	return dbName + "." + marketSchema + "." + matchesTableName
 }
 
 func fullEpochsTableName(dbName, marketSchema string) string {
-	return dbName + "." + marketSchema + ".epochs"
+	return dbName + "." + marketSchema + "." + epochsTableName
 }
 
 // CreateTable creates one of the known tables by name. The table will be
@@ -116,7 +124,6 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 		if err != nil {
 			return fmt.Errorf("failed to create row for meta table")
 		}
-
 	}
 
 	// Create the markets table in the public schema.

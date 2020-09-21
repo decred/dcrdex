@@ -24,6 +24,8 @@ import (
 
 const (
 	cancelThreshWindow = 100 // spec
+	scoringMatchLimit  = 60  // last N matches (success or at-fault fail) to be considered in swap inaction scoring
+	scoringOrderLimit  = 40  // last N orders to be considered in preimage miss scoring
 
 	maxIDsPerOrderStatusRequest = 10_000
 )
@@ -43,12 +45,15 @@ type Storage interface {
 	CloseAccount(account.AccountID, account.Rule) error
 	// RestoreAccount opens an account that was closed by CloseAccount.
 	RestoreAccount(account.AccountID) error
+	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
 	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
+	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error)
+	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
 	CreateAccount(*account.Account) (string, error)
@@ -175,6 +180,8 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // the 'connect' route.
 type AuthManager struct {
 	anarchy      bool
+	freeCancels  bool
+	banScore     uint32
 	cancelThresh float64
 	storage      Storage
 	signer       Signer
@@ -182,12 +189,118 @@ type AuthManager struct {
 	checkFee     FeeChecker
 	feeConfs     int64
 
-	// latencyQ is a queue for coin waiters to deal with latency.
+	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
 
 	connMtx sync.RWMutex
 	users   map[account.AccountID]*clientInfo
 	conns   map[uint64]*clientInfo
+
+	violationMtx   sync.Mutex
+	matchOutcomes  map[account.AccountID]*latest
+	preimgOutcomes map[account.AccountID]*latest
+}
+
+// violation badness
+const (
+	// preimage miss
+	preimageMissScore = 2 // book spoof, no match, no stuck funds
+
+	// failure to act violations
+	noSwapAsMakerScore   = 4  // book spoof, match with taker order affected, no stuck funds
+	noSwapAsTakerScore   = 11 // maker has contract stuck for 20 hrs
+	noRedeemAsMakerScore = 7  // taker has contract stuck for 8 hrs
+	noRedeemAsTakerScore = 1  // just dumb, counterparty not inconvenienced
+
+	successScore = -1 // offsets the violations
+
+	defaultBanScore = 20
+)
+
+// Violation represents a specific infraction. For example, not broadcasting a
+// swap contract transaction by the deadline as the maker.
+type Violation int32
+
+const (
+	ViolationInvalid Violation = iota - 2
+	ViolationForgiven
+	ViolationSwapSuccess
+	ViolationPreimageMiss
+	ViolationNoSwapAsMaker
+	ViolationNoSwapAsTaker
+	ViolationNoRedeemAsMaker
+	ViolationNoRedeemAsTaker
+)
+
+var violations = map[Violation]struct {
+	score int32
+	desc  string
+}{
+	ViolationSwapSuccess:     {successScore, "swap success"},
+	ViolationForgiven:        {-1, "forgiveness"},
+	ViolationPreimageMiss:    {preimageMissScore, "preimage miss"},
+	ViolationNoSwapAsMaker:   {noSwapAsMakerScore, "no swap as maker"},
+	ViolationNoSwapAsTaker:   {noSwapAsTakerScore, "no swap as taker"},
+	ViolationNoRedeemAsMaker: {noRedeemAsMakerScore, "no redeem as maker"},
+	ViolationNoRedeemAsTaker: {noRedeemAsTakerScore, "no redeem as taker"},
+	ViolationInvalid:         {0, "invalid violation"},
+}
+
+// Score returns the Violation's score, which is a representation of the
+// relative severity of the infraction.
+func (v Violation) Score() int32 {
+	return violations[v].score
+}
+
+// String returns a description of the Violation.
+func (v Violation) String() string {
+	return violations[v].desc
+}
+
+type violationCounter map[Violation]uint32
+
+func (vc violationCounter) score() int32 {
+	var score int32
+	for step, count := range vc {
+		score += step.Score() * int32(count)
+	}
+	return score
+}
+
+// NoActionStep is the action that the user failed to take. This is used to
+// define valid inputs to the Inaction method.
+type NoActionStep uint8
+
+const (
+	SwapSuccess NoActionStep = iota // success included for accounting purposes
+	NoSwapAsMaker
+	NoSwapAsTaker
+	NoRedeemAsMaker
+	NoRedeemAsTaker
+)
+
+// Violation returns the corresponding Violation for the misstep represented by
+// the NoActionStep.
+func (step NoActionStep) Violation() Violation {
+	switch step {
+	case SwapSuccess:
+		return ViolationSwapSuccess
+	case NoSwapAsMaker:
+		return ViolationNoSwapAsMaker
+	case NoSwapAsTaker:
+		return ViolationNoSwapAsTaker
+	case NoRedeemAsMaker:
+		return ViolationNoRedeemAsMaker
+	case NoRedeemAsTaker:
+		return ViolationNoRedeemAsTaker
+	default:
+		return ViolationInvalid
+	}
+}
+
+// String returns the description of the NoActionStep's corresponding Violation.
+func (step NoActionStep) String() string {
+	return step.Violation().String()
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -208,21 +321,33 @@ type Config struct {
 
 	CancelThreshold float64
 	Anarchy         bool
+	FreeCancels     bool
+	// BanScore defines the penalty score when an account gets closed.
+	BanScore uint32
 }
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
+	// A ban score of 0 is not sensible, so have a default.
+	banScore := cfg.BanScore
+	if banScore == 0 {
+		banScore = defaultBanScore
+	}
 	auth := &AuthManager{
-		anarchy:      cfg.Anarchy,
-		users:        make(map[account.AccountID]*clientInfo),
-		conns:        make(map[uint64]*clientInfo),
-		storage:      cfg.Storage,
-		signer:       cfg.Signer,
-		regFee:       cfg.RegistrationFee,
-		checkFee:     cfg.FeeChecker,
-		feeConfs:     cfg.FeeConfs,
-		cancelThresh: cfg.CancelThreshold,
-		latencyQ:     wait.NewTickerQueue(recheckInterval),
+		anarchy:        cfg.Anarchy,
+		freeCancels:    cfg.FreeCancels || cfg.Anarchy,
+		banScore:       banScore,
+		users:          make(map[account.AccountID]*clientInfo),
+		conns:          make(map[uint64]*clientInfo),
+		storage:        cfg.Storage,
+		signer:         cfg.Signer,
+		regFee:         cfg.RegistrationFee,
+		checkFee:       cfg.FeeChecker,
+		feeConfs:       cfg.FeeConfs,
+		cancelThresh:   cfg.CancelThreshold,
+		latencyQ:       wait.NewTickerQueue(recheckInterval),
+		matchOutcomes:  make(map[account.AccountID]*latest),
+		preimgOutcomes: make(map[account.AccountID]*latest),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -274,13 +399,15 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
 	client.mtx.Unlock()
-	log.Tracef("User %v cancellation rate is now %v (%d cancels : %d successes). Violation = %v", user,
-		rate, cancels, completions, penalize)
-	if penalize && !auth.anarchy && !client.isSuspended() {
+	log.Tracef("User %v cancellation rate is now %.2f%% (%d cancels : %d successes). Violation = %v", user,
+		100*rate, cancels, completions, penalize)
+	if penalize && !auth.freeCancels && !client.isSuspended() {
 		details := fmt.Sprintf("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
 		log.Info(details)
-		auth.Penalize(user, account.CancellationRate, details)
+		if err := auth.Penalize(user, account.CancellationRate, details); err != nil {
+			log.Errorf("Failed to penalize user %v: %v", user, err)
+		}
 	}
 }
 
@@ -425,19 +552,136 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	return auth.request(user, msg, f, expireTimeout, expire)
 }
 
-// Penalize signals that a user has broken a rule of community conduct, and that
-// their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) error {
+// userScore computes the user score from the user's recent match outcomes and
+// preimage history. This must be called with the violationMtx locked.
+func (auth *AuthManager) userScore(user account.AccountID) int32 {
+	var score int32
+
+	outcomes, found := auth.matchOutcomes[user]
+	if found {
+		for v, count := range outcomes.bin() {
+			score += Violation(v).Score() * int32(count)
+		}
+	}
+
+	outcomes, found = auth.preimgOutcomes[user]
+	if found {
+		for v, count := range outcomes.bin() {
+			if v == 1 {
+				score += ViolationPreimageMiss.Score() * int32(count)
+			}
+		}
+	}
+
+	return score
+}
+
+func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, refTime time.Time) int32 {
+	violation := misstep.Violation()
+
+	auth.violationMtx.Lock()
+	defer auth.violationMtx.Unlock()
+	outcomes, found := auth.matchOutcomes[user]
+	if !found {
+		outcomes = newLatest(scoringMatchLimit)
+		auth.matchOutcomes[user] = outcomes
+	}
+	outcomes.add(&stampedFlag{
+		flag: int64(violation),
+		time: encode.UnixMilli(refTime),
+	})
+
+	score := auth.userScore(user)
+	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+		violation.String(), violation.Score(), user, score)
+
+	return score
+}
+
+// SwapSuccess registers the successful completion of a swap by the given user.
+func (auth *AuthManager) SwapSuccess(user account.AccountID, redeemTime time.Time) {
+	auth.registerMatchOutcome(user, SwapSuccess, redeemTime)
+}
+
+// Inaction registers an inaction violation by the user at the given step. The
+// refTime is time to which the at-fault user's inaction deadline for the match
+// is referenced. e.g. For a swap that failed in TakerSwapCast, refTime would be
+// the maker's redeem time, which is recorded in the DB when the server
+// validates the maker's redemption and informs the taker, and is roughly when
+// the actor was first able to take the missed action.
+func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID) {
+	if misstep.Violation() == ViolationInvalid {
+		log.Errorf("Invalid inaction step %d", misstep)
+		return
+	}
+	score := auth.registerMatchOutcome(user, misstep, refTime)
+	if score < int32(auth.banScore) {
+		return
+	}
+	log.Debugf("User %v ban score %d is at or above %d. Penalizing.", user, score, auth.banScore)
+	details := fmt.Sprintf("swap %v failure (%v) for order %v", mid, misstep, oid)
+	if err := auth.Penalize(user, account.FailureToAct, details); err != nil {
+		log.Errorf("Failed to penalize user %v: %v", user, err)
+	}
+}
+
+func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, received bool, refTime time.Time) int32 {
+	auth.violationMtx.Lock()
+	defer auth.violationMtx.Unlock()
+	outcomes, found := auth.preimgOutcomes[user]
+	if !found {
+		outcomes = newLatest(scoringOrderLimit)
+		auth.preimgOutcomes[user] = outcomes
+	}
+	var flag int64
+	if !received {
+		flag = 1 // violation
+	}
+	outcomes.add(&stampedFlag{
+		flag: flag,
+		time: encode.UnixMilli(refTime),
+	})
+
+	score := auth.userScore(user)
+	if !received {
+		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, score)
+	}
+
+	return score
+}
+
+// PreimageSuccess registers an accepted preimage for the user.
+func (auth *AuthManager) PreimageSuccess(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
+	auth.registerPreimageOutcome(user, true, epochEnd)
+}
+
+// MissedPreimage registers a missed preimage violation by the user.
+func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
+	score := auth.registerPreimageOutcome(user, false, epochEnd)
+	if score < int32(auth.banScore) {
+		return
+	}
+	log.Debugf("User %v ban score %d is at or above %d. Penalizing.", user, score, auth.banScore)
+	details := fmt.Sprintf("preimage for order %v not provided upon request", oid)
+	if err := auth.Penalize(user, account.PreimageReveal, details); err != nil {
+		log.Errorf("Failed to penalize user %v: %v", user, err)
+	}
+}
+
+// Penalize closes the user's account, and notifies them of this action while
+// citing the provided rule that corresponds to their most recent infraction.
+func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule, extraDetails string) error {
 	// Notify user of penalty.
 	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
 	if auth.anarchy {
 		details = "You were penalized but the penalty will not be counted against you."
 	}
-	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, rule.Description(), extraDetails)
+	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, lastRule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
-		Rule:     rule,
+		Rule:     lastRule,
 		Time:     encode.UnixMilliU(time.Now()),
-		Duration: uint64(rule.Duration() / 1e6), // nanoseconds to milliseconds
+		Duration: uint64(lastRule.Duration().Milliseconds()),
 		Details:  details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
@@ -456,8 +700,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	// cannot be sent over ws.
 	auth.Notify(user, note)
 	if auth.anarchy {
-		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
-		log.Error(err)
+		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, lastRule)
 		return err
 	}
 
@@ -468,12 +711,11 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 		client.suspend()
 	}
 
-	if err := auth.storage.CloseAccount(user /*client.acct.ID*/, rule); err != nil {
-		log.Error(err)
+	if err := auth.storage.CloseAccount(user /*client.acct.ID*/, lastRule); err != nil {
 		return err
 	}
 
-	log.Debugf("user %v penalized for rule %v", user, rule)
+	log.Debugf("User %v account closed. Last rule broken = %v. Detail: %s", user, lastRule, extraDetails)
 
 	// We do NOT want to do disconnect if the user has active swaps.  However,
 	// we do not want the user to initiate a swap or place a new order, so there
@@ -483,21 +725,50 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	return nil
 }
 
-// Unban forgives a user, allowing them to resume trading.
+// Unban forgives a user, allowing them to resume trading if their score permits
+// it. This is primarily useful for reversing a manual ban. Use ForgiveMatchFail
+// to forgive specific match negotiation failures.
 func (auth *AuthManager) Unban(user account.AccountID) error {
 	client := auth.user(user)
 	if client != nil {
+		// If client is connected, mark the user as not suspend.
 		client.restore()
 	}
 
-	if err := auth.storage.RestoreAccount(user /*client.acct.ID*/); err != nil {
+	if err := auth.storage.RestoreAccount(user); err != nil {
 		return err
 	}
 
-	log.Debugf("user %v unbanned", user)
-
 	return nil
 }
+
+// ForgiveMatchFail forgives a user for a specific match failure, potentially
+// allowing them to resume trading if their score becomes passing.
+func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error) {
+	// Forgive the specific match failure in the DB.
+	forgiven, err = auth.storage.ForgiveMatchFail(mid)
+	if err != nil {
+		return
+	}
+
+	// Recompute the user's score.
+	var score int32
+	score, err = auth.loadUserScore(user)
+	if err != nil {
+		return
+	}
+
+	// Restore the account if score is sub-threshold.
+	if score < int32(auth.banScore) {
+		if err = auth.Unban(user); err == nil {
+			unbanned = true
+		}
+	}
+
+	return
+}
+
+// TODO: a way to manipulate/forgive cancellation rate violation.
 
 // user gets the clientInfo for the specified account ID.
 func (auth *AuthManager) user(user account.AccountID) *clientInfo {
@@ -531,6 +802,87 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	defer auth.connMtx.Unlock()
 	delete(auth.users, client.acct.ID)
 	delete(auth.conns, client.conn.ID())
+}
+
+// loadUserScore computes the user's current score from order and swap data
+// retrieved from the DB.
+func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
+	var successCount, piMissCount int32
+	// Load the N most recent matches resulting in success or an at-fault match
+	// revocation for the user.
+	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, scoringMatchLimit)
+	if err != nil {
+		return 0, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
+	}
+
+	matchStatusToViol := func(status order.MatchStatus) Violation {
+		switch status {
+		case order.NewlyMatched:
+			return ViolationNoSwapAsMaker
+		case order.MakerSwapCast:
+			return ViolationNoSwapAsTaker
+		case order.TakerSwapCast:
+			return ViolationNoRedeemAsMaker
+		case order.MakerRedeemed:
+			return ViolationNoRedeemAsTaker
+		case order.MatchComplete:
+			return ViolationSwapSuccess // should be caught by Fail==false
+		default:
+			return ViolationInvalid
+		}
+	}
+
+	// Load the count of preimage misses in the N most recently placed orders.
+	piOutcomes, err := auth.storage.PreimageStats(user, scoringOrderLimit)
+	if err != nil {
+		return 0, fmt.Errorf("PreimageStats: %w", err)
+	}
+
+	auth.violationMtx.Lock()
+	defer auth.violationMtx.Unlock()
+
+	latestMatches := newLatest(scoringMatchLimit)
+	auth.matchOutcomes[user] = latestMatches
+	for _, mo := range matchOutcomes {
+		// The Fail flag qualifies MakerRedeemed, which is always success for
+		// maker, but fail for taker if revoked.
+		v := ViolationSwapSuccess
+		if mo.Fail {
+			v = matchStatusToViol(mo.Status)
+		} else {
+			successCount++
+		}
+		latestMatches.add(&stampedFlag{
+			flag: int64(v),
+			time: mo.Time,
+		})
+	}
+
+	latestPreimageResults := newLatest(scoringOrderLimit)
+	auth.preimgOutcomes[user] = latestPreimageResults
+	for _, po := range piOutcomes {
+		var flag int64
+		if po.Miss {
+			flag = 1 // violation
+			piMissCount++
+		}
+		latestPreimageResults.add(&stampedFlag{
+			flag: flag,
+			time: po.Time,
+		})
+	}
+
+	// Integrate the match and preimage outcomes.
+	score := auth.userScore(user)
+
+	successScore := successCount * successScore // negative
+	piMissScore := piMissCount * preimageMissScore
+	// score = violationScore + piMissScore + successScore
+	violationScore := score - piMissScore - successScore
+	log.Debugf("User %v score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
+		user, score, violationScore, piMissCount, piMissScore, -successScore, successCount)
+
+	return score, nil
 }
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
@@ -568,14 +920,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "unpaid account",
 		}
 	}
-	// Commented to allow suspended accounts to connect and complete swaps, etc.
-	// but not place orders.
-	// if !open {
-	//  return &msgjson.Error{
-	//      Code:    msgjson.AuthenticationError,
-	//      Message: "closed account",
-	//  }
-	// }
+	// Note: suspended accounts may connect to complete swaps, etc. but not
+	// place new orders.
 
 	// Authorize the account.
 	sigMsg := connect.Serialize()
@@ -613,8 +959,10 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		recentOrders: latestFinished,
 		suspended:    !open,
 	}
+
+	// Compute the user's cancellation rate.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
-	if penalize && open && !auth.anarchy {
+	if penalize && open && !auth.freeCancels {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
@@ -622,7 +970,24 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		// exceeded while the server was running in anarchy mode.
 		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
 		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
-			acctInfo.ID, cancels, completions, 100*rate)
+			acctInfo.ID, 100*rate, cancels, completions)
+	}
+
+	// Compute the user's ban score.
+	score, err := auth.loadUserScore(user)
+	if err != nil {
+		log.Errorf("failed to compute user %v score: %v", user, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
+	if score >= int32(auth.banScore) && open && !auth.anarchy {
+		// Would already be penalized unless server changed the banScore or
+		// was previously running in anarchy mode.
+		client.suspended = true
+		auth.storage.CloseAccount(user, account.FailureToAct)
+		log.Debugf("Suspended account %v (score = %d) connected.", acctInfo.ID, score)
 	}
 
 	// Get the list of active orders for this user.
@@ -711,6 +1076,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		Sig:                 sig.Serialize(),
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
+		Score:               score,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {

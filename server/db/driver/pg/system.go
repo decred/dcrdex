@@ -148,7 +148,7 @@ func createTable(db *sql.DB, fmtStmt, schema, tableName string) (bool, error) {
 		log.Tracef(`Table "%s" exists.`, nameSpacedTable)
 	}
 
-	return created, err
+	return created, nil
 }
 
 func dropTable(db sqlExecutor, tableName string) error {

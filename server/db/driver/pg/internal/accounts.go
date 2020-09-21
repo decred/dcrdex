@@ -14,7 +14,7 @@ const (
 		pubkey BYTEA,
 		fee_address TEXT,
 		fee_coin BYTEA,
-		broken_rule INT2 DEFAULT 0
+		broken_rule INT2 DEFAULT 0 -- TODO: change to banned BOOL
 		);`
 
 	// InsertKeyIfMissing creates an entry for the specified key hash, if it
@@ -33,7 +33,7 @@ const (
 	// that the account is closed.
 	CloseAccount = `UPDATE %s SET broken_rule = $1 WHERE account_id = $2;`
 
-	// SelectAccount gathers account details for the specified accound ID. The
+	// SelectAccount gathers account details for the specified account ID. The
 	// details returned from this query are sufficient to determine 1) whether the
 	// registration fee has been paid, or 2) whether the account has been closed.
 	SelectAccount = `SELECT pubkey, fee_coin, broken_rule

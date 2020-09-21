@@ -43,19 +43,21 @@ type ratioData struct {
 
 // TStorage satisfies the Storage interface
 type TStorage struct {
-	acct          *account.Account
-	matches       []*db.MatchData
-	closedID      account.AccountID
-	matchStatuses []*db.MatchStatus
-	orderStatuses []*db.OrderStatus
-	acctAddr      string
-	acctErr       error
-	regAddr       string
-	regErr        error
-	payErr        error
-	unpaid        bool
-	closed        bool
-	ratio         ratioData
+	acct                *account.Account
+	matches             []*db.MatchData
+	closedID            account.AccountID
+	matchStatuses       []*db.MatchStatus
+	userPreimageResults []*db.PreimageResult
+	userMatchOutcomes   []*db.MatchOutcome
+	orderStatuses       []*db.OrderStatus
+	acctAddr            string
+	acctErr             error
+	regAddr             string
+	regErr              error
+	payErr              error
+	unpaid              bool
+	closed              bool
+	ratio               ratioData
 }
 
 func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
@@ -67,6 +69,15 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 }
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
+}
+func (s *TStorage) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
+	return s.userMatchOutcomes, nil
+}
+func (s *TStorage) PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error) {
+	return s.userPreimageResults, nil
+}
+func (s *TStorage) ForgiveMatchFail(mid order.MatchID) (bool, error) {
+	return false, nil
 }
 func (s *TStorage) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
 	return s.orderStatuses, nil
@@ -92,10 +103,10 @@ func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.
 func (s *TStorage) setRatioData(dat *ratioData) {
 	s.ratio = *dat
 }
-func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
+func (s *TStorage) CompletedUserOrders(aid account.AccountID, _ int) (oids []order.OrderID, compTimes []int64, err error) {
 	return s.ratio.oidsCompleted, s.ratio.timesCompleted, nil
 }
-func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
+func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (oids, targets []order.OrderID, execTimes []int64, err error) {
 	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
 }
 
@@ -433,6 +444,165 @@ func TestGraceLimit(t *testing.T) {
 	}
 }
 
+var t0 = int64(1601418963000)
+
+func nextTime() int64 {
+	t0 += 10
+	return t0
+}
+
+func newMatchOutcome(status order.MatchStatus, fail bool, t int64) *db.MatchOutcome {
+	switch status {
+	case order.NewlyMatched, order.MakerSwapCast, order.TakerSwapCast:
+		if !fail {
+			panic("wrong")
+		}
+	case order.MatchComplete:
+		if fail {
+			panic("wrong")
+		}
+	}
+	return &db.MatchOutcome{
+		Status: status,
+		Fail:   fail,
+		Time:   t,
+	}
+}
+
+func newPreimageResult(miss bool, t int64) *db.PreimageResult {
+	return &db.PreimageResult{
+		Miss: miss,
+		Time: t,
+	}
+}
+
+func setViolations() (wantScore int32) {
+	rig.storage.userMatchOutcomes = []*db.MatchOutcome{
+		newMatchOutcome(order.NewlyMatched, true, nextTime()),
+		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
+		newMatchOutcome(order.NewlyMatched, true, nextTime()),
+		newMatchOutcome(order.MakerSwapCast, true, nextTime()), // noSwapAsTaker at index 3
+		newMatchOutcome(order.TakerSwapCast, true, nextTime()),
+		newMatchOutcome(order.MakerRedeemed, false, nextTime()), // success (for maker)
+		newMatchOutcome(order.MakerRedeemed, true, nextTime()),
+		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
+		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
+	}
+	t0 -= 4000
+	rig.storage.userPreimageResults = []*db.PreimageResult{newPreimageResult(true, nextTime())}
+	for range rig.storage.userMatchOutcomes {
+		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
+	}
+	return 4*successScore + 1*preimageMissScore +
+		2*noSwapAsMakerScore + noSwapAsTakerScore + noRedeemAsMakerScore + 1*noRedeemAsTakerScore
+}
+
+func clearViolations() {
+	rig.storage.userMatchOutcomes = []*db.MatchOutcome{}
+}
+
+func TestAuthManager_loadUserScore(t *testing.T) {
+	// Spot test with all violations set
+	wantScore := setViolations()
+	defer clearViolations()
+	user := tNewUser(t)
+	score, err := rig.mgr.loadUserScore(user.acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score != wantScore {
+		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	}
+
+	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
+	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes,
+		newMatchOutcome(order.MakerSwapCast, true, nextTime()))
+	wantScore += noSwapAsTakerScore
+
+	score, err = rig.mgr.loadUserScore(user.acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score != wantScore {
+		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	}
+
+	tests := []struct {
+		name           string
+		user           account.AccountID
+		matchOutcomes  []*db.MatchOutcome
+		preimageMisses []*db.PreimageResult
+		wantScore      int32
+	}{
+		{
+			name: "negative",
+			user: user.acctID,
+			matchOutcomes: []*db.MatchOutcome{
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+			},
+			wantScore: -4,
+		},
+		{
+			name:          "nuthin",
+			user:          user.acctID,
+			matchOutcomes: []*db.MatchOutcome{},
+			wantScore:     0,
+		},
+		{
+			name: "balance",
+			user: user.acctID,
+			matchOutcomes: []*db.MatchOutcome{
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+			},
+			preimageMisses: []*db.PreimageResult{
+				newPreimageResult(true, nextTime()),
+				newPreimageResult(true, nextTime()),
+			},
+			wantScore: 0,
+		},
+		{
+			name: "tipping red",
+			user: user.acctID,
+			matchOutcomes: []*db.MatchOutcome{
+				newMatchOutcome(order.NewlyMatched, true, nextTime()),
+				newMatchOutcome(order.MakerSwapCast, true, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.NewlyMatched, true, nextTime()),
+				newMatchOutcome(order.MakerRedeemed, true, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, false, nextTime()),
+			},
+			preimageMisses: []*db.PreimageResult{
+				newPreimageResult(true, nextTime()),
+				newPreimageResult(false, nextTime()),
+			},
+			wantScore: 2*noSwapAsMakerScore + 1*noSwapAsTakerScore + 0*noRedeemAsMakerScore +
+				1*noRedeemAsTakerScore + 1*preimageMissScore + 5*successScore,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig.storage.userMatchOutcomes = tt.matchOutcomes
+			rig.storage.userPreimageResults = tt.preimageMisses
+			score, err := rig.mgr.loadUserScore(tt.user)
+			if err != nil {
+				t.Fatalf("got err: %v", err)
+			}
+			if score != tt.wantScore {
+				t.Errorf("incorrect user score. got %d, want %d", score, tt.wantScore)
+			}
+		})
+	}
+}
+
 func TestConnect(t *testing.T) {
 	user := tNewUser(t)
 	rig.signer.sig = user.randomSignature()
@@ -519,8 +689,50 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
 	}
 
+	// Connect with a violation score above ban score.
+	wantScore := setViolations()
+	defer clearViolations()
+
+	if wantScore < int32(rig.mgr.banScore) {
+		t.Fatalf("test score of %v is not at least the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	}
+
+	// Test loadUserScore while here.
+	score, err := rig.mgr.loadUserScore(user.acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if score != wantScore {
+		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	}
+
+	// No error, but Penalize account that was not previously closed.
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID != user.acctID {
+		t.Fatalf("penalty not stored")
+	}
+	rig.storage.closedID = account.AccountID{}
+
+	makerSwapCastIdx := 3
+	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
+	wantScore -= noSwapAsTakerScore
+	if wantScore >= int32(rig.mgr.banScore) {
+		t.Fatalf("test score of %v is not less than the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	}
+	score, err = rig.mgr.loadUserScore(user.acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score != wantScore {
+		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	}
+
 	// Connect the user.
 	respMsg := connectUser(t, user)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("user unexpectedly penalized")
+	}
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.ActiveOrderStatuses) != 1 {
 		t.Fatalf("no active orders")
@@ -890,6 +1102,7 @@ func TestPenalize(t *testing.T) {
 func TestConnectErrors(t *testing.T) {
 	user := tNewUser(t)
 	rig.storage.acct = nil
+	rig.signer.sig = user.randomSignature()
 
 	ensureErr := makeEnsureErr(t)
 

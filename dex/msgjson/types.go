@@ -858,6 +858,7 @@ type ConnectResult struct {
 	Sig                 Bytes          `json:"sig"`
 	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
 	ActiveMatches       []*Match       `json:"activematches"`
+	Score               int32          `json:"score"`
 }
 
 // PenaltyNote is the payload of a Penalty notification.

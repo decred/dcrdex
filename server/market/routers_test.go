@@ -19,6 +19,7 @@ import (
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
@@ -223,9 +224,11 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	}
 	return nil
 }
-func (a *TAuth) Penalize(user account.AccountID, rule account.Rule, _ string) error {
-	log.Infof("Penalize for user %v", user)
-	return nil
+
+func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID) {}
+func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
+func (a *TAuth) SwapSuccess(user account.AccountID, refTime time.Time)                        {}
+func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID) {
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}

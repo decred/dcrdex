@@ -30,6 +30,7 @@ const (
 		rate INT8,
 		baseRate INT8, quoteRate INT8, -- contract tx fee rates, NULL for cancel orders
 		status INT2,           -- also updated during swap negotiation, independent from active for failed swaps
+		forgiven BOOL,
 
 		-- The remaining columns are only set during swap negotiation.
 		sigMatchAckMaker BYTEA,   -- maker's ack of the match
@@ -58,6 +59,9 @@ const (
 		bRedeemTime INT8,         -- server time stamp
 		aSigAckOfBRedeem BYTEA   -- counterparty's (initiator) sig with ack of participant REDEEM data
 	)`
+
+	AddMatchesForgivenColumn = `ALTER TABLE %s
+		ADD COLUMN IF NOT EXISTS forgiven BOOL;`
 
 	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
@@ -113,6 +117,41 @@ const (
 	FROM %s
 	WHERE (takerAccount = $1 OR makerAccount = $1)
 		AND active;`
+
+	// CompletedOrAtFaultMatchesLastN retrieves inactive matches for a user that
+	// are either successfully completed by the user (MatchComplete or
+	// MakerRedeemed with user as maker), or failed because of this user's
+	// inaction. Note that the literal status values used in this query MUST BE
+	// UPDATED if the order.OrderStatus enum is changed.
+	CompletedOrAtFaultMatchesLastN = `
+		WITH acct (aid) AS ( VALUES($1::BYTEA) )
+
+		SELECT status, (status=4 OR (status=3 AND makerAccount = aid)) AS success,
+			GREATEST((epochIdx+1)*epochDur, aContractTime, bContractTime, aRedeemTime, bRedeemTime) AS lastTime
+		FROM %s, acct
+		WHERE takerSell IS NOT NULL      -- exclude cancel order matches
+			AND (
+				-- swap successes
+				status=4                                       -- success for both
+				OR
+				(status=3 AND makerAccount = aid)              -- success for maker, active or revoked
+				OR
+				( -- at-fault swap failures
+					NOT active -- failure means inactive/revoked
+					AND (forgiven IS NULL OR NOT forgiven)
+					AND (
+						(status=0 AND makerAccount = aid) OR   -- fault for maker
+						(status=1 AND takerAccount = aid) OR   -- fault for taker
+						(status=2 AND makerAccount = aid) OR   -- fault for maker
+						(status=3 AND takerAccount = aid)      -- fault for taker
+					)
+				)
+			)
+		ORDER BY lastTime DESC   -- last action time i.e. success or approx. when could have acted
+		LIMIT $2;`
+
+	ForgiveMatchFail = `UPDATE %s SET forgiven = TRUE
+		WHERE matchid = $1 AND NOT active;`
 
 	SetMakerMatchAckSig = `UPDATE %s SET sigMatchAckMaker = $2 WHERE matchid = $1;`
 	SetTakerMatchAckSig = `UPDATE %s SET sigMatchAckTaker = $2 WHERE matchid = $1;`
