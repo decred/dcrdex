@@ -87,6 +87,7 @@ signingkeypass=keypass
 adminsrvon=1
 adminsrvpass=adminpass
 adminsrvaddr=127.0.0.1:16542
+bcasttimeout=1m
 EOF
 
 # Set the postgres user pass if provided. 

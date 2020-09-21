@@ -796,7 +796,7 @@ func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 	}
 
 	if initStatus == status && filled == initFilled {
-		log.Debugf("Not updating order with no status or filled amount change.")
+		log.Tracef("Not updating order with no status or filled amount change: %v.", oid)
 		return nil
 	}
 	if filled == -1 {

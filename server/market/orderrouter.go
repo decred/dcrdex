@@ -172,7 +172,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit trade orders")
+		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
 	}
 
 	tunnel, coins, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
@@ -290,7 +290,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 
 	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit trade orders")
+		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
 	}
 
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)

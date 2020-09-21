@@ -247,7 +247,7 @@ func testNoMakerRedeem(t *testing.T) {
 }
 
 // testMakerGhostingAfterTakerRedeem places simple orders for clients 1 and 2,
-// neogiates the resulting trades smoothly till TakerSwapCast, then Maker goes
+// negotiates the resulting trades smoothly till TakerSwapCast, then Maker goes
 // AWOL after redeeming taker's swap without notifying Taker. This test ensures
 // that Taker auto-finds Maker's redeem, extracts the secret key and redeems
 // Maker's swap to complete the trade.
@@ -543,7 +543,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 			}
 
 			if assetToMine != nil {
-				assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)+1 // mine 1 extra to ensure tx gets req. confs
+				assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
 				err := mineBlocks(assetID, nBlocks)
 				if err == nil {
 					var actor order.MatchSide
@@ -693,10 +693,10 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	// confirm that balance changes are as expected.
 	for assetID, expectedBalanceDiff := range refundAmts {
 		if expectedBalanceDiff > 0 {
-			mineBlocks(assetID, 2)
+			mineBlocks(assetID, 1)
 		}
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	client.expectBalanceDiffs = refundAmts
 	err = client.assertBalanceChanges()
@@ -826,7 +826,7 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 
 	// mine drc block(s) to mark fee as paid
 	// sometimes need to mine an extra block for fee tx to get req. confs
-	err = mineBlocks(dcr.BipID, regRes.ReqConfirms+1)
+	err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
 	if err != nil {
 		return err
 	}
@@ -995,27 +995,25 @@ func (client *tClient) lockWallets() error {
 	client.log("locking wallets")
 	dcrw := client.dcrw()
 	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.daemon)
-	if err := tmuxSendKeys("dcr-harness:0", lockCmd); err != nil {
+	if err := tmuxRun("dcr-harness:0", lockCmd); err != nil {
 		return err
 	}
-	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
 	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.daemon, btcw.walletName)
-	return tmuxSendKeys("btc-harness:2", lockCmd)
+	return tmuxRun("btc-harness:2", lockCmd)
 }
 
 func (client *tClient) unlockWallets() error {
 	client.log("unlocking wallets")
 	dcrw := client.dcrw()
 	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 600", dcrw.daemon, string(dcrw.pass))
-	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
+	if err := tmuxRun("dcr-harness:0", unlockCmd); err != nil {
 		return err
 	}
-	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
 	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 600",
 		btcw.daemon, btcw.walletName, string(btcw.pass))
-	return tmuxSendKeys("btc-harness:2", unlockCmd)
+	return tmuxRun("btc-harness:2", unlockCmd)
 }
 
 func mineBlocks(assetID uint32, blocks uint16) error {
@@ -1028,11 +1026,20 @@ func mineBlocks(assetID uint32, blocks uint16) error {
 	default:
 		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
 	}
-	return tmuxSendKeys(harnessID, fmt.Sprintf("./mine-alpha %d", blocks))
+	return tmuxRun(harnessID, fmt.Sprintf("./mine-alpha %d", blocks))
 }
 
-func tmuxSendKeys(tmuxWindow, cmd string) error {
-	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run()
+func tmuxRun(tmuxWindow, cmd string) error {
+	tStart := time.Now()
+	defer func() {
+		fmt.Printf("********** TIMING: Took %v to run %q", time.Since(tStart), cmd)
+	}()
+	cmd += "; tmux wait-for -S harnessdone"
+	err := exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run() // ; wait-for harnessdone
+	if err != nil {
+		return nil
+	}
+	return exec.Command("tmux", "wait-for", "harnessdone").Run()
 }
 
 func fmtAmt(anyAmt interface{}) float64 {

@@ -184,7 +184,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			removed, ok := book.Remove(o.TargetOrderID)
 			if !ok {
 				// The targeted order might be down queue or non-existent.
-				log.Debugf("Failed to remove order %v set by a cancel order %v",
+				log.Debugf("Order %v not removed by a cancel order %v (target either non-existent or down queue in this epoch)",
 					o.ID(), o.TargetOrderID)
 				failed = append(failed, q)
 				updates.CancelsFailed = append(updates.CancelsFailed, o)
