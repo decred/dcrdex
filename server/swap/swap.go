@@ -2114,8 +2114,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		},
 		ExpireFunc: func() {
 			s.rmLiveWaiter(user, msg.ID)
-			// Tell them to broadcast again or check their node before broadcast
-			// timeout is reached and the match is revoked.
+			// NOTE: We may consider a shorter expire time so the client can
+			// receive warning that their may be node connectivity trouble
+			// while they still have a chance to fix it.
 			s.respondError(msg.ID, user, msgjson.TransactionUndiscovered,
 				fmt.Sprintf("failed to find contract coin %v", coinStr))
 		},
@@ -2212,9 +2213,11 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		},
 		ExpireFunc: func() {
 			s.rmLiveWaiter(user, msg.ID)
+			// NOTE: We may consider a shorter expire time so the client can
+			// receive warning that their may be node connectivity trouble
+			// while they still have a chance to fix it.
 			s.respondError(msg.ID, user, msgjson.TransactionUndiscovered,
 				fmt.Sprintf("failed to find redeemed coin %v", coinStr))
-			// Client should retry the redeem request, maybe even rebroadcast.
 		},
 	})
 	return nil
