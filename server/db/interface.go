@@ -52,6 +52,13 @@ type EpochResults struct {
 	OrdersMissed      []order.OrderID
 }
 
+// OrderStatus is the current status of an order, including its fill.
+type OrderStatus struct {
+	ID     order.OrderID
+	Status order.OrderStatus
+	Fill   uint64
+}
+
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
 type DEXArchivist interface {
@@ -118,6 +125,9 @@ type OrderArchiver interface {
 
 	// OrderStatus gets the status, ID, and filled amount of the given order.
 	OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error)
+
+	// OrderStatuses gets the status and filled amount of the given orders.
+	OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*OrderStatus, error)
 
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a
