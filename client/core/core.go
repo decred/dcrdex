@@ -621,12 +621,14 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 	}
 	knownActiveTrades := make(map[order.OrderID]*trackedTrade)
 	for oid, trade := range dc.trades {
+		trade.mtx.RLock()
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if serverStatus, isServerActive := serverOrderStatuses[oid]; isServerActive {
 			log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
 				oid, trade.metaData.Status, dc.acct.host, serverStatus)
 		}
+		trade.mtx.RUnlock()
 	}
 	dc.tradeMtx.RUnlock()
 
@@ -678,6 +680,12 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 			log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
+
+		// Server reports this order as active. If a cancel order was placed
+		// targetting this order, and it's over 15 minutes since the cancel
+		// order's epoch ended, delete the cancel order. If the cancel order
+		// was matched, the server would not have reported this order as active.
+		trade.deleteStaleCancelOrder()
 		trade.mtx.Unlock()
 	}
 

@@ -223,6 +223,9 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
 func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
+	if conn.reqErr != nil {
+		return conn.reqErr
+	}
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
 	handlers := conn.handlers[msg.Route]
@@ -231,7 +234,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 		conn.handlers[msg.Route] = handlers[1:]
 		return handler(msg, f)
 	}
-	return conn.reqErr
+	return fmt.Errorf("no handler for route %q", msg.Route)
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
 func (conn *TWebsocket) IsDown() bool {
@@ -775,6 +778,28 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		} else {
 			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
+		}
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueCancel(rpcErr *msgjson.Error) {
+	rig.ws.queueResponse(msgjson.CancelRoute, func(msg *msgjson.Message, f msgFunc) error {
+		var resp *msgjson.Message
+		if rpcErr == nil {
+			// Need to stamp and sign the message with the server's key.
+			msgOrder := new(msgjson.CancelOrder)
+			err := msg.Unmarshal(msgOrder)
+			if err != nil {
+				rpcErr = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+			} else {
+				co := convertMsgCancelOrder(msgOrder)
+				resp = orderResponse(msg.ID, msgOrder, co, false, false, false)
+			}
+		}
+		if rpcErr != nil {
+			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		}
 		f(resp)
 		return nil
@@ -2110,20 +2135,7 @@ func TestCancel(t *testing.T) {
 		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
-	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
-		t.Helper()
-		// Need to stamp and sign the message with the server's key.
-		msgOrder := new(msgjson.CancelOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		co := convertMsgCancelOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, co, false, false, false))
-		return nil
-	}
-
-	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
+	rig.queueCancel(nil)
 	err := rig.core.Cancel(tPW, oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
@@ -2757,7 +2769,7 @@ func TestReconcileTrades(t *testing.T) {
 			orders.bookedPendingCancel.cancel = &trackedCancel{
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
-						ServerTime: time.Now(),
+						ServerTime: time.Now().UTC().Add(-16 * time.Minute),
 					},
 				},
 			}
@@ -2806,7 +2818,7 @@ func TestReconcileTrades(t *testing.T) {
 				},
 				{
 					OrderID: standingOrders.bookedPendingCancel.ID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked), // still booked
+					Status:  uint8(order.OrderStatusBooked), // still booked, cancel order should be deleted
 				},
 				{
 					OrderID: immediateOrders.epoch.ID().Bytes(),
@@ -2866,15 +2878,26 @@ func TestReconcileTrades(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		fmt.Printf("\n==== %s\n", tt.name) // makes reading log messages easier when testing with -v
-
 		// Track client orders in dc.trades.
 		dc.tradeMtx.Lock()
+		var pendingCancel *trackedTrade
 		dc.trades = make(map[order.OrderID]*trackedTrade)
 		for _, tracker := range tt.clientOrders {
 			dc.trades[tracker.ID()] = tracker
+			if tracker.cancel != nil {
+				pendingCancel = tracker
+			}
 		}
 		dc.tradeMtx.Unlock()
+
+		if pendingCancel != nil {
+			// Canceling the order again should fail.
+			rig.queueCancel(nil)
+			err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
+			if err == nil {
+				t.Fatalf("no error for duplicate order cancellation")
+			}
+		}
 
 		// Queue order_status response if required for reconciliation.
 		if len(tt.orderStatuses) > 0 {
@@ -2906,6 +2929,26 @@ func TestReconcileTrades(t *testing.T) {
 			tracker.mtx.RUnlock()
 		}
 		dc.tradeMtx.RUnlock()
+
+		// Check if a previously canceled order existed; if the order is still
+		// active (Epoch/Booked status) and the cancel order is deleted, having
+		// been there for over 15 minutes since the cancel order's epoch ended.
+		if pendingCancel != nil {
+			pendingCancel.mtx.RLock()
+			status, stillHasCancelOrder := pendingCancel.metaData.Status, pendingCancel.cancel != nil
+			pendingCancel.mtx.RUnlock()
+			if status == order.OrderStatusBooked {
+				if stillHasCancelOrder {
+					t.Fatalf("%s: expected stale cancel order to be deleted for now-booked order", tt.name)
+				}
+				// Cancel order deleted. Canceling the order again should succeed.
+				rig.queueCancel(nil)
+				err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
+				if err != nil {
+					t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)
+				}
+			}
+		}
 	}
 }
 
@@ -3374,7 +3417,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-func Test_compareServerMatches(t *testing.T) {
+func TestCompareServerMatches(t *testing.T) {
 	rig := newTestRig()
 	preImg := newPreimage()
 	dc := rig.dc
@@ -3480,19 +3523,19 @@ func Test_compareServerMatches(t *testing.T) {
 		t.Fatalf("exceptions did not include trade %v", oid)
 	}
 	if exc.trade.ID() != oid {
-		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
+		t.Fatalf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
 	}
 	if len(exc.missing) != 1 {
-		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
 	if exc.missing[0].id != missingID {
-		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
 	}
 	if len(exc.extra) != 1 {
-		t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
+		t.Fatalf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
 	}
 	if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
-		t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
+		t.Fatalf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
 	}
 
 	exc, ok = exceptions[oidMissing]
@@ -3500,18 +3543,17 @@ func Test_compareServerMatches(t *testing.T) {
 		t.Fatalf("exceptions did not include trade %v", oidMissing)
 	}
 	if exc.trade.ID() != oidMissing {
-		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+		t.Fatalf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
 	}
 	if len(exc.missing) != 1 { // no matchIDMissingInactive
-		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
 	if exc.missing[0].id != matchIDMissing {
-		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
 	}
 	if len(exc.extra) != 0 {
-		t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+		t.Fatalf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
 	}
-
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
