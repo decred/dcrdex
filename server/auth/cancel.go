@@ -89,7 +89,7 @@ func (lo *latestOrders) add(o *oidStamped) {
 	lo.mtx.Lock()
 	defer lo.mtx.Unlock()
 
-	// Use sort.Search and insert it as the right spot.
+	// Use sort.Search and insert it at the right spot.
 	n := len(lo.orders)
 	i := sort.Search(n, func(i int) bool {
 		return less(lo.orders[n-1-i], o)

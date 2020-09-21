@@ -76,3 +76,11 @@ type UnbanResult struct {
 	AccountID string  `json:"accountid"`
 	UnbanTime APITime `json:"unbantime"`
 }
+
+// ForgiveResult holds the result of a forgive_match.
+type ForgiveResult struct {
+	AccountID   string  `json:"accountid"`
+	Forgiven    bool    `json:"forgiven"`
+	Unbanned    bool    `json:"unbanned"`
+	ForgiveTime APITime `json:"forgivetime"`
+}

@@ -26,6 +26,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -182,14 +183,18 @@ func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
-func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule, _ string) error {
+func (m *TAuthManager) SwapSuccess(id account.AccountID, refTime time.Time) {}
+func (m *TAuthManager) Inaction(id account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID) {
+	// banscore of zero => immediate penalize
+	m.penalize(id, account.FailureToAct)
+}
+func (m *TAuthManager) penalize(id account.AccountID, rule account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspensions[id] = rule
 	if m.newSuspend != nil {
 		m.newSuspend <- struct{}{}
 	}
-	return nil
 }
 
 func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}

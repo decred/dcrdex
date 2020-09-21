@@ -52,8 +52,8 @@ const (
 
 	// OrderStatusRevoked is DEX-revoked orders that were not canceled by
 	// matching with the client's cancel order but by DEX policy. This includes
-	// standing limit orders that were matched, but have failed to swap.
-	// (neither executed nor canceled).
+	// standing limit orders that were matched but have failed to swap (neither
+	// executed nor canceled), and preimage misses.
 	OrderStatusRevoked
 )
 

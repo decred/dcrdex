@@ -2585,8 +2585,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Set the account as authenticated.
-	log.Debugf("Authenticated connection to %s, %d active orders, %d active matches",
-		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches))
+	log.Debugf("Authenticated connection to %s, %d active orders, %d active matches, score %d",
+		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score)
 	dc.acct.auth()
 
 	// Associate the matches with known trades.
@@ -3506,10 +3506,10 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %v", err)
 	}
-	t := encode.UnixTimeMilli(int64(note.Penalty.Time) * 1000)
-	d := time.Duration(note.Penalty.Duration)
-	details := fmt.Sprintf("Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\nduration: %v\ndetails: %q\n",
-		dc.acct.host, note.Penalty.Rule, t, d, note.Penalty.Details)
+	t := encode.UnixTimeMilli(int64(note.Penalty.Time))
+	// d := time.Duration(note.Penalty.Duration) * time.Millisecond
+	details := fmt.Sprintf("Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
+		dc.acct.host, note.Penalty.Rule, t, note.Penalty.Details)
 	n := db.NewNotification("penalty", dc.acct.host, details, db.WarningLevel)
 	c.notify(&n)
 	return nil

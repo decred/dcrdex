@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -22,6 +23,107 @@ func (a *Archiver) matchTableName(match *order.Match) (string, error) {
 		return "", err
 	}
 	return fullMatchesTableName(a.dbName, marketSchema), nil
+}
+
+// ForgiveMatchFail marks the specified match as forgiven. Since this is an
+// administrative function, the burden is on the operator to ensure the match
+// can actually be forgiven (inactive, not already forgiven, and not in
+// MatchComplete status).
+func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
+	for m := range a.markets {
+		stmt := fmt.Sprintf(internal.ForgiveMatchFail, fullMatchesTableName(a.dbName, m))
+		N, err := sqlExec(a.db, stmt, mid)
+		if err != nil { // not just no rows updated
+			a.fatalBackendErr(err)
+			return false, err
+		}
+		if N == 1 {
+			return true, nil
+		} // N > 1 cannot happen since matchid is the primary key
+		// N==0 could also mean it was not eligible to forgive, but just keep going
+	}
+	return false, nil
+}
+
+// CompletedAndAtFaultMatchStats retrieves the outcomes of matches that were (1)
+// successfully completed by the specified user, or (2) failed with the user
+// being the at-fault party. Note that the MakerRedeemed match status may be
+// either a success or failure depending on if the user was the maker or taker
+// in the swap, respectively, and the MatchOutcome.Fail flag disambiguates this.
+func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
+	var outcomes []*db.MatchOutcome
+
+	for m := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, m)
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		defer cancel()
+		matchOutcomes, err := completedAndAtFaultMatches(ctx, a.db, matchesTableName, aid, lastN)
+		if err != nil {
+			return nil, err
+		}
+
+		outcomes = append(outcomes, matchOutcomes...)
+	}
+
+	sort.Slice(outcomes, func(i, j int) bool {
+		return outcomes[j].Time < outcomes[i].Time // descending
+	})
+	if len(outcomes) > lastN {
+		outcomes = outcomes[:lastN]
+	}
+	return outcomes, nil
+}
+
+func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName string,
+	aid account.AccountID, lastN int) (outcomes []*db.MatchOutcome, err error) {
+	stmt := fmt.Sprintf(internal.CompletedOrAtFaultMatchesLastN, tableName)
+	rows, err := dbe.QueryContext(ctx, stmt, aid, lastN)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status uint8
+		var success bool
+		var refTime sql.NullInt64
+		err = rows.Scan(&status, &success, &refTime)
+		if err != nil {
+			return
+		}
+
+		if !refTime.Valid {
+			continue // should not happen as all matches will have an epoch time, but don't error
+		}
+
+		// A little seat belt in case the query returns inconsistent results
+		// where success and status don't jive.
+		switch order.MatchStatus(status) {
+		case order.NewlyMatched, order.MakerSwapCast, order.TakerSwapCast:
+			if success {
+				log.Errorf("successfully completed match in status %v returned from DB", status)
+				continue
+			}
+		// MakerRedeemed can be either depending on user role (maker/taker).
+		case order.MatchComplete:
+			if !success {
+				log.Errorf("failed match in status %v returned from DB", status)
+				continue
+			}
+		}
+
+		outcomes = append(outcomes, &db.MatchOutcome{
+			Status: order.MatchStatus(status),
+			Fail:   !success,
+			Time:   refTime.Int64,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return
 }
 
 // UserMatches retrieves all matches involving a user on the given market.

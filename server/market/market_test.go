@@ -146,6 +146,13 @@ func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.Matc
 func (ta *TArchivist) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	return nil, nil
 }
+func (ta *TArchivist) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
+	return nil, nil
+}
+func (ta *TArchivist) PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error) {
+	return nil, nil
+}
+func (ta *TArchivist) ForgiveMatchFail(order.MatchID) (bool, error) { return false, nil }
 func (ta *TArchivist) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return nil, nil
 }
@@ -1046,7 +1053,7 @@ func TestMarket_Run(t *testing.T) {
 }
 
 func TestMarket_enqueueEpoch(t *testing.T) {
-	// This tests processing of a closed epoch by epochStart (for preimage
+	// This tests processing of a closed epoch by prepEpoch (for preimage
 	// collection) and processReadyEpoch (for sending the expected book and
 	// unbook messages to book subscribers registered via OrderFeed) via
 	// enqueueEpoch and the epochPump.
@@ -1159,7 +1166,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 		for ep := range ePump.ready {
 			t.Logf("processReadyEpoch: %d orders revealed\n", len(ep.ordersRevealed))
 
-			// epochStart has completed preimage collection.
+			// prepEpoch has completed preimage collection.
 			mkt.processReadyEpoch(ep, notifyChan) // notify is async!
 			goForIt <- struct{}{}
 		}

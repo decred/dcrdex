@@ -16,6 +16,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/go-chi/chi"
 )
@@ -310,6 +311,34 @@ func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
 	res := UnbanResult{
 		AccountID: acctIDStr,
 		UnbanTime: APITime{time.Now()},
+	}
+	writeJSON(w, res)
+}
+
+// apiForgiveMatchFail is the handler for the '/account/{accountID}/forgive_match/{matchID}' API request.
+func (s *Server) apiForgiveMatchFail(w http.ResponseWriter, r *http.Request) {
+	acctIDStr := chi.URLParam(r, accountIDKey)
+	acctID, err := decodeAcctID(acctIDStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	matchIDStr := chi.URLParam(r, matchIDKey)
+	matchID, err := order.DecodeMatchID(matchIDStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	forgiven, unbanned, err := s.core.ForgiveMatchFail(acctID, matchID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to forgive failed match %v for account %v: %v", matchID, acctID, err), http.StatusInternalServerError)
+		return
+	}
+	res := ForgiveResult{
+		AccountID:   acctIDStr,
+		Forgiven:    forgiven,
+		Unbanned:    unbanned,
+		ForgiveTime: APITime{time.Now()},
 	}
 	writeJSON(w, res)
 }

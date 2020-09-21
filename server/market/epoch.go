@@ -8,6 +8,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 // EpochQueue represents an epoch order queue. The methods are NOT thread safe
@@ -20,6 +21,8 @@ type EpochQueue struct {
 	Start, End time.Time
 	// Orders holds the epoch queue orders in a map for quick lookups.
 	Orders map[order.OrderID]order.Order
+	// UserCancels counts the number of cancel orders per user.
+	UserCancels map[account.AccountID]uint32
 	// CancelTargets maps known targeted order IDs with the CancelOrder
 	CancelTargets map[order.OrderID]*order.CancelOrder
 }
@@ -33,6 +36,7 @@ func NewEpoch(idx int64, duration int64) *EpochQueue {
 		Start:         startTime,
 		End:           startTime.Add(time.Duration(duration) * time.Millisecond),
 		Orders:        make(map[order.OrderID]order.Order),
+		UserCancels:   make(map[account.AccountID]uint32),
 		CancelTargets: make(map[order.OrderID]*order.CancelOrder),
 	}
 }
@@ -51,6 +55,7 @@ func (eq *EpochQueue) Insert(ord order.Order) {
 	eq.Orders[ord.ID()] = ord
 	if co, ok := ord.(*order.CancelOrder); ok {
 		eq.CancelTargets[co.TargetOrderID] = co
+		eq.UserCancels[co.AccountID]++
 	}
 }
 

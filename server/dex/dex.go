@@ -68,6 +68,8 @@ type DexConf struct {
 	BroadcastTimeout time.Duration
 	CancelThreshold  float64
 	Anarchy          bool
+	FreeCancels      bool
+	BanScore         uint32
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 	IgnoreState      bool
@@ -230,7 +232,7 @@ func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.E
 func NewDEX(cfg *DexConf) (*DEX, error) {
 	// Disallow running without user penalization in a mainnet config.
 	if cfg.Anarchy && cfg.Network == dex.Mainnet {
-		return nil, fmt.Errorf("User penalties may not be disabled on mainnet.")
+		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
 	}
 
 	var stopWaiters []subsystem
@@ -387,6 +389,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		FeeChecker:      dcrBackend.FeeCoin,
 		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
+		FreeCancels:     cfg.FreeCancels,
+		BanScore:        cfg.BanScore,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
@@ -394,6 +398,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cancelThresh, authMgr.GraceLimit())
+	if authCfg.FreeCancels {
+		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
+	}
+	log.Infof("Ban score threshold is %v", cfg.BanScore)
 
 	// Create an unbook dispatcher for the Swapper.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
@@ -687,6 +695,12 @@ func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string
 // Unban reverses a ban and allows a client to resume trading.
 func (dm *DEX) Unban(aid account.AccountID) error {
 	return dm.authMgr.Unban(aid)
+}
+
+// ForgiveMatchFail forgives a user for a specific match failure, potentially
+// allowing them to resume trading if their score becomes passing.
+func (dm *DEX) ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error) {
+	return dm.authMgr.ForgiveMatchFail(aid, mid)
 }
 
 // Notify sends a text notification to a connected client.

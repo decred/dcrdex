@@ -47,6 +47,15 @@ const (
 		commit, coins, quantity, rate, force, filled
 	FROM %s WHERE status = $1;`
 
+	PreimageResultsLastN = `SELECT (preimage IS NULL AND status=$3) AS preimageMiss, 
+		(epoch_idx+1) * epoch_dur as epochCloseTime   -- when preimages are requested
+	FROM %s -- e.g. dcr_btc.orders_archived
+	WHERE account_id = $1
+		AND status >= 0         -- exclude forgiven
+	ORDER BY epochCloseTime DESC
+	LIMIT $2`  // no ;
+	// NOTE: we could join with the epochs table if we really want match_time instead of epoch close time
+
 	// SelectUserOrders retrieves all columns of all orders for the given
 	// account ID.
 	SelectUserOrders = `SELECT oid, type, sell, account_id, address, client_time, server_time,
@@ -177,6 +186,15 @@ const (
 	SelectCancelOrder = `SELECT oid, account_id, client_time, server_time,
 		commit, target_order, status
 	FROM %s WHERE oid = $1;`
+
+	CancelPreimageResultsLastN = `SELECT (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
+		(epoch_idx+1) * epoch_dur AS epochCloseTime   -- when preimages are requested
+	FROM %s -- e.g. dcr_btc.cancels_archived
+	WHERE account_id = $1
+		AND commit IS NOT NULL  -- commit NOT NULL to exclude server-generated cancels
+		AND status >= 0         -- not forgiven
+	ORDER BY epochCloseTime DESC
+	LIMIT $2`  // no ;
 
 	// SelectRevokeCancels retrieves server-initiated cancels (revokes).
 	SelectRevokeCancels = `SELECT oid, target_order, server_time, epoch_idx

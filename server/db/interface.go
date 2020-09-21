@@ -58,6 +58,17 @@ type OrderStatus struct {
 	Status order.OrderStatus
 }
 
+// PreimageResult is the outcome of preimage collection for an order in an epoch
+// that closed at a certain time.
+type PreimageResult struct {
+	Miss bool
+	Time int64
+	// NOTE: There can be multiple results with the same time (same epoch) but
+	// since there is unlikely to be a mix of misses and successes in the same
+	// epoch, the sorting ambiguity is acceptable. If that proves to be a
+	// problem, order ID can be added to this struct.
+}
+
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
 type DEXArchivist interface {
@@ -124,6 +135,10 @@ type OrderArchiver interface {
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
+
+	// PreimageStats retrieves the N most recent results of preimage requests
+	// for the user across all markets.
+	PreimageStats(user account.AccountID, lastN int) ([]*PreimageResult, error)
 
 	// ExecutedCancelsForUser retrieves up to N executed cancel orders for a
 	// given user. These may be user-initiated cancels, or cancels created by
@@ -299,12 +314,29 @@ func MatchID(match *order.Match) MarketMatchID {
 	}
 }
 
+// MatchOutcome pairs an inactive match's status with a timestamp. In the case
+// of a successful match for the user, this is when their redeem was received.
+// In the case of an at-fault match failure for the user, this corresponds to
+// the time of the previous match action. The previous action times are: match
+// time, swap txn validated times, and initiator redeem validated time. Note
+// that this does not directly correspond to match revocation times where
+// inaction deadline references the time when the swap txns reach the required
+// confirms. These times must match the reference times provided to the auth
+// manager when registering new swap outcomes.
+type MatchOutcome struct {
+	Status order.MatchStatus
+	Fail   bool // taker must reach MatchComplete, maker succeeds at MakerRedeemed
+	Time   int64
+}
+
 // MatchArchiver is the interface required for storage and retrieval of all
 // match data.
 type MatchArchiver interface {
 	InsertMatch(match *order.Match) error
 	MatchByID(mid order.MatchID, base, quote uint32) (*MatchData, error)
 	UserMatches(aid account.AccountID, base, quote uint32) ([]*MatchData, error)
+	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*MatchOutcome, error)
+	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*MatchStatus, error)
 }

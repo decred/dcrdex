@@ -7,6 +7,7 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,26 +32,34 @@ func (id MatchID) Bytes() []byte {
 }
 
 // Value implements the sql/driver.Valuer interface.
-func (mid MatchID) Value() (driver.Value, error) {
-	return mid[:], nil // []byte
+func (id MatchID) Value() (driver.Value, error) {
+	return id[:], nil // []byte
 }
 
 // Scan implements the sql.Scanner interface.
-func (mid *MatchID) Scan(src interface{}) error {
-	switch src := src.(type) {
-	case []byte:
-		copy(mid[:], src)
-		return nil
-		//case string:
-		// case nil:
-		// 	*oid = nil
-		// 	return nil
+func (id *MatchID) Scan(src interface{}) error {
+	idB, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot convert %T to OrderID", src)
 	}
-
-	return fmt.Errorf("cannot convert %T to OrderID", src)
+	copy(id[:], idB)
+	return nil
 }
 
 var zeroMatchID MatchID
+
+// DecodeMatchID checks a string as being both hex and the right length and
+// returns its bytes encoded as an order.MatchID.
+func DecodeMatchID(matchIDStr string) (MatchID, error) {
+	var matchID MatchID
+	if len(matchIDStr) != MatchIDSize*2 {
+		return matchID, errors.New("match id has incorrect length")
+	}
+	if _, err := hex.Decode(matchID[:], []byte(matchIDStr)); err != nil {
+		return matchID, fmt.Errorf("could not decode match id: %v", err)
+	}
+	return matchID, nil
+}
 
 // MatchStatus represents the current negotiation step for a match.
 type MatchStatus uint8
@@ -76,7 +85,6 @@ const (
 	// their redemption transaction. The DEX has validated the redemption and
 	// sent the details to the maker.
 	MatchComplete // 4
-	//MatchRefunded // 5?
 )
 
 // String satisfies fmt.Stringer.

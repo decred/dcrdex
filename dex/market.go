@@ -5,17 +5,19 @@ package dex
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
 // MarketInfo specifies a market that the Archiver must support.
 type MarketInfo struct {
-	Name            string
-	Base            uint32
-	Quote           uint32
-	LotSize         uint64
-	EpochDuration   uint64 // msec
-	MarketBuyBuffer float64
+	Name                   string
+	Base                   uint32
+	Quote                  uint32
+	LotSize                uint64
+	EpochDuration          uint64 // msec
+	MarketBuyBuffer        float64
+	MaxUserCancelsPerEpoch uint32
 }
 
 func marketName(base, quote string) string {
@@ -50,12 +52,13 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyB
 		return nil, err
 	}
 	return &MarketInfo{
-		Name:            name,
-		Base:            base,
-		Quote:           quote,
-		LotSize:         lotSize,
-		EpochDuration:   epochDuration,
-		MarketBuyBuffer: marketBuyBuffer,
+		Name:                   name,
+		Base:                   base,
+		Quote:                  quote,
+		LotSize:                lotSize,
+		EpochDuration:          epochDuration,
+		MarketBuyBuffer:        marketBuyBuffer,
+		MaxUserCancelsPerEpoch: math.MaxUint32,
 	}, nil
 }
 
@@ -76,11 +79,12 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64,
 	}
 
 	return &MarketInfo{
-		Name:            marketName(base, quote),
-		Base:            baseID,
-		Quote:           quoteID,
-		LotSize:         lotSize,
-		EpochDuration:   epochDuration,
-		MarketBuyBuffer: marketBuyBuffer,
+		Name:                   marketName(base, quote),
+		Base:                   baseID,
+		Quote:                  quoteID,
+		LotSize:                lotSize,
+		EpochDuration:          epochDuration,
+		MarketBuyBuffer:        marketBuyBuffer,
+		MaxUserCancelsPerEpoch: math.MaxUint32,
 	}, nil
 }

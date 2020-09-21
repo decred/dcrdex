@@ -89,6 +89,12 @@ func mainCore(ctx context.Context) error {
 	}
 	log.Infof("Found %d assets, loaded %d markets, for network %s",
 		len(assets), len(markets), strings.ToUpper(cfg.Network.String()))
+	// NOTE: If MaxUserCancelsPerEpoch is ultimately a setting we want to keep,
+	// bake it into the markets.json file and load it per-market in settings.go.
+	// For now, patch it into each dex.MarketInfo.
+	for _, mkt := range markets {
+		mkt.MaxUserCancelsPerEpoch = cfg.MaxUserCancels
+	}
 
 	// Load, or create and save, the DEX signing key.
 	var privKey *secp256k1.PrivateKey
@@ -125,6 +131,8 @@ func mainCore(ctx context.Context) error {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,
 		Anarchy:          cfg.Anarchy,
+		FreeCancels:      cfg.FreeCancels,
+		BanScore:         cfg.BanScore,
 		DEXPrivKey:       privKey,
 		CommsCfg: &dexsrv.RPCConfig{
 			RPCCert:     cfg.RPCCert,
