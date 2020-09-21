@@ -501,9 +501,6 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
 			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
 
-			// TODO: I'm pretty sure that if there are no orders on the book, the
-			// midGap will be zero, and so will minReq, meaning any Quantity would
-			// be accepted. Is this a security concern?
 			if market.Quantity < minReq {
 				errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", market.Quantity, minReq, midGap)
 				return false, msgjson.NewError(msgjson.FundingError, errStr)
