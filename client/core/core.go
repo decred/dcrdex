@@ -85,7 +85,7 @@ type dexConnection struct {
 // successfully sent.
 const (
 	DefaultResponseTimeout = comms.DefaultResponseTimeout
-	fundingTxWait          = time.Minute
+	fundingTxWait          = 2 * time.Minute
 )
 
 // suspended returns the suspended status of the provided market.
@@ -3363,6 +3363,8 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 		dc.tradeMtx.Unlock()
 
+		// Unlock funding coins for retired orders for good measure, in case
+		// there were not unlocked at an earlier time.
 		updatedAssets := make(assetMap)
 		for _, trade := range doneTrades {
 			trade.mtx.Lock()

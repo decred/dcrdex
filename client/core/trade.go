@@ -1162,6 +1162,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 
 	// Workaround for server recording match ack sig, to avoid an 'init' retry.
+	// A proper solution will involve a communication dialog with the 'match'
+	// request where the server signals acceptance of the ack signature.
 	if includesMakerSwap {
 		time.Sleep(250 * time.Millisecond)
 	}

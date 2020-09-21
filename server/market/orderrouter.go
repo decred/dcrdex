@@ -479,12 +479,12 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			// 1. The quantity is in units of the quote asset.
 			// 2. The quantity has to satisfy the market buy buffer.
 			midGap := tunnel.MidGap()
+			if midGap == 0 {
+				midGap = assets.quote.RateStep
+			}
 			buyBuffer := tunnel.MarketBuyBuffer()
 			lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
 			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
-			if minReq == 0 {
-				minReq = 1
-			}
 			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
 
 			// TODO: I'm pretty sure that if there are no orders on the book, the
