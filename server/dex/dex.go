@@ -572,8 +572,8 @@ func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 
 // Penalties returns penalties for an account. all determines whether expired
 // and forgiven penalties are included.
-func (dm *DEX) Penalties(aid account.AccountID, all bool) ([]*db.Penalty, error) {
-	return dm.storage.Penalties(aid, all)
+func (dm *DEX) Penalties(aid account.AccountID, strikeThreshold int, all bool) ([]*db.Penalty, time.Time, error) {
+	return dm.storage.Penalties(aid, strikeThreshold, all)
 }
 
 // Penalize bans an account by canceling the client's orders and setting their rule

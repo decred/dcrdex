@@ -393,5 +393,10 @@ type PenaltyArchiver interface {
 	ForgivePenalties(aid account.AccountID) error
 	// Penalties returns penalties that are currently in effect for a user.
 	// Forgiven and expired penalties are not included unless all is true.
-	Penalties(aid account.AccountID, all bool) (penalties []*Penalty, err error)
+	// strikeThreshold is the number of strikes a user can have until they
+	// are considered banned. If strikeThreshold is not zero, the time a
+	// user is banned until is calculated and return. If zero or the user
+	// does not have enough strikes to meet the strikeThreshold, zero time
+	// is returned.
+	Penalties(aid account.AccountID, strikeThreshold int, all bool) (penalties []*Penalty, bannedUntil time.Time, err error)
 }

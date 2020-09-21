@@ -23,7 +23,13 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-const cancelThreshWindow = 100 // spec
+const (
+	cancelThreshWindow = 100 // spec
+	// strikeThreshold is the number of strikes it takes to be banned.
+	//
+	// TODO: Make settable by operator on startup.
+	strikeThreshold = 1
+)
 
 var (
 	ErrUserNotConnected = dex.ErrorKind("user not connected")
@@ -48,7 +54,7 @@ type Storage interface {
 	InsertPenalty(penalty *db.Penalty) (id int64, err error)
 	ForgivePenalty(id int64) error
 	ForgivePenalties(aid account.AccountID) error
-	Penalties(aid account.AccountID, all bool) (penalties []*db.Penalty, err error)
+	Penalties(aid account.AccountID, strikeThreshold int, all bool) (penalties []*db.Penalty, bannedUntil time.Time, err error)
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
@@ -693,19 +699,47 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized. The penalty is returned.
 func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) (*db.Penalty, error) {
-	// Notify user of penalty.
-	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
-	if auth.anarchy {
-		details = "You were penalized but the penalty will not be counted against you."
-	}
-	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Description(), extraDetails)
+	details := fmt.Sprintf("Rule Details: %s\n%s", rule.Description(), extraDetails)
 	penaltyMsg := &msgjson.Penalty{
 		BrokenRule: rule,
-		Time:       uint64(unixMsNow().Unix()),
-		Duration:   uint64(rule.Duration()),
+		Time:       encode.UnixMilliU(time.Now()),
+		Duration:   uint64(rule.Duration() / 1e6), // nanoseconds to milliseconds
+		Strikes:    rule.Strikes(),
 		AccountID:  user,
 		Details:    details,
 	}
+	penalty := &db.Penalty{Penalty: penaltyMsg}
+	var err error
+
+	// Store penalty in database and suspend account if necessary.
+	if auth.anarchy {
+		penaltyMsg.Details = fmt.Sprintf("You were penalized but the penalty will not be counted against you.\n%s", details)
+	} else {
+		penalty.ID, err = auth.storage.InsertPenalty(penalty)
+		if err != nil {
+			return nil, fmt.Errorf("error inserting penalty: %v", err)
+		}
+		// TODO: option to close permanently or suspend for a certain time.
+
+		// Check if account would be considered banned at this point.
+		_, bannedUntil, err := auth.storage.Penalties(user, strikeThreshold, false)
+		if err != nil {
+			return nil, fmt.Errorf("Penalties(%x): %v", user, err)
+		}
+		zeroTime := time.Time{}
+		if bannedUntil != zeroTime {
+			penaltyMsg.Details = fmt.Sprintf("Ordering has been suspended for this account until %v. Contact the exchange operator to reinstate privileges.\n%s", bannedUntil, details)
+			// We do NOT want to do disconnect if the user has active swaps.  However,
+			// we do not want the user to initiate a swap or place a new order, so there
+			// should be appropriate checks on order submission and match/swap
+			// initiation (TODO).
+			client := auth.user(user)
+			if client != nil {
+				client.suspend()
+			}
+		}
+	}
+	// Notify user of penalty.
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penaltyMsg,
 	}
@@ -718,35 +752,8 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	if err != nil {
 		return nil, fmt.Errorf("error creating penalty notification: %v", err)
 	}
-	// TODO: verify that we are not sending a note over max uint16 as it
-	// cannot be sent over ws.
 	auth.Notify(user, note, time.Hour*72)
-	if auth.anarchy {
-		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
-		log.Error(err)
-		return nil, err
-	}
-
-	// TODO: option to close permanently or suspend for a certain time.
-
-	client := auth.user(user)
-	if client != nil {
-		client.suspend()
-	}
-
-	penalty := &db.Penalty{Penalty: penaltyMsg}
-	penalty.ID, err = auth.storage.InsertPenalty(penalty)
-	if err != nil {
-		return nil, fmt.Errorf("error inserting penalty: %v", err)
-	}
-
 	log.Debugf("user %v penalized for rule %v", user, rule)
-
-	// We do NOT want to do disconnect if the user has active swaps.  However,
-	// we do not want the user to initiate a swap or place a new order, so there
-	// should be appropriate checks on order submission and match/swap
-	// initiation (TODO).
-
 	return penalty, nil
 }
 
@@ -833,7 +840,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "unpaid account",
 		}
 	}
-	penalties, err := auth.storage.Penalties(user, false)
+	_, bannedUntil, err := auth.storage.Penalties(user, strikeThreshold, false)
 	if err != nil {
 		log.Errorf("Penalties(%x): %v", user, err)
 		return &msgjson.Error{
@@ -841,7 +848,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "DB error",
 		}
 	}
-	open := len(penalties) == 0
+	open := bannedUntil == time.Time{}
 	// Commented to allow suspended accounts to connect and complete swaps, etc.
 	// but not place orders.
 	// if !open {
@@ -977,9 +984,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
 	if penalize && open && !auth.anarchy {
-		// Account should already be closed, but perhaps the server crashed
-		// or the account was not penalized before shutdown.
-		client.suspended = true
 		// The account might now be closed if the cancellation rate was
 		// exceeded while the server was running in anarchy mode.
 		auth.Penalize(acctInfo.ID, account.CancellationRate, "")

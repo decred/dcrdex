@@ -49,7 +49,7 @@ type SvrCore interface {
 	Accounts() (accts []*db.Account, err error)
 	AccountInfo(acctID account.AccountID) (*db.Account, error)
 	Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration)
-	Penalties(acctID account.AccountID, all bool) ([]*db.Penalty, error)
+	Penalties(acctID account.AccountID, strikeThreshold int, all bool) ([]*db.Penalty, time.Time, error)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)

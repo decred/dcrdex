@@ -820,7 +820,8 @@ func TestConnect(t *testing.T) {
 }
 
 func TestPenalty(t *testing.T) {
-	// serialization: rule(1) + time (8) + duration (8) + accountid (32) + details (variable, ~100) = 149 bytes
+	// serialization: rule(1) + time (8) + duration (8) + strikes (1) +
+	// accountid (32) + details (variable, ~100) = 150 bytes
 	acctIDSlice, _ := hex.DecodeString("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
 	acctID := account.AccountID{}
 	copy(acctID[:], acctIDSlice)
@@ -828,6 +829,7 @@ func TestPenalty(t *testing.T) {
 		BrokenRule: account.Rule(1),
 		Time:       uint64(1598929305),
 		Duration:   uint64(3153600000000000000),
+		Strikes:    1,
 		AccountID:  acctID,
 		Details:    "You may no longer trade. Leave your client running to finish pending trades.",
 	}
@@ -840,6 +842,8 @@ func TestPenalty(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5f, 0x4d, 0xb9, 0x99,
 		// Duration 8 bytes.
 		0x2b, 0xc3, 0xd6, 0x7d, 0xd3, 0xac, 0x00, 0x00,
+		// Strikes 1 byte.
+		0x01,
 		// Account ID 32 bytes
 		0x14, 0xae, 0x3c, 0xbc, 0x70, 0x35, 0x87, 0x12, 0x2d, 0x68,
 		0xac, 0x6f, 0xa9, 0x19, 0x4d, 0xfd, 0xc8, 0x46, 0x6f, 0xb5,
@@ -880,6 +884,9 @@ func TestPenalty(t *testing.T) {
 	}
 	if penaltyBack.Duration != penalty.Duration {
 		t.Fatal(penaltyBack.Duration, penalty.Duration)
+	}
+	if penaltyBack.Strikes != penalty.Strikes {
+		t.Fatal(penaltyBack.Strikes, penalty.Strikes)
 	}
 	if !bytes.Equal(penaltyBack.AccountID[:], penalty.AccountID[:]) {
 		t.Fatal(penaltyBack.AccountID, penalty.AccountID)

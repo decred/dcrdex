@@ -89,8 +89,12 @@ func (s *TStorage) ForgivePenalties(aid account.AccountID) error {
 	s.penalties = nil
 	return nil
 }
-func (s *TStorage) Penalties(aid account.AccountID, all bool) (penalties []*db.Penalty, err error) {
-	return s.penalties, nil
+func (s *TStorage) Penalties(aid account.AccountID, strikeThreshold int, all bool) (penalties []*db.Penalty, bannedUntil time.Time, err error) {
+	t := time.Time{}
+	if len(s.penalties) > 0 {
+		t = time.Now().Add(time.Second * 10)
+	}
+	return s.penalties, t, nil
 }
 
 // TSigner satisfies the Signer interface

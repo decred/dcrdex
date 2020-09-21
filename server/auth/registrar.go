@@ -140,7 +140,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 			Message: "'notifyfee' sent for paid account",
 		}
 	}
-	penalties, err := auth.storage.Penalties(acctID, false)
+	_, bannedUntil, err := auth.storage.Penalties(acctID, strikeThreshold, false)
 	if err != nil {
 		log.Errorf("Penalties(%x): %v", acctID, err)
 		return &msgjson.Error{
@@ -148,10 +148,12 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 			Message: "DB error",
 		}
 	}
-	if len(penalties) > 0 {
+	zeroTime := time.Time{}
+	if bannedUntil != zeroTime {
+		details := fmt.Sprintf("account closed and cannot be reopened until %s", bannedUntil)
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
-			Message: "account closed and cannot be reopened",
+			Message: details,
 		}
 	}
 

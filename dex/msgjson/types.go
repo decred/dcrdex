@@ -852,18 +852,20 @@ type Penalty struct {
 	Time       uint64            `json:"timestamp"`
 	Duration   uint64            `json:"duration"`
 	AccountID  account.AccountID `json:"accountid"`
+	Strikes    uint8             `json:"strikes"`
 	Details    string            `json:"details"`
 }
 
 // Serialize serializes the PenaltyNote data.
 func (n *PenaltyNote) Serialize() []byte {
 	p := n.Penalty
-	// serialization: rule(1) + time (8) + duration (8) + accountid (32) +
-	// details (variable, ~100) = 149 bytes
+	// serialization: rule (1) + time (8) + duration (8) + strikes (1) +
+	// accountid (32) + details (variable, ~100) = 150 bytes
 	b := make([]byte, 0, 117)
 	b = append(b, byte(p.BrokenRule))
 	b = append(b, uint64Bytes(p.Time)...)
 	b = append(b, uint64Bytes(p.Duration)...)
+	b = append(b, p.Strikes)
 	b = append(b, p.AccountID[:]...)
 	return append(b, []byte(p.Details)...)
 }

@@ -191,8 +191,8 @@ func (ta *TArchivist) SetStateHash([]byte) error                          { retu
 func (ta *TArchivist) InsertPenalty(penalty *db.Penalty) (int64, error) { return 0, nil }
 func (ta *TArchivist) ForgivePenalty(id int64) error                    { return nil }
 func (ta *TArchivist) ForgivePenalties(aid account.AccountID) error     { return nil }
-func (ta *TArchivist) Penalties(aid account.AccountID, all bool) (penalties []*db.Penalty, err error) {
-	return nil, nil
+func (ta *TArchivist) Penalties(aid account.AccountID, strikeThreshold int, all bool) (penalties []*db.Penalty, bannedUntil time.Time, err error) {
+	return nil, time.Time{}, nil
 }
 
 func randomOrderID() order.OrderID {

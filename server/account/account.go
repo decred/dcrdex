@@ -131,6 +131,7 @@ const (
 // details holds rule specific details.
 type details struct {
 	name, description string
+	strikes           uint8
 	duration          time.Duration
 }
 
@@ -139,26 +140,31 @@ var ruleDetails = map[Rule]details{
 	NoRule: {
 		name:        "NoRule",
 		description: "no rules have been broken",
+		strikes:     0,
 		duration:    0,
 	},
 	PreimageReveal: {
 		name:        "PreimageReveal",
 		description: "failed to respond with a valid preimage for an order during epoch processing",
+		strikes:     1,
 		duration:    century,
 	},
 	FailureToAct: {
 		name:        "FailureToAct",
 		description: "did not follow through on a swap negotiation step",
+		strikes:     1,
 		duration:    century,
 	},
 	CancellationRate: {
 		name:        "CancellationRate",
 		description: "cancellation rate dropped below the acceptable level",
+		strikes:     1,
 		duration:    century,
 	},
 	LowFees: {
 		name:        "LowFees",
 		description: "did not pay transaction mining fees at the requisite level",
+		strikes:     1,
 		duration:    century,
 	},
 }
@@ -184,7 +190,15 @@ func (r Rule) Duration() time.Duration {
 	if d, ok := ruleDetails[r]; ok {
 		return d.duration
 	}
-	return century
+	return 0
+}
+
+// Strikes return the number of strikes breaking this penalty gives.
+func (r Rule) Strikes() uint8 {
+	if d, ok := ruleDetails[r]; ok {
+		return d.strikes
+	}
+	return 0
 }
 
 // Punishable returns whether breaking this rule incurs a penalty.

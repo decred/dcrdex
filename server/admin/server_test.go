@@ -150,8 +150,8 @@ func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.account
 func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 	return c.accountInfo, c.accountInfoErr
 }
-func (c *TCore) Penalties(_ account.AccountID, _ bool) ([]*db.Penalty, error) {
-	return c.penalties, c.penaltiesErr
+func (c *TCore) Penalties(acctID account.AccountID, strikeThreshold int, all bool) ([]*db.Penalty, time.Time, error) {
+	return c.penalties, time.Time{}, c.penaltiesErr
 }
 func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) (*db.Penalty, error) {
 	return c.penalize, c.penalizeErr
