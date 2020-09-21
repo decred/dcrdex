@@ -67,6 +67,7 @@ type dexConnection struct {
 	marketMtx sync.RWMutex
 	marketMap map[string]*Market
 
+	submittingTrades sync.WaitGroup
 	// tradeMtx is used to synchronize access to the trades map.
 	tradeMtx sync.RWMutex
 	trades   map[order.OrderID]*trackedTrade
@@ -82,7 +83,10 @@ type dexConnection struct {
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
 // successfully sent.
-const DefaultResponseTimeout = comms.DefaultResponseTimeout
+const (
+	DefaultResponseTimeout = comms.DefaultResponseTimeout
+	fundingTxWait          = 2 * time.Minute
+)
 
 // suspended returns the suspended status of the provided market.
 func (dc *dexConnection) suspended(mkt string) bool {
@@ -148,13 +152,18 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 		}
 		mid := market.marketName()
 		dc.tradeMtx.RLock()
+		mktTrades := make([]*trackedTrade, 0, len(dc.trades))
 		for _, trade := range dc.trades {
 			if trade.mktID == mid {
-				corder, _ := trade.coreOrder()
-				market.Orders = append(market.Orders, corder)
+				mktTrades = append(mktTrades, trade)
 			}
 		}
 		dc.tradeMtx.RUnlock()
+
+		for _, trade := range mktTrades {
+			corder, _ := trade.coreOrder()
+			market.Orders = append(market.Orders, corder)
+		}
 		marketMap[market.marketName()] = market
 	}
 	dc.marketMtx.Lock()
@@ -584,17 +593,30 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 
 // tickAsset checks open matches related to a specific asset for needed action.
 func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
-	updated := make(assetMap)
 	dc.tradeMtx.RLock()
-	defer dc.tradeMtx.RUnlock()
+	assetTrades := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range dc.trades {
 		if trade.Base() == assetID || trade.Quote() == assetID {
+			assetTrades = append(assetTrades, trade)
+		}
+	}
+	dc.tradeMtx.RUnlock()
+
+	updateChan := make(chan assetMap)
+	for _, trade := range assetTrades {
+		trade := trade // bad go, bad
+		go func() {
 			newUpdates, err := trade.tick()
 			if err != nil {
 				log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
-			updated.merge(newUpdates)
-		}
+			updateChan <- newUpdates
+		}()
+	}
+
+	updated := make(assetMap)
+	for range assetTrades {
+		updated.merge(<-updateChan)
 	}
 	return updated
 }
@@ -2213,17 +2235,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
-	// Must be locked here and held until at least the trade is added to the
-	// dc.trades map.
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-
 	// Everything is ready. Send the order.
 	route, msgOrder := messageOrder(ord, msgCoins)
 
 	// Send and get the result.
+	dc.submittingTrades.Add(1) // flag that we're waiting on an OrderResult
+	defer dc.submittingTrades.Done()
 	result := new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
+	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
 		unlockCoins()
 		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
@@ -2269,7 +2288,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
 		c.db, c.latencyQ, wallets, coins, c.notify)
 
+	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
+	dc.tradeMtx.Unlock()
 
 	// Send a low-priority notification.
 	corder, _ := tracker.coreOrder()
@@ -3329,6 +3350,68 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 	}()
 
+	checkTrades := func() {
+		var doneTrades, activeTrades []*trackedTrade
+		dc.tradeMtx.Lock()
+		for oid, trade := range dc.trades {
+			if trade.isActive() {
+				activeTrades = append(activeTrades, trade)
+				continue
+			}
+			doneTrades = append(doneTrades, trade)
+			delete(dc.trades, oid)
+		}
+		dc.tradeMtx.Unlock()
+
+		// Unlock funding coins for retired orders for good measure, in case
+		// there were not unlocked at an earlier time.
+		updatedAssets := make(assetMap)
+		for _, trade := range doneTrades {
+			trade.mtx.Lock()
+			log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
+			trade.returnCoins()
+			trade.mtx.Unlock()
+			updatedAssets.count(trade.wallets.fromAsset.ID)
+		}
+
+		for _, trade := range activeTrades {
+			newUpdates, err := trade.tick()
+			if err != nil {
+				log.Error(err)
+			}
+			updatedAssets.merge(newUpdates)
+		}
+
+		if len(updatedAssets) > 0 {
+			dc.refreshMarkets()
+			c.updateBalances(updatedAssets)
+		}
+	}
+
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			select {
+			case <-ticker.C:
+				sinceLast := time.Since(lastTick)
+				lastTick = time.Now()
+				if sinceLast >= 2*dc.tickInterval {
+					// The app likely just woke up from being suspended. Skip this
+					// tick to let DEX connections reconnect and resync matches.
+					log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
+						"Skipping this check to allow reconnect.", sinceLast)
+					continue
+				}
+
+				checkTrades()
+
+			case <-c.ctx.Done():
+				return
+			}
+		}
+	}()
+
 out:
 	for {
 		select {
@@ -3367,39 +3450,6 @@ out:
 			// Queue the handling of this message.
 			nextJob <- &msgJob{handler, msg}
 
-		case <-ticker.C:
-			sinceLast := time.Since(lastTick)
-			lastTick = time.Now()
-			if sinceLast >= 2*dc.tickInterval {
-				// The app likely just woke up from being suspended. Skip this
-				// tick to let DEX connections reconnect and resync matches.
-				log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
-					"Skipping this check to allow reconnect.", sinceLast)
-				continue
-			}
-			updatedAssets := make(assetMap)
-			dc.tradeMtx.Lock()
-			for oid, trade := range dc.trades {
-				if !trade.isActive() {
-					trade.mtx.Lock()
-					log.Infof("Retiring inactive order %v in status %v", oid, trade.metaData.Status)
-					trade.returnCoins()
-					trade.mtx.Unlock()
-					delete(dc.trades, oid)
-					updatedAssets.count(trade.wallets.fromAsset.ID)
-					continue
-				}
-				newUpdates, err := trade.tick()
-				if err != nil {
-					log.Error(err)
-				}
-				updatedAssets.merge(newUpdates)
-			}
-			dc.tradeMtx.Unlock()
-			if len(updatedAssets) > 0 {
-				dc.refreshMarkets()
-				c.updateBalances(updatedAssets)
-			}
 		case <-c.ctx.Done():
 			break out
 		}
@@ -3420,7 +3470,17 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("no active order found for preimage request for %s", oid)
+		// Hack around the race in prepareTrackedTrade from submitting the
+		// order, receiving the order result, and registering the tracked trade.
+		// It's possible that the dc.trades map won't have the oid yet after
+		// submitting the order, so if (1) we didn't find this oid, AND (2)
+		// we're in that window, that order result is about to be stored, so
+		// wait for it and check again.
+		dc.submittingTrades.Wait()
+		tracker, preImg, isCancel = dc.findOrder(oid)
+		if tracker == nil {
+			return fmt.Errorf("no active order found for preimage request for %s", oid)
+		}
 	}
 	resp, err := msgjson.NewResponse(msg.ID, &msgjson.PreimageResponse{
 		Preimage: preImg[:],
@@ -3478,25 +3538,12 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		// dc.addPendingSend(resp) // e.g.
 	}
 
-	defer c.refreshUser() // update WalletState
-
 	// Begin match negotiation.
-	//
-	// TODO: We need to know that the server has first recorded the ack
-	// signature, otherwise 'init' will fail. Until this is solved with a
-	// response to the ack, sleep for a moment if we are the maker on any of the
-	// orders. However, resendPendingRequests will retry the request when the
-	// trackedTrade ticks again when the timer fires in listen.
-	for _, m := range msgMatches {
-		if m.Side == uint8(order.Maker) {
-			time.Sleep(250 * time.Millisecond)
-			break
-		}
-	}
-
 	updatedAssets, err := dc.runMatches(matches)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
+	} else {
+		c.refreshUser() // would be called by updateBalances
 	}
 
 	return err

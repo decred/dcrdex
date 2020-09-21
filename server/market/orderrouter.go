@@ -5,7 +5,9 @@ package market
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,13 +16,13 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
-
-const maxClockOffset = 600_000 // milliseconds => 600 sec => 10 minutes
 
 // The AuthManager handles client-related actions, including authorization and
 // communications.
@@ -37,7 +39,11 @@ type AuthManager interface {
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
 
-const DefaultConnectTimeout = 10 * time.Minute
+const (
+	DefaultConnectTimeout = 10 * time.Minute
+	maxClockOffset        = 600_000 // milliseconds => 600 sec => 10 minutes
+	fundingTxWait         = time.Minute
+)
 
 // MarketTunnel is a connection to a market and information about existing
 // swaps.
@@ -108,32 +114,13 @@ func newAssetSet(base, quote *asset.BackedAsset, sell bool) *assetSet {
 	return coins
 }
 
-// outpoint satisfies order.Outpoint.
-type outpoint struct {
-	hash []byte
-	vout uint32
-}
-
-// newOutpoint is a constructor for an outpoint.
-func newOutpoint(h []byte, v uint32) *outpoint {
-	return &outpoint{
-		hash: h,
-		vout: v,
-	}
-}
-
-// Txhash is a getter for the outpoint's hash.
-func (o *outpoint) TxHash() []byte { return o.hash }
-
-// Vout is a getter for the outpoint's vout.
-func (o *outpoint) Vout() uint32 { return o.vout }
-
 // OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These
 // are authenticated routes used for placing and canceling orders.
 type OrderRouter struct {
-	auth    AuthManager
-	assets  map[uint32]*asset.BackedAsset
-	tunnels map[string]MarketTunnel
+	auth     AuthManager
+	assets   map[uint32]*asset.BackedAsset
+	tunnels  map[string]MarketTunnel
+	latencyQ *wait.TickerQueue
 }
 
 // OrderRouterConfig is the configuration settings for an OrderRouter.
@@ -146,14 +133,32 @@ type OrderRouterConfig struct {
 // NewOrderRouter is a constructor for an OrderRouter.
 func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 	router := &OrderRouter{
-		auth:    cfg.AuthManager,
-		assets:  cfg.Assets,
-		tunnels: cfg.Markets,
+		auth:     cfg.AuthManager,
+		assets:   cfg.Assets,
+		tunnels:  cfg.Markets,
+		latencyQ: wait.NewTickerQueue(2 * time.Second),
 	}
 	cfg.AuthManager.Route(msgjson.LimitRoute, router.handleLimit)
 	cfg.AuthManager.Route(msgjson.MarketRoute, router.handleMarket)
 	cfg.AuthManager.Route(msgjson.CancelRoute, router.handleCancel)
 	return router
+}
+
+func (r *OrderRouter) Run(ctx context.Context) {
+	r.latencyQ.Run(ctx)
+}
+
+func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr *msgjson.Error) {
+	log.Debugf("Error going to user %v: %s", user, msgErr)
+	msg, err := msgjson.NewResponse(reqID, nil, msgErr)
+	if err != nil {
+		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
+		return // this should not be possible, but don't pass nil msg to SendWhenConnected
+	}
+	r.auth.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
+		log.Infof("Timeout waiting to send error response to disconnected user %v: %q",
+			user, msgErr)
+	})
 }
 
 // handleLimit is the handler for the 'limit' route. This route accepts a
@@ -191,11 +196,6 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for limit order. wanted %d, got %d", msgjson.LimitOrderNum, limit.OrderType)
 	}
 
-	valSum, spendSize, utxos, rpcErr := r.checkPrefixTrade(user, tunnel, coins, &limit.Prefix, &limit.Trade, true)
-	if rpcErr != nil {
-		return rpcErr
-	}
-
 	// Check that the rate is non-zero and obeys the rate step interval.
 	if limit.Rate == 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "rate = 0 not allowed")
@@ -205,17 +205,9 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			limit.Rate, coins.quote.RateStep)
 	}
 
-	// Calculate the fees and check that the utxo sum is enough.
-	swapVal := limit.Quantity
-	lots := swapVal / coins.base.LotSize
-	if !sell {
-		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
-	}
-	fundAsset := &coins.funding.Asset
-	reqVal := calc.RequiredOrderFunds(swapVal, uint64(spendSize), lots, fundAsset)
-	if valSum < reqVal {
-		return msgjson.NewError(msgjson.FundingError,
-			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
+	rpcErr = r.checkPrefixTrade(coins, &limit.Prefix, &limit.Trade, true)
+	if rpcErr != nil {
+		return rpcErr
 	}
 
 	// Check time-in-force
@@ -229,12 +221,31 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return msgjson.NewError(msgjson.OrderParameterError, "unknown time-in-force")
 	}
 
-	// Commitment.
+	// Commitment
 	if len(limit.Commit) != order.CommitmentSize {
 		return msgjson.NewError(msgjson.OrderParameterError, "invalid commitment")
 	}
 	var commit order.Commitment
 	copy(commit[:], limit.Commit)
+
+	fundingAsset := coins.funding
+
+	coinIDs := make([]order.CoinID, 0, len(limit.Trade.Coins))
+	coinStrs := make([]string, 0, len(limit.Trade.Coins))
+	for _, coin := range limit.Trade.Coins {
+		// Check that the outpoint isn't locked.
+		coinID := order.CoinID(coin.ID)
+		if tunnel.CoinLocked(coins.funding.ID, coinID) {
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %v is locked", coinID))
+		}
+
+		coinStr, err := fundingAsset.Backend.ValidateCoinID(coinID)
+		if err != nil {
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("invalid coin ID %v: %v", coinID, err))
+		}
+		coinStrs = append(coinStrs, coinStr)
+		coinIDs = append(coinIDs, coinID)
+	}
 
 	// Create the limit order.
 	lo := &order.LimitOrder{
@@ -248,7 +259,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			Commit: commit,
 		},
 		T: order.Trade{
-			Coins:    utxos,
+			Coins:    coinIDs,
 			Sell:     sell,
 			Quantity: limit.Quantity,
 			Address:  limit.Address,
@@ -261,16 +272,87 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	// from the serialized order, is not yet valid. The Market will stamp the
 	// order on receipt, and the order ID will be valid.
 
-	// Send the order to the epoch queue where it will be time stamped.
 	oRecord := &orderRecord{
 		order: lo,
 		req:   limit,
 		msgID: msg.ID,
 	}
-	if err := tunnel.SubmitOrder(oRecord); err != nil {
-		log.Warnf("Market failed to SubmitOrder: %v", err)
-		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+
+	swapVal := limit.Quantity
+	lots := swapVal / coins.base.LotSize
+	if !sell {
+		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
+
+	var valSum uint64
+	var spendSize uint32
+	neededCoins := make(map[int]*msgjson.Coin, len(limit.Trade.Coins))
+	for i, coin := range limit.Trade.Coins {
+		neededCoins[i] = coin
+	}
+
+	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
+		for key, coin := range neededCoins {
+			// Get the coin from the backend and validate it.
+			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
+			if err != nil {
+				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
+			}
+
+			// Verify that the user controls the funding coins.
+			err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
+			if err != nil {
+				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
+				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
+			}
+
+			delete(neededCoins, key) // don't check this coin again
+			valSum += dexCoin.Value()
+			spendSize += dexCoin.SpendSize()
+		}
+
+		// Calculate the fees and check that the utxo sum is enough.
+		reqVal := calc.RequiredOrderFunds(swapVal, uint64(spendSize), lots, &fundingAsset.Asset)
+		if valSum < reqVal {
+			return false, msgjson.NewError(msgjson.FundingError,
+				fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
+		}
+
+		return false, nil
+	}
+
+	log.Tracef("Searching for %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
+	r.latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(fundingTxWait),
+		TryFunc: func() bool {
+			tryAgain, msgErr := checkCoins()
+			if tryAgain {
+				return wait.TryAgain
+			}
+			if msgErr != nil {
+				r.respondError(msg.ID, user, msgErr)
+				return wait.DontTryAgain
+			}
+
+			// Send the order to the epoch queue where it will be time stamped.
+			log.Tracef("Found and validated %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
+			if err := tunnel.SubmitOrder(oRecord); err != nil {
+				log.Warnf("Market failed to SubmitOrder: %v", err)
+				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order"))
+			}
+			return wait.DontTryAgain
+		},
+		ExpireFunc: func() {
+			// Tell them to broadcast again or check their node before broadcast
+			// timeout is reached and the match is revoked.
+			r.respondError(msg.ID, user, msgjson.NewError(msgjson.TransactionUndiscovered,
+				fmt.Sprintf("failed to find funding coins %v", coinStrs)))
+		},
+	})
+
 	return nil
 }
 
@@ -310,39 +392,9 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 	// Passing sell as the checkLot parameter causes the lot size check to be
 	// ignored for market buy orders.
-	valSum, spendSize, coins, rpcErr := r.checkPrefixTrade(user, tunnel, assets, &market.Prefix, &market.Trade, sell)
+	rpcErr = r.checkPrefixTrade(assets, &market.Prefix, &market.Trade, sell)
 	if rpcErr != nil {
 		return rpcErr
-	}
-
-	// Calculate the fees and check that the utxo sum is enough.
-	fundAsset := &assets.funding.Asset
-	var reqVal uint64
-	if sell {
-		lots := market.Quantity / assets.base.LotSize
-		reqVal = calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), lots, fundAsset)
-	} else {
-		// This is a market buy order, so the quantity gets special handling.
-		// 1. The quantity is in units of the quote asset.
-		// 2. The quantity has to satisfy the market buy buffer.
-		midGap := tunnel.MidGap()
-		buyBuffer := tunnel.MarketBuyBuffer()
-		lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
-		minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
-		reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
-
-		// TODO: I'm pretty sure that if there are no orders on the book, the
-		// midGap will be zero, and so will minReq, meaning any Quantity would
-		// be accepted. Is this a security concern?
-
-		if market.Quantity < minReq {
-			errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", market.Quantity, minReq, midGap)
-			return msgjson.NewError(msgjson.FundingError, errStr)
-		}
-	}
-	if valSum < reqVal {
-		return msgjson.NewError(msgjson.FundingError,
-			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
 	}
 
 	// Commitment.
@@ -351,6 +403,25 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 	var commit order.Commitment
 	copy(commit[:], market.Commit)
+
+	fundingAsset := assets.funding
+
+	coinIDs := make([]order.CoinID, 0, len(market.Trade.Coins))
+	coinStrs := make([]string, 0, len(market.Trade.Coins))
+	for _, coin := range market.Trade.Coins {
+		// Check that the outpoint isn't locked.
+		coinID := order.CoinID(coin.ID)
+		if tunnel.CoinLocked(fundingAsset.ID, coinID) {
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %v is locked", coinID))
+		}
+
+		coinStr, err := fundingAsset.Backend.ValidateCoinID(coinID)
+		if err != nil {
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("invalid coin ID %v: %v", coinID, err))
+		}
+		coinStrs = append(coinStrs, coinStr)
+		coinIDs = append(coinIDs, coinID)
+	}
 
 	// Create the market order
 	mo := &order.MarketOrder{
@@ -364,7 +435,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			Commit: commit,
 		},
 		T: order.Trade{
-			Coins:    coins,
+			Coins:    coinIDs,
 			Sell:     sell,
 			Quantity: market.Quantity,
 			Address:  market.Address,
@@ -377,10 +448,101 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		req:   market,
 		msgID: msg.ID,
 	}
-	if err := tunnel.SubmitOrder(oRecord); err != nil {
-		log.Warnf("Market failed to SubmitOrder: %v", err)
-		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+
+	var valSum uint64
+	var spendSize uint32
+	neededCoins := make(map[int]*msgjson.Coin, len(market.Trade.Coins))
+	for i, coin := range market.Trade.Coins {
+		neededCoins[i] = coin
 	}
+
+	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
+		for key, coin := range neededCoins {
+			// Get the coin from the backend and validate it.
+			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
+			if err != nil {
+				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
+			}
+
+			// Verify that the user controls the funding coins.
+			err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
+			if err != nil {
+				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
+				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
+			}
+
+			delete(neededCoins, key) // don't check this coin again
+			valSum += dexCoin.Value()
+			spendSize += dexCoin.SpendSize()
+		}
+
+		if valSum == 0 {
+			return false, msgjson.NewError(msgjson.FundingError, "zero value funding coins not permitted")
+		}
+
+		// Calculate the fees and check that the utxo sum is enough.
+		var reqVal uint64
+		if sell {
+			lots := market.Quantity / assets.base.LotSize
+			reqVal = calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), lots, &assets.funding.Asset)
+		} else {
+			// This is a market buy order, so the quantity gets special handling.
+			// 1. The quantity is in units of the quote asset.
+			// 2. The quantity has to satisfy the market buy buffer.
+			midGap := tunnel.MidGap()
+			if midGap == 0 {
+				midGap = assets.quote.RateStep
+			}
+			buyBuffer := tunnel.MarketBuyBuffer()
+			lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
+			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
+			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
+
+			if market.Quantity < minReq {
+				errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", market.Quantity, minReq, midGap)
+				return false, msgjson.NewError(msgjson.FundingError, errStr)
+			}
+		}
+		if valSum < reqVal {
+			return false, msgjson.NewError(msgjson.FundingError,
+				fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
+		}
+
+		return false, nil
+	}
+
+	log.Tracef("Searching for %s coins %v for new market order", fundingAsset.Symbol, coinStrs)
+	r.latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(fundingTxWait),
+		TryFunc: func() bool {
+			tryAgain, msgErr := checkCoins()
+			if tryAgain {
+				return wait.TryAgain
+			}
+			if msgErr != nil {
+				r.respondError(msg.ID, user, msgErr)
+				return wait.DontTryAgain
+			}
+
+			// Send the order to the epoch queue where it will be time stamped.
+			log.Tracef("Found and validated %s coins %v for new market order", fundingAsset.Symbol, coinStrs)
+			if err := tunnel.SubmitOrder(oRecord); err != nil {
+				log.Warnf("Market failed to SubmitOrder: %v", err)
+				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order"))
+			}
+			return wait.DontTryAgain
+		},
+		ExpireFunc: func() {
+			// Tell them to broadcast again or check their node before broadcast
+			// timeout is reached and the match is revoked.
+			r.respondError(msg.ID, user, msgjson.NewError(msgjson.TransactionUndiscovered,
+				fmt.Sprintf("failed to find funding coins %v", coinStrs)))
+		},
+	})
+
 	return nil
 }
 
@@ -597,76 +759,43 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 
 // checkPrefixTrade validates the information in the prefix and trade portions
 // of an order.
-func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunnel, assets *assetSet, prefix *msgjson.Prefix,
-	trade *msgjson.Trade, checkLot bool) (uint64, uint32, []order.CoinID, *msgjson.Error) {
+func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
+	trade *msgjson.Trade, checkLot bool) *msgjson.Error {
 	// Check that the client's timestamp is still valid.
 	rpcErr := checkTimes(prefix)
 	if rpcErr != nil {
-		return 0, 0, nil, rpcErr
-	}
-	errSet := func(code int, message string) (uint64, uint32, []order.CoinID, *msgjson.Error) {
-		return 0, 0, nil, msgjson.NewError(code, message)
+		return rpcErr
 	}
 	// Check that the address is valid.
 	if !assets.receiving.Backend.CheckAddress(trade.Address) {
-		return errSet(msgjson.OrderParameterError, "address doesn't check")
+		return msgjson.NewError(msgjson.OrderParameterError, "address doesn't check")
 	}
 	// Quantity cannot be zero, and must be an integral multiple of the lot size.
 	if trade.Quantity == 0 {
-		return errSet(msgjson.OrderParameterError, "zero quantity not allowed")
+		return msgjson.NewError(msgjson.OrderParameterError, "zero quantity not allowed")
 	}
 	if checkLot && trade.Quantity%assets.base.LotSize != 0 {
-		return errSet(msgjson.OrderParameterError, "order quantity not a multiple of lot size")
+		return msgjson.NewError(msgjson.OrderParameterError, "order quantity not a multiple of lot size")
 	}
 	// Validate UTXOs
 	// Check that all required arrays are of equal length.
 	if len(trade.Coins) == 0 {
-		return errSet(msgjson.FundingError, "order must specify utxos")
+		return msgjson.NewError(msgjson.FundingError, "order must specify utxos")
 	}
-	var valSum uint64
-	var spendSize uint32
-	var coinIDs []order.CoinID
-	coinAssetID := assets.funding.ID
+
 	for i, coin := range trade.Coins {
 		sigCount := len(coin.Sigs)
 		if sigCount == 0 {
-			return errSet(msgjson.SignatureError, fmt.Sprintf("no signature for coin %d", i))
+			return msgjson.NewError(msgjson.SignatureError, fmt.Sprintf("no signature for coin %d", i))
 		}
 		if len(coin.PubKeys) != sigCount {
-			return errSet(msgjson.OrderParameterError, fmt.Sprintf(
+			return msgjson.NewError(msgjson.OrderParameterError, fmt.Sprintf(
 				"pubkey count %d not equal to signature count %d for coin %d",
 				len(coin.PubKeys), sigCount, i,
 			))
 		}
-		// Get the coin from the backend and validate it.
-		dexCoin, err := assets.funding.Backend.FundingCoin(coin.ID, coin.Redeem)
-		if err != nil {
-			log.Debugf("FundingCoin error for %s coin %v: %v", assets.funding.Symbol, coin.ID, err)
-			return errSet(msgjson.FundingError,
-				fmt.Sprintf("error retrieving coin ID %v", coin.ID))
-		}
-		// FundingCoin must ensure that the coin requires at least one signature
-		// to spend, and that the redeem script is not non-standard.
-
-		// Check that the outpoint isn't locked.
-		locked := tunnel.CoinLocked(coinAssetID, order.CoinID(coin.ID))
-		if locked {
-			return errSet(msgjson.FundingError,
-				fmt.Sprintf("coin %v is locked", dexCoin))
-		}
-
-		// Verify that the user controls the funding coins.
-		err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
-		if err != nil {
-			log.Debugf("Auth error for %s coin %s: %v", assets.funding.Symbol, dexCoin, err)
-			return errSet(msgjson.CoinAuthError,
-				fmt.Sprintf("failed to authorize coin %v", dexCoin))
-		}
-		coinIDs = append(coinIDs, []byte(coin.ID))
-		valSum += dexCoin.Value()
-		spendSize += dexCoin.SpendSize()
 	}
-	return valSum, spendSize, coinIDs, nil
+	return nil
 }
 
 // msgBytesToBytes converts a []msgjson.Byte to a [][]byte.

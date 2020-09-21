@@ -909,7 +909,7 @@ func TestMarket_Run(t *testing.T) {
 	storMsgPI(coRecord.msgID, piCo)
 	err = mkt.SubmitOrder(&coRecord)
 	if err != nil {
-		t.Errorf("Failed to submit order: %v", err)
+		t.Fatalf("Failed to submit order: %v", err)
 	}
 
 	// Duplicate cancel order

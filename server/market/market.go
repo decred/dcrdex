@@ -158,7 +158,7 @@ ordersLoop:
 			assetID = base
 		}
 		for i := range lo.Coins {
-			err := swapper.CheckUnspent(assetID, lo.Coins[i])
+			err = swapper.CheckUnspent(assetID, lo.Coins[i])
 			if err == nil {
 				continue
 			}

@@ -115,6 +115,7 @@ type TAuth struct {
 	authErr            error
 	sendsMtx           sync.Mutex
 	sends              []*msgjson.Message
+	sent               chan *msgjson.Error
 	piMtx              sync.Mutex
 	preimagesByMsgID   map[uint64]order.Preimage
 	preimagesByOrdID   map[string]order.Preimage
@@ -135,39 +136,50 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)
 	return a.authErr
 }
-func (a *TAuth) Sign(...msgjson.Signable) error { log.Info("Sign"); return nil }
+func (a *TAuth) Sign(...msgjson.Signable) error { return nil }
 func (a *TAuth) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
 	if err := a.Send(user, msg); err != nil {
 		log.Debug(err)
 	}
 }
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
-	msgTxt, _ := json.Marshal(msg)
-	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
+	//log.Infof("Send for user %v. Message: %v", user, msg)
 	a.sendsMtx.Lock()
 	a.sends = append(a.sends, msg)
 	a.sendsMtx.Unlock()
 
-	a.piMtx.Lock()
-	defer a.piMtx.Unlock()
-	preimage, ok := a.preimagesByMsgID[msg.ID]
-	if ok && msg.Type == msgjson.Response {
-		log.Infof("preimage found for msg id %v: %x", msg.ID, preimage)
-		payload, err := msg.Response()
+	var msgErr *msgjson.Error
+	var payload *msgjson.ResponsePayload
+	if msg.Type == msgjson.Response {
+		var err error
+		payload, err = msg.Response()
 		if err != nil {
 			return fmt.Errorf("Failed to unmarshal message ResponsePayload: %v", err)
 		}
+		msgErr = payload.Error
+	}
+
+	a.piMtx.Lock()
+	defer a.piMtx.Unlock()
+	preimage, ok := a.preimagesByMsgID[msg.ID]
+	if ok && payload != nil {
+		log.Infof("preimage found for msg id %v: %x", msg.ID, preimage)
 		if payload.Error != nil {
 			return fmt.Errorf("invalid response: %v", payload.Error.Message)
 		}
 		ordRes := new(msgjson.OrderResult)
-		err = json.Unmarshal(payload.Result, ordRes)
+		err := json.Unmarshal(payload.Result, ordRes)
 		if err != nil {
 			return fmt.Errorf("Failed to unmarshal message Payload into OrderResult: %v", err)
 		}
 		log.Debugf("setting preimage for order %v", ordRes.OrderID)
 		a.preimagesByOrdID[ordRes.OrderID.String()] = preimage
 	}
+
+	if a.sent != nil {
+		a.sent <- msgErr
+	}
+
 	return nil
 }
 func (a *TAuth) getSend() *msgjson.Message {
@@ -235,6 +247,7 @@ func (a *TAuth) Unban(account.AccountID) error { return nil }
 
 type TMarketTunnel struct {
 	adds       []*orderRecord
+	added      chan struct{}
 	auth       *TAuth
 	midGap     uint64
 	mbBuffer   float64
@@ -261,6 +274,10 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 	err := m.auth.Send(account.AccountID{}, resp)
 	if err != nil {
 		log.Debug("Send:", err)
+	}
+
+	if m.added != nil {
+		m.added <- struct{}{}
 	}
 
 	return nil
@@ -316,8 +333,8 @@ func tNewBackend() *TBackend {
 func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	str := hex.EncodeToString(coinID)
 	v := b.utxos[str]
-	if v == 0 {
-		return nil, fmt.Errorf("no utxo")
+	if v == 0 && b.utxoErr == nil {
+		return nil, asset.CoinNotFoundError // try again for waiters
 	}
 	return &tUTXO{val: v, decoded: str}, b.utxoErr
 }
@@ -545,6 +562,11 @@ func TestMain(m *testing.M) {
 			rig.router.Run(testCtx)
 			wg.Done()
 		}()
+		wg.Add(1)
+		go func() {
+			oRig.router.Run(testCtx)
+			wg.Done()
+		}()
 		time.Sleep(100 * time.Millisecond) // let the router actually start in runBook
 		defer func() {
 			shutdown()
@@ -589,14 +611,29 @@ func TestLimit(t *testing.T) {
 
 	ensureErr := makeEnsureErr(t)
 
+	oRig.auth.sent = make(chan *msgjson.Error, 1)
+	defer func() { oRig.auth.sent = nil }()
+
 	sendLimit := func() *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.LimitRoute, limit)
-		return oRig.router.handleLimit(user.acct, msg)
+		err := oRig.router.handleLimit(user.acct, msg)
+		if err != nil {
+			return err
+		}
+		// wait for the async success (nil) / err (non-nil)
+		return <-oRig.auth.sent
 	}
 
 	// First just send it through and ensure there are no errors.
+	oRig.market.added = make(chan struct{}, 1)
+	defer func() { oRig.market.added = nil }()
 	ensureErr("valid order", sendLimit(), -1)
 	// Make sure the order was submitted to the market
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("no order submitted to epoch")
+	}
 	oRecord := oRig.market.pop()
 	if oRecord == nil {
 		t.Fatalf("no order submitted to epoch")
@@ -611,6 +648,11 @@ func TestLimit(t *testing.T) {
 	// Now check with immediate TiF.
 	limit.TiF = msgjson.ImmediateOrderNum
 	ensureErr("valid order", sendLimit(), -1)
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("no order submitted to epoch")
+	}
 	oRecord = oRig.market.pop()
 	if oRecord == nil {
 		t.Fatalf("no order submitted to epoch")
@@ -632,7 +674,7 @@ func TestLimit(t *testing.T) {
 	limit.OrderType = msgjson.LimitOrderNum
 
 	testPrefixTrade(&limit.Prefix, &limit.Trade, oRig.dcr, oRig.btc,
-		func(tag string, code int) { ensureErr(tag, sendLimit(), code) },
+		func(tag string, code int) { t.Helper(); ensureErr(tag, sendLimit(), code) },
 	)
 
 	// Rate = 0
@@ -684,6 +726,11 @@ func TestLimit(t *testing.T) {
 		Force: order.StandingTiF,
 	}
 	// Get the last order submitted to the epoch
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("no order submitted to epoch")
+	}
 	oRecord = oRig.market.pop()
 	if oRecord == nil {
 		t.Fatalf("no buy order submitted to epoch")
@@ -750,15 +797,30 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 	ensureErr := makeEnsureErr(t)
 
+	oRig.auth.sent = make(chan *msgjson.Error, 1)
+	defer func() { oRig.auth.sent = nil }()
+
 	sendMarket := func() *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.MarketRoute, mkt)
-		return oRig.router.handleMarket(user.acct, msg)
+		err := oRig.router.handleMarket(user.acct, msg)
+		if err != nil {
+			return err
+		}
+		// wait for the async success (nil) / err (non-nil)
+		return <-oRig.auth.sent
 	}
 
 	// First just send it through and ensure there are no errors.
+	oRig.market.added = make(chan struct{}, 1)
+	defer func() { oRig.market.added = nil }()
 	ensureErr("valid order", sendMarket(), -1)
 
 	// Make sure the order was submitted to the market
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("no order submitted to epoch")
+	}
 	o := oRig.market.pop()
 	if o == nil {
 		t.Fatalf("no order submitted to epoch")
@@ -776,7 +838,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	mkt.OrderType = msgjson.MarketOrderNum
 
 	testPrefixTrade(&mkt.Prefix, &mkt.Trade, oRig.dcr, oRig.btc,
-		func(tag string, code int) { ensureErr(tag, sendMarket(), code) },
+		func(tag string, code int) { t.Helper(); ensureErr(tag, sendMarket(), code) },
 	)
 
 	// Now switch it to a buy order, and ensure it passes
@@ -790,10 +852,11 @@ func TestMarketStartProcessStop(t *testing.T) {
 		buyUTXO,
 	}
 	mkt.Address = dcrAddr
-	mkt.Quantity = matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.2))
+
 	// First check an order that doesn't satisfy the market buy buffer. For
 	// testing, the market buy buffer is set to 1.5.
-	ensureErr("market buy buffer unsatisfied", sendMarket(), msgjson.FundingError)
+	// mkt.Quantity = matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.2))
+	//ensureErr("market buy buffer unsatisfied", sendMarket(), msgjson.FundingError)
 	mktBuyQty := matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.6))
 	mkt.Quantity = mktBuyQty
 	rpcErr = sendMarket()
@@ -819,7 +882,12 @@ func TestMarketStartProcessStop(t *testing.T) {
 		},
 	}
 
-	// Get the last order submitted to the epoch
+	// Wait for the order to be submitted.
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("no order submitted to epoch")
+	}
 	oRecord := oRig.market.pop()
 	if oRecord == nil {
 		t.Fatalf("no buy order submitted to epoch")
@@ -1041,7 +1109,7 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 	oRig.market.locked = false
 
 	// utxo err
-	fundingAsset.utxoErr = dummyError
+	fundingAsset.utxoErr = dummyError // anything but asset.CoinNotFoundError
 	checkCode("utxo err", msgjson.FundingError)
 	fundingAsset.utxoErr = nil
 
@@ -1066,7 +1134,7 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 
 // Book Router Tests
 
-// nolint:unparm
+// nolint:unparam
 func randLots(max int) uint64 {
 	return uint64(rand.Intn(max) + 1)
 }
