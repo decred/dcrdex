@@ -205,7 +205,7 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 		Rate:  rate,
 		Sell:  sell,
 		Token: nextToken(),
-		Epoch: &epochIdx,
+		Epoch: epochIdx,
 	}
 }
 
@@ -908,7 +908,6 @@ out:
 			for _, o := range c.epochOrders {
 				miniOrder := o.Payload.(*core.MiniOrder)
 				if miniOrder.Rate > 0 {
-					miniOrder.Epoch = new(uint64)
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
 					if miniOrder.Sell {

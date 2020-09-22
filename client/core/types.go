@@ -316,7 +316,7 @@ func newDisplayIDFromSymbols(base, quote string) string {
 type MiniOrder struct {
 	Qty   float64 `json:"qty"`
 	Rate  float64 `json:"rate"`
-	Epoch *uint64 `json:"epoch,omitempty"`
+	Epoch uint64  `json:"epoch,omitempty"`
 	Sell  bool    `json:"sell"`
 	Token string  `json:"token"`
 }

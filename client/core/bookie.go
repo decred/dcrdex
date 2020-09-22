@@ -357,6 +357,7 @@ func translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
 			Rate:  float64(o.Rate) / conversionFactor,
 			Sell:  o.Side == msgjson.SellOrderNum,
 			Token: token(o.OrderID[:]),
+			Epoch: o.Epoch,
 		})
 	}
 	return
@@ -501,6 +502,6 @@ func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrd
 		Rate:  float64(trade.Rate) / conversionFactor,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
-		Epoch: &epoch,
+		Epoch: epoch,
 	}
 }

@@ -459,7 +459,7 @@ export default class Application {
    * ws.........Websocket connection status changes.
    */
   log (loggerID, ...msg) {
-    if (this.loggers[loggerID]) console.log(`${nowString()}[${loggerID}]:`, ...msg)    
+    if (this.loggers[loggerID]) console.log(`${nowString()}[${loggerID}]:`, ...msg)
     if (this.recorders[loggerID]) {
       this.recorders[loggerID].push({
         time: nowString(),
@@ -604,6 +604,7 @@ function handlerFromPath (path) {
   return path.replace(/^\//, '').split('/')[0].split('?')[0].split('#')[0]
 }
 
+/* nowString creates a string formatted like HH:MM:SS.xxx */
 function nowString () {
   const stamp = new Date()
   const h = stamp.getHours().toString().padStart(2, '0')
