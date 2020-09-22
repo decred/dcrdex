@@ -52,8 +52,8 @@ type EpochResults struct {
 	OrdersMissed      []order.OrderID
 }
 
-// OrderStatus is the current status of an order, including its fill.
-type OrderStatus struct {
+// Order is the current status of an order, including its fill.
+type Order struct {
 	ID     order.OrderID
 	Status order.OrderStatus
 	Fill   uint64
@@ -105,13 +105,19 @@ type OrderArchiver interface {
 	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
 
-	// UserOrders retrieves all orders for the given account in the market
-	// specified by a base and quote asset.
-	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
+	// UserOrders retrieves the orders with the provided order IDs for the given
+	// account in the market specified by a base and quote asset. If no order ID
+	// is provided, all orders for the given account in the specified market are
+	// returned.
+	// The number and ordering of the returned orders is not necessarily the same
+	// as the number and ordering of the provided order IDs, if provided. It is
+	// not an error if any or all of the provided order IDs cannot be found for
+	// the given account in the specified market.
+	UserOrders(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*Order, error)
 
 	// AllActiveUserOrders retrieves all active orders for a user across all
 	// markets.
-	AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error)
+	AllActiveUserOrders(aid account.AccountID) ([]*Order, error)
 
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.
@@ -129,9 +135,6 @@ type OrderArchiver interface {
 
 	// OrderStatus gets the status, ID, and filled amount of the given order.
 	OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error)
-
-	// OrderStatuses gets the status and filled amount of the given orders.
-	OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*OrderStatus, error)
 
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a

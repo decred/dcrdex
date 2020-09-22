@@ -670,52 +670,6 @@ func (a *Archiver) SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
 	return nil
 }
 
-// AllActiveUserOrders retrieves all active orders for a user across all
-// markets.
-func (a *Archiver) AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
-	orders := make(map[order.OrderID]order.OrderStatus)
-	for m := range a.markets {
-		tableName := fullOrderTableName(a.dbName, m, true) // active table
-		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-		mktOrders, err := userOrderStatuses(ctx, a.db, tableName, aid)
-		cancel()
-		if err != nil {
-			return nil, err
-		}
-		for oid, status := range mktOrders {
-			orders[oid] = status
-		}
-	}
-	return orders, nil
-}
-
-func userOrderStatuses(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
-	stmt := fmt.Sprintf(internal.SelectUserOrderStatuses, tableName)
-	var rows *sql.Rows
-	rows, err := dbe.QueryContext(ctx, stmt, aid)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orders := make(map[order.OrderID]order.OrderStatus)
-	for rows.Next() {
-		var oid order.OrderID
-		var status pgOrderStatus
-		err = rows.Scan(&oid, &status)
-		if err != nil {
-			return nil, err
-		}
-		orders[oid] = pgToMarketStatus(status)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return orders, nil
-}
-
 type orderCompStamped struct {
 	oid order.OrderID
 	t   int64
@@ -819,56 +773,6 @@ func (a *Archiver) OrderStatus(ord order.Order) (order.OrderStatus, order.OrderT
 
 func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType, int64, error) {
 	return a.orderStatusByID(ord.ID(), ord.Base(), ord.Quote())
-}
-
-// OrderStatuses gets the statuses and filled amounts of the orders with the
-// provided order IDs in the specified market and associated with the specified
-// account ID. The number and ordering of the returned order statuses is not
-// necessarily the same as the number and ordering of the provided order IDs.
-// It is not an error if any or all of the provided order IDs cannot be found
-// in the specified market against the specified account ID.
-func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
-	marketSchema, err := a.marketSchema(base, quote)
-	if err != nil {
-		return nil, err
-	}
-
-	// Search active orders first.
-	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
-	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-	activeOrders, err := orderStatuses(ctx, a.db, aid, oids, fullTable)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	orders := make([]*db.OrderStatus, 0, len(oids))
-	notFoundOids := make([]order.OrderID, 0, len(oids))
-	for _, oid := range oids {
-		if order, found := activeOrders[oid]; found {
-			orders = append(orders, order)
-		} else {
-			notFoundOids = append(notFoundOids, oid)
-		}
-	}
-
-	if len(notFoundOids) == 0 {
-		return orders, nil
-	}
-
-	// Search archived orders.
-	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
-	ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
-	archivedOrders, err := orderStatuses(ctx, a.db, aid, notFoundOids, fullTable)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-	for _, order := range archivedOrders {
-		orders = append(orders, order)
-	}
-
-	return orders, nil
 }
 
 // UpdateOrderStatusByID updates the status and filled amount of the order with
@@ -1033,26 +937,45 @@ func (a *Archiver) UpdateOrderFilled(ord *order.LimitOrder) error {
 	return a.UpdateOrderFilledByID(ord.ID(), ord.Base(), ord.Quote(), int64(ord.Trade().Filled()))
 }
 
-// UserOrders retrieves all orders for the given account in the market specified
-// by a base and quote asset.
-func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
+// AllActiveUserOrders retrieves all active orders for a user across all
+// markets.
+func (a *Archiver) AllActiveUserOrders(aid account.AccountID) ([]*db.Order, error) {
+	var orders []*db.Order
+	for m := range a.markets {
+		tableName := fullOrderTableName(a.dbName, m, true) // active table
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		mktOrders, err := userOrdersFromTable(ctx, a.db, tableName, aid, nil)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, mktOrders...)
+	}
+	return orders, nil
+}
+
+// UserOrders retrieves the orders with the provided order IDs for the given
+// account in the market specified by a base and quote asset. If no order ID
+// is provided, all orders for the given account in the specified market are
+// returned.
+// The number and ordering of the returned orders is not necessarily the same
+// as the number and ordering of the provided order IDs, if provided. It is
+// not an error if any or all of the provided order IDs cannot be found for
+// the given account in the specified market.
+func (a *Archiver) UserOrders(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.Order, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	orders, pgStatuses, err := a.userOrders(ctx, base, quote, aid)
+	orders, err := a.userOrders(a.ctx, aid, base, quote, oids) // from active and archived tables
 	if err != nil {
 		a.fatalBackendErr(err)
 		log.Errorf("Failed to query for orders by user for market %v and account %v",
 			marketSchema, aid)
-		return nil, nil, err
+		return nil, err
 	}
-	statuses := make([]order.OrderStatus, len(pgStatuses))
-	for i := range pgStatuses {
-		statuses[i] = pgToMarketStatus(pgStatuses[i])
-	}
-	return orders, statuses, err
+	return orders, err
 }
 
 // OrderWithCommit searches all markets' trade and cancel orders, both active
@@ -1228,43 +1151,6 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	}
 }
 
-func orderStatuses(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []order.OrderID, fullTable string) (map[order.OrderID]*db.OrderStatus, error) {
-	oidArr := make(pq.ByteaArray, 0, len(oids))
-	for i := range oids {
-		oidArr = append(oidArr, oids[i][:])
-	}
-
-	stmt := fmt.Sprintf(internal.OrderStatuses, fullTable)
-	var rows *sql.Rows
-	rows, err := dbe.QueryContext(ctx, stmt, aid, oidArr)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orderStatuses := make(map[order.OrderID]*db.OrderStatus, len(oids))
-	for rows.Next() {
-		var oid order.OrderID
-		var status pgOrderStatus
-		var filled uint64
-		err = rows.Scan(&oid, &status, &filled)
-		if err != nil {
-			return nil, err
-		}
-		orderStatuses[oid] = &db.OrderStatus{
-			ID:     oid,
-			Status: pgToMarketStatus(status),
-			Fill:   filled,
-		}
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return orderStatuses, nil
-}
-
 // loadTrade does NOT set BaseAsset and QuoteAsset!
 func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (order.Order, pgOrderStatus, error) {
 	// Search active orders first.
@@ -1331,30 +1217,50 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 	return nil, 0, fmt.Errorf("unknown order type %d retrieved", prefix.OrderType)
 }
 
-func (a *Archiver) userOrders(ctx context.Context, base, quote uint32, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {
+// userOrders returns the orders with the specified order IDs (or all orders,
+// if no order ID is specified) for the given account in the market specified
+// by a base and quote asset.
+func (a *Archiver) userOrders(ctx context.Context, aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.Order, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Active orders.
 	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
-	orders, statuses, err := userOrdersFromTable(ctx, a.db, fullTable, base, quote, aid)
+	orders, err := userOrdersFromTable(ctx, a.db, fullTable, aid, oids)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
+		return nil, err
+	}
+
+	if len(oids) > 0 && len(oids) == len(orders) {
+		// found all requested orders
+		return orders, nil
+	}
+
+	var remainingOids []order.OrderID
+	if len(oids) > 0 {
+		foundOrders := make(map[order.OrderID]bool, len(orders))
+		for _, ord := range orders {
+			foundOrders[ord.ID] = true
+		}
+		for _, oid := range oids {
+			if !foundOrders[oid] {
+				remainingOids = append(remainingOids, oid)
+			}
+		}
 	}
 
 	// Archived Orders.
 	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
-	ordersArchived, statusesArchived, err := userOrdersFromTable(ctx, a.db, fullTable, base, quote, aid)
+	ordersArchived, err := userOrdersFromTable(ctx, a.db, fullTable, aid, remainingOids)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
+		return nil, err
 	}
 
 	orders = append(orders, ordersArchived...)
-	statuses = append(statuses, statusesArchived...)
 
-	return orders, statuses, nil
+	return orders, nil
 }
 
 // base and quote are used to set the prefix, not specify which table to search.
@@ -1415,63 +1321,48 @@ func ordersByStatusFromTable(ctx context.Context, dbe *sql.DB, fullTable string,
 	return orders, nil
 }
 
-// base and quote are used to set the prefix, not specify which table to search.
-func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, base, quote uint32, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {
-	stmt := fmt.Sprintf(internal.SelectUserOrders, fullTable)
-	rows, err := dbe.QueryContext(ctx, stmt, aid)
+// Pass nil or empty oids to return all user orders in the specified table.
+func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid account.AccountID, oids []order.OrderID) ([]*db.Order, error) {
+	execQuery := func() (*sql.Rows, error) {
+		if len(oids) == 0 {
+			stmt := fmt.Sprintf(internal.SelectAllUserOrders, fullTable)
+			return dbe.QueryContext(ctx, stmt, aid)
+		}
+		oidArr := make(pq.ByteaArray, 0, len(oids))
+		for i := range oids {
+			oidArr = append(oidArr, oids[i][:])
+		}
+		stmt := fmt.Sprintf(internal.SelectUserOrdersWithIDs, fullTable)
+		return dbe.QueryContext(ctx, stmt, aid, oidArr)
+	}
+
+	rows, err := execQuery()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	var orders []order.Order
-	var statuses []pgOrderStatus
-
+	orders := make([]*db.Order, 0, len(oids))
 	for rows.Next() {
-		var prefix order.Prefix
-		var trade order.Trade
-		var id order.OrderID
-		var tif order.TimeInForce
-		var rate uint64
+		var oid order.OrderID
 		var status pgOrderStatus
-		err = rows.Scan(&id, &prefix.OrderType, &trade.Sell,
-			&prefix.AccountID, &trade.Address, &prefix.ClientTime, &prefix.ServerTime,
-			&prefix.Commit, (*dbCoins)(&trade.Coins),
-			&trade.Quantity, &rate, &tif, &status, &trade.FillAmt)
+		var filled uint64
+		err = rows.Scan(&oid, &status, &filled)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		prefix.BaseAsset, prefix.QuoteAsset = base, quote
-
-		var ord order.Order
-		switch prefix.OrderType {
-		case order.LimitOrderType:
-			ord = &order.LimitOrder{
-				P:     prefix,
-				T:     *trade.Copy(),
-				Rate:  rate,
-				Force: tif,
-			}
-		case order.MarketOrderType:
-			ord = &order.MarketOrder{
-				P: prefix,
-				T: *trade.Copy(),
-			}
-		default:
-			log.Errorf("userOrdersFromTable: encountered unexpected order type %v",
-				prefix.OrderType)
-			continue
-		}
-
-		orders = append(orders, ord)
-		statuses = append(statuses, status)
+		orders = append(orders, &db.Order{
+			ID:     oid,
+			Status: pgToMarketStatus(status),
+			Fill:   filled,
+		})
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return orders, statuses, nil
+	return orders, nil
 }
 
 func orderForCommit(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, commit order.Commitment) (bool, order.OrderID, error) {

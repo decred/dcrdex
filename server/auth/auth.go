@@ -41,12 +41,12 @@ type Storage interface {
 	RestoreAccount(account.AccountID) error
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
-	AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error)
+	UserOrders(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.Order, error)
+	AllActiveUserOrders(aid account.AccountID) ([]*db.Order, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
-	OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error)
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
@@ -606,10 +606,11 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 	msgOrders := make([]*msgjson.Order, 0, len(orders))
-	for oid, status := range orders {
+	for _, order := range orders {
 		msgOrders = append(msgOrders, &msgjson.Order{
-			OrderID: oid[:],
-			Status:  uint8(status),
+			OrderID: order.ID.Bytes(),
+			Status:  uint16(order.Status),
+			Fill:    order.Fill,
 		})
 	}
 
@@ -898,7 +899,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 			"cannot use route 'order_status' on an unauthorized connection")
 	}
 
-	var orderReqs []msgjson.OrderStatusRequest
+	var orderReqs []*msgjson.OrderStatusRequest
 	err := json.Unmarshal(msg.Payload, &orderReqs)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status: %v", err)
@@ -930,9 +931,9 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 		}
 	}
 
-	results := make([]*msgjson.OrderStatusResult, 0, uniqueReqsCount)
+	results := make(msgjson.OrderStatusResult, 0, uniqueReqsCount)
 	for _, mm := range mkts {
-		orderStatuses, err := auth.storage.OrderStatuses(client.acct.ID, mm.base, mm.quote, mm.idList())
+		orderStatuses, err := auth.storage.UserOrders(client.acct.ID, mm.base, mm.quote, mm.idList())
 		// no results is not an error
 		if err != nil {
 			log.Errorf("OrderStatuses error: acct = %s, base = %d, quote = %d, orderIDs = %v: %v",
@@ -940,7 +941,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 			return msgjson.NewError(msgjson.RPCInternalError, "DB error")
 		}
 		for _, order := range orderStatuses {
-			results = append(results, &msgjson.OrderStatusResult{
+			results = append(results, &msgjson.Order{
 				OrderID: order.ID.Bytes(),
 				Status:  uint16(order.Status),
 				Fill:    order.Fill,

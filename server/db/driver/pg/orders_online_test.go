@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -428,7 +429,7 @@ func TestFlushBook(t *testing.T) {
 		t.Errorf("got order status %v, expected %v", loStatus, order.OrderStatusRevoked)
 	}
 
-	ordersOut, _, err := archie.UserOrders(context.Background(), lo.User(), lo.BaseAsset, lo.QuoteAsset)
+	ordersOut, err := archie.UserOrders(lo.User(), lo.BaseAsset, lo.QuoteAsset, nil)
 	if err != nil {
 		t.Fatalf("UserOrders failed: %v", err)
 	}
@@ -881,138 +882,6 @@ func TestOrderStatus(t *testing.T) {
 	}
 }
 
-func TestOrderStatuses(t *testing.T) {
-	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("cleanTables: %v", err)
-	}
-
-	var epochIdx, epochDur int64 = 13245678, 6000
-
-	orderStatuses := []struct {
-		ord    order.Order
-		status order.OrderStatus
-	}{
-		{
-			newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
-			order.OrderStatusBooked, // active
-		},
-		{
-			newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
-			order.OrderStatusExecuted, // archived
-		},
-		{
-			newMarketSellOrder(2, 0),
-			order.OrderStatusEpoch, // active
-		},
-		{
-			newMarketSellOrder(1, 0),
-			order.OrderStatusExecuted, // archived
-		},
-		{
-			newMarketBuyOrder(2000000000, 0),
-			order.OrderStatusEpoch, // active
-		},
-		{
-			newMarketBuyOrder(2100000000, 0),
-			order.OrderStatusExecuted, // archived
-		},
-	}
-
-	unsavedOrder1 := newMarketBuyOrder(3000000000, 0)
-	unsavedOrder2 := newMarketSellOrder(4, 0)
-
-	orders := make([]order.Order, 0, len(orderStatuses)+2)
-	orderIDs := make([]order.OrderID, 0, len(orderStatuses)+2)
-
-	// Add unsaved orders
-	orders = append(orders, unsavedOrder1, unsavedOrder2)
-	orderIDs = append(orderIDs, unsavedOrder1.ID(), unsavedOrder2.ID())
-
-	accountID := randomAccountID()
-	for i := range orderStatuses {
-		ordIn := orderStatuses[i].ord
-		statusIn := orderStatuses[i].status
-		ordIn.Trade().AddFill(LotSize)
-		if lo, ok := ordIn.(*order.LimitOrder); ok {
-			lo.BaseAsset, lo.QuoteAsset = AssetBTC, AssetLTC // swap the assets to test across different mkts
-		}
-		ordIn.Prefix().AccountID = accountID
-		err := archie.StoreOrder(ordIn, epochIdx, epochDur, statusIn)
-		if err != nil {
-			t.Fatalf("StoreOrder failed: %v", err)
-		}
-		orders = append(orders, ordIn)
-		orderIDs = append(orderIDs, ordIn.ID())
-	}
-
-	// All orders except the 2 limit orders are DCR-BTC.
-	orderStatusesOut, err := archie.OrderStatuses(accountID, AssetDCR, AssetBTC, orderIDs)
-	if err != nil {
-		t.Fatalf("OrderStatuses failed: %v", err)
-	}
-	if len(orderStatusesOut) != len(orderStatuses)-2 /*the 2 limits*/ {
-		t.Fatalf("OrderStatuses returned %d orders instead of %d", len(orderStatusesOut), len(orderStatuses)-2)
-	}
-	outMap := make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
-	for _, orderStatus := range orderStatusesOut {
-		outMap[orderStatus.ID] = orderStatus
-	}
-	for i := range orderStatuses {
-		ordIn := orderStatuses[i].ord
-		orderOut, found := outMap[ordIn.ID()]
-		if !found {
-			continue
-		}
-		statusIn := orderStatuses[i].status
-		if orderOut.Status != statusIn {
-			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
-				orderOut.Status, statusIn)
-		}
-		if orderOut.Fill != ordIn.Trade().Filled() {
-			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
-				orderOut.Fill, ordIn.Trade().Filled())
-		}
-	}
-
-	// Check statuses for the 2 limit orders that are BTC-LTC.
-	orderStatusesOut, err = archie.OrderStatuses(accountID, AssetBTC, AssetLTC, orderIDs)
-	if err != nil {
-		t.Fatalf("OrderStatuses failed: %v", err)
-	}
-	if len(orderStatusesOut) != 2 /*the 2 limits*/ {
-		t.Fatalf("OrderStatuses returned %d orders instead of %d", len(orderStatusesOut), 2)
-	}
-	outMap = make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
-	for _, orderStatus := range orderStatusesOut {
-		outMap[orderStatus.ID] = orderStatus
-	}
-	for i := range orderStatuses {
-		ordIn := orderStatuses[i].ord
-		orderOut, found := outMap[ordIn.ID()]
-		if !found {
-			continue
-		}
-		statusIn := orderStatuses[i].status
-		if orderOut.Status != statusIn {
-			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
-				orderOut.Status, statusIn)
-		}
-		if orderOut.Fill != ordIn.Trade().Filled() {
-			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
-				orderOut.Fill, ordIn.Trade().Filled())
-		}
-	}
-
-	// Expect nothing for wrong user ID.
-	orderStatusesOut, err = archie.OrderStatuses(randomAccountID(), AssetDCR, AssetBTC, orderIDs)
-	if err != nil {
-		t.Fatalf("OrderStatuses failed: %v", err)
-	}
-	if len(orderStatusesOut) != 0 {
-		t.Fatalf("OrderStatuses returned %d orders for wrong account ID", len(orderStatusesOut))
-	}
-}
-
 func TestCancelOrderStatus(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -1325,50 +1194,47 @@ func TestUserOrders(t *testing.T) {
 	// Make all of the above orders belong to the same user.
 	aid := limitSell.AccountID
 	limitBuy.AccountID = aid
-	limitBuy.AccountID = aid
 	marketSell.AccountID = aid
 	marketBuy.AccountID = aid
 
 	marketSellOtherGuy := newMarketSellOrder(2, 0)
 	marketSellOtherGuy.Address = "1MUz4VMYui5qY1mxUiG8BQ1Luv6tqkvaiL"
 
+	marketBuyOtherGuyOtherMkt := newMarketBuyOrder(2000000000, 0)
+	marketBuyOtherGuyOtherMkt.AccountID = marketSellOtherGuy.AccountID
+	marketBuyOtherGuyOtherMkt.BaseAsset, marketBuyOtherGuyOtherMkt.QuoteAsset = AssetBTC, AssetLTC
+
 	orderStatuses := []struct {
-		ord     order.Order
-		status  order.OrderStatus
-		ordType order.OrderType
-		wantErr bool
+		ord    order.Order
+		status order.OrderStatus
 	}{
 		{
 			limitSell,
 			order.OrderStatusBooked, // active
-			order.LimitOrderType,
-			false,
 		},
 		{
 			limitBuy,
 			order.OrderStatusCanceled, // archived
-			order.LimitOrderType,
-			false,
 		},
 		{
 			marketSell,
 			order.OrderStatusEpoch, // active
-			order.MarketOrderType,
-			false,
 		},
 		{
 			marketBuy,
 			order.OrderStatusExecuted, // archived
-			order.MarketOrderType,
-			false,
 		},
 		{
 			marketSellOtherGuy,
 			order.OrderStatusExecuted, // archived
-			order.MarketOrderType,
-			false,
+		},
+		{
+			marketBuyOtherGuyOtherMkt,
+			order.OrderStatusEpoch, // active
 		},
 	}
+
+	orderIDs := make([]order.OrderID, 0, len(orderStatuses)+2)
 
 	for i := range orderStatuses {
 		ordIn := orderStatuses[i].ord
@@ -1377,27 +1243,23 @@ func TestUserOrders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("StoreOrder failed: %v", err)
 		}
+		orderIDs = append(orderIDs, ordIn.ID())
 	}
 
-	ordersOut, statusesOut, err := archie.UserOrders(context.Background(), aid, mktInfo.Base, mktInfo.Quote)
+	// Retrieve all orders for first user.
+	ordersOut, err := archie.UserOrders(aid, mktInfo.Base, mktInfo.Quote, nil)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-
-	if len(ordersOut) != len(statusesOut) {
-		t.Errorf("UserOrders returned %d orders, but %d order status. Should be equal.",
-			len(ordersOut), len(statusesOut))
-	}
-
-	numOrdersForGuy0 := len(orderStatuses) - 1
+	numOrdersForGuy0 := len(orderStatuses) - 2
 	if len(ordersOut) != numOrdersForGuy0 {
-		t.Errorf("incorrect number of orders for user %d retrieved. "+
+		t.Fatalf("incorrect number of orders for user %d retrieved. "+
 			"got %d, expected %d", aid, len(ordersOut), numOrdersForGuy0)
 	}
 
-	findExpected := func(ord order.Order) int {
+	findExpected := func(oid order.OrderID) int {
 		for i := range orderStatuses {
-			if orderStatuses[i].ord.ID() == ord.ID() {
+			if orderStatuses[i].ord.ID() == oid {
 				return i
 			}
 		}
@@ -1405,17 +1267,37 @@ func TestUserOrders(t *testing.T) {
 	}
 
 	for i := range ordersOut {
-		j := findExpected(ordersOut[i])
+		j := findExpected(ordersOut[i].ID)
 		if j == -1 {
-			t.Errorf("failed to find order %v", ordersOut[i])
-			continue
+			t.Fatalf("failed to find order %v", ordersOut[i])
 		}
-		if ordersOut[i].Type() != orderStatuses[j].ordType {
-			t.Errorf("wrong type %v, wanted %v", ordersOut[i].Type(), orderStatuses[j].ordType)
+		if ordersOut[i].Status != orderStatuses[j].status {
+			t.Fatalf("wrong status %v, wanted %v", ordersOut[i].Status, orderStatuses[j].status)
 		}
-		if statusesOut[i] != orderStatuses[j].status {
-			t.Errorf("wrong status %v, wanted %v", statusesOut[i], orderStatuses[j].status)
+		if ordersOut[i].Fill != orderStatuses[j].ord.Trade().Filled() {
+			t.Fatalf("wrong fill %v, wanted %v", ordersOut[i].Fill, orderStatuses[j].ord.Trade().Filled())
 		}
+	}
+
+	// Add unsaved orders
+	orderIDs = append(orderIDs, test.RandomOrderID(), test.RandomOrderID())
+
+	// Retrieve other user's orders by ID, in BTC-LTC market.
+	ordersOut, err = archie.UserOrders(marketSellOtherGuy.AccountID, AssetBTC, AssetLTC, orderIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordersOut) != 1 {
+		t.Fatalf("incorrect number of orders for user %d in BTC-LTC mkt retrieved. "+
+			"got %d, expected %d", aid, len(ordersOut), 1)
+	}
+	if !bytes.Equal(marketBuyOtherGuyOtherMkt.ID().Bytes(), ordersOut[0].ID.Bytes()) {
+		t.Fatalf("incorrect order ID for returned user %d order in BTC-LTC mkt. "+
+			"got %s, expected %s", aid, ordersOut[0].ID, marketBuyOtherGuyOtherMkt.ID())
+	}
+	if ordersOut[0].Status != order.OrderStatusEpoch {
+		t.Fatalf("wrong status returned for marketBuyOtherGuyOtherMkt: %v, wanted %v",
+			ordersOut[0].Status, order.OrderStatusEpoch)
 	}
 }
 
@@ -1523,15 +1405,15 @@ func TestAllActiveUserOrders(t *testing.T) {
 			if len(orders) != tt.numExpected {
 				t.Errorf("Retrieved %d active orders for user %v, expected %d.", len(orders), tt.acctID, tt.numExpected)
 			}
-			for oid, status := range orders {
-				wantId := idInSlice(oid, tt.wantOrderIDs)
+			for _, ord := range orders {
+				wantId := idInSlice(ord.ID, tt.wantOrderIDs)
 				if wantId == -1 {
-					t.Errorf("Unexpected order ID %v retrieved.", oid)
+					t.Errorf("Unexpected order ID %v retrieved.", ord.ID)
 					continue
 				}
-				if status != tt.wantOrderStatuses[wantId] {
+				if ord.Status != tt.wantOrderStatuses[wantId] {
 					t.Errorf("Incorrect order status for order %v. Got %d, want %d.",
-						oid, status, tt.wantOrderStatuses[wantId])
+						ord.ID, ord.Status, tt.wantOrderStatuses[wantId])
 				}
 			}
 		})

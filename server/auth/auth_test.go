@@ -44,11 +44,10 @@ type ratioData struct {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct          *account.Account
-	activeOrders  map[order.OrderID]order.OrderStatus
+	orders        []*db.Order
 	matches       []*db.MatchData
 	closedID      account.AccountID
 	matchStatuses []*db.MatchStatus
-	orderStatuses []*db.OrderStatus
 	acctAddr      string
 	acctErr       error
 	regAddr       string
@@ -69,17 +68,23 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
-func (s *TStorage) AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
-	return s.activeOrders, nil
+func (s *TStorage) UserOrders(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.Order, error) {
+	return s.orders, nil
+}
+func (s *TStorage) AllActiveUserOrders(aid account.AccountID) ([]*db.Order, error) {
+	var activeOrders []*db.Order
+	for _, ord := range s.orders {
+		if ord.Status == order.OrderStatusEpoch || ord.Status == order.OrderStatusBooked {
+			activeOrders = append(activeOrders, ord)
+		}
+	}
+	return activeOrders, nil
 }
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
 }
 func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
 	return s.matchStatuses, nil
-}
-func (s *TStorage) OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error) {
-	return s.orderStatuses, nil
 }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
@@ -436,10 +441,14 @@ func TestConnect(t *testing.T) {
 	matchData, userMatch := userMatchData(user.acctID)
 	matchTime := matchData.Epoch.End()
 
-	rig.storage.activeOrders = map[order.OrderID]order.OrderStatus{
-		userMatch.OrderID: order.OrderStatusBooked,
+	rig.storage.orders = []*db.Order{
+		{
+			ID:     userMatch.OrderID,
+			Status: order.OrderStatusBooked,
+			Fill:   matchData.Quantity / 2,
+		},
 	}
-	defer func() { rig.storage.activeOrders = nil }()
+	defer func() { rig.storage.orders = nil }()
 
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
@@ -521,7 +530,7 @@ func TestConnect(t *testing.T) {
 	if msgOrder.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("active order ID mismatch: ", msgOrder.OrderID.String(), " != ", userMatch.OrderID.String())
 	}
-	if msgOrder.Status != uint8(order.OrderStatusBooked) {
+	if msgOrder.Status != uint16(order.OrderStatusBooked) {
 		t.Fatal("active order Status mismatch: ", msgOrder.Status, " != ", order.OrderStatusBooked)
 	}
 	if len(cResp.Matches) != 1 {
@@ -1367,7 +1376,7 @@ func TestOrderStatus(t *testing.T) {
 	user := tNewUser(t)
 	connectUser(t, user)
 
-	rig.storage.orderStatuses = []*db.OrderStatus{{}}
+	rig.storage.orders = []*db.Order{{}}
 
 	reqPayload := []msgjson.OrderStatusRequest{
 		{
@@ -1387,7 +1396,7 @@ func TestOrderStatus(t *testing.T) {
 		t.Fatalf("no orders sent")
 	}
 
-	statuses := []msgjson.OrderStatusResult{}
+	var statuses msgjson.OrderStatusResult
 	err := resp.UnmarshalResult(&statuses)
 	if err != nil {
 		t.Fatalf("UnmarshalResult error: %v", err)

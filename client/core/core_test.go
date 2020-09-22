@@ -2782,9 +2782,9 @@ func TestReconcileTrades(t *testing.T) {
 
 	tests := []struct {
 		name                string
-		clientOrders        []*trackedTrade             // orders known to the client
-		serverOrders        []*msgjson.Order            // orders considered active by the server
-		orderStatuses       []msgjson.OrderStatusResult // server's response to order_status requests
+		clientOrders        []*trackedTrade           // orders known to the client
+		serverOrders        []*msgjson.Order          // orders considered active by the server
+		orderStatusRes      msgjson.OrderStatusResult // server's response to order_status requests
 		expectOrderStatuses map[order.OrderID]order.OrderStatus
 	}{
 		{
@@ -2793,7 +2793,7 @@ func TestReconcileTrades(t *testing.T) {
 			serverOrders: []*msgjson.Order{
 				{
 					OrderID: test.RandomOrderID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked),
+					Status:  uint16(order.OrderStatusBooked),
 				},
 			},
 			expectOrderStatuses: map[order.OrderID]order.OrderStatus{},
@@ -2810,23 +2810,23 @@ func TestReconcileTrades(t *testing.T) {
 			serverOrders: []*msgjson.Order{
 				{
 					OrderID: standingOrders.epoch.ID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked), // now booked
+					Status:  uint16(order.OrderStatusBooked), // now booked
 				},
 				{
 					OrderID: standingOrders.booked.ID().Bytes(),
-					Status:  uint8(order.OrderStatusEpoch), // invald! booked orders cannot return to epoch!
+					Status:  uint16(order.OrderStatusEpoch), // invald! booked orders cannot return to epoch!
 				},
 				{
 					OrderID: standingOrders.bookedPendingCancel.ID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked), // still booked, cancel order should be deleted
+					Status:  uint16(order.OrderStatusBooked), // still booked, cancel order should be deleted
 				},
 				{
 					OrderID: immediateOrders.epoch.ID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked), // invalid, immediate orders cannot be booked!
+					Status:  uint16(order.OrderStatusBooked), // invalid, immediate orders cannot be booked!
 				},
 				{
 					OrderID: immediateOrders.executed.ID().Bytes(),
-					Status:  uint8(order.OrderStatusBooked), // invalid, inactive orders should not be returned by DEX!
+					Status:  uint16(order.OrderStatusBooked), // invalid, inactive orders should not be returned by DEX!
 				},
 			},
 			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
@@ -2848,7 +2848,7 @@ func TestReconcileTrades(t *testing.T) {
 				immediateOrders.executed,
 			},
 			serverOrders: []*msgjson.Order{}, // no active order reported by server
-			orderStatuses: []msgjson.OrderStatusResult{
+			orderStatusRes: msgjson.OrderStatusResult{
 				{
 					OrderID: standingOrders.epoch.ID().Bytes(),
 					Status:  uint16(order.OrderStatusRevoked),
@@ -2900,9 +2900,9 @@ func TestReconcileTrades(t *testing.T) {
 		}
 
 		// Queue order_status response if required for reconciliation.
-		if len(tt.orderStatuses) > 0 {
+		if len(tt.orderStatusRes) > 0 {
 			rig.ws.queueResponse(msgjson.OrderStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
-				resp, _ := msgjson.NewResponse(msg.ID, tt.orderStatuses, nil)
+				resp, _ := msgjson.NewResponse(msg.ID, tt.orderStatusRes, nil)
 				f(resp)
 				return nil
 			})
