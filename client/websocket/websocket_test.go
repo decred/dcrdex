@@ -22,7 +22,6 @@ var (
 )
 
 type TCore struct {
-	syncBook   *core.OrderBook
 	syncFeed   *core.BookFeed
 	syncErr    error
 	notHas     bool
@@ -30,8 +29,8 @@ type TCore struct {
 	notOpen    bool
 }
 
-func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
-	return c.syncBook, c.syncFeed, c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
+	return c.syncFeed, c.syncErr
 }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
@@ -167,20 +166,6 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	subscription, _ := msgjson.NewRequest(1, "loadmarket", params)
-	tCore.syncBook = &core.OrderBook{}
-
-	extractMessage := func() *msgjson.Message {
-		t.Helper()
-		select {
-		case msgB := <-link.conn.respReady:
-			msg := new(msgjson.Message)
-			json.Unmarshal(msgB, &msg)
-			return msg
-		case <-time.NewTimer(time.Millisecond * 100).C:
-			t.Fatalf("extractMessage got nothing")
-		}
-		return nil
-	}
 
 	ensureGood := func() {
 		t.Helper()
@@ -190,10 +175,6 @@ func TestLoadMarket(t *testing.T) {
 		msgErr := srv.handleMessage(link.cl, subscription)
 		if msgErr != nil {
 			t.Fatalf("'loadmarket' error: %d: %s", msgErr.Code, msgErr.Message)
-		}
-		msg := extractMessage()
-		if msg.Route != "book" {
-			t.Fatalf("wrong message received. Expected 'book', got %s", msg.Route)
 		}
 		if link.cl.feedLoop == nil {
 			t.Fatalf("nil book feed waiter after 'loadmarket'")

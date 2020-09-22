@@ -73,7 +73,7 @@ class MessageSocket {
       payload: payload
     })
 
-    if (window.loggingDebug) console.log('send', message)
+    window.log('ws', 'sending', message)
     this.connection.send(message)
   }
 

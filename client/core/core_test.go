@@ -893,11 +893,11 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// Sync to unknown dex
-	_, _, err = tCore.SyncBook("unknown dex", tDCR.ID, tBTC.ID)
+	_, err = tCore.SyncBook("unknown dex", tDCR.ID, tBTC.ID)
 	if err == nil {
 		t.Fatalf("no error for unknown dex")
 	}
-	_, _, err = tCore.SyncBook(tDexHost, tDCR.ID, 12345)
+	_, err = tCore.SyncBook(tDexHost, tDCR.ID, 12345)
 	if err == nil {
 		t.Fatalf("no error for nonsense market")
 	}
@@ -907,11 +907,11 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		f(bookMsg)
 		return nil
 	})
-	_, feed1, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
+	feed1, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
 		t.Fatalf("SyncBook 1 error: %v", err)
 	}
-	_, feed2, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
+	feed2, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
 		t.Fatalf("SyncBook 2 error: %v", err)
 	}
@@ -924,6 +924,18 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	// Should have one buy order
 	if len(book.Buys) != 1 {
 		t.Fatalf("no buy orders found. expected 1")
+	}
+
+	// Both channels should have a full orderbook.
+	select {
+	case <-feed1.C:
+	default:
+		t.Fatalf("no book on feed 1")
+	}
+	select {
+	case <-feed2.C:
+	default:
+		t.Fatalf("no book on feed 2")
 	}
 
 	err = handleBookOrderMsg(tCore, dc, bookNote)

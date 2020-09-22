@@ -492,7 +492,7 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
-func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, error) {
 	quoteAsset := tExchanges[dexAddr].Assets[quote]
 	baseAsset := tExchanges[dexAddr].Assets[base]
 	c.midGap = float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
@@ -571,7 +571,19 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *
 			}
 		}
 	}()
-	return c.book(), c.feed, nil
+
+	c.feed.C <- &core.BookUpdate{
+		Action:   core.FreshBookAction,
+		Host:     dexAddr,
+		MarketID: mktID,
+		Payload: &core.MarketOrderBook{
+			Base:  base,
+			Quote: quote,
+			Book:  c.book(),
+		},
+	}
+
+	return c.feed, nil
 }
 
 var numBuys = 80

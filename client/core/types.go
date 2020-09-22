@@ -338,8 +338,9 @@ type OrderBook struct {
 // MarketOrderBook is used as the BookUpdate's Payload with the FreshBookAction.
 // The subscriber will likely need to translate into a JSON tagged type.
 type MarketOrderBook struct {
-	Base, Quote uint32
-	Book        *OrderBook
+	Base  uint32     `json:"base"`
+	Quote uint32     `json:"quote"`
+	Book  *OrderBook `json:"book"`
 }
 
 const (

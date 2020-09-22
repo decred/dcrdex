@@ -165,38 +165,49 @@ func (b *bookie) book() *OrderBook {
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
-func (dc *dexConnection) syncBook(base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
+
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
 
 	mkt := marketName(base, quote)
 	booky, found := dc.books[mkt]
-	if found {
-		// Get the order book and a NEW feed.
-		return booky.book(), booky.feed(), nil
-	}
-
-	// Make sure the market exists.
-	dc.marketMtx.RLock()
-	_, found = dc.marketMap[mkt]
-	dc.marketMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unknown market %s", mkt)
+		// Make sure the market exists.
+		dc.marketMtx.RLock()
+		_, found = dc.marketMap[mkt]
+		dc.marketMtx.RUnlock()
+		if !found {
+			return nil, fmt.Errorf("unknown market %s", mkt)
+		}
+
+		obRes, err := dc.subscribe(base, quote)
+		if err != nil {
+			return nil, err
+		}
+
+		booky = newBookie(func() { dc.stopBook(base, quote) })
+		err = booky.Sync(obRes)
+		if err != nil {
+			return nil, err
+		}
+		dc.books[mkt] = booky
 	}
 
-	obRes, err := dc.subscribe(base, quote)
-	if err != nil {
-		return nil, nil, err
+	feed := booky.feed()
+
+	feed.C <- &BookUpdate{
+		Action:   FreshBookAction,
+		Host:     dc.acct.host,
+		MarketID: mkt,
+		Payload: &MarketOrderBook{
+			Base:  base,
+			Quote: quote,
+			Book:  booky.book(),
+		},
 	}
 
-	booky = newBookie(func() { dc.stopBook(base, quote) })
-	err = booky.Sync(obRes)
-	if err != nil {
-		return nil, nil, err
-	}
-	dc.books[mkt] = booky
-
-	return booky.book(), booky.feed(), nil
+	return feed, nil
 }
 
 // subscribe subscribes to the given market's order book via the 'orderbook'
@@ -284,12 +295,12 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 // SyncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) SyncBook(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (c *Core) SyncBook(host string, base, quote uint32) (*BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
+		return nil, fmt.Errorf("unknown DEX '%s'", host)
 	}
 
 	return dc.syncBook(base, quote)

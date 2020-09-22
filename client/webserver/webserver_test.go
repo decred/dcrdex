@@ -54,7 +54,6 @@ func (c *tCoin) Confirmations() (uint32, error) {
 
 type TCore struct {
 	balanceErr      error
-	syncBook        *core.OrderBook
 	syncFeed        *core.BookFeed
 	syncErr         error
 	regErr          error
@@ -77,8 +76,8 @@ func (c *TCore) GetFee(string, string) (uint64, error)                       { r
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) InitializeClient(pw []byte) error                            { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }
-func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
-	return c.syncBook, c.syncFeed, c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
+	return c.syncFeed, c.syncErr
 }
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil

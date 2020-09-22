@@ -1,12 +1,12 @@
 export default class OrderBook {
-  constructor (market, baseSymbol, quoteSymbol) {
-    this.base = market.base
+  constructor (mktBook, baseSymbol, quoteSymbol) {
+    this.base = mktBook.base
     this.baseSymbol = baseSymbol
-    this.quote = market.quote
+    this.quote = mktBook.quote
     this.quoteSymbol = quoteSymbol
     // Books are sorted mid-gap first.
-    this.buys = market.book.buys || []
-    this.sells = market.book.sells || []
+    this.buys = mktBook.book.buys || []
+    this.sells = mktBook.book.sells || []
   }
 
   /* add adds an order to the order book. */
