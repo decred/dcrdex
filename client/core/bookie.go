@@ -77,10 +77,9 @@ func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
 	return b.OrderBook.Sync(snapshot)
 }
 
-// feed gets a new *BookFeed and cancels the close timer.
+// feed gets a new *BookFeed and cancels the close timer. feed must be called
+// with the bookie.mtx locked.
 func (b *bookie) feed() *BookFeed {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
 	if b.closeTimer != nil {
 		// If Stop returns true, the timer did not fire. If false, the timer
 		// already fired and the close func was called. The caller of feed()
@@ -194,6 +193,10 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 		dc.books[mkt] = booky
 	}
 
+	// Get the feed and the book under a single lock to make sure the first
+	// message is the book.
+	booky.mtx.Lock()
+	defer booky.mtx.Unlock()
 	feed := booky.feed()
 
 	feed.C <- &BookUpdate{

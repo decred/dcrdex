@@ -876,8 +876,8 @@ Registration is complete after the fee transaction has been confirmed.`,
           "qty" (float): The number of coins base asset being bought or sold.
           "rate" (float): The coins quote asset to accept per coin base asset.
           "sell" (bool): Whether this order is a sell order.
-		  "token" (string): The first 8 bytes of the order id, coded in hex.
-		  "epoch" (int): The order's epoch.
+          "token" (string): The first 8 bytes of the order id, coded in hex.
+          "epoch" (int): The order's epoch.
         },...
       ],
     }`,
