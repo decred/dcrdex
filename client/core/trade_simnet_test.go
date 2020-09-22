@@ -558,18 +558,8 @@ func TestOrderStatusReconciliation(t *testing.T) {
 				return err
 			}
 		}
-
-		// We won't be sending init swap, but mine a couple blocks on the
-		// fromAsset to trigger match inaction check.
-		time.Sleep(tracker.broadcastTimeout() * 2)
+		// Match will get revoked after lastEvent+bTimeout.
 		forgetClient2Order(oid) // ensure revoke_match request is "missed"
-		swapConfs := tracker.wallets.fromAsset.SwapConf
-		err = mineBlocks(tracker.wallets.fromAsset.ID, swapConfs+1)
-		if err == nil {
-			client2.log("mined %d blocks to trigger inaction check on order %v", swapConfs+1, oid)
-		} else {
-			client2.log("%s mine error %v", tracker.wallets.fromAsset.Symbol, err)
-		}
 
 		c2OrdersBefore[oid] = order.OrderStatusBooked
 		c2OrdersAfter[oid] = order.OrderStatusRevoked
@@ -615,9 +605,9 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		t.Fatalf("client 2 dex not disconnected after %v", disconnectTimeout)
 	}
 
-	// Allow some time for orders to be revoked due to inaction,
-	// and for requests pending on the server to expire (10 mins?).
-	disconnectPeriod := time.Duration(2 * time.Minute)
+	// Allow some time for orders to be revoked due to inaction, and
+	// for requests pending on the server to expire (usually bTimeout).
+	disconnectPeriod := time.Millisecond*time.Duration(c2dc.cfg.BroadcastTimeout) + 2*time.Second
 	client2.log("waiting %v before reconnecting DEX", disconnectPeriod)
 	time.Sleep(disconnectPeriod)
 
@@ -1131,8 +1121,8 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	}
 	client.log("mined %d dcr blocks for fee payment confirmation", regRes.ReqConfirms)
 
-	// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
-	feeTimeout := 12 * time.Second
+	// wait bTimeout+12 seconds for fee payment, notifyfee times out after bTimeout+10 seconds
+	feeTimeout := time.Millisecond*time.Duration(client.dc().cfg.BroadcastTimeout) + 12*time.Second
 	client.log("waiting %s for fee confirmation notice", feeTimeout)
 	feePaid := client.notes.find(ctx, feeTimeout, func(n Notification) bool {
 		return n.Type() == "feepayment" && n.Subject() == "Account registered"
@@ -1369,7 +1359,7 @@ func mineBlocks(assetID, blocks uint32) error {
 func tmuxRun(tmuxWindow, cmd string) error {
 	tStart := time.Now()
 	defer func() {
-		fmt.Printf("********** TIMING: Took %v to run %q", time.Since(tStart), cmd)
+		fmt.Printf("********** TIMING: Took %v to run %q\n", time.Since(tStart), cmd)
 	}()
 	cmd += "; tmux wait-for -S harnessdone"
 	err := exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run() // ; wait-for harnessdone

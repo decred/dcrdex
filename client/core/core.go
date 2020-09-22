@@ -658,7 +658,7 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 			orderStatusRequests = append(orderStatusRequests, &msgjson.OrderStatusRequest{
 				Base:    trade.Base(),
 				Quote:   trade.Quote(),
-				OrderID: oid[:],
+				OrderID: trade.ID().Bytes(),
 			})
 			continue
 		}
@@ -2564,20 +2564,17 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	dc.acct.auth()
 
 	// Compare the server-returned active orders with tracked trades, updating
-	// the trade statuses where necessary. Perform reconciliation in goroutine,
-	// some orders might require sending an order_status request.
-	go func() {
-		unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
-		if unknownOrdersCount > 0 {
-			details := fmt.Sprintf("%d active orders reported by %s were not found.",
-				unknownOrdersCount, dc.acct.host)
-			c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
-		}
-		if reconciledOrdersCount > 0 {
-			details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
-			c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
-		}
-	}()
+	// the trade statuses where necessary.
+	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
+	if unknownOrdersCount > 0 {
+		details := fmt.Sprintf("%d active orders reported by %s were not found.",
+			unknownOrdersCount, dc.acct.host)
+		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
+	}
+	if reconciledOrdersCount > 0 {
+		details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
+		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
+	}
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.Matches, false)

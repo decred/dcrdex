@@ -542,7 +542,9 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
 func (t *trackedTrade) deleteStaleCancelOrder() {
-	if t.cancel == nil {
+	if t.cancel == nil || t.metaData.Status != order.OrderStatusBooked {
+		log.Debugf("ignoring delete cancel order attempt for order %v in status with pending cancel = %v",
+			t.ID(), t.metaData.Status, t.cancel != nil)
 		return
 	}
 

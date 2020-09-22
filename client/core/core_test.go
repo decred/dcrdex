@@ -2942,7 +2942,6 @@ func TestReconcileTrades(t *testing.T) {
 					t.Fatalf("%s: expected stale cancel order to be deleted for now-booked order", tt.name)
 				}
 				// Cancel order deleted. Canceling the order again should succeed.
-				rig.queueCancel(nil)
 				err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
 				if err != nil {
 					t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)

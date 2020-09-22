@@ -693,7 +693,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	err = conn.Send(respMsg)
 	if err != nil {
-		log.Errorf("handleConnect send response error: %v", err)
 		log.Error("error sending connect response: " + err.Error())
 		return nil
 	}
