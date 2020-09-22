@@ -651,8 +651,8 @@ export default class MarketsPage extends BasePage {
     app.log('book', 'handleEpochOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
-    if (order.rate > 0) this.book.add(order)
-    this.addTableOrder(order)
+    if (order.rate > 0) this.book.add(order) // No cancels or market orders
+    if (order.qty > 0) this.addTableOrder(order) // No cancel orders
     this.chart.draw()
   }
 
