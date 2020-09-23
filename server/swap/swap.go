@@ -1769,7 +1769,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		Time: uint64(redeemTimeMs),
 	}
 	s.authMgr.Sign(rParams)
-	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
+	redemptionReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
 		return wait.DontTryAgain
@@ -1790,8 +1790,11 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// The counterparty does not need to actually locate the redemption on txn,
 	// so use the default request timeout.
-	s.authMgr.Request(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+	s.authMgr.RequestWithTimeout(ack.user, redemptionReq, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
+	}, s.bTimeout, func() {
+		log.Infof("Timeout waiting for 'redemption' request from user %v (%s) for match %v",
+			ack.user, makerTaker(ack.isMaker), matchID)
 	})
 
 	return wait.DontTryAgain
