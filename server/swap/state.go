@@ -33,8 +33,6 @@ type State struct {
 	MatchTrackers map[order.MatchID]*matchTrackerData
 	// Swapper.orders.orderMatches
 	OrderMatches map[order.OrderID]*orderSwapStat
-	// Swapper.liveAckers
-	LiveAckers map[uint64]*msgAckers
 	// Swapper.liveWaiters
 	LiveWaiters map[waiterKey]*handlerArgs
 }

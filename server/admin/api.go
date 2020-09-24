@@ -347,21 +347,12 @@ func (s *Server) apiNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	timeout := defaultTimeout
-	if timeoutStr := r.URL.Query().Get(timeoutToken); timeoutStr != "" {
-		var err error
-		timeout, err = time.ParseDuration(timeoutStr)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("invalid timeout %q: %v", timeoutStr, err), http.StatusBadRequest)
-			return
-		}
-	}
 	msg, errCode, err := toNote(r)
 	if err != nil {
 		http.Error(w, err.Error(), errCode)
 		return
 	}
-	s.core.Notify(acctID, msg, timeout)
+	s.core.Notify(acctID, msg)
 	w.WriteHeader(http.StatusOK)
 }
 

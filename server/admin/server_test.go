@@ -166,8 +166,8 @@ func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) error {
 func (c *TCore) Unban(_ account.AccountID) error {
 	return c.unbanErr
 }
-func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message, _ time.Duration) {}
-func (c *TCore) NotifyAll(_ *msgjson.Message)                                    {}
+func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message) {}
+func (c *TCore) NotifyAll(_ *msgjson.Message)                   {}
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
@@ -1219,17 +1219,11 @@ func TestNotify(t *testing.T) {
 	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
 	msgStr := "Hello world.\nAll your base are belong to us."
 	tests := []struct {
-		name, txt, acctID, timeout string
-		wantCode                   int
+		name, txt, acctID string
+		wantCode          int
 	}{{
-		name:     "ok no timeout",
+		name:     "ok",
 		acctID:   acctIDStr,
-		txt:      msgStr,
-		wantCode: http.StatusOK,
-	}, {
-		name:     "ok with timeout",
-		acctID:   acctIDStr,
-		timeout:  "5h3m59s",
 		txt:      msgStr,
 		wantCode: http.StatusOK,
 	}, {
@@ -1241,12 +1235,6 @@ func TestNotify(t *testing.T) {
 		name:     "message too long",
 		acctID:   acctIDStr,
 		txt:      string(make([]byte, maxUInt16+1)),
-		wantCode: http.StatusBadRequest,
-	}, {
-		name:     "bad duration",
-		acctID:   acctIDStr,
-		timeout:  "1d",
-		txt:      msgStr,
 		wantCode: http.StatusBadRequest,
 	}, {
 		name:     "account id not hex",
@@ -1266,7 +1254,7 @@ func TestNotify(t *testing.T) {
 	for _, test := range tests {
 		w := httptest.NewRecorder()
 		br := bytes.NewReader([]byte(test.txt))
-		r, _ := http.NewRequest("POST", "https://localhost/account/"+test.acctID+"/notify?timeout="+test.timeout, br)
+		r, _ := http.NewRequest("POST", "https://localhost/account/"+test.acctID+"/notify", br)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)
