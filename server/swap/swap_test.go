@@ -136,10 +136,6 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) error 
 	return nil
 }
 
-func (m *TAuthManager) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
-	_ = m.Send(user, msg)
-}
-
 func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message,
 	f func(comms.Link, *msgjson.Message)) error {
 	return m.RequestWithTimeout(user, msg, f, time.Hour, func() {})

@@ -137,11 +137,6 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	return a.authErr
 }
 func (a *TAuth) Sign(...msgjson.Signable) error { return nil }
-func (a *TAuth) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
-	if err := a.Send(user, msg); err != nil {
-		log.Debug(err)
-	}
-}
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 	//log.Infof("Send for user %v. Message: %v", user, msg)
 	a.sendsMtx.Lock()

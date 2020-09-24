@@ -38,9 +38,8 @@ type AuthManager interface {
 }
 
 const (
-	DefaultConnectTimeout = 10 * time.Minute
-	maxClockOffset        = 600_000 // milliseconds => 600 sec => 10 minutes
-	fundingTxWait         = time.Minute
+	maxClockOffset = 600_000 // milliseconds => 600 sec => 10 minutes
+	fundingTxWait  = time.Minute
 )
 
 // MarketTunnel is a connection to a market and information about existing
@@ -151,11 +150,11 @@ func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr 
 	msg, err := msgjson.NewResponse(reqID, nil, msgErr)
 	if err != nil {
 		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
-		return // this should not be possible, but don't pass nil msg to SendWhenConnected
+		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := r.auth.Send(user, msg); err != nil {
-		log.Infof("Failed to send %s error response to disconnected user %v: %q",
-			msg.Route, user, msgErr)
+		log.Infof("Failed to send %s error response (msg = %s) to disconnected user %v: %q",
+			msg.Route, msgErr, user, err)
 	}
 }
 

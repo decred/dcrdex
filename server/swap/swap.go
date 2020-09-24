@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -23,7 +22,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -312,10 +310,6 @@ type Swapper struct {
 	lockTimeMaker time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
 	latencyQ *wait.TickerQueue
-	// gracePeriod is a flag that indicates how long clients have to respond to
-	// requests before being penalized. A value of 1 indicates that the connect
-	// timeout should be used, while 0 indicates the shorter response timeout.
-	gracePeriod int32
 
 	// handlerMtx should be read-locked for the duration of the comms route
 	// handlers (handleInit and handleRedeem) and Negotiate. This blocks
@@ -568,11 +562,6 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// waiter requires (1) s.step to get stepInfo and (2) msg.Payload unmarshal
 	// into params, a msgjson.Init or msgjson.Redeem. Manually doing this would
 	// skip the msg and contract/redeem validation.
-
-	s.gracePeriod = 1
-	time.AfterFunc(2*auth.DefaultConnectTimeout, func() {
-		atomic.StoreInt32(&s.gracePeriod, 0)
-	})
 
 	for _, waitDat := range state.LiveWaiters {
 		var msgErr *msgjson.Error
@@ -1214,11 +1203,11 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 	})
 	if err != nil {
 		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
-		return // this should not be possible, but don't pass nil msg to SendWhenConnected
+		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s error response (code %d) to disconnected user %v: %q",
-			msg.Route, code, user, errMsg)
+		log.Infof("Unable to send %s error response (code = %d, msg = %s) to disconnected user %v: %q",
+			msg.Route, code, errMsg, user, err)
 	}
 }
 
@@ -1227,10 +1216,10 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 	msg, err := msgjson.NewResponse(id, result, nil)
 	if err != nil {
 		log.Errorf("failed to send success: %v", err)
-		return // this should not be possible, but don't pass nil msg to SendWhenConnected
+		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s success response to disconnected user %v", msg.Route, user)
+		log.Infof("Unable to send %s success response to disconnected user %v: %v", msg.Route, user, err)
 	}
 }
 
@@ -1788,7 +1777,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// Send the ack request.
 
-	// The counterparty does not need to actually locate the redemption on txn,
+	// The counterparty does not need to actually locate the redemption txn,
 	// so use the default request timeout.
 	s.authMgr.RequestWithTimeout(ack.user, redemptionReq, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID

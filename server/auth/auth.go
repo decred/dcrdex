@@ -341,18 +341,13 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 	return nil
 }
 
-// DefaultConnectTimeout is the default timeout for a user to connect before a
-// pending request or non-request message expires.
-const DefaultConnectTimeout = 10 * time.Minute
-
 // Response and notification (non-request) messages
 
 // Send sends the non-Request-type msgjson.Message to the client identified by
 // the specified account ID. The message is sent asynchronously, so an error is
 // only generated if the specified user is not connected and authorized, if the
 // message fails marshalling, or if the link is in a failing state. See
-// dex/ws.(*WSLink).Send for more information. Use SendWhenConnected to
-// continually retry until a timeout is reached.
+// dex/ws.(*WSLink).Send for more information.
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
 	client := auth.user(user)
 	if client == nil {
@@ -362,11 +357,19 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) erro
 
 	err := client.conn.Send(msg)
 	if err != nil {
-		log.Debugf("Failed to send on link: %v", err)
+		log.Debugf("error sending on link: %v", err)
 		// Remove client asssuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
 	}
 	return err
+}
+
+// Notify sends a message to a client. The message should be a notification.
+// See msgjson.NewNotification.
+func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message) {
+	if err := auth.Send(acctID, msg); err != nil {
+		log.Infof("Failed to send notification to user %s: %v", acctID, err)
+	}
 }
 
 // Requests
@@ -416,15 +419,6 @@ func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f
 func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
 	expireTimeout time.Duration, expire func()) error {
 	return auth.request(user, msg, f, expireTimeout, expire)
-}
-
-// Notify sends a message to a client. The message should be a notification.
-// See msgjson.NewNotification. The notification is abandoned upon timeout
-// being reached.
-func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message) {
-	if err := auth.Send(acctID, msg); err != nil {
-		log.Infof("Failed to send notification to user %s: %v", acctID, err)
-	}
 }
 
 // Penalize signals that a user has broken a rule of community conduct, and that
@@ -493,6 +487,10 @@ func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 func (auth *AuthManager) addClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
+	oldClient := auth.users[client.acct.ID]
+	if oldClient != nil {
+		oldClient.conn.Disconnect()
+	}
 	auth.users[client.acct.ID] = client
 	auth.conns[client.conn.ID()] = client
 }
@@ -561,31 +559,24 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Check to see if there is already an existing client for this account.
 	respHandlers := make(map[uint64]*respHandler)
-	client := auth.user(acctInfo.ID)
-	if client != nil {
-		// Disconnect and remove known connections. We are creating a new one,
-		// but persist the response handlers.
-		auth.connMtx.Lock() // hold clientInfo maps during conn.Disconnect and respHandlers access
-		delete(auth.users, client.acct.ID)
-		delete(auth.conns, client.conn.ID())
-		client.mtx.Lock()
-		client.conn.Disconnect()
-		respHandlers = client.respHandlers
-		client.mtx.Unlock()
-		auth.connMtx.Unlock()
+	oldClient := auth.user(acctInfo.ID)
+	if oldClient != nil {
+		oldClient.mtx.Lock()
+		respHandlers = oldClient.respHandlers
+		oldClient.mtx.Unlock()
 	}
 
 	// Retrieve the user's N latest finished (completed or canceled orders)
 	// and store them in a latestOrders.
 	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
 	if err != nil {
-		log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
+		log.Errorf("Unable to retrieve user's executed cancels and completed orders: %v", err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
 		}
 	}
-	client = &clientInfo{
+	client := &clientInfo{
 		acct:         acctInfo,
 		conn:         conn,
 		respHandlers: respHandlers,

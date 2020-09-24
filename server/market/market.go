@@ -1046,8 +1046,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// inserted into the current epoch queue.
 	user := ord.User()
 	if err := m.auth.Send(user, respMsg); err != nil {
-		log.Infof("Failed to send signed new order response to user %v, order %v",
-			user, oid)
+		log.Infof("Failed to send signed new order response to user %v, order %v: %v",
+			user, oid, err)
 	}
 
 	// Send epoch update to epoch queue subscribers.
@@ -1078,8 +1078,8 @@ func (m *Market) respondError(id uint64, user account.AccountID, code int, errMs
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
 	if err := m.auth.Send(user, msg); err != nil {
-		log.Infof("Failed to send %s error response (code %d) to user %v: %q",
-			msg.Route, code, user, errMsg)
+		log.Infof("Failed to send %s error response (code = %d, msg = %s) to user %v: %v",
+			msg.Route, code, errMsg, user, err)
 	}
 }
 

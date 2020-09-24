@@ -95,11 +95,6 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	err = conn.Send(resp)
 	if err != nil {
 		log.Warnf("Error sending register result to link: %v", err)
-		// TODO: allow sending pending requests on connect to unpaid users.
-		// auth.SendWhenConnected(acct.ID, resp, DefaultConnectTimeout, func() {
-		// 	log.Infof("Unable to send register response to disconnected user %v", acct.ID)
-		// })
-		// log.Warnf("Error sending register result to link, queueing the response on connect: %v", err)
 	}
 
 	return nil
