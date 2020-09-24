@@ -603,19 +603,22 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 //   observes that there are no active matches for the trades.
 // - coins are unlocked either as the affected trades' matches are swapped or
 //   revoked (for trades with active matches), or when the trades are retired.
-func (dc *dexConnection) reconcileTrades(srvActiveOrders []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
+// Also purges "stale" cancel orders if the targetted order is returned in the
+// server's `connect` response. See *trackedTrade.deleteStaleCancelOrder for
+// the definition of a stale cancel order.
+func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
 	dc.tradeMtx.RLock()
 	// Check for unknown orders reported as active by the server. If such
 	// exists, could be that they were known to the client but were thought
 	// to be inactive and thus were not loaded from db or were retired.
-	srvActiveOrderStatuses := make(map[order.OrderID]*msgjson.OrderStatus, len(srvActiveOrders))
-	for _, msgOrder := range srvActiveOrders {
+	srvActiveOrderStatuses := make(map[order.OrderID]*msgjson.OrderStatus, len(srvOrderStatuses))
+	for _, srvOrderStatus := range srvOrderStatuses {
 		var oid order.OrderID
-		copy(oid[:], msgOrder.OrderID)
+		copy(oid[:], srvOrderStatus.OrderID)
 		if _, tracked := dc.trades[oid]; tracked {
-			srvActiveOrderStatuses[oid] = msgOrder
+			srvActiveOrderStatuses[oid] = srvOrderStatus
 		} else {
-			log.Errorf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
+			log.Warnf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
 			unknownOrdersCount++
 		}
 	}
@@ -684,10 +687,8 @@ func (dc *dexConnection) reconcileTrades(srvActiveOrders []*msgjson.OrderStatus)
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
 
-		// Server reports this order as active. If a cancel order was placed
-		// targetting this order, and it's over 15 minutes since the cancel
-		// order's epoch ended, delete the cancel order. If the cancel order
-		// was matched, the server would not have reported this order as active.
+		// Server reports this order as active. Delete any associated cancel
+		// order if the cancel order's epoch has passed.
 		trade.deleteStaleCancelOrder()
 		trade.mtx.Unlock()
 	}
@@ -2569,7 +2570,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// the trade statuses where necessary.
 	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
 	if unknownOrdersCount > 0 {
-		details := fmt.Sprintf("%d active orders reported by %s were not found.",
+		details := fmt.Sprintf("%d active orders reported by DEX %s were not found.",
 			unknownOrdersCount, dc.acct.host)
 		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
 	}

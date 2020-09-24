@@ -2758,14 +2758,14 @@ func TestReconcileTrades(t *testing.T) {
 		bookedPendingCancel *trackedTrade // standing limit orders only
 		executed            *trackedTrade
 	}
-	makeOrderSet := func(force order.TimeInForce, nMatches int) *orderSet {
+	makeOrderSet := func(force order.TimeInForce) *orderSet {
 		orders := &orderSet{
-			epoch:    makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
-			executed: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted, nMatches),
+			epoch:    makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch),
+			executed: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted),
 		}
 		if force == order.StandingTiF {
-			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
-			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
+			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
+			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
 			orders.bookedPendingCancel.cancel = &trackedCancel{
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
@@ -2777,8 +2777,8 @@ func TestReconcileTrades(t *testing.T) {
 		return orders
 	}
 
-	standingOrders := makeOrderSet(order.StandingTiF, 0)
-	immediateOrders := makeOrderSet(order.ImmediateTiF, 0)
+	standingOrders := makeOrderSet(order.StandingTiF)
+	immediateOrders := makeOrderSet(order.ImmediateTiF)
 
 	tests := []struct {
 		name                string
@@ -2951,7 +2951,7 @@ func TestReconcileTrades(t *testing.T) {
 	}
 }
 
-func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus, nMatches int) *trackedTrade {
+func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus) *trackedTrade {
 	qty := 4 * tDCR.LotSize
 	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, tBTC.RateStep)
 	lo.Force = force
@@ -2960,18 +2960,6 @@ func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force ord
 	tracker := newTrackedTrade(dbOrder, preImg, rig.dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify)
-
-	for i := 1; i <= nMatches; i++ {
-		mid := ordertest.RandomMatchID()
-		match := &matchTracker{
-			id: mid,
-			MetaMatch: db.MetaMatch{
-				MetaData: &db.MatchMetaData{},
-				Match:    &order.UserMatch{},
-			},
-		}
-		tracker.matches[mid] = match
-	}
 
 	return tracker
 }
