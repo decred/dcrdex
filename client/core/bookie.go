@@ -77,10 +77,9 @@ func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
 	return b.OrderBook.Sync(snapshot)
 }
 
-// feed gets a new *BookFeed and cancels the close timer.
+// feed gets a new *BookFeed and cancels the close timer. feed must be called
+// with the bookie.mtx locked.
 func (b *bookie) feed() *BookFeed {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
 	if b.closeTimer != nil {
 		// If Stop returns true, the timer did not fire. If false, the timer
 		// already fired and the close func was called. The caller of feed()
@@ -165,38 +164,53 @@ func (b *bookie) book() *OrderBook {
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
-func (dc *dexConnection) syncBook(base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
+
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
 
 	mkt := marketName(base, quote)
 	booky, found := dc.books[mkt]
-	if found {
-		// Get the order book and a NEW feed.
-		return booky.book(), booky.feed(), nil
-	}
-
-	// Make sure the market exists.
-	dc.marketMtx.RLock()
-	_, found = dc.marketMap[mkt]
-	dc.marketMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unknown market %s", mkt)
+		// Make sure the market exists.
+		dc.marketMtx.RLock()
+		_, found = dc.marketMap[mkt]
+		dc.marketMtx.RUnlock()
+		if !found {
+			return nil, fmt.Errorf("unknown market %s", mkt)
+		}
+
+		obRes, err := dc.subscribe(base, quote)
+		if err != nil {
+			return nil, err
+		}
+
+		booky = newBookie(func() { dc.stopBook(base, quote) })
+		err = booky.Sync(obRes)
+		if err != nil {
+			return nil, err
+		}
+		dc.books[mkt] = booky
 	}
 
-	obRes, err := dc.subscribe(base, quote)
-	if err != nil {
-		return nil, nil, err
+	// Get the feed and the book under a single lock to make sure the first
+	// message is the book.
+	booky.mtx.Lock()
+	defer booky.mtx.Unlock()
+	feed := booky.feed()
+
+	feed.C <- &BookUpdate{
+		Action:   FreshBookAction,
+		Host:     dc.acct.host,
+		MarketID: mkt,
+		Payload: &MarketOrderBook{
+			Base:  base,
+			Quote: quote,
+			Book:  booky.book(),
+		},
 	}
 
-	booky = newBookie(func() { dc.stopBook(base, quote) })
-	err = booky.Sync(obRes)
-	if err != nil {
-		return nil, nil, err
-	}
-	dc.books[mkt] = booky
-
-	return booky.book(), booky.feed(), nil
+	return feed, nil
 }
 
 // subscribe subscribes to the given market's order book via the 'orderbook'
@@ -284,12 +298,12 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 // SyncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) SyncBook(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (c *Core) SyncBook(host string, base, quote uint32) (*BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
+		return nil, fmt.Errorf("unknown DEX '%s'", host)
 	}
 
 	return dc.syncBook(base, quote)
@@ -346,6 +360,7 @@ func translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
 			Rate:  float64(o.Rate) / conversionFactor,
 			Sell:  o.Side == msgjson.SellOrderNum,
 			Token: token(o.OrderID[:]),
+			Epoch: o.Epoch,
 		})
 	}
 	return
@@ -490,6 +505,6 @@ func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrd
 		Rate:  float64(trade.Rate) / conversionFactor,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
-		Epoch: &epoch,
+		Epoch: epoch,
 	}
 }

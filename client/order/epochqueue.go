@@ -186,6 +186,7 @@ func (eq *EpochQueue) Orders() (orders []*Order) {
 			Side:     ord.Side,
 			Quantity: ord.Quantity,
 			Rate:     ord.Rate,
+			Epoch:    ord.epoch,
 		})
 	}
 	return

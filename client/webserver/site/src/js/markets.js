@@ -579,21 +579,22 @@ export default class MarketsPage extends BasePage {
    * in response to a new market subscription. The data received will contain
    * the entire order book.
    */
-  handleBookRoute (data) {
-    app.log('book', 'handleOrderBook:', data)
+  handleBookRoute (note) {
+    app.log('book', 'handleBookRoute:', note)
+    const mktBook = note.payload
     const market = this.market
     const page = this.page
     const host = market.dex.host
     const [b, q] = [market.baseCfg, market.quoteCfg]
-    if (data.base !== b.id || data.quote !== q.id) return
-    this.handleBook(data)
+    if (mktBook.base !== b.id || mktBook.quote !== q.id) return
+    this.handleBook(mktBook)
     page.marketLoader.classList.add('d-none')
     this.marketList.select(host, b.id, q.id)
 
     State.store(lastMarketKey, {
-      host: data.host,
-      base: data.base,
-      quote: data.quote
+      host: note.host,
+      base: mktBook.base,
+      quote: mktBook.quote
     })
 
     page.lotSize.textContent = Doc.formatCoinValue(market.baseCfg.lotSize / 1e8)
@@ -650,8 +651,8 @@ export default class MarketsPage extends BasePage {
     app.log('book', 'handleEpochOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
-    if (order.rate > 0) this.book.add(order)
-    this.addTableOrder(order)
+    if (order.rate > 0) this.book.add(order) // No cancels or market orders
+    if (order.qty > 0) this.addTableOrder(order) // No cancel orders
     this.chart.draw()
   }
 
@@ -838,6 +839,7 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
+    app.log('book', 'handleEpochNote:', note)
     if (note.host !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)

@@ -18,6 +18,7 @@ const unbind = Doc.unbind
 
 const notificationRoute = 'notify'
 const loggersKey = 'loggers'
+const recordersKey = 'recorders'
 
 /* constructors is a map to page constructors. */
 const constructors = {
@@ -39,15 +40,8 @@ export default class Application {
       wallets: {}
     }
     this.commitHash = commitHash
-    window.log = (...a) => { this.log(...a) }
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
-  }
 
-  /**
-   * Start the application. This is the only thing done from the index.js entry
-   * point. Read the id = main element and attach handlers.
-   */
-  async start () {
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.
@@ -56,8 +50,43 @@ export default class Application {
       if (state) this.loggers[loggerID] = true
       else delete this.loggers[loggerID]
       State.store(loggersKey, this.loggers)
-      return `[${loggerID}] logger ${state ? 'enabled' : 'disabled'}`
+      return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
+    // Enable logging from anywhere.
+    window.log = (...a) => { this.log(...a) }
+
+    // Recorders can record log messages, and then save them to file on request.
+    const recorderKeys = State.fetch(recordersKey) || []
+    this.recorders = {}
+    for (const loggerID of recorderKeys) {
+      console.log('recording', loggerID)
+      this.recorders[loggerID] = []
+    }
+    window.recordLogger = (loggerID, on) => {
+      if (on) this.recorders[loggerID] = []
+      else delete this.recorders[loggerID]
+      State.store(recordersKey, Object.keys(this.recorders))
+      return `${loggerID} recorder ${on ? 'enabled' : 'disabled'}`
+    }
+    window.dumpLogger = loggerID => {
+      const record = this.recorders[loggerID]
+      if (!record) return `no recorder for logger ${loggerID}`
+      const a = document.createElement('a')
+      a.href = `data:application/octet-stream;base64,${window.btoa(JSON.stringify(record, null, 4))}`
+      a.download = `${loggerID}.json`
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        document.body.removeChild(a)
+      }, 0)
+    }
+  }
+
+  /**
+   * Start the application. This is the only thing done from the index.js entry
+   * point. Read the id = main element and attach handlers.
+   */
+  async start () {
     // The "user" is a large data structure that contains nearly all state
     // information, including exchanges, markets, wallets, and orders. It must
     // be loaded immediately.
@@ -430,13 +459,13 @@ export default class Application {
    * ws.........Websocket connection status changes.
    */
   log (loggerID, ...msg) {
-    if (!this.loggers[loggerID]) return
-    const stamp = new Date()
-    const h = stamp.getHours().toString().padStart(2, '0')
-    const m = stamp.getMinutes().toString().padStart(2, '0')
-    const s = stamp.getSeconds().toString().padStart(2, '0')
-    const ms = stamp.getMilliseconds().toString().padStart(3, '0')
-    console.log(`${`${h}:${m}:${s}.${ms}`}[${loggerID}]:`, ...msg)
+    if (this.loggers[loggerID]) console.log(`${nowString()}[${loggerID}]:`, ...msg)
+    if (this.recorders[loggerID]) {
+      this.recorders[loggerID].push({
+        time: nowString(),
+        msg: msg
+      })
+    }
   }
 
   /* setNoteElements re-builds the drop-down notification list. */
@@ -573,4 +602,14 @@ function setSeverityClass (el, severity) {
 /* handlerFromPath parses the handler name from the path. */
 function handlerFromPath (path) {
   return path.replace(/^\//, '').split('/')[0].split('?')[0].split('#')[0]
+}
+
+/* nowString creates a string formatted like HH:MM:SS.xxx */
+function nowString () {
+  const stamp = new Date()
+  const h = stamp.getHours().toString().padStart(2, '0')
+  const m = stamp.getMinutes().toString().padStart(2, '0')
+  const s = stamp.getSeconds().toString().padStart(2, '0')
+  const ms = stamp.getMilliseconds().toString().padStart(3, '0')
+  return `${h}:${m}:${s}.${ms}`
 }

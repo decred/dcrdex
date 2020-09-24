@@ -205,7 +205,7 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 		Rate:  rate,
 		Sell:  sell,
 		Token: nextToken(),
-		Epoch: &epochIdx,
+		Epoch: epochIdx,
 	}
 }
 
@@ -492,7 +492,7 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
-func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, error) {
 	quoteAsset := tExchanges[dexAddr].Assets[quote]
 	baseAsset := tExchanges[dexAddr].Assets[base]
 	c.midGap = float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
@@ -571,7 +571,19 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *
 			}
 		}
 	}()
-	return c.book(), c.feed, nil
+
+	c.feed.C <- &core.BookUpdate{
+		Action:   core.FreshBookAction,
+		Host:     dexAddr,
+		MarketID: mktID,
+		Payload: &core.MarketOrderBook{
+			Base:  base,
+			Quote: quote,
+			Book:  c.book(),
+		},
+	}
+
+	return c.feed, nil
 }
 
 var numBuys = 80
@@ -896,7 +908,6 @@ out:
 			for _, o := range c.epochOrders {
 				miniOrder := o.Payload.(*core.MiniOrder)
 				if miniOrder.Rate > 0 {
-					miniOrder.Epoch = new(uint64)
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
 					if miniOrder.Sell {

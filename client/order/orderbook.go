@@ -25,6 +25,8 @@ type Order struct {
 	Quantity uint64
 	Rate     uint64
 	Time     uint64
+	// Epoch is only used in the epoch queue, otherwise it is ignored.
+	Epoch uint64
 }
 
 // RemoteOrderBook defines the functions a client tracked order book

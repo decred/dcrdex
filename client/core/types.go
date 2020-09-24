@@ -316,7 +316,7 @@ func newDisplayIDFromSymbols(base, quote string) string {
 type MiniOrder struct {
 	Qty   float64 `json:"qty"`
 	Rate  float64 `json:"rate"`
-	Epoch *uint64 `json:"epoch,omitempty"`
+	Epoch uint64  `json:"epoch,omitempty"`
 	Sell  bool    `json:"sell"`
 	Token string  `json:"token"`
 }
@@ -338,8 +338,9 @@ type OrderBook struct {
 // MarketOrderBook is used as the BookUpdate's Payload with the FreshBookAction.
 // The subscriber will likely need to translate into a JSON tagged type.
 type MarketOrderBook struct {
-	Base, Quote uint32
-	Book        *OrderBook
+	Base  uint32     `json:"base"`
+	Quote uint32     `json:"quote"`
+	Book  *OrderBook `json:"book"`
 }
 
 const (

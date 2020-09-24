@@ -50,7 +50,7 @@ func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message)
 
 // Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
 type Core interface {
-	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (*core.BookFeed, error)
 	AckNotes([]dex.Bytes)
 }
 
@@ -220,15 +220,6 @@ type marketLoad struct {
 	Quote uint32 `json:"quote"`
 }
 
-// marketResponse is the websocket update sent when the client requests a
-// market via the 'loadmarket' route.
-type marketResponse struct {
-	Host  string          `json:"host"`
-	Book  *core.OrderBook `json:"book"`
-	Base  uint32          `json:"base"`
-	Quote uint32          `json:"quote"`
-}
-
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
 // manages a map of clients who are subscribed to the market, and distributes
 // order book updates when received.
@@ -263,25 +254,7 @@ out:
 				m.log.Warnf("marketSyncer stopping on feed closed")
 				return
 			}
-			var payload interface{} = update
-			if update.Action == core.FreshBookAction {
-				// For FreshBookAction, translate the *core.MarketOrderBook
-				// payload into a *marketResponse.
-				mob, ok := update.Payload.(*core.MarketOrderBook)
-				if !ok {
-					m.log.Errorf("FreshBookAction payload not a *MarketOrderBook")
-					continue
-				}
-				// The outgoing payload is not a BookUpdate for this signal.
-				payload = &marketResponse{
-					Host:  update.Host,
-					Book:  mob.Book,
-					Base:  mob.Base,
-					Quote: mob.Quote,
-				}
-				m.log.Tracef("FreshBookAction: %v", update.MarketID)
-			}
-			note, err := msgjson.NewNotification(update.Action, payload)
+			note, err := msgjson.NewNotification(update.Action, update)
 			if err != nil {
 				m.log.Errorf("error encoding notification message: %v", err)
 				break out
@@ -315,7 +288,7 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 		return msgjson.NewError(msgjson.UnknownMarketError, errMsg)
 	}
 
-	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
+	feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		s.log.Errorf(errMsg)
@@ -329,21 +302,6 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 	}
 	cl.feedLoop = newMarketSyncer(cl, feed, s.log.SubLogger(name))
 	cl.feedLoopMtx.Unlock()
-
-	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
-		Host:  market.Host,
-		Book:  book,
-		Base:  market.Base,
-		Quote: market.Quote,
-	})
-	if err != nil {
-		s.log.Errorf("error encoding loadmarkets response: %v", err)
-		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
-	}
-	if err = cl.Send(note); err != nil {
-		s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
-			note.Route, cl.cid, cl.IP(), err)
-	}
 	return nil
 }
 

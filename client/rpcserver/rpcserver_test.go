@@ -97,8 +97,8 @@ func (c *TCore) GetFee(url, cert string) (uint64, error) {
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 	return c.registerResult, c.registerErr
 }
-func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
-	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
+	return core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
 }
 func (c *TCore) Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error) {
 	return c.order, c.tradeErr
