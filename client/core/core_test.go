@@ -4195,8 +4195,6 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		Duration: uint64(3153600000000000000),
 		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
 	}
-	rigAcctID := rig.dc.acct.id[:]
-	diffAcctID := append(rig.dc.acct.id[1:], 1)
 	diffKey, _ := secp256k1.GeneratePrivateKey()
 	noMatch, err := msgjson.NewNotification(msgjson.NoMatchRoute, "fake")
 	if err != nil {
@@ -4206,13 +4204,11 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		name    string
 		key     *secp256k1.PrivateKey
 		payload interface{}
-		acctID  []byte
 		wantErr bool
 	}{{
 		name:    "ok",
 		key:     tDexPriv,
 		payload: penalty,
-		acctID:  rigAcctID,
 	}, {
 		name:    "bad note",
 		key:     tDexPriv,
@@ -4222,13 +4218,6 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		name:    "wrong sig",
 		key:     diffKey,
 		payload: penalty,
-		acctID:  rigAcctID,
-		wantErr: true,
-	}, {
-		name:    "wrong acct",
-		key:     tDexPriv,
-		payload: penalty,
-		acctID:  diffAcctID,
 		wantErr: true,
 	}}
 	for _, test := range tests {
@@ -4236,7 +4225,6 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		var note *msgjson.Message
 		switch v := test.payload.(type) {
 		case *msgjson.Penalty:
-			v.AccountID = test.acctID
 			penaltyNote := &msgjson.PenaltyNote{
 				Penalty: v,
 			}

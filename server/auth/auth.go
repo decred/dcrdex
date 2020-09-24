@@ -266,8 +266,6 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 
 	// Update recent orders and check/set suspended status atomically.
 	client.mtx.Lock()
-	defer client.mtx.Unlock()
-
 	client.recentOrders.add(&oidStamped{
 		OrderID: oid,
 		time:    tMS,
@@ -279,13 +277,14 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	client.mtx.Unlock()
 	log.Tracef("User %v cancellation rate is now %v (%d cancels : %d successes). Violation = %v", user,
 		rate, cancels, completions, penalize)
-	if penalize && !auth.anarchy && !client.suspended {
-		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
+	if penalize && !auth.anarchy && !client.isSuspended() {
+		details := fmt.Sprintf("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
-		client.suspended = true
-		auth.storage.CloseAccount(user, account.CancellationRate)
+		log.Info(details)
+		auth.Penalize(user, account.CancellationRate, details)
 	}
 }
 
@@ -700,13 +699,12 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	if auth.anarchy {
 		details = "You were penalized but the penalty will not be counted against you."
 	}
-	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Description(), extraDetails)
+	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, rule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
-		Rule:      rule,
-		Time:      uint64(unixMsNow().Unix()),
-		Duration:  uint64(rule.Duration()),
-		AccountID: user[:],
-		Details:   details,
+		Rule:     rule,
+		Time:     encode.UnixMilliU(time.Now()),
+		Duration: uint64(rule.Duration() / 1e6), // nanoseconds to milliseconds
+		Details:  details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,

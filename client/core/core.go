@@ -3311,13 +3311,10 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %v", err)
 	}
-	if !bytes.Equal(note.Penalty.AccountID, dc.acct.id[:]) {
-		return fmt.Errorf("received penalty addressed to wrong accountID: %v", note.Penalty.AccountID)
-	}
 	t := encode.UnixTimeMilli(int64(note.Penalty.Time) * 1000)
 	d := time.Duration(note.Penalty.Duration)
-	details := fmt.Sprintf("Penalty from DEX at %s\nbroken rule: %s\ntime: %v\nduration: %v\naccountID: %v\ndetails: \"%s\"\n",
-		dc.acct.host, note.Penalty.Rule, t, d, note.Penalty.AccountID, note.Penalty.Details)
+	details := fmt.Sprintf("Penalty from DEX at %s\nbroken rule: %s\ntime: %v\nduration: %v\ndetails: %q\n",
+		dc.acct.host, note.Penalty.Rule, t, d, note.Penalty.Details)
 	n := db.NewNotification("penalty", dc.acct.host, details, db.WarningLevel)
 	c.notify(&n)
 	return nil
