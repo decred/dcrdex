@@ -820,7 +820,7 @@ func TestConnect(t *testing.T) {
 }
 
 func TestPenalty(t *testing.T) {
-	// serialization: rule(1) + time (8) + duration (8) + accountid (32) + details (variable, ~100) = 149 bytes
+	// serialization: rule(1) + time (8) + duration (8) + details (variable, ~100) = 117 bytes
 	penalty := &Penalty{
 		Rule:     account.Rule(1),
 		Time:     uint64(1598929305),
