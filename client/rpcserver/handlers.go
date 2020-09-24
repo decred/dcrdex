@@ -710,7 +710,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     }`,
 	},
 	exchangesRoute: {
-		cmdSummary: `Detailed information about known exchanges, markets, and active trades.`,
+		cmdSummary: `Detailed information about known exchanges and markets.`,
 		returns: `Returns:
     obj: The exchanges result.
     {
@@ -729,16 +729,16 @@ Registration is complete after the fee transaction has been confirmed.`,
         },
         "assets": {
           "[assetID]": {
-            "symbol (string)": The asset's coin symbol.
+            "symbol" (string): The asset's coin symbol.
             "lotSize" (int): The amount of units of a coin in one lot.
             "rateStep" (int): the price rate increment in atoms.
             "feeRate" (int): The transaction fee in atoms per byte.
-			"swapSize" (int): The size of a swap transaction in bytes.
-			"swapSizeBase" (int): The size of a swap transaction minus inputs in bytes.
+            "swapSize" (int): The size of a swap transaction in bytes.
+            "swapSizeBase" (int): The size of a swap transaction minus inputs in bytes.
             "swapConf" (int): The number of confirmations needed to confirm
 	      trade transactions.
           },...
-		},
+        },
         "confsrequired": (int) The number of confirmations needed for the
           registration fee payment
         "confs" (int): The current number of confirmations for the registration
@@ -775,7 +775,7 @@ Registration is complete after the fee transaction has been confirmed.`,
           "authed" (bool): Whether the dex has been successfully authed.
           "autherr" (string): Omitted if authed. If not authed, the reason.
           "tradeIDs" (array): An array of active trade IDs.
-        }
+        },...
       ]
     }`,
 	},
@@ -893,7 +893,7 @@ Registration is complete after the fee transaction has been confirmed.`,
   array: An array of orders.
   [
     {
-      "host" (string): The DEX address.,
+      "host" (string): The DEX address.
       "marketName" (string): The market's name. e.g. "DCR_BTC".
       "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
       "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.

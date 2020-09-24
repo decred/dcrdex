@@ -20,5 +20,6 @@ dist/
 node_modules/
 client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
+docs/examples/rpcclient/rpcclient
 wiki
 dex/testing/loadbot/loadbot
