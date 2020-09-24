@@ -137,11 +137,6 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	return a.authErr
 }
 func (a *TAuth) Sign(...msgjson.Signable) error { return nil }
-func (a *TAuth) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
-	if err := a.Send(user, msg); err != nil {
-		log.Debug(err)
-	}
-}
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 	//log.Infof("Send for user %v. Message: %v", user, msg)
 	a.sendsMtx.Lock()
@@ -194,11 +189,6 @@ func (a *TAuth) getSend() *msgjson.Message {
 }
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
-}
-func (a *TAuth) RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
-	expireTimeout, connectTimeout time.Duration, expireFunc func()) {
-	// TODO
-	a.RequestWithTimeout(user, req, handlerFunc, expireTimeout, expireFunc)
 }
 func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
