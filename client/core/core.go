@@ -603,17 +603,17 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 //   observes that there are no active matches for the trades.
 // - coins are unlocked either as the affected trades' matches are swapped or
 //   revoked (for trades with active matches), or when the trades are retired.
-func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknownOrdersCount, reconciledOrdersCount int) {
+func (dc *dexConnection) reconcileTrades(srvActiveOrders []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
 	dc.tradeMtx.RLock()
 	// Check for unknown orders reported as active by the server. If such
 	// exists, could be that they were known to the client but were thought
 	// to be inactive and thus were not loaded from db or were retired.
-	serverMsgOrders := make(map[order.OrderID]*msgjson.Order, len(serverOrders))
-	for _, msgOrder := range serverOrders {
+	srvActiveOrderStatuses := make(map[order.OrderID]*msgjson.OrderStatus, len(srvActiveOrders))
+	for _, msgOrder := range srvActiveOrders {
 		var oid order.OrderID
 		copy(oid[:], msgOrder.OrderID)
 		if _, tracked := dc.trades[oid]; tracked {
-			serverMsgOrders[oid] = msgOrder
+			srvActiveOrderStatuses[oid] = msgOrder
 		} else {
 			log.Errorf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
 			unknownOrdersCount++
@@ -624,20 +624,20 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 		trade.mtx.RLock()
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
-		} else if serverMsgOrder := serverMsgOrders[oid]; serverMsgOrder != nil {
+		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
 			log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
-				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(serverMsgOrder.Status))
+				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
 		trade.mtx.RUnlock()
 	}
 	dc.tradeMtx.RUnlock()
 
-	updateOrder := func(trade *trackedTrade, msgOrder *msgjson.Order) {
+	updateOrder := func(trade *trackedTrade, srvOrderStatus *msgjson.OrderStatus) {
 		reconciledOrdersCount++
 		oid := trade.ID()
 		previousStatus := trade.metaData.Status
-		newStatus := order.OrderStatus(msgOrder.Status)
-		trade.Trade().SetFill(msgOrder.Fill)
+		newStatus := order.OrderStatus(srvOrderStatus.Status)
+		trade.Trade().SetFill(srvOrderStatus.Fill)
 		trade.metaData.Status = newStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
@@ -653,9 +653,9 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 	// for such orders and update accordingly.
 	var orderStatusRequests []*msgjson.OrderStatusRequest
 	for oid, trade := range knownActiveTrades {
-		serverMsgOrder := serverMsgOrders[oid]
-		if serverMsgOrder == nil {
-			// Order not returned by server. Must be inactive now.
+		srvOrderStatus := srvActiveOrderStatuses[oid]
+		if srvOrderStatus == nil {
+			// Order status not returned by server. Must be inactive now.
 			// Request current status from the DEX.
 			orderStatusRequests = append(orderStatusRequests, &msgjson.OrderStatusRequest{
 				Base:    trade.Base(),
@@ -666,7 +666,7 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 		}
 
 		trade.mtx.Lock()
-		serverStatus := order.OrderStatus(serverMsgOrder.Status)
+		serverStatus := order.OrderStatus(srvOrderStatus.Status)
 		if trade.metaData.Status == serverStatus {
 			log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
 				oid, trade.metaData.Status, serverStatus)
@@ -674,7 +674,7 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 			// Only standing orders can move from Epoch to Booked. This must have
 			// happened in the client's absence (maybe a missed nomatch message).
 			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-				updateOrder(trade, serverMsgOrder)
+				updateOrder(trade, srvOrderStatus)
 			} else {
 				log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
 					serverStatus, oid, dc.acct.host, trade.metaData.Status)
@@ -696,7 +696,7 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 		log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
 
 		// Send the 'order_status' request.
-		var orderStatusResults msgjson.OrderStatusResult
+		var orderStatusResults []*msgjson.OrderStatus
 		err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests, &orderStatusResults, DefaultResponseTimeout)
 		if err != nil {
 			log.Errorf("Error retreiving order statuses from DEX %s: %v", dc.acct.host, err)
@@ -709,12 +709,12 @@ func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknown
 		}
 
 		// Update the orders with the statuses received.
-		for _, msgOrder := range orderStatusResults {
+		for _, srvOrderStatus := range orderStatusResults {
 			var oid order.OrderID
-			copy(oid[:], msgOrder.OrderID)
+			copy(oid[:], srvOrderStatus.OrderID)
 			trade := knownActiveTrades[oid] // no need to lock dc.tradeMtx
 			trade.mtx.Lock()
-			updateOrder(trade, msgOrder)
+			updateOrder(trade, srvOrderStatus)
 			trade.mtx.Unlock()
 		}
 	}
@@ -2562,12 +2562,12 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	// Set the account as authenticated.
 	log.Debugf("Authenticated connection to %s, %d active orders, %d active matches",
-		dc.acct.host, len(result.Orders), len(result.Matches))
+		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches))
 	dc.acct.auth()
 
 	// Compare the server-returned active orders with tracked trades, updating
 	// the trade statuses where necessary.
-	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
+	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
 	if unknownOrdersCount > 0 {
 		details := fmt.Sprintf("%d active orders reported by %s were not found.",
 			unknownOrdersCount, dc.acct.host)
@@ -2579,7 +2579,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Associate the matches with known trades.
-	matches, _, err := dc.parseMatches(result.Matches, false)
+	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
 	if err != nil {
 		log.Error(err)
 	}

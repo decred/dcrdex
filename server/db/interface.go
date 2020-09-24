@@ -52,11 +52,11 @@ type EpochResults struct {
 	OrdersMissed      []order.OrderID
 }
 
-// Order is the current status of an order, including its fill.
-type Order struct {
-	ID     order.OrderID
-	Status order.OrderStatus
-	Fill   uint64
+// OrderStatus is the current status of an order, including its fill.
+type OrderStatus struct {
+	OrderID order.OrderID
+	Status  order.OrderStatus
+	Fill    uint64
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with
@@ -105,19 +105,22 @@ type OrderArchiver interface {
 	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
 
-	// UserOrders retrieves the orders with the provided order IDs for the given
-	// account in the market specified by a base and quote asset. If no order ID
-	// is provided, all orders for the given account in the specified market are
-	// returned.
-	// The number and ordering of the returned orders is not necessarily the same
-	// as the number and ordering of the provided order IDs, if provided. It is
-	// not an error if any or all of the provided order IDs cannot be found for
-	// the given account in the specified market.
-	UserOrders(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*Order, error)
+	// UserOrders retrieves all orders for the given account in the market
+	// specified by a base and quote asset.
+	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
-	// AllActiveUserOrders retrieves all active orders for a user across all
-	// markets.
-	AllActiveUserOrders(aid account.AccountID) ([]*Order, error)
+	// UserOrderStatuses retrieves the statuses and filled amounts of the orders
+	// with the provided order IDs for the given account in the market specified
+	// by a base and quote asset.
+	// The number and ordering of the returned statuses is not necessarily the
+	// same as the number and ordering of the provided order IDs. It is not an
+	// error if any or all of the provided order IDs cannot be found for the
+	// given account in the specified market.
+	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*OrderStatus, error)
+
+	// AllActiveUserOrderStatuses retrieves the statuses and filled amounts of
+	// all active orders for a user across all markets.
+	AllActiveUserOrderStatuses(aid account.AccountID) ([]*OrderStatus, error)
 
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.

@@ -47,14 +47,21 @@ const (
 		commit, coins, quantity, rate, force, filled
 	FROM %s WHERE status = $1;`
 
-	// SelectAllUserOrders the order id, order status, and filled amount of all
-	// orders for the given account ID. Only applies to market and limit orders.
-	SelectAllUserOrders = `SELECT oid, status, filled FROM %s WHERE account_id = $1;`
+	// SelectUserOrders retrieves all columns of all orders for the given
+	// account ID.
+	SelectUserOrders = `SELECT oid, type, sell, account_id, address, client_time, server_time,
+		commit, coins, quantity, rate, force, status, filled
+	FROM %s WHERE account_id = $1;`
 
-	// SelectUserOrders the order id, order status, and filled amount of the
-	// orders with the given order IDs for the given account ID. Only applies
-	// to market and limit orders.
-	SelectUserOrdersWithIDs = `SELECT oid, status, filled FROM %s WHERE account_id = $1 AND oid = ANY($2);`
+	// SelectUserOrderStatuses retrieves the order id, status and filled amount
+	// of all orders for the given account ID. Only applies to market and limit
+	// orders.
+	SelectUserOrderStatuses = `SELECT oid, status, filled FROM %s WHERE account_id = $1;`
+
+	// SelectUserOrderStatusesByID retrieves the order id, status and filled
+	// amount of the orders with the provided order IDs for the given account
+	// ID. Only applies to market and limit orders.
+	SelectUserOrderStatusesByID = `SELECT oid, status, filled FROM %s WHERE account_id = $1 AND oid = ANY($2);`
 
 	// SelectCanceledUserOrders gets the ID of orders that were either canceled
 	// by the user or revoked/canceled by the server, but these statuses can be

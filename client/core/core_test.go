@@ -767,12 +767,12 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.Order) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches, Orders: orders}
+		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
@@ -2782,15 +2782,15 @@ func TestReconcileTrades(t *testing.T) {
 
 	tests := []struct {
 		name                string
-		clientOrders        []*trackedTrade           // orders known to the client
-		serverOrders        []*msgjson.Order          // orders considered active by the server
-		orderStatusRes      msgjson.OrderStatusResult // server's response to order_status requests
+		clientOrders        []*trackedTrade        // orders known to the client
+		serverOrders        []*msgjson.OrderStatus // orders considered active by the server
+		orderStatusRes      []*msgjson.OrderStatus // server's response to order_status requests
 		expectOrderStatuses map[order.OrderID]order.OrderStatus
 	}{
 		{
 			name:         "server orders unknown to client",
 			clientOrders: []*trackedTrade{},
-			serverOrders: []*msgjson.Order{
+			serverOrders: []*msgjson.OrderStatus{
 				{
 					OrderID: test.RandomOrderID().Bytes(),
 					Status:  uint16(order.OrderStatusBooked),
@@ -2807,7 +2807,7 @@ func TestReconcileTrades(t *testing.T) {
 				immediateOrders.epoch,
 				immediateOrders.executed,
 			},
-			serverOrders: []*msgjson.Order{
+			serverOrders: []*msgjson.OrderStatus{
 				{
 					OrderID: standingOrders.epoch.ID().Bytes(),
 					Status:  uint16(order.OrderStatusBooked), // now booked
@@ -2847,8 +2847,8 @@ func TestReconcileTrades(t *testing.T) {
 				immediateOrders.epoch,
 				immediateOrders.executed,
 			},
-			serverOrders: []*msgjson.Order{}, // no active order reported by server
-			orderStatusRes: msgjson.OrderStatusResult{
+			serverOrders: []*msgjson.OrderStatus{}, // no active order reported by server
+			orderStatusRes: []*msgjson.OrderStatus{
 				{
 					OrderID: standingOrders.epoch.ID().Bytes(),
 					Status:  uint16(order.OrderStatusRevoked),

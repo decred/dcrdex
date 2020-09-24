@@ -44,10 +44,10 @@ type ratioData struct {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct          *account.Account
-	orders        []*db.Order
 	matches       []*db.MatchData
 	closedID      account.AccountID
 	matchStatuses []*db.MatchStatus
+	orderStatuses []*db.OrderStatus
 	acctAddr      string
 	acctErr       error
 	regAddr       string
@@ -68,17 +68,17 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
-func (s *TStorage) UserOrders(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.Order, error) {
-	return s.orders, nil
+func (s *TStorage) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	return s.orderStatuses, nil
 }
-func (s *TStorage) AllActiveUserOrders(aid account.AccountID) ([]*db.Order, error) {
-	var activeOrders []*db.Order
-	for _, ord := range s.orders {
-		if ord.Status == order.OrderStatusEpoch || ord.Status == order.OrderStatusBooked {
-			activeOrders = append(activeOrders, ord)
+func (s *TStorage) AllActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+	var activeOrderStatuses []*db.OrderStatus
+	for _, orderStatus := range s.orderStatuses {
+		if orderStatus.Status == order.OrderStatusEpoch || orderStatus.Status == order.OrderStatusBooked {
+			activeOrderStatuses = append(activeOrderStatuses, orderStatus)
 		}
 	}
-	return activeOrders, nil
+	return activeOrderStatuses, nil
 }
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
@@ -441,14 +441,14 @@ func TestConnect(t *testing.T) {
 	matchData, userMatch := userMatchData(user.acctID)
 	matchTime := matchData.Epoch.End()
 
-	rig.storage.orders = []*db.Order{
+	rig.storage.orderStatuses = []*db.OrderStatus{
 		{
-			ID:     userMatch.OrderID,
-			Status: order.OrderStatusBooked,
-			Fill:   matchData.Quantity / 2,
+			OrderID: userMatch.OrderID,
+			Status:  order.OrderStatusBooked,
+			Fill:    matchData.Quantity / 2,
 		},
 	}
-	defer func() { rig.storage.orders = nil }()
+	defer func() { rig.storage.orderStatuses = nil }()
 
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
@@ -523,20 +523,20 @@ func TestConnect(t *testing.T) {
 	// Connect the user.
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
-	if len(cResp.Orders) != 1 {
+	if len(cResp.ActiveOrderStatuses) != 1 {
 		t.Fatalf("no active orders")
 	}
-	msgOrder := cResp.Orders[0]
+	msgOrder := cResp.ActiveOrderStatuses[0]
 	if msgOrder.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("active order ID mismatch: ", msgOrder.OrderID.String(), " != ", userMatch.OrderID.String())
 	}
 	if msgOrder.Status != uint16(order.OrderStatusBooked) {
 		t.Fatal("active order Status mismatch: ", msgOrder.Status, " != ", order.OrderStatusBooked)
 	}
-	if len(cResp.Matches) != 1 {
+	if len(cResp.ActiveMatches) != 1 {
 		t.Fatalf("no active matches")
 	}
-	msgMatch := cResp.Matches[0]
+	msgMatch := cResp.ActiveMatches[0]
 	if msgMatch.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("active match OrderID mismatch: ", msgMatch.OrderID.String(), " != ", userMatch.OrderID.String())
 	}
@@ -617,7 +617,6 @@ func TestConnect(t *testing.T) {
 	if reuser.conn.getReq() == nil {
 		t.Fatalf("new connection did not receive the request")
 	}
-
 }
 
 func TestAccountErrors(t *testing.T) {
@@ -636,10 +635,10 @@ func TestAccountErrors(t *testing.T) {
 	// Check the response.
 	respMsg := user.conn.getSend()
 	result := extractConnectResult(t, respMsg)
-	if len(result.Matches) != 1 {
-		t.Fatalf("expected 1 match, received %d", len(result.Matches))
+	if len(result.ActiveMatches) != 1 {
+		t.Fatalf("expected 1 match, received %d", len(result.ActiveMatches))
 	}
-	match := result.Matches[0]
+	match := result.ActiveMatches[0]
 	if match.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("wrong OrderID: ", match.OrderID, " != ", userMatch.OrderID)
 	}
@@ -1376,7 +1375,7 @@ func TestOrderStatus(t *testing.T) {
 	user := tNewUser(t)
 	connectUser(t, user)
 
-	rig.storage.orders = []*db.Order{{}}
+	rig.storage.orderStatuses = []*db.OrderStatus{{}}
 
 	reqPayload := []msgjson.OrderStatusRequest{
 		{
@@ -1396,7 +1395,7 @@ func TestOrderStatus(t *testing.T) {
 		t.Fatalf("no orders sent")
 	}
 
-	var statuses msgjson.OrderStatusResult
+	var statuses []*msgjson.OrderStatus
 	err := resp.UnmarshalResult(&statuses)
 	if err != nil {
 		t.Fatalf("UnmarshalResult error: %v", err)

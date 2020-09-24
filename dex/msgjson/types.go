@@ -480,8 +480,12 @@ type OrderStatusRequest struct {
 	OrderID Bytes  `json:"orderid"`
 }
 
-// OrderStatusResult is the successful result for the OrderStatusRoute request.
-type OrderStatusResult []*Order
+// OrderStatus describes an order, its status and fill.
+type OrderStatus struct {
+	OrderID Bytes  `json:"orderid"`
+	Status  uint16 `json:"status"`
+	Fill    uint64 `json:"fill"`
+}
 
 // Init is the payload for a client-originating InitRoute request.
 type Init struct {
@@ -841,19 +845,11 @@ func (c *Connect) Serialize() []byte {
 	return append(s, uint64Bytes(c.Time)...)
 }
 
-// Order describes an order, its status and fill, and is returned as part of a
-// ConnectResult or as part of a OrderStatusResult.
-type Order struct {
-	OrderID Bytes  `json:"orderid"`
-	Status  uint16 `json:"status"`
-	Fill    uint64 `json:"fill"`
-}
-
 // ConnectResult is the result result for the ConnectRoute request.
 type ConnectResult struct {
-	Sig     Bytes    `json:"sig"`
-	Orders  []*Order `json:"orders"`
-	Matches []*Match `json:"matches"`
+	Sig                 Bytes          `json:"sig"`
+	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
+	ActiveMatches       []*Match       `json:"activematches"`
 }
 
 // Register is the payload for the RegisterRoute request.

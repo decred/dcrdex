@@ -528,8 +528,8 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 }
 
 // deleteStaleCancelOrder checks if this trade has an associated cancel order,
-// and deletes the cancel order if it (i.e. the cancel order) remains at Epoch
-// status more than 15 minutes after the close of the cancel order's epoch.
+// and deletes the cancel order if it (i.e. the cancel order) stays at Epoch
+// status for 2 or more epochs after the close of the cancel order's epoch.
 // Deleting the stale cancel order from this trade makes it possible for the
 // client to re-attempt cancelling the order.
 //
@@ -543,7 +543,7 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 // This method MUST be called with the trackedTrade mutex lock held for writes.
 func (t *trackedTrade) deleteStaleCancelOrder() {
 	if t.cancel == nil || t.metaData.Status != order.OrderStatusBooked {
-		log.Debugf("ignoring delete cancel order attempt for order %v in status with pending cancel = %v",
+		log.Debugf("Ignoring delete cancel order attempt for order %v, status %v, pending cancel = %v",
 			t.ID(), t.metaData.Status, t.cancel != nil)
 		return
 	}
@@ -551,7 +551,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	stamp := t.cancel.ServerTime
 	epoch := order.EpochID{Idx: encode.UnixMilliU(stamp) / t.epochLen, Dur: t.epochLen}
 	epochEnd := epoch.End()
-	if time.Since(epochEnd) < 15*time.Minute {
+	if time.Since(epochEnd).Milliseconds() < int64(2*t.epochLen) {
 		return // not stuck, yet
 	}
 
