@@ -2566,19 +2566,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches))
 	dc.acct.auth()
 
-	// Compare the server-returned active orders with tracked trades, updating
-	// the trade statuses where necessary.
-	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
-	if unknownOrdersCount > 0 {
-		details := fmt.Sprintf("%d active orders reported by DEX %s were not found.",
-			unknownOrdersCount, dc.acct.host)
-		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
-	}
-	if reconciledOrdersCount > 0 {
-		details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
-		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
-	}
-
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
 	if err != nil {
@@ -2633,6 +2620,21 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		}
 
 		trade.mtx.Unlock()
+	}
+
+	// Compare the server-returned active orders with tracked trades, updating
+	// the trade statuses where necessary. This is done after processing the
+	// connect resp matches so that where possible, avialable match data can be
+	// used to properly set order statuses and filled amount.
+	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
+	if unknownOrdersCount > 0 {
+		details := fmt.Sprintf("%d active orders reported by DEX %s were not found.",
+			unknownOrdersCount, dc.acct.host)
+		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
+	}
+	if reconciledOrdersCount > 0 {
+		details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
+		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
 	}
 
 	if len(updatedAssets) > 0 {
