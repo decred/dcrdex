@@ -1043,7 +1043,7 @@ func (a *Archiver) userOrderStatusesFromTable(fullTable string, aid account.Acco
 
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	rows, err := execQuery(ctx)
-	cancel()
+	defer cancel()
 	if err != nil {
 		return nil, err
 	}
