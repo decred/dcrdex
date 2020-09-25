@@ -62,7 +62,9 @@ func (c *TCore) ConfigMsg() json.RawMessage { return nil }
 func (c *TCore) Suspend(tSusp time.Time, persistBooks bool) map[string]*market.SuspendEpoch {
 	return nil
 }
-
+func (c *TCore) ResumeMarket(name string, tRes time.Time) (int64, time.Time) {
+	return 0, time.Time{} // test TODO
+}
 func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch {
 	tMkt := c.markets[name]
 	if tMkt == nil {

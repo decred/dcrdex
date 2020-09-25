@@ -987,6 +987,17 @@ func (t *trackedTrade) revoke() {
 		log.Errorf("unable to update order: %v", err)
 	}
 
+	// Send out a data notification with the revoke information.
+	// corder, _ := t.coreOrderInternal()
+	cancelOrder := &Order{
+		Host:     t.dc.acct.host,
+		MarketID: t.mktID,
+		Type:     order.CancelOrderType,
+		Stamp:    encode.UnixMilliU(time.Now()),
+		TargetID: t.ID().Bytes(), // the important part for the frontend
+	}
+	t.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
+
 	// Return coins if there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
 }

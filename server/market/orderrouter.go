@@ -690,9 +690,7 @@ func (r *OrderRouter) SuspendMarket(mktName string, asSoonAs time.Time, persistB
 	}
 }
 
-// Suspend is like SuspendMarket, but for all known markets. TODO: use this in a
-// "suspend all as soon as" DEX function with rather than shutting down in the
-// middle of an active epoch as SIGINT shutdown presently does.
+// Suspend is like SuspendMarket, but for all known markets.
 func (r *OrderRouter) Suspend(asSoonAs time.Time, persistBooks bool) map[string]*SuspendEpoch {
 
 	suspendTimes := make(map[string]*SuspendEpoch, len(r.tunnels))

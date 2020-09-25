@@ -151,6 +151,20 @@ func (cr *configResponse) setMktSuspend(name string, finalEpoch uint64, persist 
 	log.Errorf("Failed to set MarketStatus for market %q", name)
 }
 
+func (cr *configResponse) setMktResume(name string, startEpoch uint64) (epochLen uint64) {
+	for _, mkt := range cr.configMsg.Markets {
+		if mkt.Name == name {
+			// mkt.EpochLen = newEpochLen // TODO: reconfig
+			mkt.MarketStatus.StartEpoch = startEpoch
+			mkt.MarketStatus.FinalEpoch = 0
+			cr.remarshal()
+			return mkt.EpochLen
+		}
+	}
+	log.Errorf("Failed to set MarketStatus for market %q", name)
+	return 0
+}
+
 func (cr *configResponse) remarshal() {
 	encResult, err := json.Marshal(cr.configMsg)
 	if err != nil {
@@ -180,6 +194,10 @@ func (dm *DEX) Stop() {
 	if err := dm.storage.Close(); err != nil {
 		log.Errorf("DEXArchivist.Close: %v", err)
 	}
+}
+
+func marketSubSysName(name string) string {
+	return fmt.Sprintf("Market[%s]", name)
 }
 
 func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
@@ -433,7 +451,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
-		startSubSys(fmt.Sprintf("Market[%s]", name), mkt)
+		startSubSys(marketSubSysName(name), mkt)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
@@ -561,8 +579,71 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *m
 	return suspEpoch
 }
 
-// TODO: resume by relaunching the market subsystems (Run)
-// Resume / ResumeMarket
+func (dm *DEX) findSubsys(name string) int {
+	for i := range dm.stopWaiters {
+		if dm.stopWaiters[i].name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// ResumeMarket launches a stopped market subsystem as earlier as the given
+// time. The actual time the market will resume depends on the configure epoch
+// duration, as the market only starts at the beginning of an epoch.
+func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time) {
+	name = strings.ToLower(name)
+	mkt := dm.markets[name]
+	if mkt == nil {
+		return
+	}
+
+	// Get the next available start epoch given the earliers allowed time.
+	// Requires the market to be stopped already.
+	startEpoch = mkt.ResumeEpoch(asSoonAs)
+	if startEpoch == 0 {
+		return
+	}
+
+	// Locate the (stopped) subsystem for this market.
+	i := dm.findSubsys(marketSubSysName(name))
+	if i == -1 {
+		return
+	}
+
+	// Update config message with resume schedule.
+	dm.configRespMtx.Lock()
+	epochLen := dm.configResp.setMktResume(name, uint64(startEpoch))
+	dm.configRespMtx.Unlock()
+	if epochLen == 0 {
+		return // couldn't set the new start epoch
+	}
+
+	// Configure the start epoch with the Market.
+	startTimeMS := int64(epochLen) * startEpoch
+	startTime = encode.UnixTimeMilli(startTimeMS)
+	mkt.SetStartEpochIdx(startEpoch)
+
+	// Relaunch the market.
+	ssw := dex.NewStartStopWaiter(mkt)
+	dm.stopWaiters[i].StartStopWaiter = ssw
+	ssw.Start(context.Background())
+
+	// Broadcast a TradeResumption notification to all connected clients.
+	note, err := msgjson.NewNotification(msgjson.ResumptionRoute, msgjson.TradeResumption{
+		MarketID:   name,
+		ResumeTime: uint64(startTimeMS),
+		StartEpoch: uint64(startEpoch),
+		// EpochLen:   epochLen, // no change (reconfig TODO)
+	})
+	if err != nil {
+		log.Errorf("Failed to create resume notification: %v", err)
+	} else {
+		dm.server.Broadcast(note)
+	}
+
+	return
+}
 
 // Accounts returns data for all accounts.
 func (dm *DEX) Accounts() ([]*db.Account, error) {

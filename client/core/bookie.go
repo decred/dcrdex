@@ -9,8 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/db"
 	orderbook "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -394,6 +396,206 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	})
 	return nil
 }
+
+// marketConfig searches the stored ConfigResponse for the named market.
+func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
+	for _, mktConf := range dc.cfg.Markets {
+		if mktConf.Name == name {
+			return mktConf
+		}
+	}
+	return nil
+}
+
+// setMarketStartEpoch revises the StartEpoch field of he named market in the
+// stored ConfigResponse. It can also zeros the FinalEpoch and Persist, which
+// should only be done at start time.
+func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, clearFinal bool) {
+	dc.cfgMtx.Lock()
+	defer dc.cfgMtx.Unlock()
+	mkt := dc.marketConfig(name)
+	if mkt == nil {
+		return
+	}
+	mkt.StartEpoch = startEpoch
+	// NOTE: should only clear these if starting now.
+	if clearFinal {
+		mkt.FinalEpoch = 0
+		mkt.Persist = nil
+	}
+}
+
+// setMarketFinalEpoch revises the FinalEpoch and Persist fields of he named
+// market in the stored ConfigResponse.
+func (dc *dexConnection) setMarketFinalEpoch(name string, finalEpoch uint64, persist bool) {
+	dc.cfgMtx.Lock()
+	defer dc.cfgMtx.Unlock()
+	mkt := dc.marketConfig(name)
+	if mkt == nil {
+		return
+	}
+	mkt.FinalEpoch = finalEpoch
+	mkt.Persist = &persist
+}
+
+// handleTradeSuspensionMsg is called when a trade suspension notification is
+// received. This message may come in advance of suspension, in which case it
+// has a SuspendTime set, or at the time of suspension if subscribed to the
+// order book, in which case it has a Seq value set.
+func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var sp msgjson.TradeSuspension
+	err := msg.Unmarshal(&sp)
+	if err != nil {
+		return fmt.Errorf("trade suspension unmarshal error: %v", err)
+	}
+
+	// Ensure the provided market exists for the dex.
+	mkt := dc.market(sp.MarketID)
+	if mkt == nil {
+		return fmt.Errorf("no market found with ID %s", sp.MarketID)
+	}
+
+	// Update the data in the stored ConfigResponse.
+	dc.setMarketFinalEpoch(sp.MarketID, sp.FinalEpoch, sp.Persist)
+
+	// SuspendTime == 0 means suspending now.
+	if sp.SuspendTime != 0 {
+		// This is just a warning about a scheduled suspension.
+		suspendTime := encode.UnixTimeMilli(int64(sp.SuspendTime))
+		detail := fmt.Sprintf("Market %s is now scheduled for suspension at %v", sp.MarketID, suspendTime)
+		c.notify(newServerNotifyNote("market suspend scheduled", detail, db.WarningLevel))
+		return nil
+	}
+
+	detail := fmt.Sprintf("Market %s is now suspended", sp.MarketID)
+	c.notify(newServerNotifyNote("market suspended", detail, db.WarningLevel))
+
+	if sp.Persist {
+		// No book changes. Just wait for more order notes.
+		return nil
+	}
+
+	// Clear the book and unbook/revoke own orders.
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+
+	book, ok := dc.books[sp.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'", sp.MarketID)
+	}
+
+	err = book.Reset(&msgjson.OrderBook{
+		MarketID: sp.MarketID,
+		Seq:      sp.Seq,        // forces seq reset, but should be in seq with previous
+		Epoch:    sp.FinalEpoch, // unused?
+		// Orders is nil
+	})
+	// Return any non-nil error, but still revoke purged orders.
+
+	// Revoke all active orders of the suspended market for the dex.
+	updatedAssets := make(assetMap)
+	dc.tradeMtx.RLock()
+	for _, tracker := range dc.trades {
+		if tracker.Order.Base() == mkt.BaseID && tracker.Order.Quote() == mkt.QuoteID &&
+			tracker.metaData.Host == dc.acct.host {
+			// Locally revoke the purged order.
+			tracker.revoke()
+			updatedAssets.count(tracker.fromAssetID)
+		}
+	}
+	dc.tradeMtx.RUnlock()
+
+	// Clear the book.
+	book.send(&BookUpdate{
+		Action:   FreshBookAction,
+		Host:     dc.acct.host,
+		MarketID: sp.MarketID,
+		Payload: &MarketOrderBook{
+			Base:  mkt.BaseID,
+			Quote: mkt.QuoteID,
+			Book:  book.book(), // empty
+		},
+	})
+
+	dc.refreshMarkets()
+	c.updateBalances(updatedAssets)
+
+	return err
+}
+
+// handleTradeResumptionMsg is called when a trade resumption notification is
+// received. This may be an orderbook message at the time of resumption or a
+// general notification at any time prior to the market suspend.
+func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var rs msgjson.TradeResumption
+	err := msg.Unmarshal(&rs)
+	if err != nil {
+		return fmt.Errorf("trade resumption unmarshal error: %v", err)
+	}
+
+	// Ensure the provided market exists for the dex.
+	if dc.market(rs.MarketID) == nil {
+		return fmt.Errorf("no market found with ID %s", rs.MarketID)
+	}
+
+	// rs.ResumeTime == 0 means resume now.
+	if rs.ResumeTime != 0 {
+		// This is just a notice about a scheduled resumption.
+		dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, false) // set the start epoch, leaving any final/persist data
+		resTime := encode.UnixTimeMilli(int64(rs.ResumeTime))
+		detail := fmt.Sprintf("Market %s is now scheduled for resumption at %v", rs.MarketID, resTime)
+		c.notify(newServerNotifyNote("market resume scheduled", detail, db.WarningLevel))
+		return nil
+	}
+
+	// Update the market's status and mark the new epoch.
+	dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, true) // and clear the final/persist data
+	dc.epochMtx.Lock()
+	dc.epoch[rs.MarketID] = rs.StartEpoch
+	dc.epochMtx.Unlock()
+
+	// Server config change without restart is not implemented on the server,
+	// but it would involve either getting the config response or adding the
+	// entire market config to the TradeResumption payload.
+	//
+	// Fetch the updated DEX configuration.
+	// dc.fetchServerConfig()
+
+	detail := fmt.Sprintf("Market %s has resumed trading at epoch %d",
+		rs.MarketID, rs.StartEpoch)
+	c.notify(newServerNotifyNote("market resumed", detail, db.WarningLevel))
+
+	// Book notes may resume at any time. Seq not used since no book changes.
+
+	return nil
+}
+
+/*
+func (dc *dexConnection) fetchServerConfig() error {
+	// Fetch the updated DEX configuration.
+	cfg := new(msgjson.ConfigResult)
+	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
+	if err != nil {
+		dc.connMaster.Disconnect()
+		return fmt.Errorf("unable to fetch DEX server config: %w", err)
+	}
+
+	// Update the dex connection with the new config details, including
+	// StartEpoch and FinalEpoch, and rebuild the market data maps.
+	dc.cfgMtx.Lock()
+	defer dc.cfgMtx.Unlock()
+	dc.cfg = cfg
+
+	assets, markets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
+	if err != nil {
+		return fmt.Errorf("Inconsistent 'config' response: %v", err)
+	}
+
+	// Update dc.{marketMap,epoch,assets}...
+
+	return nil
+}
+*/
 
 // handleUnbookOrderMsg is called when an unbook_order notification is
 // received.

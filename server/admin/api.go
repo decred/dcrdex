@@ -85,13 +85,19 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var persist *bool
+	if status.SuspendEpoch != 0 {
+		persistLocal := status.PersistBook
+		persist = &persistLocal
+	}
 	mktStatus := &MarketStatus{
 		Name:          mkt,
 		Running:       status.Running,
 		EpochDuration: status.EpochDuration,
 		ActiveEpoch:   status.ActiveEpoch,
-		StartEpoch:    status.ActiveEpoch,
+		StartEpoch:    status.StartEpoch,
 		SuspendEpoch:  status.SuspendEpoch,
+		PersistBook:   persist,
 	}
 	if status.SuspendEpoch != 0 {
 		persist := status.PersistBook
@@ -100,7 +106,53 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, mktStatus)
 }
 
-// hander for route '/market/{marketName}/suspend?t=EPOCH-MS&persist=BOOL'
+// hander for route '/market/{marketName}/resume?t=UNIXMS'
+func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
+	// Ensure the market exists and is running.
+	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
+	found, running := s.core.MarketRunning(mkt)
+	if !found {
+		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
+		return
+	}
+	if running {
+		http.Error(w, fmt.Sprintf("market %q running", mkt), http.StatusBadRequest)
+		return
+	}
+
+	// Validate the resume time provided in the "t" query. If not specified,
+	// the zero time.Time is used to indicate ASAP.
+	var resTime time.Time
+	if tResumeStr := r.URL.Query().Get("t"); tResumeStr != "" {
+		resTimeMs, err := strconv.ParseInt(tResumeStr, 10, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid resume time %q: %v", tResumeStr, err), http.StatusBadRequest)
+			return
+		}
+
+		resTime = encode.UnixTimeMilli(resTimeMs)
+		if time.Until(resTime) < 0 {
+			http.Error(w, fmt.Sprintf("specified market resume time is in the past: %v", resTime),
+				http.StatusBadRequest)
+			return
+		}
+	}
+
+	resEpoch, resTime := s.core.ResumeMarket(mkt, resTime)
+	if resEpoch == 0 {
+		// Should not happen.
+		http.Error(w, "failed to resume market "+mkt, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, &ResumeResult{
+		Market:     mkt,
+		StartEpoch: resEpoch,
+		StartTime:  APITime{resTime},
+	})
+}
+
+// hander for route '/market/{marketName}/suspend?t=UNIXMS&persist=BOOL'
 func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 	// Ensure the market exists and is running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))

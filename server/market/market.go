@@ -272,7 +272,7 @@ ordersLoop:
 // as soon as possible, always allowing an active epoch to close. See also
 // Suspend.
 func (m *Market) SuspendASAP(persistBook bool) (finalEpochIdx int64, finalEpochEnd time.Time) {
-	return m.Suspend(time.Time{}, persistBook)
+	return m.Suspend(time.Now(), persistBook)
 }
 
 // Suspend requests the market to gracefully suspend epoch cycling as soon as
@@ -322,6 +322,35 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 	m.suspendEpochIdx = finalEpochIdx
 	m.persistBook = persistBook
 
+	return
+}
+
+// ResumeEpochNext gets the next available resume epoch index for the currently
+// configured epoch duration for the market.
+func (m *Market) ResumeEpochNext() (startEpochIdx int64) {
+	return m.ResumeEpoch(time.Now())
+}
+
+// ResumeEpoch gets the next available resume epoch index for the currently
+// configured epoch duration for the market and the provided earliest allowable
+// start time. The market must be running, otherwise the zero index is returned.
+func (m *Market) ResumeEpoch(asSoonAs time.Time) (startEpochIdx int64) {
+	// Only allow scheduling a resume if the market is not running.
+	if m.Running() {
+		return
+	}
+
+	dur := int64(m.EpochDuration())
+
+	now := encode.UnixMilli(time.Now())
+	nextEpochIdx := 1 + now/dur
+
+	ms := encode.UnixMilli(asSoonAs)
+	startEpochIdx = ms / dur
+
+	if startEpochIdx < nextEpochIdx {
+		startEpochIdx = nextEpochIdx
+	}
 	return
 }
 
@@ -629,11 +658,10 @@ func (m *Market) PurgeBook() {
 
 // Run is the main order processing loop, which takes new orders, notifies book
 // subscribers, and cycles the epochs. The caller should cancel the provided
-// Context to stop the market. When Run returns, all book order feeds obtained
-// via OrderFeed are closed and invalidated. Clients must request a new feed to
-// receive updates when and if the Market restarts.
+// Context to stop the market. The outgoing order feed channels persist after
+// Run returns for possible Market resume, and for Swapper's unbook callback to
+// function using sendToFeeds.
 func (m *Market) Run(ctx context.Context) {
-
 	var running bool
 	ctxRun, cancel := context.WithCancel(ctx)
 	var wgFeeds, wgEpochs sync.WaitGroup
@@ -675,15 +703,14 @@ func (m *Market) Run(ctx context.Context) {
 		close(notifyChan)
 		wgFeeds.Wait()
 
-		// Retain the outgoing order feed channels, which are the links to the
-		// book router and any other consumers, for possible Market resume, and
-		// for Swapper's unbook callback to function using sendToFeeds.
-
 		// persistBook is set under epochMtx lock.
 		m.epochMtx.RLock()
-		if !m.persistBook {
-			m.PurgeBook()
+		// Suspend, not interrupt, will have cleared activeEpochIdx.
+		if !m.persistBook && m.activeEpochIdx == 0 {
+			m.PurgeBook() // only if suspend message sent via book router
 		}
+		m.persistBook = true // future resume default
+		m.activeEpochIdx = 0
 		m.epochMtx.RUnlock()
 
 		log.Infof("Market %q stopped.", m.marketInfo.Name)
@@ -757,8 +784,6 @@ func (m *Market) Run(ctx context.Context) {
 		// Check suspendEpochIdx and suspend if the just-closed epoch idx is the
 		// suspend epoch.
 		if m.suspendEpochIdx == nextEpoch.Epoch-1 {
-			epochCloseTime := encode.UnixMilli(currentEpoch.End)
-
 			// Reject incoming orders.
 			currentEpoch = nil
 			m.activeEpochIdx = 0
@@ -768,7 +793,6 @@ func (m *Market) Run(ctx context.Context) {
 				action: suspendAction,
 				data: sigDataSuspend{
 					finalEpoch:  m.suspendEpochIdx,
-					stopTime:    epochCloseTime,
 					persistBook: m.persistBook,
 				},
 			}
@@ -787,6 +811,16 @@ func (m *Market) Run(ctx context.Context) {
 			running = true
 			log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
 				currentEpoch.Epoch, epochDuration)
+			// Signal to the book router if this is a resume.
+			if m.suspendEpochIdx != 0 {
+				notifyChan <- &updateSignal{
+					action: resumeAction,
+					data: sigDataResume{
+						epochIdx: currentEpoch.Epoch,
+						epochLen: epochDuration,
+					},
+				}
+			}
 		}
 
 		// Replace the next epoch and set the cycle Timer.

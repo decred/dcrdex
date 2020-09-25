@@ -7,9 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/dex/encode"
 )
 
 // Error codes
@@ -807,8 +809,9 @@ type MatchProofNote struct {
 // the orderbook subscription.
 type TradeSuspension struct {
 	MarketID    string `json:"marketid"`
+	Seq         uint64 `json:"seq,omitempty"`         // only set at suspend time and if Persist==false
+	SuspendTime uint64 `json:"suspendtime,omitempty"` // only set in advance of suspend
 	FinalEpoch  uint64 `json:"finalepoch"`
-	SuspendTime uint64 `json:"suspendtime"`
 	Persist     bool   `json:"persistbook"`
 }
 
@@ -817,8 +820,9 @@ type TradeSuspension struct {
 // change, and the client should also hit the 'config' route for full details.
 type TradeResumption struct {
 	MarketID   string `json:"marketid"`
+	ResumeTime uint64 `json:"resumetime,omitempty"` // only set in advance of resume
 	StartEpoch uint64 `json:"startepoch"`
-	EpochLen   uint64 `json:"epochlen,omitempty"` // maybe just ConfigChange bool `json:"configchange"`
+	// EpochLen   uint64 `json:"epochlen,omitempty"` // maybe just ConfigChange bool `json:"configchange"`
 }
 
 // PreimageRequest is the server-originating preimage request payload.
@@ -969,6 +973,16 @@ type Market struct {
 	EpochLen        uint64  `json:"epochlen"`
 	MarketBuyBuffer float64 `json:"buybuffer"`
 	MarketStatus    `json:"status"`
+}
+
+// Running indicates if the market should be running given the known StartEpoch,
+// EpochLen, and FinalEpoch (if set).
+func (m *Market) Running() bool {
+	dur := m.EpochLen
+	now := encode.UnixMilliU(time.Now())
+	start := m.StartEpoch * dur
+	end := m.FinalEpoch * dur
+	return now >= start && (now < end || end < start) // end < start detects obsolete end
 }
 
 // Asset describes an asset and its variables, and is returned as part of a

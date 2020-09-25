@@ -33,6 +33,13 @@ type SuspendResult struct {
 	SuspendTime APITime `json:"supendtime"`
 }
 
+// ResumeResult is the result of a market resume request.
+type ResumeResult struct {
+	Market     string  `json:"market"`
+	StartEpoch int64   `json:"startepoch"`
+	StartTime  APITime `json:"starttime"`
+}
+
 // RFC3339Milli is the RFC3339 time formatting with millisecond precision.
 const RFC3339Milli = "2006-01-02T15:04:05.999Z07:00"
 

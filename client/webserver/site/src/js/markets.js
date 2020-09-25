@@ -815,8 +815,8 @@ export default class MarketsPage extends BasePage {
         Doc.hide(status)
         status.textContent = 'canceled'
       } else if (note.subject === 'revoke') {
+        Doc.hide(status)
         status.textContent = 'revoked'
-        Doc.show(status)
       }
       return
     }
