@@ -428,8 +428,8 @@ func (ob *OrderBook) Orders() ([]*Order, []*Order, []*Order) {
 	return ob.buys.orders(), ob.sells.orders(), ob.epochQueue.Orders()
 }
 
-// BestFIll returns the best fill for a quantity from the provided side.
-func (ob *OrderBook) BestFill(qty uint64, side uint8) ([]*fill, error) {
+// bestFill returns the best fill for a quantity from the provided side.
+func (ob *OrderBook) bestFill(qty uint64, side uint8) ([]*fill, error) {
 	if !ob.isSynced() {
 		return nil, fmt.Errorf("order book is unsynced")
 	}

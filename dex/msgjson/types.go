@@ -816,13 +816,12 @@ type TradeSuspension struct {
 }
 
 // TradeResumption is the ResumptionRoute notification payload. It is part of
-// the orderbook subscription. EpochLen is specified if the market configuration
-// change, and the client should also hit the 'config' route for full details.
+// the orderbook subscription.
 type TradeResumption struct {
 	MarketID   string `json:"marketid"`
 	ResumeTime uint64 `json:"resumetime,omitempty"` // only set in advance of resume
 	StartEpoch uint64 `json:"startepoch"`
-	// EpochLen   uint64 `json:"epochlen,omitempty"` // maybe just ConfigChange bool `json:"configchange"`
+	// TODO: ConfigChange bool or entire Config Market here.
 }
 
 // PreimageRequest is the server-originating preimage request payload.

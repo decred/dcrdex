@@ -817,7 +817,7 @@ func (m *Market) Run(ctx context.Context) {
 					action: resumeAction,
 					data: sigDataResume{
 						epochIdx: currentEpoch.Epoch,
-						epochLen: epochDuration,
+						// TODO: signal config or new config
 					},
 				}
 			}

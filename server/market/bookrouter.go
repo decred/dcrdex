@@ -105,7 +105,7 @@ type sigDataSuspend struct {
 
 type sigDataResume struct {
 	epochIdx int64
-	epochLen int64
+	// TODO: indicate config change if applicable
 }
 
 type sigDataMatchProof struct {
@@ -429,7 +429,6 @@ out:
 					MarketID: book.name,
 					// ResumeTime of 0 means now.
 					StartEpoch: uint64(sigData.epochIdx),
-					// EpochLen:   uint64(sigData.epochLen), // config change is TODO
 				} // no Seq for the resume since it doesn't modify the book
 
 				log.Infof("Market %q resumed at epoch %d", book.name, sigData.epochIdx)

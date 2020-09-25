@@ -148,20 +148,19 @@ func (cr *configResponse) setMktSuspend(name string, finalEpoch uint64, persist 
 			return
 		}
 	}
-	log.Errorf("Failed to set MarketStatus for market %q", name)
+	log.Errorf("Failed to update MarketStatus for market %q", name)
 }
 
 func (cr *configResponse) setMktResume(name string, startEpoch uint64) (epochLen uint64) {
 	for _, mkt := range cr.configMsg.Markets {
 		if mkt.Name == name {
-			// mkt.EpochLen = newEpochLen // TODO: reconfig
 			mkt.MarketStatus.StartEpoch = startEpoch
 			mkt.MarketStatus.FinalEpoch = 0
 			cr.remarshal()
 			return mkt.EpochLen
 		}
 	}
-	log.Errorf("Failed to set MarketStatus for market %q", name)
+	log.Errorf("Failed to update MarketStatus for market %q", name)
 	return 0
 }
 
@@ -634,7 +633,6 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 		MarketID:   name,
 		ResumeTime: uint64(startTimeMS),
 		StartEpoch: uint64(startEpoch),
-		// EpochLen:   epochLen, // no change (reconfig TODO)
 	})
 	if err != nil {
 		log.Errorf("Failed to create resume notification: %v", err)
