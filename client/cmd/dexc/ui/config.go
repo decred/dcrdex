@@ -39,7 +39,7 @@ var (
 func setNet(applicationDirectory, net string) string {
 	netDirectory = filepath.Join(applicationDirectory, net)
 	logDirectory = filepath.Join(netDirectory, "logs")
-	logFilename = filepath.Join(logDirectory, "dex.log")
+	logFilename = filepath.Join(logDirectory, "dexc.log")
 	err := os.MkdirAll(netDirectory, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create net directory: %v\n", err)
