@@ -482,9 +482,9 @@ type OrderStatusRequest struct {
 
 // OrderStatus describes an order, its status and fill.
 type OrderStatus struct {
-	OrderID Bytes  `json:"orderid"`
-	Status  uint16 `json:"status"`
-	Fill    uint64 `json:"fill"`
+	ID     Bytes  `json:"id"`
+	Status uint16 `json:"status"`
+	Fill   uint64 `json:"fill"`
 }
 
 // Init is the payload for a client-originating InitRoute request.

@@ -614,7 +614,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 	srvActiveOrderStatuses := make(map[order.OrderID]*msgjson.OrderStatus, len(srvOrderStatuses))
 	for _, srvOrderStatus := range srvOrderStatuses {
 		var oid order.OrderID
-		copy(oid[:], srvOrderStatus.OrderID)
+		copy(oid[:], srvOrderStatus.ID)
 		if _, tracked := dc.trades[oid]; tracked {
 			srvActiveOrderStatuses[oid] = srvOrderStatus
 		} else {
@@ -712,7 +712,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		// Update the orders with the statuses received.
 		for _, srvOrderStatus := range orderStatusResults {
 			var oid order.OrderID
-			copy(oid[:], srvOrderStatus.OrderID)
+			copy(oid[:], srvOrderStatus.ID)
 			trade := knownActiveTrades[oid] // no need to lock dc.tradeMtx
 			trade.mtx.Lock()
 			updateOrder(trade, srvOrderStatus)
@@ -2624,7 +2624,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	// Compare the server-returned active orders with tracked trades, updating
 	// the trade statuses where necessary. This is done after processing the
-	// connect resp matches so that where possible, avialable match data can be
+	// connect resp matches so that where possible, available match data can be
 	// used to properly set order statuses and filled amount.
 	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
 	if unknownOrdersCount > 0 {

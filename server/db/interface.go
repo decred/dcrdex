@@ -54,9 +54,9 @@ type EpochResults struct {
 
 // OrderStatus is the current status of an order, including its fill.
 type OrderStatus struct {
-	OrderID order.OrderID
-	Status  order.OrderStatus
-	Fill    uint64
+	ID     order.OrderID
+	Status order.OrderStatus
+	Fill   uint64
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with

@@ -423,6 +423,13 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	// Expected order statuses before and after client 2 goes AWOL.
 	c2OrdersBefore := make(map[order.OrderID]order.OrderStatus)
 	c2OrdersAfter := make(map[order.OrderID]order.OrderStatus)
+	var statusMtx sync.Mutex
+	recordBeforeAfterStatuses := func(oid order.OrderID, beforeStatus, afterStatus order.OrderStatus) {
+		statusMtx.Lock()
+		defer statusMtx.Unlock()
+		c2OrdersBefore[oid] = beforeStatus
+		c2OrdersAfter[oid] = afterStatus
+	}
 
 	// Order 1:
 	// - Standing order, preimage not revealed, "missed" revoke_order note.
@@ -443,8 +450,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		// Foil preimage reveal by "forgetting" this order.
 		// Also prevents processing revoke_order notes for this order.
 		forgetClient2Order(oid)
-		c2OrdersBefore[oid] = order.OrderStatusEpoch
-		c2OrdersAfter[oid] = order.OrderStatusRevoked
+		recordBeforeAfterStatuses(oid, order.OrderStatusEpoch, order.OrderStatusRevoked)
 		return nil
 	})
 
@@ -482,8 +488,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		if !preimageRevealed {
 			return fmt.Errorf("preimage not revealed for order %s after %s", tracker.token(), twoEpochs)
 		}
-		c2OrdersBefore[oid] = order.OrderStatusEpoch
-		c2OrdersAfter[oid] = order.OrderStatusExecuted
+		recordBeforeAfterStatuses(oid, order.OrderStatusEpoch, order.OrderStatusExecuted)
 		return nil
 	})
 
@@ -560,9 +565,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		}
 		// Match will get revoked after lastEvent+bTimeout.
 		forgetClient2Order(oid) // ensure revoke_match request is "missed"
-
-		c2OrdersBefore[oid] = order.OrderStatusBooked
-		c2OrdersAfter[oid] = order.OrderStatusRevoked
+		recordBeforeAfterStatuses(oid, order.OrderStatusEpoch, order.OrderStatusRevoked)
 		return nil
 	})
 

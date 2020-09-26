@@ -538,7 +538,8 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 // if their preimages was not sent. We cannot currently tell whether the cancel
 // order's preimage was revealed, so assume that the cancel order is Executed
 // but unmatched. Consider adding a order.PreimageRevealed field to ensure that
-// the correct final status is set for the cancel order.
+// the correct final status is set for the cancel order; or allow the server to
+// check and return status of cancel orders.
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
 func (t *trackedTrade) deleteStaleCancelOrder() {

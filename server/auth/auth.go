@@ -599,7 +599,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	// Get the list of active orders for this user.
 	activeOrderStatuses, err := auth.storage.AllActiveUserOrderStatuses(user)
 	if err != nil {
-		log.Errorf("AllActiveUserOrderStatuses(%x): %v", user, err)
+		log.Errorf("AllActiveUserOrderStatuses(%v): %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
@@ -609,16 +609,16 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	msgOrderStatuses := make([]*msgjson.OrderStatus, 0, len(activeOrderStatuses))
 	for _, orderStatus := range activeOrderStatuses {
 		msgOrderStatuses = append(msgOrderStatuses, &msgjson.OrderStatus{
-			OrderID: orderStatus.OrderID.Bytes(),
-			Status:  uint16(orderStatus.Status),
-			Fill:    orderStatus.Fill,
+			ID:     orderStatus.ID.Bytes(),
+			Status: uint16(orderStatus.Status),
+			Fill:   orderStatus.Fill,
 		})
 	}
 
 	// Get the list of active matches for this user.
 	matches, err := auth.storage.AllActiveUserMatches(user)
 	if err != nil {
-		log.Errorf("AllActiveUserMatches(%x): %v", user, err)
+		log.Errorf("AllActiveUserMatches(%v): %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
@@ -943,9 +943,9 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 		}
 		for _, orderStatus := range orderStatuses {
 			results = append(results, &msgjson.OrderStatus{
-				OrderID: orderStatus.OrderID.Bytes(),
-				Status:  uint16(orderStatus.Status),
-				Fill:    orderStatus.Fill,
+				ID:     orderStatus.ID.Bytes(),
+				Status: uint16(orderStatus.Status),
+				Fill:   orderStatus.Fill,
 			})
 		}
 	}

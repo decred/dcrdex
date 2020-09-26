@@ -988,7 +988,7 @@ func (a *Archiver) UserOrderStatuses(aid account.AccountID, base, quote uint32, 
 
 	foundOrders := make(map[order.OrderID]bool, len(activeOrderStatuses))
 	for _, status := range activeOrderStatuses {
-		foundOrders[status.OrderID] = true
+		foundOrders[status.ID] = true
 	}
 	var remainingOids []order.OrderID
 	for _, oid := range oids {
@@ -1059,9 +1059,9 @@ func (a *Archiver) userOrderStatusesFromTable(fullTable string, aid account.Acco
 			return nil, err
 		}
 		statuses = append(statuses, &db.OrderStatus{
-			OrderID: oid,
-			Status:  pgToMarketStatus(status),
-			Fill:    filled,
+			ID:     oid,
+			Status: pgToMarketStatus(status),
+			Fill:   filled,
 		})
 	}
 

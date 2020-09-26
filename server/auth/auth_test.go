@@ -443,9 +443,9 @@ func TestConnect(t *testing.T) {
 
 	rig.storage.orderStatuses = []*db.OrderStatus{
 		{
-			OrderID: userMatch.OrderID,
-			Status:  order.OrderStatusBooked,
-			Fill:    matchData.Quantity / 2,
+			ID:     userMatch.OrderID,
+			Status: order.OrderStatusBooked,
+			Fill:   matchData.Quantity / 2,
 		},
 	}
 	defer func() { rig.storage.orderStatuses = nil }()
@@ -527,8 +527,8 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("no active orders")
 	}
 	msgOrder := cResp.ActiveOrderStatuses[0]
-	if msgOrder.OrderID.String() != userMatch.OrderID.String() {
-		t.Fatal("active order ID mismatch: ", msgOrder.OrderID.String(), " != ", userMatch.OrderID.String())
+	if msgOrder.ID.String() != userMatch.OrderID.String() {
+		t.Fatal("active order ID mismatch: ", msgOrder.ID.String(), " != ", userMatch.OrderID.String())
 	}
 	if msgOrder.Status != uint16(order.OrderStatusBooked) {
 		t.Fatal("active order Status mismatch: ", msgOrder.Status, " != ", order.OrderStatusBooked)

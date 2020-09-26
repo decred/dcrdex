@@ -1360,7 +1360,7 @@ func TestUserOrderStatuses(t *testing.T) {
 	}
 	outMap := make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
 	for _, orderStatus := range orderStatusesOut {
-		outMap[orderStatus.OrderID] = orderStatus
+		outMap[orderStatus.ID] = orderStatus
 	}
 	for i := range orderStatuses {
 		ordIn := orderStatuses[i].ord
@@ -1389,7 +1389,7 @@ func TestUserOrderStatuses(t *testing.T) {
 	}
 	outMap = make(map[order.OrderID]*db.OrderStatus, len(orderStatusesOut))
 	for _, orderStatus := range orderStatusesOut {
-		outMap[orderStatus.OrderID] = orderStatus
+		outMap[orderStatus.ID] = orderStatus
 	}
 	for i := range orderStatuses {
 		ordIn := orderStatuses[i].ord
@@ -1522,14 +1522,14 @@ func TestAllActiveUserOrderStatuses(t *testing.T) {
 				t.Errorf("Retrieved %d active orders for user %v, expected %d.", len(orderStatuses), tt.acctID, tt.numExpected)
 			}
 			for _, ord := range orderStatuses {
-				wantId := idInSlice(ord.OrderID, tt.wantOrderIDs)
+				wantId := idInSlice(ord.ID, tt.wantOrderIDs)
 				if wantId == -1 {
-					t.Errorf("Unexpected order ID %v retrieved.", ord.OrderID)
+					t.Errorf("Unexpected order ID %v retrieved.", ord.ID)
 					continue
 				}
 				if ord.Status != tt.wantOrderStatuses[wantId] {
 					t.Errorf("Incorrect order status for order %v. Got %d, want %d.",
-						ord.OrderID, ord.Status, tt.wantOrderStatuses[wantId])
+						ord.ID, ord.Status, tt.wantOrderStatuses[wantId])
 				}
 			}
 		})
