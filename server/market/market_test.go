@@ -72,7 +72,7 @@ func (ta *TArchivist) UserOrders(ctx context.Context, aid account.AccountID, bas
 func (ta *TArchivist) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
 	return nil, errors.New("boom")
 }
-func (ta *TArchivist) AllActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+func (ta *TArchivist) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
 	return nil, errors.New("boom")
 }
 func (ta *TArchivist) OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error) {

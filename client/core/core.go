@@ -645,7 +645,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
 		} else {
-			log.Debugf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+			log.Warnf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
 				oid, previousStatus, newStatus, dc.acct.host)
 		}
 	}
@@ -669,6 +669,11 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		}
 
 		trade.mtx.Lock()
+
+		// Server reports this order as active. Delete any associated cancel
+		// order if the cancel order's epoch has passed.
+		trade.deleteStaleCancelOrder()
+
 		serverStatus := order.OrderStatus(srvOrderStatus.Status)
 		if trade.metaData.Status == serverStatus {
 			log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
@@ -687,9 +692,6 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
 
-		// Server reports this order as active. Delete any associated cancel
-		// order if the cancel order's epoch has passed.
-		trade.deleteStaleCancelOrder()
 		trade.mtx.Unlock()
 	}
 

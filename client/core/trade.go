@@ -528,10 +528,9 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 }
 
 // deleteStaleCancelOrder checks if this trade has an associated cancel order,
-// and deletes the cancel order if it (i.e. the cancel order) stays at Epoch
-// status for 2 or more epochs after the close of the cancel order's epoch.
-// Deleting the stale cancel order from this trade makes it possible for the
-// client to re-attempt cancelling the order.
+// and deletes the cancel order if the cancel order stays at Epoch status for
+// more than 2 epochs. Deleting the stale cancel order from this trade makes
+// it possible for the client to re- attempt cancelling the order.
 //
 // NOTE:
 // Stale cancel orders would be Executed if their preimage was sent or Revoked
@@ -567,7 +566,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	t.cancel = nil
 	t.metaData.LinkedOrder = order.OrderID{}
 
-	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 15+ minutes and is now deleted.", t.token())
+	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
 	corder, _ := t.coreOrderInternal()
 	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, corder))
 }

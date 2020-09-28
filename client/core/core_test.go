@@ -2890,15 +2890,6 @@ func TestReconcileTrades(t *testing.T) {
 		}
 		dc.tradeMtx.Unlock()
 
-		if pendingCancel != nil {
-			// Canceling the order again should fail.
-			rig.queueCancel(nil)
-			err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
-			if err == nil {
-				t.Fatalf("no error for duplicate order cancellation")
-			}
-		}
-
 		// Queue order_status response if required for reconciliation.
 		if len(tt.orderStatusRes) > 0 {
 			rig.ws.queueResponse(msgjson.OrderStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -2942,6 +2933,7 @@ func TestReconcileTrades(t *testing.T) {
 					t.Fatalf("%s: expected stale cancel order to be deleted for now-booked order", tt.name)
 				}
 				// Cancel order deleted. Canceling the order again should succeed.
+				rig.queueCancel(nil)
 				err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
 				if err != nil {
 					t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)

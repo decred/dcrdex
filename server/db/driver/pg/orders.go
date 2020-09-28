@@ -1010,9 +1010,9 @@ func (a *Archiver) UserOrderStatuses(aid account.AccountID, base, quote uint32, 
 	return append(activeOrderStatuses, archivedOrderStatuses...), nil
 }
 
-// AllActiveUserOrderStatuses retrieves the statuses and filled amounts of all
+// ActiveUserOrderStatuses retrieves the statuses and filled amounts of all
 // active orders for a user across all markets.
-func (a *Archiver) AllActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+func (a *Archiver) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
 	var orders []*db.OrderStatus
 	for m := range a.markets {
 		tableName := fullOrderTableName(a.dbName, m, true) // active table

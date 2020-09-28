@@ -22,7 +22,11 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-const cancelThreshWindow = 100 // spec
+const (
+	cancelThreshWindow = 100 // spec
+
+	maxIDsPerOrderStatusRequest = 10_000
+)
 
 var (
 	ErrUserNotConnected = dex.ErrorKind("user not connected")
@@ -42,7 +46,7 @@ type Storage interface {
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
-	AllActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
+	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
@@ -597,9 +601,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Get the list of active orders for this user.
-	activeOrderStatuses, err := auth.storage.AllActiveUserOrderStatuses(user)
+	activeOrderStatuses, err := auth.storage.ActiveUserOrderStatuses(user)
 	if err != nil {
-		log.Errorf("AllActiveUserOrderStatuses(%v): %v", user, err)
+		log.Errorf("ActiveUserOrderStatuses(%v): %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
@@ -904,6 +908,13 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 	err := json.Unmarshal(msg.Payload, &orderReqs)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status: %v", err)
+	}
+	if len(orderReqs) == 0 {
+		return msgjson.NewError(msgjson.InvalidRequestError, "no order id provided")
+	}
+	if len(orderReqs) > maxIDsPerOrderStatusRequest {
+		return msgjson.NewError(msgjson.InvalidRequestError, "cannot request statuses for more than %v orders",
+			maxIDsPerOrderStatusRequest)
 	}
 
 	mkts := make(map[string]*marketOrders)

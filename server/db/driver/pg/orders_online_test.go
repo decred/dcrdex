@@ -1417,7 +1417,7 @@ func TestUserOrderStatuses(t *testing.T) {
 		t.Fatalf("OrderStatuses returned %d orders for wrong account ID", len(orderStatusesOut))
 	}
 }
-func TestAllActiveUserOrderStatuses(t *testing.T) {
+func TestActiveUserOrderStatuses(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
 	}
@@ -1514,7 +1514,7 @@ func TestAllActiveUserOrderStatuses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orderStatuses, err := archie.AllActiveUserOrderStatuses(tt.acctID)
+			orderStatuses, err := archie.ActiveUserOrderStatuses(tt.acctID)
 			if err != tt.wantedErr {
 				t.Fatal(err)
 			}

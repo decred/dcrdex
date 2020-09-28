@@ -71,7 +71,7 @@ func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 func (s *TStorage) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
 	return s.orderStatuses, nil
 }
-func (s *TStorage) AllActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+func (s *TStorage) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
 	var activeOrderStatuses []*db.OrderStatus
 	for _, orderStatus := range s.orderStatuses {
 		if orderStatus.Status == order.OrderStatusEpoch || orderStatus.Status == order.OrderStatusBooked {

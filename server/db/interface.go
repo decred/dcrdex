@@ -118,9 +118,9 @@ type OrderArchiver interface {
 	// given account in the specified market.
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*OrderStatus, error)
 
-	// AllActiveUserOrderStatuses retrieves the statuses and filled amounts of
-	// all active orders for a user across all markets.
-	AllActiveUserOrderStatuses(aid account.AccountID) ([]*OrderStatus, error)
+	// ActiveUserOrderStatuses retrieves the statuses and filled amounts of all
+	// active orders for a user across all markets.
+	ActiveUserOrderStatuses(aid account.AccountID) ([]*OrderStatus, error)
 
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.
