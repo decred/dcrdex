@@ -864,7 +864,7 @@ func bufferedTicker(ctx context.Context, dur time.Duration) chan struct{} {
 	return buffered
 }
 
-func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) {
+func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) (final bool) {
 	status.mtx.Lock()
 	defer status.mtx.Unlock()
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
@@ -882,7 +882,9 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) {
 		log.Debugf("Swap %v (%s) has reached %d confirmations (%d required)",
 			status.swap, dex.BipIDSymbol(status.swapAsset), confs, swapConf)
 		status.swapConfirmed = confTime.UTC()
+		final = true
 	}
+	return
 }
 
 // processBlock scans the matches and updates match status based on number of
@@ -892,123 +894,46 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) {
 // not evaluated here, but in (Swapper).checkInaction. This method simply sets
 // the appropriate flags in the swapStatus structures.
 func (s *Swapper) processBlock(block *blockNotification) {
-	var completions []*matchTracker
-	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
-	for _, match := range s.matches {
+	checkMatch := func(match *matchTracker) {
 		// If it's neither of the match assets, nothing to do.
-		if match.makerStatus.swapAsset != block.assetID && match.takerStatus.swapAsset != block.assetID {
-			continue
+		if match.makerStatus.swapAsset != block.assetID &&
+			match.takerStatus.swapAsset != block.assetID {
+			return
 		}
 
 		// Lock the matchTracker so the following checks and updates are atomic
 		// with respect to Status.
 		match.mtx.RLock()
+		defer match.mtx.RUnlock()
 
-	statusSwitch:
 		switch match.Status {
-		case order.NewlyMatched:
 		case order.MakerSwapCast:
 			if match.makerStatus.swapAsset != block.assetID {
-				break statusSwitch
+				break
 			}
 			// If the maker has broadcast their transaction, the taker's broadcast
 			// timeout starts once the maker's swap has SwapConf confs.
-			s.tryConfirmSwap(match.makerStatus, block.time)
+			if s.tryConfirmSwap(match.makerStatus, block.time) {
+				s.unlockOrderCoins(match.Maker)
+			}
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != block.assetID {
-				break statusSwitch
+				break
 			}
 			// If the taker has broadcast their transaction, the maker's broadcast
 			// timeout (for redemption) starts once the maker's swap has SwapConf
 			// confs.
-			s.tryConfirmSwap(match.takerStatus, block.time)
-		case order.MakerRedeemed:
-			// It's the taker's turn to redeem. Nothing to do here.
-			break statusSwitch
-		case order.MatchComplete:
-			// Once both redemption transactions have SwapConf confirmations, the
-			// order is complete.
-			makerRedeemed, takerRedeemed := s.RedeemStatus(match.makerStatus, match.takerStatus)
-			// TODO: Can coins be unlocked now regardless of redemption?
-			if makerRedeemed && takerRedeemed {
-				completions = append(completions, match)
-				// Note that although match status is now "complete", the swap
-				// may still be active until both counterparties acknowledge the
-				// redemptions. Conversely, the match may already be inactive
-				// before the status is complete if the parties have
-				// acknowledged the redeem txns before they hit their
-				// confirmation requirements, which triggers this status change.
+			if s.tryConfirmSwap(match.takerStatus, block.time) {
+				s.unlockOrderCoins(match.Taker)
 			}
 		}
-
-		match.mtx.RUnlock()
 	}
 
-	for _, match := range completions {
-		// Note that orders are not considered completed for the purposes of
-		// cancellation rate until the user sends their redeem ack.
-
-		s.unlockOrderCoins(match.Taker)
-		s.unlockOrderCoins(match.Maker)
-		// Remove the completed match. Note that checkInaction may also remove
-		// matches, so this entire function must lock even if there are no
-		// completions.
-		log.Debugf("Deleting completed match %v", match.ID())
-		delete(s.matches, match.ID())
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
+	for _, match := range s.matches {
+		checkMatch(match)
 	}
-}
-
-// RedeemStatus checks maker and taker redemption completion status.
-func (s *Swapper) RedeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
-	mStatus.mtx.RLock()
-	defer mStatus.mtx.RUnlock()
-	tStatus.mtx.RLock()
-	defer tStatus.mtx.RUnlock()
-
-	return s.redeemStatus(mStatus, tStatus)
-}
-
-// redeemStatus is not thread-safe with respect to the swapStatuses. The caller
-// must lock each swapStatus to guard concurrent status access.
-func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
-	makerRedeemComplete = s.makerRedeemStatus(mStatus, tStatus.swapAsset)
-	// Taker is only complete if the maker is complete because
-	// order.MatchComplete follows order.MakerRedeemed.
-	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
-		confs, err := tStatus.redemption.Confirmations()
-		if err != nil {
-			log.Errorf("Confirmations failed for taker redemption %v: %v",
-				tStatus.redemption.TxID(), err)
-			return
-		}
-		takerRedeemComplete = confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
-	}
-	return
-}
-
-// MakerRedeemStatus checks maker redemption completion status The taker asset
-// is required to check the confirmation requirement.
-func (s *Swapper) MakerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
-	mStatus.mtx.RLock()
-	defer mStatus.mtx.RUnlock()
-
-	return s.makerRedeemStatus(mStatus, tAsset)
-}
-
-// makerRedeemStatus is not thread-safe with respect to the swapStatus. The
-// caller must lock the swapStatus to guard concurrent status access.
-func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
-	if !mStatus.redeemTime.IsZero() {
-		confs, err := mStatus.redemption.Confirmations()
-		if err != nil {
-			log.Errorf("Confirmations failed for maker redemption %v: %v",
-				mStatus.redemption.TxID(), err) // Severity?
-			return
-		}
-		makerRedeemComplete = confs >= int64(s.coins[tAsset].SwapConf)
-	}
-	return
 }
 
 func (s *Swapper) failMatch(match *matchTracker) {
@@ -1399,10 +1324,6 @@ type messageAcker struct {
 // (order.Match).Sigs record. This is required by processInit, processRedeem,
 // and revoke. Match Acknowledgements are handled by processMatchAck.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
-	// The time that the ack is received is stored for redeem acks to facilitate
-	// cancellation rate enforcement.
-	tAck := time.Now()
-
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
 	if err != nil {
@@ -1431,7 +1352,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
 		log.Infof("Received revoke_match ack for match %v, order %v, user %v",
 			rev.MatchID, rev.OrderID, acker.user)
-		// TODO: do something in the DB for this??
+		// TODO: eliminate this ack, along with the others
 		return // drop the revoke ack sig for now
 	}
 
@@ -1454,52 +1375,12 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	log.Debugf("Received 'redemption' acknowledgement from user %v (%s) for match %v (%s)",
 		acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
 
-	// TODO: Don't record it if the match is revoked.
-
 	// This is a redemption acknowledgement. Store the ack signature, and
 	// potentially record the order as complete with the auth manager and in
 	// persistent storage.
-	tAckMS := encode.UnixMilli(tAck)
-	if acker.isMaker {
-		// A maker order is complete if it has force immediate or no
-		// remaining amount, indicating it is off the books.
-		lo := acker.match.Maker
-		if s.orders.swapSuccess(lo) {
-			s.authMgr.RecordCompletedOrder(acker.user, lo.ID(), tAck)
-			if err = s.storage.SetOrderCompleteTime(lo, tAckMS); err != nil {
-				if db.IsErrGeneralFailure(err) {
-					log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", lo, err)
-					s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
-					return
-				}
-				log.Warnf("SetOrderCompleteTime for %v: %v", lo, err)
-			}
-		}
 
-		acker.match.Sigs.MakerRedeem = ack.Sig
-		if err = s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig); err != nil {
-			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
-			log.Errorf("SaveRedeemAckSigA failed for match %v: %v", mktMatch.String(), err)
-			return
-		}
-
-	} else {
-		// A taker order is complete if it is one of: (1) a market order,
-		// which does not go on the books, (2) limit with force immediate,
-		// or (3) limit with no remaining amount.
-		ord := acker.match.Taker
-		if s.orders.swapSuccess(ord) {
-			s.authMgr.RecordCompletedOrder(acker.user, ord.ID(), tAck)
-			if err = s.storage.SetOrderCompleteTime(ord, tAckMS); err != nil {
-				if db.IsErrGeneralFailure(err) {
-					log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord.UID(), err)
-					s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
-					return
-				}
-				log.Warnf("SetOrderCompleteTime for %v: %v", ord.UID(), err)
-			}
-		}
-
+	// Record the taker's redeem ack sig. There isn't one for maker.
+	if !acker.isMaker {
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
 			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
@@ -1507,7 +1388,6 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			return
 		}
 	}
-
 }
 
 // processInit processes the `init` RPC request, which is used to inform the DEX
@@ -1709,6 +1589,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		return wait.DontTryAgain
 	}
 
+	newStatus := stepInfo.nextStep
+
 	// NOTE: redemption.FeeRate is not checked since the counter party is not
 	// inconvenienced by slow confirmation of the redemption.
 
@@ -1730,7 +1612,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	actor.status.mtx.Unlock()
 
 	match.mtx.Lock()
-	newStatus := stepInfo.nextStep
 	match.Status = newStatus
 	match.mtx.Unlock()
 
@@ -1742,6 +1623,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, cpSwapStr, redeemTime, actor.user,
 		makerTaker(actor.isMaker), matchID, stepInfo.step, newStatus)
 
+	if newStatus == order.MatchComplete { // actor is taker
+		log.Debugf("Deleting completed match %v", matchID)
+		s.matchMtx.Lock()
+		delete(s.matches, matchID)
+		s.matchMtx.Unlock()
+		// SaveRedeemB flags the match as inactive in the DB.
+	}
+
 	// Credit the user for completing the swap, adjusting the user's score.
 	if actor.user != counterParty.user || newStatus == order.MatchComplete { // is user is both sides, only credit on MatchComplete (taker done too)
 		s.authMgr.SwapSuccess(actor.user, redeemTime)
@@ -1750,7 +1639,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
 	// the secret. Taker is party B, the participant.
-	storFn := s.storage.SaveRedeemB // also sets match status to MatchComplete
+	storFn := s.storage.SaveRedeemB // taker's redeem also sets match status to MatchComplete, active to FALSE
 	if actor.isMaker {
 		// Maker redeem stores the secret too.
 		storFn = func(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
@@ -1773,7 +1662,33 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		Sig:     params.Sig,
 	})
 
-	// Inform the counterparty.
+	// Cancellation rate accounting
+	ord := match.Taker
+	if actor.isMaker {
+		ord = match.Maker
+	}
+	// Mark the completed swap for this order.
+	if s.orders.swapSuccess(ord) {
+		// If it was the last for the order, AND no prior swaps for this order
+		// failed with this user at-fault, register the order as successfully
+		// completed in the auth manager.
+		s.authMgr.RecordCompletedOrder(actor.user, ord.ID(), redeemTime)
+		// Record the successful completion time.
+		if err = s.storage.SetOrderCompleteTime(ord, redeemTimeMs); err != nil {
+			if db.IsErrGeneralFailure(err) {
+				log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord, err)
+				s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "internal server error")
+				return wait.DontTryAgain
+			}
+			log.Errorf("SetOrderCompleteTime for %v: %v", ord, err)
+		}
+	}
+
+	// For taker's redeem, that's the end.
+	if !actor.isMaker {
+		return wait.DontTryAgain
+	}
+	// For maker's redeem, inform the taker.
 	rParams := &msgjson.Redemption{
 		Redeem: msgjson.Redeem{
 			OrderID: idToBytes(counterParty.order.ID()),
@@ -1807,7 +1722,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// so use the default request timeout.
 	s.authMgr.RequestWithTimeout(ack.user, redemptionReq, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
-	}, s.bTimeout, func() {
+	}, time.Until(redeemTime.Add(s.bTimeout)), func() {
 		log.Infof("Timeout waiting for 'redemption' request from user %v (%s) for match %v",
 			ack.user, makerTaker(ack.isMaker), matchID)
 	})
@@ -2242,7 +2157,7 @@ func (s *Swapper) LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID
 }
 
 // unlockOrderCoins is not exported since only the Swapper knows when to unlock
-// coins (when swaps are completed).
+// coins (when funding coins are spent in a fully-confirmed contract).
 func (s *Swapper) unlockOrderCoins(ord order.Order) {
 	asset := ord.Quote()
 	if ord.Trade().Sell {
@@ -2252,8 +2167,6 @@ func (s *Swapper) unlockOrderCoins(ord order.Order) {
 	s.unlockOrderIDCoins(asset, ord.ID())
 }
 
-// unlockOrderIDCoins is not exported since only the Swapper knows when to unlock
-// coins (when swaps are completed).
 func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 	assetLock := s.coins[asset]
 	if assetLock == nil {
