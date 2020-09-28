@@ -3,32 +3,6 @@
 
 package db
 
-// TODO
-//
-// Epochs:
-//  1. PK: epoch ID
-//  2. list of order IDs and order hashes (ref orders table)
-//  3. resulting shuffle order
-//  4. resulting matches (ref matches table)
-//  5. resulting order mods (change filled amount)
-//  6. resulting book mods (insert, remove)
-//  refs: orders, matches
-//
-// Books are in-memory, but on shutdown or other maintenance events, the books
-// can be stored to facilitate restart without clearing the books.
-//  1. buy and sell orders (two differnet lists)
-//
-// For dex/market activity, consider a noSQL DB for structured logging. Market
-// activity with *timestamped* events, possibly including:
-//  1. order receipt
-//  2. order validation
-//  3. order entry into an epoch
-//  4. matches made
-//  5. book mods (insert, update, remove)
-//  6. swap events (announce, init, etc.)
-//
-// NOTE: all other events can go to the logger
-
 import (
 	"context"
 	"time"
@@ -291,11 +265,8 @@ type SwapData struct {
 	RedeemASecret    []byte // the secret revealed in A's redeem, also used in B's redeem
 	RedeemATime      int64
 	RedeemAAckSig    []byte // B's signature of redeem A data
-	RedeemAAckTime   int64  // time that B's signature of redeem A data was received
 	RedeemBCoinID    []byte
 	RedeemBTime      int64
-	RedeemBAckSig    []byte // A's signature of redeem B data
-	RedeemBAckTime   int64  // time that A's signature of redeem B data was received
 }
 
 // MarketMatchID designates a MatchID for a certain market by the market's
@@ -350,9 +321,9 @@ type MatchArchiver interface {
 //
 // For each match, a successful swap will generate the following data that must
 // be stored:
-// - 6 client signatures. Both parties sign the data to acknowledge (1) the
-//   match ack, (2) the counterparty's contract script and contract transaction,
-//   and (3) the counterparty's redemption transaction.
+// - 5 client signatures. Both parties sign the data to acknowledge (1) the
+//   match ack, and (2) the counterparty's contract script and contract
+//   transaction. Plus the taker acks the maker's redemption transaction.
 // - 2 swap contracts and the associated transaction outputs (more generally,
 //   coinIDs), one on each party's blockchain.
 // - 2 redemption transaction outputs (coinIDs).
@@ -405,16 +376,13 @@ type SwapArchiver interface {
 	SaveRedeemAckSigB(mid MarketMatchID, sig []byte) error
 
 	// SaveRedeemB records party B's redemption coinID (e.g. transaction
-	// output), which spends party A's swap contract on chain X.
+	// output), which spends party A's swap contract on chain X. This should
+	// also flag the match as inactive.
 	SaveRedeemB(mid MarketMatchID, coinID []byte, timestamp int64) error
-
-	// SaveRedeemAckSigA records party A's signature acknowledging party B's
-	// redemption.
-	SaveRedeemAckSigA(mid MarketMatchID, sig []byte) error
 
 	// SetMatchInactive sets the swap as done/inactive. This can be because of a
 	// failed or successfully completed swap, but in practice this will be used
-	// for failed swaps since SaveRedeemAckSigA flags the swap as done/inactive.
+	// for failed swaps since SaveRedeemB flags the swap as done/inactive.
 	SetMatchInactive(mid MarketMatchID) error
 }
 
