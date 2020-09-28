@@ -587,8 +587,8 @@ func (dm *DEX) findSubsys(name string) int {
 	return -1
 }
 
-// ResumeMarket launches a stopped market subsystem as earlier as the given
-// time. The actual time the market will resume depends on the configure epoch
+// ResumeMarket launches a stopped market subsystem as early as the given time.
+// The actual time the market will resume depends on the configure epoch
 // duration, as the market only starts at the beginning of an epoch.
 func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time) {
 	name = strings.ToLower(name)
@@ -597,7 +597,7 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 		return
 	}
 
-	// Get the next available start epoch given the earliers allowed time.
+	// Get the next available start epoch given the earliest allowed time.
 	// Requires the market to be stopped already.
 	startEpoch = mkt.ResumeEpoch(asSoonAs)
 	if startEpoch == 0 {

@@ -3826,6 +3826,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	// active matches.
 	fundCoinDcrID := encode.RandomBytes(36)
 	freshTracker := addTracker(asset.Coins{&tCoin{id: fundCoinDcrID}})
+	freshTracker.metaData.Status = order.OrderStatusBooked // suspend with purge only purges book orders since epoch orders are always processed first
 
 	// Ensure a non-existent market cannot be suspended.
 	payload := &msgjson.TradeSuspension{
@@ -3875,6 +3876,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	changeCoinID := encode.RandomBytes(36)
 	swappedTracker.change = &tCoin{id: changeCoinID}
 	swappedTracker.changeLocked = true
+	swappedTracker.metaData.Status = order.OrderStatusBooked
 	rig.dc.cfgMtx.Lock()
 	mktConf.StartEpoch = 12 // make it appear running again first
 	mktConf.FinalEpoch = 0
@@ -3933,6 +3935,103 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	_, err = rig.core.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("expected a suspension market error")
+	}
+}
+
+func TestHandleTradeResumptionMsg(t *testing.T) {
+	rig := newTestRig()
+
+	tCore := rig.core
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.Unlock(wPW, time.Hour)
+
+	epochLen := rig.dc.market(tDcrBtcMktName).EpochLen
+
+	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
+		return nil
+	}
+
+	tradeForm := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     tDCR.LotSize * 10,
+		Rate:    tBTC.RateStep * 1000,
+		TifNow:  false,
+	}
+
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+
+	// Ensure a non-existent market cannot be suspended.
+	payload := &msgjson.TradeResumption{
+		MarketID: "dcr_dcr",
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
+	err := handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeResumptionMsg] expected a market ID not found error")
+	}
+
+	var resumeTime uint64
+	newPayload := func() *msgjson.TradeResumption {
+		return &msgjson.TradeResumption{
+			MarketID:   tDcrBtcMktName,
+			ResumeTime: resumeTime, // set the time to test the scheduling notification case, zero it for immediate resume
+			StartEpoch: resumeTime / epochLen,
+		}
+	}
+
+	// Notify of scheduled resume.
+	rig.dc.cfgMtx.Lock()
+	mktConf := rig.dc.marketConfig(tDcrBtcMktName)
+	mktConf.StartEpoch = 12
+	mktConf.FinalEpoch = mktConf.StartEpoch + 1 // long since closed
+	rig.dc.cfgMtx.Unlock()
+
+	resumeTime = encode.UnixMilliU(time.Now().Add(time.Hour))
+	payload = newPayload()
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
+	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
+	}
+
+	// Should be suspended still, no trades
+	_, err = rig.core.Trade(tPW, tradeForm)
+	if err == nil {
+		t.Fatal("trade was accepted for suspended market")
+	}
+
+	// Resume the market immediately.
+	resumeTime = encode.UnixMilliU(time.Now())
+	payload = newPayload()
+	payload.ResumeTime = 0 // resume now, not scheduled
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
+	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
+	}
+
+	// Ensure trades for a resumed market are processed without error.
+	_, err = rig.core.Trade(tPW, tradeForm)
+	if err != nil {
+		t.Fatalf("unexpected trade error %v", err)
 	}
 }
 
@@ -4210,103 +4309,6 @@ func TestSetWalletPassword(t *testing.T) {
 	// Check that the xcWallet was updated.
 	if !bytes.Equal(xyzWallet.encPW, newPW) {
 		t.Fatalf("xcWallet encPW field not updated")
-	}
-}
-
-func TestHandleTradeResumptionMsg(t *testing.T) {
-	rig := newTestRig()
-
-	tCore := rig.core
-	dcrWallet, _ := newTWallet(tDCR.ID)
-	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(wPW, time.Hour)
-
-	btcWallet, _ := newTWallet(tBTC.ID)
-	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(wPW, time.Hour)
-
-	epochLen := rig.dc.market(tDcrBtcMktName).EpochLen
-
-	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
-		// Need to stamp and sign the message with the server's key.
-		msgOrder := new(msgjson.LimitOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		lo := convertMsgLimitOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
-		return nil
-	}
-
-	tradeForm := &TradeForm{
-		Host:    tDexHost,
-		IsLimit: true,
-		Sell:    true,
-		Base:    tDCR.ID,
-		Quote:   tBTC.ID,
-		Qty:     tDCR.LotSize * 10,
-		Rate:    tBTC.RateStep * 1000,
-		TifNow:  false,
-	}
-
-	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
-
-	// Ensure a non-existent market cannot be suspended.
-	payload := &msgjson.TradeResumption{
-		MarketID: "dcr_dcr",
-	}
-
-	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
-	err := handleTradeResumptionMsg(rig.core, rig.dc, req)
-	if err == nil {
-		t.Fatal("[handleTradeResumptionMsg] expected a market ID not found error")
-	}
-
-	var resumeTime uint64
-	newPayload := func() *msgjson.TradeResumption {
-		return &msgjson.TradeResumption{
-			MarketID:   tDcrBtcMktName,
-			ResumeTime: resumeTime, // set the time to test the scheduling notification case, zero it for immediate resume
-			StartEpoch: resumeTime / epochLen,
-		}
-	}
-
-	// Notify of scheduled resume.
-	rig.dc.cfgMtx.Lock()
-	mktConf := rig.dc.marketConfig(tDcrBtcMktName)
-	mktConf.StartEpoch = 12
-	mktConf.FinalEpoch = mktConf.StartEpoch + 1 // long since closed
-	rig.dc.cfgMtx.Unlock()
-
-	resumeTime = encode.UnixMilliU(time.Now().Add(time.Hour))
-	payload = newPayload()
-	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
-	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
-	if err != nil {
-		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
-	}
-
-	// Should be suspended still, no trades
-	_, err = rig.core.Trade(tPW, tradeForm)
-	if err == nil {
-		t.Fatal("trade was accepted for suspended market")
-	}
-
-	// Resume the market immediately.
-	resumeTime = encode.UnixMilliU(time.Now())
-	payload = newPayload()
-	payload.ResumeTime = 0 // resume now, not scheduled
-	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
-	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
-	if err != nil {
-		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
-	}
-
-	// Ensure trades for a resumed market are processed without error.
-	_, err = rig.core.Trade(tPW, tradeForm)
-	if err != nil {
-		t.Fatalf("unexpected trade error %v", err)
 	}
 }
 

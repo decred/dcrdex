@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 )
 
 var (
@@ -407,8 +408,8 @@ func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
 	return nil
 }
 
-// setMarketStartEpoch revises the StartEpoch field of he named market in the
-// stored ConfigResponse. It can also zeros the FinalEpoch and Persist, which
+// setMarketStartEpoch revises the StartEpoch field of the named market in the
+// stored ConfigResponse. It optionally zeros FinalEpoch and Persist, which
 // should only be done at start time.
 func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, clearFinal bool) {
 	dc.cfgMtx.Lock()
@@ -425,7 +426,7 @@ func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, cle
 	}
 }
 
-// setMarketFinalEpoch revises the FinalEpoch and Persist fields of he named
+// setMarketFinalEpoch revises the FinalEpoch and Persist fields of the named
 // market in the stored ConfigResponse.
 func (dc *dexConnection) setMarketFinalEpoch(name string, finalEpoch uint64, persist bool) {
 	dc.cfgMtx.Lock()
@@ -467,7 +468,10 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		return nil
 	}
 
-	detail := fmt.Sprintf("Market %s is now suspended", sp.MarketID)
+	detail := fmt.Sprintf("Trading for market %s at %s is now suspended.", sp.MarketID, dc.acct.host)
+	if !sp.Persist {
+		detail += " All booked orders are now PURGED."
+	}
 	c.notify(newServerNotifyNote("market suspended", detail, db.WarningLevel))
 
 	if sp.Persist {
@@ -493,12 +497,13 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Return any non-nil error, but still revoke purged orders.
 
 	// Revoke all active orders of the suspended market for the dex.
+	log.Warnf("Revoking all active orders for market %v.", mkt.Name)
 	updatedAssets := make(assetMap)
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {
 		if tracker.Order.Base() == mkt.BaseID && tracker.Order.Quote() == mkt.QuoteID &&
-			tracker.metaData.Host == dc.acct.host {
-			// Locally revoke the purged order.
+			tracker.metaData.Host == dc.acct.host && tracker.metaData.Status == order.OrderStatusBooked {
+			// Locally revoke the purged book order.
 			tracker.revoke()
 			updatedAssets.count(tracker.fromAssetID)
 		}
@@ -554,9 +559,9 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	dc.epoch[rs.MarketID] = rs.StartEpoch
 	dc.epochMtx.Unlock()
 
-	// Server config change without restart is not implemented on the server,
-	// but it would involve either getting the config response or adding the
-	// entire market config to the TradeResumption payload.
+	// TODO: Server config change without restart is not implemented on the
+	// server, but it would involve either getting the config response or adding
+	// the entire market config to the TradeResumption payload.
 	//
 	// Fetch the updated DEX configuration.
 	// dc.fetchServerConfig()
@@ -565,7 +570,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		rs.MarketID, rs.StartEpoch)
 	c.notify(newServerNotifyNote("market resumed", detail, db.WarningLevel))
 
-	// Book notes may resume at any time. Seq not used since no book changes.
+	// Book notes may resume at any time. Seq not set since no book changes.
 
 	return nil
 }

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/server/account"
 )
 
 // Error codes

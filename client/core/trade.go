@@ -988,7 +988,6 @@ func (t *trackedTrade) revoke() {
 	}
 
 	// Send out a data notification with the revoke information.
-	// corder, _ := t.coreOrderInternal()
 	cancelOrder := &Order{
 		Host:     t.dc.acct.host,
 		MarketID: t.mktID,
