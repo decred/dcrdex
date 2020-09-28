@@ -367,8 +367,6 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 //   match.
 // - Expect order status to be Booked before going AWOL and to become Revoked
 //   after re-connecting the DEX. Locked coins should be returned.
-// TODO: Update the test to confirm that locked coins are returned where
-// necessary.
 func TestOrderStatusReconciliation(t *testing.T) {
 	tLog.Info("=== SETUP")
 	cancelCtx, err := setup()
@@ -387,6 +385,14 @@ func TestOrderStatusReconciliation(t *testing.T) {
 
 	client1.isSeller, client2.isSeller = false, true
 	var lotSize, rateStep uint64 = 1 * 1e8, 1 * 1e4 // 1 DCR at 0.0001 BTC/DCR
+
+	// Record client 2's locked balance before placing trades
+	// to determine the amount locked for the placed trades.
+	c2Balance, err := client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	if err != nil {
+		t.Fatalf("client 2 pre-trade balance error %v", err)
+	}
+	preTradeLockedBalance := c2Balance.Locked
 
 	// Place an order for client 1, qty=2*lotSize, rate=1*rateStep
 	// This order should get matched to either or both of these client 2
@@ -565,7 +571,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		}
 		// Match will get revoked after lastEvent+bTimeout.
 		forgetClient2Order(oid) // ensure revoke_match request is "missed"
-		recordBeforeAfterStatuses(oid, order.OrderStatusEpoch, order.OrderStatusRevoked)
+		recordBeforeAfterStatuses(oid, order.OrderStatusBooked, order.OrderStatusRevoked)
 		return nil
 	})
 
@@ -595,6 +601,15 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	}
 	c2dc.tradeMtx.RUnlock()
 
+	// Check trade-locked amount before disconnecting.
+	c2Balance, err = client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	if err != nil {
+		t.Fatalf("client 2 pre-disconnect balance error %v", err)
+	}
+	totalLockedByTrades := c2Balance.Locked - preTradeLockedBalance
+	preDisconnectLockedBalance := c2Balance.Locked   // should reduce after funds are returned
+	preDisconnectAvialableBal := c2Balance.Available // should increase after funds are returned
+
 	// Disconnect the DEX and allow sometime for DEX to udpate order statuses.
 	client2.log("disconnecting DEX")
 	c2dc.connMaster.Disconnect()
@@ -610,7 +625,8 @@ func TestOrderStatusReconciliation(t *testing.T) {
 
 	// Allow some time for orders to be revoked due to inaction, and
 	// for requests pending on the server to expire (usually bTimeout).
-	disconnectPeriod := time.Millisecond*time.Duration(c2dc.cfg.BroadcastTimeout) + 2*time.Second
+	bTimeout := time.Millisecond * time.Duration(c2dc.cfg.BroadcastTimeout)
+	disconnectPeriod := 2 * bTimeout
 	client2.log("waiting %v before reconnecting DEX", disconnectPeriod)
 	time.Sleep(disconnectPeriod)
 
@@ -637,6 +653,23 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("client 2 order %v in expected post-recovery status %v", oid, expectStatus)
 	}
 	c2dc.tradeMtx.RUnlock()
+
+	// Wait a bit for tick cycle to trigger inactive trade retirement and funds unlocking.
+	halfBTimeout := time.Millisecond * time.Duration(c2dc.cfg.BroadcastTimeout/2)
+	time.Sleep(halfBTimeout)
+
+	c2Balance, err = client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	if err != nil {
+		t.Fatalf("client 2 post-reconnect balance error %v", err)
+	}
+	if c2Balance.Available != preDisconnectAvialableBal+totalLockedByTrades {
+		t.Fatalf("client 2 locked funds not returned: locked before trading %v, locked after trading %v, "+
+			"locked after reconnect %v", preTradeLockedBalance, preDisconnectLockedBalance, c2Balance.Locked)
+	}
+	if c2Balance.Locked != preDisconnectLockedBalance-totalLockedByTrades {
+		t.Fatalf("client 2 locked funds not returned: locked before trading %v, locked after trading %v, "+
+			"locked after reconnect %v", preTradeLockedBalance, preDisconnectLockedBalance, c2Balance.Locked)
+	}
 }
 
 // simpleTradeTest uses client1 and client2 to place similar orders but on
