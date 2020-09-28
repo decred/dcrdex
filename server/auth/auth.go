@@ -266,8 +266,6 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 
 	// Update recent orders and check/set suspended status atomically.
 	client.mtx.Lock()
-	defer client.mtx.Unlock()
-
 	client.recentOrders.add(&oidStamped{
 		OrderID: oid,
 		time:    tMS,
@@ -279,13 +277,14 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	client.mtx.Unlock()
 	log.Tracef("User %v cancellation rate is now %v (%d cancels : %d successes). Violation = %v", user,
 		rate, cancels, completions, penalize)
-	if penalize && !auth.anarchy && !client.suspended {
-		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
+	if penalize && !auth.anarchy && !client.isSuspended() {
+		details := fmt.Sprintf("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
-		client.suspended = true
-		auth.storage.CloseAccount(user, account.CancellationRate)
+		log.Info(details)
+		auth.Penalize(user, account.CancellationRate, details)
 	}
 }
 
@@ -694,7 +693,34 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
+func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) error {
+	// Notify user of penalty.
+	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
+	if auth.anarchy {
+		details = "You were penalized but the penalty will not be counted against you."
+	}
+	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, rule.Description(), extraDetails)
+	penalty := &msgjson.Penalty{
+		Rule:     rule,
+		Time:     encode.UnixMilliU(time.Now()),
+		Duration: uint64(rule.Duration() / 1e6), // nanoseconds to milliseconds
+		Details:  details,
+	}
+	penaltyNote := &msgjson.PenaltyNote{
+		Penalty: penalty,
+	}
+	sig, err := auth.signer.Sign(penaltyNote.Serialize())
+	if err != nil {
+		return fmt.Errorf("signature error: %v", err)
+	}
+	penaltyNote.Sig = sig.Serialize()
+	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
+	if err != nil {
+		return fmt.Errorf("error creating penalty notification: %v", err)
+	}
+	// TODO: verify that we are not sending a note over max uint16 as it
+	// cannot be sent over ws.
+	auth.Notify(user, note, time.Hour*72)
 	if auth.anarchy {
 		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
 		log.Error(err)
@@ -720,7 +746,6 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) err
 	// should be appropriate checks on order submission and match/swap
 	// initiation (TODO).
 
-	// TODO: notify client of penalty / account status change?
 	return nil
 }
 

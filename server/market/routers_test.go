@@ -233,7 +233,7 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	}
 	return nil
 }
-func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) error {
+func (a *TAuth) Penalize(user account.AccountID, rule account.Rule, _ string) error {
 	log.Infof("Penalize for user %v", user)
 	return nil
 }

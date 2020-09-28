@@ -35,7 +35,7 @@ type AuthManager interface {
 	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
-	Penalize(user account.AccountID, rule account.Rule) error
+	Penalize(user account.AccountID, rule account.Rule, details string) error
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
 

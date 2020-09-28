@@ -576,8 +576,8 @@ func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 
 // Penalize bans an account by canceling the client's orders and setting their rule
 // status to rule.
-func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule) error {
-	return dm.authMgr.Penalize(aid, rule)
+func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string) error {
+	return dm.authMgr.Penalize(aid, rule, details)
 }
 
 // Unban reverses a ban and allows a client to resume trading.

@@ -54,7 +54,7 @@ type SvrCore interface {
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
-	Penalize(aid account.AccountID, rule account.Rule) error
+	Penalize(aid account.AccountID, rule account.Rule, details string) error
 	Unban(aid account.AccountID) error
 }
 

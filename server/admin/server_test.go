@@ -147,7 +147,7 @@ func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.account
 func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 	return c.account, c.accountErr
 }
-func (c *TCore) Penalize(_ account.AccountID, _ account.Rule) error {
+func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) error {
 	return c.penalizeErr
 }
 func (c *TCore) Unban(_ account.AccountID) error {

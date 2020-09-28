@@ -1279,7 +1279,8 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	for _, ord := range misses {
 		log.Infof("No preimage received for order %v from user %v. Penalizing user and revoking order.",
 			ord.ID(), ord.User())
-		m.auth.Penalize(ord.User(), account.PreimageReveal)
+		details := fmt.Sprintf("Order ID: %s", ord.ID())
+		m.auth.Penalize(ord.User(), account.PreimageReveal, details)
 		// Unlock the order's coins locked in processOrder.
 		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
 		// Change the order status from orderStatusEpoch to orderStatusRevoked.

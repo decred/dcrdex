@@ -4196,3 +4196,70 @@ func TestSetWalletPassword(t *testing.T) {
 		t.Fatalf("xcWallet encPW field not updated")
 	}
 }
+
+func TestHandlePenaltyMsg(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dc := rig.dc
+	penalty := &msgjson.Penalty{
+		Rule:     account.Rule(1),
+		Time:     uint64(1598929305),
+		Duration: uint64(3153600000000000000),
+		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
+	}
+	diffKey, _ := secp256k1.GeneratePrivateKey()
+	noMatch, err := msgjson.NewNotification(msgjson.NoMatchRoute, "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		key     *secp256k1.PrivateKey
+		payload interface{}
+		wantErr bool
+	}{{
+		name:    "ok",
+		key:     tDexPriv,
+		payload: penalty,
+	}, {
+		name:    "bad note",
+		key:     tDexPriv,
+		payload: noMatch,
+		wantErr: true,
+	}, {
+		name:    "wrong sig",
+		key:     diffKey,
+		payload: penalty,
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		var err error
+		var note *msgjson.Message
+		switch v := test.payload.(type) {
+		case *msgjson.Penalty:
+			penaltyNote := &msgjson.PenaltyNote{
+				Penalty: v,
+			}
+			sign(test.key, penaltyNote)
+			note, err = msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
+			if err != nil {
+				t.Fatalf("error creating penalty notification: %v", err)
+			}
+		case *msgjson.Message:
+			note = v
+		default:
+			t.Fatalf("unknown payload type: %T", v)
+		}
+
+		err = handlePenaltyMsg(tCore, dc, note)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %s", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+	}
+}
