@@ -65,24 +65,26 @@ func (c *TCore) ConfigMsg() json.RawMessage { return nil }
 func (c *TCore) Suspend(tSusp time.Time, persistBooks bool) map[string]*market.SuspendEpoch {
 	return nil
 }
-func (c *TCore) ResumeMarket(name string, tRes time.Time) (startEpoch int64, startTime time.Time) {
+func (c *TCore) ResumeMarket(name string, tRes time.Time) (startEpoch int64, startTime time.Time, err error) {
 	tMkt := c.markets[name]
 	if tMkt == nil {
+		err = fmt.Errorf("unknown market %s", name)
 		return
 	}
 	tMkt.resumeEpoch = 1 + encode.UnixMilli(tRes)/int64(tMkt.dur)
 	tMkt.resumeTime = encode.UnixTimeMilli(tMkt.resumeEpoch * int64(tMkt.dur))
-	return tMkt.resumeEpoch, tMkt.resumeTime
+	return tMkt.resumeEpoch, tMkt.resumeTime, nil
 }
-func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch {
+func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (suspEpoch *market.SuspendEpoch, err error) {
 	tMkt := c.markets[name]
 	if tMkt == nil {
-		return nil
+		err = fmt.Errorf("unknown market %s", name)
+		return
 	}
 	tMkt.persist = persistBooks
 	tMkt.suspend.Idx = encode.UnixMilli(tSusp)
 	tMkt.suspend.End = tSusp.Add(time.Millisecond)
-	return tMkt.suspend
+	return tMkt.suspend, nil
 }
 
 func (c *TCore) market(name string) *TMarket {

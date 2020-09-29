@@ -138,10 +138,12 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resEpoch, resTime := s.core.ResumeMarket(mkt, resTime)
-	if resEpoch == 0 {
+	resEpoch, resTime, err := s.core.ResumeMarket(mkt, resTime)
+	if resEpoch == 0 || err != nil {
 		// Should not happen.
-		http.Error(w, "failed to resume market "+mkt, http.StatusInternalServerError)
+		msg := fmt.Sprintf("Failed to resume market: %v", err)
+		log.Errorf(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
 
@@ -196,10 +198,12 @@ func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	suspEpoch := s.core.SuspendMarket(mkt, suspTime, persistBook)
-	if suspEpoch == nil {
+	suspEpoch, err := s.core.SuspendMarket(mkt, suspTime, persistBook)
+	if suspEpoch == nil || err != nil {
 		// Should not happen.
-		http.Error(w, "failed to suspend market "+mkt, http.StatusInternalServerError)
+		msg := fmt.Sprintf("Failed to suspend market: %v", err)
+		log.Errorf(msg)
+		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
 

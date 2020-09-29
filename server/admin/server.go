@@ -53,8 +53,8 @@ type SvrCore interface {
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
-	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
-	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time)
+	SuspendMarket(name string, tSusp time.Time, persistBooks bool) (*market.SuspendEpoch, error)
+	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
 	Penalize(aid account.AccountID, rule account.Rule, details string) error
 	Unban(aid account.AccountID) error
 }
