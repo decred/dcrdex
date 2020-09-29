@@ -108,7 +108,7 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 
 // hander for route '/market/{marketName}/resume?t=UNIXMS'
 func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
-	// Ensure the market exists and is running.
+	// Ensure the market exists and is not running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
 	found, running := s.core.MarketRunning(mkt)
 	if !found {

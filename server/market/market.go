@@ -699,19 +699,27 @@ func (m *Market) Run(ctx context.Context) {
 		cancel() // may already be done by suspend
 		wgEpochs.Wait()
 
-		// Stop and wait for the order feed goroutine.
-		close(notifyChan)
-		wgFeeds.Wait()
-
 		// persistBook is set under epochMtx lock.
-		m.epochMtx.RLock()
-		// Suspend, not interrupt, will have cleared activeEpochIdx.
-		if !m.persistBook && m.activeEpochIdx == 0 {
-			m.PurgeBook() // only if suspend message sent via book router
+		m.epochMtx.Lock()
+		if !m.persistBook {
+			m.PurgeBook()
+		}
+		// Signal to the book router of the suspend now that the closed epoch
+		// processing pipeline is finished (wgEpochs).
+		notifyChan <- &updateSignal{
+			action: suspendAction,
+			data: sigDataSuspend{
+				finalEpoch:  m.activeEpochIdx,
+				persistBook: m.persistBook,
+			},
 		}
 		m.persistBook = true // future resume default
 		m.activeEpochIdx = 0
-		m.epochMtx.RUnlock()
+		m.epochMtx.Unlock()
+
+		// Stop and wait for the order feed goroutine.
+		close(notifyChan)
+		wgFeeds.Wait()
 
 		log.Infof("Market %q stopped.", m.marketInfo.Name)
 	}()
@@ -786,17 +794,6 @@ func (m *Market) Run(ctx context.Context) {
 		if m.suspendEpochIdx == nextEpoch.Epoch-1 {
 			// Reject incoming orders.
 			currentEpoch = nil
-			m.activeEpochIdx = 0
-
-			// Signal to the book router of the suspend:
-			notifyChan <- &updateSignal{
-				action: suspendAction,
-				data: sigDataSuspend{
-					finalEpoch:  m.suspendEpochIdx,
-					persistBook: m.persistBook,
-				},
-			}
-
 			cancel() // graceful market shutdown
 			return
 		}
