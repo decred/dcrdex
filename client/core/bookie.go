@@ -453,7 +453,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Ensure the provided market exists for the dex.
 	mkt := dc.market(sp.MarketID)
 	if mkt == nil {
-		return fmt.Errorf("no market found with ID %s", sp.MarketID)
+		return fmt.Errorf("no market at %s found with ID %s", dc.acct.host, sp.MarketID)
 	}
 
 	// Update the data in the stored ConfigResponse.
@@ -463,7 +463,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if sp.SuspendTime != 0 {
 		// This is just a warning about a scheduled suspension.
 		suspendTime := encode.UnixTimeMilli(int64(sp.SuspendTime))
-		detail := fmt.Sprintf("Market %s is now scheduled for suspension at %v", sp.MarketID, suspendTime)
+		detail := fmt.Sprintf("Market %s at %s is now scheduled for suspension at %v", sp.MarketID, dc.acct.host, suspendTime)
 		c.notify(newServerNotifyNote("market suspend scheduled", detail, db.WarningLevel))
 		return nil
 	}
@@ -485,7 +485,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 	book, ok := dc.books[sp.MarketID]
 	if !ok {
-		return fmt.Errorf("no order book found with market id '%v'", sp.MarketID)
+		return fmt.Errorf("no order book found with market id '%s' at %s", sp.MarketID, dc.acct.host)
 	}
 
 	err = book.Reset(&msgjson.OrderBook{
@@ -497,7 +497,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Return any non-nil error, but still revoke purged orders.
 
 	// Revoke all active orders of the suspended market for the dex.
-	log.Warnf("Revoking all active orders for market %v.", mkt.Name)
+	log.Warnf("Revoking all active orders for market %s at %s.", mkt.Name, dc.acct.host)
 	updatedAssets := make(assetMap)
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {
@@ -540,7 +540,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 	// Ensure the provided market exists for the dex.
 	if dc.market(rs.MarketID) == nil {
-		return fmt.Errorf("no market found with ID %s", rs.MarketID)
+		return fmt.Errorf("no market at %v found with ID %s", dc.acct.host, rs.MarketID)
 	}
 
 	// rs.ResumeTime == 0 means resume now.
@@ -548,7 +548,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		// This is just a notice about a scheduled resumption.
 		dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, false) // set the start epoch, leaving any final/persist data
 		resTime := encode.UnixTimeMilli(int64(rs.ResumeTime))
-		detail := fmt.Sprintf("Market %s is now scheduled for resumption at %v", rs.MarketID, resTime)
+		detail := fmt.Sprintf("Market %s at %s is now scheduled for resumption at %v", rs.MarketID, dc.acct.host, resTime)
 		c.notify(newServerNotifyNote("market resume scheduled", detail, db.WarningLevel))
 		return nil
 	}
@@ -564,25 +564,24 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// the entire market config to the TradeResumption payload.
 	//
 	// Fetch the updated DEX configuration.
-	// dc.fetchServerConfig()
+	// dc.refreshServerConfig()
 
-	detail := fmt.Sprintf("Market %s has resumed trading at epoch %d",
-		rs.MarketID, rs.StartEpoch)
-	c.notify(newServerNotifyNote("market resumed", detail, db.WarningLevel))
+	detail := fmt.Sprintf("Market %s at %s has resumed trading at epoch %d",
+		rs.MarketID, dc.acct.host, rs.StartEpoch)
+	c.notify(newServerNotifyNote("market resumed", detail, db.Success))
 
 	// Book notes may resume at any time. Seq not set since no book changes.
 
 	return nil
 }
 
-/*
-func (dc *dexConnection) fetchServerConfig() error {
+func (dc *dexConnection) refreshServerConfig() error {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
 		dc.connMaster.Disconnect()
-		return fmt.Errorf("unable to fetch DEX server config: %w", err)
+		return fmt.Errorf("unable to fetch server config: %w", err)
 	}
 
 	// Update the dex connection with the new config details, including
@@ -596,11 +595,21 @@ func (dc *dexConnection) fetchServerConfig() error {
 		return fmt.Errorf("Inconsistent 'config' response: %v", err)
 	}
 
-	// Update dc.{marketMap,epoch,assets}...
+	// Update dc.{marketMap,epoch,assets}
+	dc.assetsMtx.Lock()
+	dc.assets = assets
+	dc.assetsMtx.Unlock()
+
+	dc.epochMtx.Lock()
+	dc.epoch = epochs
+	dc.epochMtx.Unlock()
+
+	dc.marketMtx.Lock()
+	dc.marketMap = markets
+	dc.marketMtx.Unlock()
 
 	return nil
 }
-*/
 
 // handleUnbookOrderMsg is called when an unbook_order notification is
 // received.

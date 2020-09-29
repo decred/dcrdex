@@ -3144,7 +3144,17 @@ func (c *Core) handleReconnect(host string) {
 		log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
 		return
 	}
-	if err := c.authDEX(dc); err != nil {
+
+	// The server's configuration may have changed, so retrieve the current
+	// server configuration.
+	err := dc.refreshServerConfig()
+	if err != nil {
+		log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
+		return
+	}
+
+	err = c.authDEX(dc)
+	if err != nil {
 		log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
 		return
 	}
