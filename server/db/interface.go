@@ -52,11 +52,10 @@ type EpochResults struct {
 	OrdersMissed      []order.OrderID
 }
 
-// OrderStatus is the current status of an order, including its fill.
+// OrderStatus is the current status of an order.
 type OrderStatus struct {
 	ID     order.OrderID
 	Status order.OrderStatus
-	Fill   uint64
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with

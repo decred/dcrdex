@@ -1053,15 +1053,13 @@ func (a *Archiver) userOrderStatusesFromTable(fullTable string, aid account.Acco
 	for rows.Next() {
 		var oid order.OrderID
 		var status pgOrderStatus
-		var filled uint64
-		err = rows.Scan(&oid, &status, &filled)
+		err = rows.Scan(&oid, &status)
 		if err != nil {
 			return nil, err
 		}
 		statuses = append(statuses, &db.OrderStatus{
 			ID:     oid,
 			Status: pgToMarketStatus(status),
-			Fill:   filled,
 		})
 	}
 

@@ -1337,7 +1337,6 @@ func TestUserOrderStatuses(t *testing.T) {
 	for i := range orderStatuses {
 		ordIn := orderStatuses[i].ord
 		statusIn := orderStatuses[i].status
-		ordIn.Trade().AddFill(LotSize)
 		if lo, ok := ordIn.(*order.LimitOrder); ok {
 			lo.BaseAsset, lo.QuoteAsset = AssetBTC, AssetLTC // swap the assets to test across different mkts
 		}
@@ -1373,10 +1372,6 @@ func TestUserOrderStatuses(t *testing.T) {
 			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
 				orderOut.Status, statusIn)
 		}
-		if orderOut.Fill != ordIn.Trade().Filled() {
-			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
-				orderOut.Fill, ordIn.Trade().Filled())
-		}
 	}
 
 	// Check statuses for the 2 limit orders that are BTC-LTC.
@@ -1401,10 +1396,6 @@ func TestUserOrderStatuses(t *testing.T) {
 		if orderOut.Status != statusIn {
 			t.Errorf("Incorrect OrderStatus for retrieved order. Got %v, expected %v.",
 				orderOut.Status, statusIn)
-		}
-		if orderOut.Fill != ordIn.Trade().Filled() {
-			t.Errorf("Incorrect FillAmt for retrieved order. Got %v, expected %v.",
-				orderOut.Fill, ordIn.Trade().Filled())
 		}
 	}
 

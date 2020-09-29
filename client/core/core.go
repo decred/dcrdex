@@ -640,7 +640,6 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		oid := trade.ID()
 		previousStatus := trade.metaData.Status
 		newStatus := order.OrderStatus(srvOrderStatus.Status)
-		trade.Trade().SetFill(srvOrderStatus.Fill)
 		trade.metaData.Status = newStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)

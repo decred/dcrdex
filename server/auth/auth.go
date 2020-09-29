@@ -615,7 +615,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		msgOrderStatuses = append(msgOrderStatuses, &msgjson.OrderStatus{
 			ID:     orderStatus.ID.Bytes(),
 			Status: uint16(orderStatus.Status),
-			Fill:   orderStatus.Fill,
 		})
 	}
 
@@ -956,7 +955,6 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 			results = append(results, &msgjson.OrderStatus{
 				ID:     orderStatus.ID.Bytes(),
 				Status: uint16(orderStatus.Status),
-				Fill:   orderStatus.Fill,
 			})
 		}
 	}

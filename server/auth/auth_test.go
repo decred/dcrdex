@@ -445,7 +445,6 @@ func TestConnect(t *testing.T) {
 		{
 			ID:     userMatch.OrderID,
 			Status: order.OrderStatusBooked,
-			Fill:   matchData.Quantity / 2,
 		},
 	}
 	defer func() { rig.storage.orderStatuses = nil }()
