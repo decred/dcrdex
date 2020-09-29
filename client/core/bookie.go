@@ -398,7 +398,8 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	return nil
 }
 
-// marketConfig searches the stored ConfigResponse for the named market.
+// marketConfig searches the stored ConfigResponse for the named market. This
+// must be called with cfgMtx at least read locked.
 func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
 	for _, mktConf := range dc.cfg.Markets {
 		if mktConf.Name == name {
@@ -453,7 +454,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Ensure the provided market exists for the dex.
 	mkt := dc.market(sp.MarketID)
 	if mkt == nil {
-		return fmt.Errorf("no market at %s found with ID %s", dc.acct.host, sp.MarketID)
+		return fmt.Errorf("no market found with ID %s", sp.MarketID)
 	}
 
 	// Update the data in the stored ConfigResponse.
@@ -485,7 +486,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 	book, ok := dc.books[sp.MarketID]
 	if !ok {
-		return fmt.Errorf("no order book found with market id '%s' at %s", sp.MarketID, dc.acct.host)
+		return fmt.Errorf("no order book found with market id '%s'", sp.MarketID)
 	}
 
 	err = book.Reset(&msgjson.OrderBook{
@@ -523,14 +524,18 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	})
 
 	dc.refreshMarkets()
-	c.updateBalances(updatedAssets)
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	} else {
+		c.refreshUser() // would be called by updateBalances
+	}
 
 	return err
 }
 
 // handleTradeResumptionMsg is called when a trade resumption notification is
 // received. This may be an orderbook message at the time of resumption or a
-// general notification at any time prior to the market suspend.
+// general notification at any time prior to market suspend.
 func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var rs msgjson.TradeResumption
 	err := msg.Unmarshal(&rs)

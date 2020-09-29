@@ -102,11 +102,9 @@ func (dc *dexConnection) running(mkt string) bool {
 	return mktCfg.Running()
 }
 
-// refreshMarkets rebuilds, saves, and returns the market map. The map itself
-// should be treated as read only. A new map is constructed and is assigned to
-// dc.marketMap under lock, and can be safely accessed with
-// dexConnection.markets. refreshMarkets is used when a change to the status of
-// a market or the user's orders on a market has changed.
+// refreshMarkets rebuilds the market map. The updated markets map may be safely
+// accessed with the markets method. refreshMarkets is used when a change to the
+// status of a market or the user's orders on a market has changed.
 func (dc *dexConnection) refreshMarkets() {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
@@ -893,13 +891,13 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 	if !wallet.connected() {
 		err := wallet.Connect(c.ctx)
 		if err != nil {
-			return fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err)
+			return codedError(walletErr, fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err))
 		}
 	}
 	if !wallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
-			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return codedError(walletAuthErr, fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err))
 		}
 	}
 	return nil
@@ -2144,18 +2142,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, 0, fmt.Errorf("order placed for unknown market %q", mktID)
+		return nil, 0, codedError(marketErr, fmt.Errorf("order placed for unknown market %q", mktID))
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if !dc.running(mktID) {
-		return nil, 0, fmt.Errorf("%s market trading is suspended", mktID)
+		return nil, 0, codedError(marketErr, fmt.Errorf("%s market trading is suspended", mktID))
 	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
-		return nil, 0, fmt.Errorf("zero-rate order not allowed")
+		return nil, 0, codedError(orderParamsErr, fmt.Errorf("zero-rate order not allowed"))
 	}
 
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
@@ -2176,7 +2174,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Get an address for the swap contract.
 	addr, err := toWallet.Address()
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err)
+		return nil, 0, codedError(walletErr, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err))
 	}
 
 	// Fund the order and prepare the coins.
@@ -2208,16 +2206,20 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / wallets.baseAsset.LotSize
 				if lots == 0 {
-					return nil, 0, fmt.Errorf("order quantity is too low for current market rates. qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
-						qty, wallets.quoteAsset.Symbol, midGap, baseQty, wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
+					err = codedError(orderParamsErr,
+						fmt.Errorf("order quantity is too low for current market rates. "+
+							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
+							qty, wallets.quoteAsset.Symbol, midGap, baseQty,
+							wallets.baseAsset.Symbol, wallets.baseAsset.LotSize))
+					return nil, 0, err
 				}
 			}
 		}
 	}
 
 	if lots == 0 {
-		return nil, 0, fmt.Errorf("order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
-			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
+		return nil, 0, codedError(orderParamsErr, fmt.Errorf("order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize))
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
@@ -2227,7 +2229,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		Immediate:    isImmediate,
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w", wallets.fromAsset.Symbol, fundQty, lots, err)
+		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
+			wallets.fromAsset.Symbol, fundQty, lots, err))
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
@@ -2379,15 +2382,13 @@ type walletSet struct {
 // walletSet constructs a walletSet.
 func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
 	dc.assetsMtx.RLock()
-	baseAsset, found := dc.assets[baseID]
+	baseAsset, baseFound := dc.assets[baseID]
+	quoteAsset, quoteFound := dc.assets[quoteID]
 	dc.assetsMtx.RUnlock()
-	if !found {
+	if !baseFound {
 		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", baseID, unbip(baseID), dc.acct.host)
 	}
-	dc.assetsMtx.RLock()
-	quoteAsset, found := dc.assets[quoteID]
-	dc.assetsMtx.RUnlock()
-	if !found {
+	if !quoteFound {
 		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", quoteID, unbip(quoteID), dc.acct.host)
 	}
 
@@ -3374,7 +3375,8 @@ func (c *Core) listen(dc *dexConnection) {
 		defer c.wg.Done()
 		for job := range nextJob {
 			if err := job.hander(c, dc, job.msg); err != nil {
-				log.Errorf("route '%v' %v handler error: %v", job.msg.Route, job.msg.Type, err)
+				log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
+					job.msg.Type, dc.acct.host, err)
 			}
 		}
 	}()
