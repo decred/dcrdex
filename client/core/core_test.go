@@ -31,6 +31,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order/test"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
@@ -226,6 +227,9 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
 func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
+	if conn.reqErr != nil {
+		return conn.reqErr
+	}
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
 	handlers := conn.handlers[msg.Route]
@@ -234,7 +238,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 		conn.handlers[msg.Route] = handlers[1:]
 		return handler(msg, f)
 	}
-	return conn.reqErr
+	return fmt.Errorf("no handler for route %q", msg.Route)
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
 func (conn *TWebsocket) IsDown() bool {
@@ -768,17 +772,39 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches}
+		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		} else {
 			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
+		}
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueCancel(rpcErr *msgjson.Error) {
+	rig.ws.queueResponse(msgjson.CancelRoute, func(msg *msgjson.Message, f msgFunc) error {
+		var resp *msgjson.Message
+		if rpcErr == nil {
+			// Need to stamp and sign the message with the server's key.
+			msgOrder := new(msgjson.CancelOrder)
+			err := msg.Unmarshal(msgOrder)
+			if err != nil {
+				rpcErr = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+			} else {
+				co := convertMsgCancelOrder(msgOrder)
+				resp = orderResponse(msg.ID, msgOrder, co, false, false, false)
+			}
+		}
+		if rpcErr != nil {
+			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		}
 		f(resp)
 		return nil
@@ -1257,7 +1283,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect(nil, nil)
+		rig.queueConnect(nil, nil, nil)
 	}
 
 	form := &RegisterForm{
@@ -1508,7 +1534,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1525,7 +1551,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
@@ -1591,7 +1617,7 @@ func TestLogin(t *testing.T) {
 
 	tCore = rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch})
+	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
@@ -1618,11 +1644,11 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
-	rig.queueConnect(accountNotFoundError, nil)
+	rig.queueConnect(accountNotFoundError, nil, nil)
 
 	wallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 
 	result, err := tCore.Login(tPW)
 	if err != nil {
@@ -1639,7 +1665,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -1658,7 +1684,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	expectedErrorMessage := "test account not found error"
-	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil)
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -2125,20 +2151,7 @@ func TestCancel(t *testing.T) {
 		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
-	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
-		t.Helper()
-		// Need to stamp and sign the message with the server's key.
-		msgOrder := new(msgjson.CancelOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		co := convertMsgCancelOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, co, false, false, false))
-		return nil
-	}
-
-	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
+	rig.queueCancel(nil)
 	err := rig.core.Cancel(tPW, oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
@@ -2201,6 +2214,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:    ord,
 		preImg:   preImg,
+		db:       rig.db,
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
 	}
@@ -2751,6 +2765,222 @@ func TestTradeTracking(t *testing.T) {
 	}
 }
 
+func TestReconcileTrades(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+
+	mkt := rig.dc.market(tDcrBtcMktName)
+	rig.core.wallets[mkt.BaseID], _ = newTWallet(mkt.BaseID)
+	rig.core.wallets[mkt.QuoteID], _ = newTWallet(mkt.QuoteID)
+	walletSet, err := rig.core.walletSet(dc, mkt.BaseID, mkt.QuoteID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	type orderSet struct {
+		epoch               *trackedTrade
+		booked              *trackedTrade // standing limit orders only
+		bookedPendingCancel *trackedTrade // standing limit orders only
+		executed            *trackedTrade
+	}
+	makeOrderSet := func(force order.TimeInForce) *orderSet {
+		orders := &orderSet{
+			epoch:    makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch),
+			executed: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted),
+		}
+		if force == order.StandingTiF {
+			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
+			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
+			orders.bookedPendingCancel.cancel = &trackedCancel{
+				CancelOrder: order.CancelOrder{
+					P: order.Prefix{
+						ServerTime: time.Now().UTC().Add(-16 * time.Minute),
+					},
+				},
+			}
+		}
+		return orders
+	}
+
+	standingOrders := makeOrderSet(order.StandingTiF)
+	immediateOrders := makeOrderSet(order.ImmediateTiF)
+
+	tests := []struct {
+		name                string
+		clientOrders        []*trackedTrade        // orders known to the client
+		serverOrders        []*msgjson.OrderStatus // orders considered active by the server
+		orderStatusRes      []*msgjson.OrderStatus // server's response to order_status requests
+		expectOrderStatuses map[order.OrderID]order.OrderStatus
+	}{
+		{
+			name:         "server orders unknown to client",
+			clientOrders: []*trackedTrade{},
+			serverOrders: []*msgjson.OrderStatus{
+				{
+					ID:     test.RandomOrderID().Bytes(),
+					Status: uint16(order.OrderStatusBooked),
+				},
+			},
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{},
+		},
+		{
+			name: "different server-client statuses",
+			clientOrders: []*trackedTrade{
+				standingOrders.epoch,
+				standingOrders.booked,
+				standingOrders.bookedPendingCancel,
+				immediateOrders.epoch,
+				immediateOrders.executed,
+			},
+			serverOrders: []*msgjson.OrderStatus{
+				{
+					ID:     standingOrders.epoch.ID().Bytes(),
+					Status: uint16(order.OrderStatusBooked), // now booked
+				},
+				{
+					ID:     standingOrders.booked.ID().Bytes(),
+					Status: uint16(order.OrderStatusEpoch), // invald! booked orders cannot return to epoch!
+				},
+				{
+					ID:     standingOrders.bookedPendingCancel.ID().Bytes(),
+					Status: uint16(order.OrderStatusBooked), // still booked, cancel order should be deleted
+				},
+				{
+					ID:     immediateOrders.epoch.ID().Bytes(),
+					Status: uint16(order.OrderStatusBooked), // invalid, immediate orders cannot be booked!
+				},
+				{
+					ID:     immediateOrders.executed.ID().Bytes(),
+					Status: uint16(order.OrderStatusBooked), // invalid, inactive orders should not be returned by DEX!
+				},
+			},
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
+				standingOrders.epoch.ID():               order.OrderStatusBooked,   // epoch => booked
+				standingOrders.booked.ID():              order.OrderStatusBooked,   // should not change, cannot return to epoch
+				standingOrders.bookedPendingCancel.ID(): order.OrderStatusBooked,   // no status change
+				immediateOrders.epoch.ID():              order.OrderStatusEpoch,    // should not change, cannot be booked
+				immediateOrders.executed.ID():           order.OrderStatusExecuted, // should not change, inactive cannot become active
+			},
+		},
+		{
+			name: "active becomes inactive",
+			clientOrders: []*trackedTrade{
+				standingOrders.epoch,
+				standingOrders.booked,
+				standingOrders.bookedPendingCancel,
+				standingOrders.executed,
+				immediateOrders.epoch,
+				immediateOrders.executed,
+			},
+			serverOrders: []*msgjson.OrderStatus{}, // no active order reported by server
+			orderStatusRes: []*msgjson.OrderStatus{
+				{
+					ID:     standingOrders.epoch.ID().Bytes(),
+					Status: uint16(order.OrderStatusRevoked),
+				},
+				{
+					ID:     standingOrders.booked.ID().Bytes(),
+					Status: uint16(order.OrderStatusRevoked),
+				},
+				{
+					ID:     standingOrders.bookedPendingCancel.ID().Bytes(),
+					Status: uint16(order.OrderStatusCanceled),
+				},
+				{
+					ID:     immediateOrders.epoch.ID().Bytes(),
+					Status: uint16(order.OrderStatusExecuted),
+				},
+			},
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
+				standingOrders.epoch.ID():               order.OrderStatusRevoked,  // preimage missed = revoked
+				standingOrders.booked.ID():              order.OrderStatusRevoked,  // booked, not canceled = assume revoked (may actually be executed)
+				standingOrders.bookedPendingCancel.ID(): order.OrderStatusCanceled, // booked pending canceled = assume canceled (may actually be revoked or executed)
+				standingOrders.executed.ID():            order.OrderStatusExecuted, // should not change
+				immediateOrders.epoch.ID():              order.OrderStatusExecuted, // preimage sent, not canceled = executed
+				immediateOrders.executed.ID():           order.OrderStatusExecuted, // should not change
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		// Track client orders in dc.trades.
+		dc.tradeMtx.Lock()
+		var pendingCancel *trackedTrade
+		dc.trades = make(map[order.OrderID]*trackedTrade)
+		for _, tracker := range tt.clientOrders {
+			dc.trades[tracker.ID()] = tracker
+			if tracker.cancel != nil {
+				pendingCancel = tracker
+			}
+		}
+		dc.tradeMtx.Unlock()
+
+		// Queue order_status response if required for reconciliation.
+		if len(tt.orderStatusRes) > 0 {
+			rig.ws.queueResponse(msgjson.OrderStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
+				resp, _ := msgjson.NewResponse(msg.ID, tt.orderStatusRes, nil)
+				f(resp)
+				return nil
+			})
+		}
+
+		// Reconcile tracked orders with server orders.
+		dc.reconcileTrades(tt.serverOrders)
+
+		dc.tradeMtx.RLock()
+		if len(dc.trades) != len(tt.expectOrderStatuses) {
+			t.Fatalf("%s: post-reconcileTrades order count mismatch. expected %d, got %d",
+				tt.name, len(tt.expectOrderStatuses), len(dc.trades))
+		}
+		for oid, tracker := range dc.trades {
+			expectedStatus, expected := tt.expectOrderStatuses[oid]
+			if !expected {
+				t.Fatalf("%s: unexpected order %v tracked by client", tt.name, oid)
+			}
+			tracker.mtx.RLock()
+			if tracker.metaData.Status != expectedStatus {
+				t.Fatalf("%s: client reported wrong order status %v, expected %v",
+					tt.name, tracker.metaData.Status, expectedStatus)
+			}
+			tracker.mtx.RUnlock()
+		}
+		dc.tradeMtx.RUnlock()
+
+		// Check if a previously canceled order existed; if the order is still
+		// active (Epoch/Booked status) and the cancel order is deleted, having
+		// been there for over 15 minutes since the cancel order's epoch ended.
+		if pendingCancel != nil {
+			pendingCancel.mtx.RLock()
+			status, stillHasCancelOrder := pendingCancel.metaData.Status, pendingCancel.cancel != nil
+			pendingCancel.mtx.RUnlock()
+			if status == order.OrderStatusBooked {
+				if stillHasCancelOrder {
+					t.Fatalf("%s: expected stale cancel order to be deleted for now-booked order", tt.name)
+				}
+				// Cancel order deleted. Canceling the order again should succeed.
+				rig.queueCancel(nil)
+				err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
+				if err != nil {
+					t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)
+				}
+			}
+		}
+	}
+}
+
+func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus) *trackedTrade {
+	qty := 4 * tDCR.LotSize
+	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, tBTC.RateStep)
+	lo.Force = force
+	dbOrder.MetaData.Status = status
+
+	tracker := newTrackedTrade(dbOrder, preImg, rig.dc, mkt.EpochLen,
+		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+
+	return tracker
+}
+
 func TestRefunds(t *testing.T) {
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
@@ -3191,7 +3421,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-func Test_compareServerMatches(t *testing.T) {
+func TestCompareServerMatches(t *testing.T) {
 	rig := newTestRig()
 	preImg := newPreimage()
 	dc := rig.dc
@@ -3297,19 +3527,19 @@ func Test_compareServerMatches(t *testing.T) {
 		t.Fatalf("exceptions did not include trade %v", oid)
 	}
 	if exc.trade.ID() != oid {
-		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
+		t.Fatalf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
 	}
 	if len(exc.missing) != 1 {
-		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
 	if exc.missing[0].id != missingID {
-		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
 	}
 	if len(exc.extra) != 1 {
-		t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
+		t.Fatalf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
 	}
 	if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
-		t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
+		t.Fatalf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
 	}
 
 	exc, ok = exceptions[oidMissing]
@@ -3317,18 +3547,17 @@ func Test_compareServerMatches(t *testing.T) {
 		t.Fatalf("exceptions did not include trade %v", oidMissing)
 	}
 	if exc.trade.ID() != oidMissing {
-		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+		t.Fatalf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
 	}
 	if len(exc.missing) != 1 { // no matchIDMissingInactive
-		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
 	if exc.missing[0].id != matchIDMissing {
-		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
 	}
 	if len(exc.extra) != 0 {
-		t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+		t.Fatalf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
 	}
-
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {

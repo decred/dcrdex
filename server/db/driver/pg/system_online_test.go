@@ -134,7 +134,7 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 // nukeAll removes all of the market schemas and the tables within them, as well
 // as all of the DEX tables in the public schema.
 // TODO: find a long term home for this once it is clear if and how it will be
-// used outside fo tests.
+// used outside of tests.
 func nukeAll(db *sql.DB) error {
 	markets, err := detectMarkets(db)
 	if err != nil {

@@ -775,56 +775,6 @@ func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType,
 	return a.orderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
-// OrderStatuses gets the statuses and filled amounts of the orders with the
-// provided order IDs in the specified market and associated with the specified
-// account ID. The number and ordering of the returned order statuses is not
-// necessarily the same as the number and ordering of the provided order IDs.
-// It is not an error if any or all of the provided order IDs cannot be found
-// in the specified market against the specified account ID.
-func (a *Archiver) OrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
-	marketSchema, err := a.marketSchema(base, quote)
-	if err != nil {
-		return nil, err
-	}
-
-	// Search active orders first.
-	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
-	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-	activeOrders, err := orderStatuses(ctx, a.db, aid, oids, fullTable)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	orders := make([]*db.OrderStatus, 0, len(oids))
-	notFoundOids := make([]order.OrderID, 0, len(oids))
-	for _, oid := range oids {
-		if order, found := activeOrders[oid]; found {
-			orders = append(orders, order)
-		} else {
-			notFoundOids = append(notFoundOids, oid)
-		}
-	}
-
-	if len(notFoundOids) == 0 {
-		return orders, nil
-	}
-
-	// Search archived orders.
-	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
-	ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
-	archivedOrders, err := orderStatuses(ctx, a.db, aid, notFoundOids, fullTable)
-	cancel()
-	if err != nil {
-		return nil, err
-	}
-	for _, order := range archivedOrders {
-		orders = append(orders, order)
-	}
-
-	return orders, nil
-}
-
 // UpdateOrderStatusByID updates the status and filled amount of the order with
 // the given OrderID in the market specified by a base and quote asset. If
 // filled is -1, the filled amount is unchanged. For cancel orders, the filled
@@ -1009,6 +959,117 @@ func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, 
 	return orders, statuses, err
 }
 
+// UserOrderStatuses retrieves the statuses and filled amounts of the orders
+// with the provided order IDs for the given account in the market specified
+// by a base and quote asset.
+// The number and ordering of the returned statuses is not necessarily the same
+// as the number and ordering of the provided order IDs. It is not an error if
+// any or all of the provided order IDs cannot be found for the given account
+// in the specified market.
+func (a *Archiver) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	// Active orders.
+	fullTable := fullOrderTableName(a.dbName, marketSchema, true)
+	activeOrderStatuses, err := a.userOrderStatusesFromTable(fullTable, aid, oids)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		a.fatalBackendErr(err)
+		log.Errorf("Failed to query for active order statuses by user for market %v and account %v",
+			marketSchema, aid)
+		return nil, err
+	}
+
+	if len(oids) == len(activeOrderStatuses) {
+		return activeOrderStatuses, nil
+	}
+
+	foundOrders := make(map[order.OrderID]bool, len(activeOrderStatuses))
+	for _, status := range activeOrderStatuses {
+		foundOrders[status.ID] = true
+	}
+	var remainingOids []order.OrderID
+	for _, oid := range oids {
+		if !foundOrders[oid] {
+			remainingOids = append(remainingOids, oid)
+		}
+	}
+
+	// Archived Orders.
+	fullTable = fullOrderTableName(a.dbName, marketSchema, false)
+	archivedOrderStatuses, err := a.userOrderStatusesFromTable(fullTable, aid, remainingOids)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		a.fatalBackendErr(err)
+		log.Errorf("Failed to query for archived order statuses by user for market %v and account %v",
+			marketSchema, aid)
+		return nil, err
+	}
+
+	return append(activeOrderStatuses, archivedOrderStatuses...), nil
+}
+
+// ActiveUserOrderStatuses retrieves the statuses and filled amounts of all
+// active orders for a user across all markets.
+func (a *Archiver) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+	var orders []*db.OrderStatus
+	for m := range a.markets {
+		tableName := fullOrderTableName(a.dbName, m, true) // active table
+		mktOrders, err := a.userOrderStatusesFromTable(tableName, aid, nil)
+		if err != nil {
+			return nil, err
+		}
+		orders = append(orders, mktOrders...)
+	}
+	return orders, nil
+}
+
+// Pass nil or empty oids to return statuses for all user orders in the
+// specified table.
+func (a *Archiver) userOrderStatusesFromTable(fullTable string, aid account.AccountID, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	execQuery := func(ctx context.Context) (*sql.Rows, error) {
+		if len(oids) == 0 {
+			stmt := fmt.Sprintf(internal.SelectUserOrderStatuses, fullTable)
+			return a.db.QueryContext(ctx, stmt, aid)
+		}
+		oidArr := make(pq.ByteaArray, 0, len(oids))
+		for i := range oids {
+			oidArr = append(oidArr, oids[i][:])
+		}
+		stmt := fmt.Sprintf(internal.SelectUserOrderStatusesByID, fullTable)
+		return a.db.QueryContext(ctx, stmt, aid, oidArr)
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	rows, err := execQuery(ctx)
+	defer cancel()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	statuses := make([]*db.OrderStatus, 0, len(oids))
+	for rows.Next() {
+		var oid order.OrderID
+		var status pgOrderStatus
+		err = rows.Scan(&oid, &status)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, &db.OrderStatus{
+			ID:     oid,
+			Status: pgToMarketStatus(status),
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return statuses, nil
+}
+
 // OrderWithCommit searches all markets' trade and cancel orders, both active
 // and archived, for an order with the given Commitment.
 func (a *Archiver) OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error) {
@@ -1180,43 +1241,6 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	default:
 		return false, orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
-}
-
-func orderStatuses(ctx context.Context, dbe *sql.DB, aid account.AccountID, oids []order.OrderID, fullTable string) (map[order.OrderID]*db.OrderStatus, error) {
-	oidArr := make(pq.ByteaArray, 0, len(oids))
-	for i := range oids {
-		oidArr = append(oidArr, oids[i][:])
-	}
-
-	stmt := fmt.Sprintf(internal.OrderStatuses, fullTable)
-	var rows *sql.Rows
-	rows, err := dbe.QueryContext(ctx, stmt, aid, oidArr)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	orderStatuses := make(map[order.OrderID]*db.OrderStatus, len(oids))
-	for rows.Next() {
-		var oid order.OrderID
-		var status pgOrderStatus
-		var filled uint64
-		err = rows.Scan(&oid, &status, &filled)
-		if err != nil {
-			return nil, err
-		}
-		orderStatuses[oid] = &db.OrderStatus{
-			ID:     oid,
-			Status: pgToMarketStatus(status),
-			Fill:   filled,
-		}
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return orderStatuses, nil
 }
 
 // loadTrade does NOT set BaseAsset and QuoteAsset!
