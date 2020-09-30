@@ -1669,6 +1669,38 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		return nil, err
 	}
 
+	// Attempt to connect to and retrieve balance from all known wallets. It is
+	// not an error if we can't connect, unless we need the wallet for active
+	// trades, but that condition is checked later in resolveActiveTrades.
+	// Ignoring walletBalances errors here too, to accommodate wallets that must
+	// be unlocked to get the balance. We won't try to unlock here, but if the
+	// wallet is needed for active trades, it will be unlocked in
+	// resolveActiveTrades and the balance updated there.
+	var wg sync.WaitGroup
+	var connectCount, balanceCount uint32
+	c.walletMtx.Lock()
+	walletCount := len(c.wallets)
+	for _, wallet := range c.wallets {
+		wg.Add(1)
+		go func(wallet *xcWallet) {
+			defer wg.Done()
+			err := wallet.Connect(c.ctx)
+			if err != nil {
+				return
+			}
+			atomic.AddUint32(&connectCount, 1)
+			_, err = c.walletBalances(wallet)
+			if err == nil {
+				atomic.AddUint32(&balanceCount, 1)
+			}
+		}(wallet)
+	}
+	c.walletMtx.Unlock()
+	wg.Wait()
+	if walletCount > 0 {
+		log.Infof("Connected to %d of %d wallets. Updated %d balances.", connectCount, walletCount, balanceCount)
+	}
+
 	loaded := c.resolveActiveTrades(crypter)
 	if loaded > 0 {
 		log.Infof("loaded %d incomplete orders", loaded)
