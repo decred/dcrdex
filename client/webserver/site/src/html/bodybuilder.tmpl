@@ -11,7 +11,9 @@
   <link href="/css/style.css?v=Ueawg" rel="stylesheet">
 </head>
 <body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
-  <div class="poke-note px-2 fs14 d-flex align-items-center" id="pokeNote"><span>Here is a poke note.</span></div>
+  <div class="poke-note" id="pokeNote">
+    <span data-tmpl="note"></span>
+  </div>
   <div id="tooltip" class="flex-center"></div>
   {{template "header" .}}
 {{end}}

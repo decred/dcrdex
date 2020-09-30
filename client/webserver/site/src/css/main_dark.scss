@@ -90,10 +90,9 @@ body.dark {
     border-color: white;
   }
 
-  div.poke-note {
+  div.poke-note > span {
     background-color: white;
     color: $font-color-light;
-    border-color: #aaa;
   }
 
   .buycolor {

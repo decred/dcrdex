@@ -3125,13 +3125,11 @@ func (c *Core) handleConnectEvent(host string, connected bool) {
 	}
 	c.connMtx.Unlock()
 	statusStr := "connected"
-	lvl := db.Success
 	if !connected {
 		statusStr = "disconnected"
-		lvl = db.WarningLevel
 	}
 	details := fmt.Sprintf("DEX at %s has %s", host, statusStr)
-	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, lvl))
+	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, db.Poke))
 	c.refreshUser()
 }
 

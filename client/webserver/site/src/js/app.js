@@ -223,7 +223,9 @@ export default class Application {
    */
   attachHeader () {
     this.header = idel(document.body, 'header')
-    this.pokeNote = idel(document.body, 'pokeNote')
+    this.pokeNotes = idel(document.body, 'pokeNote')
+    this.pokeTmpl = Doc.tmplElement(this.pokeNotes, 'note')
+    this.pokeTmpl.remove()
     this.tooltip = idel(document.body, 'tooltip')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
@@ -428,15 +430,15 @@ export default class Application {
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
     if (note.severity === ntfn.POKE) {
-      this.pokeNote.firstChild.textContent = `${note.subject}: ${note.details}`
-      this.pokeNote.classList.add('active')
-      if (this.pokeNote.timer) {
-        clearTimeout(this.pokeNote.timer)
-      }
-      this.pokeNote.timer = setTimeout(() => {
-        this.pokeNote.classList.remove('active')
-        delete this.pokeNote.timer
-      }, 5000)
+      const span = this.pokeTmpl.cloneNode(true)
+      span.textContent = `${note.subject}: ${note.details}`
+      this.pokeNotes.appendChild(span)
+      setTimeout(async () => {
+        await Doc.animate(500, progress => {
+          span.style.opacity = 1 - progress
+        })
+        span.remove()
+      }, 4000)
       return
     }
     // Success and higher severity go to the bell dropdown.
