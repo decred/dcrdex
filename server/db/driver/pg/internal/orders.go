@@ -53,6 +53,15 @@ const (
 		commit, coins, quantity, rate, force, status, filled
 	FROM %s WHERE account_id = $1;`
 
+	// SelectUserOrderStatuses retrieves the order IDs and statuses of all orders
+	// for the given account ID. Only applies to market and limit orders.
+	SelectUserOrderStatuses = `SELECT oid, status FROM %s WHERE account_id = $1;`
+
+	// SelectUserOrderStatusesByID retrieves the order IDs and statuses of the
+	// orders with the provided order IDs for the given account ID. Only applies
+	// to market and limit orders.
+	SelectUserOrderStatusesByID = `SELECT oid, status FROM %s WHERE account_id = $1 AND oid = ANY($2);`
+
 	// SelectCanceledUserOrders gets the ID of orders that were either canceled
 	// by the user or revoked/canceled by the server, but these statuses can be
 	// set by the caller. Note that revoked orders can be market or immediate
@@ -100,11 +109,6 @@ const (
 	// orders. For cancel orders, which lack a type and filled column, use
 	// CancelOrderStatus.
 	OrderStatus = `SELECT type, status, filled FROM %s WHERE oid = $1;`
-
-	// OrderStatuses retrieves the order id, order status, and filled amount
-	// for orders with the given order IDs. This only applies to market and
-	// limit orders.
-	OrderStatuses = `SELECT oid, status, filled FROM %s WHERE account_id = $1 AND oid = ANY($2);`
 
 	// MoveOrder moves an order row from one table to another (e.g.
 	// orders_active to orders_archived), while updating the order's status and

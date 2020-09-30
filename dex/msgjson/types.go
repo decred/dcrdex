@@ -486,11 +486,10 @@ type OrderStatusRequest struct {
 	OrderID Bytes  `json:"orderid"`
 }
 
-// OrderStatusResult is the successful result for the OrderStatusRoute request.
-type OrderStatusResult struct {
-	OrderID Bytes  `json:"orderid"`
-	Status  uint16 `json:"status"`
-	Fill    uint64 `json:"fill"`
+// OrderStatus is the current status of an order.
+type OrderStatus struct {
+	ID     Bytes  `json:"id"`
+	Status uint16 `json:"status"`
 }
 
 // Init is the payload for a client-originating InitRoute request.
@@ -856,8 +855,9 @@ func (c *Connect) Serialize() []byte {
 //
 // TODO: Include penalty data as specified in the spec.
 type ConnectResult struct {
-	Sig     Bytes    `json:"sig"`
-	Matches []*Match `json:"matches"`
+	Sig                 Bytes          `json:"sig"`
+	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
+	ActiveMatches       []*Match       `json:"activematches"`
 }
 
 // PenaltyNote is the payload of a Penalty notification.

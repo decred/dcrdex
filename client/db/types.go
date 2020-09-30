@@ -356,7 +356,7 @@ func DecodeOrderProof(b []byte) (*OrderProof, error) {
 
 func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 	if len(pushes) != 2 {
-		return nil, fmt.Errorf("decodeMatchProof: expected 2 push, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeOrderProof: expected 2 push, got %d", len(pushes))
 	}
 	return &OrderProof{
 		DEXSig:   pushes[0],
