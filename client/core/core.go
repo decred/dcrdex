@@ -3525,12 +3525,20 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 	c.piSyncMtx.Unlock()
 
+	deletePiSyncer := func() {
+		c.piSyncMtx.Lock()
+		delete(c.piSyncers, oid)
+		c.piSyncMtx.Unlock()
+	}
+
 	if !found {
 		select {
 		case <-syncChan:
-		case <-time.NewTimer(time.Minute).C:
+		case <-time.After(time.Minute):
+			deletePiSyncer()
 			return fmt.Errorf("timed out syncing preimage request for %s, order %s", dc.acct.host, oid)
 		case <-c.ctx.Done():
+			deletePiSyncer()
 			return nil
 		}
 	}

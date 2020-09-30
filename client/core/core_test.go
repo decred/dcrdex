@@ -4323,7 +4323,7 @@ func TestPreimageSync(t *testing.T) {
 		msgOrder := new(msgjson.LimitOrder)
 		err := msg.Unmarshal(msgOrder)
 		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
+			return fmt.Errorf("unmarshal error: %v", err)
 		}
 		lo := convertMsgLimitOrder(msgOrder)
 		resp := orderResponse(msg.ID, msgOrder, lo, false, false, false)
@@ -4333,12 +4333,11 @@ func TestPreimageSync(t *testing.T) {
 		return nil
 	})
 
+	errChan := make(chan error, 1)
 	// Run the trade in a goroutine.
 	go func() {
 		_, err := tCore.Trade(tPW, form)
-		if err != nil {
-			t.Fatalf("limit order error: %v", err)
-		}
+		errChan <- err
 	}()
 
 	// Wait for the limit route to start processing. Then we have 100 ms to call
@@ -4361,5 +4360,8 @@ func TestPreimageSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("early preimage request error: %v", err)
 	}
-
+	err = <-errChan
+	if err != nil {
+		t.Fatalf("trade error: %v", err)
+	}
 }
