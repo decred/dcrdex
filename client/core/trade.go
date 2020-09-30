@@ -527,6 +527,50 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 	return
 }
 
+// deleteStaleCancelOrder checks if this trade has an associated cancel order,
+// and deletes the cancel order if the cancel order stays at Epoch status for
+// more than 2 epochs. Deleting the stale cancel order from this trade makes
+// it possible for the client to re- attempt cancelling the order.
+//
+// NOTE:
+// Stale cancel orders would be Executed if their preimage was sent or Revoked
+// if their preimages was not sent. We cannot currently tell whether the cancel
+// order's preimage was revealed, so assume that the cancel order is Executed
+// but unmatched. Consider adding a order.PreimageRevealed field to ensure that
+// the correct final status is set for the cancel order; or allow the server to
+// check and return status of cancel orders.
+//
+// This method MUST be called with the trackedTrade mutex lock held for writes.
+func (t *trackedTrade) deleteStaleCancelOrder() {
+	if t.cancel == nil || t.metaData.Status != order.OrderStatusBooked {
+		log.Debugf("Ignoring delete cancel order attempt for order %v, status %v, pending cancel = %v",
+			t.ID(), t.metaData.Status, t.cancel != nil)
+		return
+	}
+
+	stamp := t.cancel.ServerTime
+	epoch := order.EpochID{Idx: encode.UnixMilliU(stamp) / t.epochLen, Dur: t.epochLen}
+	epochEnd := epoch.End()
+	if time.Since(epochEnd).Milliseconds() < int64(2*t.epochLen) {
+		return // not stuck, yet
+	}
+
+	log.Infof("Cancel order %v in epoch status with server time stamp %v, epoch end %v (%v ago) considered executed and unmatched.",
+		t.cancel.ID(), t.cancel.ServerTime, epochEnd, time.Since(epochEnd))
+
+	err := t.db.LinkOrder(t.ID(), order.OrderID{})
+	if err != nil {
+		log.Errorf("DB error unlinking cancel order %s for trade %s: %w", t.cancel.ID(), t.ID(), err)
+	}
+	// Clearing the trackedCancel allows this order to be canceled again.
+	t.cancel = nil
+	t.metaData.LinkedOrder = order.OrderID{}
+
+	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
+	corder, _ := t.coreOrderInternal()
+	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, corder))
+}
+
 // isActive will be true if the trade is booked or epoch, or if any of the
 // matches are still negotiating.
 func (t *trackedTrade) isActive() bool {
@@ -1754,7 +1798,7 @@ func (t *trackedTrade) maybeReturnCoins() bool {
 			side == order.Taker && status < order.TakerSwapCast {
 			// Match is active (not revoked, not refunded) and client
 			// is yet to execute swap. Keep coins locked.
-			log.Tracef("not unlocking coins for order with match side %s, status", side, status)
+			log.Tracef("not unlocking coins for order %v with match side %s, status %s", t.ID(), side, status)
 			return false
 		}
 	}

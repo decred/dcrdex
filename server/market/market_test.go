@@ -69,6 +69,12 @@ func (ta *TArchivist) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoin
 func (ta *TArchivist) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
 	return nil, nil, errors.New("boom")
 }
+func (ta *TArchivist) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	return nil, errors.New("boom")
+}
+func (ta *TArchivist) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+	return nil, errors.New("boom")
+}
 func (ta *TArchivist) OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error) {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()
@@ -91,9 +97,6 @@ func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) (oids
 }
 func (ta *TArchivist) OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return order.OrderStatusUnknown, order.UnknownOrderType, -1, errors.New("boom")
-}
-func (ta *TArchivist) OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error) {
-	return nil, errors.New("not mocked")
 }
 func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error {
 	ta.mtx.Lock()

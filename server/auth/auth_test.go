@@ -68,14 +68,23 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
+func (s *TStorage) UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error) {
+	return s.orderStatuses, nil
+}
+func (s *TStorage) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
+	var activeOrderStatuses []*db.OrderStatus
+	for _, orderStatus := range s.orderStatuses {
+		if orderStatus.Status == order.OrderStatusEpoch || orderStatus.Status == order.OrderStatusBooked {
+			activeOrderStatuses = append(activeOrderStatuses, orderStatus)
+		}
+	}
+	return activeOrderStatuses, nil
+}
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
 }
 func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
 	return s.matchStatuses, nil
-}
-func (s *TStorage) OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*db.OrderStatus, error) {
-	return s.orderStatuses, nil
 }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
@@ -428,9 +437,17 @@ func TestConnect(t *testing.T) {
 	user := tNewUser(t)
 	rig.signer.sig = user.randomSignature()
 
-	// Before connecting, put an activeMatch in storage.
+	// Before connecting, put an activeOrder and activeMatch in storage.
 	matchData, userMatch := userMatchData(user.acctID)
 	matchTime := matchData.Epoch.End()
+
+	rig.storage.orderStatuses = []*db.OrderStatus{
+		{
+			ID:     userMatch.OrderID,
+			Status: order.OrderStatusBooked,
+		},
+	}
+	defer func() { rig.storage.orderStatuses = nil }()
 
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
@@ -505,10 +522,20 @@ func TestConnect(t *testing.T) {
 	// Connect the user.
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
-	if len(cResp.Matches) != 1 {
+	if len(cResp.ActiveOrderStatuses) != 1 {
+		t.Fatalf("no active orders")
+	}
+	msgOrder := cResp.ActiveOrderStatuses[0]
+	if msgOrder.ID.String() != userMatch.OrderID.String() {
+		t.Fatal("active order ID mismatch: ", msgOrder.ID.String(), " != ", userMatch.OrderID.String())
+	}
+	if msgOrder.Status != uint16(order.OrderStatusBooked) {
+		t.Fatal("active order Status mismatch: ", msgOrder.Status, " != ", order.OrderStatusBooked)
+	}
+	if len(cResp.ActiveMatches) != 1 {
 		t.Fatalf("no active matches")
 	}
-	msgMatch := cResp.Matches[0]
+	msgMatch := cResp.ActiveMatches[0]
 	if msgMatch.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("active match OrderID mismatch: ", msgMatch.OrderID.String(), " != ", userMatch.OrderID.String())
 	}
@@ -589,7 +616,6 @@ func TestConnect(t *testing.T) {
 	if reuser.conn.getReq() == nil {
 		t.Fatalf("new connection did not receive the request")
 	}
-
 }
 
 func TestAccountErrors(t *testing.T) {
@@ -608,10 +634,10 @@ func TestAccountErrors(t *testing.T) {
 	// Check the response.
 	respMsg := user.conn.getSend()
 	result := extractConnectResult(t, respMsg)
-	if len(result.Matches) != 1 {
-		t.Fatalf("expected 1 match, received %d", len(result.Matches))
+	if len(result.ActiveMatches) != 1 {
+		t.Fatalf("expected 1 match, received %d", len(result.ActiveMatches))
 	}
-	match := result.Matches[0]
+	match := result.ActiveMatches[0]
 	if match.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("wrong OrderID: ", match.OrderID, " != ", userMatch.OrderID)
 	}
@@ -1368,7 +1394,7 @@ func TestOrderStatus(t *testing.T) {
 		t.Fatalf("no orders sent")
 	}
 
-	statuses := []msgjson.OrderStatusResult{}
+	var statuses []*msgjson.OrderStatus
 	err := resp.UnmarshalResult(&statuses)
 	if err != nil {
 		t.Fatalf("UnmarshalResult error: %v", err)

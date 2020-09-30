@@ -52,11 +52,10 @@ type EpochResults struct {
 	OrdersMissed      []order.OrderID
 }
 
-// OrderStatus is the current status of an order, including its fill.
+// OrderStatus is the current status of an order.
 type OrderStatus struct {
 	ID     order.OrderID
 	Status order.OrderStatus
-	Fill   uint64
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with
@@ -109,6 +108,19 @@ type OrderArchiver interface {
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
+	// UserOrderStatuses retrieves the statuses and filled amounts of the orders
+	// with the provided order IDs for the given account in the market specified
+	// by a base and quote asset.
+	// The number and ordering of the returned statuses is not necessarily the
+	// same as the number and ordering of the provided order IDs. It is not an
+	// error if any or all of the provided order IDs cannot be found for the
+	// given account in the specified market.
+	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*OrderStatus, error)
+
+	// ActiveUserOrderStatuses retrieves the statuses and filled amounts of all
+	// active orders for a user across all markets.
+	ActiveUserOrderStatuses(aid account.AccountID) ([]*OrderStatus, error)
+
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
@@ -125,9 +137,6 @@ type OrderArchiver interface {
 
 	// OrderStatus gets the status, ID, and filled amount of the given order.
 	OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error)
-
-	// OrderStatuses gets the status and filled amount of the given orders.
-	OrderStatuses(aid account.AccountID, base, quote uint32, orderIDs []order.OrderID) ([]*OrderStatus, error)
 
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a
