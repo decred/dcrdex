@@ -67,7 +67,6 @@ type dexConnection struct {
 	marketMtx sync.RWMutex
 	marketMap map[string]*Market
 
-	submittingTrades sync.WaitGroup
 	// tradeMtx is used to synchronize access to the trades map.
 	tradeMtx sync.RWMutex
 	trades   map[order.OrderID]*trackedTrade
@@ -711,6 +710,9 @@ type Core struct {
 
 	noteMtx   sync.RWMutex
 	noteChans []chan Notification
+
+	piSyncMtx sync.Mutex
+	piSyncers map[order.OrderID]chan struct{}
 }
 
 // New is the constructor for a new Core.
@@ -728,6 +730,7 @@ func New(cfg *Config) (*Core, error) {
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[uint64]*blockWaiter),
+		piSyncers:     make(map[order.OrderID]chan struct{}),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -2239,8 +2242,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	route, msgOrder := messageOrder(ord, msgCoins)
 
 	// Send and get the result.
-	dc.submittingTrades.Add(1) // flag that we're waiting on an OrderResult
-	defer dc.submittingTrades.Done()
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
@@ -2291,6 +2292,23 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
 	dc.tradeMtx.Unlock()
+
+	// Synchronize with the preimage request, in case that request came before
+	// we had an order ID and added this trade to the map.
+	oid := ord.ID()
+	c.piSyncMtx.Lock()
+	syncChan, found := c.piSyncers[oid]
+	if found {
+		// If we found the channel, the preimage request is already waiting.
+		// Close the channel to allow that request to proceed.
+		close(syncChan)
+		delete(c.piSyncers, oid)
+	} else {
+		// If there is no channel, the preimage request hasn't come yet. Add the
+		// channel to signal readiness.
+		c.piSyncers[oid] = make(chan struct{})
+	}
+	c.piSyncMtx.Unlock()
 
 	// Send a low-priority notification.
 	corder, _ := tracker.coreOrder()
@@ -3492,6 +3510,31 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	var oid order.OrderID
 	copy(oid[:], req.OrderID)
 
+	// Sync with order placement.
+	c.piSyncMtx.Lock()
+	syncChan, found := c.piSyncers[oid]
+	if found {
+		// If we found the channel, the tracker is already in the map, and we
+		// can go ahead.
+		delete(c.piSyncers, oid)
+	} else {
+		// If we didn't find the channel, Trade is still running. Add the chan
+		// and wait for Trade to close it.
+		syncChan = make(chan struct{})
+		c.piSyncers[oid] = syncChan
+	}
+	c.piSyncMtx.Unlock()
+
+	if !found {
+		select {
+		case <-syncChan:
+		case <-time.NewTimer(time.Minute).C:
+			return fmt.Errorf("timed out syncing preimage request for %s, order %s", dc.acct.host, oid)
+		case <-c.ctx.Done():
+			return nil
+		}
+	}
+
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
 		// Hack around the race in prepareTrackedTrade from submitting the
@@ -3500,7 +3543,6 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// submitting the order, so if (1) we didn't find this oid, AND (2)
 		// we're in that window, that order result is about to be stored, so
 		// wait for it and check again.
-		dc.submittingTrades.Wait()
 		tracker, preImg, isCancel = dc.findOrder(oid)
 		if tracker == nil {
 			return fmt.Errorf("no active order found for preimage request for %s", oid)

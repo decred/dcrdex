@@ -718,6 +718,7 @@ func newTestRig() *testRig {
 			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[uint64]*blockWaiter),
+			piSyncers:     make(map[order.OrderID]chan struct{}),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -2188,7 +2189,15 @@ func TestHandlePreimageRequest(t *testing.T) {
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
 	}
+
+	loadSyncer := func() {
+		rig.core.piSyncMtx.Lock()
+		rig.core.piSyncers[oid] = make(chan struct{})
+		rig.core.piSyncMtx.Unlock()
+	}
+
 	rig.dc.trades[oid] = tracker
+	loadSyncer()
 	err := handlePreimageRequest(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handlePreimageRequest error: %v", err)
@@ -2196,6 +2205,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		t.Helper()
+		loadSyncer()
 		err := handlePreimageRequest(rig.core, rig.dc, req)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -4262,4 +4272,94 @@ func TestHandlePenaltyMsg(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 	}
+}
+
+func TestPreimageSync(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.Unlock(wPW, time.Hour)
+
+	var lots uint64 = 10
+	qty := tDCR.LotSize * lots
+	rate := tBTC.RateStep * 1000
+
+	form := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     qty,
+		Rate:    rate,
+		TifNow:  false,
+	}
+
+	dcrCoin := &tCoin{
+		id:  encode.RandomBytes(36),
+		val: qty * 2,
+	}
+	tDcrWallet.fundCoins = asset.Coins{dcrCoin}
+	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
+
+	btcVal := calc.BaseToQuote(rate, qty*2)
+	btcCoin := &tCoin{
+		id:  encode.RandomBytes(36),
+		val: btcVal,
+	}
+	tBtcWallet.fundCoins = asset.Coins{btcCoin}
+	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
+
+	limitRouteProcessing := make(chan order.OrderID)
+
+	rig.ws.queueResponse(msgjson.LimitRoute, func(msg *msgjson.Message, f msgFunc) error {
+		t.Helper()
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		resp := orderResponse(msg.ID, msgOrder, lo, false, false, false)
+		limitRouteProcessing <- lo.ID()
+		<-time.NewTimer(time.Millisecond * 100).C
+		f(resp)
+		return nil
+	})
+
+	// Run the trade in a goroutine.
+	go func() {
+		_, err := tCore.Trade(tPW, form)
+		if err != nil {
+			t.Fatalf("limit order error: %v", err)
+		}
+	}()
+
+	// Wait for the limit route to start processing. Then we have 100 ms to call
+	// handlePreimageRequest to catch the early-preimage case.
+	var oid order.OrderID
+	select {
+	case oid = <-limitRouteProcessing:
+	case <-time.NewTimer(time.Second).C:
+		t.Fatalf("limit route never hit")
+	}
+
+	// So ideally, we're calling handlePreimageRequest about 100 ms before we
+	// even have an order id back from the server. This shouldn't result in an
+	// error.
+	payload := &msgjson.PreimageRequest{
+		OrderID: oid[:],
+	}
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+	err := handlePreimageRequest(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("early preimage request error: %v", err)
+	}
+
 }
