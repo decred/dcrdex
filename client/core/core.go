@@ -246,7 +246,7 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 
 // tryCancel will look for an order with the specified order ID, and attempt to
 // cancel the order. It is not an error if the order is not found.
-func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
+func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err error) {
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return
@@ -307,6 +307,9 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 		return
 	}
 
+	// Now that the trackedTrade is updated, sync with the preimage request.
+	c.syncOrderPlaced(co.ID())
+
 	// Store the cancel order.
 	err = tracker.db.UpdateOrder(&db.MetaOrder{
 		MetaData: &db.OrderMetaData{
@@ -325,7 +328,28 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 		return
 	}
 
+	log.Info("Cancel order %s targeting order %s at %s has been placed",
+		co.ID(), oid, dc.acct.host)
+
 	return
+}
+
+// Synchronize with the preimage request, in case that request came before
+// we had an order ID and added this order to the trades map or cancel field.
+func (c *Core) syncOrderPlaced(oid order.OrderID) {
+	c.piSyncMtx.Lock()
+	syncChan, found := c.piSyncers[oid]
+	if found {
+		// If we found the channel, the preimage request is already waiting.
+		// Close the channel to allow that request to proceed.
+		close(syncChan)
+		delete(c.piSyncers, oid)
+	} else {
+		// If there is no channel, the preimage request hasn't come yet. Add the
+		// channel to signal readiness.
+		c.piSyncers[oid] = make(chan struct{})
+	}
+	c.piSyncMtx.Unlock()
 }
 
 // signAndRequest signs and sends the request, unmarshaling the response into
@@ -2293,22 +2317,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	dc.trades[tracker.ID()] = tracker
 	dc.tradeMtx.Unlock()
 
-	// Synchronize with the preimage request, in case that request came before
-	// we had an order ID and added this trade to the map.
-	oid := ord.ID()
-	c.piSyncMtx.Lock()
-	syncChan, found := c.piSyncers[oid]
-	if found {
-		// If we found the channel, the preimage request is already waiting.
-		// Close the channel to allow that request to proceed.
-		close(syncChan)
-		delete(c.piSyncers, oid)
-	} else {
-		// If there is no channel, the preimage request hasn't come yet. Add the
-		// channel to signal readiness.
-		c.piSyncers[oid] = make(chan struct{})
-	}
-	c.piSyncMtx.Unlock()
+	// Now that the trades map is updated, sync with the preimage request.
+	c.syncOrderPlaced(ord.ID())
 
 	// Send a low-priority notification.
 	corder, _ := tracker.coreOrder()
@@ -2391,7 +2401,7 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
-		found, err := dc.tryCancel(oid)
+		found, err := c.tryCancel(dc, oid)
 		if err != nil {
 			return err
 		}
