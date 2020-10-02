@@ -2568,7 +2568,8 @@ func TestTradeTracking(t *testing.T) {
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	tCore.tickAsset(dc, tBTC.ID)
-	checkStatus("maker redeemed", order.MakerRedeemed)
+	// TakerSwapCast -> MatchComplete (MakerRedeem skipped when redeem ack is received with valid sig)
+	checkStatus("taker match complete after ack'd redeem", order.MatchComplete)
 	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
 		t.Fatalf("redeem coin ID not logged")
 	}
@@ -3541,8 +3542,15 @@ func TestCompareServerMatches(t *testing.T) {
 	missingTradeMatchInactive := &matchTracker{
 		id: matchIDMissingInactive,
 		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{Status: order.MatchComplete},
-			Match:    &order.UserMatch{Status: order.MatchComplete},
+			MetaData: &db.MatchMetaData{
+				Status: order.MatchComplete,
+				Proof: db.MatchProof{
+					Auth: db.MatchAuth{
+						RedeemSig: []byte{1, 2, 3}, // won't be considered complete with out it
+					},
+				},
+			},
+			Match: &order.UserMatch{Status: order.MatchComplete},
 		},
 		counterConfirms: 1,
 	}

@@ -3109,9 +3109,11 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
 				if err != nil {
-					c.log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked)
+					c.log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status,
+						len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked())
 					match.failErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
-					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v", tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
+					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v",
+						tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
 					continue
 				}
 				match.counterSwap = auditInfo
