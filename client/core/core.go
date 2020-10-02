@@ -236,8 +236,16 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 	}
 
 	if tracker.cancel != nil {
-		err = fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
-		return
+		// Existing cancel might be stale. Deleting it now allows this
+		// cancel attempt to proceed.
+		tracker.mtx.Lock()
+		tracker.deleteStaleCancelOrder()
+		tracker.mtx.Unlock()
+
+		if tracker.cancel != nil {
+			err = fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
+			return
+		}
 	}
 
 	// Construct the order.
@@ -305,7 +313,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 		return
 	}
 
-	log.Info("Cancel order %s targeting order %s at %s has been placed",
+	log.Infof("Cancel order %s targeting order %s at %s has been placed",
 		co.ID(), oid, dc.acct.host)
 
 	return
