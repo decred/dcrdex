@@ -6,11 +6,11 @@ set -e
 echo initializing
 ./dexcctl -p abc init
 echo configuring Decred wallet
-./dexcctl -p abc -p abc newwallet 42 ~/dextest/dcr/alpha/w-alpha.conf '{"account":"default"}'
+./dexcctl -p abc -p abc newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
 echo configuring Bitcoin wallet
-./dexcctl -p abc -p abc newwallet 0 ~/dextest/btc/harness-ctl/alpha.conf '{"walletname":"gamma"}'
+./dexcctl -p abc -p "" newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
 echo configuring Litecoin wallet
-./dexcctl -p abc -p abc newwallet 2 ~/dextest/ltc/harness-ctl/alpha.conf '{"walletname":"gamma"}'
+./dexcctl -p abc -p "" newwallet 2 ~/dextest/ltc/alpha/alpha.conf '{"walletname":"gamma"}'
 echo registering with DEX
 ./dexcctl -p abc register 127.0.0.1:17273 100000000 ~/dextest/dcrdex/rpc.cert
 echo mining fee confirmation blocks

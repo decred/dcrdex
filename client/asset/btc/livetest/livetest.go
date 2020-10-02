@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"math"
 	"math/rand"
 	"os/exec"
@@ -31,8 +32,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 )
 
-const tPW = "abc"
-
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
 // Convert the BTC value to satoshi.
@@ -40,14 +39,14 @@ func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }
 
-func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
+func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, node, name string,
 	logger dex.Logger, blkFunc func(string, error), splitTx bool) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
 
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	cfgPath := filepath.Join(user.HomeDir, "dextest", symbol, "harness-ctl", conf+".conf")
+	cfgPath := filepath.Join(user.HomeDir, "dextest", symbol, node, node+".conf")
 	settings, err := config.Parse(cfgPath)
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
@@ -56,10 +55,13 @@ func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, sy
 	if splitTx {
 		settings["txsplit"] = "1"
 	}
+
+	reportName := fmt.Sprintf("%s:%s", symbol, node)
+
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
 		TipChange: func(err error) {
-			blkFunc(conf, err)
+			blkFunc(reportName, err)
 		},
 	}
 	var backend asset.Wallet
@@ -164,7 +166,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 
 	// Unlock the wallet for use.
-	err := rig.gamma().Unlock(walletPassword)
+	err := rig.alpha().Unlock(walletPassword)
 	if err != nil {
 		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}
@@ -383,10 +385,4 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		t.Fatalf("error withdrawing: %v", err)
 	}
 	tLogger.Infof("withdrew with tx %s", coin.String())
-
-	// Lock the wallet
-	err = rig.gamma().Lock()
-	if err != nil {
-		t.Fatalf("error locking wallet: %v", err)
-	}
 }

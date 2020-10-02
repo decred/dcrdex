@@ -62,7 +62,7 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", name, "w-"+name+".conf")
+	cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", name, name+".conf")
 	settings, err := config.Parse(cfgPath)
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)

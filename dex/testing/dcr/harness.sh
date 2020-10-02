@@ -2,9 +2,9 @@
 # Tmux script that sets up a simnet harness.
 set -ex
 SESSION="dcr-harness"
-RPC_USER="user"
-RPC_PASS="pass"
-WALLET_PASS=abc
+export RPC_USER="user"
+export RPC_PASS="pass"
+export WALLET_PASS=abc
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
 ALPHA_MINING_ADDR="SsXciQNTo3HuV5tX3yy4hXndRWgLMRVC7Ah"
 ALPHA_NODE_PORT="19571"
@@ -28,12 +28,28 @@ TRADING_WALLET2_PORT="19582"
 WAIT="; tmux wait-for -S donedcr"
 
 NODES_ROOT=~/dextest/dcr
+export NODES_ROOT
+
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
 fi
 mkdir -p "${NODES_ROOT}/alpha"
 mkdir -p "${NODES_ROOT}/beta"
 mkdir -p "${NODES_ROOT}/harness-ctl"
+
+MINE=1
+# Bump sleep up to 3 if we have to mine a lot of blocks, because dcrwallet
+# doesn't always keep up.
+MINE_SLEEP=3
+if [ -f ./harnesschain.tar.gz ]; then
+  echo "Seeding blockchain from compressed file"
+  MINE=0
+  MINE_SLEEP=0.5
+  mkdir -p "${NODES_ROOT}/alpha/data"
+  mkdir -p "${NODES_ROOT}/beta/data"
+  tar -xzf ./harnesschain.tar.gz -C ${NODES_ROOT}/alpha/data
+  cp -r ${NODES_ROOT}/alpha/data/simnet ${NODES_ROOT}/beta/data/simnet
+fi
 
 echo "Writing ctl scripts"
 ################################################################################
@@ -42,6 +58,7 @@ echo "Writing ctl scripts"
 
 # Add wallet script
 HARNESS_DIR=$(dirname $0)
+export HARNESS_DIR
 cp "${HARNESS_DIR}/create-wallet.sh" "${NODES_ROOT}/harness-ctl/create-wallet"
 
 # Script to send funds from alpha to address
@@ -65,7 +82,7 @@ cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
     sleep 0.05
     dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
     if [ $i != $NUM ]; then
-      sleep 0.5
+      sleep ${MINE_SLEEP}
     fi
   done
 EOF
@@ -84,7 +101,7 @@ NUM=1
     sleep 0.05
     dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
     if [ $i != $NUM ]; then
-      sleep 0.5
+      sleep ${MINE_SLEEP}
     fi
   done
 EOF
@@ -125,6 +142,12 @@ tmux kill-session
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/quit"
 
+cat > "${NODES_ROOT}/harness-ctl/new-wallet" <<EOF
+#!/bin/sh
+./\$1 createnewaccount \$2
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/new-wallet"
+
 echo "Writing node config files"
 ################################################################################
 # Configuration Files
@@ -137,6 +160,7 @@ rpcpass=${RPC_PASS}
 rpccert=${NODES_ROOT}/alpha/rpc.cert
 rpclisten=127.0.0.1:${ALPHA_RPC_PORT}
 EOF
+
 
 ################################################################################
 # Start harness
@@ -185,27 +209,34 @@ sleep 3
 # dcrwallets
 ################################################################################
 
+# Re-using $MINE to signal whether the wallets need to be created
+# from scratch, or if they were loaded from file.
 echo "Creating simnet alpha wallet"
 ENABLE_TICKET_BUYER="1"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
-${WALLET_PASS} ${RPC_USER} ${RPC_PASS} ${ALPHA_WALLET_PORT} ${ENABLE_TICKET_BUYER}
+${ALPHA_WALLET_PORT} ${ENABLE_TICKET_BUYER}
 
 echo "Creating simnet beta wallet"
 ENABLE_TICKET_BUYER="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
-${WALLET_PASS} ${RPC_USER} ${RPC_PASS} ${BETA_WALLET_PORT} ${ENABLE_TICKET_BUYER}
+${BETA_WALLET_PORT} ${ENABLE_TICKET_BUYER}
 
+# The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
 ENABLE_TICKET_BUYER="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
-${WALLET_PASS} ${RPC_USER} ${RPC_PASS} ${TRADING_WALLET1_PORT} ${ENABLE_TICKET_BUYER}
+${TRADING_WALLET1_PORT} ${ENABLE_TICKET_BUYER}
 
 echo "Creating simnet trading wallet 2"
 ENABLE_TICKET_BUYER="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
-${WALLET_PASS} ${RPC_USER} ${RPC_PASS} ${TRADING_WALLET2_PORT} ${ENABLE_TICKET_BUYER}
+${TRADING_WALLET2_PORT} ${ENABLE_TICKET_BUYER}
 
 sleep 15
+
+# Create fee account on alpha wallet for use by dcrdex simnet instances.
+tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
 
 ################################################################################
 # Prepare the wallets
@@ -217,23 +248,36 @@ for WALLET in alpha beta trading1 trading2; do
   tmux send-keys -t $SESSION:0 "./${WALLET} getnewaddress${WAIT}" C-m\; wait-for donedcr
 done
 
-echo "Mining 160 blocks on alpha"
-tmux send-keys -t $SESSION:0 "./mine-alpha 160${WAIT}" C-m\; wait-for donedcr
+if [ "$MINE" = "1" ]; then
+  echo "Mining 600 blocks on alpha"
+  echo "Mining blocks 0 through 99"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
 
-sleep 5
+  # Send beta some dough while we're here.
+  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${BETA_MINING_ADDR} 1000${WAIT}" C-m\; wait-for donedcr
 
-# Have alpha send some credits to the other wallets
-for i in 10 18 5 7 1 15 3 25
-do
-  RECIPIENTS="{\"${BETA_MINING_ADDR}\":${i},\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i}}"
-  tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
-done
-sleep 0.5
-tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
+  echo "Mining blocks 100 through 199"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
+  echo "Mining blocks 200 through 299"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
+  echo "Mining blocks 300 through 399"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
+  echo "Mining blocks 400 through 499"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
+  # Don't stop here. There's a period of high ticket price where the avaialable
+  # balance for alpha is really low. Go to 600 to get through it.
+  echo "Mining blocks 500 through 599"
+  tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
 
-# Create fee account on alpha wallet for use by dcrdex simnet instances.
-tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
-tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
+  # Have alpha send some credits to the other wallets
+  for i in 10 18 5 7 1 15 3 25
+  do
+    RECIPIENTS="{\"${BETA_MINING_ADDR}\":${i},\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i}}"
+    tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
+  done
+  sleep 0.5
+  tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
+fi
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:0 "set -o history" C-m

@@ -10,14 +10,14 @@ export ALPHA_RPC_PORT="20556"
 export BETA_RPC_PORT="20557"
 export ALPHA_WALLET_SEED="cMndqchcXSCUQDDZQSKU2cUHbPb5UfFL9afspxsBELeE6qx6ac9n"
 export BETA_WALLET_SEED="cRHosJjgZ2UWsEAeHYYUFa8Z6viHYXm94GguGtpzMo6qwKBC1DSq"
-export ALPHA_MINING_ADDR="2MzNGEV9CBZBptm25CZ4rm2TrKF8gfVU8XA"
-export BETA_MINING_ADDR="2NC2bYfZ9GX3gnDZB8CL7pYLytNKMfVxYDX"
+export ALPHA_MINING_ADDR="bcrt1qy7agjj62epx0ydnqskgwlcfwu52xjtpj36hr0d"
+export BETA_MINING_ADDR="bcrt1qsl5u7cvc7f96zewf5te6kzpunmd5plzuxgdlfq"
 export WALLET_PASSWORD="abc"
 # Gamma is a named wallet in the alpha wallet directory.
 export GAMMA_WALLET_SEED="cR6gasj1RtB9Qv9j2kVej2XzQmXPmZBcn8KzUmxSSCQoz3TqTNMg"
-export GAMMA_ADDRESS="2N9Lwbw6DKoNSyTB9xL4e9LXftuPP7XU214"
+export GAMMA_ADDRESS="bcrt1qh6m8v7czylaz8tzeaxxjqjhqgs0ruu0lu44ksy"
 # Delta is a named wallet in the beta wallet directory.
 export DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
-export DELTA_ADDRESS="2NBeBjSW2W5yhRK23F7rZMtqKiDsLCKmifa"
+export DELTA_ADDRESS="bcrt1q4clywna5re22qh9mexqty8u8mqvhjh8cwhp5ms"
 # Run the harness
 ./base-harness.sh
