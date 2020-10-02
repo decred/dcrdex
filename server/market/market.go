@@ -1705,6 +1705,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			len(matches), len(partial), len(doneOK),
 			len(booked), len(unbooked), len(failed),
 		)
+	} else {
+		log.Tracef("No orders to match for market %v, epoch %d", m.marketInfo.Name, epoch.Epoch)
 	}
 
 	// Store data in epochs table, including matchTime so that cancel execution

@@ -66,7 +66,7 @@ var (
 	clients = []*tClient{client1, client2}
 
 	dexHost = "127.0.0.1:17273"
-	dexCert string
+	dexCert []byte
 
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
@@ -76,12 +76,12 @@ var (
 )
 
 func readWalletCfgsAndDexCert() error {
-	readText := func(path string) (string, error) {
+	readCert := func(path string) ([]byte, error) {
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return string(data), nil
+		return data, nil
 	}
 
 	user, err := user.Current()
@@ -104,7 +104,7 @@ func readWalletCfgsAndDexCert() error {
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
-	dexCert, err = readText(dexCertPath)
+	dexCert, err = readCert(dexCertPath)
 	return err
 }
 

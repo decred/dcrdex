@@ -6,6 +6,7 @@ package market
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,7 +242,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		// Check that the outpoint isn't locked.
 		coinID := order.CoinID(coin.ID)
 		if tunnel.CoinLocked(coins.funding.ID, coinID) {
-			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %v is locked", coinID))
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %s is locked", fmtCoinID(coins.funding.Symbol, coinID)))
 		}
 
 		coinStr, err := fundingAsset.Backend.ValidateCoinID(coinID)
@@ -304,6 +305,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				if errors.Is(err, asset.CoinNotFoundError) {
 					return true, nil
 				}
+				log.Errorf("Error retreiving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
 				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
 			}
 
@@ -434,7 +436,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		// Check that the outpoint isn't locked.
 		coinID := order.CoinID(coin.ID)
 		if tunnel.CoinLocked(fundingAsset.ID, coinID) {
-			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %v is locked", coinID))
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %s is locked", fmtCoinID(fundingAsset.Symbol, coinID)))
 		}
 
 		coinStr, err := fundingAsset.Backend.ValidateCoinID(coinID)
@@ -486,6 +488,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 				if errors.Is(err, asset.CoinNotFoundError) {
 					return true, nil
 				}
+				log.Errorf("Error retreiving market order funding coin ID %s. user = %s: %v", coin.ID, user, err)
 				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
 			}
 
@@ -839,4 +842,14 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 		b = append(b, msgB)
 	}
 	return b
+}
+
+// fmtCoinID formats the coin ID by asset. If an error is encounted, the coinID
+// string returned hex-encoded and prepended with "unparsed:".
+func fmtCoinID(symbol string, coinID []byte) string {
+	strID, err := asset.DecodeCoinID(symbol, coinID)
+	if err != nil {
+		return "unparsed:" + hex.EncodeToString(coinID)
+	}
+	return strID
 }
