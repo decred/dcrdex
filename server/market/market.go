@@ -327,12 +327,6 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 	return
 }
 
-// ResumeEpochNext gets the next available resume epoch index for the currently
-// configured epoch duration for the market.
-func (m *Market) ResumeEpochNext() (startEpochIdx int64) {
-	return m.ResumeEpoch(time.Now())
-}
-
 // ResumeEpoch gets the next available resume epoch index for the currently
 // configured epoch duration for the market and the provided earliest allowable
 // start time. The market must be running, otherwise the zero index is returned.

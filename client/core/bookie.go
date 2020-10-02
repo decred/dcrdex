@@ -534,8 +534,9 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 }
 
 // handleTradeResumptionMsg is called when a trade resumption notification is
-// received. This may be an orderbook message at the time of resumption or a
-// general notification at any time prior to market suspend.
+// received. This may be an orderbook message at the time of resumption, or a
+// notification of a newly-schedule resumption while the market is suspended
+// (prior to the market resume).
 func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var rs msgjson.TradeResumption
 	err := msg.Unmarshal(&rs)

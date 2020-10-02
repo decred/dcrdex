@@ -891,13 +891,13 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 	if !wallet.connected() {
 		err := wallet.Connect(c.ctx)
 		if err != nil {
-			return codedError(walletErr, fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err))
+			return newError(walletErr, "error connecting %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 	if !wallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
-			return codedError(walletAuthErr, fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err))
+			return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 	return nil
@@ -2142,18 +2142,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, 0, codedError(marketErr, fmt.Errorf("order placed for unknown market %q", mktID))
+		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if !dc.running(mktID) {
-		return nil, 0, codedError(marketErr, fmt.Errorf("%s market trading is suspended", mktID))
+		return nil, 0, newError(marketErr, "%s market trading is suspended", mktID)
 	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
-		return nil, 0, codedError(orderParamsErr, fmt.Errorf("zero-rate order not allowed"))
+		return nil, 0, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
@@ -2206,11 +2206,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / wallets.baseAsset.LotSize
 				if lots == 0 {
-					err = codedError(orderParamsErr,
-						fmt.Errorf("order quantity is too low for current market rates. "+
+					err = newError(orderParamsErr,
+						"order quantity is too low for current market rates. "+
 							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
-							qty, wallets.quoteAsset.Symbol, midGap, baseQty,
-							wallets.baseAsset.Symbol, wallets.baseAsset.LotSize))
+						qty, wallets.quoteAsset.Symbol, midGap, baseQty,
+						wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
 					return nil, 0, err
 				}
 			}
@@ -2218,8 +2218,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	if lots == 0 {
-		return nil, 0, codedError(orderParamsErr, fmt.Errorf("order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
-			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize))
+		return nil, 0, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
