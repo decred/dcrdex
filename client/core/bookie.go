@@ -470,7 +470,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		// This is just a warning about a scheduled suspension.
 		suspendTime := encode.UnixTimeMilli(int64(sp.SuspendTime))
 		detail := fmt.Sprintf("Market %s at %s is now scheduled for suspension at %v", sp.MarketID, dc.acct.host, suspendTime)
-		c.notify(newServerNotifyNote("market suspend scheduled", detail, db.WarningLevel))
+		c.notify(newServerNotifyNote(MarketSuspendScheduledSubject, detail, db.WarningLevel))
 		return nil
 	}
 
@@ -478,7 +478,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if !sp.Persist {
 		detail += " All booked orders are now PURGED."
 	}
-	c.notify(newServerNotifyNote("market suspended", detail, db.WarningLevel))
+	c.notify(newServerNotifyNote(MarketSuspendedSubject, detail, db.WarningLevel))
 
 	if sp.Persist {
 		// No book changes. Just wait for more order notes.
@@ -560,7 +560,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, false) // set the start epoch, leaving any final/persist data
 		resTime := encode.UnixTimeMilli(int64(rs.ResumeTime))
 		detail := fmt.Sprintf("Market %s at %s is now scheduled for resumption at %v", rs.MarketID, dc.acct.host, resTime)
-		c.notify(newServerNotifyNote("market resume scheduled", detail, db.WarningLevel))
+		c.notify(newServerNotifyNote(MarketResumeScheduledSubject, detail, db.WarningLevel))
 		return nil
 	}
 
@@ -579,7 +579,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 	detail := fmt.Sprintf("Market %s at %s has resumed trading at epoch %d",
 		rs.MarketID, dc.acct.host, rs.StartEpoch)
-	c.notify(newServerNotifyNote("market resumed", detail, db.Success))
+	c.notify(newServerNotifyNote(MarketResumedSubject, detail, db.Success))
 
 	// Book notes may resume at any time. Seq not set since no book changes.
 

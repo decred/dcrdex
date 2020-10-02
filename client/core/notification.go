@@ -9,6 +9,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
 )
 
 // Notifications should use the following note type strings.
@@ -144,6 +145,17 @@ type FeePaymentNote struct {
 	Dex           string  `json:"dex,omitempty"`
 }
 
+const (
+	FeePaymentInProgressSubject    = "Fee payment in progress"
+	RegUpdateSubject               = "regupdate"
+	FeePaymentErrorSubject         = "Fee payment error"
+	AccountRegisteredSubject       = "Account registered"
+	AccountUnlockErrorSubject      = "Account unlock error"
+	FeeCoinErrorSubject            = "Fee coin error"
+	WalletConnectionWarningSubject = "Wallet connection warning"
+	WalletUnlockErrorSubject       = "Wallet unlock error"
+)
+
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	host, _ := addrHost(dexAddr)
 	return &FeePaymentNote{
@@ -163,6 +175,11 @@ type WithdrawNote struct {
 	db.Notification
 }
 
+const (
+	WithdrawErrorSubject = "Withdraw error"
+	WithdrawSendSubject  = "Withdraw sent"
+)
+
 func newWithdrawNote(subject, details string, severity db.Severity) *WithdrawNote {
 	return &WithdrawNote{
 		Notification: db.NewNotification(NoteTypeWithdraw, subject, details, severity),
@@ -174,6 +191,38 @@ type OrderNote struct {
 	db.Notification
 	Order *Order `json:"order"`
 }
+
+const (
+	OrderLoadFailureSubject     = "Order load failure"
+	OrderPlacedSubject          = "Order placed"
+	MissingMatchesSubject       = "Missing matches"
+	WalletMissingSubject        = "Wallet missing"
+	MatchStatusErrorSubject     = "Match status error"
+	MatchRecoveryErrorSubject   = "Match recovery error"
+	NoFundingCoinsSubject       = "No funding coins"
+	OrderCoinErrorSubject       = "Order coin error"
+	PreimageSentSubject         = "preimage sent"
+	CancelPreimageSentSubject   = "cancel preimage sent"
+	MissedCancelSubject         = "Missed cancel"
+	OrderBookedSubject          = "Order booked"
+	NoMatchSubject              = "No match"
+	OrderCanceledSubject        = "Order canceled"
+	CancelSubject               = "cancel"
+	MatchesMadeSubject          = "Matches made"
+	SwapErrorSubject            = "Swap error"
+	SwapsInitiatedSubject       = "Swaps initiated"
+	RedemptionErrorSubject      = "Redemption error"
+	MatchCompleteSubject        = "Match complete"
+	RefundFailureSubject        = "Refund Failure"
+	MatchesRefundedSubject      = "Matches Refunded"
+	MatchRevokedSubject         = "Match revoked"
+	RevokeSubject               = "revoke"
+	MatchRecoveredSubject       = "Match recovered"
+	CancellingOrderSubject      = "Cancelling order"
+	OrderStatusUpdateSubject    = "Order status update"
+	MatchResolutionErrorSubject = "Match resolution error"
+	FailedCancelSubject         = "Failed cancel"
+)
 
 func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
 	return &OrderNote{
@@ -210,6 +259,32 @@ func (on *OrderNote) String() string {
 		return base
 	}
 	return fmt.Sprintf("%s - Order: %s", base, on.Order.ID)
+}
+
+type MatchNote struct {
+	db.Notification
+	Order *Order `json:"order"`
+	Match *Match `json:"match"`
+}
+
+const (
+	AuditSubject    = "audit"
+	NewMatchSubject = "new_match"
+)
+
+func newMatchNote(subject, details string, severity db.Severity, corder *Order, matchID order.MatchID) *MatchNote {
+	midStr := matchID.String()
+	var coreMatch *Match
+	for _, match := range corder.Matches {
+		if match.MatchID.String() == midStr {
+			coreMatch = match
+		}
+	}
+	return &MatchNote{
+		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
+		Order:        corder,
+		Match:        coreMatch,
+	}
 }
 
 // EpochNotification is a data notification that a new epoch has begun.
@@ -271,6 +346,12 @@ type DEXAuthNote struct {
 	Authenticated bool   `json:"authenticated"`
 }
 
+const (
+	DexAuthErrorSubject     = "DEX auth error"
+	UnknownOrdersSubject    = "DEX reported unknown orders"
+	OrdersReconciledSubject = "Orders reconciled with DEX"
+)
+
 func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
 	return &DEXAuthNote{
 		Notification:  db.NewNotification("dex_auth", subject, details, severity),
@@ -285,6 +366,11 @@ type WalletConfigNote struct {
 	db.Notification
 	Wallet *WalletState `json:"wallet"`
 }
+
+const (
+	WalletConfigurationUpdatedSubject = "Wallet Configuration Updated"
+	WalletPasswordUpdatedSubject      = "Wallet Password Updated"
+)
 
 func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
 	return &WalletConfigNote{
@@ -309,6 +395,13 @@ func newWalletStateNote(walletState *WalletState) *WalletStateNote {
 type ServerNotifyNote struct {
 	db.Notification
 }
+
+const (
+	MarketSuspendScheduledSubject = "market suspend scheduled"
+	MarketSuspendedSubject        = "market suspended"
+	MarketResumeScheduledSubject  = "market resume scheduled"
+	MarketResumedSubject          = "market resumed"
+)
 
 func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
 	return &ServerNotifyNote{
