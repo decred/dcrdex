@@ -175,12 +175,18 @@ func (ob *OrderBook) processCachedNotes() error {
 	return nil
 }
 
-// Sync updates a client tracked order book with an order book snapshot.
+// Sync updates a client tracked order book with an order book snapshot. It is
+// an error if the the OrderBook is already synced.
 func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 	if ob.isSynced() {
 		return fmt.Errorf("order book is already synced")
 	}
+	return ob.Reset(snapshot)
+}
 
+// Reset forcibly updates a client tracked order book with an order book
+// snapshot. This resets the sequence.
+func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 	// Don't use setSeq here, since this message is the seed and is not expected
 	// to be 1 more than the current seq value.
 	ob.seqMtx.Lock()
@@ -422,8 +428,8 @@ func (ob *OrderBook) Orders() ([]*Order, []*Order, []*Order) {
 	return ob.buys.orders(), ob.sells.orders(), ob.epochQueue.Orders()
 }
 
-// BestFIll returns the best fill for a quantity from the provided side.
-func (ob *OrderBook) BestFill(qty uint64, side uint8) ([]*fill, error) {
+// bestFill returns the best fill for a quantity from the provided side.
+func (ob *OrderBook) bestFill(qty uint64, side uint8) ([]*fill, error) {
 	if !ob.isSynced() {
 		return nil, fmt.Errorf("order book is unsynced")
 	}

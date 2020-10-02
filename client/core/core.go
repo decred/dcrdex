@@ -91,51 +91,21 @@ const (
 	fundingTxWait          = 2 * time.Minute
 )
 
-// suspended returns the suspended status of the provided market.
-func (dc *dexConnection) suspended(mkt string) bool {
-	dc.marketMtx.Lock()
-	defer dc.marketMtx.Unlock()
-	market, ok := dc.marketMap[mkt]
-	if !ok {
-		return false
+// running returns the status of the provided market.
+func (dc *dexConnection) running(mkt string) bool {
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+	mktCfg := dc.marketConfig(mkt)
+	if mktCfg == nil {
+		return false // not found means not running
 	}
-	return market.Suspended()
+	return mktCfg.Running()
 }
 
-// suspend halts trading for the provided market.
-func (dc *dexConnection) suspend(mkt string) error {
-	dc.marketMtx.Lock()
-	market, ok := dc.marketMap[mkt]
-	dc.marketMtx.Unlock()
-	if !ok {
-		return fmt.Errorf("no market found with ID %s", mkt)
-	}
-
-	market.setSuspended(true)
-
-	return nil
-}
-
-// resume commences trading for the provided market.
-func (dc *dexConnection) resume(mkt string) error {
-	dc.marketMtx.Lock()
-	market, ok := dc.marketMap[mkt]
-	dc.marketMtx.Unlock()
-	if !ok {
-		return fmt.Errorf("no market found with ID %s", mkt)
-	}
-
-	market.setSuspended(false)
-
-	return nil
-}
-
-// refreshMarkets rebuilds, saves, and returns the market map. The map itself
-// should be treated as read only. A new map is constructed and is assigned to
-// dc.marketMap under lock, and can be safely accessed with
-// dexConnection.markets. refreshMarkets is used when a change to the status of
-// a market or the user's orders on a market has changed.
-func (dc *dexConnection) refreshMarkets() map[string]*Market {
+// refreshMarkets rebuilds the market map. The updated markets map may be safely
+// accessed with the markets method. refreshMarkets is used when a change to the
+// status of a market or the user's orders on a market has changed.
+func (dc *dexConnection) refreshMarkets() {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
 
@@ -155,7 +125,6 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			EpochLen:        mkt.EpochLen,
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
-			suspended:       dc.suspended(mkt.Name),
 		}
 		mid := market.marketName()
 		dc.tradeMtx.RLock()
@@ -171,12 +140,12 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			corder, _ := trade.coreOrder()
 			market.Orders = append(market.Orders, corder)
 		}
-		marketMap[market.marketName()] = market
+		marketMap[mid] = market
 	}
+
 	dc.marketMtx.Lock()
 	dc.marketMap = marketMap
 	dc.marketMtx.Unlock()
-	return marketMap
 }
 
 // markets returns the current market map.
@@ -922,13 +891,13 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 	if !wallet.connected() {
 		err := wallet.Connect(c.ctx)
 		if err != nil {
-			return fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err)
+			return newError(walletErr, "error connecting %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 	if !wallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
-			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 	return nil
@@ -2173,18 +2142,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, 0, fmt.Errorf("order placed for unknown market %q", mktID)
+		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
-	if mkt.Suspended() {
-		return nil, 0, fmt.Errorf("%s market suspended", mktID)
+	if !dc.running(mktID) {
+		return nil, 0, newError(marketErr, "%s market trading is suspended", mktID)
 	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
-		return nil, 0, fmt.Errorf("zero-rate order not allowed")
+		return nil, 0, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
@@ -2205,7 +2174,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Get an address for the swap contract.
 	addr, err := toWallet.Address()
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err)
+		return nil, 0, codedError(walletErr, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err))
 	}
 
 	// Fund the order and prepare the coins.
@@ -2237,15 +2206,19 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / wallets.baseAsset.LotSize
 				if lots == 0 {
-					return nil, 0, fmt.Errorf("order quantity is too low for current market rates. qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
-						qty, wallets.quoteAsset.Symbol, midGap, baseQty, wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
+					err = newError(orderParamsErr,
+						"order quantity is too low for current market rates. "+
+							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
+						qty, wallets.quoteAsset.Symbol, midGap, baseQty,
+						wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
+					return nil, 0, err
 				}
 			}
 		}
 	}
 
 	if lots == 0 {
-		return nil, 0, fmt.Errorf("order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+		return nil, 0, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
 			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
 	}
 
@@ -2256,7 +2229,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		Immediate:    isImmediate,
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w", wallets.fromAsset.Symbol, fundQty, lots, err)
+		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
+			wallets.fromAsset.Symbol, fundQty, lots, err))
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
@@ -2408,15 +2382,13 @@ type walletSet struct {
 // walletSet constructs a walletSet.
 func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
 	dc.assetsMtx.RLock()
-	baseAsset, found := dc.assets[baseID]
+	baseAsset, baseFound := dc.assets[baseID]
+	quoteAsset, quoteFound := dc.assets[quoteID]
 	dc.assetsMtx.RUnlock()
-	if !found {
+	if !baseFound {
 		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", baseID, unbip(baseID), dc.acct.host)
 	}
-	dc.assetsMtx.RLock()
-	quoteAsset, found := dc.assets[quoteID]
-	dc.assetsMtx.RUnlock()
-	if !found {
+	if !quoteFound {
 		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", quoteID, unbip(quoteID), dc.acct.host)
 	}
 
@@ -3042,8 +3014,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 	return relocks
 }
 
-// generateDEXMaps creates the associated assets, market and epoch maps of
-// the dexs from the provided configuration.
+// generateDEXMaps creates the associated assets, market and epoch maps of the
+// DEXs from the provided configuration.
 func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.Asset, map[string]*Market, map[string]uint64, error) {
 	assets := make(map[uint32]*dex.Asset, len(cfg.Assets))
 	for _, asset := range cfg.Assets {
@@ -3076,6 +3048,7 @@ func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.As
 			EpochLen:        mkt.EpochLen,
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
+			// no Orders yet
 		}
 		marketMap[mkt.Name] = market
 		epochMap[mkt.Name] = 0
@@ -3172,7 +3145,17 @@ func (c *Core) handleReconnect(host string) {
 		log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
 		return
 	}
-	if err := c.authDEX(dc); err != nil {
+
+	// The server's configuration may have changed, so retrieve the current
+	// server configuration.
+	err := dc.refreshServerConfig()
+	if err != nil {
+		log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
+		return
+	}
+
+	err = c.authDEX(dc)
+	if err != nil {
 		log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
 		return
 	}
@@ -3306,93 +3289,6 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return dc.ack(msg.ID, matchID, &revocation)
 }
 
-// handleTradeSuspensionMsg is called when a trade suspension notification is received.
-func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var sp msgjson.TradeSuspension
-	err := msg.Unmarshal(&sp)
-	if err != nil {
-		return fmt.Errorf("trade suspension unmarshal error: %v", err)
-	}
-
-	// Ensure the provided market exists for the dex.
-	dc.marketMtx.Lock()
-	mkt, ok := dc.marketMap[sp.MarketID]
-	dc.marketMtx.Unlock()
-	if !ok {
-		return fmt.Errorf("no market found with ID %s", sp.MarketID)
-	}
-
-	// Ensure the market is not already suspended.
-	mkt.mtx.Lock()
-	defer mkt.mtx.Unlock()
-
-	if mkt.suspended {
-		return fmt.Errorf("market %s for dex %s is already suspended",
-			sp.MarketID, dc.acct.host)
-	}
-
-	// Stop the current pending suspend.
-	if mkt.pendingSuspend != nil {
-		if !mkt.pendingSuspend.Stop() {
-			// TODO: too late, timer already fired. Need to request the
-			// current configuration for the market at this point.
-			return fmt.Errorf("unable to stop previously scheduled "+
-				"suspend for market %s on dex %s", sp.MarketID, dc.acct.host)
-		}
-	}
-
-	// Set a new scheduled suspend.
-	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
-	mkt.pendingSuspend = time.AfterFunc(duration, func() {
-		mkt.mtx.Lock()
-		mkt.pendingSuspend = nil
-		mkt.mtx.Unlock()
-		// Update the market as suspended.
-		err := dc.suspend(sp.MarketID)
-		if err != nil {
-			log.Error(err)
-			return
-		}
-
-		// Clear the bookie associated with the suspended market.
-		dc.booksMtx.Lock()
-		if bookie := dc.books[sp.MarketID]; bookie != nil {
-			// TODO: This is wrong. The server subscription remains. Also the
-			// BookFeed receivers are still waiting on the old bookie. Fixing
-			// this will require some thought to keep the bookie, but signal to
-			// the receivers of an empty book, while maintaining the proper
-			// order book message seq.
-
-			// Old bookie and it's feeds get garbage collected. Any orderbook
-			// subscriptions remain, and are handled by the new bookie.
-			dc.books[sp.MarketID] = newBookie(func() { dc.stopBook(mkt.BaseID, mkt.QuoteID) })
-		}
-		dc.booksMtx.Unlock()
-
-		if !sp.Persist {
-			// Revoke all active orders of the suspended market for the dex.
-			updatedAssets := make(assetMap)
-			dc.tradeMtx.RLock()
-			for _, tracker := range dc.trades {
-
-				if tracker.Order.Base() == mkt.BaseID &&
-					tracker.Order.Quote() == mkt.QuoteID &&
-					tracker.metaData.Host == dc.acct.host {
-
-					tracker.revoke()
-					updatedAssets.count(tracker.fromAssetID)
-				}
-			}
-			dc.tradeMtx.RUnlock()
-
-			dc.refreshMarkets()
-			c.updateBalances(updatedAssets)
-		}
-	})
-
-	return nil
-}
-
 // handleNotifyMsg is called when a notify notification is received.
 func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var txt string
@@ -3402,94 +3298,6 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 	txt = fmt.Sprintf("Message from DEX at %s:\n\n\"%s\"\n", dc.acct.host, txt)
 	c.notify(newServerNotifyNote(dc.acct.host, txt, db.WarningLevel))
-	return nil
-}
-
-// handleTradeResumptionMsg is called when a trade resumption notification is received.
-func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var rs msgjson.TradeResumption
-	err := msg.Unmarshal(&rs)
-	if err != nil {
-		return fmt.Errorf("trade resumption unmarshal error: %v", err)
-	}
-
-	// Ensure the provided market exists for the dex.
-	dc.marketMtx.RLock()
-	mkt, ok := dc.marketMap[rs.MarketID]
-	dc.marketMtx.RUnlock()
-	if !ok {
-		return fmt.Errorf("no market found with ID %s", rs.MarketID)
-	}
-
-	// Ensure the market is suspended.
-	mkt.mtx.Lock()
-	defer mkt.mtx.Unlock()
-
-	if !mkt.suspended {
-		return fmt.Errorf("market %s for dex %s is not suspended",
-			rs.MarketID, dc.acct.host)
-	}
-
-	// Stop the current pending resume.
-	if mkt.pendingResume != nil {
-		if !mkt.pendingResume.Stop() {
-			// TODO: too late, timer already fired. The market has resumed.
-			return fmt.Errorf("unable to stop previously scheduled "+
-				"resume for market %s on dex %s", rs.MarketID, dc.acct.host)
-		}
-	}
-
-	// TODO: the server on sending the resumption message would know the exact
-	// resumption time, perhaps the message should send that instead of the
-	// EpochLen here?
-	resumeTime := rs.StartEpoch * rs.EpochLen
-
-	// Set the new scheduled resume.
-	duration := time.Until(encode.UnixTimeMilli(int64(resumeTime)))
-	mkt.pendingSuspend = time.AfterFunc(duration, func() {
-		mkt.mtx.Lock()
-		mkt.pendingSuspend = nil
-		mkt.mtx.Unlock()
-
-		// Update the market as resumed.
-		err := dc.resume(rs.MarketID)
-		if err != nil {
-			log.Error(err)
-			return
-		}
-
-		// Fetch the updated DEX configuration.
-		cfg := new(msgjson.ConfigResult)
-		err = sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
-		if err != nil {
-			dc.connMaster.Disconnect()
-			log.Errorf("unable to fetch DEX server config: %v", err)
-			return
-		}
-
-		assets, markets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
-		if err != nil {
-			log.Error(err)
-		}
-
-		// Update the dex connection wih the new config details.
-		dc.cfgMtx.Lock()
-		dc.cfg = cfg
-		dc.cfgMtx.Unlock()
-
-		dc.marketMtx.Lock()
-		dc.marketMap = markets
-		dc.marketMtx.Unlock()
-
-		dc.epochMtx.Lock()
-		dc.epoch = epochs
-		dc.epochMtx.Unlock()
-
-		dc.assetsMtx.Lock()
-		dc.assets = assets
-		dc.assetsMtx.Unlock()
-	})
-
 	return nil
 }
 
@@ -3534,10 +3342,10 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
+	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,
 	msgjson.PenaltyRoute:         handlePenaltyMsg,
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
-	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -3567,7 +3375,8 @@ func (c *Core) listen(dc *dexConnection) {
 		defer c.wg.Done()
 		for job := range nextJob {
 			if err := job.hander(c, dc, job.msg); err != nil {
-				log.Errorf("route '%v' %v handler error: %v", job.msg.Route, job.msg.Type, err)
+				log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
+					job.msg.Type, dc.acct.host, err)
 			}
 		}
 	}()

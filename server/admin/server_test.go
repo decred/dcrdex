@@ -40,11 +40,14 @@ func init() {
 }
 
 type TMarket struct {
-	running bool
-	ep0, ep int64
-	dur     uint64
-	suspend *market.SuspendEpoch
-	persist bool
+	running     bool
+	dur         uint64
+	suspend     *market.SuspendEpoch
+	startEpoch  int64
+	activeEpoch int64
+	resumeEpoch int64
+	resumeTime  time.Time
+	persist     bool
 }
 
 type TCore struct {
@@ -62,16 +65,26 @@ func (c *TCore) ConfigMsg() json.RawMessage { return nil }
 func (c *TCore) Suspend(tSusp time.Time, persistBooks bool) map[string]*market.SuspendEpoch {
 	return nil
 }
-
-func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch {
+func (c *TCore) ResumeMarket(name string, tRes time.Time) (startEpoch int64, startTime time.Time, err error) {
 	tMkt := c.markets[name]
 	if tMkt == nil {
-		return nil
+		err = fmt.Errorf("unknown market %s", name)
+		return
+	}
+	tMkt.resumeEpoch = 1 + encode.UnixMilli(tRes)/int64(tMkt.dur)
+	tMkt.resumeTime = encode.UnixTimeMilli(tMkt.resumeEpoch * int64(tMkt.dur))
+	return tMkt.resumeEpoch, tMkt.resumeTime, nil
+}
+func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (suspEpoch *market.SuspendEpoch, err error) {
+	tMkt := c.markets[name]
+	if tMkt == nil {
+		err = fmt.Errorf("unknown market %s", name)
+		return
 	}
 	tMkt.persist = persistBooks
 	tMkt.suspend.Idx = encode.UnixMilli(tSusp)
 	tMkt.suspend.End = tSusp.Add(time.Millisecond)
-	return tMkt.suspend
+	return tMkt.suspend, nil
 }
 
 func (c *TCore) market(name string) *TMarket {
@@ -93,8 +106,8 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 	return &market.Status{
 		Running:       mkt.running,
 		EpochDuration: mkt.dur,
-		ActiveEpoch:   mkt.ep,
-		StartEpoch:    mkt.ep0,
+		ActiveEpoch:   mkt.activeEpoch,
+		StartEpoch:    mkt.startEpoch,
 		SuspendEpoch:  suspendEpoch,
 		PersistBook:   mkt.persist,
 	}
@@ -110,8 +123,8 @@ func (c *TCore) MarketStatuses() map[string]*market.Status {
 		mktStatuses[name] = &market.Status{
 			Running:       mkt.running,
 			EpochDuration: mkt.dur,
-			ActiveEpoch:   mkt.ep,
-			StartEpoch:    mkt.ep0,
+			ActiveEpoch:   mkt.activeEpoch,
+			StartEpoch:    mkt.startEpoch,
 			SuspendEpoch:  suspendEpoch,
 			PersistBook:   mkt.persist,
 		}
@@ -282,10 +295,10 @@ func TestMarkets(t *testing.T) {
 	dur := uint64(1234)
 	idx := int64(12345)
 	tMkt := &TMarket{
-		running: true,
-		dur:     dur,
-		ep0:     12340,
-		ep:      12343,
+		running:     true,
+		dur:         dur,
+		startEpoch:  12340,
+		activeEpoch: 12343,
 	}
 	core.markets["dcr_btc"] = tMkt
 
@@ -477,8 +490,115 @@ func TestMarketInfo(t *testing.T) {
 	}
 }
 
-func TestSuspend(t *testing.T) {
+func TestResume(t *testing.T) {
+	core := &TCore{
+		markets: make(map[string]*TMarket),
+	}
+	srv := &Server{
+		core: core,
+	}
 
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}/resume", srv.apiResume)
+
+	// Non-existent market
+	name := "dcr_btc"
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiResume returned code %d, expected %d", w.Code, http.StatusBadRequest)
+	}
+
+	// With the market, but already running
+	tMkt := &TMarket{
+		running: true,
+		dur:     6000,
+	}
+	core.markets[name] = tMkt
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiResume returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	wantMsg := "market \"dcr_btc\" running\n"
+	if w.Body.String() != wantMsg {
+		t.Errorf("expected body %q, got %q", wantMsg, w.Body)
+	}
+
+	// Now stopped.
+	tMkt.running = false
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiResume returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	resRes := new(ResumeResult)
+	err := json.Unmarshal(w.Body.Bytes(), &resRes)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if resRes.Market != name {
+		t.Errorf("incorrect market name %q, expected %q", resRes.Market, name)
+	}
+
+	if resRes.StartTime.IsZero() {
+		t.Errorf("start time not set")
+	}
+	if resRes.StartEpoch == 0 {
+		t.Errorf("start epoch not sest")
+	}
+
+	// reset
+	tMkt.resumeEpoch = 0
+	tMkt.resumeTime = time.Time{}
+
+	// Time in past
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume?t=12", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiResume returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	resp := w.Body.String()
+	wantPrefix := "specified market resume time is in the past"
+	if !strings.HasPrefix(resp, wantPrefix) {
+		t.Errorf("Expected error message starting with %q, got %q", wantPrefix, resp)
+	}
+
+	// Bad suspend time (not a time)
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume?t=QWERT", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiResume returned code %d, expected %d", w.Code, http.StatusBadRequest)
+	}
+	resp = w.Body.String()
+	wantPrefix = "invalid resume time"
+	if !strings.HasPrefix(resp, wantPrefix) {
+		t.Errorf("Expected error message starting with %q, got %q", wantPrefix, resp)
+	}
+}
+
+func TestSuspend(t *testing.T) {
 	core := &TCore{
 		markets: make(map[string]*TMarket),
 	}
@@ -562,7 +682,7 @@ func TestSuspend(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusBadRequest)
 	}
 	resp := w.Body.String()
 	wantPrefix := "specified market suspend time is in the past"
@@ -578,7 +698,7 @@ func TestSuspend(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusBadRequest)
 	}
 	resp = w.Body.String()
 	wantPrefix = "invalid suspend time"
@@ -656,7 +776,7 @@ func TestSuspend(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusBadRequest)
 	}
 	resp = w.Body.String()
 	wantPrefix = "invalid persist book boolean"

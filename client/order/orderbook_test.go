@@ -909,7 +909,7 @@ func TestOrderBookBestFill(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		best, err := tc.orderBook.BestFill(tc.qty, tc.side)
+		best, err := tc.orderBook.bestFill(tc.qty, tc.side)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[OrderBook.BestFill] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)

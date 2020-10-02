@@ -33,7 +33,7 @@ func (cm *contextManager) On() bool {
 // Runner is satisfied by DEX subsystems, which must start any of their
 // goroutines via the Run method.
 type Runner interface {
-	Run(ctx context.Context) //error
+	Run(ctx context.Context)
 }
 
 // StartStopWaiter wraps a Runner, providing the non-blocking Start and Stop
@@ -59,6 +59,7 @@ func (ssw *StartStopWaiter) Start(ctx context.Context) {
 	ssw.wg.Add(1)
 	go func() {
 		ssw.runner.Run(ssw.ctx)
+		ssw.cancel() // in case it stopped on its own
 		ssw.wg.Done()
 	}()
 }

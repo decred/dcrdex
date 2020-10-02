@@ -53,7 +53,8 @@ type SvrCore interface {
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
-	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
+	SuspendMarket(name string, tSusp time.Time, persistBooks bool) (*market.SuspendEpoch, error)
+	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
 	Penalize(aid account.AccountID, rule account.Rule, details string) error
 	Unban(aid account.AccountID) error
 }
@@ -143,6 +144,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiMarketInfo)
 			rm.Get("/suspend", s.apiSuspend)
+			rm.Get("/resume", s.apiResume)
 		})
 	})
 

@@ -6,7 +6,6 @@ package market
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"decred.org/dcrdex/dex"
@@ -44,6 +43,8 @@ const (
 	matchProofAction
 	// suspendAction means the market has suspended.
 	suspendAction
+	// resumeAction means the market has resumed.
+	resumeAction
 )
 
 // String provides a string representation of a updateAction. This is primarily
@@ -99,8 +100,12 @@ type sigDataNewEpoch struct {
 
 type sigDataSuspend struct {
 	finalEpoch  int64
-	stopTime    int64
 	persistBook bool
+}
+
+type sigDataResume struct {
+	epochIdx int64
+	// TODO: indicate config change if applicable
 }
 
 type sigDataMatchProof struct {
@@ -400,25 +405,37 @@ out:
 				}
 
 			case sigDataSuspend:
-				// Consider sending a TradeSuspension here too:
-				// note = &msgjson.TradeSuspension{
-				// 	MarketID:    book.name,
-				// 	FinalEpoch:  uint64(sigData.finalEpoch),
-				// 	SuspendTime: uint64(sigData.stopTime),
-				// 	Persist:     sigData.persistBook,
-				// }
-				// r.sendNote(msgjson.SuspensionRoute, subs, note)
+				// When sent with seq set, it indicates immediate stop, and may
+				// also indicate to purge the book.
+				route = msgjson.SuspensionRoute
+				susp := &msgjson.TradeSuspension{
+					MarketID: book.name,
+					// SuspendTime of 0 means now.
+					FinalEpoch: uint64(sigData.finalEpoch),
+					Persist:    sigData.persistBook,
+				}
+				// Only set Seq if there is a book update.
+				if !sigData.persistBook {
+					susp.Seq = subs.nextSeq() // book purge
+				}
+				note = susp
 
-				// Depending on resume handling, maybe kill the book router.
-				// Presently the Market closes the order feed channels, so quit.
 				log.Infof("Market %q suspended after epoch %d, persist book = %v.",
 					book.name, sigData.finalEpoch, sigData.persistBook)
 
-				// Stay running for Swapper unbook callbacks.
-				continue // no note to send presently, but need one
+			case sigDataResume:
+				route = msgjson.ResumptionRoute
+				note = &msgjson.TradeResumption{
+					MarketID: book.name,
+					// ResumeTime of 0 means now.
+					StartEpoch: uint64(sigData.epochIdx),
+				} // no Seq for the resume since it doesn't modify the book
+
+				log.Infof("Market %q resumed at epoch %d", book.name, sigData.epochIdx)
 
 			default:
-				panic(fmt.Sprintf("unknown orderbook update action %d", u.action))
+				log.Errorf("Unknown orderbook update action %d", u.action)
+				continue
 			}
 
 			r.sendNote(route, subs, note)
