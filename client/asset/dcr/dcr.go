@@ -53,7 +53,7 @@ const (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 3, Patch: 0}
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 4, Patch: 0}
 	requiredNodeVersion   = dex.Semver{Major: 6, Minor: 1, Patch: 2}
 )
 
@@ -348,7 +348,6 @@ type ExchangeWallet struct {
 	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[outPoint]*fundingCoin
-	splitFunds   map[outPoint][]*fundingCoin
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
@@ -419,7 +418,6 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		acct:                cfg.Settings["account"],
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
-		splitFunds:          make(map[outPoint][]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
 		useSplitTx:          dcrCfg.UseSplitTx,
@@ -798,7 +796,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
-	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map) and storing the previous funding coins in splitFunds
+	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
 	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, dcr.feeRateWithFallback(), false)
 	if err != nil {
@@ -820,35 +818,11 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("error locking funding coin from split transaction %s", op)
 	}
 
-	// NOTE: Can't return coins yet, because dcrwallet doesn't recognize them as
-	// spent immediately, so subsequent calls to FundOrder might result in a
-	// `-4: rejected transaction: transaction in the pool already spends the
-	// same coins` error.
-	// TODO: Could this cause balance report inaccuracy, where the locked atoms
-	// returned by dcrwallet includes both the funding coins and the split tx
-	// output?
-	// E.g. total of 100 DCR (locked) split to produce a desired output of 40 DCR
-	// that is also locked:
-	// dcr balance before split, total = 200 DCR, locked = 0
-	// dcr balance after split, total = 199 DCR (-split tx fee), locked = 140 DCR
-	// If this inaccurate report is a possibility, might be better to unlock the
-	// funding coins sooner rather than later and prevent FundOrder double spends
-	// by checking listunspent results against `dcr.splitFunds`.
-	// If the split fund txout is later unlocked without being spent, the initial
-	// funding coins will be deleted from dcr.splitFunds, making them re-spendable
-	// by dcr.FundOrder.
-	// // Unlock the spent coins.
-	// err = dcr.returnCoins(coins)
-	// if err != nil {
-	// 	dcr.log.Errorf("error locking coins spent in split transaction %v", coins)
-	// }
-
-	// Associate the funding coins with the split tx output, so that the coins
-	// can be unlocked when the swap is sent. The helps to deal with a timing
-	// issue with dcrwallet where listunspent might still return outputs that
-	// were just spent in a transaction broadcast with sendrawtransaction.
-	// Instead, we'll keep them locked until the split output is spent.
-	dcr.splitFunds[op.pt] = fundingCoins
+	// Unlock the spent coins.
+	err = dcr.returnCoins(coins)
+	if err != nil {
+		dcr.log.Errorf("error returning coins spent in split transaction %v", coins)
+	}
 
 	dcr.log.Infof("Funding %d atom order with split output coin %v from original coins %v", value, op, coins)
 	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
@@ -897,13 +871,6 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) error {
 		}
 		ops = append(ops, wire.NewOutPoint(op.txHash(), op.vout(), op.tree))
 		delete(dcr.fundingCoins, op.pt)
-		splitFunds, found := dcr.splitFunds[op.pt]
-		if found {
-			for _, c := range splitFunds {
-				ops = append(ops, c.op.wireOutPoint())
-			}
-			delete(dcr.splitFunds, op.pt)
-		}
 	}
 	return dcr.node.LockUnspent(true, ops)
 }

@@ -221,12 +221,6 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	rig.beta().ReturnCoins(utxos)
 
-	if splitTx {
-		// Wait a bit before calling FundOrder to prevent listunspent
-		// from returning coins spent in previous split txs.
-		time.Sleep(time.Second)
-	}
-
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue)
 	utxos1, _, err := rig.beta().FundOrder(ord)
