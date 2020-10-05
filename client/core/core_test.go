@@ -524,6 +524,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		lockTime:  time.Now().Add(time.Hour),
 		hookedUp:  true,
 		dbID:      encode.Uint32Bytes(assetID),
+		encPW:     []byte{0x01},
 	}, w
 }
 
@@ -1899,12 +1900,12 @@ func TestTrade(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	var lots uint64 = 10
 	qty := tDCR.LotSize * lots
@@ -2300,7 +2301,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundCoinDcr := &tCoin{id: fundCoinDcrID}
@@ -2308,7 +2309,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	// fundCoinBID := encode.RandomBytes(36)
 	// fundCoinB := &tCoin{id: fundCoinBID}
@@ -2372,12 +2373,12 @@ func TestTradeTracking(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	matchSize := 4 * tDCR.LotSize
 	cancelledQty := tDCR.LotSize
@@ -3080,12 +3081,12 @@ func TestRefunds(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	matchSize := 4 * tDCR.LotSize
 	qty := 3 * matchSize
@@ -4076,11 +4077,11 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	dc := rig.dc
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	mkt := dc.market(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
@@ -4218,11 +4219,11 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	tCore := rig.core
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	epochLen := rig.dc.market(tDcrBtcMktName).EpochLen
 
@@ -4658,11 +4659,11 @@ func TestPreimageSync(t *testing.T) {
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(wPW, time.Hour)
+	dcrWallet.Unlock(rig.crypter, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(rig.crypter, time.Hour)
 
 	var lots uint64 = 10
 	qty := tDCR.LotSize * lots

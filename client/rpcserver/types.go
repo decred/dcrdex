@@ -199,6 +199,9 @@ func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
 	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
 		return nil, err
 	}
+	if len(params.PWArgs[0]) == 0 {
+		return nil, fmt.Errorf("app password cannot be empty")
+	}
 	return params.PWArgs[0], nil
 }
 

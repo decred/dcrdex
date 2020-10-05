@@ -219,16 +219,6 @@ tmux send-keys -t $SESSION:2 "./beta createwallet delta${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:2 "./delta sethdseed true ${DELTA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:2 "./delta getnewaddress${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:2 "./delta getnewaddress \"\" \"legacy\"${DONE}" C-m\; ${WAIT}
-echo "Encrypting the delta wallet (may take a minute)"
-tmux send-keys -t $SESSION:2 "./delta encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
-if [ "$RESTART_AFTER_ENCRYPT" = 1 ] ; then
-    echo "Restarting beta/delta wallets."
-    tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
-      -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
-      -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S beta${SYMBOL}" C-m
-    sleep 3
-    tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
-fi
 
 #  Send some bitcoin to gamma and delta wallets, mining some blocks too.
 echo "Sending 84 BTC to gamma, delta in 8 blocks"

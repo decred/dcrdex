@@ -1076,10 +1076,14 @@ func dcrWallet(daemon string) *tWallet {
 }
 
 func btcWallet(daemon, walletName string) *tWallet {
+	pass := "abc"
+	if walletName == "delta" {
+		pass = ""
+	}
 	return &tWallet{
 		daemon:     daemon,
 		walletName: walletName,
-		pass:       []byte("abc"),
+		pass:       []byte(pass),
 	}
 }
 
