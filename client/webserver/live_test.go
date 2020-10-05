@@ -46,6 +46,7 @@ var (
 	forceDisconnectWallet bool
 	wipeWalletBalance     bool
 	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
+	randomPokes           = false
 )
 
 func dummySettings() map[string]string {
@@ -925,6 +926,31 @@ out:
 	}
 }
 
+func (c *TCore) runRandomPokes() {
+	nextWait := func() time.Duration {
+		return time.Duration(float64(time.Second)*rand.Float64()) * 5
+	}
+	chars := []byte("abcd efgh ijkl mnop qrst uvwx yz123")
+	numChars := len(chars)
+	randStr := func(maxLen int) string {
+		strLen := rand.Intn(maxLen)
+		b := make([]byte, 0, strLen)
+		for i := 0; i < strLen; i++ {
+			b = append(b, chars[rand.Intn(numChars)])
+		}
+		return string(b)
+	}
+	for {
+		select {
+		case <-time.NewTimer(nextWait()).C:
+			note := db.NewNotification(randStr(20), randStr(20), randStr(100), db.Poke)
+			c.noteFeed <- &note
+		case <-tCtx.Done():
+			return
+		}
+	}
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})  // mona
@@ -939,6 +965,7 @@ func TestServer(t *testing.T) {
 	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
+	randomPokes = true
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -968,5 +995,8 @@ func TestServer(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 	go tCore.runEpochs()
+	if randomPokes {
+		go tCore.runRandomPokes()
+	}
 	cm.Wait()
 }

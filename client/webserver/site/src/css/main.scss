@@ -249,28 +249,27 @@ div.note-indicator.warn {
 div.poke-note {
   position: fixed;
   right: 20px;
-  top: 100%;
-  height: 30px;
-  transition: top 1s;
-  background-color: black;
-  color: $font-color-dark;
-  border-radius: 5px 5px 0 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  border-radius: 4px;
   z-index: 1000;
-  border-width: 1px;
-  border-style: solid;
-  border-color: #444;
   max-width: 90%;
 
   & > span {
     display: inline-block;
+    background-color: black;
+    color: $font-color-dark;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 15px;
+    border-bottom: 1px solid #7777;
+    padding: 4px 10px;
+    line-height: 1;
+    margin: 3px 0 0;
   }
-}
-
-div.poke-note.active {
-  top: calc(100% - 30px);
 }
 
 #noteBox,
