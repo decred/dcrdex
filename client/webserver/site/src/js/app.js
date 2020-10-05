@@ -438,7 +438,7 @@ export default class Application {
           span.style.opacity = 1 - progress
         })
         span.remove()
-      }, 4000)
+      }, 6000)
       return
     }
     // Success and higher severity go to the bell dropdown.
