@@ -812,13 +812,13 @@ export default class MarketsPage extends BasePage {
     if (order.targetID) {
       const targetOrder = this.metaOrders[order.targetID]
       if (!targetOrder) return
-      Doc.hide(Doc.tmplElement(targetOrder.row, 'cancelStatus'))
       if (note.subject === 'cancel') {
-        targetOrder.order.status = Order.StatusCanceled
+        const cancelStatus = Doc.tmplElement(this.metaOrders[order.targetID].row, 'cancelStatus')
+        cancelStatus.textContent = 'canceled'
       } else if (note.subject === 'revoke') {
         targetOrder.order.status = Order.StatusRevoked
+        updateUserOrderRow(targetOrder.row, targetOrder)
       }
-      updateUserOrderRow(targetOrder.row, targetOrder)
       return
     }
 
