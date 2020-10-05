@@ -796,7 +796,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
-	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map) and storing the previous funding coins in splitFunds
+	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
 	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, dcr.feeRateWithFallback(), false)
 	if err != nil {
