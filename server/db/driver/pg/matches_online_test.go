@@ -516,6 +516,218 @@ func TestUserMatches(t *testing.T) {
 	}
 }
 
+type matchPair struct {
+	match  *order.Match
+	status *db.MatchStatus
+}
+
+func generateMatch(t *testing.T, matchStatus order.MatchStatus, active bool, makerBuyer, takerSeller account.AccountID, epochIdx ...uint64) *matchPair {
+	loBuy := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	loBuy.P.AccountID = makerBuyer
+	loSell := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+	loSell.P.AccountID = takerSeller
+	epIdx := uint64(132412341)
+	if len(epochIdx) > 0 {
+		epIdx = epochIdx[0]
+	}
+	match := newMatch(loBuy, loSell, loSell.Quantity, order.EpochID{epIdx, 10})
+	match.Status = matchStatus
+	err := archie.InsertMatch(match)
+	if err != nil {
+		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	matchID := match.ID()
+	mktMatchID := db.MarketMatchID{
+		MatchID: matchID,
+		Base:    loBuy.Base(),
+		Quote:   loBuy.Quote(),
+	}
+	// Just alternate the active state.
+	status := &db.MatchStatus{
+		Status: matchStatus,
+		Active: active,
+	}
+	if !active {
+		archie.SetMatchInactive(mktMatchID)
+	}
+	for iStatus := order.NewlyMatched; iStatus <= matchStatus; iStatus++ {
+		switch iStatus {
+		case order.MakerSwapCast:
+			status.MakerContract = encode.RandomBytes(50)
+			status.MakerSwap = encode.RandomBytes(36)
+			err := archie.SaveContractA(mktMatchID, status.MakerContract, status.MakerSwap, 0)
+			if err != nil {
+				t.Fatalf("SaveContractA error: %v", err)
+			}
+		case order.TakerSwapCast:
+			status.TakerContract = encode.RandomBytes(50)
+			status.TakerSwap = encode.RandomBytes(36)
+			err := archie.SaveContractB(mktMatchID, status.TakerContract, status.TakerSwap, 0)
+			if err != nil {
+				t.Fatalf("SaveContractB error: %v", err)
+			}
+		case order.MakerRedeemed:
+			status.MakerRedeem = encode.RandomBytes(36)
+			status.Secret = encode.RandomBytes(32)
+			err := archie.SaveRedeemA(mktMatchID, status.MakerRedeem, status.Secret, 0)
+			if err != nil {
+				t.Fatalf("SaveContractB error: %v", err)
+			}
+		case order.MatchComplete:
+			status.TakerRedeem = encode.RandomBytes(36)
+			err := archie.SaveRedeemB(mktMatchID, status.TakerRedeem, 0)
+			if err != nil {
+				t.Fatalf("SaveContractB error: %v", err)
+			}
+		}
+	}
+	return &matchPair{match: match, status: status}
+}
+
+func TestCompletedAndAtFaultMatchStats(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	epIdx := uint64(132412341)
+	nextIdx := func() uint64 {
+		epIdx++
+		return epIdx
+	}
+
+	maker, taker := randomAccountID(), randomAccountID()
+	matches := []*matchPair{
+		generateMatch(t, order.TakerSwapCast, false, maker, taker, nextIdx()), // 0: failed, maker fault
+		generateMatch(t, order.MatchComplete, false, maker, taker, nextIdx()), // 1: success
+		generateMatch(t, order.MakerRedeemed, true, maker, taker, nextIdx()),  // 2: still active, but maker success
+		generateMatch(t, order.MakerRedeemed, false, maker, taker, nextIdx()), // 3: failed, maker success, taker fault
+		generateMatch(t, order.MakerRedeemed, false, maker, maker, nextIdx()), // 4: failed, maker fault (no same-user maker success until MatchComplete)
+		generateMatch(t, order.MakerSwapCast, false, maker, taker, nextIdx()), // 5: failed, taker fault
+		generateMatch(t, order.NewlyMatched, false, maker, taker, nextIdx()),  // 6: failed, maker fault
+	}
+
+	// Make a perfect 1 lot match in different market (BTC-LTC).
+	limitBuy := newLimitOrder(false, 4500000, 1, order.StandingTiF, 20)
+	limitBuy.BaseAsset, limitBuy.QuoteAsset = AssetBTC, AssetLTC
+	limitBuy.AccountID = maker
+	limitSell := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 30)
+	limitSell.BaseAsset, limitSell.QuoteAsset = AssetBTC, AssetLTC
+	taker2 := randomAccountID()
+	limitSell.AccountID = taker2
+	matchLTC := newMatch(limitBuy, limitSell, limitSell.Quantity, order.EpochID{nextIdx(), 10})
+	matchLTC.Status = order.MatchComplete
+	err := archie.InsertMatch(matchLTC)
+	if err != nil {
+		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	archie.SetMatchInactive(db.MarketMatchID{
+		MatchID: matchLTC.ID(),
+		Base:    limitBuy.Base(),
+		Quote:   limitBuy.Quote(),
+	})
+	// 7: success
+	matches = append(matches, &matchPair{
+		match: matchLTC,
+		status: &db.MatchStatus{
+			Active: false,
+			Status: matchLTC.Status,
+		},
+	})
+
+	epochTime := func(mp *matchPair) int64 {
+		return encode.UnixMilli(mp.match.Epoch.End())
+	}
+
+	tests := []struct {
+		name         string
+		acctID       account.AccountID
+		wantOutcomes []*db.MatchOutcome
+		wantedErr    error
+	}{
+		{
+			"maker",
+			maker,
+			[]*db.MatchOutcome{ // descending by time (MatchID field TODO)
+				{
+					Status: matches[7].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[7]),
+				}, {
+					Status: matches[6].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[6]),
+				}, {
+					Status: matches[4].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[4]),
+				}, {
+					Status: matches[3].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[3]),
+				}, {
+					Status: matches[2].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[2]),
+				}, {
+					Status: matches[1].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[1]),
+				}, {
+					Status: matches[0].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[0]),
+				},
+			},
+			nil,
+		},
+		{
+			"taker",
+			taker,
+			[]*db.MatchOutcome{
+				{
+					Status: matches[5].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[5]),
+				}, {
+					Status: matches[3].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[3]),
+				}, {
+					Status: matches[1].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[1]),
+				},
+			},
+			nil,
+		},
+		{
+			"nope",
+			randomAccountID(),
+			nil,
+			nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outcomes, err := archie.CompletedAndAtFaultMatchStats(tt.acctID, 60)
+			if err != tt.wantedErr {
+				t.Fatal(err)
+			}
+			if len(outcomes) != len(tt.wantOutcomes) {
+				t.Errorf("Retrieved %d match outcomes for user %v, expected %d.", len(outcomes), tt.acctID, len(tt.wantOutcomes))
+			}
+			for i, mo := range tt.wantOutcomes {
+				if outcomes[i].Time != mo.Time || outcomes[i].Status != mo.Status || outcomes[i].Fail != mo.Fail {
+					t.Log(outcomes[i])
+					t.Log(mo)
+					t.Errorf("wrong %d", i)
+				}
+			}
+		})
+	}
+}
+
 func TestAllActiveUserMatches(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -666,81 +878,16 @@ func TestMatchStatuses(t *testing.T) {
 		t.Fatalf("incorrect error for unsupported market: %v", err)
 	}
 
-	type matchPair struct {
-		match  *order.Match
-		status *db.MatchStatus
-	}
-
-	generateMatch := func(matchStatus order.MatchStatus, buyer, seller account.AccountID) *matchPair {
-		loBuy := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
-		loBuy.P.AccountID = buyer
-		loSell := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
-		loSell.P.AccountID = seller
-		match := newMatch(loBuy, loSell, loSell.Quantity, order.EpochID{132412341, 10})
-		err = archie.InsertMatch(match)
-		if err != nil {
-			t.Fatalf("InsertMatch() failed: %v", err)
-		}
-		matchID := match.ID()
-		mktMatchID := db.MarketMatchID{
-			MatchID: matchID,
-			Base:    loBuy.Base(),
-			Quote:   loBuy.Quote(),
-		}
-		// Just alternate the active state.
-		active := matchStatus%2 == 0
-		status := &db.MatchStatus{
-			Status: matchStatus,
-			Active: active,
-		}
-		if !active {
-			archie.SetMatchInactive(mktMatchID)
-
-		}
-		for iStatus := order.NewlyMatched; iStatus <= matchStatus; iStatus++ {
-			switch iStatus {
-			case order.MakerSwapCast:
-				status.MakerContract = encode.RandomBytes(50)
-				status.MakerSwap = encode.RandomBytes(36)
-				err := archie.SaveContractA(mktMatchID, status.MakerContract, status.MakerSwap, 0)
-				if err != nil {
-					t.Fatalf("SaveContractA error: %v", err)
-				}
-			case order.TakerSwapCast:
-				status.TakerContract = encode.RandomBytes(50)
-				status.TakerSwap = encode.RandomBytes(36)
-				err := archie.SaveContractB(mktMatchID, status.TakerContract, status.TakerSwap, 0)
-				if err != nil {
-					t.Fatalf("SaveContractB error: %v", err)
-				}
-			case order.MakerRedeemed:
-				status.MakerRedeem = encode.RandomBytes(36)
-				status.Secret = encode.RandomBytes(32)
-				err := archie.SaveRedeemA(mktMatchID, status.MakerRedeem, status.Secret, 0)
-				if err != nil {
-					t.Fatalf("SaveContractB error: %v", err)
-				}
-			case order.MatchComplete:
-				status.TakerRedeem = encode.RandomBytes(36)
-				err := archie.SaveRedeemB(mktMatchID, status.TakerRedeem, 0)
-				if err != nil {
-					t.Fatalf("SaveContractB error: %v", err)
-				}
-			}
-		}
-		return &matchPair{match: match, status: status}
-	}
-
 	user1 := randomAccountID()
 	user2 := randomAccountID()
 
 	matches := []*matchPair{
-		generateMatch(order.NewlyMatched, user1, user2),                          // 0
-		generateMatch(order.MakerSwapCast, user1, user2),                         // 1
-		generateMatch(order.TakerSwapCast, user1, user2),                         // 2
-		generateMatch(order.MakerRedeemed, user1, user2),                         // 3
-		generateMatch(order.MatchComplete, user1, user2),                         // 4
-		generateMatch(order.MatchComplete, randomAccountID(), randomAccountID()), // 5
+		generateMatch(t, order.NewlyMatched, true, user1, user2),                           // 0
+		generateMatch(t, order.MakerSwapCast, false, user1, user2),                         // 1
+		generateMatch(t, order.TakerSwapCast, true, user1, user2),                          // 2
+		generateMatch(t, order.MakerRedeemed, true, user1, user2),                          // 3
+		generateMatch(t, order.MatchComplete, false, user1, user2),                         // 4
+		generateMatch(t, order.MatchComplete, false, randomAccountID(), randomAccountID()), // 5
 	}
 
 	idList := func(idxs ...int) []order.MatchID {
