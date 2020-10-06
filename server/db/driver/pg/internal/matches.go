@@ -130,6 +130,7 @@ const (
 			GREATEST((epochIdx+1)*epochDur, aContractTime, bContractTime, aRedeemTime, bRedeemTime) AS lastTime
 		FROM %s, acct
 		WHERE takerSell IS NOT NULL      -- exclude cancel order matches
+			AND (makerAccount = aid OR takerAccount = aid)
 			AND (
 				-- swap successes
 				status=4                                       -- success for both
