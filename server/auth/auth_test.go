@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,6 +135,8 @@ type TRPCClient struct {
 	banished   bool
 	sends      []*msgjson.Message
 	reqs       []*tReq
+	on         uint32
+	closed     chan struct{}
 }
 
 func (c *TRPCClient) ID() uint64 { return c.id }
@@ -151,8 +154,15 @@ func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.M
 	})
 	return c.requestErr
 }
-func (c *TRPCClient) Disconnect() {}
-func (c *TRPCClient) Banish()     { c.banished = true }
+func (c *TRPCClient) Done() <-chan struct{} {
+	return c.closed
+}
+func (c *TRPCClient) Disconnect() {
+	if atomic.CompareAndSwapUint32(&c.on, 0, 1) {
+		close(c.closed)
+	}
+}
+func (c *TRPCClient) Banish() { c.banished = true }
 func (c *TRPCClient) getReq() *tReq {
 	if len(c.reqs) == 0 {
 		return nil
@@ -175,8 +185,9 @@ var tClientID uint64
 func tNewRPCClient() *TRPCClient {
 	tClientID++
 	return &TRPCClient{
-		id: tClientID,
-		ip: "123.123.123.123",
+		id:     tClientID,
+		ip:     "123.123.123.123",
+		closed: make(chan struct{}),
 	}
 }
 
@@ -350,6 +361,8 @@ func TestMain(m *testing.M) {
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
+			UserUnbooker:    func(account.AccountID) {},
+			MiaUserTimeout:  90 * time.Second, // TODO: test
 			CancelThreshold: 0.9,
 		})
 		go authMgr.Run(ctx)
@@ -894,7 +907,8 @@ func TestAccountErrors(t *testing.T) {
 	}
 
 	// closed accounts allowed to connect
-	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first
+	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
+	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID
 	rig.storage.closed = true
 	rpcErr = rig.mgr.handleConnect(user.conn, connect)
 	rig.storage.closed = false
@@ -902,6 +916,9 @@ func TestAccountErrors(t *testing.T) {
 		t.Fatalf("should be no error for closed account")
 	}
 	client := rig.mgr.user(user.acctID)
+	if client == nil {
+		t.Fatalf("client not found")
+	}
 	if !client.isSuspended() {
 		t.Errorf("client should have been in suspended state")
 	}

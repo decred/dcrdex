@@ -133,6 +133,7 @@ func mainCore(ctx context.Context) error {
 		Anarchy:          cfg.Anarchy,
 		FreeCancels:      cfg.FreeCancels,
 		BanScore:         cfg.BanScore,
+		MiaUserTimeout:   cfg.MiaUserTimeout,
 		DEXPrivKey:       privKey,
 		CommsCfg: &dexsrv.RPCConfig{
 			RPCCert:     cfg.RPCCert,

@@ -558,7 +558,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 //   observes that there are no active matches for the trades.
 // - coins are unlocked either as the affected trades' matches are swapped or
 //   revoked (for trades with active matches), or when the trades are retired.
-// Also purges "stale" cancel orders if the targetted order is returned in the
+// Also purges "stale" cancel orders if the targeted order is returned in the
 // server's `connect` response. See *trackedTrade.deleteStaleCancelOrder for
 // the definition of a stale cancel order.
 func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
@@ -583,7 +583,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
-			dc.log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
+			dc.log.Warnf("Inactive order %v, status %q reported by DEX %s as active, status %q",
 				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
 		trade.mtx.RUnlock()
@@ -599,7 +599,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
 		} else {
-			dc.log.Warnf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+			dc.log.Warnf("Order %v updated from recorded status %q to new status %q reported by DEX %s",
 				oid, previousStatus, newStatus, dc.acct.host)
 		}
 	}
@@ -630,7 +630,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 
 		serverStatus := order.OrderStatus(srvOrderStatus.Status)
 		if trade.metaData.Status == serverStatus {
-			dc.log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
+			dc.log.Tracef("Status reconciliation not required for order %v, status %q, server-reported status %q",
 				oid, trade.metaData.Status, serverStatus)
 		} else if trade.metaData.Status == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
 			// Only standing orders can move from Epoch to Booked. This must have
@@ -638,11 +638,11 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 				updateOrder(trade, srvOrderStatus)
 			} else {
-				dc.log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
+				dc.log.Warnf("Incorrect status %q reported for non-standing order %v by DEX %s, client status = %q",
 					serverStatus, oid, dc.acct.host, trade.metaData.Status)
 			}
 		} else {
-			dc.log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
+			dc.log.Warnf("Inconsistent status %q reported for order %v by DEX %s, client status = %q",
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
 
@@ -661,7 +661,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		}
 
 		if len(orderStatusResults) != len(orderStatusRequests) {
-			dc.log.Errorf("Retreived statuses for %d out of %d orders from order_status route",
+			dc.log.Errorf("Retrieved statuses for %d out of %d orders from order_status route",
 				len(orderStatusResults), len(orderStatusRequests))
 		}
 

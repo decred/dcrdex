@@ -15,6 +15,8 @@ import (
 // reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
 type Link interface {
+	// Done returns a channel that is closed when the link goes down.
+	Done() <-chan struct{}
 	// ID returns a unique ID by which this connection can be identified.
 	ID() uint64
 	// IP returns the IP address of the peer.

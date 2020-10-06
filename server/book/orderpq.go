@@ -441,6 +441,24 @@ func (pq *OrderPQ) RemoveOrderID(oid order.OrderID) (*order.LimitOrder, bool) {
 	return pq.removeOrder(pq.orders[oid])
 }
 
+// RemoveUserOrders removes all orders from the queue that belong to a user.
+func (pq *OrderPQ) RemoveUserOrders(user account.AccountID) (removed []*order.LimitOrder) {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	uos, found := pq.userOrders[user]
+	if !found {
+		return
+	}
+	delete(pq.userOrders, user) // save some work from removeOrder=>Pop
+
+	removed = make([]*order.LimitOrder, 0, len(uos))
+	for oid, lo := range uos {
+		pq.removeOrder(pq.orders[oid])
+		removed = append(removed, lo)
+	}
+	return
+}
+
 // HaveOrder indicates if an order is in the queue.
 func (pq *OrderPQ) HaveOrder(oid order.OrderID) bool {
 	return pq.Order(oid) != nil

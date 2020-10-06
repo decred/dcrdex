@@ -70,6 +70,7 @@ type DexConf struct {
 	Anarchy          bool
 	FreeCancels      bool
 	BanScore         uint32
+	MiaUserTimeout   time.Duration
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 	IgnoreState      bool
@@ -380,6 +381,14 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %v", err)
 	}
 
+	// Create the user order unbook dispatcher for the AuthManager.
+	markets := make(map[string]*market.Market, len(cfg.Markets))
+	userUnbookFun := func(user account.AccountID) {
+		for _, mkt := range markets {
+			mkt.UnbookUserOrders(user)
+		}
+	}
+
 	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
 		Storage:         storage,
@@ -387,6 +396,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,
+		UserUnbooker:    userUnbookFun,
+		MiaUserTimeout:  cfg.MiaUserTimeout,
 		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
 		FreeCancels:     cfg.FreeCancels,
@@ -394,17 +405,15 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
-	startSubSys("Auth manager", authMgr)
-
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cancelThresh, authMgr.GraceLimit())
+	log.Infof("MIA user order unbook timeout %v", authCfg.MiaUserTimeout)
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
 	log.Infof("Ban score threshold is %v", cfg.BanScore)
 
 	// Create an unbook dispatcher for the Swapper.
-	markets := make(map[string]*market.Market, len(cfg.Markets))
 	marketUnbookHook := func(lo *order.LimitOrder) bool {
 		name, err := dex.MarketName(lo.BaseAsset, lo.QuoteAsset)
 		if err != nil {
@@ -447,7 +456,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		markets[mktInf.Name] = mkt
 	}
 
-	startSubSys("Swapper", swapper) // after markets map set
+	// Start the AuthManager and Swapper subsystems after populating the markets
+	// map used by the unbook callbacks.
+	startSubSys("Auth manager", authMgr)
+	startSubSys("Swapper", swapper)
 
 	// Set start epoch index for each market. Also create BookSources for the
 	// BookRouter, and MarketTunnels for the OrderRouter

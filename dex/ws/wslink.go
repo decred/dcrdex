@@ -186,16 +186,19 @@ func (c *WSLink) stop() bool {
 	return true
 }
 
+// Done returns a channel that is closed when the link goes down.
+func (c *WSLink) Done() <-chan struct{} {
+	// Only call Done after connect.
+	return c.stopped
+}
+
 // Disconnect begins shutdown of the WSLink, preventing new messages from
 // entering the outgoing queue, and ultimately closing the underlying connection
 // when all queued messages have been handled. This shutdown process is complete
 // when the WaitGroup returned by Connect is Done.
 func (c *WSLink) Disconnect() {
 	// Cancel the Context and close the stopped channel if not already done.
-	if !c.stop() {
-		c.log.Debugf("Disconnect attempted on stopped WSLink.")
-		return
-	}
+	c.stop() // false if already disconnected
 	// NOTE: outHandler closes the c.conn on its return.
 }
 
@@ -256,7 +259,6 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			c.log.Debugf("Connection already dead. Not sending Close control message.")
 			return
 		}
-		c.log.Debug("Sending close 1000 (normal) message.")
 		_ = c.conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"),
 			time.Now().Add(time.Second))
@@ -320,14 +322,13 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			}
 		}
 		// Attempt sending all queued outgoing messages.
-		c.log.Tracef("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
 		for _, sd := range outQueue {
 			write(sd)
 		}
 		// NOTE: This also addresses a full trigger channel, but their is no
 		// need to drain it, just the outQueue so SendNow never hangs.
 
-		c.log.Debugf("Sent %d and dropped %d messages to %v before shutdown.",
+		c.log.Tracef("Sent %d and dropped %d messages to %v before shutdown.",
 			writeCount, lostCount, c.ip)
 	}()
 
@@ -422,8 +423,6 @@ out:
 			break out
 		}
 	}
-
-	c.log.Tracef("Websocket output handler done for peer %s", c.ip)
 }
 
 // Off will return true if the link has disconnected.

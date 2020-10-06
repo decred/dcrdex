@@ -131,6 +131,12 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	return nil, false
 }
 
+// RemoveUserOrders removes all ords from the book that belong to a user. The
+// OrderIDs of the removed buy and sell orders are returned.
+func (b *Book) RemoveUserOrders(user account.AccountID) (removedBuys, removedSells []*order.LimitOrder) {
+	return b.buys.RemoveUserOrders(user), b.sells.RemoveUserOrders(user)
+}
+
 // HaveOrder checks if an order is in either the buy or sell side of the book.
 func (b *Book) HaveOrder(oid order.OrderID) bool {
 	b.mtx.RLock()
