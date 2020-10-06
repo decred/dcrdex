@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 const (
@@ -146,6 +147,14 @@ func (b *Book) Order(oid order.OrderID) *order.LimitOrder {
 		return lo
 	}
 	return b.sells.Order(oid)
+}
+
+func (b *Book) UserOrderTotals(user account.AccountID) (buyAmt, sellAmt, buyCount, sellCount uint64) {
+	b.mtx.RLock()
+	buyAmt, buyCount = b.buys.UserOrderTotals(user)
+	sellAmt, sellCount = b.sells.UserOrderTotals(user)
+	b.mtx.RUnlock()
+	return
 }
 
 // SellOrders copies out all sell orders in the book, sorted.

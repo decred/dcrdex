@@ -21,16 +21,6 @@ var (
 	}
 )
 
-// func randomBytes(len int) []byte {
-// 	bytes := make([]byte, len)
-// 	rand.Read(bytes)
-// 	return bytes
-// }
-
-// func randomHash() [32]byte {
-// 	return blake256.Sum256(randomBytes(32))
-// }
-
 func newFakeAddr() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, 35)
@@ -504,30 +494,6 @@ func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
 	ok = pq.Insert(nil)
 	if ok {
 		t.Errorf("Inserted nil order %v", orders[1])
-	}
-}
-
-func TestOrderPriorityQueue_Replace(t *testing.T) {
-	startLogger()
-
-	pq := NewMinOrderPQ(2)
-
-	ok := pq.Insert(orders[0])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[0])
-	}
-
-	ok = pq.ReplaceOrder(orders[0], orders[1])
-	if !ok {
-		t.Fatalf("failed to ReplaceOrder for %v <- %v", orders[0], orders[1])
-	}
-	if pq.Len() != 1 {
-		t.Fatalf("expected queue length 1, got %d", pq.Len())
-	}
-	best := pq.ExtractBest()
-	if best.UID() != orders[1].UID() {
-		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
-			best.Price(), best.UID())
 	}
 }
 
