@@ -51,7 +51,7 @@ func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 
 // upgradeDB checks whether any upgrades are necessary before the database is
 // ready for application usage.  If any are, they are performed.
-func upgradeDB(db *bbolt.DB) error {
+func (db *BoltDB) upgradeDB() error {
 	var version uint32
 	err := db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(appBucket)
@@ -81,7 +81,7 @@ func upgradeDB(db *bbolt.DB) error {
 		return nil
 	}
 
-	log.Infof("Upgrading database from version %d to %d", version, DBVersion)
+	db.log.Infof("Upgrading database from version %d to %d", version, DBVersion)
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		// Execute all necessary upgrades in order.

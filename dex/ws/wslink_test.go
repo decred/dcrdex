@@ -20,6 +20,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var tLogger = dex.StdOutLogger("ws_TEST", dex.LevelTrace)
+
 type ConnStub struct {
 	inMsg  chan []byte
 	inErr  chan error
@@ -99,8 +101,6 @@ func (c *ConnStub) WriteControl(messageType int, data []byte, deadline time.Time
 
 func TestWSLink_send(t *testing.T) {
 	defer os.Stdout.Sync()
-	log := dex.StdOutLogger("ws_TEST", dex.LevelTrace)
-	UseLogger(log)
 
 	handlerChan := make(chan struct{}, 1)
 	inMsgHandler := func(msg *msgjson.Message) *msgjson.Error {
@@ -112,7 +112,7 @@ func TestWSLink_send(t *testing.T) {
 		inMsg: make(chan []byte, 1),
 		inErr: make(chan error, 1),
 	}
-	wsLink := NewWSLink("127.0.0.1", conn, time.Second, inMsgHandler)
+	wsLink := NewWSLink("127.0.0.1", conn, time.Second, inMsgHandler, tLogger)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

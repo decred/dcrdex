@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/db"
-	orderbook "decred.org/dcrdex/client/order"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -54,6 +54,7 @@ func (f *BookFeed) Close() {
 // supplied close() callback.
 type bookie struct {
 	orderbook.OrderBook
+	log        dex.Logger
 	mtx        sync.Mutex
 	feeds      map[uint32]*BookFeed
 	close      func() // e.g. dexConnection.StopBook
@@ -63,9 +64,10 @@ type bookie struct {
 // newBookie is a constructor for a bookie. The caller should provide a callback
 // function to be called when there are no subscribers and the close timer has
 // expired.
-func newBookie(close func()) *bookie {
+func newBookie(logger dex.Logger, close func()) *bookie {
 	return &bookie{
-		OrderBook: *orderbook.NewOrderBook(),
+		OrderBook: *orderbook.NewOrderBook(logger.SubLogger("book")),
+		log:       logger,
 		feeds:     make(map[uint32]*BookFeed, 1),
 		close:     close,
 	}
@@ -76,7 +78,7 @@ func newBookie(close func()) *bookie {
 func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	b.OrderBook = *orderbook.NewOrderBook()
+	b.OrderBook = *orderbook.NewOrderBook(b.log)
 	return b.OrderBook.Sync(snapshot)
 }
 
@@ -147,7 +149,7 @@ func (b *bookie) send(u *BookUpdate) {
 		select {
 		case feed.C <- u:
 		default:
-			log.Warnf("bookie %p: Closing book update feed %d with no receiver. "+
+			b.log.Warnf("bookie %p: Closing book update feed %d with no receiver. "+
 				"The receiver should have closed the feed before going away.", b, fid)
 			b.closeFeed(feed) // delete it and maybe start a delayed bookie close
 		}
@@ -188,7 +190,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(func() { dc.stopBook(base, quote) })
+		booky = newBookie(dc.log.SubLogger(mkt), func() { dc.stopBook(base, quote) })
 		err = booky.Sync(obRes)
 		if err != nil {
 			return nil, err
@@ -223,7 +225,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, error) {
 	mkt := marketName(base, quote)
 	// Subscribe via the 'orderbook' request.
-	log.Debugf("Subscribing to the %v order book for %v", mkt, dc.acct.host)
+	dc.log.Debugf("Subscribing to the %v order book for %v", mkt, dc.acct.host)
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
 		Base:  base,
 		Quote: quote,
@@ -262,7 +264,7 @@ func (dc *dexConnection) stopBook(base, quote uint32) {
 		numFeeds := len(booky.feeds)
 		booky.mtx.Unlock()
 		if numFeeds > 0 {
-			log.Warnf("Aborting booky %p unsubscribe for market %s with active feeds", booky, mkt)
+			dc.log.Warnf("Aborting booky %p unsubscribe for market %s with active feeds", booky, mkt)
 			return
 		}
 		// No BookFeeds, delete the bookie.
@@ -270,14 +272,14 @@ func (dc *dexConnection) stopBook(base, quote uint32) {
 	}
 
 	if err := dc.unsubscribe(base, quote); err != nil {
-		log.Error(err)
+		dc.log.Error(err)
 	}
 }
 
 // unsubscribe unsubscribes from to the given market's order book.
 func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 	mkt := marketName(base, quote)
-	log.Debugf("Unsubscribing from the %v order book for %v", mkt, dc.acct.host)
+	dc.log.Debugf("Unsubscribing from the %v order book for %v", mkt, dc.acct.host)
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: mkt,
 	})
@@ -289,7 +291,7 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 		var res bool
 		_ = msg.UnmarshalResult(&res) // res==false if unmarshal fails
 		if !res {
-			log.Errorf("error unsubscribing from %s", mkt)
+			dc.log.Errorf("error unsubscribing from %s", mkt)
 		}
 	})
 	if err != nil {
@@ -315,7 +317,10 @@ func (c *Core) SyncBook(host string, base, quote uint32) (*BookFeed, error) {
 // Book fetches the order book. If a subscription doesn't exist, one will be
 // attempted and immediately closed.
 func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
-	dex = addrHost(dex)
+	dex, err := addrHost(dex)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
 	c.connMtx.RLock()
 	dc, found := c.conns[dex]
 	c.connMtx.RUnlock()
@@ -337,9 +342,9 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 		}
 		err = dc.unsubscribe(base, quote)
 		if err != nil {
-			log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
+			c.log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
 		}
-		ob = orderbook.NewOrderBook()
+		ob = orderbook.NewOrderBook(c.log.SubLogger(mkt))
 		if err = ob.Sync(snap); err != nil {
 			return nil, fmt.Errorf("unable to sync book: %v", err)
 		}
@@ -498,7 +503,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Return any non-nil error, but still revoke purged orders.
 
 	// Revoke all active orders of the suspended market for the dex.
-	log.Warnf("Revoking all active orders for market %s at %s.", mkt.Name, dc.acct.host)
+	c.log.Warnf("Revoking all active orders for market %s at %s.", mkt.Name, dc.acct.host)
 	updatedAssets := make(assetMap)
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {

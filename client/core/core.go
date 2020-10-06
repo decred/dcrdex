@@ -55,6 +55,7 @@ var (
 type dexConnection struct {
 	comms.WsConn
 	connMaster   *dex.ConnectionMaster
+	log          dex.Logger
 	tickInterval time.Duration
 	acct         *dexAccount
 	notify       func(Notification)
@@ -313,7 +314,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 		return
 	}
 
-	log.Infof("Cancel order %s targeting order %s at %s has been placed",
+	c.log.Infof("Cancel order %s targeting order %s at %s has been placed",
 		co.ID(), oid, dc.acct.host)
 
 	return
@@ -429,7 +430,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		}
 
 		status := order.MatchStatus(msgMatch.Status)
-		log.Debugf("Registering match %v for order %v (%v) in status %v",
+		dc.log.Debugf("Registering match %v for order %v (%v) in status %v",
 			msgMatch.MatchID, oid, order.MatchSide(msgMatch.Side), status)
 	}
 
@@ -574,7 +575,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if _, tracked := dc.trades[oid]; tracked {
 			srvActiveOrderStatuses[oid] = srvOrderStatus
 		} else {
-			log.Warnf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
+			dc.log.Warnf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
 			unknownOrdersCount++
 		}
 	}
@@ -584,7 +585,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
-			log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
+			dc.log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
 				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
 		trade.mtx.RUnlock()
@@ -598,9 +599,9 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		newStatus := order.OrderStatus(srvOrderStatus.Status)
 		trade.metaData.Status = newStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
-			log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
+			dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
 		} else {
-			log.Warnf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+			dc.log.Warnf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
 				oid, previousStatus, newStatus, dc.acct.host)
 		}
 	}
@@ -631,7 +632,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 
 		serverStatus := order.OrderStatus(srvOrderStatus.Status)
 		if trade.metaData.Status == serverStatus {
-			log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
+			dc.log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
 				oid, trade.metaData.Status, serverStatus)
 		} else if trade.metaData.Status == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
 			// Only standing orders can move from Epoch to Booked. This must have
@@ -639,11 +640,11 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 				updateOrder(trade, srvOrderStatus)
 			} else {
-				log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
+				dc.log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
 					serverStatus, oid, dc.acct.host, trade.metaData.Status)
 			}
 		} else {
-			log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
+			dc.log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
 
@@ -651,18 +652,18 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 	}
 
 	if len(orderStatusRequests) > 0 {
-		log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
+		dc.log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
 
 		// Send the 'order_status' request.
 		var orderStatusResults []*msgjson.OrderStatus
 		err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests, &orderStatusResults, DefaultResponseTimeout)
 		if err != nil {
-			log.Errorf("Error retreiving order statuses from DEX %s: %v", dc.acct.host, err)
+			dc.log.Errorf("Error retreiving order statuses from DEX %s: %v", dc.acct.host, err)
 			return
 		}
 
 		if len(orderStatusResults) != len(orderStatusRequests) {
-			log.Errorf("Retreived statuses for %d out of %d orders from order_status route",
+			dc.log.Errorf("Retreived statuses for %d out of %d orders from order_status route",
 				len(orderStatusResults), len(orderStatusRequests))
 		}
 
@@ -697,7 +698,7 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 		go func() {
 			newUpdates, err := c.tick(trade)
 			if err != nil {
-				log.Errorf("%s tick error: %v", dc.acct.host, err)
+				c.log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
 			updateChan <- newUpdates
 		}()
@@ -735,7 +736,7 @@ func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 func (dc *dexConnection) marketEpochDuration(mktID string) uint64 {
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		log.Errorf("marketEpoch called for unknown market %s", mktID)
+		dc.log.Errorf("marketEpoch called for unknown market %s", mktID)
 		return 0
 	}
 	return mkt.EpochLen
@@ -768,6 +769,9 @@ type Config struct {
 	DBPath string
 	// Net is the current network.
 	Net dex.Network
+	// Logger is is core's logger and used to create the core
+	// SubLoggers for the asset backends.
+	Logger dex.Logger
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -776,6 +780,7 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	cfg           *Config
+	log           dex.Logger
 	db            db.DB
 	net           dex.Network
 	lockTimeTaker time.Duration
@@ -807,12 +812,14 @@ type Core struct {
 
 // New is the constructor for a new Core.
 func New(cfg *Config) (*Core, error) {
-	db, err := bolt.NewDB(cfg.DBPath)
+	db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg:           cfg,
+		cfg: cfg,
+		// loggerMaker:   cfg.LoggerMaker,
+		log:           cfg.Logger,
 		db:            db,
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
@@ -831,13 +838,13 @@ func New(cfg *Config) (*Core, error) {
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
 	core.refreshUser()
-	log.Debugf("new client core created")
+	core.log.Debugf("new client core created")
 	return core, nil
 }
 
 // Run runs the core. Satisfies the runner.Runner interface.
 func (c *Core) Run(ctx context.Context) {
-	log.Infof("started DEX client core")
+	c.log.Infof("started DEX client core")
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
@@ -853,19 +860,20 @@ func (c *Core) Run(ctx context.Context) {
 		c.latencyQ.Run(ctx)
 	}()
 	c.wg.Wait()
-	log.Infof("DEX client core off")
+	c.log.Infof("DEX client core off")
 }
 
 // addrHost returns the host or url:port pair for an address.
-func addrHost(addr string) string {
+func addrHost(addr string) (string, error) {
 	const defaultHost = "localhost"
 	const missingPort = "missing port in address"
 	// Empty addresses are localhost.
 	if addr == "" {
-		return defaultHost
+		return defaultHost, nil
 	}
 	host, port, splitErr := net.SplitHostPort(addr)
 	_, portErr := strconv.ParseUint(port, 10, 16)
+
 	// net.SplitHostPort will error on anything not in the format
 	// string:string or :string or if a colon is in an unexpected position,
 	// such as in the scheme.
@@ -874,28 +882,27 @@ func addrHost(addr string) string {
 		// Any address with no colons is returned as is.
 		var addrErr *net.AddrError
 		if errors.As(splitErr, &addrErr) && addrErr.Err == missingPort {
-			return addr
+			return addr, nil
 		}
 		// These are addresses with at least one colon in an unexpected
 		// position.
 		a, err := url.Parse(addr)
 		// This address is of an unknown format. Return as is.
 		if err != nil {
-			log.Debugf("addrHost: unable to parse address '%s'", addr)
-			return addr
+			return "", fmt.Errorf("addrHost: unable to parse address '%s'", addr)
 		}
 		host, port = a.Hostname(), a.Port()
 		// If the address parses but there is no port, return just the
 		// host.
 		if port == "" {
-			return host
+			return host, nil
 		}
 	}
 	// We have a port but no host. Replace with localhost.
 	if host == "" {
 		host = defaultHost
 	}
-	return net.JoinHostPort(host, port)
+	return net.JoinHostPort(host, port), nil
 }
 
 // Network returns the current DEX network.
@@ -958,7 +965,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		return nil, fmt.Errorf("no wallet found for %d -> %s", assetID, unbip(assetID))
 	}
 	if !wallet.connected() {
-		log.Infof("connecting wallet for %s", unbip(assetID))
+		c.log.Infof("connecting wallet for %s", unbip(assetID))
 		err := wallet.Connect(c.ctx)
 		if err != nil {
 			return nil, fmt.Errorf("Connect error: %v", err)
@@ -968,7 +975,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		// until unlocked.
 		_, err = c.walletBalances(wallet)
 		if err != nil {
-			log.Tracef("could not retrieve balances for locked %s wallet: %v", unbip(assetID), err)
+			c.log.Tracef("could not retrieve balances for locked %s wallet: %v", unbip(assetID), err)
 		}
 	}
 	return wallet, nil
@@ -1040,12 +1047,12 @@ func (c *Core) updateBalances(assets assetMap) {
 		if !exists {
 			// This should never be the case, but log an error in case I'm
 			// wrong or something changes.
-			log.Errorf("non-existent %d wallet should exist", assetID)
+			c.log.Errorf("non-existent %d wallet should exist", assetID)
 			continue
 		}
 		_, err := c.walletBalances(w)
 		if err != nil {
-			log.Errorf("error updating %q balance: %v", unbip(assetID), err)
+			c.log.Errorf("error updating %q balance: %v", unbip(assetID), err)
 			continue
 		}
 	}
@@ -1104,7 +1111,7 @@ func (c *Core) User() *User {
 func (c *Core) refreshUser() {
 	initialized, err := c.IsInitialized()
 	if err != nil {
-		log.Errorf("refreshUser: error checking if app is initialized: %v", err)
+		c.log.Errorf("refreshUser: error checking if app is initialized: %v", err)
 	}
 	u := &User{
 		Assets:      c.SupportedAssets(),
@@ -1206,7 +1213,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
 
-	log.Infof("Created %s wallet. Balance available = %d / "+
+	c.log.Infof("Created %s wallet. Balance available = %d / "+
 		"locked = %d / locked in contracts = %d, Deposit address = %s",
 		symbol, balances.Available, balances.Locked, balances.ContractLocked,
 		dbWallet.Address)
@@ -1244,7 +1251,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
 	}
-	logger := log.SubLogger(unbip(dbWallet.AssetID))
+	logger := c.log.SubLogger(unbip(dbWallet.AssetID))
 	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
 	if err != nil {
 		return nil, fmt.Errorf("error creating wallet: %v", err)
@@ -1260,7 +1267,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 	defer c.walletMtx.Unlock()
 	wallet, has := c.wallets[assetID]
 	if !has {
-		log.Tracef("wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
+		c.log.Tracef("wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
 		return nil
 	}
 	return wallet.state()
@@ -1286,7 +1293,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Connected to and unlocked %s wallet. Balance available "+
+	c.log.Infof("Connected to and unlocked %s wallet. Balance available "+
 		"= %d / locked = %d / locked in contracts = %d, Deposit address = %s",
 		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
 		state.Address)
@@ -1502,9 +1509,9 @@ func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 		return nil, fmt.Errorf("asset.Info error: %w", err)
 	}
 	settings, err := config.Parse(winfo.DefaultConfigPath)
-	log.Infof("%d %s configuration settings loaded from file at default location %s", len(settings), unbip(assetID), winfo.DefaultConfigPath)
+	c.log.Infof("%d %s configuration settings loaded from file at default location %s", len(settings), unbip(assetID), winfo.DefaultConfigPath)
 	if err != nil {
-		log.Debugf("config.Parse could not load settings from default path: %v", err)
+		c.log.Debugf("config.Parse could not load settings from default path: %v", err)
 		return make(map[string]string), nil
 	}
 	return settings, nil
@@ -1521,7 +1528,10 @@ func (c *Core) isRegistered(host string) bool {
 // registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX.
 func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
-	host := addrHost(dexAddr)
+	host, err := addrHost(dexAddr)
+	if err != nil {
+		return 0, newError(addressParseErr, "error parsing address: %v", err)
+	}
 	if c.isRegistered(host) {
 		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
@@ -1564,7 +1574,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	if form.Addr == "" {
 		return nil, newError(emptyHostErr, "no dex address specified")
 	}
-	host := addrHost(form.Addr)
+	host, err := addrHost(form.Addr)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
 	if c.isRegistered(host) {
 		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
 	}
@@ -1645,7 +1658,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	// Pay the registration fee.
-	log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
+	c.log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
 		regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
 	if err != nil {
@@ -1663,7 +1676,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	dc.acct.feeCoin = coin.ID()
 	err = c.db.CreateAccount(dc.acct.dbInfo())
 	if err != nil {
-		log.Errorf("error saving account: %v", err)
+		c.log.Errorf("error saving account: %v", err)
 		// Don't abandon registration. The fee is already paid.
 	}
 
@@ -1718,7 +1731,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 
 	c.wait(assetID, trigger, func(err error) {
 		wallet, _ := c.wallet(assetID)
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
+		c.log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
@@ -1733,7 +1746,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		if err != nil {
 			return
 		}
-		log.Infof("Notifying dex %s of fee payment.", dc.acct.host)
+		c.log.Infof("Notifying dex %s of fee payment.", dc.acct.host)
 		err = c.notifyFee(dc, coinID)
 		if err != nil {
 			return
@@ -1741,7 +1754,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		dc.acct.markFeePaid()
 		err = c.authDEX(dc)
 		if err != nil {
-			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
+			c.log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 		}
 		c.refreshUser()
 	})
@@ -1819,18 +1832,18 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	c.walletMtx.Unlock()
 	wg.Wait()
 	if walletCount > 0 {
-		log.Infof("Connected to %d of %d wallets. Updated %d balances.", connectCount, walletCount, balanceCount)
+		c.log.Infof("Connected to %d of %d wallets. Updated %d balances.", connectCount, walletCount, balanceCount)
 	}
 
 	loaded := c.resolveActiveTrades(crypter)
 	if loaded > 0 {
-		log.Infof("loaded %d incomplete orders", loaded)
+		c.log.Infof("loaded %d incomplete orders", loaded)
 	}
 
 	dexStats := c.initializeDEXConnections(crypter)
 	notes, err := c.db.NotificationsN(10)
 	if err != nil {
-		log.Errorf("Login -> NotificationsN error: %v", err)
+		c.log.Errorf("Login -> NotificationsN error: %v", err)
 	}
 
 	c.refreshUser()
@@ -1964,7 +1977,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
-				log.Warnf("Account at dex %v not found. The account has been disabled. "+
+				c.log.Warnf("Account at dex %v not found. The account has been disabled. "+
 					"It is disconnected and has been removed from core connections.",
 					disabledAccountHost)
 			}
@@ -2010,7 +2023,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			// in turn will run authDEX.
 			dcrWallet, err := c.connectedWallet(dcrID)
 			if err != nil {
-				log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
+				c.log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
 				details := fmt.Sprintf("Incomplete registration detected for %s, but failed to connect to the Decred wallet", dc.acct.host)
 				c.notify(newFeePaymentNote("Wallet connection warning", details, db.WarningLevel, dc.acct.host))
 				result.AuthErr = details
@@ -2042,12 +2055,12 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 					mErr.Code == msgjson.AccountNotFoundError {
 					acctInfo, err := c.db.Account(dc.acct.host)
 					if err != nil {
-						log.Errorf("Error retrieving account: %v", err)
+						c.log.Errorf("Error retrieving account: %v", err)
 						return
 					}
 					err = c.db.DisableAccount(acctInfo)
 					if err != nil {
-						log.Errorf("Error disabling account: %v", err)
+						c.log.Errorf("Error disabling account: %v", err)
 						return
 					}
 					disabledAccountHostChan <- dc.acct.host
@@ -2143,7 +2156,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		}
 		err := dc.acct.checkSig(req.Serialize(), ack.Sig)
 		if err != nil {
-			log.Warnf("Account was registered, but DEX signature could not be verified: %v", err)
+			c.log.Warnf("Account was registered, but DEX signature could not be verified: %v", err)
 		}
 		errChan <- c.db.AccountPaid(&db.AccountProof{
 			Host:  dc.acct.host,
@@ -2200,7 +2213,10 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Trade password error: %v", err)
 	}
-	host := addrHost(form.Host)
+	host, err := addrHost(form.Host)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
 
 	// Get the dexConnection and the dex.Asset for each asset.
 	c.connMtx.RLock()
@@ -2338,7 +2354,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	unlockCoins := func() {
 		err := fromWallet.ReturnCoins(coins)
 		if err != nil {
-			log.Warnf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
+			c.log.Warnf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
 		}
 	}
 
@@ -2408,7 +2424,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	//
 	// TODO: Notify the client somehow.
 	logAbandon := func(err interface{}) {
-		log.Errorf("Abandoning order. "+
+		c.log.Errorf("Abandoning order. "+
 			"preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
 	}
@@ -2416,7 +2432,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = validateOrderResponse(dc, result, ord, msgOrder)
 	if err != nil {
 		unlockCoins()
-		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
+		c.log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
 		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
@@ -2442,7 +2458,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.log)
 
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -2592,14 +2608,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Set the account as authenticated.
-	log.Debugf("Authenticated connection to %s, %d active orders, %d active matches, score %d",
+	c.log.Debugf("Authenticated connection to %s, %d active orders, %d active matches, score %d",
 		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score)
 	dc.acct.auth()
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
 	if err != nil {
-		log.Error(err)
+		c.log.Error(err)
 	}
 
 	exceptions, matchConflicts := dc.compareServerMatches(matches)
@@ -2612,14 +2628,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
-			log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
+			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
 				dc.acct.host, match.id, oid)
 			match.failErr = fmt.Errorf("order not reported by the server on connect")
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
 			match.MetaData.Proof.SelfRevoked = true
 			if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
-				log.Errorf("Failed to update missing/revoked match: %v", err)
+				c.log.Errorf("Failed to update missing/revoked match: %v", err)
 			}
 		}
 
@@ -2640,12 +2656,12 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Send a "Match resolution error" if there are extra match messages.
 		if len(extras) > 0 {
 			for _, extra := range extras {
-				log.Debugf("DEX %s reported match %s which is not a known active match for order %s",
+				c.log.Debugf("DEX %s reported match %s which is not a known active match for order %s",
 					dc.acct.host, extra.MatchID, extra.OrderID)
 
 				err := trade.negotiate(extras)
 				if err != nil {
-					log.Errorf("error negotiating previously unknown match %s, order %s from %s reported on connect: %v",
+					c.log.Errorf("error negotiating previously unknown match %s, order %s from %s reported on connect: %v",
 						extra.MatchID, extra.OrderID, dc.acct.host, err)
 
 					corder, _ := trade.coreOrderInternal()
@@ -2707,68 +2723,72 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 func (c *Core) initialize() {
 	accts, err := c.db.Accounts()
 	if err != nil {
-		log.Errorf("Error retrieve accounts from database: %v", err)
+		c.log.Errorf("Error retrieve accounts from database: %v", err)
 	}
 	var wg sync.WaitGroup
 	for _, acct := range accts {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			dc, err := c.connectDEX(acct)
+			host, err := addrHost(acct.Host)
 			if err != nil {
-				log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
+				c.log.Errorf("skipping loading of %s due to address parse error: %w", acct.Host, err)
 				return
 			}
-			log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
+			dc, err := c.connectDEX(acct)
+			if err != nil {
+				c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
+				return
+			}
+			c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
 			if !acct.Paid {
 				if len(acct.FeeCoin) == 0 {
 					// Register should have set this when creating the account
 					// that was obtained via db.Accounts.
-					log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+					c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
 						"Discarding account.", acct.Host)
 					return
 				}
-				log.Infof("Incomplete registration detected for DEX %s. "+
+				c.log.Infof("Incomplete registration detected for DEX %s. "+
 					"Registration will be completed when the Decred wallet is unlocked.",
 					acct.Host)
 				details := fmt.Sprintf("Unlock your Decred wallet to complete registration for %s", acct.Host)
 				c.notify(newFeePaymentNote("Incomplete registration", details, db.WarningLevel, acct.Host))
 				// checkUnpaidFees will pay the fees if the wallet is unlocked
 			}
-			host := addrHost(acct.Host)
 			c.connMtx.Lock()
 			c.conns[host] = dc
 			c.connMtx.Unlock()
-			log.Debugf("dex connection to %s ready", acct.Host)
+			c.log.Debugf("dex connection to %s ready", acct.Host)
 		}(acct)
 	}
 	dbWallets, err := c.db.Wallets()
 	if err != nil {
-		log.Errorf("error loading wallets from database: %v", err)
+		c.log.Errorf("error loading wallets from database: %v", err)
 	}
 	c.walletMtx.Lock()
 	for _, dbWallet := range dbWallets {
 		wallet, err := c.loadWallet(dbWallet)
 		aid := dbWallet.AssetID
 		if err != nil {
-			log.Errorf("error loading %d -> %s wallet: %v", aid, unbip(aid), err)
+			c.log.Errorf("error loading %d -> %s wallet: %v", aid, unbip(aid), err)
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		log.Infof("Loaded %s wallet configuration. Deposit address = %s",
+		c.log.Infof("Loaded %s wallet configuration. Deposit address = %s",
 			unbip(aid), dbWallet.Address)
 		c.wallets[dbWallet.AssetID] = wallet
 	}
 	numWallets := len(c.wallets)
 	c.walletMtx.Unlock()
 	if len(dbWallets) > 0 {
-		log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
+		c.log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
 	// Wait for DEXes to be connected to ensure DEXes are ready
 	// for authentication when Login is triggered.
 	wg.Wait()
 	c.connMtx.RLock()
-	log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
+	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
 	c.connMtx.RUnlock()
 	c.refreshUser()
 }
@@ -2791,7 +2811,7 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 			continue
 		}
 		if len(dc.acct.feeCoin) == 0 {
-			log.Errorf("empty fee coin found for unpaid account")
+			c.log.Errorf("empty fee coin found for unpaid account")
 			continue
 		}
 		wg.Add(1)
@@ -2811,22 +2831,22 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	// Get the database account info.
 	acctInfo, err := c.db.Account(dc.acct.host)
 	if err != nil {
-		log.Errorf("reFee %s - error retrieving account info: %v", dc.acct.host, err)
+		c.log.Errorf("reFee %s - error retrieving account info: %v", dc.acct.host, err)
 		return
 	}
 	// A couple sanity checks.
 	if !bytes.Equal(acctInfo.FeeCoin, dc.acct.feeCoin) {
-		log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.host, acctInfo.FeeCoin, dc.acct.feeCoin)
+		c.log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.host, acctInfo.FeeCoin, dc.acct.feeCoin)
 		return
 	}
 	if acctInfo.Paid {
-		log.Errorf("reFee %s - account for %x already marked paid", dc.acct.host, dc.acct.feeCoin)
+		c.log.Errorf("reFee %s - account for %x already marked paid", dc.acct.host, dc.acct.feeCoin)
 		return
 	}
 	// Get the coin for the fee.
 	confs, err := dcrWallet.Confirmations(acctInfo.FeeCoin)
 	if err != nil {
-		log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
+		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
 	}
 	dc.cfgMtx.RLock()
@@ -2836,18 +2856,18 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	if confs >= requiredConfs {
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
-			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.host, err)
+			c.log.Errorf("reFee %s - notifyfee error: %v", dc.acct.host, err)
 			details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
 			c.notify(newFeePaymentNote("Fee payment error", details, db.ErrorLevel, dc.acct.host))
 		} else {
-			log.Infof("Fee paid at %s", dc.acct.host)
+			c.log.Infof("Fee paid at %s", dc.acct.host)
 			details := fmt.Sprintf("You may now trade at %s.", dc.acct.host)
 			c.notify(newFeePaymentNote("Account registered", details, db.Success, dc.acct.host))
 			// dc.acct.pay() and c.authDEX????
 			dc.acct.markFeePaid()
 			err = c.authDEX(dc)
 			if err != nil {
-				log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
+				c.log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 			}
 		}
 		return
@@ -2865,7 +2885,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	if err != nil {
 		return nil, fmt.Errorf("database error when fetching orders for %s: %v", dc.acct.host, err)
 	}
-	log.Infof("Loaded %d active orders.", len(dbOrders))
+	c.log.Infof("Loaded %d active orders.", len(dbOrders))
 
 	// It's possible for an order to not be active, but still have active matches.
 	// Grab the orders for those too.
@@ -2882,7 +2902,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	if err != nil {
 		return nil, fmt.Errorf("database error fetching active match orders for %s: %v", dc.acct.host, err)
 	}
-	log.Infof("Loaded %d active match orders", len(activeMatchOrders))
+	c.log.Infof("Loaded %d active match orders", len(activeMatchOrders))
 	for _, oid := range activeMatchOrders {
 		if haveOrder(oid) {
 			continue
@@ -2905,13 +2925,13 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		mktID := marketName(ord.Base(), ord.Quote())
 		mkt := dc.market(mktID)
 		if mkt == nil {
-			log.Errorf("active %s order retrieved for unknown market %s", oid, mktID)
+			c.log.Errorf("active %s order retrieved for unknown market %s", oid, mktID)
 			continue
 		}
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
+			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.log)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -2939,19 +2959,19 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 		metaCancel, err := c.db.Order(cancelID)
 		if err != nil {
-			log.Errorf("cancel order %s not found for trade %s", cancelID, oid)
+			c.log.Errorf("cancel order %s not found for trade %s", cancelID, oid)
 			continue
 		}
 		co, ok := metaCancel.Order.(*order.CancelOrder)
 		if !ok {
-			log.Errorf("linked order %s is not a cancel order", cancelID)
+			c.log.Errorf("linked order %s is not a cancel order", cancelID)
 			continue
 		}
 		var pimg order.Preimage
 		copy(pimg[:], metaCancel.MetaData.Proof.Preimage)
 		err = tracker.cancelTrade(co, pimg)
 		if err != nil {
-			log.Errorf("error setting cancel order info %s: %w", co.ID(), err)
+			c.log.Errorf("error setting cancel order info %s: %w", co.ID(), err)
 		}
 		// TODO: The trackedTrade.cancel.matches is not being repopulated on
 		// startup. The consequences are that the Filled value will not include
@@ -2983,7 +3003,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 		if !trade.isActive() {
 			// In this event, there is a discrepancy between the active criteria
 			// between dbTrackers and isActive that should be resolved.
-			log.Warnf("Loaded inactive trade %v from the DB.", trade.ID())
+			c.log.Warnf("Loaded inactive trade %v from the DB.", trade.ID())
 			continue
 		}
 		base, quote := trade.Base(), trade.Quote()
@@ -3092,7 +3112,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
 				if err != nil {
-					log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked)
+					c.log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked)
 					match.failErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
 					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v", tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
 					continue
@@ -3262,7 +3282,10 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 // route.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Get the host from the DEX URL.
-	host := addrHost(acctInfo.Host)
+	host, err := addrHost(acctInfo.Host)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
 	wsAddr := "wss://" + host + "/ws"
 	wsURL, err := url.Parse(wsAddr)
 	if err != nil {
@@ -3280,6 +3303,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		ConnectEventFunc: func(connected bool) {
 			go c.handleConnectEvent(host, connected)
 		},
+		Logger: c.log.SubLogger(wsURL.String()),
 	})
 	if err != nil {
 		return nil, err
@@ -3312,6 +3336,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	bTimeout := time.Millisecond * time.Duration(dexCfg.BroadcastTimeout)
 	dc := &dexConnection{
 		WsConn:       conn,
+		log:          c.log,
 		connMaster:   connMaster,
 		assets:       assets,
 		cfg:          dexCfg,
@@ -3325,12 +3350,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		connected:    true,
 	}
 
-	log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
+	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
 
 	dc.refreshMarkets()
 	c.wg.Add(1)
 	go c.listen(dc)
-	log.Infof("Connected to DEX server at %s and listening for messages.", host)
+	c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
 
 	return dc, nil
 }
@@ -3342,7 +3367,7 @@ func (c *Core) handleReconnect(host string) {
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
+		c.log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
 		return
 	}
 
@@ -3350,13 +3375,13 @@ func (c *Core) handleReconnect(host string) {
 	// server configuration.
 	err := dc.refreshServerConfig()
 	if err != nil {
-		log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
+		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
 
 	err = c.authDEX(dc)
 	if err != nil {
-		log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
+		c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
 		return
 	}
 
@@ -3374,14 +3399,14 @@ func (c *Core) handleReconnect(host string) {
 		// server when the connection dropped.
 		snap, err := dc.subscribe(mkt.BaseID, mkt.QuoteID)
 		if err != nil {
-			log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
+			c.log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
 			return
 		}
 
 		// Create a fresh OrderBook for the bookie.
 		err = booky.reset(snap)
 		if err != nil {
-			log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.Name, err)
+			c.log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.Name, err)
 		}
 
 		// Send a FreshBookAction to the subscribers.
@@ -3573,7 +3598,7 @@ func (c *Core) listen(dc *dexConnection) {
 		defer c.wg.Done()
 		for job := range nextJob {
 			if err := job.hander(c, dc, job.msg); err != nil {
-				log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
+				c.log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
 					job.msg.Type, dc.acct.host, err)
 			}
 		}
@@ -3597,7 +3622,7 @@ func (c *Core) listen(dc *dexConnection) {
 		updatedAssets := make(assetMap)
 		for _, trade := range doneTrades {
 			trade.mtx.Lock()
-			log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
+			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
 			trade.returnCoins()
 			trade.mtx.Unlock()
 			updatedAssets.count(trade.wallets.fromAsset.ID)
@@ -3606,7 +3631,7 @@ func (c *Core) listen(dc *dexConnection) {
 		for _, trade := range activeTrades {
 			newUpdates, err := c.tick(trade)
 			if err != nil {
-				log.Error(err)
+				c.log.Error(err)
 			}
 			updatedAssets.merge(newUpdates)
 		}
@@ -3628,7 +3653,7 @@ func (c *Core) listen(dc *dexConnection) {
 				if sinceLast >= 2*dc.tickInterval {
 					// The app likely just woke up from being suspended. Skip this
 					// tick to let DEX connections reconnect and resync matches.
-					log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
+					c.log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
 						"Skipping this check to allow reconnect.", sinceLast)
 					continue
 				}
@@ -3646,7 +3671,7 @@ out:
 		select {
 		case msg, ok := <-msgs:
 			if !ok {
-				log.Debugf("Connection closed for %s.", dc.acct.host)
+				c.log.Debugf("Connection closed for %s.", dc.acct.host)
 				// TODO: This just means that wsConn, which created the
 				// MessageSource channel, was shut down before this loop
 				// returned via ctx.Done. It may be necessary to investigate the
@@ -3664,15 +3689,15 @@ out:
 				handler, found = noteHandlers[msg.Route]
 			case msgjson.Response:
 				// client/comms.wsConn handles responses to requests we sent.
-				log.Errorf("A response was received in the message queue: %s", msg)
+				c.log.Errorf("A response was received in the message queue: %s", msg)
 				continue
 			default:
-				log.Errorf("Invalid message type %d from MessageSource", msg.Type)
+				c.log.Errorf("Invalid message type %d from MessageSource", msg.Type)
 				continue
 			}
 			// Until all the routes have handlers, check for nil too.
 			if !found || handler == nil {
-				log.Errorf("No handler found for route '%s'", msg.Route)
+				c.log.Errorf("No handler found for route '%s'", msg.Route)
 				continue
 			}
 
@@ -3795,7 +3820,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	// TODO: Consider a "QueueSend" or similar, but do not bail on the matches.
 	err = dc.Send(resp)
 	if err != nil {
-		log.Errorf("Send match response: %v", err)
+		c.log.Errorf("Send match response: %v", err)
 		// dc.addPendingSend(resp) // e.g.
 	}
 
@@ -3899,10 +3924,10 @@ func (c *Core) removeWaiter(id uint64) {
 // adversely affected.
 func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	if nodeErr != nil {
-		log.Errorf("%s wallet is reporting a failed state: %v", unbip(assetID), nodeErr)
+		c.log.Errorf("%s wallet is reporting a failed state: %v", unbip(assetID), nodeErr)
 		return
 	}
-	log.Tracef("processing tip change for %s", unbip(assetID))
+	c.log.Tracef("processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
 	for id, waiter := range c.blockWaiters {
 		if waiter.assetID != assetID {
@@ -3952,7 +3977,7 @@ func (c *Core) PromptShutdown() bool {
 			wallet, found := c.wallet(assetID)
 			if found && wallet.connected() {
 				if err := wallet.Lock(); err != nil {
-					log.Errorf("error locking wallet: %v", err)
+					c.log.Errorf("error locking wallet: %v", err)
 				}
 			}
 		}

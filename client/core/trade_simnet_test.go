@@ -42,7 +42,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
-	"github.com/decred/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -71,7 +70,7 @@ var (
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
 
-	tLog   dex.Logger
+	tLog   = dex.StdOutLogger("TEST", dex.LevelTrace)
 	tmpDir string
 )
 
@@ -147,14 +146,6 @@ func startClients(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func init() {
-	UseLoggerMaker(&dex.LoggerMaker{
-		Backend:      slog.NewBackend(os.Stdout),
-		DefaultLevel: slog.LevelTrace,
-	})
-	tLog = dex.StdOutLogger("TEST", dex.LevelTrace)
 }
 
 func setup() (context.CancelFunc, error) {

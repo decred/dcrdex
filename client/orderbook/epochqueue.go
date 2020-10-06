@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package order
+package orderbook
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/crypto/blake256"
@@ -27,10 +28,11 @@ type epochOrder struct {
 type EpochQueue struct {
 	orders map[order.OrderID]*epochOrder
 	mtx    sync.RWMutex
+	log    dex.Logger
 }
 
 // NewEpochQueue creates a client epoch queue.
-func NewEpochQueue() *EpochQueue {
+func NewEpochQueue(logger dex.Logger) *EpochQueue {
 	return &EpochQueue{
 		orders: make(map[order.OrderID]*epochOrder),
 	}
@@ -168,7 +170,7 @@ outer:
 	// Check for old orders and log any found.
 	for oid, ord := range eq.orders {
 		if ord.epoch <= epoch {
-			log.Errorf("removing stale order from epoch queue %s", oid)
+			eq.log.Errorf("removing stale order from epoch queue %s", oid)
 			delete(eq.orders, oid)
 		}
 	}

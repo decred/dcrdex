@@ -24,12 +24,13 @@ var (
 	tDir     string
 	tCtx     context.Context
 	tCounter int
+	tLogger  = dex.StdOutLogger("db_TEST", dex.LevelTrace)
 )
 
 func newTestDB(t *testing.T) *BoltDB {
 	tCounter++
 	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
-	dbi, err := NewDB(dbPath)
+	dbi, err := NewDB(dbPath, tLogger)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
 	}
@@ -43,9 +44,6 @@ func newTestDB(t *testing.T) *BoltDB {
 
 func TestMain(m *testing.M) {
 	defer os.Stdout.Sync()
-	log := dex.StdOutLogger("TEST", dex.LevelTrace)
-	UseLogger(log)
-
 	doIt := func() int {
 		var err error
 		tDir, err = ioutil.TempDir("", "dbtest")

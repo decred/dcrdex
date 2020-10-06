@@ -14,6 +14,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
@@ -90,13 +91,14 @@ var (
 // the db.DB interface defined at decred.org/dcrdex/client/db.
 type BoltDB struct {
 	*bbolt.DB
+	log dex.Logger
 }
 
 // Check that BoltDB satisfies the db.DB interface.
 var _ dexdb.DB = (*BoltDB)(nil)
 
 // NewDB is a constructor for a *BoltDB.
-func NewDB(dbPath string) (dexdb.DB, error) {
+func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
 	isNew := os.IsNotExist(err)
 
@@ -107,7 +109,8 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 
 	// Release the file lock on exit.
 	bdb := &BoltDB{
-		DB: db,
+		DB:  db,
+		log: logger,
 	}
 
 	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket, disabledAccountsBucket,
@@ -130,7 +133,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 				return err
 			}
 
-			log.Infof("creating new version %d database", DBVersion)
+			bdb.log.Infof("creating new version %d database", DBVersion)
 
 			return nil
 		})
@@ -141,7 +144,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		return bdb, nil
 	}
 
-	return bdb, upgradeDB(bdb.DB)
+	return bdb, bdb.upgradeDB()
 }
 
 // Run waits for context cancellation and closes the database.
@@ -149,7 +152,7 @@ func (db *BoltDB) Run(ctx context.Context) {
 	<-ctx.Done()
 	err := db.Backup()
 	if err != nil {
-		log.Errorf("unable to backup database: %v", err)
+		db.log.Errorf("unable to backup database: %v", err)
 	}
 	db.Close()
 }
@@ -327,7 +330,7 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	err = db.deleteAccount(ai.Host)
 	if err != nil {
 		if err == bbolt.ErrBucketNotFound {
-			log.Warnf("Cannot delete account from active accounts"+
+			db.log.Warnf("Cannot delete account from active accounts"+
 				" table. Host: not found. %s err: %v", ai.Host, err)
 		} else {
 			return err
@@ -575,7 +578,7 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 		func(oidB []byte, oBkt *bbolt.Bucket) bool {
 			oTypeB := oBkt.Get(typeKey)
 			if len(oTypeB) != 1 {
-				log.Error("encountered order type encoded with wrong number of bytes = %d for order %x", len(oTypeB), oidB)
+				db.log.Error("encountered order type encoded with wrong number of bytes = %d for order %x", len(oTypeB), oidB)
 				return false
 			}
 			oType := order.OrderType(oTypeB[0])
@@ -795,7 +798,7 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			// Inactive with MatchComplete status.
 			statusB := mBkt.Get(statusKey)
 			if len(statusB) != 1 {
-				log.Errorf("match %x has no status set", k)
+				db.log.Errorf("match %x has no status set", k)
 				return nil
 			}
 			status := order.MatchStatus(statusB[0])
@@ -806,12 +809,12 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			// Inactive if refunded.
 			proofB := getCopy(mBkt, proofKey)
 			if len(proofB) == 0 {
-				log.Errorf("empty match proof")
+				db.log.Errorf("empty match proof")
 				return nil
 			}
 			proof, errM := dexdb.DecodeMatchProof(proofB)
 			if errM != nil {
-				log.Errorf("error decoding proof: %v", errM)
+				db.log.Errorf("error decoding proof: %v", errM)
 				return nil
 			}
 			if len(proof.RefundCoin) > 0 {
@@ -830,12 +833,12 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 				// Load the UserMatch to check the match Side.
 				matchB := mBkt.Get(matchKey) // no copy, just need Side
 				if matchB == nil {
-					log.Errorf("nil match bytes for %x", k)
+					db.log.Errorf("nil match bytes for %x", k)
 					return nil
 				}
 				match, err := order.DecodeMatch(matchB)
 				if err != nil {
-					log.Errorf("error decoding match %x: %v", k, err)
+					db.log.Errorf("error decoding match %x: %v", k, err)
 					return nil
 				}
 				side := match.Side // done with match and matchB

@@ -53,6 +53,8 @@ type Connection interface {
 // WSLink is the local, per-connection representation of a DEX peer (client or
 // server) connection.
 type WSLink struct {
+	// log is the WSLink's logger
+	log dex.Logger
 	// ip is the peer's IP address.
 	ip string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
@@ -82,9 +84,10 @@ type sendData struct {
 }
 
 // NewWSLink is a constructor for a new WSLink.
-func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error) *WSLink {
+func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
 	return &WSLink{
 		ip:         addr,
+		log:        logger,
 		conn:       conn,
 		outChan:    make(chan *sendData, outBufferSize),
 		pingPeriod: pingPeriod,
@@ -134,11 +137,11 @@ func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
 func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	msg, err := msgjson.NewResponse(id, nil, rpcErr)
 	if err != nil {
-		log.Errorf("SendError: failed to create message: %v", err)
+		c.log.Errorf("SendError: failed to create message: %v", err)
 	}
 	err = c.Send(msg)
 	if err != nil {
-		log.Debug("SendError: failed to send message to peer %s: %v", c.ip, err)
+		c.log.Debug("SendError: failed to send message to peer %s: %v", c.ip, err)
 	}
 }
 
@@ -162,7 +165,7 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
 	}
 
-	log.Tracef("Starting websocket messaging with peer %s", c.ip)
+	c.log.Tracef("Starting websocket messaging with peer %s", c.ip)
 	// Start processing input and output.
 	c.wg.Add(3)
 	go c.inHandler(linkCtx)
@@ -190,7 +193,7 @@ func (c *WSLink) stop() bool {
 func (c *WSLink) Disconnect() {
 	// Cancel the Context and close the stopped channel if not already done.
 	if !c.stop() {
-		log.Debugf("Disconnect attempted on stopped WSLink.")
+		c.log.Debugf("Disconnect attempted on stopped WSLink.")
 		return
 	}
 	// NOTE: outHandler closes the c.conn on its return.
@@ -214,7 +217,7 @@ out:
 			// Log the error if it's not due to disconnecting.
 			if !websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
-				log.Errorf("Websocket receive error from peer %s: %v", c.ip, err)
+				c.log.Errorf("Websocket receive error from peer %s: %v", c.ip, err)
 			}
 			break out
 		}
@@ -250,10 +253,10 @@ func (c *WSLink) outHandler(ctx context.Context) {
 		// Unless we are returning because of a write error, try to send a Close
 		// control message before closing the connection.
 		if writeFailed {
-			log.Debugf("Connection already dead. Not sending Close control message.")
+			c.log.Debugf("Connection already dead. Not sending Close control message.")
 			return
 		}
-		log.Debug("Sending close 1000 (normal) message.")
+		c.log.Debug("Sending close 1000 (normal) message.")
 		_ = c.conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"),
 			time.Now().Add(time.Second))
@@ -317,14 +320,14 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			}
 		}
 		// Attempt sending all queued outgoing messages.
-		log.Tracef("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
+		c.log.Tracef("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
 		for _, sd := range outQueue {
 			write(sd)
 		}
 		// NOTE: This also addresses a full trigger channel, but their is no
 		// need to drain it, just the outQueue so SendNow never hangs.
 
-		log.Debugf("Sent %d and dropped %d messages to %v before shutdown.",
+		c.log.Debugf("Sent %d and dropped %d messages to %v before shutdown.",
 			writeCount, lostCount, c.ip)
 	}()
 
@@ -372,7 +375,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			initCap := cap(outQueue)
 			outQueue = append(outQueue, sd)
 			if newCap := cap(outQueue); newCap > initCap {
-				log.Infof("Outgoing message queue capacity increased from %d to %d for %v.",
+				c.log.Infof("Outgoing message queue capacity increased from %d to %d for %v.",
 					initCap, newCap, c.ip)
 				// The capacity 7168 is a heuristic for when the slice shift on
 				// the pop front operation starts to become a performance issue.
@@ -381,7 +384,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 				// messages, something is wrong with the client, or the server
 				// is spamming excessively.
 				if newCap >= 7168 {
-					log.Warnf("Stopping client %v with outgoing message queue of length %d, capacity %d",
+					c.log.Warnf("Stopping client %v with outgoing message queue of length %d, capacity %d",
 						c.ip, len(outQueue), newCap)
 					c.stop()
 				}
@@ -412,7 +415,7 @@ out:
 			if err != nil {
 				c.stop()
 				// Don't really care what the error is, but log it at debug level.
-				log.Debugf("WriteMessage ping error: %v", err)
+				c.log.Debugf("WriteMessage ping error: %v", err)
 				break out
 			}
 		case <-ctx.Done():
@@ -420,7 +423,7 @@ out:
 		}
 	}
 
-	log.Tracef("Websocket output handler done for peer %s", c.ip)
+	c.log.Tracef("Websocket output handler done for peer %s", c.ip)
 }
 
 // Off will return true if the link has disconnected.
