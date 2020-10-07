@@ -474,7 +474,7 @@ func (pq *OrderPQ) Order(oid order.OrderID) *order.LimitOrder {
 	return nil
 }
 
-// UserOrderTotals
+// UserOrderTotals returns the total value and number of booked orders.
 func (pq *OrderPQ) UserOrderTotals(user account.AccountID) (amt, count uint64) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()

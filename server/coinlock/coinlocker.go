@@ -29,6 +29,7 @@ type CoinLocker interface {
 	UnlockAll()
 	// UnlockOrderCoins unlocks all locked coins associated with an order.
 	UnlockOrderCoins(oid order.OrderID)
+	// UnlockOrdersCoins is like UnlockOrderCoins for multiple orders.
 	UnlockOrdersCoins(oids []order.OrderID)
 	// LockOrdersCoins locks all of the coins associated with multiple orders.
 	LockOrdersCoins(orders []order.Order) (failed []order.Order)
