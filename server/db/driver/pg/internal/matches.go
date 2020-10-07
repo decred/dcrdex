@@ -126,15 +126,17 @@ const (
 	CompletedOrAtFaultMatchesLastN = `
 		WITH acct (aid) AS ( VALUES($1::BYTEA) )
 
-		SELECT status, (status=4 OR (status=3 AND makerAccount = aid)) AS success,
+		SELECT status, (status=4 OR (status=3 AND makerAccount = aid AND takerAccount != aid)) AS success,
 			GREATEST((epochIdx+1)*epochDur, aContractTime, bContractTime, aRedeemTime, bRedeemTime) AS lastTime
 		FROM %s, acct
 		WHERE takerSell IS NOT NULL      -- exclude cancel order matches
+			AND (makerAccount = aid OR takerAccount = aid)
 			AND (
-				-- swap successes
+				-- swap success for both
 				status=4                                       -- success for both
 				OR
-				(status=3 AND makerAccount = aid)              -- success for maker, active or revoked
+				-- swap success for maker unless maker==taker
+				(status=3 AND makerAccount = aid AND takerAccount != aid)
 				OR
 				( -- at-fault swap failures
 					NOT active -- failure means inactive/revoked
