@@ -361,6 +361,26 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
+// ExpectUsers specifies which users are expected to connected within a certain
+// time or have their orders unbooked (revoked). This should be run prior to
+// starting the AuthManager. This is not part of the constructor since it is
+// convenient to obtain this information from the Market's Books, and Market
+// requires the AuthManager. The same information could be pulled from storage,
+// but the Market is the authoritative book. The AuthManager should be start via
+// Run immediately after calling ExpectUsers so the users can connect.
+func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
+	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
+	for user := range users {
+		auth.unbookers[user] = time.AfterFunc(within, func() {
+			log.Tracef("Unbooking all orders for MIA user %v", user)
+			auth.unbookFun(user)
+			auth.connMtx.Lock()
+			delete(auth.unbookers, user)
+			auth.connMtx.Unlock()
+		})
+	}
+}
+
 // RecordCancel records a user's executed cancel order, including the canceled
 // order ID, and the time when the cancel was executed.
 func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {

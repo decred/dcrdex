@@ -445,6 +445,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	// Markets
+	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
@@ -454,15 +455,29 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("NewMarket failed: %v", err)
 		}
 		markets[mktInf.Name] = mkt
+
+		// Having loaded the book, get the accounts owning the orders.
+		_, buys, sells := mkt.Book()
+		for _, lo := range buys {
+			usersWithOrders[lo.AccountID] = struct{}{}
+		}
+		for _, lo := range sells {
+			usersWithOrders[lo.AccountID] = struct{}{}
+		}
 	}
 
+	// Having enumerated all users with booked orders, configure the AuthManager
+	// to expect them to connect in a certain time period.
+	authMgr.ExpectUsers(usersWithOrders, 2*cfg.MiaUserTimeout)
+
 	// Start the AuthManager and Swapper subsystems after populating the markets
-	// map used by the unbook callbacks.
+	// map used by the unbook callbacks, and setting the AuthManager's unbook
+	// timers for the users with currently booked orders.
 	startSubSys("Auth manager", authMgr)
 	startSubSys("Swapper", swapper)
 
 	// Set start epoch index for each market. Also create BookSources for the
-	// BookRouter, and MarketTunnels for the OrderRouter
+	// BookRouter, and MarketTunnels for the OrderRouter.
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
