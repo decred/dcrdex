@@ -540,7 +540,7 @@ func RedeemP2WSHContract(contract, sig, pubkey, secret []byte) [][]byte {
 		sig,
 		pubkey,
 		secret,
-		[]byte{0x01},
+		{0x01},
 		contract,
 	}
 }
@@ -578,7 +578,7 @@ func RefundP2WSHContract(contract, sig, pubkey []byte) [][]byte {
 	return [][]byte{
 		sig,
 		pubkey,
-		[]byte{},
+		{},
 		contract,
 	}
 }

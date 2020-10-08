@@ -71,22 +71,30 @@ type responseHandler struct {
 type WsCfg struct {
 	// URL is the websocket endpoint URL.
 	URL string
+
 	// The maximum time in seconds to wait for a ping from the server. This
 	// should be larger than the server's ping interval to allow for network
 	// latency.
 	PingWait time.Duration
+
 	// The server's certificate.
 	Cert []byte
+
 	// ReconnectSync runs the needed reconnection synchronization after
 	// a reconnect.
 	ReconnectSync func()
+
 	// ConnectEventFunc runs whenever connection status changes.
 	//
 	// NOTE: Disconnect event notifications may lag behind actual
 	// disconnections.
 	ConnectEventFunc func(bool)
+
 	// Logger is the logger for the WsConn.
 	Logger dex.Logger
+
+	// NetDialContext specifies an optional dialer context to use.
+	NetDialContext func(context.Context, string, string) (net.Conn, error)
 }
 
 // wsConn represents a client websocket connection.
@@ -173,11 +181,14 @@ func (conn *wsConn) setConnected(connected bool) {
 // connect attempts to establish a websocket connection.
 func (conn *wsConn) connect(ctx context.Context) error {
 	dialer := &websocket.Dialer{
-		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:  conn.tlsCfg,
 	}
-
+	if conn.cfg.NetDialContext != nil {
+		dialer.NetDialContext = conn.cfg.NetDialContext
+	} else {
+		dialer.Proxy = http.ProxyFromEnvironment
+	}
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
 		if _, isUnknownAuthError := err.(x509.UnknownAuthorityError); isUnknownAuthError {
