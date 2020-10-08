@@ -6,7 +6,6 @@ package admin
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"syscall"
 
@@ -48,9 +47,6 @@ func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 	case res := <-passwordReadChan:
 		if res.err != nil {
 			return nil, res.err
-		}
-		if res.password == nil {
-			return nil, errors.New("password must not be empty")
 		}
 		return res.password, nil
 	}

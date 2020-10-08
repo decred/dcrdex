@@ -1130,9 +1130,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return err
 	}
-	encPW, err := crypter.Encrypt(walletPW)
-	if err != nil {
-		return fmt.Errorf("wallet password encryption error: %v", err)
+	var encPW []byte
+	if len(walletPW) > 0 {
+		encPW, err = crypter.Encrypt(walletPW)
+		if err != nil {
+			return fmt.Errorf("wallet password encryption error: %w", err)
+		}
 	}
 
 	walletInfo, err := asset.Info(assetID)
@@ -1178,7 +1181,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf(s, a...)
 	}
 
-	err = wallet.Unlock(string(walletPW), aYear)
+	err = wallet.Unlock(crypter, aYear)
 	if err != nil {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
@@ -1300,11 +1303,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 
 // unlockWallet unlocks the wallet with the crypter.
 func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
-	pwB, err := crypter.Decrypt(wallet.encPW)
-	if err != nil {
-		return fmt.Errorf("unlockWallet decryption error: %v", err)
-	}
-	err = wallet.Unlock(string(pwB), aYear)
+	err := wallet.Unlock(crypter, aYear)
 	if err != nil {
 		return fmt.Errorf("unlockWallet unlock error: %v", err)
 	}
@@ -1437,6 +1436,8 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(authErr, "SetWalletPassword password error: %v", err)
 	}
 
+	newPasswordSet := len(newPW) > 0
+
 	// Check that the specified wallet exists.
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()
@@ -1454,11 +1455,14 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		}
 	}
 
-	// Check that the new password works.
+	// Check that the new password works. If the new password is empty, skip
+	// this step, since an empty password signifies an unencrypted wallet.
 	wasUnlocked := wallet.unlocked()
-	err = wallet.Unlock(string(newPW), aYear)
-	if err != nil {
-		return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
+	if newPasswordSet {
+		err = wallet.Wallet.Unlock(string(newPW), aYear)
+		if err != nil {
+			return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
+		}
 	}
 
 	if !wasConnected {
@@ -1468,9 +1472,12 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	}
 
 	// Encrypt the password.
-	encPW, err := crypter.Encrypt(newPW)
-	if err != nil {
-		return newError(encryptionErr, "encryption error: %v", err)
+	var encPW []byte
+	if newPasswordSet {
+		encPW, err = crypter.Encrypt(newPW)
+		if err != nil {
+			return newError(encryptionErr, "encryption error: %v", err)
+		}
 	}
 
 	err = c.db.SetWalletPassword(wallet.dbID, encPW)

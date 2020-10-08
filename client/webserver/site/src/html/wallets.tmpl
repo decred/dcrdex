@@ -24,7 +24,7 @@
     <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Unlock</button>
     <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Withdraw</button>
     <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Deposit</button>
-    <button data-action="lock"{{if not $ready}} class="d-hide"{{end}}>Lock</button>
+    <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Lock</button>
     <button data-action="create" class="d-hide">Create a {{.Info.Name}} Wallet</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
   {{else}}

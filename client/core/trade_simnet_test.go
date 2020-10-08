@@ -31,6 +31,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,7 +71,8 @@ var (
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
 
-	tLog dex.Logger
+	tLog   dex.Logger
+	tmpDir string
 )
 
 func readWalletCfgsAndDexCert() error {
@@ -109,6 +111,9 @@ func readWalletCfgsAndDexCert() error {
 func startClients(ctx context.Context) error {
 	for _, c := range clients {
 		err := c.init(ctx)
+		if err != nil {
+			return err
+		}
 		c.log("core created")
 
 		go func() {
@@ -345,6 +350,12 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 
 	tLog.Infof("Trades completed. Maker went dark at %s, Taker continued till %s.",
 		order.MakerRedeemed, order.MatchComplete)
+}
+
+func TestMain(m *testing.M) {
+	tmpDir, _ = ioutil.TempDir("", "")
+	defer os.RemoveAll(tmpDir)
+	os.Exit(m.Run())
 }
 
 // TestOrderStatusReconciliation simulates a few conditions that could cause a
@@ -1076,10 +1087,14 @@ func dcrWallet(daemon string) *tWallet {
 }
 
 func btcWallet(daemon, walletName string) *tWallet {
+	pass := "abc"
+	if walletName == "delta" {
+		pass = ""
+	}
 	return &tWallet{
 		daemon:     daemon,
 		walletName: walletName,
-		pass:       []byte("abc"),
+		pass:       []byte(pass),
 	}
 }
 
@@ -1105,13 +1120,13 @@ func (client *tClient) log(format string, args ...interface{}) {
 	tLog.Infof("[client %d] "+format, args...)
 }
 
+var clientCounter uint32
+
 func (client *tClient) init(ctx context.Context) error {
-	db, err := ioutil.TempFile("", "dexc.db")
-	if err != nil {
-		return err
-	}
+	cNum := atomic.AddUint32(&clientCounter, 1)
+	var err error
 	client.core, err = New(&Config{
-		DBPath: db.Name(),
+		DBPath: filepath.Join(tmpDir, fmt.Sprintf("dex_%d.db", cNum)),
 		Net:    dex.Regtest,
 	})
 	if err != nil {

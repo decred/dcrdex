@@ -5,11 +5,13 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encrypt"
 )
 
 // xcWallet is a wallet.
@@ -27,8 +29,15 @@ type xcWallet struct {
 }
 
 // Unlock unlocks the wallet.
-func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
-	err := w.Wallet.Unlock(pw, dur)
+func (w *xcWallet) Unlock(crypter encrypt.Crypter, dur time.Duration) error {
+	if len(w.encPW) == 0 {
+		return nil
+	}
+	pwB, err := crypter.Decrypt(w.encPW)
+	if err != nil {
+		return fmt.Errorf("unlockWallet decryption error: %v", err)
+	}
+	err = w.Wallet.Unlock(string(pwB), dur)
 	if err != nil {
 		return err
 	}
@@ -40,6 +49,9 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 
 // Lock the wallet. The lockTime is zeroed so that unlocked will return false.
 func (w *xcWallet) Lock() error {
+	if len(w.encPW) == 0 {
+		return nil
+	}
 	w.mtx.Lock()
 	w.lockTime = time.Time{}
 	w.mtx.Unlock()
@@ -48,6 +60,9 @@ func (w *xcWallet) Lock() error {
 
 // unlocked will return true if the lockTime has not passed.
 func (w *xcWallet) unlocked() bool {
+	if len(w.encPW) == 0 {
+		return true
+	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	return w.lockTime.After(time.Now())
@@ -59,13 +74,14 @@ func (w *xcWallet) state() *WalletState {
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
 	return &WalletState{
-		Symbol:  unbip(w.AssetID),
-		AssetID: w.AssetID,
-		Open:    w.lockTime.After(time.Now()),
-		Running: w.connector.On(),
-		Balance: w.balance,
-		Address: w.address,
-		Units:   winfo.Units,
+		Symbol:    unbip(w.AssetID),
+		AssetID:   w.AssetID,
+		Open:      w.unlocked(),
+		Running:   w.connector.On(),
+		Balance:   w.balance,
+		Address:   w.address,
+		Units:     winfo.Units,
+		Encrypted: len(w.encPW) > 0,
 	}
 }
 

@@ -20,11 +20,6 @@ export class NewWalletForm {
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
 
     bind(form, fields.submitAdd, async () => {
-      if (fields.newWalletPass.value === '') {
-        fields.newWalletErr.textContent = 'wallet password cannot be empty'
-        Doc.show(fields.newWalletErr)
-        return
-      }
       if (fields.nwAppPass.value === '') {
         fields.newWalletErr.textContent = 'app password cannot be empty'
         Doc.show(fields.newWalletErr)
@@ -34,7 +29,7 @@ export class NewWalletForm {
 
       const createForm = {
         assetID: parseInt(this.currentAsset.id),
-        pass: fields.newWalletPass.value,
+        pass: fields.newWalletPass.value || '',
         config: this.subform.map(),
         appPass: fields.nwAppPass.value
       }
