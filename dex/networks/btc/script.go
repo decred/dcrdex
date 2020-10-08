@@ -196,6 +196,8 @@ const (
 	InitTxSize = InitTxSizeBase + RedeemP2PKHInputSize // 76 + 149 = 225
 	// Varies greatly with some other input types, e.g nested witness (p2sh with
 	// p2wpkh redeem script): 23 byte scriptSig + 108 byte (75 vbyte) witness = ~50
+
+	witnessWeight = blockchain.WitnessScaleFactor
 )
 
 // BTCScriptType holds details about a pubkey script and possibly it's redeem
@@ -335,7 +337,7 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	}
 	totalSize := txOut.SerializeSize() + 41
 	if txscript.IsWitnessProgram(txOut.PkScript) {
-		totalSize += (107 / blockchain.WitnessScaleFactor)
+		totalSize += (107 / witnessWeight)
 	} else {
 		totalSize += 107
 	}
@@ -494,6 +496,20 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		Script()
 }
 
+// MsgTxVBytes returns the transaction's virtual size, which accounts for the
+// segwit input weighting.
+func MsgTxVBytes(msgTx *wire.MsgTx) uint64 {
+	baseSize := msgTx.SerializeSizeStripped()
+	totalSize := msgTx.SerializeSize()
+	txWeight := baseSize*(witnessWeight-1) + totalSize
+	// vbytes is ceil(tx_weight/4)
+	return uint64(txWeight+(witnessWeight-1)) / witnessWeight // +3 before / 4 to round up
+	// NOTE: This is the same as doing the following:
+	// tx := btcutil.NewTx(msgTx)
+	// return uint64(blockchain.GetTransactionWeight(tx)+(blockchain.WitnessScaleFactor-1)) /
+	// 	blockchain.WitnessScaleFactor // mempool.GetTxVirtualSize(tx)
+}
+
 // SpendInfo is information about an input and it's previous outpoint.
 type SpendInfo struct {
 	SigScriptSize     uint32
@@ -508,7 +524,7 @@ type SpendInfo struct {
 // transaction fees.
 func (nfo *SpendInfo) VBytes() uint32 {
 	return TxInOverhead + uint32(wire.VarIntSerializeSize(uint64(nfo.SigScriptSize))) +
-		nfo.SigScriptSize + (nfo.WitnessSize+3)/4 // Add 3 before dividing witness weight to force rounding up.
+		nfo.SigScriptSize + (nfo.WitnessSize+(witnessWeight-1))/witnessWeight // Add 3 before dividing witness weight to force rounding up.
 }
 
 // InputInfo is some basic information about the input required to spend an

@@ -26,7 +26,6 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -1834,13 +1833,6 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	return newOutput(btc.node, txHash, vout, coin.Value()), nil
 }
 
-// msgTxVBytes returns the transaction's virtual size, which accounts for the
-// segwit input weighting.
-func msgTxVBytes(msgTx *wire.MsgTx) uint64 {
-	tx := btcutil.NewTx(msgTx)
-	return uint64(mempool.GetTxVirtualSize(tx))
-}
-
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
@@ -1856,7 +1848,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	if err != nil {
 		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
-	vSize := msgTxVBytes(msgTx)
+	vSize := dexbtc.MsgTxVBytes(msgTx)
 	minFee := feeRate * vSize
 	remaining := totalIn - totalOut
 	if minFee > remaining {
@@ -1877,9 +1869,9 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
 	if changeAdded {
 		// Add the change output.
-		vSize0 := msgTxVBytes(baseTx)
+		vSize0 := dexbtc.MsgTxVBytes(baseTx)
 		baseTx.AddTxOut(changeOutput)
-		changeSize := msgTxVBytes(baseTx) - vSize0 // may be dexbtc.P2WPKHOutputSize
+		changeSize := dexbtc.MsgTxVBytes(baseTx) - vSize0 // may be dexbtc.P2WPKHOutputSize
 		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addr.String())
 
 		vSize += changeSize
@@ -1895,7 +1887,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			if err != nil {
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
-			vSize = msgTxVBytes(msgTx) // recompute the size with new tx signature
+			vSize = dexbtc.MsgTxVBytes(msgTx) // recompute the size with new tx signature
 			reqFee := feeRate * vSize
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
