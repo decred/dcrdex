@@ -636,7 +636,7 @@ var helpMsgs = map[string]helpMsg{
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.
-    walletPass (string): The wallet's password.`,
+    walletPass (string): The wallet's password. Leave the password empty for wallets without a password set.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md

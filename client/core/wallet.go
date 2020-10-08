@@ -76,7 +76,7 @@ func (w *xcWallet) state() *WalletState {
 	return &WalletState{
 		Symbol:  unbip(w.AssetID),
 		AssetID: w.AssetID,
-		Open:    len(w.encPW) == 0 || w.lockTime.After(time.Now()),
+		Open:    w.unlocked(),
 		Running: w.connector.On(),
 		Balance: w.balance,
 		Address: w.address,
