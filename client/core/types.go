@@ -182,9 +182,8 @@ type Order struct {
 	Canceled     bool              `json:"canceled"`
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
 	FundingCoins []dex.Bytes       `json:"fundingCoins"`
-	Rate         uint64            `json:"rate"`               // limit only
-	TimeInForce  order.TimeInForce `json:"tif"`                // limit only
-	TargetID     dex.Bytes         `json:"targetID,omitempty"` // cancel only
+	Rate         uint64            `json:"rate"` // limit only
+	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
 }
 
 // FeeBreakdown is categorized fee information.
@@ -207,7 +206,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 	var cancelling, canceled bool
 	if !metaData.LinkedOrder.IsZero() {
-		if trade.Filled() == trade.Quantity {
+		if metaData.Status == order.OrderStatusCanceled {
 			canceled = true
 		} else {
 			cancelling = true

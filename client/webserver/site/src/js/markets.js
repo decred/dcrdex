@@ -57,8 +57,7 @@ export default class MarketsPage extends BasePage {
       // Active orders
       'liveTemplate', 'liveList',
       // Cancel order form
-      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
-      'cancelStatus'
+      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
     ])
     this.main = main
     app.loading(this.main.parentElement)
@@ -734,9 +733,7 @@ export default class MarketsPage extends BasePage {
     var res = await postJSON('/api/cancel', req)
     app.loaded()
     if (!app.checkResponse(res)) return
-    cancelData.status.textContent = 'cancelling'
     Doc.hide(cancelData.bttn, page.forms)
-    Doc.show(cancelData.status)
     order.cancelling = true
   }
 
@@ -751,7 +748,6 @@ export default class MarketsPage extends BasePage {
     this.showForm(page.cancelForm)
     this.cancelData = {
       bttn: Doc.tmplElement(row, 'cancelBttn'),
-      status: Doc.tmplElement(row, 'cancelStatus'),
       order: order
     }
   }
@@ -806,29 +802,15 @@ export default class MarketsPage extends BasePage {
 
   /*
    * handleOrderNote is the handler for the 'order'-type notification, which are
-   * used to update an order's status.
+   * used to update a user's order's status.
    */
   handleOrderNote (note) {
     const order = note.order
-    if (order.targetID) {
-      const targetOrder = this.metaOrders[order.targetID]
-      if (!targetOrder) return
-      Doc.hide(Doc.tmplElement(targetOrder.row, 'cancelStatus'))
-      if (note.subject === 'cancel') {
-        targetOrder.order.status = Order.StatusCanceled
-      } else if (note.subject === 'revoke') {
-        targetOrder.order.status = Order.StatusRevoked
-      }
-      updateUserOrderRow(targetOrder.row, targetOrder)
-      return
-    }
-
     const metaOrder = this.metaOrders[order.id]
     if (!metaOrder) return
     metaOrder.order = order
     const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
     if (note.subject === 'Missed cancel') {
-      Doc.hide(Doc.tmplElement(metaOrder.row, 'cancelStatus'))
       Doc.show(bttn)
     }
     if (order.filled === order.qty) {
