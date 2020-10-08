@@ -812,6 +812,9 @@ type Core struct {
 
 // New is the constructor for a new Core.
 func New(cfg *Config) (*Core, error) {
+	if cfg.Logger == nil {
+		return nil, fmt.Errorf("Core.Config must specify a Logger")
+	}
 	db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
@@ -2457,7 +2460,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.log)
+		c.db, c.latencyQ, wallets, coins, c.notify)
 
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -2930,7 +2933,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.log)
+			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.

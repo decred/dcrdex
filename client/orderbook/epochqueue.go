@@ -35,6 +35,7 @@ type EpochQueue struct {
 func NewEpochQueue(logger dex.Logger) *EpochQueue {
 	return &EpochQueue{
 		orders: make(map[order.OrderID]*epochOrder),
+		log:    logger,
 	}
 }
 

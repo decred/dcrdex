@@ -1590,7 +1590,7 @@ func TestLogin(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		id: matchID,
@@ -2190,7 +2190,7 @@ func TestCancel(t *testing.T) {
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	rig.queueCancel(nil)
@@ -2256,7 +2256,6 @@ func TestHandlePreimageRequest(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:    ord,
 		preImg:   preImg,
-		log:      tLogger,
 		db:       rig.db,
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
@@ -2333,7 +2332,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 
 	match := &matchTracker{
 		id: mid,
@@ -2401,7 +2400,7 @@ func TestTradeTracking(t *testing.T) {
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -3021,7 +3020,7 @@ func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force ord
 
 	tracker := newTrackedTrade(dbOrder, preImg, rig.dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 
 	return tracker
 }
@@ -3099,7 +3098,7 @@ func TestRefunds(t *testing.T) {
 	}
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -3493,7 +3492,7 @@ func TestCompareServerMatches(t *testing.T) {
 	}
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, nil, tLogger)
+		rig.db, rig.queue, nil, nil, nil)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -3524,7 +3523,7 @@ func TestCompareServerMatches(t *testing.T) {
 	// Entirely missing order
 	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
 	trackerMissing := newTrackedTrade(dbOrderMissing, preImgMissing, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, notify, tLogger)
+		rig.db, rig.queue, nil, nil, notify)
 	oidMissing := loMissing.ID()
 	// an active match for the missing trade
 	matchIDMissing := ordertest.RandomMatchID()
@@ -3835,7 +3834,6 @@ func TestLogout(t *testing.T) {
 		Order:  ord,
 		preImg: newPreimage(),
 		dc:     rig.dc,
-		log:    tLogger,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
@@ -4101,7 +4099,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 		oid := lo.ID()
 		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-			rig.db, rig.queue, walletSet, coins, rig.core.notify, tLogger)
+			rig.db, rig.queue, walletSet, coins, rig.core.notify)
 		dc.trades[oid] = tracker
 		return tracker
 	}
@@ -4342,7 +4340,7 @@ func TestHandleNomatch(t *testing.T) {
 	loImmediate.Force = order.ImmediateTiF
 	immediateOID := loImmediate.ID()
 	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	dc.trades[immediateOID] = immediateTracker
 
 	// 2. Standing limit order
@@ -4350,7 +4348,7 @@ func TestHandleNomatch(t *testing.T) {
 	loStanding.Force = order.StandingTiF
 	standingOID := loStanding.ID()
 	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	dc.trades[standingOID] = standingTracker
 
 	// 3. Cancel order.
@@ -4373,7 +4371,7 @@ func TestHandleNomatch(t *testing.T) {
 	dbOrder.Order = mktOrder
 	marketOID := mktOrder.ID()
 	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
@@ -4774,7 +4772,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
 	oid := lo.ID()
 	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, tLogger)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 
 	dc.trades[trade.ID()] = trade
 	matchID := ordertest.RandomMatchID()
