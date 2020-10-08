@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,9 +125,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	tBlockWait := tBlockTick + time.Millisecond*50
 	walletPassword := "abc"
 
-	blockReported := false
+	var blockReported uint32
 	blkFunc := func(name string, err error) {
-		blockReported = true
+		atomic.StoreUint32(&blockReported, 1)
 		tLogger.Infof("%s has reported a new block, error = %v", name, err)
 	}
 
@@ -316,7 +317,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	// Mine a block and find the redemption again.
 	rig.mineAlpha()
 	time.Sleep(tBlockWait)
-	if !blockReported {
+	if atomic.LoadUint32(&blockReported) == 0 {
 		t.Fatalf("no block reported")
 	}
 	// Check that there is 1 confirmation on the swap
