@@ -958,22 +958,6 @@ func (rig *testRig) ackRedemption_taker(checkSig bool) error {
 	return nil
 }
 
-// Maker: Acknowledge the DEX 'redemption' request.
-func (rig *testRig) ackRedemption_maker(checkSig bool) error {
-	matchInfo := rig.matchInfo
-	err := rig.ackRedemption(matchInfo.maker, matchInfo.makerOID, matchInfo.db.takerRedeem)
-	if err != nil {
-		return err
-	}
-	if checkSig {
-		tracker := rig.getTracker()
-		if !bytes.Equal(tracker.Sigs.MakerRedeem, matchInfo.maker.sig) {
-			return fmt.Errorf("expected maker redemption signature '%x', got '%x'", matchInfo.maker.sig, tracker.Sigs.MakerRedeem)
-		}
-	}
-	return nil
-}
-
 func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedeem) error {
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")

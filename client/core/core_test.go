@@ -2573,25 +2573,8 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
 		t.Fatalf("redeem coin ID not logged")
 	}
-	redemptionCoin := encode.RandomBytes(36)
-	// The taker's redemption is simply logged.
-	redemption := &msgjson.Redemption{
-		Redeem: msgjson.Redeem{
-			OrderID: loid[:],
-			MatchID: mid[:],
-			CoinID:  redemptionCoin,
-		},
-	}
-	sign(tDexPriv, redemption)
-	msg, _ = msgjson.NewRequest(1, msgjson.RedemptionRoute, redemption)
-	err = handleRedemptionRoute(tCore, rig.dc, msg)
-	if err != nil {
-		t.Fatalf("redemption message error: %v", err)
-	}
-	checkStatus("maker match complete", order.MatchComplete)
-	if !bytes.Equal(redemptionCoin, proof.TakerRedeem) {
-		t.Fatalf("taker redemption coin not recorded")
-	}
+	// No redemption request received as maker. Only taker gets a redemption
+	// request following maker's redeem.
 
 	// Check that fees were incremented appropriately.
 	if tracker.metaData.SwapFeesPaid != tSwapFeesPaid {
@@ -2684,8 +2667,8 @@ func TestTradeTracking(t *testing.T) {
 	}
 
 	// Receive the maker's redemption.
-	redemptionCoin = encode.RandomBytes(36)
-	redemption = &msgjson.Redemption{
+	redemptionCoin := encode.RandomBytes(36)
+	redemption := &msgjson.Redemption{
 		Redeem: msgjson.Redeem{
 			OrderID: loid[:],
 			MatchID: mid[:],
@@ -5154,14 +5137,6 @@ func TestMatchStatusResolution(t *testing.T) {
 			ours:    order.MakerRedeemed,
 			servers: order.MatchComplete,
 			side:    order.Taker,
-		},
-		{ // Server didn't provide redemption coin ID.
-			ours:    order.MakerRedeemed,
-			servers: order.MatchComplete,
-			side:    order.Maker,
-			tweaker: func() {
-				tMatchResults.TakerRedeem = nil
-			},
 		},
 		{ // We have data before the server.
 			ours:    order.MakerRedeemed,

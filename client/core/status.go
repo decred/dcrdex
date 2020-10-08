@@ -106,7 +106,7 @@ var conflictResolvers = []struct {
 	{order.TakerSwapCast, order.MakerSwapCast, resolveServerMissedTakerInit},
 	{order.TakerSwapCast, order.MakerRedeemed, resolveMissedMakerRedemption},
 	{order.MakerRedeemed, order.TakerSwapCast, resolveServerMissedMakerRedeem},
-	{order.MakerRedeemed, order.MatchComplete, resolveMissedTakerRedemption},
+	{order.MakerRedeemed, order.MatchComplete, resolveMatchComplete},
 	{order.MatchComplete, order.MakerRedeemed, resolveServerMissedTakerRedeem},
 }
 
@@ -319,11 +319,11 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 	}
 }
 
-// resolveMissedTakerRedemption is a matchConflictResolver to handle the case
-// when our status is MakerRedeemed, but the server is at MatchComplete. If
-// we're the maker, we probably missed the redemption request from the server,
-// and we can process the match_status data to get caught up.
-func resolveMissedTakerRedemption(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+// resolveMatchComplete is a matchConflictResolver to handle the case when our
+// status is MakerRedeemed, but the server is at MatchComplete. Since the server
+// does not send redemption requests to the maker following taker redeem, this
+// indicates the match status was just not updated after sending our redeem.
+func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	var err error
 	defer func() {
@@ -340,15 +340,10 @@ func resolveMissedTakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 			" self-revoking. %s, reported coin = %s", logID, coinStr)
 		return
 	}
-	if len(srvData.TakerRedeem) == 0 {
-		err = fmt.Errorf("Server reporting status MatchComplete, but not reporting "+
-			"a redemption coin ID. self-revoking. %s", logID)
-		return
-	}
-	if err = trade.processTakersRedemption(match, srvData.MakerRedeem); err != nil {
-		err = fmt.Errorf("error processing taker's redemption data during match status resolution. "+
-			"self-revoking. %s", logID)
-	}
+	// As maker, set it to MatchComplete. We no longer expect to receive taker
+	// redeem info.
+	dc.log.Warnf("Server reporting MatchComplete while we (maker) have it as MakerRedeemed. Resolved. Detail: %v", logID)
+	match.SetStatus(order.MatchComplete)
 }
 
 // resolveServerMissedMakerRedeem is a matchConflictResolver to handle the case

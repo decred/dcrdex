@@ -1745,38 +1745,22 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	auth.RedemptionSig = redemption.Sig
 	auth.RedemptionStamp = redemption.Time
 
-	if dbMatch.Side == order.Maker {
-		if err := t.processTakersRedemption(match, redemption.CoinID); err != nil {
-			errs.addErr(err)
-		}
-	} else {
-		if err := t.processMakersRedemption(match, redemption.CoinID, redemption.Secret); err != nil {
+	if dbMatch.Side == order.Taker {
+		err = t.processMakersRedemption(match, redemption.CoinID, redemption.Secret)
+		if err != nil {
 			errs.addErr(err)
 		}
 	}
+	// The server does not send a redemption request to the maker for the
+	// taker's redeem since match negotiation is complete server-side when the
+	// taker redeems, and it is complete client-side when we redeem. If we are
+	// both sides, there is another trackedTrade and matchTracker for that side.
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
 		errs.add("error storing match info in database: %v", err)
 	}
 	return errs.ifAny()
-}
-
-// NOTE: processTakersRedemption is obsolete with latest server version that no
-// longer requests a redemption ack from the taker following maker redeem. As
-// maker, we will set status to MatchComplete as soon as our redeem request is
-// acknowledged by the server.
-func (t *trackedTrade) processTakersRedemption(match *matchTracker, coinID []byte) error {
-	if match.Match.Side == order.Taker {
-		return fmt.Errorf("processTakersRedemption called when we are the taker, which is nonsense. order = %s, match = %s", t.ID(), match.id)
-	}
-	// You are the maker, this is the taker's redeem.
-	redeemAsset := t.wallets.fromAsset
-	t.dc.log.Debugf("Notified of taker's redemption (%s: %v) for order %v...",
-		redeemAsset.Symbol, coinIDString(redeemAsset.ID, coinID), t.ID())
-	match.SetStatus(order.MatchComplete)
-	match.MetaData.Proof.TakerRedeem = coinID
-	return nil
 }
 
 func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secret []byte) error {
