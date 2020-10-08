@@ -47,7 +47,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts []*match
 		for _, conflict := range statusConflicts {
 			conflict.trade.mtx.Unlock()
 		}
-		log.Errorf("match_status request error for %s requesting %d match statuses. %s: %v", dc.acct.host, len(statusRequests), err)
+		c.log.Errorf("match_status request error for %s requesting %d match statuses. %s: %v", dc.acct.host, len(statusRequests), err)
 		return
 	}
 
@@ -65,7 +65,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts []*match
 			// I don't really know how this would happen, considering the server
 			// reported the match as active in the connect response. I'm also
 			// not sure what action to take. Maybe just revoke the match.
-			log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, conflict.trade, conflict.match))
+			c.log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, conflict.trade, conflict.match))
 			// revokeMatch only returns an error for a missing match ID,
 			// and we already checked in compareServerMatches.
 			conflict.trade.revokeMatch(conflict.match.id, false)
@@ -150,17 +150,17 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 		// sync.
 		match.failErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
 			match.MetaData.Status, srvStatus, logID)
-		log.Error(match.failErr)
+		c.log.Error(match.failErr)
 		match.MetaData.Proof.SelfRevoked = true
 		err := c.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
-			log.Errorf("error updating database after self revocation for no conflict handler for %s: %v", logID, err)
+			c.log.Errorf("error updating database after self revocation for no conflict handler for %s: %v", logID, err)
 		}
 	}
 
 	err := c.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
-		log.Errorf("error updating database after successful match resolution for %s: %v", logID, err)
+		c.log.Errorf("error updating database after successful match resolution for %s: %v", logID, err)
 	}
 }
 
@@ -174,7 +174,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	defer func() {
 		if err != nil {
 			match.MetaData.Proof.SelfRevoked = true
-			log.Error(err)
+			dc.log.Error(err)
 		}
 	}()
 
@@ -209,7 +209,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	defer func() {
 		if err != nil {
 			match.MetaData.Proof.SelfRevoked = true
-			log.Error(err)
+			dc.log.Error(err)
 		}
 	}()
 	// This is nonsensical if we're the taker.
@@ -240,7 +240,7 @@ func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match 
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, there's nothing we can do.
 	if match.Match.Side != order.Maker {
-		log.Errorf("Server reporting no maker swap, but they've already sent us the swap info. self-revoking. %s", logID)
+		dc.log.Errorf("Server reporting no maker swap, but they've already sent us the swap info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
 
@@ -253,7 +253,7 @@ func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match 
 	// On the other hand, if we do have an acknowledgement from the server,
 	// this appears to be a server error, and we should just revoke the match
 	// and wait to refund.
-	log.Errorf("Server appears to have lost our (maker's) init data after acknowledgement. self-revoking order. %s", logID)
+	dc.log.Errorf("Server appears to have lost our (maker's) init data after acknowledgement. self-revoking order. %s", logID)
 	match.MetaData.Proof.SelfRevoked = true
 }
 
@@ -265,7 +265,7 @@ func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match 
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the taker, there's nothing we can do.
 	if match.Match.Side != order.Taker {
-		log.Errorf("Server reporting no taker swap, but they've already sent us the swap info. self-revoking. %s", logID)
+		dc.log.Errorf("Server reporting no taker swap, but they've already sent us the swap info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
 	}
@@ -277,7 +277,7 @@ func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match 
 	// On the other hand, if we do have an acknowledgement from the server,
 	// this appears to be a server error, and we should just revoke the match
 	// and wait to refund.
-	log.Errorf("Server appears to have lost our (taker's) init data after acknowledgement. self-revoking order. %s", logID)
+	dc.log.Errorf("Server appears to have lost our (taker's) init data after acknowledgement. self-revoking order. %s", logID)
 	match.MetaData.Proof.SelfRevoked = true
 }
 
@@ -291,7 +291,7 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 	defer func() {
 		if err != nil {
 			match.MetaData.Proof.SelfRevoked = true
-			log.Error(err)
+			dc.log.Error(err)
 		}
 	}()
 	// If we're the maker, this state is nonsense. Just revoke the match for
@@ -329,7 +329,7 @@ func resolveMissedTakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 	defer func() {
 		if err != nil {
 			match.MetaData.Proof.SelfRevoked = true
-			log.Error(err)
+			dc.log.Error(err)
 		}
 	}()
 	// If we're the taker, this state is nonsense. Just revoke the match for
@@ -359,7 +359,7 @@ func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, we can't do anything about this.
 	if match.Match.Side != order.Maker {
-		log.Errorf("server reporting no maker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
+		dc.log.Errorf("server reporting no maker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
 	}
@@ -370,7 +370,7 @@ func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	}
 	// Otherwise, it appears that the server has acked, and then lost our redeem
 	// data. Just revoke.
-	log.Errorf("server reporting no maker redeem, but we are the maker and we have a valid ack. self-revoking. %s", logID)
+	dc.log.Errorf("server reporting no maker redeem, but we are the maker and we have a valid ack. self-revoking. %s", logID)
 	match.MetaData.Proof.SelfRevoked = true
 }
 
@@ -382,7 +382,7 @@ func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the Taker, we can't do anything about this.
 	if match.Match.Side != order.Taker {
-		log.Errorf("server reporting no taker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
+		dc.log.Errorf("server reporting no taker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
 		return
 	}
 	// We are the taker, if we don't have an ack from the server, this will be
@@ -392,6 +392,6 @@ func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	}
 	// Otherwise, it appears that the server has acked, and then lost our redeem
 	// data. Just revoke.
-	log.Errorf("server reporting no taker redeem, but we are the taker and we have a valid ack. self-revoking. %s", logID)
+	dc.log.Errorf("server reporting no taker redeem, but we are the taker and we have a valid ack. self-revoking. %s", logID)
 	match.MetaData.Proof.SelfRevoked = true
 }

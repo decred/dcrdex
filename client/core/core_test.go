@@ -38,7 +38,6 @@ import (
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/slog"
 )
 
 var (
@@ -75,6 +74,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
 )
 
 type tMsg = *msgjson.Message
@@ -169,6 +169,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	}
 	return &dexConnection{
 		WsConn:     conn,
+		log:        tLogger,
 		connMaster: connMaster,
 		acct:       acct,
 		assets: map[uint32]*dex.Asset{
@@ -720,6 +721,7 @@ func newTestRig() *testRig {
 		core: &Core{
 			ctx:      tCtx,
 			db:       tdb,
+			log:      tLogger,
 			latencyQ: queue,
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
@@ -814,10 +816,6 @@ func (rig *testRig) queueCancel(rpcErr *msgjson.Error) {
 }
 
 func TestMain(m *testing.M) {
-	UseLoggerMaker(&dex.LoggerMaker{
-		Backend:      slog.NewBackend(os.Stdout),
-		DefaultLevel: dex.LevelTrace,
-	})
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
@@ -1937,7 +1935,7 @@ func TestTrade(t *testing.T) {
 	tBtcWallet.fundCoins = asset.Coins{btcCoin}
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
-	book := newBookie(func() {})
+	book := newBookie(tLogger, func() {})
 	rig.dc.books[tDcrBtcMktName] = book
 
 	msgOrderNote := &msgjson.BookOrderNote{
@@ -3746,7 +3744,7 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
 
 	err = handleEpochOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
@@ -3808,7 +3806,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
 
 	err = rig.dc.books[tDcrBtcMktName].Enqueue(eo)
 	if err != nil {
@@ -3901,7 +3899,7 @@ func TestLogout(t *testing.T) {
 func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
-	dc.books[tDcrBtcMktName] = newBookie(func() {})
+	dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
 
 	mktEpoch := func() uint64 {
 		dc.epochMtx.RLock()
@@ -3970,6 +3968,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 func TestAddrHost(t *testing.T) {
 	tests := []struct {
 		name, addr, want string
+		wantErr          bool
 	}{{
 		name: "scheme, host, and port",
 		addr: "https://localhost:5758",
@@ -3991,7 +3990,7 @@ func TestAddrHost(t *testing.T) {
 		addr: "thatonedex.com",
 		want: "thatonedex.com",
 	}, {
-		name: "shceme and host",
+		name: "scheme and host",
 		addr: "https://thatonedex.com",
 		want: "thatonedex.com",
 	}, {
@@ -4010,21 +4009,29 @@ func TestAddrHost(t *testing.T) {
 		name: "empty address",
 		want: "localhost",
 	}, {
-		name: "invalid host",
-		addr: "https://\n:1234",
-		want: "https://\n:1234",
+		name:    "invalid host",
+		addr:    "https://\n:1234",
+		wantErr: true,
 	}, {
-		name: "invalid port",
-		addr: ":asdf",
-		want: ":asdf",
+		name:    "invalid port",
+		addr:    ":asdf",
+		wantErr: true,
 	}}
 	for _, test := range tests {
-		res := addrHost(test.addr)
+		res, err := addrHost(test.addr)
 		if res != test.want {
 			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
 		}
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("wanted error for test %s, but got none", test.name)
+			}
+			continue
+		} else if err != nil {
+			t.Fatalf("addrHost error for test %s: %v", test.name, err)
+		}
 		// Parsing results a second time should produce the same results.
-		res = addrHost(res)
+		res, _ = addrHost(res)
 		if res != test.want {
 			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
 		}
@@ -4086,7 +4093,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	mkt := dc.market(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
 
 	addTracker := func(coins asset.Coins) *trackedTrade {
 		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)

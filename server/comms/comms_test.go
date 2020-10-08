@@ -28,6 +28,7 @@ import (
 var (
 	tErr    = fmt.Errorf("test error")
 	testCtx context.Context
+	tLogger = dex.StdOutLogger("TCOMMS", dex.LevelTrace)
 )
 
 func newServer() *Server {
@@ -231,10 +232,7 @@ func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
-	// logger := slog.NewBackend(os.Stdout).Logger("COMMSTEST")
-	// logger.SetLevel(dex.LevelTrace)
-	// UseLogger(logger)
-	// ws.UseLogger(logger)
+	UseLogger(tLogger)
 	os.Exit(m.Run())
 }
 

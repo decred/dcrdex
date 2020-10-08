@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/gorilla/websocket"
 )
@@ -84,12 +85,15 @@ type WsCfg struct {
 	// NOTE: Disconnect event notifications may lag behind actual
 	// disconnections.
 	ConnectEventFunc func(bool)
+	// Logger is the logger for the WsConn.
+	Logger dex.Logger
 }
 
 // wsConn represents a client websocket connection.
 type wsConn struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	log    dex.Logger
 	rID    uint64
 	cfg    *WsCfg
 	tlsCfg *tls.Config
@@ -139,6 +143,7 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 
 	return &wsConn{
 		cfg:          cfg,
+		log:          cfg.Logger,
 		tlsCfg:       tlsConfig,
 		readCh:       make(chan *msgjson.Message, readBuffSize),
 		respHandlers: make(map[uint64]*responseHandler),
@@ -188,7 +193,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	// deadlines are set in the ping handler.
 	err = ws.SetReadDeadline(time.Now().Add(conn.cfg.PingWait))
 	if err != nil {
-		log.Errorf("set read deadline failed: %v", err)
+		conn.log.Errorf("set read deadline failed: %v", err)
 		return err
 	}
 
@@ -198,7 +203,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		// Set the deadline for the next ping.
 		err := ws.SetReadDeadline(now.Add(conn.cfg.PingWait))
 		if err != nil {
-			log.Errorf("set read deadline failed: %v", err)
+			conn.log.Errorf("set read deadline failed: %v", err)
 			return err
 		}
 
@@ -206,7 +211,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		err = ws.WriteControl(websocket.PongMessage, []byte{}, now.Add(writeWait))
 		if err != nil {
 			// read loop handles reconnect
-			log.Errorf("pong write error: %v", err)
+			conn.log.Errorf("pong write error: %v", err)
 			return err
 		}
 
@@ -268,7 +273,7 @@ func (conn *wsConn) read(ctx context.Context) {
 			// Read timeout should flag the connection as down asap.
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				log.Errorf("Read timeout on connection to %s.", conn.cfg.URL)
+				conn.log.Errorf("Read timeout on connection to %s.", conn.cfg.URL)
 				reconnect()
 				return
 			}
@@ -276,7 +281,7 @@ func (conn *wsConn) read(ctx context.Context) {
 			var mErr *json.UnmarshalTypeError
 			if errors.As(err, &mErr) {
 				// JSON decode errors are not fatal, log and proceed.
-				log.Errorf("json decode error: %v", mErr)
+				conn.log.Errorf("json decode error: %v", mErr)
 				continue
 			}
 
@@ -298,14 +303,14 @@ func (conn *wsConn) read(ctx context.Context) {
 			if errors.As(err, &opErr) && opErr.Op == "read" {
 				if strings.Contains(opErr.Err.Error(),
 					"use of closed network connection") {
-					log.Errorf("read quitting: %v", err)
+					conn.log.Errorf("read quitting: %v", err)
 					reconnect()
 					return
 				}
 			}
 
 			// Log all other errors and trigger a reconnection.
-			log.Errorf("read error (%v), attempting reconnection", err)
+			conn.log.Errorf("read error (%v), attempting reconnection", err)
 			reconnect()
 			// Successful reconnect via connect() will start read() again.
 			return
@@ -316,7 +321,7 @@ func (conn *wsConn) read(ctx context.Context) {
 			handler := conn.respHandler(msg.ID)
 			if handler == nil {
 				b, _ := json.Marshal(msg)
-				log.Errorf("No handler found for response: %v", string(b))
+				conn.log.Errorf("No handler found for response: %v", string(b))
 				continue
 			}
 			// Run handlers in a goroutine so that other messages can be
@@ -346,10 +351,10 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 				return
 			}
 
-			log.Infof("Attempting to reconnect to %s...", conn.cfg.URL)
+			conn.log.Infof("Attempting to reconnect to %s...", conn.cfg.URL)
 			err := conn.connect(ctx)
 			if err != nil {
-				log.Errorf("Reconnect failed. Scheduling reconnect to %s in %.1f seconds.",
+				conn.log.Errorf("Reconnect failed. Scheduling reconnect to %s in %.1f seconds.",
 					conn.cfg.URL, rcInt.Seconds())
 				time.AfterFunc(rcInt, func() {
 					conn.reconnectCh <- struct{}{}
@@ -361,7 +366,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 				continue
 			}
 
-			log.Info("Successfully reconnected.")
+			conn.log.Info("Successfully reconnected.")
 			rcInt = reconnectInterval
 
 			// Synchronize after a reconnection.
@@ -401,7 +406,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		conn.setConnected(false)
 		conn.wsMtx.Lock()
 		if conn.ws != nil {
-			log.Debug("Sending close 1000 (normal) message.")
+			conn.log.Debug("Sending close 1000 (normal) message.")
 			conn.close()
 		}
 		conn.wsMtx.Unlock()
@@ -431,7 +436,7 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	// it fails to marshal completely, which gorilla/websocket.WriteJSON does.
 	b, err := json.Marshal(msg)
 	if err != nil {
-		log.Errorf("Failed to marshal message: %v", err)
+		conn.log.Errorf("Failed to marshal message: %v", err)
 		return err
 	}
 
@@ -439,13 +444,13 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	defer conn.wsMtx.Unlock()
 	err = conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
 	if err != nil {
-		log.Errorf("Send: failed to set write deadline: %v", err)
+		conn.log.Errorf("Send: failed to set write deadline: %v", err)
 		return err
 	}
 
 	err = conn.ws.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
-		log.Errorf("Send: WriteMessage error: %v", err)
+		conn.log.Errorf("Send: WriteMessage error: %v", err)
 		return err
 	}
 	return nil
@@ -495,7 +500,7 @@ func (conn *wsConn) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Mes
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
-		log.Debugf("(*wsConn).Request(route '%s') Send error, unregistering msg ID %d handler",
+		conn.log.Debugf("(*wsConn).Request(route '%s') Send error, unregistering msg ID %d handler",
 			msg.Route, msg.ID)
 		conn.respHandler(msg.ID) // drop the responseHandler logged by logReq that is no longer necessary
 	}

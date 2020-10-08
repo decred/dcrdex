@@ -34,12 +34,11 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-var testLogger dex.Logger
+var tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 
 func TestMain(m *testing.M) {
 	// Set the global chainParams.
 	chainParams = chaincfg.MainNetParams()
-	testLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	os.Exit(m.Run())
 }
 
@@ -665,7 +664,7 @@ func testMsgTxRevocation() *testMsgTx {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	dcr := unconnectedDCR(testLogger)
+	dcr := unconnectedDCR(tLogger)
 	dcr.node = testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())

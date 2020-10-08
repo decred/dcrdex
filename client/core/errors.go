@@ -30,6 +30,7 @@ const (
 	missingWalletErr
 	encryptionErr
 	marketErr
+	addressParseErr
 )
 
 // Error is an error message and an error code.

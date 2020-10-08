@@ -1,4 +1,4 @@
-package order
+package orderbook
 
 import (
 	"bytes"
@@ -59,13 +59,14 @@ func makeCachedUnbookOrderNote(orderNote *msgjson.UnbookOrderNote) *cachedOrderN
 
 func makeOrderBook(seq uint64, marketID string, orders []*Order, cachedOrders []*cachedOrderNote, synced bool) *OrderBook {
 	ob := &OrderBook{
+		log:        tLogger,
 		seq:        seq,
 		marketID:   marketID,
 		noteQueue:  cachedOrders,
 		orders:     make(map[order.OrderID]*Order),
 		buys:       NewBookSide(descending),
 		sells:      NewBookSide(ascending),
-		epochQueue: NewEpochQueue(),
+		epochQueue: NewEpochQueue(tLogger),
 	}
 
 	for _, order := range orders {
@@ -105,7 +106,7 @@ func TestOrderBookSync(t *testing.T) {
 					makeBookOrderNote(2, "ob", [32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
 				},
 			),
-			orderBook: NewOrderBook(),
+			orderBook: NewOrderBook(tLogger),
 			expected: makeOrderBook(
 				2,
 				"ob",
@@ -127,7 +128,7 @@ func TestOrderBookSync(t *testing.T) {
 				"ob",
 				[]*msgjson.BookOrderNote{},
 			),
-			orderBook: NewOrderBook(),
+			orderBook: NewOrderBook(tLogger),
 			expected: makeOrderBook(
 				2,
 				"ob",
@@ -149,7 +150,7 @@ func TestOrderBookSync(t *testing.T) {
 					makeBookOrderNote(2, "ob", [32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
 				},
 			),
-			orderBook:         NewOrderBook(),
+			orderBook:         NewOrderBook(tLogger),
 			expected:          nil,
 			initialQueueState: make([]*cachedOrderNote, 0),
 			initialSyncState:  true,
@@ -165,7 +166,7 @@ func TestOrderBookSync(t *testing.T) {
 					makeBookOrderNote(2, "ob", [32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
 				},
 			),
-			orderBook: NewOrderBook(),
+			orderBook: NewOrderBook(tLogger),
 			expected: makeOrderBook(
 				3,
 				"ob",
@@ -192,7 +193,7 @@ func TestOrderBookSync(t *testing.T) {
 					makeBookOrderNote(3, "ob", [32]byte{'d'}, msgjson.SellOrderNum, 6, 3, 10),
 				},
 			),
-			orderBook: NewOrderBook(),
+			orderBook: NewOrderBook(tLogger),
 			expected: makeOrderBook(
 				4,
 				"ob",
@@ -946,7 +947,7 @@ func TestOrderBookBestFill(t *testing.T) {
 
 func TestValidateMatchProof(t *testing.T) {
 	mid := "mkt"
-	ob := NewOrderBook()
+	ob := NewOrderBook(tLogger)
 	epoch := uint64(10)
 	n1Pimg := [32]byte{'1'}
 	n1Commitment := makeCommitment(n1Pimg)

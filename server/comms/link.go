@@ -60,7 +60,7 @@ func newWSLink(addr string, conn ws.Connection) *wsLink {
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
-		}),
+		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
 	}
 	return c

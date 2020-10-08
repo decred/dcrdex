@@ -30,18 +30,18 @@ func (c *Core) notify(n Notification) {
 		c.db.SaveNotification(n.DBNote())
 	}
 
-	logFun := log.Warnf // default in case the Severity level is unknown to notify
+	logFun := c.log.Warnf // default in case the Severity level is unknown to notify
 	switch n.Severity() {
 	case db.Data:
-		logFun = log.Tracef
+		logFun = c.log.Tracef
 	case db.Poke:
-		logFun = log.Debugf
+		logFun = c.log.Debugf
 	case db.Success:
-		logFun = log.Infof
+		logFun = c.log.Infof
 	case db.WarningLevel:
-		logFun = log.Warnf
+		logFun = c.log.Warnf
 	case db.ErrorLevel:
-		logFun = log.Errorf
+		logFun = c.log.Errorf
 	}
 	logFun("notify: %v", n)
 
@@ -50,7 +50,7 @@ func (c *Core) notify(n Notification) {
 		select {
 		case ch <- n:
 		default:
-			log.Errorf("blocking notification channel")
+			c.log.Errorf("blocking notification channel")
 		}
 	}
 	c.noteMtx.RUnlock()
@@ -72,7 +72,7 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 	for _, id := range ids {
 		err := c.db.AckNotification(id)
 		if err != nil {
-			log.Errorf("error saving notification acknowledgement for %s: %v", id, err)
+			c.log.Errorf("error saving notification acknowledgement for %s: %v", id, err)
 		}
 	}
 }
@@ -118,9 +118,10 @@ type FeePaymentNote struct {
 }
 
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
+	host, _ := addrHost(dexAddr)
 	return &FeePaymentNote{
 		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
-		Dex:          addrHost(dexAddr),
+		Dex:          host,
 	}
 }
 

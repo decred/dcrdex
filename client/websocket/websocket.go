@@ -41,9 +41,9 @@ type wsClient struct {
 	feedLoop    *dex.StartStopWaiter
 }
 
-func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error) *wsClient {
+func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
 	return &wsClient{
-		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr),
+		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr, logger),
 		cid:    atomic.AddInt32(&cidCounter, 1),
 	}
 }
@@ -131,7 +131,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, ip string) {
 	var cl *wsClient
 	cl = newWSClient(ip, conn, func(msg *msgjson.Message) *msgjson.Error {
 		return s.handleMessage(cl, msg)
-	})
+	}, s.log.SubLogger(ip))
 
 	// Lock the clients map before starting the connection listening so that
 	// synchronized map accesses are guaranteed to reflect this connection.

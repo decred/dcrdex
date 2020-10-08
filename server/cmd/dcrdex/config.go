@@ -17,7 +17,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/wait"
-	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/admin"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
@@ -238,7 +237,6 @@ func parseAndSetDebugLevels(debugLevel string, UTC bool) (*dex.LoggerMaker, erro
 	dexsrv.UseLogger(subsystemLoggers["DEX"])
 	db.UseLogger(subsystemLoggers["DB"])
 	comms.UseLogger(subsystemLoggers["COMM"])
-	ws.UseLogger(subsystemLoggers["COMM"].SubLogger("WS"))
 	auth.UseLogger(subsystemLoggers["AUTH"])
 	swap.UseLogger(subsystemLoggers["SWAP"])
 	market.UseLogger(subsystemLoggers["MKT"])

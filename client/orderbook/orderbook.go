@@ -1,13 +1,14 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package order
+package orderbook
 
 import (
 	"bytes"
 	"fmt"
 	"sync"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -49,6 +50,7 @@ type cachedOrderNote struct {
 
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
+	log          dex.Logger
 	seqMtx       sync.Mutex
 	seq          uint64
 	marketID     string
@@ -64,13 +66,14 @@ type OrderBook struct {
 }
 
 // NewOrderBook creates a new order book.
-func NewOrderBook() *OrderBook {
+func NewOrderBook(logger dex.Logger) *OrderBook {
 	ob := &OrderBook{
+		log:        logger,
 		noteQueue:  make([]*cachedOrderNote, 0, defaultQueueCapacity),
 		orders:     make(map[order.OrderID]*Order),
 		buys:       NewBookSide(descending),
 		sells:      NewBookSide(ascending),
-		epochQueue: NewEpochQueue(),
+		epochQueue: NewEpochQueue(logger),
 	}
 	return ob
 }
@@ -95,7 +98,7 @@ func (ob *OrderBook) setSeq(seq uint64) {
 	ob.seqMtx.Lock()
 	defer ob.seqMtx.Unlock()
 	if seq != ob.seq+1 {
-		log.Errorf("notification received out of sync. %d != %d - 1", ob.seq, seq)
+		ob.log.Errorf("notification received out of sync. %d != %d - 1", ob.seq, seq)
 	}
 	if seq > ob.seq {
 		ob.seq = seq
@@ -474,7 +477,7 @@ func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
 	localSize := ob.epochQueue.Size()
 	noteSize := len(note.Preimages) + len(note.Misses)
 	if noteSize > 0 {
-		log.Debugf("Validating match proof note with %d preimages and %d misses.",
+		ob.log.Debugf("Validating match proof note with %d preimages and %d misses.",
 			len(note.Preimages), len(note.Misses))
 	}
 	if noteSize != localSize {
@@ -484,7 +487,7 @@ func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
 
 	if len(note.Preimages) == 0 {
 		if noteSize > 0 {
-			log.Debugf("Match proof note contains only misses (%d) for %v epoch %v",
+			ob.log.Debugf("Match proof note contains only misses (%d) for %v epoch %v",
 				noteSize, note.MarketID, note.Epoch)
 		}
 		return nil

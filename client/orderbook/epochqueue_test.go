@@ -1,15 +1,19 @@
-package order
+package orderbook
 
 import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/crypto/blake256"
 )
+
+var tLogger = dex.NewLogger("TBOOK", dex.LevelTrace, os.Stdout)
 
 func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, qty uint64, commitment order.Commitment, epoch uint64) *msgjson.EpochOrderNote {
 	return &msgjson.EpochOrderNote{
@@ -54,7 +58,7 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 func TestEpochQueue(t *testing.T) {
 	mid := "mkt"
 	epoch := uint64(10)
-	eq := NewEpochQueue()
+	eq := NewEpochQueue(tLogger)
 	n1Pimg := [32]byte{'1'}
 	n1Commitment := makeCommitment(n1Pimg)
 	n1OrderID := [32]byte{'a'}
@@ -266,7 +270,7 @@ func benchmarkGenerateMatchProof(c int, b *testing.B) {
 		}
 	}
 
-	eq := NewEpochQueue()
+	eq := NewEpochQueue(tLogger)
 
 	b.ResetTimer()
 
