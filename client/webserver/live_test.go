@@ -142,13 +142,14 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:  unbip(assetID),
-			AssetID: assetID,
-			Open:    state.open,
-			Running: state.running,
-			Address: ordertest.RandomAddress(),
-			Balance: bal,
-			Units:   winfo.Units,
+			Symbol:    unbip(assetID),
+			AssetID:   assetID,
+			Open:      state.open,
+			Running:   state.running,
+			Address:   ordertest.RandomAddress(),
+			Balance:   bal,
+			Units:     winfo.Units,
+			Encrypted: true,
 		}
 	}
 	return &core.SupportedAsset{
@@ -705,13 +706,14 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		return nil
 	}
 	return &core.WalletState{
-		Symbol:  unbip(assetID),
-		AssetID: assetID,
-		Open:    w.open,
-		Running: w.running,
-		Address: ordertest.RandomAddress(),
-		Balance: c.balances[assetID],
-		Units:   winfos[assetID].Units,
+		Symbol:    unbip(assetID),
+		AssetID:   assetID,
+		Open:      w.open,
+		Running:   w.running,
+		Address:   ordertest.RandomAddress(),
+		Balance:   c.balances[assetID],
+		Units:     winfos[assetID].Units,
+		Encrypted: true,
 	}
 }
 
@@ -769,19 +771,20 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 func (c *TCore) Wallets() []*core.WalletState {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
-	stats := make([]*core.WalletState, 0, len(c.wallets))
+	states := make([]*core.WalletState, 0, len(c.wallets))
 	for assetID, wallet := range c.wallets {
-		stats = append(stats, &core.WalletState{
-			Symbol:  unbip(assetID),
-			AssetID: assetID,
-			Open:    wallet.open,
-			Running: wallet.running,
-			Address: ordertest.RandomAddress(),
-			Balance: c.balances[assetID],
-			Units:   winfos[assetID].Units,
+		states = append(states, &core.WalletState{
+			Symbol:    unbip(assetID),
+			AssetID:   assetID,
+			Open:      wallet.open,
+			Running:   wallet.running,
+			Address:   ordertest.RandomAddress(),
+			Balance:   c.balances[assetID],
+			Units:     winfos[assetID].Units,
+			Encrypted: true,
 		})
 	}
-	return stats
+	return states
 }
 
 func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {

@@ -74,13 +74,14 @@ func (w *xcWallet) state() *WalletState {
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
 	return &WalletState{
-		Symbol:  unbip(w.AssetID),
-		AssetID: w.AssetID,
-		Open:    w.unlocked(),
-		Running: w.connector.On(),
-		Balance: w.balance,
-		Address: w.address,
-		Units:   winfo.Units,
+		Symbol:    unbip(w.AssetID),
+		AssetID:   w.AssetID,
+		Open:      w.unlocked(),
+		Running:   w.connector.On(),
+		Balance:   w.balance,
+		Address:   w.address,
+		Units:     winfo.Units,
+		Encrypted: len(w.encPW) > 0,
 	}
 }
 

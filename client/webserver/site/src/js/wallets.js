@@ -134,7 +134,8 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(firstRow.assetID)
 
     this.notifiers = {
-      balance: note => { this.handleBalanceNote(note) }
+      balance: note => { this.handleBalanceNote(note) },
+      walletstate: note => { this.handleWalletStateNote(note) }
     }
   }
 
@@ -334,26 +335,30 @@ export default class WalletsPage extends BasePage {
     if (!app.checkResponse(res)) return
     const rowInfo = this.rowInfos[assetID]
     Doc.hide(rowInfo.actions.connect)
-    rowInfo.stateIcons.locked()
   }
 
   /* createWalletSuccess is the success callback for wallet creation. */
-  createWalletSuccess () {
+  async createWalletSuccess () {
     const rowInfo = this.rowInfos[this.walletAsset]
     this.showMarkets(rowInfo.assetID)
     const a = rowInfo.actions
     Doc.hide(a.create)
-    Doc.show(a.withdraw, a.deposit, a.lock, a.settings)
-    rowInfo.stateIcons.unlocked()
+    Doc.show(a.withdraw, a.deposit, a.settings)
+    await app.fetchUser()
+    if (app.walletMap[rowInfo.assetID].encrypted) {
+      Doc.show(a.lock)
+    }
   }
 
   /* openWalletSuccess is the success callback for wallet unlocking. */
   async openWalletSuccess () {
     const rowInfo = this.rowInfos[this.openAsset]
     const a = rowInfo.actions
-    Doc.show(a.lock, a.withdraw, a.deposit)
+    Doc.show(a.withdraw, a.deposit)
     Doc.hide(a.unlock, a.connect)
-    rowInfo.stateIcons.unlocked()
+    if (app.walletMap[rowInfo.assetID].encrypted) {
+      Doc.show(a.lock)
+    }
     this.showMarkets(this.openAsset)
   }
 
@@ -406,22 +411,24 @@ export default class WalletsPage extends BasePage {
 
   /* lock instructs the API to lock the wallet. */
   async lock (assetID, asset) {
-    const rowInfo = this.rowInfos[assetID]
     const page = this.page
     app.loading(page.walletForm)
     var res = await postJSON('/api/closewallet', { assetID: assetID })
     app.loaded()
     if (!app.checkResponse(res)) return
     const a = asset.actions
-    Doc.hide(a.lock, a.withdraw, a.deposit)
+    Doc.hide(a.withdraw, a.lock, a.deposit)
     Doc.show(a.unlock)
-    rowInfo.stateIcons.locked()
   }
 
   /* handleBalance handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     const td = this.page.walletTable.querySelector(`[data-balance-target="${note.assetID}"]`)
     td.textContent = (note.balance.available / 1e8).toFixed(8)
+  }
+
+  handleWalletStateNote (note) {
+    this.rowInfos[note.assetID].stateIcons.readWallet(note)
   }
 }
 

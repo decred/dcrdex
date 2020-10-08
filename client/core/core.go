@@ -1436,7 +1436,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(authErr, "SetWalletPassword password error: %v", err)
 	}
 
-	passNeeded := len(newPW) > 0
+	newPasswordSet := len(newPW) > 0
 
 	// Check that the specified wallet exists.
 	c.walletMtx.Lock()
@@ -1458,7 +1458,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	// Check that the new password works. If the new password is empty, skip
 	// this step, since an empty password signifies an unencrypted wallet.
 	wasUnlocked := wallet.unlocked()
-	if passNeeded {
+	if newPasswordSet {
 		err = wallet.Wallet.Unlock(string(newPW), aYear)
 		if err != nil {
 			return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
@@ -1473,7 +1473,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 
 	// Encrypt the password.
 	var encPW []byte
-	if passNeeded {
+	if newPasswordSet {
 		encPW, err = crypter.Encrypt(newPW)
 		if err != nil {
 			return newError(encryptionErr, "encryption error: %v", err)
