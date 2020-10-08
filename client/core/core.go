@@ -137,8 +137,7 @@ func (dc *dexConnection) refreshMarkets() {
 		dc.tradeMtx.RUnlock()
 
 		for _, trade := range mktTrades {
-			corder, _ := trade.coreOrder()
-			market.Orders = append(market.Orders, corder)
+			market.Orders = append(market.Orders, trade.coreOrder())
 		}
 		marketMap[mid] = market
 	}
@@ -230,6 +229,9 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 	}
 	found = true
 
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
 	if lo, ok := tracker.Order.(*order.LimitOrder); !ok || lo.Force != order.StandingTiF {
 		err = fmt.Errorf("cannot cancel %s order %s that is not a standing limit order", tracker.Type(), oid)
 		return
@@ -238,9 +240,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 	if tracker.cancel != nil {
 		// Existing cancel might be stale. Deleting it now allows this
 		// cancel attempt to proceed.
-		tracker.mtx.Lock()
 		tracker.deleteStaleCancelOrder()
-		tracker.mtx.Unlock()
 
 		if tracker.cancel != nil {
 			err = fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
@@ -267,10 +267,6 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 		return
 	}
 
-	// Lock at least until the cancel is added to the trackedTrade struct.
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
@@ -296,7 +292,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 	c.syncOrderPlaced(co.ID())
 
 	// Store the cancel order.
-	err = tracker.db.UpdateOrder(&db.MetaOrder{
+	err = c.db.UpdateOrder(&db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
 			Host:   dc.acct.host,
@@ -315,6 +311,8 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 
 	log.Infof("Cancel order %s targeting order %s at %s has been placed",
 		co.ID(), oid, dc.acct.host)
+
+	c.notify(newOrderNote("Cancelling order", "A cancel order has been submitted for order "+tracker.token(), db.Poke, tracker.coreOrderInternal()))
 
 	return
 }
@@ -2445,7 +2443,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	c.syncOrderPlaced(ord.ID())
 
 	// Send a low-priority notification.
-	corder, _ := tracker.coreOrder()
+	corder := tracker.coreOrder()
 	details := fmt.Sprintf("%sing %.8f %s (%s)",
 		sellString(corder.Sell), float64(corder.Qty)/conversionFactor, unbip(form.Base), tracker.token())
 	if !form.IsLimit && !form.Sell {
@@ -2624,10 +2622,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 				updatedAssets.count(trade.wallets.fromAsset.ID)
 			}
 
-			corder, _ := trade.coreOrderInternal()
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
-			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
+			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, trade.coreOrderInternal()))
 		}
 
 		// Send a "Match resolution error" if there are extra match messages.
@@ -2641,10 +2638,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 					log.Errorf("error negotiating previously unknown match %s, order %s from %s reported on connect: %v",
 						extra.MatchID, extra.OrderID, dc.acct.host, err)
 
-					corder, _ := trade.coreOrderInternal()
 					details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
 						len(extras), dc.acct.host, trade.token())
-					c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
+					c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, trade.coreOrderInternal()))
 				} else if order.MatchSide(extra.Side) == order.Taker && order.MatchStatus(extra.Status) == order.MakerSwapCast {
 					// Have the conflict resolver run resolveMissedMakerAudit
 					// to grab the maker's contract, coin, and secret hash.
@@ -3028,8 +3024,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 	var tracker *trackedTrade
 	notifyErr := func(subject, s string, a ...interface{}) {
 		detail := fmt.Sprintf(s, a...)
-		corder, _ := tracker.coreOrder()
-		c.notify(newOrderNote(subject, detail, db.ErrorLevel, corder))
+		c.notify(newOrderNote(subject, detail, db.ErrorLevel, tracker.coreOrder()))
 	}
 	relocks := make(assetMap)
 	dc.tradeMtx.Lock()
@@ -3746,15 +3741,11 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return fmt.Errorf("preimage send error: %v", err)
 	}
-	corder, cancelOrder := tracker.coreOrder()
-	var details string
+	subject := "preimage sent"
 	if isCancel {
-		corder = cancelOrder
-		details = fmt.Sprintf("match cycle has begun for cancellation order for trade %s", tracker.token())
-	} else {
-		details = fmt.Sprintf("match cycle has begun for order %s", tracker.token())
+		subject = "cancel preimage sent"
 	}
-	c.notify(newOrderNote("Preimage sent", details, db.Poke, corder))
+	c.notify(newOrderNote(subject, "", db.Data, tracker.coreOrder()))
 	return nil
 }
 

@@ -155,7 +155,7 @@ func (t *trackedTrade) broadcastTimeout() time.Duration {
 // coreOrder constructs a *core.Order for the tracked order.Order. If the trade
 // has a cancel order associated with it, the cancel order will be returned,
 // otherwise the second returned *Order will be nil.
-func (t *trackedTrade) coreOrder() (*Order, *Order) {
+func (t *trackedTrade) coreOrder() *Order {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	return t.coreOrderInternal()
@@ -165,25 +165,14 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 // the trade has a cancel order associated with it, the cancel order will be
 // returned, otherwise the second returned *Order will be nil. coreOrderInternal
 // should be called with the mtx >= RLocked.
-func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
+func (t *trackedTrade) coreOrderInternal() *Order {
 	corder := coreOrderFromTrade(t.Order, t.metaData)
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 
 	for _, mt := range t.matches {
 		corder.Matches = append(corder.Matches, matchFromMetaMatch(&mt.MetaMatch))
 	}
-	var cancelOrder *Order
-	if t.cancel != nil {
-		cancelOrder = &Order{
-			Host:     t.dc.acct.host,
-			MarketID: t.mktID,
-			Type:     order.CancelOrderType,
-			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
-			Epoch:    t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime),
-			TargetID: t.cancel.TargetOrderID[:],
-		}
-	}
-	return corder, cancelOrder
+	return corder
 }
 
 // token is a shortened representation of the order ID.
@@ -193,9 +182,8 @@ func (t *trackedTrade) token() string {
 }
 
 // cancelTrade sets the cancellation data with the order and its preimage.
+// cancelTrade must be called with the mtx write-locked.
 func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	t.cancel = &trackedCancel{
 		CancelOrder: *co,
 		preImg:      preImg,
@@ -232,8 +220,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		t.metaData.LinkedOrder = order.OrderID{}
 
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
-		corder, _ := t.coreOrderInternal()
-		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
+		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, t.coreOrderInternal()))
 		return assets, t.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
 	}
 	// This is the trade. Return coins and set status based on whether this is
@@ -244,15 +231,13 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 		log.Infof("Standing order %s did not match and is now booked.", t.token())
 		t.metaData.Status = order.OrderStatusBooked
-		corder, _ := t.coreOrderInternal()
-		t.notify(newOrderNote("Order booked", "", db.Data, corder))
+		t.notify(newOrderNote("Order booked", "", db.Data, t.coreOrderInternal()))
 	} else {
 		t.returnCoins()
 		assets.count(t.wallets.fromAsset.ID)
 		log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
-		corder, _ := t.coreOrderInternal()
-		t.notify(newOrderNote("No match", "", db.Data, corder))
+		t.notify(newOrderNote("No match", "", db.Data, t.coreOrderInternal()))
 	}
 	return assets, t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
@@ -404,13 +389,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	}
 
 	// Send notifications.
-	corder, cancelOrder := t.coreOrderInternal()
+	corder := t.coreOrderInternal()
 	if cancelMatch != nil {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
-		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
+		t.notify(newOrderNote("cancel", "", db.Data, corder))
 	}
 	if len(newTrackers) > 0 {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
@@ -569,8 +554,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	t.metaData.LinkedOrder = order.OrderID{}
 
 	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
-	corder, _ := t.coreOrderInternal()
-	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, corder))
+	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, t.coreOrderInternal()))
 }
 
 // isActive will be true if the trade is booked or epoch, or if any of the
@@ -918,7 +902,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
-		corder, _ := t.coreOrderInternal()
+		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
@@ -940,7 +924,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			qty = quoteReceived
 		}
 		err := c.redeemMatches(t, redeems)
-		corder, _ := t.coreOrderInternal()
+		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s",
@@ -955,7 +939,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if len(refunds) > 0 {
 		refunded, err := t.refundMatches(refunds)
-		corder, _ := t.coreOrderInternal()
+		corder := t.coreOrderInternal()
 		details := fmt.Sprintf("Refunded %.8f %s on order %s",
 			float64(refunded)/conversionFactor, unbip(fromID), t.token())
 		if err != nil {
@@ -1033,15 +1017,7 @@ func (t *trackedTrade) revoke() {
 		log.Errorf("unable to update order: %v", err)
 	}
 
-	// Send out a data notification with the revoke information.
-	cancelOrder := &Order{
-		Host:     t.dc.acct.host,
-		MarketID: t.mktID,
-		Type:     order.CancelOrderType,
-		Stamp:    encode.UnixMilliU(time.Now()),
-		TargetID: t.ID().Bytes(), // the important part for the frontend
-	}
-	t.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
+	t.notify(newOrderNote("revoke", "", db.Data, t.coreOrderInternal()))
 
 	// Return coins if there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
@@ -1074,20 +1050,9 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 	}
 
 	// Notify the user of the failed match.
-	corder, _ := t.coreOrderInternal() // no cancel order
+	corder := t.coreOrderInternal() // no cancel order
 	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
 		token(matchID[:])), db.WarningLevel, corder))
-
-	// Send out a data notification with the revoke information.
-	cancelOrder := &Order{
-		Host:     t.dc.acct.host,
-		MarketID: t.mktID,
-		Type:     order.CancelOrderType,
-		Stamp:    encode.UnixMilliU(time.Now()),
-		Epoch:    corder.Epoch,
-		TargetID: corder.ID, // the important part for the frontend
-	}
-	t.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
 
 	// Unlock coins if we're not expecting future matches for this
 	// trade and there are no matches that MAY later require sending
@@ -1499,8 +1464,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 
 		details := fmt.Sprintf("Found maker's redemption (%s: %v) and validated secret for match %s",
 			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match.id)
-		corder, _ := t.coreOrderInternal()
-		t.notify(newOrderNote("Match recovered", details, db.Poke, corder))
+		t.notify(newOrderNote("Match recovered", details, db.Poke, t.coreOrderInternal()))
 	}()
 }
 
