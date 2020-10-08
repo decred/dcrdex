@@ -510,7 +510,7 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
 	client := auth.user(user)
 	if client == nil {
-		log.Errorf("Send requested for unknown user %v", user)
+		log.Debugf("Send requested for disconnected user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 
@@ -543,7 +543,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 
 	client := auth.user(user)
 	if client == nil {
-		log.Errorf("Send requested for unknown user %v", user)
+		log.Debugf("Send requested for disconnected user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 	// log.Tracef("Registering '%s' request ID %d for user %v (auth clientInfo)", msg.Route, msg.ID, user)
@@ -956,7 +956,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	// score = violationScore + piMissScore + successScore
 	violationScore := score - piMissScore - successScore
 	log.Debugf("User %v score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
-		user, score, violationScore, piMissCount, piMissScore, -successScore, successCount)
+		user, score, violationScore, piMissScore, piMissCount, -successScore, successCount)
 
 	return score, nil
 }
