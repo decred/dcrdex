@@ -311,6 +311,10 @@ func (m *TMarketTunnel) Running() bool {
 	return true
 }
 
+func (m *TMarketTunnel) CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder) {
+	return
+}
+
 type TBackend struct {
 	utxoErr    error
 	utxos      map[string]uint64

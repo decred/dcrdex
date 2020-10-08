@@ -101,6 +101,19 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 	return newPQ
 }
 
+// UnfilledForUser retrieves all completely unfilled orders for a given user.
+func (pq *OrderPQ) UnfilledForUser(user account.AccountID) []*order.LimitOrder {
+	pq.mtx.RLock()
+	var orders []*order.LimitOrder
+	for _, oe := range pq.oh {
+		if oe.order.AccountID == user && oe.order.Filled() == 0 {
+			orders = append(orders, oe.order)
+		}
+	}
+	pq.mtx.RUnlock()
+	return orders
+}
+
 // Orders copies all orders, sorted with the lessFn. The OrderPQ is unmodified.
 func (pq *OrderPQ) Orders() []*order.LimitOrder {
 	// Deep copy the orders.

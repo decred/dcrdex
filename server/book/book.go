@@ -184,3 +184,19 @@ func (b *Book) BuyOrders() []*order.LimitOrder {
 func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
 	return b.buys.OrdersN(N)
 }
+
+// UnfilledUserBuys retrieves all buy orders belonging to a given user that are
+// completely unfilled.
+func (b *Book) UnfilledUserBuys(user account.AccountID) []*order.LimitOrder {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	return b.buys.UnfilledForUser(user)
+}
+
+// UnfilledUserSells retrieves all sell orders belonging to a given user that
+// are completely unfilled.
+func (b *Book) UnfilledUserSells(user account.AccountID) []*order.LimitOrder {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	return b.sells.UnfilledForUser(user)
+}
