@@ -769,8 +769,8 @@ type Config struct {
 	DBPath string
 	// Net is the current network.
 	Net dex.Network
-	// Logger is is core's logger and used to create the core
-	// SubLoggers for the asset backends.
+	// Logger is the Core's logger and is also used to create the sub-loggers
+	// for the asset backends.
 	Logger dex.Logger
 }
 
@@ -817,8 +817,7 @@ func New(cfg *Config) (*Core, error) {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg: cfg,
-		// loggerMaker:   cfg.LoggerMaker,
+		cfg:           cfg,
 		log:           cfg.Logger,
 		db:            db,
 		conns:         make(map[string]*dexConnection),
@@ -887,7 +886,7 @@ func addrHost(addr string) (string, error) {
 		// These are addresses with at least one colon in an unexpected
 		// position.
 		a, err := url.Parse(addr)
-		// This address is of an unknown format. Return as is.
+		// This address is of an unknown format.
 		if err != nil {
 			return "", fmt.Errorf("addrHost: unable to parse address '%s'", addr)
 		}
