@@ -315,7 +315,7 @@ type Config struct {
 	FeeChecker FeeChecker
 	// UserUnbooker is a function for unbooking all of a user's orders.
 	UserUnbooker func(account.AccountID)
-	// MiaUserTimeout is how after a user disconnects until UserUnbooker is
+	// MiaUserTimeout is how long after a user disconnects until UserUnbooker is
 	// called for that user.
 	MiaUserTimeout time.Duration
 
@@ -361,13 +361,13 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
-// ExpectUsers specifies which users are expected to connected within a certain
+// ExpectUsers specifies which users are expected to connect within a certain
 // time or have their orders unbooked (revoked). This should be run prior to
 // starting the AuthManager. This is not part of the constructor since it is
 // convenient to obtain this information from the Market's Books, and Market
 // requires the AuthManager. The same information could be pulled from storage,
-// but the Market is the authoritative book. The AuthManager should be start via
-// Run immediately after calling ExpectUsers so the users can connect.
+// but the Market is the authoritative book. The AuthManager should be started
+// via Run immediately after calling ExpectUsers so the users can connect.
 func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
 	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
 	for user := range users {
