@@ -20,8 +20,11 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+var (
+	appCtx, closeApp = context.WithCancel(context.Background())
+)
+
 func main() {
-	appCtx, cancel := context.WithCancel(context.Background())
 
 	// Parse configuration.
 	cfg, err := configure()
@@ -43,10 +46,16 @@ func main() {
 		utc = false
 	}
 	logMaker := initLogging(cfg.DebugLevel, utc)
+	defer closeFileLogger()
 	log = logMaker.Logger("DEXC")
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
+	}
+
+	if !cfg.NoWeb && !cfg.NoWindow && processServerRunning() {
+		log.Warn("An instance of dexc is already running")
+		os.Exit(1)
 	}
 
 	// Prepare the Core.
@@ -67,7 +76,7 @@ func main() {
 	go func() {
 		for range killChan {
 			if clientCore.PromptShutdown() {
-				cancel()
+				closeApp()
 				return
 			}
 		}
@@ -77,7 +86,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		clientCore.Run(appCtx)
-		cancel() // in the event that Run returns prematurely prior to context cancellation
+		closeApp() // in the event that Run returns prematurely prior to context cancellation
 		wg.Done()
 	}()
 
@@ -94,8 +103,8 @@ func main() {
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
 			log.Errorf("Error creating rpc server: %v", err)
-			cancel()
-			goto done
+			closeApp()
+			return
 		}
 		cm := dex.NewConnectionMaster(rpcSrv)
 		wg.Add(1)
@@ -104,7 +113,7 @@ func main() {
 			err = cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting rpc server: %v", err)
-				cancel()
+				closeApp()
 				return
 			}
 			cm.Wait()
@@ -115,7 +124,7 @@ func main() {
 		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
-			cancel()
+			closeApp()
 			goto done
 		}
 		cm := dex.NewConnectionMaster(webSrv)
@@ -125,15 +134,24 @@ func main() {
 			err = cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
-				cancel()
+				closeApp()
 				return
 			}
 			cm.Wait()
 		}()
-	}
 
+		if !cfg.NoWindow {
+			processChan, err := runProcessServer()
+			if err != nil {
+				log.Errorf("Error starting process server: %v", err)
+				closeApp()
+				return
+			}
+			go runUI(cfg, processChan, clientCore)
+		}
+	}
 done:
+
 	wg.Wait()
-	closeFileLogger()
 	log.Info("Exiting dexc main.")
 }

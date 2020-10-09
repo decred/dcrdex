@@ -3988,14 +3988,25 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.updateBalances(assets)
 }
 
+// IsActivelyTrading will be true if there are any active orders or settling
+// matches.
+func (c *Core) IsActivelyTrading() bool {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	for _, dc := range c.conns {
+		if dc.hasActiveOrders() {
+			return true
+		}
+	}
+	return false
+}
+
 // PromptShutdown asks confirmation to shutdown the dexc when has active orders.
 // If the user answers in the affirmative, the wallets are locked and true is
 // returned. The provided channel is used to allow an OS signal to break the
 // prompt and force the shutdown with out answering the prompt in the
 // affirmative.
 func (c *Core) PromptShutdown() bool {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
 
 	lockWallets := func() {
 		// Lock wallets
@@ -4013,15 +4024,12 @@ func (c *Core) PromptShutdown() bool {
 		}
 	}
 
-	ok := true
-	for _, dc := range c.conns {
-		if dc.hasActiveOrders() {
-			ok = false
-			break
-		}
-	}
+	active := c.IsActivelyTrading()
 
-	if !ok {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+
+	if active {
 		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
 			"Do you want to quit anyway? ('y' to quit, 'n' or enter to abort shutdown):")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -4033,7 +4041,7 @@ func (c *Core) PromptShutdown() bool {
 
 		switch strings.ToLower(scanner.Text()) {
 		case "y", "yes":
-			ok = true
+			active = false
 		case "n", "no":
 			fallthrough
 		default:
@@ -4041,11 +4049,25 @@ func (c *Core) PromptShutdown() bool {
 		}
 	}
 
-	if ok {
+	if !active {
 		lockWallets()
 	}
 
-	return ok
+	return !active
+}
+
+// ForceShutdown shuts down the client, ignoring any active trades.
+func (c *Core) ForceShutdown() {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	for _, wallet := range c.wallets {
+		wallet.Lock()
+	}
+	for _, dc := range c.conns {
+		dc.acct.lock()
+	}
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
