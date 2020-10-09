@@ -4,6 +4,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,16 +22,16 @@ type Backend interface {
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
-	Contract(coinID []byte, redeemScript []byte) (Contract, error)
+	Contract(ctx context.Context, coinID []byte, redeemScript []byte) (Contract, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns a Coin for redemptionID, a transaction input, that
 	// spends contract ID, an output containing the swap contract.
-	Redemption(redemptionID, contractID []byte) (Coin, error)
+	Redemption(ctx context.Context, redemptionID, contractID []byte) (Coin, error)
 	// FundingCoin returns the unspent coin at the specified location. Coins
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
-	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
+	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -52,12 +53,12 @@ type Backend interface {
 	// and retrieving the corresponding Coin. If the coin is not found or no
 	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
 	// for more UTXO data.
-	VerifyUnspentCoin(coinID []byte) error
+	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
-	FeeRate() (uint64, error)
+	FeeRate(context.Context) (uint64, error)
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
-	Synced() (bool, error)
+	Synced(context.Context) (bool, error)
 }
 
 // Coin represents a transaction input or output.
@@ -73,7 +74,7 @@ type Coin interface {
 	// TODO: This really must get a timeout, and a short one, as the Swapper
 	// will block at inconvenient times. The timeout can be at the RPC client
 	// level or a wrapper around the underlying RPC calls
-	Confirmations() (int64, error)
+	Confirmations(context.Context) (int64, error)
 	// ID is the coin ID.
 	ID() []byte
 	// TxID is a transaction identifier for the coin.

@@ -61,7 +61,7 @@ func NextID() uint64 {
 }
 
 // MsgHandler describes a handler for a specific message route.
-type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
+type MsgHandler func(context.Context, Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]MsgHandler)

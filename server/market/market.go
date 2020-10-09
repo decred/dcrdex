@@ -56,10 +56,10 @@ const (
 
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
-	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
-	CheckUnspent(asset uint32, coinID []byte) error
+	Negotiate(ctx context.Context, matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
+	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
-	ChainsSynced(base, quote uint32) (bool, error)
+	ChainsSynced(ctx context.Context, base, quote uint32) (bool, error)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -146,6 +146,7 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 	baseCoins := make(map[order.OrderID][]order.CoinID)
 	quoteCoins := make(map[order.OrderID][]order.CoinID)
 
+	ctx := context.TODO()
 ordersLoop:
 	for id, lo := range bookOrdersByID {
 		if lo.FillAmt > 0 {
@@ -169,7 +170,7 @@ ordersLoop:
 			assetID = base
 		}
 		for i := range lo.Coins {
-			err = swapper.CheckUnspent(assetID, lo.Coins[i])
+			err = swapper.CheckUnspent(ctx, assetID, lo.Coins[i])
 			if err == nil {
 				continue
 			}
@@ -637,12 +638,12 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, e
 	return true, nil
 }
 
-func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
+func (m *Market) checkUnfilledOrders(ctx context.Context, assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
 orders:
 	for _, lo := range unfilled {
 		log.Tracef("Checking %d funding coins for order %v", len(lo.Coins), lo.ID())
 		for i := range lo.Coins {
-			err := m.swapper.CheckUnspent(assetID, lo.Coins[i])
+			err := m.swapper.CheckUnspent(ctx, assetID, lo.Coins[i])
 			if err == nil {
 				continue // unspent, check next coin
 			}
@@ -677,7 +678,7 @@ orders:
 // from the in-memory book, revoked in the DB, a cancellation marked against the
 // user, coins unlocked, and orderbook subscribers notified). See Unbook for
 // details.
-func (m *Market) CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder) {
+func (m *Market) CheckUnfilled(ctx context.Context, assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder) {
 	base, quote := m.marketInfo.Base, m.marketInfo.Quote
 	if assetID != base && assetID != quote {
 		return
@@ -694,7 +695,7 @@ func (m *Market) CheckUnfilled(assetID uint32, user account.AccountID) (unbooked
 		return
 	}
 
-	return m.checkUnfilledOrders(assetID, unfilled)
+	return m.checkUnfilledOrders(ctx, assetID, unfilled)
 }
 
 // Book retrieves the market's current order book and the current epoch index.
@@ -859,7 +860,7 @@ func (m *Market) Run(ctx context.Context) {
 		defer wgEpochs.Done()
 		for ep := range eq.ready {
 			// prepEpoch has completed preimage collection.
-			m.processReadyEpoch(ep, notifyChan)
+			m.processReadyEpoch(ctx, ep, notifyChan)
 		}
 		log.Debugf("epoch pump drained for market %s", m.marketInfo.Name)
 		// There must be no more notify calls.
@@ -915,7 +916,7 @@ func (m *Market) Run(ctx context.Context) {
 
 		if !running {
 			// Check that both blockchains are synced before actually starting.
-			synced, err := m.swapper.ChainsSynced(m.marketInfo.Base, m.marketInfo.Quote)
+			synced, err := m.swapper.ChainsSynced(ctx, m.marketInfo.Base, m.marketInfo.Quote)
 			if err != nil {
 				log.Errorf("Not starting %s market because of ChainsSynced error: %v", m.marketInfo.Name, err)
 			} else if !synced {
@@ -1672,7 +1673,7 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 //  4. Lock coins with the swap lock.
 //  5. Initiate the swap negotiation via the Market's Swapper.
 // The EpochQueue's Orders map must not be modified by another goroutine.
-func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateSignal) {
+func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch, notifyChan chan<- *updateSignal) {
 	// Ensure the epoch has actually completed preimage collection. This can
 	// only fail if the epochPump malfunctioned. Remove this check eventually.
 	select {
@@ -1928,7 +1929,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		m.swapper.Negotiate(matches, offBookOrders)
+		m.swapper.Negotiate(ctx, matches, offBookOrders)
 	}
 }
 
