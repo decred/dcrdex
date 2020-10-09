@@ -1101,7 +1101,9 @@ func testRedemption(t *testing.T, segwit bool) {
 	}
 
 	// Missing transaction
+	testChainMtx.Lock()
 	delete(testChain.txRaws, *txHash)
+	testChainMtx.Unlock()
 	_, err = btc.Redemption(redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
