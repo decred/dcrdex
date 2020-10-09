@@ -40,8 +40,14 @@ import (
 const (
 	// BipID is the BIP-0044 asset ID.
 	BipID = 42
+
 	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
+	// defaultRedeemConfTarget is the default redeem transaction confirmation
+	// target in blocks used by estimatesmartfee to get the optimal fee for a
+	// redeem transaction.
+	defaultRedeemConfTarget = 1
+
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
@@ -59,9 +65,8 @@ var (
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker    = time.Second
-	fallbackFeeKey = "fallbackfee"
-	configOpts     = []*asset.ConfigOption{
+	blockTicker = time.Second
+	configOpts  = []*asset.ConfigOption{
 		{
 			Key:         "account",
 			DisplayName: "Account Name",
@@ -91,10 +96,16 @@ var (
 			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
 		},
 		{
-			Key:          fallbackFeeKey,
+			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:          "redeemconftarget",
+			DisplayName:  "Redeem confirmation target",
+			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 1 block)",
+			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
 			Key:         "txsplit",
@@ -334,13 +345,14 @@ func init() {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client          *rpcclient.Client
-	node            rpcClient
-	log             dex.Logger
-	acct            string
-	tipChange       func(error)
-	fallbackFeeRate uint64
-	useSplitTx      bool
+	client           *rpcclient.Client
+	node             rpcClient
+	log              dex.Logger
+	acct             string
+	tipChange        func(error)
+	fallbackFeeRate  uint64
+	redeemConfTarget uint64
+	useSplitTx       bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -411,7 +423,13 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	if fallbackFeesPerByte == 0 {
 		fallbackFeesPerByte = defaultFee
 	}
-	logger.Tracef("fallback fees set at %d atoms/byte", fallbackFeesPerByte)
+	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
+
+	redeemConfTarget := dcrCfg.RedeemConfTarget
+	if redeemConfTarget == 0 {
+		redeemConfTarget = defaultRedeemConfTarget
+	}
+	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
 	return &ExchangeWallet{
 		log:                 logger,
@@ -420,6 +438,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
+		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
 	}
 }
@@ -551,9 +570,12 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
-func (dcr *ExchangeWallet) FeeRate() (uint64, error) {
+func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
-	dcrPerKB, err := dcr.node.EstimateSmartFee(2, chainjson.EstimateSmartFeeConservative)
+	if confTarget < 2 {
+		confTarget = 2
+	}
+	dcrPerKB, err := dcr.node.EstimateSmartFee(int64(confTarget), chainjson.EstimateSmartFeeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -568,8 +590,8 @@ func (dcr *ExchangeWallet) FeeRate() (uint64, error) {
 
 // feeRateWithFallback attempts to get the optimal fee rate in atoms / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
-func (dcr *ExchangeWallet) feeRateWithFallback() uint64 {
-	feeRate, err := dcr.FeeRate()
+func (dcr *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
+	feeRate, err := dcr.feeRate(confTarget)
 	if err != nil {
 		feeRate = dcr.fallbackFeeRate
 		dcr.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
@@ -794,7 +816,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
-	feeRate := dcr.feeRateWithFallback()
+	feeRate := dcr.feeRateWithFallback(1)
 	if feeRate > nfo.MaxFeeRate {
 		feeRate = nfo.MaxFeeRate
 	}
@@ -1124,7 +1146,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 
 	// Calculate the size and the fees.
 	size := msgTx.SerializeSize() + dexdcr.RedeemSwapSigScriptSize*len(redemptions) + dexdcr.P2PKHOutputSize
-	feeRate := dcr.feeRateWithFallback()
+	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget)
 	fee := feeRate * uint64(size)
 	if fee > totalIn {
 		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
@@ -1655,7 +1677,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := dcr.feeRateWithFallback()
+	feeRate := dcr.feeRateWithFallback(2)
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
@@ -1734,7 +1756,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 	}
 	// TODO: Evaluate SendToAddress and how it deals with the change output
 	// address index to see if it can be used here instead.
-	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback())
+	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(1))
 	if err != nil {
 		return nil, err
 	}
@@ -1752,7 +1774,7 @@ func (dcr *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, e
 	if err != nil {
 		return nil, err
 	}
-	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback())
+	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(2))
 	if err != nil {
 		return nil, err
 	}
