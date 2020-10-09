@@ -30,9 +30,9 @@ type xcWallet struct {
 }
 
 // Unlock unlocks the wallet.
-func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
+func (w *xcWallet) Unlock(ctx context.Context, crypter encrypt.Crypter) error {
 	if len(w.encPW) == 0 {
-		if w.Locked() {
+		if w.Locked(ctx) {
 			return fmt.Errorf("Wallet reporting as locked, but no password has been set.")
 		}
 		return nil
@@ -42,7 +42,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 		return fmt.Errorf("unlockWallet decryption error: %w", err)
 	}
 	pw := string(pwB)
-	err = w.Wallet.Unlock(pw)
+	err = w.Wallet.Unlock(ctx, pw)
 	if err != nil {
 		return err
 	}
@@ -54,9 +54,9 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 
 // refreshUnlock checks that the wallet is unlocked, and if not, uses the cached
 // password to attempt unlocking.
-func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
+func (w *xcWallet) refreshUnlock(ctx context.Context) (unlockAttempted bool, err error) {
 	// Check if the wallet is already unlocked.
-	if !w.Locked() {
+	if !w.Locked(ctx) {
 		return false, nil
 	}
 	if len(w.encPW) == 0 {
@@ -67,25 +67,25 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	if len(w.pw) == 0 {
 		return false, fmt.Errorf("cannot refresh unlock on a locked %s wallet", unbip(w.AssetID))
 	}
-	return true, w.Wallet.Unlock(w.pw)
+	return true, w.Wallet.Unlock(ctx, w.pw)
 }
 
 // Lock the wallet.
-func (w *xcWallet) Lock() error {
+func (w *xcWallet) Lock(ctx context.Context) error {
 	if len(w.encPW) == 0 {
 		return nil
 	}
 	w.mtx.Lock()
 	w.pw = ""
 	w.mtx.Unlock()
-	return w.Wallet.Lock()
+	return w.Wallet.Lock(ctx)
 }
 
 // unlocked will return true if the wallet is unlocked. The wallet is queried
 // directly, likely involving an RPC call. Use locallyUnlocked if it's not
 // critical.
-func (w *xcWallet) unlocked() bool {
-	return !w.Locked()
+func (w *xcWallet) unlocked(ctx context.Context) bool {
+	return !w.Locked(ctx)
 }
 
 // locallyUnlocked checks whether we think the wallet is unlocked, but without
@@ -144,7 +144,7 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	synced, progress, err := w.SyncStatus()
+	synced, progress, err := w.SyncStatus(ctx)
 	if err != nil {
 		return err
 	}

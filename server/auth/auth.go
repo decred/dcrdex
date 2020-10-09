@@ -70,7 +70,7 @@ type Signer interface {
 
 // FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).FeeCoin.
-type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
+type FeeChecker func(ctx context.Context, coinID []byte) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
 // respHandler has a time associated with it so that old unused handlers can be
@@ -486,8 +486,8 @@ func (auth *AuthManager) Run(ctx context.Context) {
 // Route wraps the comms.Route function, storing the response handler with the
 // associated clientInfo, and sending the message on the current comms.Link for
 // the client.
-func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
-	comms.Route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) Route(route string, handler func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error) {
+	comms.Route(route, func(ctx context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
 		if client == nil {
 			return &msgjson.Error{
@@ -495,7 +495,7 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 				Message: "cannot use route '" + route + "' on an unauthorized connection",
 			}
 		}
-		msgErr := handler(client.acct.ID, msg)
+		msgErr := handler(ctx, client.acct.ID, msg)
 		if msgErr != nil {
 			log.Debugf("Handling of '%s' request for user %v failed: %v", route, client.acct.ID, msgErr)
 		}
@@ -1028,7 +1028,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
 // a response is issued, and a clientInfo is created or updated.
-func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleConnect(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	connect := new(msgjson.Connect)
 	err := json.Unmarshal(msg.Payload, &connect)
 	if err != nil {
@@ -1321,7 +1321,7 @@ func (mm *marketMatches) idList() []order.MatchID {
 }
 
 // handleMatchStatus handles requests to the 'match_status' route.
-func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleMatchStatus(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	client := auth.conn(conn)
 	if client == nil {
 		return msgjson.NewError(msgjson.UnauthorizedConnection,
@@ -1424,7 +1424,7 @@ func (mo *marketOrders) idList() []order.OrderID {
 }
 
 // handleOrderStatus handles requests to the 'order_status' route.
-func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleOrderStatus(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	client := auth.conn(conn)
 	if client == nil {
 		return msgjson.NewError(msgjson.UnauthorizedConnection,

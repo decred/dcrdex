@@ -5,6 +5,7 @@ package btc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -120,7 +121,7 @@ func (input *Input) String() string {
 
 // Confirmations returns the number of confirmations on this input's
 // transaction.
-func (input *Input) Confirmations() (int64, error) {
+func (input *Input) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := input.confirmations()
 	if errors.Is(err, ErrReorgDetected) {
 		newInput, err := input.btc.input(&input.tx.hash, input.vin)
@@ -128,7 +129,7 @@ func (input *Input) Confirmations() (int64, error) {
 			return -1, fmt.Errorf("input block is not mainchain")
 		}
 		*input = *newInput
-		return input.Confirmations()
+		return input.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -188,7 +189,7 @@ var _ asset.Contract = (*Contract)(nil)
 
 // Confirmations returns the number of confirmations on this output's
 // transaction.
-func (output *Output) Confirmations() (int64, error) {
+func (output *Output) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := output.confirmations()
 	if errors.Is(err, ErrReorgDetected) {
 		newOut, err := output.btc.output(&output.tx.hash, output.vout, output.redeemScript)
@@ -196,7 +197,7 @@ func (output *Output) Confirmations() (int64, error) {
 			return -1, fmt.Errorf("output block is not mainchain")
 		}
 		*output = *newOut
-		return output.Confirmations()
+		return output.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -291,7 +292,7 @@ type UTXO struct {
 // transaction. See also (*Output).Confirmations. This function differs from the
 // Output method in that it is necessary to relocate the utxo after a reorg, it
 // may error if the output is spent.
-func (utxo *UTXO) Confirmations() (int64, error) {
+func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := utxo.confirmations()
 	if errors.Is(err, ErrReorgDetected) {
 		// See if we can find the utxo in another block.
@@ -300,7 +301,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
 		*utxo = *newUtxo
-		return utxo.Confirmations()
+		return utxo.Confirmations(ctx)
 	}
 	return confs, err
 }

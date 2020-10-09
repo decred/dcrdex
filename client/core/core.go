@@ -1073,7 +1073,7 @@ func (c *Core) connectWallet(w *xcWallet) error {
 			for {
 				select {
 				case <-ticker.C:
-					synced, progress, err := w.SyncStatus()
+					synced, progress, err := w.SyncStatus(c.ctx)
 					if err != nil {
 						c.log.Errorf("error monitoring sync status for %s", unbip(w.AssetID))
 						return
@@ -1105,8 +1105,8 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 			return err
 		}
 	}
-	if !wallet.unlocked() {
-		err := unlockWallet(wallet, crypter)
+	if !wallet.unlocked(c.ctx) {
+		err := unlockWallet(c.ctx, wallet, crypter)
 		if err != nil {
 			return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
@@ -1118,7 +1118,7 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	bal, err := wallet.Balance()
+	bal, err := wallet.Balance(c.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1313,12 +1313,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf(s, a...)
 	}
 
-	err = wallet.Unlock(crypter)
+	err = wallet.Unlock(c.ctx, crypter)
 	if err != nil {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
 
-	dbWallet.Address, err = wallet.Address()
+	dbWallet.Address, err = wallet.Address(c.ctx)
 	if err != nil {
 		return initErr("error getting deposit address for %s: %v", symbol, err)
 	}
@@ -1410,7 +1410,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = unlockWallet(wallet, crypter)
+	err = unlockWallet(c.ctx, wallet, crypter)
 	if err != nil {
 		return err
 	}
@@ -1436,8 +1436,8 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 }
 
 // unlockWallet unlocks the wallet with the crypter.
-func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
-	err := wallet.Unlock(crypter)
+func unlockWallet(ctx context.Context, wallet *xcWallet, crypter encrypt.Crypter) error {
+	err := wallet.Unlock(ctx, crypter)
 	if err != nil {
 		return fmt.Errorf("unlockWallet unlock error: %w", err)
 	}
@@ -1458,7 +1458,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = wallet.Lock()
+	err = wallet.Lock(c.ctx)
 	if err != nil {
 		return err
 	}
@@ -1523,15 +1523,15 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	}
 	// Get a new address. Definitely want this when the account changes, and
 	// maybe other settings as well.
-	addr, err := wallet.Address()
+	addr, err := wallet.Address(c.ctx)
 	if err != nil {
 		wallet.Disconnect()
 		return newError(addrErr, "error getting wallet address: %v", err)
 	}
 	dbWallet.Address = addr
 	wallet.address = addr
-	if oldWallet.unlocked() {
-		err := unlockWallet(wallet, crypter)
+	if oldWallet.unlocked(c.ctx) {
+		err := unlockWallet(c.ctx, wallet, crypter)
 		if err != nil {
 			wallet.Disconnect()
 			return newError(walletAuthErr, "wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err)
@@ -1623,9 +1623,9 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 
 	// Check that the new password works. If the new password is empty, skip
 	// this step, since an empty password signifies an unencrypted wallet.
-	wasUnlocked := wallet.unlocked()
+	wasUnlocked := wallet.unlocked(c.ctx)
 	if newPasswordSet {
-		err = wallet.Wallet.Unlock(string(newPW))
+		err = wallet.Wallet.Unlock(c.ctx, string(newPW))
 		if err != nil {
 			return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
 		}
@@ -1634,7 +1634,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	if !wasConnected {
 		wallet.Disconnect()
 	} else if !wasUnlocked {
-		wallet.Lock()
+		wallet.Lock(c.ctx)
 	}
 
 	// Encrypt the password.
@@ -1671,7 +1671,7 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 		return "", fmt.Errorf("cannot get address from unconnected %s wallet", unbip(assetID))
 	}
 
-	addr, err := w.Address()
+	addr, err := w.Address(c.ctx)
 	if err != nil {
 		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(assetID), err)
 	}
@@ -1791,8 +1791,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(walletErr, "cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
-	if !wallet.unlocked() {
-		err = unlockWallet(wallet, crypter)
+	if !wallet.unlocked(c.ctx) {
+		err = unlockWallet(c.ctx, wallet, crypter)
 		if err != nil {
 			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
@@ -1871,7 +1871,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, acctID, regRes.Fee, regAsset.Symbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
+	coin, err := wallet.PayFee(c.ctx, regRes.Address, regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -1925,7 +1925,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
 		wallet, _ := c.wallet(assetID)
-		confs, err := wallet.Confirmations(coinID)
+		confs, err := wallet.Confirmations(c.ctx, coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDString(wallet.AssetID, coinID), err)
 		}
@@ -2084,7 +2084,7 @@ func (c *Core) Logout() error {
 	for assetID := range c.User().Assets {
 		wallet, found := c.wallet(assetID)
 		if found && wallet.connected() {
-			if err := wallet.Lock(); err != nil {
+			if err := wallet.Lock(c.ctx); err != nil {
 				return err
 			}
 		}
@@ -2263,8 +2263,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				result.AuthErr = details
 				continue
 			}
-			if !dcrWallet.unlocked() {
-				err = unlockWallet(dcrWallet, crypter)
+			if !dcrWallet.unlocked(c.ctx) {
+				err = unlockWallet(c.ctx, dcrWallet, crypter)
 				if err != nil {
 					details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.host, err)
 					c.notify(newFeePaymentNote(SubjectWalletUnlockError, details, db.ErrorLevel, dc.acct.host))
@@ -2421,7 +2421,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	coin, err := wallet.Withdraw(address, value)
+	coin, err := wallet.Withdraw(c.ctx, address, value)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote(SubjectWithdrawError, details, db.ErrorLevel))
@@ -2526,7 +2526,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Get an address for the swap contract.
-	addr, err := toWallet.Address()
+	addr, err := toWallet.Address(c.ctx)
 	if err != nil {
 		return nil, 0, codedError(walletErr, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err))
 	}
@@ -2576,7 +2576,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
 	}
 
-	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
+	coins, redeemScripts, err := fromWallet.FundOrder(c.ctx, &asset.Order{
 		Value:        fundQty,
 		MaxSwapCount: lots,
 		DEXConfig:    wallets.fromAsset,
@@ -2594,7 +2594,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// The coins selected for this order will need to be unlocked
 	// if the order does not get to the server successfully.
 	unlockCoins := func() {
-		err := fromWallet.ReturnCoins(coins)
+		err := fromWallet.ReturnCoins(c.ctx, coins)
 		if err != nil {
 			c.log.Warnf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
 		}
@@ -2645,7 +2645,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
-	msgCoins, err := messageCoins(wallets.fromWallet, coins, redeemScripts)
+	msgCoins, err := messageCoins(c.ctx, wallets.fromWallet, coins, redeemScripts)
 	if err != nil {
 		unlockCoins()
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
@@ -2890,7 +2890,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Also, check if the now-Revoked matches were the last set of matches that
 		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
-			if trade.maybeReturnCoins() {
+			if trade.maybeReturnCoins(c.ctx) {
 				updatedAssets.count(trade.wallets.fromAsset.ID)
 			}
 
@@ -2901,7 +2901,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Start negotiation for extra matches for this trade.
 		if len(extras) > 0 {
-			err := trade.negotiate(extras)
+			err := trade.negotiate(c.ctx, extras)
 			if err != nil {
 				c.log.Errorf("Error negotiating one or more previously unknown matches for order %s reported by %s on connect: %v",
 					oid, dc.acct.host, err)
@@ -3116,7 +3116,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// Get the coin for the fee.
-	confs, err := dcrWallet.Confirmations(acctInfo.FeeCoin)
+	confs, err := dcrWallet.Confirmations(c.ctx, acctInfo.FeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
@@ -3319,8 +3319,8 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 			if err != nil {
 				baseFailed = true
 				failed[base] = struct{}{}
-			} else if !baseWallet.unlocked() {
-				err = unlockWallet(baseWallet, crypter)
+			} else if !baseWallet.unlocked(c.ctx) {
+				err = unlockWallet(c.ctx, baseWallet, crypter)
 				if err != nil {
 					baseFailed = true
 					failed[base] = struct{}{}
@@ -3332,8 +3332,8 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 			if err != nil {
 				quoteFailed = true
 				failed[quote] = struct{}{}
-			} else if !quoteWallet.unlocked() {
-				err = unlockWallet(quoteWallet, crypter)
+			} else if !quoteWallet.unlocked(c.ctx) {
+				err = unlockWallet(c.ctx, quoteWallet, crypter)
 				if err != nil {
 					quoteFailed = true
 					failed[quote] = struct{}{}
@@ -3415,7 +3415,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", dbMatch.Side, tracker.token(), dbMatch.Status)
 					continue
 				}
-				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
+				auditInfo, err := wallets.toWallet.AuditContract(c.ctx, counterSwap, counterContract)
 				if err != nil {
 					c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 						match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked(), err)
@@ -3449,7 +3449,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				notifyErr(SubjectOrderCoinError, "No coins for loaded order %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
-			coins, err := wallets.fromWallet.FundingCoins(byteIDs)
+			coins, err := wallets.fromWallet.FundingCoins(c.ctx, byteIDs)
 			if err != nil {
 				notifyErr(SubjectOrderCoinError, "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
@@ -3534,7 +3534,7 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 		// Begin negotiation for any trade Matches.
 		if len(sm.msgMatches) > 0 {
 			tracker.mtx.Lock()
-			err := tracker.negotiate(sm.msgMatches)
+			err := tracker.negotiate(c.ctx, sm.msgMatches)
 			tracker.mtx.Unlock()
 			if err != nil {
 				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %w", oid, err)
@@ -3813,7 +3813,7 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
 
-	tracker.revoke()
+	tracker.revoke(c.ctx)
 
 	details := fmt.Sprintf("Order %s on market %s at %s has been revoked by the server", tracker.token(), tracker.mktID, dc.acct.host)
 	c.notify(newOrderNote(SubjectOrderRevoked, details, db.ErrorLevel, tracker.coreOrder()))
@@ -3848,7 +3848,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	copy(matchID[:], revocation.MatchID)
 
 	tracker.mtx.Lock()
-	err = tracker.revokeMatch(matchID, true)
+	err = tracker.revokeMatch(c.ctx, matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
@@ -3986,7 +3986,7 @@ func (c *Core) listen(dc *dexConnection) {
 		for _, trade := range doneTrades {
 			trade.mtx.Lock()
 			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
-			trade.returnCoins()
+			trade.returnCoins(c.ctx)
 			trade.mtx.Unlock()
 			updatedAssets.count(trade.wallets.fromAsset.ID)
 		}
@@ -4210,7 +4210,7 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	if tracker == nil {
 		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
 	}
-	updatedAssets, err := tracker.nomatch(oid)
+	updatedAssets, err := tracker.nomatch(c.ctx, oid)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
@@ -4272,7 +4272,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
-	return tracker.processAuditMsg(msg.ID, audit)
+	return tracker.processAuditMsg(c.ctx, msg.ID, audit)
 }
 
 // handleRedemptionRoute handles the DEX-originating redemption request, which
@@ -4370,7 +4370,7 @@ func (c *Core) PromptShutdown() bool {
 		for assetID := range c.User().Assets {
 			wallet, found := c.wallet(assetID)
 			if found && wallet.connected() {
-				if err := wallet.Lock(); err != nil {
+				if err := wallet.Lock(c.ctx); err != nil {
 					c.log.Errorf("error locking wallet: %v", err)
 				}
 			}
@@ -4541,11 +4541,11 @@ func messageTrade(trade *order.Trade, coins []*msgjson.Coin) *msgjson.Trade {
 
 // messageCoin converts the []asset.Coin to a []*msgjson.Coin, signing the coin
 // IDs and retrieving the pubkeys too.
-func messageCoins(wallet *xcWallet, coins asset.Coins, redeemScripts []dex.Bytes) ([]*msgjson.Coin, error) {
+func messageCoins(ctx context.Context, wallet *xcWallet, coins asset.Coins, redeemScripts []dex.Bytes) ([]*msgjson.Coin, error) {
 	msgCoins := make([]*msgjson.Coin, 0, len(coins))
 	for i, coin := range coins {
 		coinID := coin.ID()
-		pubKeys, sigs, err := wallet.SignMessage(coin, coinID)
+		pubKeys, sigs, err := wallet.SignMessage(ctx, coin, coinID)
 		if err != nil {
 			return nil, fmt.Errorf("%s SignMessage error: %w", unbip(wallet.AssetID), err)
 		}
