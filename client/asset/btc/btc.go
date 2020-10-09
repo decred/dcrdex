@@ -41,11 +41,18 @@ const (
 	methodGetNetworkInfo    = "getnetworkinfo"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
+
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultFee         = 100
+	defaultFee = 100
+	// defaultRedeemConfTarget is the default redeem transaction confirmation
+	// target in blocks used by estimatesmartfee to get the optimal fee for a
+	// redeem transaction.
+	defaultRedeemConfTarget = 2
+
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015
+
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + 2*dexbtc.P2PKHOutputSize
@@ -57,9 +64,8 @@ const (
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker    = time.Second
-	fallbackFeeKey = "fallbackfee"
-	configOpts     = []*asset.ConfigOption{
+	blockTicker = time.Second
+	configOpts  = []*asset.ConfigOption{
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
@@ -89,10 +95,16 @@ var (
 			DefaultValue: "8332",
 		},
 		{
-			Key:          fallbackFeeKey,
+			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Bitcoin's 'fallbackfee' rate. Units: BTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:          "redeemconftarget",
+			DisplayName:  "Redeem confirmation target",
+			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 2 blocks)",
+			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
 			Key:         "txsplit",
@@ -104,7 +116,7 @@ var (
 			IsBoolean: true,
 		},
 	}
-	// walletInfo defines some general information about a Bitcoin wallet.
+	// WalletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
 		Units:             "Satoshis",
@@ -338,6 +350,7 @@ type ExchangeWallet struct {
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
+	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
@@ -413,7 +426,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
-
 	// Read the configuration parameters
 	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
@@ -442,14 +454,19 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
 func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
-
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/B.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
 	if fallbackFeesPerByte == 0 {
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
 	}
-	cfg.Logger.Tracef("fallback fees set at %d %s/byte", fallbackFeesPerByte, cfg.WalletInfo.Units)
+	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte", fallbackFeesPerByte, cfg.WalletInfo.Units)
+
+	redeemConfTarget := btcCfg.RedeemConfTarget
+	if redeemConfTarget == 0 {
+		redeemConfTarget = defaultRedeemConfTarget
+	}
+	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
 	return &ExchangeWallet{
 		node:                node,
@@ -462,6 +479,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
+		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
@@ -566,8 +584,8 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.
-func (btc *ExchangeWallet) FeeRate() (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
+func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
+	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeEconomical)
 	if err != nil {
 		return 0, err
 	}
@@ -588,8 +606,8 @@ func (btc *ExchangeWallet) FeeRate() (uint64, error) {
 
 // feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
-func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
-	feeRate, err := btc.FeeRate()
+func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
+	feeRate, err := btc.feeRate(confTarget)
 	if err != nil {
 		feeRate = btc.fallbackFeeRate
 		btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
@@ -784,7 +802,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 		return nil, false, fmt.Errorf("error creating change address: %v", err)
 	}
 
-	feeRate := btc.feeRateWithFallback()
+	feeRate := btc.feeRateWithFallback(1) // these must fund swaps, so don't under-pay (is this an issue with no fundconf requirement?)
 	if feeRate > nfo.MaxFeeRate {
 		feeRate = nfo.MaxFeeRate
 	}
@@ -1119,7 +1137,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		size += dexbtc.RedeemSwapSigScriptSize*uint64(len(redemptions)) + dexbtc.P2PKHOutputSize
 	}
 
-	feeRate := btc.feeRateWithFallback()
+	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget)
 	fee := feeRate * size
 	if fee > totalIn {
 		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
@@ -1653,7 +1671,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := btc.feeRateWithFallback()
+	feeRate := btc.feeRateWithFallback(2) // meh level urgency
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
@@ -1734,7 +1752,7 @@ func (btc *ExchangeWallet) Address() (string, error) {
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
 func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(), false)
+	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1), false)
 	if err != nil {
 		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
 		return nil, err
@@ -1745,7 +1763,7 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(), true)
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2), true)
 	if err != nil {
 		btc.log.Errorf("Withdraw error address = '%s', fee = %d: %v", address, value, err)
 		return nil, err

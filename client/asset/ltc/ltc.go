@@ -23,8 +23,7 @@ const (
 )
 
 var (
-	fallbackFeeKey = "fallbackfee"
-	configOpts     = []*asset.ConfigOption{
+	configOpts = []*asset.ConfigOption{
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
@@ -54,10 +53,16 @@ var (
 			DefaultValue: "9332",
 		},
 		{
-			Key:          fallbackFeeKey,
+			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:          "redeemconftarget",
+			DisplayName:  "Redeem transaction confirmation target",
+			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 2 blocks)",
+			DefaultValue: 2,
 		},
 		{
 			Key:         "txsplit",

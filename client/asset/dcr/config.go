@@ -32,12 +32,13 @@ var (
 // Config holds the parameters needed to initialize an RPC connection to a dcr
 // wallet. Default values are used for RPCListen and/or RPCCert if not set.
 type Config struct {
-	RPCUser         string  `ini:"username"`
-	RPCPass         string  `ini:"password"`
-	RPCListen       string  `ini:"rpclisten"`
-	RPCCert         string  `ini:"rpccert"`
-	UseSplitTx      bool    `ini:"txsplit"`
-	FallbackFeeRate float64 `ini:"fallbackfee"`
+	RPCUser          string  `ini:"username"`
+	RPCPass          string  `ini:"password"`
+	RPCListen        string  `ini:"rpclisten"`
+	RPCCert          string  `ini:"rpccert"`
+	UseSplitTx       bool    `ini:"txsplit"`
+	FallbackFeeRate  float64 `ini:"fallbackfee"`
+	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
 	Context context.Context `ini:"-"`
