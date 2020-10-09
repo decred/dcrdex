@@ -54,7 +54,6 @@ const (
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
 	defaultBroadcastTimeout = 5 * time.Minute
-	defaultMiaUserTimeout   = 90 * time.Second
 )
 
 var (
@@ -85,7 +84,6 @@ type dexConf struct {
 	FreeCancels      bool
 	MaxUserCancels   uint32
 	BanScore         uint32
-	MiaUserTimeout   time.Duration
 	DEXPrivKeyPath   string
 	RPCCert          string
 	RPCKey           string
@@ -130,7 +128,6 @@ type flagsData struct {
 	FreeCancels      bool          `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders). Implied by --anarchy."`
 	MaxUserCancels   uint32        `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
 	BanScore         uint32        `long:"banscore" description:"The accumulated penalty score at which when an account gets closed."`
-	MiaUserTimeout   time.Duration `long:"miatimeout" description:"How long until a user's orders are automatically unbooked after they are known to be disconnected."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
@@ -309,7 +306,6 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
 		BanScore:         defaultBanScore,
-		MiaUserTimeout:   defaultMiaUserTimeout,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
@@ -585,7 +581,6 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		Anarchy:          cfg.Anarchy,
 		FreeCancels:      cfg.FreeCancels || cfg.Anarchy,
 		BanScore:         cfg.BanScore,
-		MiaUserTimeout:   cfg.MiaUserTimeout,
 		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
 		RPCCert:          cfg.RPCCert,
 		RPCKey:           cfg.RPCKey,

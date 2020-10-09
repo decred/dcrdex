@@ -70,7 +70,6 @@ type DexConf struct {
 	Anarchy          bool
 	FreeCancels      bool
 	BanScore         uint32
-	MiaUserTimeout   time.Duration
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 	IgnoreState      bool
@@ -397,7 +396,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,
 		UserUnbooker:    userUnbookFun,
-		MiaUserTimeout:  cfg.MiaUserTimeout,
+		MiaUserTimeout:  cfg.BroadcastTimeout,
 		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
 		FreeCancels:     cfg.FreeCancels,
@@ -407,7 +406,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	authMgr := auth.NewAuthManager(&authCfg)
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cancelThresh, authMgr.GraceLimit())
-	log.Infof("MIA user order unbook timeout %v", authCfg.MiaUserTimeout)
+	log.Infof("MIA user order unbook timeout %v", cfg.BroadcastTimeout)
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
@@ -468,7 +467,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	// Having enumerated all users with booked orders, configure the AuthManager
 	// to expect them to connect in a certain time period.
-	authMgr.ExpectUsers(usersWithOrders, 2*cfg.MiaUserTimeout)
+	authMgr.ExpectUsers(usersWithOrders, cfg.BroadcastTimeout)
 
 	// Start the AuthManager and Swapper subsystems after populating the markets
 	// map used by the unbook callbacks, and setting the AuthManager's unbook
