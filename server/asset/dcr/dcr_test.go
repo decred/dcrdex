@@ -157,17 +157,20 @@ type testBlockChain struct {
 
 // The testChain is a "blockchain" to store RPC responses for the Backend
 // node stub to request.
+var testChainMtx sync.RWMutex
 var testChain testBlockChain
 
 // This must be called before using the testNode, and should be called
 // in-between independent tests.
 func cleanTestChain() {
+	testChainMtx.Lock()
 	testChain = testBlockChain{
 		txOuts: make(map[string]*chainjson.GetTxOutResult),
 		txRaws: make(map[chainhash.Hash]*chainjson.TxRawResult),
 		blocks: make(map[chainhash.Hash]*chainjson.GetBlockVerboseResult),
 		hashes: make(map[int64]*chainhash.Hash),
 	}
+	testChainMtx.Unlock()
 }
 
 // A stub to replace rpcclient.Client for offline testing.
@@ -189,6 +192,8 @@ func (testNode) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSma
 // Part of the dcrNode interface.
 func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
+	testChainMtx.RLock()
+	defer testChainMtx.RUnlock()
 	out := testChain.txOuts[outID]
 	// Unfound is not an error for GetTxOut.
 	return out, nil
@@ -196,6 +201,8 @@ func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjs
 
 // Part of the dcrNode interface.
 func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
+	testChainMtx.RLock()
+	defer testChainMtx.RUnlock()
 	tx, found := testChain.txRaws[*txHash]
 	if !found {
 		return nil, fmt.Errorf("test transaction not found\n")
@@ -205,6 +212,8 @@ func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxR
 
 // Part of the dcrNode interface.
 func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+	testChainMtx.RLock()
+	defer testChainMtx.RUnlock()
 	block, found := testChain.blocks[*blockHash]
 	if !found {
 		return nil, fmt.Errorf("test block not found")
@@ -214,6 +223,8 @@ func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*cha
 
 // Part of the dcrNode interface.
 func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+	testChainMtx.RLock()
+	defer testChainMtx.RUnlock()
 	hash, found := testChain.hashes[blockHeight]
 	if !found {
 		return nil, fmt.Errorf("test hash not found")
@@ -223,6 +234,8 @@ func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 
 // Part of the dcrNode interface.
 func (testNode) GetBestBlockHash() (*chainhash.Hash, error) {
+	testChainMtx.RLock()
+	defer testChainMtx.RUnlock()
 	if len(testChain.hashes) == 0 {
 		return nil, fmt.Errorf("no blocks in testChain")
 	}
@@ -271,7 +284,9 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 // Add a transaction output and it's getrawtransaction data.
 func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *chainjson.GetTxOutResult {
 	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].PkScript)
+	testChainMtx.Lock()
 	testChain.txOuts[txOutID(txHash, vout)] = txOut
+	testChainMtx.Unlock()
 	testAddTxVerbose(msgTx, txHash, blockHash, blockHeight, confirmations)
 	return txOut
 }
@@ -279,22 +294,10 @@ func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.H
 // Add a chainjson.TxRawResult to the blockchain.
 func testAddTxVerbose(msgTx *wire.MsgTx, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *chainjson.TxRawResult {
 	tx := testRawTransactionVerbose(msgTx, txHash, blockHash, blockHeight, confirmations)
+	testChainMtx.Lock()
+	defer testChainMtx.Unlock()
 	testChain.txRaws[*txHash] = tx
 	return tx
-}
-
-// Create a *chainjson.GetBlockVerboseResult such as is returned by
-// GetBlockVerbose.
-func testBlockVerbose(blockHash *chainhash.Hash, confirmations, height int64, voteBits uint16) *chainjson.GetBlockVerboseResult {
-	if voteBits&1 != 0 {
-		testChain.hashes[height] = blockHash
-	}
-	return &chainjson.GetBlockVerboseResult{
-		Hash:          blockHash.String(),
-		Confirmations: confirmations,
-		Height:        height,
-		VoteBits:      voteBits,
-	}
 }
 
 // Add a GetBlockVerboseResult to the blockchain.
@@ -302,7 +305,17 @@ func testAddBlockVerbose(blockHash *chainhash.Hash, confirmations int64, height 
 	if blockHash == nil {
 		blockHash = randomHash()
 	}
-	testChain.blocks[*blockHash] = testBlockVerbose(blockHash, confirmations, int64(height), voteBits)
+	testChainMtx.Lock()
+	defer testChainMtx.Unlock()
+	if voteBits&1 != 0 {
+		testChain.hashes[int64(height)] = blockHash
+	}
+	testChain.blocks[*blockHash] = &chainjson.GetBlockVerboseResult{
+		Hash:          blockHash.String(),
+		Confirmations: confirmations,
+		Height:        int64(height),
+		VoteBits:      voteBits,
+	}
 	return blockHash
 }
 
@@ -887,7 +900,9 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.add(testChain.blocks[*betterHash])
 	dcr.blockCache.reorg(int64(txHeight))
 	// Remove the txout from the blockchain, since dcrd would no longer return it.
+	testChainMtx.Lock()
 	delete(testChain.txOuts, txOutID(txHash, msg.vout))
+	testChainMtx.Unlock()
 	_, err = utxo.Confirmations()
 	if err == nil {
 		t.Fatalf("case 7 - received no error for orphaned transaction")
@@ -1109,7 +1124,9 @@ func TestRedemption(t *testing.T) {
 	}
 
 	// Missing transaction
+	testChainMtx.Lock()
 	delete(testChain.txRaws, *txHash)
+	testChainMtx.Unlock()
 	_, err = dcr.Redemption(redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
