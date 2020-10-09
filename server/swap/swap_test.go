@@ -808,7 +808,7 @@ func (rig *testRig) auditSwap_taker() error {
 		select {
 		case <-rig.auth.newReq:
 		default:
-			return fmt.Errorf("no match ntfn")
+			return fmt.Errorf("no taker audit request")
 		}
 	}
 	req := rig.auth.getReq(matchInfo.taker.acct)
@@ -827,7 +827,7 @@ func (rig *testRig) auditSwap_maker() error {
 		select {
 		case <-rig.auth.newReq:
 		default:
-			return fmt.Errorf("no match ntfn")
+			return fmt.Errorf("no maker audit request")
 		}
 	}
 	req := rig.auth.getReq(matchInfo.maker.acct)
@@ -997,7 +997,7 @@ func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedee
 		select {
 		case <-rig.auth.newReq:
 		default:
-			return fmt.Errorf("no match ntfn")
+			return fmt.Errorf("no redemption request")
 		}
 	}
 	req := rig.auth.getReq(user.acct)
@@ -1369,8 +1369,8 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 }
 
 func TestMain(m *testing.M) {
-	recheckInterval = time.Millisecond * 20
-	txWaitExpiration = recheckInterval * 10
+	recheckInterval = time.Millisecond * 40
+	txWaitExpiration = time.Millisecond * 200
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	UseLogger(logger)
 	db.UseLogger(logger)
@@ -1645,7 +1645,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
-	ntfnTimeout := func(timeout time.Duration) {
+	ntfnWait := func(timeout time.Duration) {
 		t.Helper()
 		select {
 		case <-rig.auth.newNtfn:
@@ -1696,8 +1696,8 @@ func TestBroadcastTimeouts(t *testing.T) {
 			t.Fatalf("no penalty at step %d (status %v)", i, step)
 		}
 		// Make sure the specified user has a cancellation for this order
-		ntfnTimeout(rig.swapper.bTimeout * 2) // wait for both revoke requests, no particular order
-		ntfnTimeout(rig.swapper.bTimeout * 2)
+		ntfnWait(rig.swapper.bTimeout * 3) // wait for both revoke requests, no particular order
+		ntfnWait(rig.swapper.bTimeout * 3)
 		checkRevokeMatch(jerk, i)
 		checkRevokeMatch(victim, i)
 		return true
@@ -1967,7 +1967,7 @@ func TestState(t *testing.T) {
 	}
 
 	// Wait for a request up to timeout.
-	reqTimeout := func(timeout time.Duration) {
+	reqWait := func(timeout time.Duration) {
 		t.Helper()
 		select {
 		case <-rig.auth.newReq:
@@ -2113,7 +2113,8 @@ func TestState(t *testing.T) {
 	sendBlock(abc) // trigger processBlock, tryConfirmSwap
 	// processInit should have succeeded, requesting an audit ack from taker of
 	// the maker's contract.
-	reqTimeout(recheckInterval * 2) // 'audit' sent, but no ack resp yet
+	reqWait(recheckInterval * 10) // wait for audit request
+	// 'audit' sent, but no ack resp yet
 
 	matchInfo.db.makerSwap = makerSwap // for taker's audit
 
@@ -2199,7 +2200,8 @@ func TestState(t *testing.T) {
 	sendBlock(xyz) // trigger processBlock, tryConfirmSwap
 	// processInit should have succeeded, requesting an ack from taker of the
 	// maker's contract.
-	reqTimeout(recheckInterval * 2) // 'audit' sent, but no ack resp yet
+	reqWait(recheckInterval * 10) // wait for audit request
+	// 'audit' sent, but no ack resp yet
 
 	matchInfo.db.takerSwap = takerSwap // for maker's audit
 
@@ -2280,7 +2282,7 @@ func TestState(t *testing.T) {
 	xyz.setRedemption(makerRedeem.coin, makerRedeem.cpSwapCoin, true)
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	// sendBlock(xyz) // trigger processBlock, redeem status check (not needed!)
-	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
+	reqWait(recheckInterval * 10) // 'redemption' sent, but no ack resp yet
 	// processRedeem should have succeeded, requesting an ack from taker of the maker's redeem.
 
 	matchInfo.db.makerRedeem = makerRedeem // for taker's redeem ack
