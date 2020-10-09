@@ -15,54 +15,36 @@ import (
 	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/client/asset/ltc" // register ltc asset
-	"decred.org/dcrdex/client/cmd/dexc/ui"
 	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
-	"github.com/decred/slog"
 )
-
-var log slog.Logger
 
 func main() {
 	appCtx, cancel := context.WithCancel(context.Background())
 
-	// Parse configuration and set up initial logging.
-	//
-	// DRAFT NOTE: It's a little odd that the Configure function is from the ui
-	// package. The ui.Config struct is used both here and in ui. Could create  a
-	// types package used by both, but doing it this way works for now.
-	cfg, err := ui.Configure()
+	// Parse configuration.
+	cfg, err := configure()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "configration error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if cfg.TUI {
-		// Run in TUI mode.
-		ui.Run(appCtx)
-		os.Exit(0)
-	}
-
 	// If explicitly running without web server then you must run the rpc
-	// server or the terminal ui.
+	// server.
 	if cfg.NoWeb && !cfg.RPCOn {
-		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
+		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc is specified\n")
 		os.Exit(1)
 	}
 
-	// If --tui is not specified, don't create the tview application. Initialize
-	// logging with the standard stdout logger.
-	logStdout := func(msg []byte) {
-		os.Stdout.Write(msg)
-	}
+	// Initialize logging.
 	utc := !cfg.LocalLogs
 	if cfg.Net == dex.Simnet {
 		utc = false
 	}
-	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel, utc)
+	logMaker := initLogging(cfg.DebugLevel, utc)
 	log = logMaker.Logger("DEXC")
 	log.Infof("%s version %v (Go version %s)", version.AppName, version.Version(), runtime.Version())
 	if utc {
@@ -70,6 +52,7 @@ func main() {
 			time.Now().Local().Format("15:04:05 MST"))
 	}
 
+	// Prepare the Core.
 	clientCore, err := core.New(&core.Config{
 		DBPath:       cfg.DBPath, // global set in config.go
 		Net:          cfg.Net,
@@ -157,5 +140,5 @@ func main() {
 done:
 	wg.Wait()
 	log.Info("Exiting dexc main.")
-	ui.Close()
+	closeFileLogger()
 }
