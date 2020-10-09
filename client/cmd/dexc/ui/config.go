@@ -56,25 +56,27 @@ func setNet(applicationDirectory, net string) string {
 
 // Config is the configuration for the DEX client application.
 type Config struct {
-	AppData    string `long:"appdata" description:"Path to application directory."`
-	Config     string `long:"config" description:"Path to an INI configuration file."`
-	DBPath     string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
-	RPCOn      bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCAddr    string `long:"rpcaddr" description:"RPC server listen address"`
-	RPCUser    string `long:"rpcuser" description:"RPC server user name"`
-	RPCPass    string `long:"rpcpass" description:"RPC server password"`
-	RPCCert    string `long:"rpccert" description:"RPC server certificate file location"`
-	RPCKey     string `long:"rpckey" description:"RPC server key file location"`
-	WebAddr    string `long:"webaddr" description:"HTTP server address"`
-	NoWeb      bool   `long:"noweb" description:"disable the web server."`
-	TUI        bool   `long:"tui" description:"enable the terminal-based user interface."`
-	Testnet    bool   `long:"testnet" description:"use testnet"`
-	Simnet     bool   `long:"simnet" description:"use simnet"`
-	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
-	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
-	LocalLogs  bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
-	ShowVer    bool   `short:"V" long:"version" description:"Display version information and exit"`
-	Net        dex.Network
+	AppData      string `long:"appdata" description:"Path to application directory."`
+	Config       string `long:"config" description:"Path to an INI configuration file."`
+	DBPath       string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
+	RPCOn        bool   `long:"rpc" description:"turn on the rpc server"`
+	RPCAddr      string `long:"rpcaddr" description:"RPC server listen address"`
+	RPCUser      string `long:"rpcuser" description:"RPC server user name"`
+	RPCPass      string `long:"rpcpass" description:"RPC server password"`
+	RPCCert      string `long:"rpccert" description:"RPC server certificate file location"`
+	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
+	WebAddr      string `long:"webaddr" description:"HTTP server address"`
+	NoWeb        bool   `long:"noweb" description:"disable the web server."`
+	TUI          bool   `long:"tui" description:"enable the terminal-based user interface."`
+	Testnet      bool   `long:"testnet" description:"use testnet"`
+	Simnet       bool   `long:"simnet" description:"use simnet"`
+	ReloadHTML   bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	DebugLevel   string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
+	ShowVer      bool   `short:"V" long:"version" description:"Display version information and exit"`
+	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
+	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
+	Net          dex.Network
 }
 
 var defaultConfig = Config{
