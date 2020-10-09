@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package ui
+package main
 
 import (
 	"fmt"
@@ -67,7 +67,6 @@ type Config struct {
 	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
 	WebAddr      string `long:"webaddr" description:"HTTP server address"`
 	NoWeb        bool   `long:"noweb" description:"disable the web server."`
-	TUI          bool   `long:"tui" description:"enable the terminal-based user interface."`
 	Testnet      bool   `long:"testnet" description:"use testnet"`
 	Simnet       bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML   bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
@@ -87,8 +86,8 @@ var defaultConfig = Config{
 	WebAddr:    defaultWebAddr,
 }
 
-// Configure processes the application configuration.
-func Configure() (*Config, error) {
+// configure processes the application configuration.
+func configure() (*Config, error) {
 	// Pre-parse the command line options to see if an alternative config file
 	// or the version flag was specified. Override any environment variables
 	// with parsed command line flags.
