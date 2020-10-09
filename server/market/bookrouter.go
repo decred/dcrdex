@@ -481,7 +481,7 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 // A client sends a request to this route to start an order book subscription,
 // downloading the existing order book and receiving updates as a feed of
 // notifications.
-func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (r *BookRouter) handleOrderBook(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	sub := new(msgjson.OrderBookSubscription)
 	err := json.Unmarshal(msg.Payload, sub)
 	if err != nil {
@@ -512,7 +512,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 // handleUnsubOrderBook is the handler for the non-authenticated
 // 'unsub_orderbook' route. Clients use this route to unsubscribe from an
 // order book.
-func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (r *BookRouter) handleUnsubOrderBook(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	unsub := new(msgjson.UnsubOrderBook)
 	err := json.Unmarshal(msg.Payload, unsub)
 	if err != nil {

@@ -28,7 +28,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v2"
 	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v5"
+	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	walletjson "github.com/decred/dcrwallet/rpc/jsonrpc/types"

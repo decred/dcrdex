@@ -68,7 +68,7 @@ type Wallet interface {
 	// available, immature, and locked. Balance takes a list of minimum
 	// confirmations for which to calculate maturity, and returns a list of
 	// corresponding *Balance.
-	Balance() (*Balance, error)
+	Balance(context.Context) (*Balance, error)
 	// FundOrder selects coins for use in an order. The coins will be locked,
 	// and will not be returned in subsequent calls to FundOrder or calculated
 	// in calls to Available, unless they are unlocked with ReturnCoins. The
@@ -76,34 +76,34 @@ type Wallet interface {
 	// Equal number of coins and redeemed scripts must be returned. A nil or
 	// empty dex.Bytes should be appended to the redeem scripts collection for
 	// coins with no redeem script.
-	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, err error)
+	FundOrder(context.Context, *Order) (coins Coins, redeemScripts []dex.Bytes, err error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
-	ReturnCoins(Coins) error
+	ReturnCoins(context.Context, Coins) error
 	// FundingCoins gets funding coins for the coin IDs. The coins are locked.
 	// This method might be called to reinitialize an order from data stored
 	// externally. This method will only return funding coins, e.g. unspent
 	// transaction outputs.
-	FundingCoins([]dex.Bytes) (Coins, error)
+	FundingCoins(context.Context, []dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can
 	// be used to refund a failed transaction. The Input coins are unlocked where
 	// necessary to ensure accurate balance reporting in cases where the wallet
 	// includes spent coins as part of the locked balance just because they were
 	// previously locked.
-	Swap(*Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
+	Swap(context.Context, *Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
-	Redeem(redeems []*Redemption) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
+	Redeem(ctx context.Context, redeems []*Redemption) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
-	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
+	SignMessage(context.Context, Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
 	// AuditContract retrieves information about a swap contract on the
 	// blockchain. This would be used to verify the counter-party's contract
 	// during a swap. If the coin cannot be found for the coin ID, the
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
 	// to properly handle network latency.
-	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
+	AuditContract(ctx context.Context, coinID, contract dex.Bytes) (AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
 	// is also returned, but reaching this time does not necessarily mean the
@@ -131,29 +131,29 @@ type Wallet interface {
 	// wallet does not store it, even though it was known when the init transaction
 	// was created. The client should store this information for persistence across
 	// sessions.
-	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
+	Refund(ctx context.Context, coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
-	Address() (string, error)
+	Address(context.Context) (string, error)
 	// Unlock unlocks the exchange wallet.
-	Unlock(pw string) error
+	Unlock(ctx context.Context, pw string) error
 	// Lock locks the exchange wallet.
-	Lock() error
+	Lock(context.Context) error
 	// Locked will be true if the wallet is currently locked.
-	Locked() bool
+	Locked(context.Context) bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, feeAmt uint64) (Coin, error)
+	PayFee(ctx context.Context, address string, feeAmt uint64) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
-	Confirmations(id dex.Bytes) (uint32, error)
+	Confirmations(ctx context.Context, id dex.Bytes) (uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
-	Withdraw(address string, value uint64) (Coin, error)
+	Withdraw(ctx context.Context, address string, value uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.
-	SyncStatus() (synced bool, progress float32, err error)
+	SyncStatus(context.Context) (synced bool, progress float32, err error)
 }
 
 // Balance is categorized information about a wallet's balance.
@@ -179,7 +179,7 @@ type Coin interface {
 	Value() uint64
 	// Confirmations is the number of confirmations on this Coin's block. If the
 	// coin becomes spent, Confirmations should return an error.
-	Confirmations() (uint32, error)
+	Confirmations(context.Context) (uint32, error)
 }
 
 // Coins a collection of coins as returned by Fund.

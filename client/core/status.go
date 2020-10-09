@@ -4,6 +4,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -66,7 +67,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 					c.log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, trade, match))
 					// revokeMatch only returns an error for a missing match ID,
 					// and we already checked in compareServerMatches.
-					trade.revokeMatch(match.id, false)
+					trade.revokeMatch(c.ctx, match.id, false)
 					continue
 				}
 				c.resolveConflictWithServerData(dc, trade, match, srvData)
@@ -82,7 +83,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 // by the server. A matchConflictResolver may update the MetaMatch, but need
 // not save the changes to persistent storage. Changes will be saved by
 // resolveConflictWithServerData.
-type matchConflictResolver func(*dexConnection, *trackedTrade, *matchTracker, *msgjson.MatchStatusResult)
+type matchConflictResolver func(context.Context, *dexConnection, *trackedTrade, *matchTracker, *msgjson.MatchStatusResult)
 
 // conflictResolvers are the resolvers specified for each MatchStatus combo.
 var conflictResolvers = []struct {
@@ -140,7 +141,7 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 
 	resolver := conflictResolver(match.MetaData.Status, srvStatus)
 	if resolver != nil {
-		resolver(dc, trade, match, srvData)
+		resolver(c.ctx, dc, trade, match, srvData)
 	} else {
 		// We don't know how to handle this. Set the swapErr, and self-revoke
 		// the match. This condition would be virtually impossible, because it
@@ -166,7 +167,7 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 // our status is NewlyMatched, but the server is at MakerSwapCast. If we are the
 // taker, we likely missed an audit request and we can process the match_status
 // data to get caught up.
-func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveMissedMakerAudit(ctx context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	var err error
 	defer func() {
@@ -191,7 +192,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		return
 	}
 
-	err = trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract)
+	err = trade.auditContract(ctx, match, srvData.MakerSwap, srvData.MakerContract)
 	if err != nil {
 		err = fmt.Errorf("auditContract error during match status resolution. %s: %w", logID, err)
 	}
@@ -201,7 +202,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 // our status is MakerSwapCast, but the server is at TakerSwapCast. If we are
 // the maker, we likely missed an audit request and we can process the
 // match_status data to get caught up.
-func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveMissedTakerAudit(ctx context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	var err error
 	defer func() {
@@ -224,7 +225,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		err = fmt.Errorf("Server is reporting a match with status TakerSwapCast, but didn't include the contract data. %s", logID)
 		return
 	}
-	err = trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract)
+	err = trade.auditContract(ctx, match, srvData.TakerSwap, srvData.TakerContract)
 	if err != nil {
 		err = fmt.Errorf("auditContract error during match status resolution. %s: %w", logID, err)
 	}
@@ -234,7 +235,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 // when our status is MakerSwapCast, but the server is at NewlyMatched. If we're
 // the maker, we probably encountered an issue while sending our init request,
 // so we'll defer to resendPendingRequests to handle it in the next tick.
-func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveServerMissedMakerInit(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, there's nothing we can do.
 	if match.Match.Side != order.Maker {
@@ -259,7 +260,7 @@ func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match 
 // when our status is TakerSwapCast, but the server is at MakerSwapCast. If
 // we're the taker, the server likely missed our init request, so we'll defer to
 // resendPendingRequests to handle it in the next tick.
-func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveServerMissedTakerInit(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the taker, there's nothing we can do.
 	if match.Match.Side != order.Taker {
@@ -283,7 +284,7 @@ func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match 
 // when our status is TakerSwapCast, but the server is at MakerRedeemed. If
 // we're the taker, we probably missed the redemption request from the server,
 // and we can process the match_status data to get caught up.
-func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveMissedMakerRedemption(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	var err error
 	defer func() {
@@ -321,7 +322,7 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 // status is MakerRedeemed, but the server is at MatchComplete. Since the server
 // does not send redemption requests to the maker following taker redeem, this
 // indicates the match status was just not updated after sending our redeem.
-func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveMatchComplete(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	var err error
 	defer func() {
@@ -348,7 +349,7 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 // when our status is MakerRedeemed, but the server is at TakerSwapCast. If
 // we're the maker, the server probably missed our redeem request, so we'll
 // defer to resendPendingRequests to handle it in the next tick.
-func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveServerMissedMakerRedeem(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, we can't do anything about this.
 	if match.Match.Side != order.Maker {
@@ -371,7 +372,7 @@ func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 // when our status is MatchComplete, but the server is at MakerRedeemed. If
 // we're the taker, the server probably missed our redeem request, so we'll
 // defer to resendPendingRequests to handle it in the next tick.
-func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+func resolveServerMissedTakerRedeem(_ context.Context, dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're the Maker, we really are done. The server is in MakerRedeemed as
 	// it's waiting on the taker.

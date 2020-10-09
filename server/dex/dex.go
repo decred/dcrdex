@@ -211,7 +211,7 @@ func marketSubSysName(name string) string {
 	return fmt.Sprintf("Market[%s]", name)
 }
 
-func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (dm *DEX) handleDEXConfig(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 
