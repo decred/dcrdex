@@ -71,6 +71,10 @@ type WalletForm struct {
 // amounts in addition to other balance details stored in db.
 type WalletBalance struct {
 	*db.Balance
+	// OrderLocked is the total amount of funds that is currently locked
+	// for swap, but not actually swapped yet. This amount is also included
+	// in the `Locked` balance value.
+	OrderLocked uint64 `json:"orderlocked"`
 	// ContractLocked is the total amount of funds locked in unspent
 	// (i.e. unredeemed / unrefunded) swap contracts.
 	ContractLocked uint64 `json:"contractlocked"`
@@ -184,6 +188,7 @@ type Order struct {
 	Canceled     bool              `json:"canceled"`
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
 	FundingCoins []dex.Bytes       `json:"fundingCoins"`
+	LockedAmt    uint64
 	Rate         uint64            `json:"rate"` // limit only
 	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
 }
@@ -253,15 +258,17 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 // Market is market info.
 type Market struct {
-	Name            string   `json:"name"`
-	BaseID          uint32   `json:"baseid"`
-	BaseSymbol      string   `json:"basesymbol"`
-	QuoteID         uint32   `json:"quoteid"`
-	QuoteSymbol     string   `json:"quotesymbol"`
-	EpochLen        uint64   `json:"epochlen"`
-	StartEpoch      uint64   `json:"startepoch"`
-	MarketBuyBuffer float64  `json:"buybuffer"`
-	Orders          []*Order `json:"orders"`
+	Name             string   `json:"name"`
+	BaseID           uint32   `json:"baseid"`
+	BaseSymbol       string   `json:"basesymbol"`
+	QuoteID          uint32   `json:"quoteid"`
+	QuoteSymbol      string   `json:"quotesymbol"`
+	EpochLen         uint64   `json:"epochlen"`
+	StartEpoch       uint64   `json:"startepoch"`
+	MarketBuyBuffer  float64  `json:"buybuffer"`
+	Orders           []*Order `json:"orders"`
+	BaseFundsLocked  uint64   `json:"basefundslocked"`
+	QuoteFundsLocked uint64   `json:"quotefundslocked"`
 }
 
 // Display returns an ID string suitable for displaying in a UI.

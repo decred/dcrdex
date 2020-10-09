@@ -161,6 +161,8 @@ type Balance struct {
 	Immature uint64 `json:"immature"`
 	// Locked is the balance that that is currently locked for swap, but
 	// not actually swapped yet.
+	// TODO: this may actually be more than the balance locked for swap,
+	// if user manually locks some coins for example.
 	Locked uint64 `json:"locked"`
 }
 
