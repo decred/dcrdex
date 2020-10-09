@@ -56,8 +56,7 @@ const (
 
 		-- participant/B (taker) REDEEM data
 		bRedeemCoinID BYTEA,
-		bRedeemTime INT8,         -- server time stamp
-		aSigAckOfBRedeem BYTEA   -- counterparty's (initiator) sig with ack of participant REDEEM data
+		bRedeemTime INT8          -- server time stamp
 	)`
 
 	AddMatchesForgivenColumn = `ALTER TABLE %s
@@ -67,7 +66,7 @@ const (
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
 		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
 		aRedeemCoinID, aRedeemSecret, aRedeemTime, bSigAckOfARedeem,
-		bRedeemCoinID, bRedeemTime, aSigAckOfBRedeem
+		bRedeemCoinID, bRedeemTime
 	FROM %s WHERE matchid = $1;`
 
 	InsertMatch = `INSERT INTO %s (matchid, takerSell,
@@ -172,21 +171,11 @@ const (
 		aRedeemCoinID = $3, aRedeemSecret = $4, aRedeemTime = $5
 	WHERE matchid = $1;`
 	SetParticipantRedeemData = `UPDATE %s SET status = $2,
-		bRedeemCoinID = $3, bRedeemTime = $4
+		bRedeemCoinID = $3, bRedeemTime = $4, active = FALSE
 	WHERE matchid = $1;`
 
-	// Both SetParticipantRedeemAckSig and SetInitiatorRedeemAckSig may set
-	// active=FALSE since this can be the final step in swap negotiation. Either
-	// party may ack first. Note that this can happen before status is set to
-	// MatchComplete on account of the confirmation requirement.
-
 	SetParticipantRedeemAckSig = `UPDATE %s
-		SET bSigAckOfARedeem = $2,
-			active = (aSigAckOfBRedeem IS NULL) -- set inactive if aSigAckOfBRedeem is set
-		WHERE matchid = $1;`
-	SetInitiatorRedeemAckSig = `UPDATE %s
-		SET aSigAckOfBRedeem = $2,
-			active = (bSigAckOfARedeem IS NULL) -- set inactive if bSigAckOfARedeem is set
+		SET bSigAckOfARedeem = $2
 		WHERE matchid = $1;`
 
 	SetSwapDone = `UPDATE %s SET active = FALSE

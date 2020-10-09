@@ -366,9 +366,9 @@ func matchStatusesByID(ctx context.Context, dbe *sql.DB, aid account.AccountID, 
 //
 // For each match, a successful swap will generate the following data that must
 // be stored:
-// - 6 client signatures. Both parties sign the data to acknowledge (1) the
-//   match ack, (2) the counterparty's contract script and contract transaction,
-//   and (3) the counterparty's redemption transaction.
+// - 5 client signatures. Both parties sign the data to acknowledge (1) the
+//   match ack, and (2) the counterparty's contract script and contract
+//   transaction. Plus, the taker acks the makers's redemption transaction.
 // - 2 swap contracts and the associated transaction outputs (more generally,
 //   coinIDs), one on each party's blockchain.
 // - the secret hash from the initiator contract
@@ -400,8 +400,7 @@ func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapDa
 			&sd.ContractBAckSig,
 			&sd.RedeemACoinID, &sd.RedeemASecret, &redeemATime,
 			&sd.RedeemAAckSig,
-			&sd.RedeemBCoinID, &redeemBTime,
-			&sd.RedeemBAckSig)
+			&sd.RedeemBCoinID, &redeemBTime)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -510,16 +509,6 @@ func (a *Archiver) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return a.updateMatchStmt(mid, internal.SetParticipantRedeemData,
 		mid.MatchID, uint8(order.MatchComplete), coinID, timestamp)
-}
-
-// SaveRedeemAckSigA records party A's signature acknowledging party B's
-// redemption. Since this may be the final step in match negotiation, the match
-// is also flagged as inactive (not the same as archival or even status of
-// MatchComplete, which is set by SaveRedeemB) if the participant's redeem ack
-// signature is already set.
-func (a *Archiver) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return a.updateMatchStmt(mid, internal.SetInitiatorRedeemAckSig,
-		mid.MatchID, sig)
 }
 
 // SetMatchInactive flags the match as done/inactive. This is not necessary if

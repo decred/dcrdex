@@ -575,7 +575,7 @@ func (t *trackedTrade) isActive() bool {
 		t.dc.log.Tracef("Checking match %v (%v) in status %v. "+
 			"Order: %v, Refund coin: %v, Script: %x, Revoked: %v", match.id,
 			match.Match.Side, match.MetaData.Status, t.ID(),
-			proof.RefundCoin, proof.Script, proof.IsRevoked)
+			proof.RefundCoin, proof.Script, proof.IsRevoked())
 		if t.matchIsActive(match) {
 			return true
 		}
@@ -587,17 +587,20 @@ func (t *trackedTrade) isActive() bool {
 // it is revoked and this side of the match requires no further action like
 // refund or auto-redeem.
 func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
-	if match.MetaData.Status == order.MatchComplete {
+	proof := &match.MetaData.Proof
+	// MatchComplete only means inactive for maker if redeem request was
+	// accepted, but MatchComplete may be set immediately after bcast.
+	if match.MetaData.Status == order.MatchComplete && len(proof.Auth.RedeemSig) > 0 {
 		return false
 	}
 
 	// Refunded matches are inactive regardless of status.
-	if len(match.MetaData.Proof.RefundCoin) > 0 {
+	if len(proof.RefundCoin) > 0 {
 		return false
 	}
 
 	// Revoked matches may need to be refunded or auto-redeemed first.
-	if match.MetaData.Proof.IsRevoked() {
+	if proof.IsRevoked() {
 		// - NewlyMatched requires no further action from either side
 		// - MakerSwapCast requires no further action from the taker
 		// - (TakerSwapCast requires action on both sides)
@@ -1374,8 +1377,10 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 					match: match,
 				}})
 			}
+			ack.Sig = nil // in case of partial unmarshal
 			errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
 		} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
+			ack.Sig = nil // don't record an invalid signature
 			errs.add("'redeem' ack signature error for match %s: %v", match.id, err)
 		}
 		// Update the match db data with the redeem details.
@@ -1389,7 +1394,13 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 		match.SetStatus(order.MatchComplete)
 		proof.TakerRedeem = coinID
 	} else {
-		match.SetStatus(order.MakerRedeemed)
+		if len(auth.RedeemSig) > 0 {
+			// As maker, this is the end. However, this diverges from server,
+			// which is still needs taker's redeem.
+			match.SetStatus(order.MatchComplete)
+		} else {
+			match.SetStatus(order.MakerRedeemed)
+		}
 		proof.MakerRedeem = coinID
 	}
 	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
@@ -1734,34 +1745,22 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	auth.RedemptionSig = redemption.Sig
 	auth.RedemptionStamp = redemption.Time
 
-	if dbMatch.Side == order.Maker {
-		if err := t.processTakersRedemption(match, redemption.CoinID); err != nil {
-			errs.addErr(err)
-		}
-	} else {
-		if err := t.processMakersRedemption(match, redemption.CoinID, redemption.Secret); err != nil {
+	if dbMatch.Side == order.Taker {
+		err = t.processMakersRedemption(match, redemption.CoinID, redemption.Secret)
+		if err != nil {
 			errs.addErr(err)
 		}
 	}
+	// The server does not send a redemption request to the maker for the
+	// taker's redeem since match negotiation is complete server-side when the
+	// taker redeems, and it is complete client-side when we redeem. If we are
+	// both sides, there is another trackedTrade and matchTracker for that side.
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
 		errs.add("error storing match info in database: %v", err)
 	}
 	return errs.ifAny()
-}
-
-func (t *trackedTrade) processTakersRedemption(match *matchTracker, coinID []byte) error {
-	if match.Match.Side == order.Taker {
-		return fmt.Errorf("processTakersRedemption called when we are the taker, which is nonsense. order = %s, match = %s", t.ID(), match.id)
-	}
-	// You are the maker, this is the taker's redeem.
-	redeemAsset := t.wallets.fromAsset
-	t.dc.log.Debugf("Notified of taker's redemption (%s: %v) for order %v...",
-		redeemAsset.Symbol, coinIDString(redeemAsset.ID, coinID), t.ID())
-	match.SetStatus(order.MatchComplete)
-	match.MetaData.Proof.TakerRedeem = coinID
-	return nil
 }
 
 func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secret []byte) error {

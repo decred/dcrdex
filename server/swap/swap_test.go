@@ -914,8 +914,8 @@ func (rig *testRig) redeem_taker(checkStatus bool) error {
 	tracker := rig.getTracker()
 	// Check the match status
 	if checkStatus {
-		if tracker.Status != order.MatchComplete {
-			return fmt.Errorf("unexpected swap status %d after taker redeem notification", tracker.Status)
+		if tracker != nil {
+			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
 		}
 		err := rig.checkResponse(matchInfo.taker, "redeem")
 		if err != nil {
@@ -953,22 +953,6 @@ func (rig *testRig) ackRedemption_taker(checkSig bool) error {
 		tracker := rig.getTracker()
 		if !bytes.Equal(tracker.Sigs.TakerRedeem, matchInfo.taker.sig) {
 			return fmt.Errorf("expected taker redemption signature '%x', got '%x'", matchInfo.taker.sig, tracker.Sigs.TakerRedeem)
-		}
-	}
-	return nil
-}
-
-// Maker: Acknowledge the DEX 'redemption' request.
-func (rig *testRig) ackRedemption_maker(checkSig bool) error {
-	matchInfo := rig.matchInfo
-	err := rig.ackRedemption(matchInfo.maker, matchInfo.makerOID, matchInfo.db.takerRedeem)
-	if err != nil {
-		return err
-	}
-	if checkSig {
-		tracker := rig.getTracker()
-		if !bytes.Equal(tracker.Sigs.MakerRedeem, matchInfo.maker.sig) {
-			return fmt.Errorf("expected maker redemption signature '%x', got '%x'", matchInfo.maker.sig, tracker.Sigs.MakerRedeem)
 		}
 	}
 	return nil
@@ -1405,7 +1389,6 @@ func testSwap(t *testing.T, rig *testRig) {
 		ensureNilErr(rig.redeem_maker(true))
 		ensureNilErr(rig.ackRedemption_taker(true))
 		ensureNilErr(rig.redeem_taker(true))
-		ensureNilErr(rig.ackRedemption_maker(true))
 	}
 }
 
@@ -1810,7 +1793,6 @@ func TestSigErrors(t *testing.T) {
 	testAction(rig.redeem_maker, maker)
 	testAction(rig.ackRedemption_taker, taker)
 	testAction(rig.redeem_taker, taker)
-	testAction(rig.ackRedemption_maker, maker)
 }
 
 func TestMalformedSwap(t *testing.T) {
@@ -2260,10 +2242,9 @@ func TestState(t *testing.T) {
 	// "broadcast" the redeem and signal a new block.
 	xyz.setRedemption(makerRedeem.coin, true)
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
-	sendBlock(xyz) // trigger processBlock, redeem status check (not needed!)
-	// processRedeem should have succeeded, requesting an ack from taker of the
-	// maker's redeem.
+	// sendBlock(xyz) // trigger processBlock, redeem status check (not needed!)
 	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
+	// processRedeem should have succeeded, requesting an ack from taker of the maker's redeem.
 
 	matchInfo.db.makerRedeem = makerRedeem // for taker's redeem ack
 
@@ -2336,11 +2317,11 @@ func TestState(t *testing.T) {
 	// "broadcast" the redeem and signal a new block.
 	abc.setRedemption(takerRedeem.coin, true)
 	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
-	sendBlock(abc) // trigger processBlock, redeem status check (not needed!)
-	// processRedeem should have succeeded, requesting an ack from maker of the taker's redeem.
-	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
+	// sendBlock(abc) // trigger processBlock, redeem status check (not needed!)
+	tickMempool() // latencyQ recheck
+	// processRedeem should have succeeded, deleting the match, no more requests.
 
-	matchInfo.db.takerRedeem = takerRedeem // for maker's redeem ack
+	matchInfo.db.takerRedeem = takerRedeem
 
 	// The match status should now be MatchComplete, and there should be one ack
 	// (maker redemption ack request).
@@ -2349,6 +2330,10 @@ func TestState(t *testing.T) {
 
 	if tracker.Status != order.MatchComplete {
 		t.Fatalf("match not marked as MatchComplete: %v", tracker.Status)
+	}
+	tracker = rig.getTracker()
+	if tracker != nil {
+		t.Fatalf("match not deleted")
 	}
 
 	state, err = loadLatestState()
@@ -2360,31 +2345,20 @@ func TestState(t *testing.T) {
 		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
 	}
 
-	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MatchComplete {
-		t.Fatalf("state's match tracker in status %v, expected %v",
-			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MatchComplete)
+	if state.MatchTrackers[matchInfo.matchID] != nil {
+		t.Fatalf("state's match tracker in status %v, expected it to be deleted",
+			state.MatchTrackers[matchInfo.matchID].Match.Status)
 	}
 
 	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
-	if len(rig.swapper.matches) != 1 {
-		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	if len(rig.swapper.matches) != 0 {
+		t.Errorf("expected 0 tracked match, got %d", len(rig.swapper.matches))
 	}
 
-	tracker = rig.getTracker()
-	if tracker.Status != order.MatchComplete {
-		t.Fatalf("match not marked as MatchComplete: %v", tracker.Status)
+	// match should be gone now
+	if rig.getTracker() != nil {
+		t.Fatalf("expected matchTracker to be removed")
 	}
-
-	// TODO: Don't require maker redemption acknowledgement. Sending a block
-	// here should cause the match to be removed from Swapper.
-
-	// sendBlock(abc)
-	// tickMempool() // processBlock -> match removed
-
-	// // match should be gone now
-	// if rig.getTracker() != nil {
-	// 	t.Fatalf("expected matchTracker to be removed")
-	// }
 }

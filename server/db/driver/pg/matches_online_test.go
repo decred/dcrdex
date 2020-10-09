@@ -376,24 +376,6 @@ func TestSetSwapData(t *testing.T) {
 			swapData.RedeemBTime, redeemBTime)
 	}
 
-	// Party A's signature for acknowledgement of B's redemption
-	redeemAckSigA := randomBytes(73)
-	if err = archie.SaveRedeemAckSigA(mid, redeemAckSigA); err != nil {
-		t.Fatal(err)
-	}
-
-	status, swapData, err = archie.SwapData(mid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status != order.MatchComplete {
-		t.Errorf("Got status %v, expected %v", status, order.MatchComplete)
-	}
-	if !bytes.Equal(swapData.RedeemBAckSig, redeemAckSigA) {
-		t.Fatalf("RedeemBAckSig incorrect. got %v, expected %v",
-			swapData.RedeemBAckSig, redeemAckSigA)
-	}
-
 	// Check active flag via MatchByID.
 	if err = checkMatch(order.MatchComplete, false); err != nil {
 		t.Fatal(err)
@@ -886,8 +868,8 @@ func TestMatchStatuses(t *testing.T) {
 		generateMatch(t, order.MakerSwapCast, false, user1, user2),                         // 1
 		generateMatch(t, order.TakerSwapCast, true, user1, user2),                          // 2
 		generateMatch(t, order.MakerRedeemed, true, user1, user2),                          // 3
-		generateMatch(t, order.MatchComplete, false, user1, user2),                         // 4
-		generateMatch(t, order.MatchComplete, false, randomAccountID(), randomAccountID()), // 5
+		generateMatch(t, order.MatchComplete, false, user1, user2),                         // 4 -- inactive via SaveRedeemB
+		generateMatch(t, order.MakerRedeemed, false, randomAccountID(), randomAccountID()), // 5
 	}
 
 	idList := func(idxs ...int) []order.MatchID {
@@ -918,12 +900,12 @@ func TestMatchStatuses(t *testing.T) {
 			req:  idList(1, 5),
 			exp:  []int{1},
 		},
-		// user 2 hit 5
+		// user 2 hit 4
 		{
-			name: "find5",
+			name: "find4",
 			user: user2,
-			req:  idList(0, 1, 2, 3, 4),
-			exp:  []int{0, 1, 2, 3, 4},
+			req:  idList(0, 1, 2, 3),
+			exp:  []int{0, 1, 2, 3},
 		},
 	}
 
