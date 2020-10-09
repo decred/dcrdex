@@ -1357,26 +1357,21 @@ func (m *Market) UnbookUserOrders(user account.AccountID) {
 	log.Infof("Unbooked %d orders (%d buys, %d sells) from market %v from user %v.",
 		total, len(removedBuys), len(removedSells), m.marketInfo.Name, user)
 
-	// Unlock the order coins in batch.
+	// Unlock the order funding coins, update order statuses in DB, and notify
+	// orderbook subscribers.
 	sellIDs := make([]order.OrderID, 0, len(removedSells))
 	for _, lo := range removedSells {
 		sellIDs = append(sellIDs, lo.ID())
+		m.unbookedOrder(lo)
 	}
 	m.coinLockerBase.UnlockOrdersCoins(sellIDs)
 
 	buyIDs := make([]order.OrderID, 0, len(removedBuys))
 	for _, lo := range removedBuys {
 		buyIDs = append(buyIDs, lo.ID())
+		m.unbookedOrder(lo)
 	}
 	m.coinLockerQuote.UnlockOrdersCoins(buyIDs)
-
-	// Update the order status in DB, and notify orderbook subscribers.
-	for _, lo := range removedSells {
-		m.unbookedOrder(lo)
-	}
-	for _, lo := range removedBuys {
-		m.unbookedOrder(lo)
-	}
 }
 
 // Unbook allows the DEX manager to remove a booked order. This does: (1) remove
@@ -1420,6 +1415,8 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 			epochIdx: -1, // NOTE: no epoch
 		},
 	})
+
+	// TODO: send revoke_order to owner
 }
 
 // processReadyEpoch performs the following operations for a closed epoch that

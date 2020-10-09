@@ -228,9 +228,7 @@ func (pq *OrderPQ) Push(ord interface{}) {
 	pq.orders[oid] = entry
 	uos, found := pq.userOrders[lo.AccountID]
 	if !found {
-		uos = map[order.OrderID]*order.LimitOrder{
-			oid: lo,
-		}
+		uos = map[order.OrderID]*order.LimitOrder{oid: lo}
 		pq.userOrders[lo.AccountID] = uos
 	} else {
 		uos[oid] = lo
@@ -262,6 +260,8 @@ func (pq *OrderPQ) Pop() interface{} {
 		} else {
 			delete(uos, oid)
 		}
+	} else {
+		fmt.Printf("(*OrderPQ).Pop: no userOrders for %v found when popping order %v!", user, oid)
 	}
 	return lo
 }
@@ -405,7 +405,12 @@ func (pq *OrderPQ) Insert(ord *order.LimitOrder) bool {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
-	if pq.capacity == 0 || ord == nil {
+	if pq.capacity == 0 {
+		return false
+	}
+
+	if ord == nil {
+		fmt.Println("(*OrderPQ).Insert: attempting to insert nil *LimitOrder!")
 		return false
 	}
 
@@ -449,7 +454,6 @@ func (pq *OrderPQ) RemoveUserOrders(user account.AccountID) (removed []*order.Li
 	if !found {
 		return
 	}
-	delete(pq.userOrders, user) // save some work from removeOrder=>Pop
 
 	removed = make([]*order.LimitOrder, 0, len(uos))
 	for oid, lo := range uos {

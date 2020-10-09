@@ -361,6 +361,14 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
+func (auth *AuthManager) unbookUserOrders(user account.AccountID) {
+	log.Tracef("Unbooking all orders for user %v", user)
+	auth.unbookFun(user)
+	auth.connMtx.Lock()
+	delete(auth.unbookers, user)
+	auth.connMtx.Unlock()
+}
+
 // ExpectUsers specifies which users are expected to connect within a certain
 // time or have their orders unbooked (revoked). This should be run prior to
 // starting the AuthManager. This is not part of the constructor since it is
@@ -371,13 +379,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
 	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
 	for user := range users {
-		auth.unbookers[user] = time.AfterFunc(within, func() {
-			log.Tracef("Unbooking all orders for MIA user %v", user)
-			auth.unbookFun(user)
-			auth.connMtx.Lock()
-			delete(auth.unbookers, user)
-			auth.connMtx.Unlock()
-		})
+		user := user // bad go
+		auth.unbookers[user] = time.AfterFunc(within, func() { auth.unbookUserOrders(user) })
 	}
 }
 
@@ -871,13 +874,7 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	delete(auth.users, user)
 	delete(auth.conns, connID)
 	client.conn.Disconnect() // in case not triggered by disconnect
-	auth.unbookers[user] = time.AfterFunc(auth.miaUserTimeout, func() {
-		log.Tracef("Unbooking all orders for MIA user %v", user)
-		auth.unbookFun(user)
-		auth.connMtx.Lock()
-		delete(auth.unbookers, user)
-		auth.connMtx.Unlock()
-	})
+	auth.unbookers[user] = time.AfterFunc(auth.miaUserTimeout, func() { auth.unbookUserOrders(user) })
 }
 
 // loadUserScore computes the user's current score from order and swap data
