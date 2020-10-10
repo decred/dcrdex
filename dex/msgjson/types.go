@@ -103,9 +103,12 @@ const (
 	// relaying redemption transaction (from RedeemRoute) details from one client
 	// to the other.
 	RedemptionRoute = "redemption"
-	// RevokeMatchRoute is a DEX-originating request-type message informing a
-	// client that a match has been revoked.
+	// RevokeMatchRoute is a DEX-originating notification-type message informing
+	// a client that a match has been revoked.
 	RevokeMatchRoute = "revoke_match"
+	// RevokeOrderRoute is a DEX-originating notification-type message informing
+	// a client that an order has been revoked.
+	RevokeOrderRoute = "revoke_order"
 	// LimitRoute is the client-originating request-type message placing a limit
 	// order.
 	LimitRoute = "limit"
@@ -394,28 +397,6 @@ func (msg *Message) String() string {
 	return string(b)
 }
 
-// ExtractMatchID attempts to extract a "matchid" value from a request-typed
-// Message's Payload. The request must have one of the following routes:
-// AuditRoute, RedemptionRoute, RedeemRoute, MatchRoute, or RevokeMatchRoute.
-// A non-nil error is only returned if unmarshalling the payload fails.
-func (msg *Message) ExtractMatchID() (Bytes, error) {
-	// Name the targeted request routes.
-	switch msg.Route {
-	case AuditRoute, RedemptionRoute, RedeemRoute, MatchRoute,
-		RevokeMatchRoute:
-	default:
-		return nil, nil
-	}
-
-	var payload struct {
-		MatchID dex.Bytes `json:"matchid"`
-	}
-	if err := msg.Unmarshal(&payload); err != nil {
-		return nil, err
-	}
-	return payload.MatchID, nil
-}
-
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	Signature
@@ -538,6 +519,22 @@ func (audit *Audit) Serialize() []byte {
 	return append(s, audit.Contract...)
 }
 
+// RevokeOrder are the params for a DEX-originating RevokeOrderRoute notification.
+type RevokeOrder struct {
+	Signature
+	OrderID Bytes `json:"orderid"`
+}
+
+var _ Signable = (*RevokeMatch)(nil)
+
+// Serialize serializes the RevokeOrder data.
+func (rev *RevokeOrder) Serialize() []byte {
+	// RevokeMatch serialization is order id (32) = 32 bytes
+	s := make([]byte, 64)
+	copy(s, rev.OrderID)
+	return s
+}
+
 // RevokeMatch are the params for a DEX-originating RevokeMatchRoute request.
 type RevokeMatch struct {
 	Signature
@@ -547,7 +544,7 @@ type RevokeMatch struct {
 
 var _ Signable = (*RevokeMatch)(nil)
 
-// Serialize serializes the RevokeMatchParams data.
+// Serialize serializes the RevokeMatch data.
 func (rev *RevokeMatch) Serialize() []byte {
 	// RevokeMatch serialization is order id (32) + match id (32) = 64 bytes
 	s := make([]byte, 0, 64)

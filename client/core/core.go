@@ -3476,6 +3476,30 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	return book.ValidateMatchProof(note)
 }
 
+// handleRevokeOrderMsg is called when a revoke_order message is received.
+func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var revocation msgjson.RevokeOrder
+	err := msg.Unmarshal(&revocation)
+	if err != nil {
+		return fmt.Errorf("revoke order unmarshal error: %v", err)
+	}
+
+	var oid order.OrderID
+	copy(oid[:], revocation.OrderID)
+
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("no order found with id %s", oid.String())
+	}
+
+	tracker.revoke()
+
+	// Update market orders, and the balance to account for unlocked coins.
+	dc.refreshMarkets()
+	c.updateAssetBalance(tracker.fromAssetID)
+	return nil
+}
+
 // handleRevokeMatchMsg is called when a revoke_match message is received.
 func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var revocation msgjson.RevokeMatch
@@ -3507,8 +3531,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
 	c.updateAssetBalance(tracker.fromAssetID)
-	// Respond to DEX.
-	return dc.ack(msg.ID, matchID, &revocation)
+	return nil
 }
 
 // handleNotifyMsg is called when a notify notification is received.
@@ -3550,11 +3573,10 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
 var reqHandlers = map[string]routeHandler{
-	msgjson.PreimageRoute:    handlePreimageRequest,
-	msgjson.MatchRoute:       handleMatchRoute,
-	msgjson.AuditRoute:       handleAuditRoute,
-	msgjson.RedemptionRoute:  handleRedemptionRoute,
-	msgjson.RevokeMatchRoute: handleRevokeMatchMsg,
+	msgjson.PreimageRoute:   handlePreimageRequest,
+	msgjson.MatchRoute:      handleMatchRoute,
+	msgjson.AuditRoute:      handleAuditRoute,
+	msgjson.RedemptionRoute: handleRedemptionRoute, // TODO: to ntfn
 }
 
 var noteHandlers = map[string]routeHandler{
@@ -3568,6 +3590,8 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.NotifyRoute:          handleNotifyMsg,
 	msgjson.PenaltyRoute:         handlePenaltyMsg,
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
+	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
+	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

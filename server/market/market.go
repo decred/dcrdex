@@ -1399,12 +1399,28 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	// Create the server-generated cancel order, and register it with the
 	// AuthManager for cancellation rate computation if still connected.
+	oid, user := lo.ID(), lo.User()
 	coid, revTime, err := m.storage.RevokeOrder(lo)
 	if err == nil {
-		m.auth.RecordCancel(lo.User(), coid, lo.ID(), revTime)
+		m.auth.RecordCancel(user, coid, oid, revTime)
 	} else {
 		log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 			lo.UID(), err)
+	}
+
+	// Send revoke_order notification to order owner.
+	revMsg := &msgjson.RevokeOrder{
+		OrderID: oid.Bytes(),
+	}
+	m.auth.Sign(revMsg)
+	revNtfn, err := msgjson.NewNotification(msgjson.RevokeOrderRoute, revMsg)
+	if err != nil {
+		log.Errorf("Failed to create %s notification for order %v: %v", msgjson.RevokeOrderRoute, oid, err)
+	} else {
+		err = m.auth.Send(user, revNtfn)
+		if err != nil {
+			log.Debugf("Failed to send %s notification to user %v: %v", msgjson.RevokeOrderRoute, user, err)
+		}
 	}
 
 	// Send "unbook" notification to order book subscribers.
@@ -1415,8 +1431,6 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 			epochIdx: -1, // NOTE: no epoch
 		},
 	})
-
-	// TODO: send revoke_order to owner
 }
 
 // processReadyEpoch performs the following operations for a closed epoch that

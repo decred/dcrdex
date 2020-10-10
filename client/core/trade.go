@@ -1799,7 +1799,7 @@ func (t *trackedTrade) maybeReturnCoins() bool {
 	if t.metaData.Status < order.OrderStatusExecuted {
 		// Booked and epoch orders may get matched any moment from
 		// now, keep the coins locked.
-		t.dc.log.Tracef("not unlocking coins for order with status %s", t.metaData.Status)
+		t.dc.log.Tracef("Not unlocking coins for order with status %s", t.metaData.Status)
 		return false
 	}
 
@@ -1817,7 +1817,7 @@ func (t *trackedTrade) maybeReturnCoins() bool {
 			side == order.Taker && status < order.TakerSwapCast {
 			// Match is active (not revoked, not refunded) and client
 			// is yet to execute swap. Keep coins locked.
-			t.dc.log.Tracef("not unlocking coins for order %v with match side %s, status %s", t.ID(), side, status)
+			t.dc.log.Tracef("Not unlocking coins for order %v with match side %s, status %s", t.ID(), side, status)
 			return false
 		}
 	}
