@@ -137,6 +137,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Ports:              ports,
 		DefaultFallbackFee: defaultFee,
 		LegacyBalance:      true,
+		Segwit:             false,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

@@ -117,12 +117,23 @@ const (
 	//
 	//   - OP_HASH160
 	//   - OP_DATA_20
-	//   - 20 bytes pubkey hash
+	//   - 20 bytes redeem script hash
 	//   - OP_EQUAL
 	P2SHPkScriptSize = 1 + 1 + 20 + 1
 
 	// P2SHOutputSize is the size of the serialized P2SH output.
 	P2SHOutputSize = TxOutOverhead + P2SHPkScriptSize // 9 + 23 = 32
+
+	// P2WSHPkScriptSize is the size of a segwit transaction output script that
+	// pays to a redeem script.  It is calculated as:
+	//
+	//   - OP_0
+	//   - OP_DATA_32
+	//   - 32 bytes redeem script hash
+	P2WSHPkScriptSize = 1 + 1 + 32
+
+	// P2WSHOutputSize is the size of the serialized P2WSH output.
+	P2WSHOutputSize = TxOutOverhead + P2WSHPkScriptSize // 9 + 34 = 43
 
 	// RedeemP2PKHInputSize is the worst case (largest) serialize size of a
 	// transaction input redeeming a compressed P2PKH output.  It is
@@ -146,6 +157,11 @@ const (
 	//   - 1 byte encoding empty redeem script
 	//   - 0 bytes signature script
 	RedeemP2WPKHInputSize = TxInOverhead + 1
+
+	// RedeemP2WPKHInputVBytes is the size of an input that redeems a p2wpkh
+	// output, in units of virtual bytes.
+	// 41 + 27 = 68
+	RedeemP2WPKHInputVBytes = RedeemP2WPKHInputSize + ((RedeemP2WPKHInputWitnessWeight + 3) / 4)
 
 	// RedeemP2WPKHInputWitnessWeight is the worst case weight of
 	// a witness for spending P2WPKH and nested P2WPKH outputs. It
@@ -180,22 +196,33 @@ const (
 	//   - 22 bytes P2PKH output script
 	P2WPKHOutputSize = TxOutOverhead + P2WPKHPkScriptSize // 31
 
-	// MimimumTxOverhead is the size of an empty transaction.
+	// MinimumTxOverhead is the size of an empty transaction.
 	// 4 bytes version + 4 bytes locktime + 2 bytes of varints for the number of
 	// transaction inputs and outputs
-	MimimumTxOverhead = 4 + 4 + 1 + 1 // 10
+	MinimumTxOverhead = 4 + 4 + 1 + 1 // 10
 
 	// InitTxSizeBase is the size of a standard serialized atomic swap
 	// initialization transaction with one change output and no inputs. This is
 	// MsgTx overhead + 1 P2PKH change output + 1 P2SH contract output. However,
 	// the change output might be P2WPKH, in which case it would be smaller.
-	InitTxSizeBase = MimimumTxOverhead + P2PKHOutputSize + P2SHOutputSize // 10 + 34 + 32 = 76
+	InitTxSizeBase = MinimumTxOverhead + P2PKHOutputSize + P2SHOutputSize // 10 + 34 + 32 = 76
 	// leaner with P2WPKH+P2SH outputs: 10 + 31 + 32 = 73
 
 	// InitTxSize is InitTxBaseSize + 1 P2PKH input
 	InitTxSize = InitTxSizeBase + RedeemP2PKHInputSize // 76 + 149 = 225
 	// Varies greatly with some other input types, e.g nested witness (p2sh with
 	// p2wpkh redeem script): 23 byte scriptSig + 108 byte (75 vbyte) witness = ~50
+
+	// InitTxSizeBaseSegwit is the size of a standard serialized atomic swap
+	// initialization transaction with one change output and no inputs. The
+	// change output is assumed to be segwit. 10 + 31 + 43 = 84
+	InitTxSizeBaseSegwit = MinimumTxOverhead + P2WPKHOutputSize + P2WSHOutputSize
+
+	// InitTxSizeSegwit is InitTxSizeSegwit + 1 P2WPKH input.
+	// RedeemP2WPKHInputWitnessWeight is actually a perfect multiple of 4, but
+	// using the round up formula for good practice.
+	// 84 + 41 + 27 = 152
+	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2WPKHInputVBytes
 
 	witnessWeight = blockchain.WitnessScaleFactor
 )
@@ -249,6 +276,7 @@ func (s BTCScriptType) IsMultiSig() bool {
 func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 	var scriptType BTCScriptType
 	class := txscript.GetScriptClass(pkScript)
+
 	switch class {
 	case txscript.PubKeyHashTy:
 		scriptType |= ScriptP2PKH
@@ -274,26 +302,36 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 	return scriptType
 }
 
-// MakeContract creates an atomic swap contract. The secretHash MUST be computed
-// from a secret of length SecretKeySize bytes or the resulting contract will be
-// invalid.
-// TODO: P2WSH or P2WSH nested in P2SH?
-func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
+// MakeContract creates a segwit atomic swap contract. The secretHash MUST
+// be computed from a secret of length SecretKeySize bytes or the resulting
+// contract will be invalid.
+func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
 	rAddr, err := btcutil.DecodeAddress(recipient, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding recipient address %s: %v", recipient, err)
-	}
-	_, ok := rAddr.(*btcutil.AddressPubKeyHash)
-	if !ok {
-		return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", recipient)
 	}
 	sAddr, err := btcutil.DecodeAddress(sender, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding sender address %s: %v", sender, err)
 	}
-	_, ok = sAddr.(*btcutil.AddressPubKeyHash)
-	if !ok {
-		return nil, fmt.Errorf("sender address %s is not a pubkey-hash address", recipient)
+	if segwit {
+		_, ok := rAddr.(*btcutil.AddressWitnessPubKeyHash)
+		if !ok {
+			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", recipient)
+		}
+		_, ok = sAddr.(*btcutil.AddressWitnessPubKeyHash)
+		if !ok {
+			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", recipient)
+		}
+	} else {
+		_, ok := rAddr.(*btcutil.AddressPubKeyHash)
+		if !ok {
+			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", recipient)
+		}
+		_, ok = sAddr.(*btcutil.AddressPubKeyHash)
+		if !ok {
+			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", recipient)
+		}
 	}
 	if len(secretHash) != SecretHashSize {
 		return nil, fmt.Errorf("secret hash of length %d not supported", len(secretHash))
@@ -393,7 +431,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
 // contract. If the provided script is not a swap contract, an error will be
 // returned.
-func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
+func ExtractSwapDetails(pkScript []byte, segwit bool, chainParams *chaincfg.Params) (
 	sender, receiver btcutil.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
 	// following swap contract.
@@ -451,14 +489,26 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 			return nil, nil, 0, nil, fmt.Errorf("invalid secret size %d", ssz)
 		}
 
-		receiver, err = btcutil.NewAddressPubKeyHash(pkScript[43:63], chainParams)
-		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
-		}
+		if segwit {
+			receiver, err = btcutil.NewAddressWitnessPubKeyHash(pkScript[43:63], chainParams)
+			if err != nil {
+				return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
+			}
 
-		sender, err = btcutil.NewAddressPubKeyHash(pkScript[74:94], chainParams)
-		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
+			sender, err = btcutil.NewAddressWitnessPubKeyHash(pkScript[74:94], chainParams)
+			if err != nil {
+				return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
+			}
+		} else {
+			receiver, err = btcutil.NewAddressPubKeyHash(pkScript[43:63], chainParams)
+			if err != nil {
+				return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
+			}
+
+			sender, err = btcutil.NewAddressPubKeyHash(pkScript[74:94], chainParams)
+			if err != nil {
+				return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
+			}
 		}
 
 		lockTime = uint64(binary.LittleEndian.Uint32(pkScript[65:69]))
@@ -471,7 +521,7 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 	return
 }
 
-// redeemP2SHContract returns the signature script to redeem a contract output
+// RedeemP2SHContract returns the signature script to redeem a contract output
 // using the redeemer's signature and the initiator's secret.  This function
 // assumes P2SH and appends the contract as the final data push.
 func RedeemP2SHContract(contract, sig, pubkey, secret []byte) ([]byte, error) {
@@ -484,7 +534,20 @@ func RedeemP2SHContract(contract, sig, pubkey, secret []byte) ([]byte, error) {
 		Script()
 }
 
-// refundP2SHContract returns the signature script to refund a contract output
+// RedeemP2WSHContract returns the witness script to redeem a contract output
+// using the redeemer's signature and the initiator's secret.  This function
+// assumes P2WSH and appends the contract as the final data push.
+func RedeemP2WSHContract(contract, sig, pubkey, secret []byte) [][]byte {
+	return [][]byte{
+		sig,
+		pubkey,
+		secret,
+		[]byte{0x01},
+		contract,
+	}
+}
+
+// RefundP2SHContract returns the signature script to refund a contract output
 // using the contract author's signature after the locktime has been reached.
 // This function assumes P2SH and appends the contract as the final data push.
 func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
@@ -508,6 +571,18 @@ func MsgTxVBytes(msgTx *wire.MsgTx) uint64 {
 	// tx := btcutil.NewTx(msgTx)
 	// return uint64(blockchain.GetTransactionWeight(tx)+(blockchain.WitnessScaleFactor-1)) /
 	// 	blockchain.WitnessScaleFactor // mempool.GetTxVirtualSize(tx)
+}
+
+// RefundP2WSHContract returns the witness to refund a contract output
+// using the contract author's signature after the locktime has been reached.
+// This function assumes P2WSH and appends the contract as the final data push.
+func RefundP2WSHContract(contract, sig, pubkey []byte) [][]byte {
+	return [][]byte{
+		sig,
+		pubkey,
+		[]byte{},
+		contract,
+	}
 }
 
 // SpendInfo is information about an input and it's previous outpoint.
@@ -604,43 +679,45 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 // contract must be provided for the search algorithm to verify the correct data
 // push. Only contracts of length SwapContractSize that can be validated by
 // ExtractSwapDetails are recognized.
-func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
-	dataPushes, err := txscript.PushedData(sigScript)
+func FindKeyPush(txIn *wire.TxIn, contractHash []byte, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
+	var redeemScript, secret []byte
+	var hasher func([]byte) []byte
+	if segwit {
+		if len(txIn.Witness) != 5 {
+			return nil, fmt.Errorf("sigScript should contain 5 data pushes. Found %d", len(txIn.Witness))
+		}
+		secret, redeemScript = txIn.Witness[2], txIn.Witness[4]
+		hasher = func(b []byte) []byte {
+			h := sha256.Sum256(b)
+			return h[:]
+		}
+	} else {
+		pushes, err := txscript.PushedData(txIn.SignatureScript)
+		if err != nil {
+			return nil, fmt.Errorf("sigScript PushedData(%x): %w", txIn.SignatureScript, err)
+		}
+		if len(pushes) != 4 {
+			return nil, fmt.Errorf("sigScript should contain 4 data pushes. Found %d", len(pushes))
+		}
+		secret, redeemScript = pushes[2], pushes[3]
+		hasher = btcutil.Hash160
+	}
+	return findKeyPush(redeemScript, secret, contractHash, chainParams, hasher)
+}
+
+func findKeyPush(redeemScript, secret, contractHash []byte, chainParams *chaincfg.Params, hasher func([]byte) []byte) ([]byte, error) {
+	_, _, _, keyHash, err := ExtractSwapDetails(redeemScript, true, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("sigScript PushedData(%x): %w", sigScript, err)
+		return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
 	}
-	if len(dataPushes) == 0 {
-		return nil, fmt.Errorf("no data pushes in in the signature script")
+	if !bytes.Equal(hasher(redeemScript), contractHash) {
+		return nil, fmt.Errorf("redeemScript is not correct for provided contract hash")
 	}
-	// The key must be the last data push, but iterate through all of the pushes
-	// backwards to ensure it not hidden behind some non-standard script.
-	var keyHash []byte
-	for i := len(dataPushes) - 1; i >= 0; i-- {
-		push := dataPushes[i]
-
-		// First locate the swap contract.
-		if len(keyHash) == 0 {
-			// Skip hashing if ExtractSwapDetails will not recognize it.
-			if len(push) != SwapContractSize {
-				continue
-			}
-			h := btcutil.Hash160(push)
-			if bytes.Equal(h, contractHash) {
-				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
-				if err != nil {
-					return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
-				}
-				continue
-			}
-		}
-
-		// We have the key hash from the contract. See if this is the key.
-		h := sha256.Sum256(push)
-		if bytes.Equal(h[:], keyHash) {
-			return push, nil
-		}
+	h := sha256.Sum256(secret)
+	if !bytes.Equal(h[:], keyHash) {
+		return nil, fmt.Errorf("incorrect secret")
 	}
-	return nil, fmt.Errorf("key not found")
+	return secret, nil
 }
 
 // ExtractPubKeyHash extracts the pubkey hash from the passed script if it is a

@@ -41,13 +41,15 @@ const (
 type walletClient struct {
 	node        rpcClient
 	chainParams *chaincfg.Params
+	segwit      bool
 }
 
 // newWalletClient is the constructor for a walletClient.
-func newWalletClient(node rpcClient, chainParams *chaincfg.Params) *walletClient {
+func newWalletClient(node rpcClient, segwit bool, chainParams *chaincfg.Params) *walletClient {
 	return &walletClient{
 		node:        node,
 		chainParams: chainParams,
+		segwit:      segwit,
 	}
 }
 
@@ -99,7 +101,12 @@ func (wc *walletClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 // be bech32-encoded (P2WPKH).
 func (wc *walletClient) ChangeAddress() (btcutil.Address, error) {
 	var addrStr string
-	err := wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
+	var err error
+	if wc.segwit {
+		err = wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
+	} else {
+		err = wc.call(methodChangeAddress, anylist{"legacy"}, &addrStr)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -267,7 +267,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		// Alpha should be able to redeem.
 		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract())
 		if err != nil {
-			t.Fatalf("error auditing contract")
+			t.Fatalf("error auditing contract: %v", err)
 		}
 		auditCoin := ci.Coin()
 		if ci.Recipient() != address {

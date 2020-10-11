@@ -574,7 +574,7 @@ type testMsgTxSwap struct {
 
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
-func testSwapContract() ([]byte, btcutil.Address, btcutil.Address) {
+func testSwapContract(segwit bool) ([]byte, btcutil.Address, btcutil.Address) {
 	lockTime := time.Now().Add(time.Hour * 8).Unix()
 	secretHash := randomBytes(32)
 	_, receiverPKH := genPubkey()
@@ -608,14 +608,21 @@ func testSwapContract() ([]byte, btcutil.Address, btcutil.Address) {
 	if err != nil {
 		fmt.Printf("testSwapContract error: %v\n", err)
 	}
-	receiverAddr, _ := btcutil.NewAddressPubKeyHash(receiverPKH, testParams)
-	refundAddr, _ := btcutil.NewAddressPubKeyHash(senderPKH, testParams)
+	var receiverAddr, refundAddr btcutil.Address
+	if segwit {
+		receiverAddr, _ = btcutil.NewAddressWitnessPubKeyHash(receiverPKH, testParams)
+		refundAddr, _ = btcutil.NewAddressWitnessPubKeyHash(senderPKH, testParams)
+	} else {
+		receiverAddr, _ = btcutil.NewAddressPubKeyHash(receiverPKH, testParams)
+		refundAddr, _ = btcutil.NewAddressPubKeyHash(senderPKH, testParams)
+	}
+
 	return contract, receiverAddr, refundAddr
 }
 
-func testMsgTxSwapInit(val int64) *testMsgTxSwap {
+func testMsgTxSwapInit(val int64, segwit bool) *testMsgTxSwap {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	contract, recipient, refund := testSwapContract()
+	contract, recipient, refund := testSwapContract(segwit)
 	scriptHash := btcutil.Hash160(contract)
 	pkScript, err := txscript.NewScriptBuilder().
 		AddOp(txscript.OP_HASH160).
@@ -719,9 +726,9 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 }
 
 // Make a backend that logs to stdout.
-func testBackend() (*Backend, func()) {
+func testBackend(segwit bool) (*Backend, func()) {
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
-	btc := newBTC("btc", testParams, logger, testNode{})
+	btc := newBTC("btc", segwit, testParams, logger, testNode{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	shutdown := func() {
@@ -752,7 +759,7 @@ func TestUTXOs(t *testing.T) {
 	// 10. A UTXO from a coinbase transaction, before and after maturing.
 
 	// Create a Backend with the test node.
-	btc, shutdown := testBackend()
+	btc, shutdown := testBackend(false)
 	defer shutdown()
 
 	// The vout will be randomized during reset.
@@ -1007,7 +1014,7 @@ func TestUTXOs(t *testing.T) {
 	cleanTestChain()
 	txHash = randomHash()
 	blockHash = randomHash()
-	swap := testMsgTxSwapInit(val)
+	swap := testMsgTxSwapInit(val, btc.segwit)
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
 	btcVal := btcutil.Amount(val).ToBTC()
 	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = btcVal
@@ -1031,7 +1038,7 @@ func TestUTXOs(t *testing.T) {
 	contract := &Contract{Output: utxo.Output}
 
 	// Now try again with the correct vout.
-	err = contract.auditContract() // sets refund and swap addresses
+	err = btc.auditContract(contract) // sets refund and swap addresses
 	if err != nil {
 		t.Fatalf("case 11 - unexpected error auditing contract: %v", err)
 	}
@@ -1047,7 +1054,16 @@ func TestUTXOs(t *testing.T) {
 }
 
 func TestRedemption(t *testing.T) {
-	btc, shutdown := testBackend()
+	t.Run("segwit", func(t *testing.T) {
+		testRedemption(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testRedemption(t, false)
+	})
+}
+
+func testRedemption(t *testing.T, segwit bool) {
+	btc, shutdown := testBackend(false)
 	defer shutdown()
 
 	// The vout will be randomized during reset.
@@ -1059,11 +1075,11 @@ func TestRedemption(t *testing.T) {
 	spentHash := randomHash()
 	spentVout := uint32(0)
 	spentID := toCoinID(spentHash, spentVout)
-	verboseTx := testAddTxVerbose(testMakeMsgTx(false).tx, spentHash, nil, 0)
+	verboseTx := testAddTxVerbose(testMakeMsgTx(segwit).tx, spentHash, nil, 0)
 	verboseTx.Vout = append(verboseTx.Vout, btcjson.Vout{
 		Value: 5,
 	})
-	msg := testMakeMsgTx(false)
+	msg := testMakeMsgTx(segwit)
 	vin := btcjson.Vin{
 		Txid: spentHash.String(),
 		Vout: spentVout,
@@ -1128,7 +1144,7 @@ func TestRedemption(t *testing.T) {
 // block monitor loop and the block cache.
 func TestReorg(t *testing.T) {
 	// Create a Backend with the test node.
-	btc, shutdown := testBackend()
+	btc, shutdown := testBackend(false)
 	defer shutdown()
 
 	// Clear the blockchain and set the provided chain to build on the ancestor
@@ -1292,7 +1308,7 @@ func TestReorg(t *testing.T) {
 // TxID.
 func TestAuxiliary(t *testing.T) {
 	// Create a Backend with the test node.
-	btc, shutdown := testBackend()
+	btc, shutdown := testBackend(false)
 	defer shutdown()
 
 	// Add a transaction and retrieve it.

@@ -49,6 +49,7 @@ var (
 	tTxHash        *chainhash.Hash
 	tP2PKHAddr     = "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi"
 	tP2PKH         []byte
+	tP2WPKH        []byte
 	tP2WPKHAddr    = "bc1qq49ypf420s0kh52l9pk7ha8n8nhsugdpculjas"
 )
 
@@ -308,10 +309,14 @@ func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte
 		if err != nil {
 			return nil, err
 		}
-		sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
-		if err != nil {
-			return nil, err
+		var sigScript []byte
+		if input.ScriptSig != nil {
+			sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
+			if err != nil {
+				return nil, err
+			}
 		}
+
 		witness := make([][]byte, len(input.Witness))
 		for i, witnessHex := range input.Witness {
 			witness[i], err = hex.DecodeString(witnessHex)
@@ -334,13 +339,19 @@ func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte
 	return txBuf.Bytes(), nil
 }
 
-func makeRPCVin(txid string, vout uint32, sigScript []byte) btcjson.Vin {
+func makeRPCVin(txid string, vout uint32, sigScript []byte, witness [][]byte) btcjson.Vin {
+	var rpcWitness []string
+	for _, b := range witness {
+		rpcWitness = append(rpcWitness, hex.EncodeToString(b))
+	}
+
 	return btcjson.Vin{
 		Txid: txid,
 		Vout: vout,
 		ScriptSig: &btcjson.ScriptSig{
 			Hex: hex.EncodeToString(sigScript),
 		},
+		Witness: rpcWitness,
 	}
 }
 
@@ -354,7 +365,15 @@ func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutR
 	}
 }
 
-func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
+func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
+	if segwit {
+		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
+		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
+	} else {
+		tBTC.SwapSize = dexbtc.InitTxSize
+		tBTC.SwapSizeBase = dexbtc.InitTxSizeBase
+	}
+
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
 		TipChange: func(error) {},
@@ -367,6 +386,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		ChainParams:        &chaincfg.MainNetParams,
 		WalletInfo:         WalletInfo,
 		DefaultFallbackFee: defaultFee,
+		Segwit:             segwit,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, client)
 	// Initialize the best block.
@@ -394,6 +414,7 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)
 	tP2PKH, _ = hex.DecodeString("76a9148fc02268f208a61767504fe0b48d228641ba81e388ac")
+	tP2WPKH, _ = hex.DecodeString("0014148fc02268f208a61767504fe0b48d228641ba81")
 	// tP2SH, _ = hex.DecodeString("76a91412a9abf5c32392f38bd8a1f57d81b1aeecc5699588ac")
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
@@ -404,7 +425,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestAvailableFund(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	// With an empty list returned, there should be no error, but the value zero
@@ -704,7 +725,7 @@ func (c *tCoin) Value() uint64                  { return 100 }
 func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	// Test it with the local output type.
@@ -739,7 +760,7 @@ func TestReturnCoins(t *testing.T) {
 }
 
 func TestFundingCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	vout := uint32(123)
@@ -811,7 +832,7 @@ func TestFundingCoins(t *testing.T) {
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(false)
 	defer shutdown()
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
@@ -820,6 +841,9 @@ func TestFundEdges(t *testing.T) {
 	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
 	// swap_size: 225 bytes (InitTxSize)
 	// p2pkh input: 149 bytes (RedeemP2PKHInputSize)
+
+	// NOTE: Shouldn't swap_size_base be 73 bytes?
+
 	// swap_size_base: 76 bytes (225 - 149 p2pkh input) (InitTxSizeBase)
 	// lot_size: 1e6
 	// swap_value: 1e7
@@ -831,7 +855,7 @@ func TestFundEdges(t *testing.T) {
 	//   base_tx_bytes = total_bytes - backing_bytes
 	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 225 + 76 = 2101
 	// base_fees = base_tx_bytes * fee_rate = 2101 * 34 = 71434
-	// backing_bytes: 1x P2PKH inputs = dexdcr.P2PKHInputSize = 149 bytes
+	// backing_bytes: 1x P2PKH inputs = dexbtc.P2PKHInputSize = 149 bytes
 	// backing_fees: 149 * fee_rate(34 atoms/byte) = 5066 atoms
 	// total_bytes  = base_tx_bytes + backing_bytes = 2101 + 149 = 2250
 	// total_fees: base_fees + backing_fees = 71434 + 5066 = 76500 atoms
@@ -968,21 +992,95 @@ func TestFundEdges(t *testing.T) {
 	}
 }
 
+func TestFundEdgesSegwit(t *testing.T) {
+	wallet, node, shutdown := tNewWallet(true)
+	defer shutdown()
+	swapVal := uint64(1e7)
+	lots := swapVal / tBTC.LotSize
+	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+
+	// Base Fees
+	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
+
+	// swap_size: 152 bytes (InitTxSizeSegwit)
+	// pw2pk_witness_vbytes = (RedeemP2WPKHInputWitnessWeight + 3) / 4 = 27
+	// p2wpkh input: 68 bytes (RedeemP2WPKHInputVBytes)
+	// swap_size_base: 84 bytes (152 - 68 p2pkh input) (InitTxSizeBaseSegwit)
+
+	// lot_size: 1e6
+	// swap_value: 1e7
+	// lots = swap_value / lot_size = 10
+	//   total_bytes = first_swap_size + chained_swap_sizes
+	//   chained_swap_sizes = (lots - 1) * swap_size
+	//   first_swap_size = swap_size_base + backing_bytes
+	//   total_bytes  = swap_size_base + backing_bytes + (lots - 1) * swap_size
+	//   base_tx_bytes = total_bytes - backing_bytes
+	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 152 + 84 = 1452
+	// base_fees = base_tx_bytes * fee_rate = 1452 * 34 = 49401
+	// backing_bytes: 1x P2WPKH-spending input = p2wpkh input = 68 bytes
+	// backing_fees: 68 * fee_rate(34 atoms/byte) = 2312 atoms
+	// total_bytes  = base_tx_bytes + backing_bytes = 1452 + 68 = 1520
+	// total_fees: base_fees + backing_fees = 49402 + 2312 = 51341 atoms
+	//          OR total_bytes * fee_rate = 1521 * 34 = 51714
+	backingFees := uint64(1520) * tBTC.MaxFeeRate // total_bytes * fee_rate
+	p2wpkhUnspent := &ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tP2WPKHAddr,
+		Amount:        float64(swapVal+backingFees-1) / 1e8,
+		Confirmations: 5,
+		ScriptPubKey:  tP2WPKH,
+		Spendable:     true,
+		Solvable:      true,
+		Safe:          true,
+	}
+	unspents := []*ListUnspentResult{p2wpkhUnspent}
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	ord := &asset.Order{
+		Value:        swapVal,
+		MaxSwapCount: lots,
+		DEXConfig:    tBTC,
+	}
+	_, _, err := wallet.FundOrder(ord)
+	if err == nil {
+		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
+	}
+	// Now add the needed satoshi and try again.
+	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	_, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
+	}
+}
+
 func TestSwap(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	t.Run("segwit", func(t *testing.T) {
+		testSwap(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testSwap(t, false)
+	})
+}
+
+func testSwap(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit)
 	defer shutdown()
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
 		newOutput(node, tTxHash, 0, toSatoshi(3)),
 		newOutput(node, tTxHash, 0, toSatoshi(3)),
 	}
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
 
-	node.rawRes[methodNewAddress] = mustMarshal(t, tP2PKHAddr)
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.rawRes[methodNewAddress] = mustMarshal(t, addrStr)
+	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
 
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	contract := &asset.Contract{
-		Address:    tP2PKHAddr,
+		Address:    addrStr,
 		Value:      swapVal,
 		SecretHash: secretHash,
 		LockTime:   uint64(time.Now().Unix()),
@@ -1085,14 +1183,27 @@ func (ai *TAuditInfo) Contract() dex.Bytes   { return nil }
 func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
 func TestRedeem(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	t.Run("segwit", func(t *testing.T) {
+		testRedeem(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testRedeem(t, false)
+	})
+}
+
+func testRedeem(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit)
 	defer shutdown()
 	swapVal := toSatoshi(5)
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
 
-	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash[:], lockTime.Unix(), &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
@@ -1117,7 +1228,7 @@ func TestRedeem(t *testing.T) {
 		t.Fatalf("error encoding wif: %v", err)
 	}
 
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
 	_, _, feesPaid, err := wallet.Redeem([]*asset.Redemption{redemption})
@@ -1199,7 +1310,7 @@ func TestRedeem(t *testing.T) {
 }
 
 func TestSignMessage(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	vout := uint32(5)
@@ -1288,18 +1399,39 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	t.Run("segwit", func(t *testing.T) {
+		testAuditContract(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testAuditContract(t, false)
+	})
+}
+
+func testAuditContract(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit)
 	defer shutdown()
 	vout := uint32(5)
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash, lockTime.Unix(), &chaincfg.MainNetParams)
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+
+	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash, lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	addr, _ := btcutil.NewAddressScriptHash(contract, &chaincfg.MainNetParams)
-	pkScript, _ := txscript.PayToAddrScript(addr)
+
+	var contractAddr btcutil.Address
+	if segwit {
+		h := sha256.Sum256(contract)
+		contractAddr, _ = btcutil.NewAddressWitnessScriptHash(h[:], &chaincfg.MainNetParams)
+	} else {
+		contractAddr, _ = btcutil.NewAddressScriptHash(contract, &chaincfg.MainNetParams)
+	}
+	pkScript, _ := txscript.PayToAddrScript(contractAddr)
 
 	node.txOutRes = &btcjson.GetTxOutResult{
 		Confirmations: 2,
@@ -1313,8 +1445,8 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
-	if audit.Recipient() != tP2PKHAddr {
-		t.Fatalf("wrong recipient. wanted '%s', got '%s'", tP2PKHAddr, audit.Recipient())
+	if audit.Recipient() != addrStr {
+		t.Fatalf("wrong recipient. wanted '%s', got '%s'", addrStr, audit.Recipient())
 	}
 	if !bytes.Equal(audit.Contract(), contract) {
 		t.Fatalf("contract not set to coin redeem script")
@@ -1345,7 +1477,6 @@ func TestAuditContract(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
-
 }
 
 type tReceipt struct {
@@ -1359,6 +1490,15 @@ func (r *tReceipt) Coin() asset.Coin      { return r.coin }
 func (r *tReceipt) Contract() dex.Bytes   { return r.contract }
 
 func TestFindRedemption(t *testing.T) {
+	t.Run("segwit", func(t *testing.T) {
+		testFindRedemption(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testFindRedemption(t, false)
+	})
+}
+
+func testFindRedemption(t *testing.T, segwit bool) {
 	node := newTRPCClient()
 	cfg := &BTCCloneCFG{
 		WalletCFG: &asset.WalletConfig{
@@ -1369,6 +1509,7 @@ func TestFindRedemption(t *testing.T) {
 		ChainParams:        &chaincfg.MainNetParams,
 		WalletInfo:         WalletInfo,
 		DefaultFallbackFee: defaultFee,
+		Segwit:             segwit,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, node)
 	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
@@ -1382,25 +1523,38 @@ func TestFindRedemption(t *testing.T) {
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
+
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+
 	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash[:], lockTime.Unix(), &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	contractAddr, _ := btcutil.NewAddressScriptHash(contract, &chaincfg.MainNetParams)
+	contractAddr, _ := wallet.scriptHashAddress(contract)
 	pkScript, _ := txscript.PayToAddrScript(contractAddr)
 
-	otherAddr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
+	otherAddr, _ := btcutil.DecodeAddress(addrStr, &chaincfg.MainNetParams)
 	otherScript, _ := txscript.PayToAddrScript(otherAddr)
 
-	redemptionScript, _ := dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
-	otherSpendScript, _ := txscript.NewScriptBuilder().
-		AddData(randBytes(73)).
-		AddData(randBytes(33)).
-		Script()
+	var redemptionWitness, otherWitness [][]byte
+	var redemptionSigScript, otherSigScript []byte
+	if segwit {
+		redemptionWitness = dexbtc.RedeemP2WSHContract(contract, randBytes(73), randBytes(33), secret)
+		otherWitness = [][]byte{randBytes(73), randBytes(33)}
+	} else {
+		redemptionSigScript, _ = dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+		otherSigScript, _ = txscript.NewScriptBuilder().
+			AddData(randBytes(73)).
+			AddData(randBytes(33)).
+			Script()
+	}
 
 	// Prepare the "blockchain"
-	inputs := []btcjson.Vin{makeRPCVin(otherTxid, 0, otherSpendScript)}
+	inputs := []btcjson.Vin{makeRPCVin(otherTxid, 0, otherSigScript, otherWitness)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
 	txHex, err := makeTxHex(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs)
@@ -1425,7 +1579,8 @@ func TestFindRedemption(t *testing.T) {
 	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
 
 	// Now add the redemption.
-	inputs = append(inputs, makeRPCVin(contractTxid, contractVout, redemptionScript))
+	rpcVin := makeRPCVin(contractTxid, contractVout, redemptionSigScript, redemptionWitness)
+	inputs = append(inputs, rpcVin)
 	_, redeemBlock := node.addRawTx(contractHeight+2, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
 	redeemVin := &redeemBlock.RawTx[0].Vin[1]
 
@@ -1470,14 +1625,17 @@ func TestFindRedemption(t *testing.T) {
 
 	// Expect FindRedemption to error because of bad input sig.
 	node.blockchainMtx.Lock()
+	redeemVin.Witness = []string{string(randBytes(100))}
 	redeemVin.ScriptSig.Hex = hex.EncodeToString(randBytes(100))
+
 	node.blockchainMtx.Unlock()
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
 	node.blockchainMtx.Lock()
-	redeemVin.ScriptSig.Hex = hex.EncodeToString(redemptionScript)
+	redeemVin.Witness = rpcVin.Witness
+	redeemVin.ScriptSig.Hex = hex.EncodeToString(redemptionSigScript)
 	node.blockchainMtx.Unlock()
 
 	// Wrong script type for contract output
@@ -1501,20 +1659,35 @@ func TestFindRedemption(t *testing.T) {
 }
 
 func TestRefund(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	t.Run("segwit", func(t *testing.T) {
+		testRefund(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testRefund(t, false)
+	})
+}
+
+func testRefund(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit)
 	defer shutdown()
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash[:], lockTime.Unix(), &chaincfg.MainNetParams)
+
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+
+	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -1605,7 +1778,7 @@ func TestRefund(t *testing.T) {
 }
 
 func TestLockUnlock(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	// just checking that the errors come through.
@@ -1642,7 +1815,7 @@ const (
 )
 
 func testSender(t *testing.T, senderType tSenderType) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	sender := func(addr string, val uint64) (asset.Coin, error) {
 		return wallet.PayFee(addr, val)
 	}
@@ -1716,7 +1889,7 @@ func TestWithdraw(t *testing.T) {
 }
 
 func TestConfirmations(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown := tNewWallet(true)
 	defer shutdown()
 
 	coinID := make([]byte, 36)

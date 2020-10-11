@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	alphaAddress = "mjqAiNeRe8jWzTUnEYL9CYa2YKjFWQDjJY"
+	alphaAddress = "bcrt1qy7agjj62epx0ydnqskgwlcfwu52xjtpj36hr0d"
 )
 
 var (
 	tBTC = &dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
+		SwapSize:     dexbtc.InitTxSizeSegwit,
+		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
 		MaxFeeRate:   10,
 		LotSize:      1e6,
 		RateStep:     10,
