@@ -3104,11 +3104,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			continue
 		}
 
-		// Keep mutex locked to set tracker.wallets, match.failErr, match.counterSwap
-		// and tracker.coins below. Lock also required for tracker.unspentContractAmounts().
 		tracker.mtx.Lock()
-
 		tracker.wallets = wallets
+		tracker.mtx.Unlock()
+
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -3168,7 +3167,6 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				coinIDs = []order.CoinID{tracker.metaData.ChangeCoin}
 			}
 			if len(coinIDs) == 0 {
-				tracker.mtx.Unlock()
 				notifyErr("No funding coins", "Order %s has no %s funding coins", tracker.token(), unbip(wallets.fromAsset.ID))
 				continue
 			}
@@ -3177,13 +3175,11 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				byteIDs = append(byteIDs, []byte(cid))
 			}
 			if len(byteIDs) == 0 {
-				tracker.mtx.Unlock()
 				notifyErr("Order coin error", "No coins for loaded order %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
 			coins, err := wallets.fromWallet.FundingCoins(byteIDs)
 			if err != nil {
-				tracker.mtx.Unlock()
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
@@ -3193,11 +3189,15 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Active orders and orders with matches with unsent swaps need the funding
 		// coin(s).
 		// Orders with sent but unspent swaps need to recompute contract-locked amts.
-		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
+		hasUnspentContracts := func() bool {
+			tracker.mtx.RLock()
+			defer tracker.mtx.RUnlock()
+			return tracker.unspentContractAmounts() > 0
+		}
+		if isActive || needsCoins || hasUnspentContracts() {
 			relocks.count(wallets.fromAsset.ID)
 		}
 
-		tracker.mtx.Unlock()
 		dc.trades[tracker.ID()] = tracker
 	}
 	return relocks
