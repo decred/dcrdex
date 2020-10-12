@@ -1056,13 +1056,6 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 
 	// Notify the user of the failed match.
 	corder := t.coreOrderInternal() // no cancel order
-	// For the frontend, call this a complete match so it doesn't say "settling".
-	for _, match := range corder.Matches {
-		if bytes.Equal(match.MatchID, matchID[:]) {
-			match.Status = order.MatchComplete
-			break
-		}
-	}
 	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
 		token(matchID[:])), db.WarningLevel, corder))
 
@@ -1155,7 +1148,7 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 		inputs[i] = coin
 	}
 
-	if t.dc.IsDown() {
+	if true || t.dc.IsDown() {
 		return errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
 	}
 	// swapMatches is no longer idempotent after this point.
