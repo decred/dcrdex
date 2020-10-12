@@ -235,11 +235,6 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	copy(commit[:], limit.Commit)
 
 	fundingAsset := coins.funding
-	unbookedUnfunded := tunnel.CheckUnfilled(fundingAsset.ID, user)
-	for _, badLo := range unbookedUnfunded {
-		log.Infof("Unbooked unfunded order %v for user %v", badLo, user)
-	}
-
 	coinIDs := make([]order.CoinID, 0, len(limit.Trade.Coins))
 	coinStrs := make([]string, 0, len(limit.Trade.Coins))
 	for _, coin := range limit.Trade.Coins {
@@ -424,11 +419,6 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	copy(commit[:], market.Commit)
 
 	fundingAsset := assets.funding
-	unbookedUnfunded := tunnel.CheckUnfilled(fundingAsset.ID, user)
-	for _, badLo := range unbookedUnfunded {
-		log.Infof("Unbooked unfunded order %v for user %v", badLo, user)
-	}
-
 	coinIDs := make([]order.CoinID, 0, len(market.Trade.Coins))
 	coinStrs := make([]string, 0, len(market.Trade.Coins))
 	for _, coin := range market.Trade.Coins {
@@ -585,12 +575,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	// Consideration: allow suspended accounts to submit cancel orders? Depends
-	// if their orders get canceled on suspension or if they simply cannot make
-	// new orders.
-	// if _, suspended := r.auth.Suspended(user); suspended {
-	// 	return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit cancel orders")
-	// }
+	// NOTE: Allow suspended accounts to submit cancel orders.
 
 	tunnel, rpcErr := r.extractMarket(&cancel.Prefix)
 	if rpcErr != nil {
@@ -815,6 +800,17 @@ func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
 				"pubkey count %d not equal to signature count %d for coin %d",
 				len(coin.PubKeys), sigCount, i,
 			))
+		}
+	}
+
+	// Verify all of the user's unfilled book orders have unspent funding coins,
+	// unbooking them as necessary.
+	var user account.AccountID
+	copy(user[:], prefix.AccountID)
+	for mktName, tunnel := range r.tunnels {
+		unbookedUnfunded := tunnel.CheckUnfilled(assets.funding.ID, user)
+		for _, badLo := range unbookedUnfunded {
+			log.Infof("Unbooked unfunded order %v from market %s for user %v", badLo, mktName, user)
 		}
 	}
 
