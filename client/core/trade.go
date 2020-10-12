@@ -1148,7 +1148,7 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 		inputs[i] = coin
 	}
 
-	if true || t.dc.IsDown() {
+	if t.dc.IsDown() {
 		return errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
 	}
 	// swapMatches is no longer idempotent after this point.
