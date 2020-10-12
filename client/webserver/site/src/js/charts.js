@@ -233,13 +233,15 @@ export class DepthChart {
     ctx.font = '12px \'sans\', sans-serif'
     ctx.fillStyle = this.theme.axisLabel
 
-    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50, this.lotSize)
+    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min,
+      dataExtents.y.max, 50, this.lotSize, this.book.baseSymbol)
     // Reassign the width of the y-label column to accommodate the widest text.
     const newWidth = yLabels.widest * 1.5
     this.yRegion.extents.x.max = newWidth
     this.plotRegion.extents.x.min = newWidth
     this.xRegion.extents.x.min = newWidth
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100, this.rateStep)
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
+      dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
 
     // A function to be run at the end if there is legend data to display.
     var legendData
@@ -366,16 +368,34 @@ export class DepthChart {
 
     // Print the y labels.
     this.yRegion.plot(new Extents(0, 1, 0, maxY), (ctx, tools) => {
+      const centerY = maxY / 2
+      var lastY = 0
+      var unitCenter = centerY
       yLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(0.5), tools.y(lbl.val))
+        if (centerY >= lastY && centerY < lbl.val) {
+          unitCenter = (lastY + lbl.val) / 2
+        }
+        lastY = lbl.val
       })
+      ctx.fillText(this.baseTicker, tools.x(0.5), tools.y(unitCenter))
     }, true)
 
     // Print the x labels
     this.xRegion.plot(new Extents(low, high, 0, 1), (ctx, tools) => {
+      const centerX = (high + low) / 2
+      var lastX = low
+      var unitCenter = centerX
       xLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
+        if (centerX >= lastX && centerX < lbl.val) {
+          unitCenter = (lastX + lbl.val) / 2
+        }
+        lastX = lbl.val
       })
+      ctx.font = '11px \'sans\', sans-serif'
+      ctx.fillText(`${this.quoteTicker}/`, tools.x(unitCenter), tools.y(0.63))
+      ctx.fillText(this.baseTicker, tools.x(unitCenter), tools.y(0.23))
     }, true)
 
     // Draw the epoch lines
@@ -661,7 +681,7 @@ class Region {
 
 // makeLabels attempts to create the appropriate labels for the specified
 // screen size, context, and label spacing.
-function makeLabels (ctx, screenW, min, max, spacingGuess, step) {
+function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
   var n = screenW / spacingGuess
   const diff = max - min
   var tickGuess = diff / n
@@ -684,6 +704,8 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step) {
     })
     x += tick
   }
+  const unitW = ctx.measureText(unit).width
+  if (unitW > widest) widest = unitW
   return {
     widest: widest,
     lbls: pts

@@ -51,7 +51,7 @@
   <div>
     {{if .}}
     <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
-    <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet backend.</div>
+    <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet software.</div>
     {{else}}
     <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password
       {{if not .}} {{- /* Don't show this for registration (when . is set), since Decred always requires a password. */ -}}

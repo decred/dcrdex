@@ -102,6 +102,11 @@ export default class Doc {
     return el.classList.contains('d-hide')
   }
 
+  /* isDisplayed returns true if the specified element is not hidden */
+  static isDisplayed (el) {
+    return !el.classList.contains('d-hide')
+  }
+
   /*
    * animate runs the supplied function, which should be a "progress" function
    * accepting one argument. The progress function will be called repeatedly

@@ -87,10 +87,9 @@ body.dark {
   #noteBox,
   #profileBox {
     background-color: $dark_bg_1;
-    border-color: white;
   }
 
-  div.poke-note > span {
+  div.popup-notes > span {
     background-color: white;
     color: $font-color-light;
   }

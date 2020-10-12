@@ -19,6 +19,7 @@ const unbind = Doc.unbind
 const notificationRoute = 'notify'
 const loggersKey = 'loggers'
 const recordersKey = 'recorders'
+const noteCacheSize = 100
 
 /* constructors is a map to page constructors. */
 const constructors = {
@@ -35,11 +36,13 @@ const constructors = {
 export default class Application {
   constructor () {
     this.notes = []
+    this.pokes = []
     this.user = {
       accounts: {},
       wallets: {}
     }
     this.commitHash = commitHash
+    this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
@@ -156,9 +159,7 @@ export default class Application {
   async loadPage (page, data, skipPush) {
     // Close some menus and tooltips.
     this.tooltip.style.left = '-10000px'
-    this.page.noteBox.style.display = 'none'
-    this.page.noteIndicator.style.display = 'none'
-    this.page.profileBox.style.display = 'none'
+    Doc.hide(this.page.noteBox, this.page.profileBox)
     // Parse the request.
     const url = new URL(`/${page}`, window.location.origin)
     const requestedHandler = handlerFromPath(page)
@@ -223,59 +224,115 @@ export default class Application {
    */
   attachHeader () {
     this.header = idel(document.body, 'header')
-    this.pokeNotes = idel(document.body, 'pokeNote')
-    this.pokeTmpl = Doc.tmplElement(this.pokeNotes, 'note')
-    this.pokeTmpl.remove()
+    this.popupNotes = idel(document.body, 'popupNotes')
+    this.popupTmpl = Doc.tmplElement(this.popupNotes, 'note')
+    this.popupTmpl.remove()
     this.tooltip = idel(document.body, 'tooltip')
     const pg = this.page = Doc.parsePage(this.header, [
-      'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
-      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader',
-      'profileMenuEntry', 'profileIndicator', 'profileBox', 'profileSignout'
+      'noteIndicator', 'noteList', 'noteTmpl', 'marketsMenuEntry',
+      'walletsMenuEntry', 'noteMenuEntry', 'loader', 'profileMenuEntry',
+      'profileIndicator', 'profileSignout', 'innerNoteIcon', 'innerProfileIcon',
+      'noteBox', 'profileBox', 'pokeCat', 'noteCat', 'pokeBox', 'pokeList',
+      'pokeTmpl'
     ])
-    pg.noteIndicator.style.display = 'none'
-    delete pg.noteTemplate.id
-    pg.noteTemplate.remove()
+    delete pg.noteTmpl.id
+    pg.noteTmpl.remove()
+    delete pg.pokeTmpl.id
+    pg.pokeTmpl.remove()
     pg.loader.remove()
     pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
     Doc.show(pg.loader)
-    var hide = (el, e, f) => {
-      if (!Doc.mouseInElement(e, el)) {
-        el.style.display = 'none'
-        unbind(document, f)
-      }
-    }
-    const hideNotes = e => { hide(pg.noteBox, e, hideNotes) }
-    const hideProfile = e => { hide(pg.profileBox, e, hideProfile) }
 
-    bind(pg.noteMenuEntry, 'click', async e => {
-      bind(document, 'click', hideNotes)
-      pg.noteBox.style.display = 'block'
-      pg.noteIndicator.style.display = 'none'
-      const acks = []
+    bind(pg.noteMenuEntry, 'click', async () => {
+      Doc.hide(pg.pokeList)
+      Doc.show(pg.noteList)
+      this.ackNotes()
+      pg.noteCat.classList.add('active')
+      pg.pokeCat.classList.remove('active')
+      this.showDropdown(pg.noteMenuEntry, pg.noteBox)
+      Doc.hide(pg.noteIndicator)
       for (const note of this.notes) {
-        if (!note.acked) {
-          note.acked = true
-          if (note.id && note.severity > ntfn.POKE) acks.push(note.id)
+        if (note.acked) {
+          note.el.classList.remove('firstview')
         }
-        note.el.querySelector('div.note-time').textContent = Doc.timeSince(note.stamp)
       }
+      this.setNoteTimes(pg.noteList)
       this.storeNotes()
-      if (acks.length) ws.request('acknotes', acks)
     })
-    if (this.notes.length === 0) {
-      pg.noteList.textContent = 'no notifications'
-    }
-    bind(pg.profileMenuEntry, 'click', async e => {
-      bind(document, 'click', hideProfile)
-      pg.profileBox.style.display = 'block'
+
+    bind(pg.profileMenuEntry, 'click', () => {
+      this.showDropdown(pg.profileMenuEntry, pg.profileBox)
     })
+
+    bind(pg.innerNoteIcon, 'click', () => { Doc.hide(pg.noteBox) })
+    bind(pg.innerProfileIcon, 'click', () => { Doc.hide(pg.profileBox) })
+
     bind(pg.profileSignout, 'click', async e => await this.signOut())
+
+    bind(pg.pokeCat, 'click', () => {
+      pg.pokeCat.classList.add('active')
+      pg.noteCat.classList.remove('active')
+      Doc.hide(pg.noteList)
+      Doc.show(pg.pokeList)
+      this.ackNotes()
+    })
+
+    bind(pg.noteCat, 'click', () => {
+      pg.noteCat.classList.add('active')
+      pg.pokeCat.classList.remove('active')
+      Doc.hide(pg.pokeList)
+      Doc.show(pg.noteList)
+      this.ackNotes()
+    })
+  }
+
+  /*
+   * showDropdown sets the position and visibility of the specified dropdown
+   * dialog according to the position of its icon button.
+   */
+  showDropdown (icon, dialog) {
+    const ico = icon.getBoundingClientRect()
+    Doc.hide(this.page.noteBox, this.page.profileBox)
+    Doc.show(dialog)
+    dialog.style.right = `${window.innerWidth - ico.left - ico.width + 11}px`
+    dialog.style.top = `${ico.top - 9}px`
+
+    const hide = e => {
+      if (!Doc.mouseInElement(e, dialog)) {
+        Doc.hide(dialog)
+        unbind(document, 'click', hide)
+        if (dialog === this.page.noteBox && Doc.isDisplayed(this.page.noteList)) {
+          this.ackNotes()
+        }
+      }
+    }
+    bind(document, 'click', hide)
+  }
+
+  ackNotes () {
+    const acks = []
+    for (const note of this.notes) {
+      if (note.acked) {
+        note.el.classList.remove('firstview')
+      } else {
+        note.acked = true
+        if (note.id && note.severity > ntfn.POKE) acks.push(note.id)
+      }
+    }
+    if (acks.length) ws.request('acknotes', acks)
+    Doc.hide(this.page.noteIndicator)
+  }
+
+  setNoteTimes (noteList) {
+    for (const el of Array.from(noteList.children)) {
+      el.querySelector('span.note-time').textContent = Doc.timeSince(el.note.stamp)
+    }
   }
 
   /*
    * bindInternalNavigation hijacks navigation by click on any local links that
    * are descendents of ancestor.
-   * */
+   */
   bindInternalNavigation (ancestor) {
     const pageURL = new URL(window.location)
     ancestor.querySelectorAll('a').forEach(a => {
@@ -382,8 +439,11 @@ export default class Application {
    */
   setNotes (notes) {
     this.log('notes', 'setNotes', notes)
-    this.notes = notes
-    this.setNoteElements()
+    // this.notes = notes
+    Doc.empty(this.page.noteList)
+    for (let i = 0; i < notes.length; i++) {
+      this.prependNoteElement(notes[i])
+    }
   }
 
   /*
@@ -429,21 +489,27 @@ export default class Application {
     // Discard data notifications.
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
-    if (note.severity === ntfn.POKE) {
-      const span = this.pokeTmpl.cloneNode(true)
-      span.textContent = `${note.subject}: ${note.details}`
-      this.pokeNotes.appendChild(span)
+    if (this.showPopups) {
+      const span = this.popupTmpl.cloneNode(true)
+      Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
+      const indicator = Doc.tmplElement(span, 'indicator')
+      if (note.severity === ntfn.POKE) {
+        Doc.hide(indicator)
+      } else setSeverityClass(indicator, note.severity)
+      const pn = this.popupNotes
+      pn.appendChild(span)
+      // These take up screen space. Only show max 5 at a time.
+      while (pn.children.length > 5) pn.removeChild(pn.firstChild)
       setTimeout(async () => {
         await Doc.animate(500, progress => {
           span.style.opacity = 1 - progress
         })
         span.remove()
       }, 6000)
-      return
     }
     // Success and higher severity go to the bell dropdown.
-    this.notes.push(note)
-    this.setNoteElements()
+    if (note.severity === ntfn.POKE) this.prependPokeElement(note)
+    else this.prependNoteElement(note)
   }
 
   /*
@@ -470,25 +536,43 @@ export default class Application {
     }
   }
 
-  /* setNoteElements re-builds the drop-down notification list. */
-  setNoteElements () {
+  prependPokeElement (note) {
+    this.pokes.push(note)
+    while (this.pokes.length > noteCacheSize) this.pokes.shift()
+    const el = this.makePoke(note)
+    const noteList = this.page.pokeList
+    this.prependListElement(noteList, note, el)
+  }
+
+  prependNoteElement (note) {
+    this.notes.push(note)
+    while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
-    while (this.notes.length > 10) this.notes.shift()
-    Doc.empty(noteList)
-    for (let i = this.notes.length - 1; i >= 0; i--) {
-      const note = this.notes[i]
-      const noteEl = this.makeNote(note)
-      note.el = noteEl
-      noteList.appendChild(noteEl)
-    }
+    const el = this.makeNote(note)
+    this.prependListElement(noteList, note, el)
     this.storeNotes()
     // Set the indicator color.
-    if (this.notes.length === 0) return
-    const severity = this.notes.reduce((s, v) => {
-      if (!v.acked && v.severity > s) return v.severity
+    if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(this.page.noteList))) return
+    var unacked = 0
+    const severity = this.notes.reduce((s, note) => {
+      if (!note.acked) unacked++
+      if (!note.acked && note.severity > s) return note.severity
       return s
     }, ntfn.IGNORE)
-    setSeverityClass(this.page.noteIndicator, severity)
+    const ni = this.page.noteIndicator
+    setSeverityClass(ni, severity)
+    if (unacked) {
+      ni.textContent = (unacked > noteCacheSize - 1) ? `${noteCacheSize - 1}+` : unacked
+      Doc.show(ni)
+    } else Doc.hide(ni)
+  }
+
+  prependListElement (noteList, note, el) {
+    note.el = el
+    el.note = note
+    noteList.prepend(el)
+    while (noteList.children.length > noteCacheSize) noteList.removeChild(noteList.lastChild)
+    this.setNoteTimes(noteList)
   }
 
   /*
@@ -496,7 +580,7 @@ export default class Application {
    * notification list.
    */
   makeNote (note) {
-    const el = this.page.noteTemplate.cloneNode(true)
+    const el = this.page.noteTmpl.cloneNode(true)
     if (note.severity > ntfn.POKE) {
       const cls = note.severity === ntfn.SUCCESS ? 'good' : note.severity === ntfn.WARNING ? 'warn' : 'bad'
       el.querySelector('div.note-indicator').classList.add(cls)
@@ -504,6 +588,14 @@ export default class Application {
 
     el.querySelector('div.note-subject').textContent = note.subject
     el.querySelector('div.note-details').textContent = note.details
+    return el
+  }
+
+  makePoke (note) {
+    const el = this.page.pokeTmpl.cloneNode(true)
+    const d = new Date(note.stamp)
+    Doc.tmplElement(el, 'dateTime').textContent = `${d.toLocaleDateString()}, ${d.toLocaleTimeString()}`
+    Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
     return el
   }
 
@@ -565,7 +657,7 @@ export default class Application {
   async signOut () {
     const res = await postJSON('/api/logout')
     if (!this.checkResponse(res)) {
-      this.page.profileBox.style.display = 'none'
+      Doc.hide(this.page.profileBox)
       return
     }
     State.clearAllStore()
@@ -590,17 +682,6 @@ const severityClassMap = {
   [ntfn.WARNING]: 'warn'
 }
 
-/*
- * setSeverityClass sets the element's CSS class based on the specified
- * notification severity level.
- */
-function setSeverityClass (el, severity) {
-  el.classList.remove('bad', 'warn', 'good')
-  const cls = severityClassMap[severity]
-  if (cls) el.classList.add(cls)
-  el.style.display = cls ? 'block' : 'none'
-}
-
 /* handlerFromPath parses the handler name from the path. */
 function handlerFromPath (path) {
   return path.replace(/^\//, '').split('/')[0].split('?')[0].split('#')[0]
@@ -614,4 +695,9 @@ function nowString () {
   const s = stamp.getSeconds().toString().padStart(2, '0')
   const ms = stamp.getMilliseconds().toString().padStart(3, '0')
   return `${h}:${m}:${s}.${ms}`
+}
+
+function setSeverityClass (el, severity) {
+  el.classList.remove('bad', 'warn', 'good')
+  el.classList.add(severityClassMap[severity])
 }

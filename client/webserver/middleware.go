@@ -37,26 +37,29 @@ func securityMiddleware(next http.Handler) http.Handler {
 // including the auth token.
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// darkMode cookie.
-		var darkMode bool
-		cookie, err := r.Cookie(darkModeCK)
-		switch err {
-		// Dark mode is the default
-		case nil:
-			darkMode = cookie.Value == "1"
-		case http.ErrNoCookie:
-			darkMode = true
-		default:
-			log.Errorf("Cookie dark mode retrieval error: %v", err)
-		}
-
 		ctx := context.WithValue(r.Context(), ctxKeyUserInfo, &userInfo{
-			User:     s.core.User(),
-			Authed:   s.isAuthed(r),
-			DarkMode: darkMode,
+			User:       s.core.User(),
+			Authed:     s.isAuthed(r),
+			DarkMode:   extractBooleanCookie(r, darkModeCK, true),
+			ShowPopups: extractBooleanCookie(r, popupsCK, true),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// extractBooleanCookie extracts the cookie value with key k from the Request,
+// and interprets the value as true only if it's equal to the string "1".
+func extractBooleanCookie(r *http.Request, k string, deFault bool) bool {
+	cookie, err := r.Cookie(k)
+	switch err {
+	// Dark mode is the default
+	case nil:
+		return cookie.Value == "1"
+	case http.ErrNoCookie:
+	default:
+		log.Errorf("Cookie %q retrieval error: %v", k, err)
+	}
+	return deFault
 }
 
 // requireInit ensures that the core app is initialized before allowing the

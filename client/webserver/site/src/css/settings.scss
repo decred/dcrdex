@@ -1,0 +1,24 @@
+div.settings {
+  width: 500px;
+
+  & > div {
+    position: relative;
+    padding: 10px;
+    border-bottom: 1px solid #7777;
+  }
+
+  & > div:first-child {
+    border-top: 1px solid #7777;
+  }
+
+  & > div.form-check {
+    padding-left: 35px;
+  }
+}
+
+span.settings-gear {
+  display: inline-block;
+  font-size: 40px;
+  opacity: 0.6;
+  margin: 10px;
+}

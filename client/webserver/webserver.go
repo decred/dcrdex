@@ -42,6 +42,8 @@ const (
 	darkModeCK = "darkMode"
 	// authCK is the authorization token cookie key.
 	authCK = "dexauth"
+	// popupsCK is the cookie key for the user's preference for showing popups.
+	popupsCK = "popups"
 	// ctxKeyUserInfo is used in the authorization middleware for saving user
 	// info in http request contexts.
 	ctxKeyUserInfo = contextKey("userinfo")
@@ -376,8 +378,9 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 // and cookies.
 type userInfo struct {
 	*core.User
-	Authed   bool
-	DarkMode bool
+	Authed     bool
+	DarkMode   bool
+	ShowPopups bool
 }
 
 // Extract the userInfo from the request context.

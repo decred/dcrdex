@@ -2,17 +2,29 @@
 {{template "top" .}}
 <div id="main" data-handler="settings" class="main align-items-center justify-content-center flex-column">
 
-  <div class="d-inline-block">
+  <span class="settings-gear ico-settings"></span>
+
+  <div class="settings">
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
       <label class="form-check-label" for="darkMode">
         Dark Mode
       </label>
     </div>
-    <div class="mt-2 {{if not .UserInfo.Authed}} d-hide{{end}}">
-      <button id="addADex" class="col bg2 selected">Add a DEX</button>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
+      <label class="form-check-label" for="showPokes">
+        Show pop-up notifications
+      </label>
     </div>
-    <div class="pt-2">Build ID: <span id="commitHash" class="mono"></span></div>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <p>
+        The Decred DEX Client supports simultaneous use of any number of DEX
+        servers.
+      </p>
+      <button id="addADex" class="bg2 selected">Add a DEX</button>
+    </div>
+    <div>Build ID: <span id="commitHash" class="mono"></span></div>
   </div>
 
   {{- /* POP-UP FORMS */ -}}

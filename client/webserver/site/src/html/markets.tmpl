@@ -14,14 +14,14 @@
 
     {{- /* SEARCH INPUT */ -}}
     <label class="market-search">
-        <input class="flex-grow-1 pl-2" type="text" id="marketSearch">
-        <span class="ico-search px-1"></span>
+      <div><span class="ico-search px-2"></span></div>
+      <div><input type="text" id="marketSearch" class="w-100 px-1"></div>
     </label>
 
     {{- /* LIST OF EXCHANGE SECTIONS WITH MARKETS */ -}}
     <div id="marketList">
       <div data-tmpl="xc">
-        <div class="fs16 py-1 pl-2 bg1" data-tmpl="header">
+        <div class="header fs16 py-1 pl-2 bg1" data-tmpl="header">
           <span class="ico-disconnected" title="disconnected" data-tmpl="disconnected"></span>
         </div>
         <div data-tmpl="mkts">
@@ -57,25 +57,27 @@
           {{- /* BUY ORDER LIST */ -}}
           <div class="marketorders col-7 p-0 bg1">
             <div class="market-header text-center fs14 py-1">Buy Orders</div>
-            <table class="ordertable bg0">
-              {{block "thead" .}}
-              <thead>
-                <tr>
-                  <th class="text-left pl-2">Quantity</th>
-                  <th class="text-right pr-2">Rate</th>
-                  <th class="text-right pr-2">Epoch</th>
-                </tr>
-              </thead>
-              {{end}}
-              <tbody id="buyRows">
-                {{- /* This row is used by the app as a template. */ -}}
-                <tr id="rowTemplate">
-                  <td class="text-left pl-2" data-type="qty">-</td>
-                  <td class="text-right pr-2" data-type="rate">-</td>
-                  <td class="text-right pr-3" data-type="epoch"></td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="max-h-100 stylish-overflow">
+              <table class="ordertable">
+                {{block "thead" .}}
+                <thead>
+                  <tr>
+                    <th class="text-left pl-2">Quantity</th>
+                    <th class="text-right pr-2">Rate</th>
+                    <th class="text-right pr-2">Epoch</th>
+                  </tr>
+                </thead>
+                {{end}}
+                <tbody id="buyRows">
+                  {{- /* This row is used by the app as a template. */ -}}
+                  <tr id="rowTemplate">
+                    <td class="text-left pl-2" data-type="qty">-</td>
+                    <td class="text-right pr-2" data-type="rate">-</td>
+                    <td class="text-right pr-3" data-type="epoch"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {{- /* ORDER PANEL */ -}}
@@ -272,10 +274,12 @@
           {{- /* SELL ORDER LIST */ -}}
           <div class="marketorders col-7 p-0 bg1">
             <div class="market-header text-center fs14 py-1">Sell Orders</div>
-            <table class="ordertable bg0">
-              {{template "thead"}}
-              <tbody id="sellRows"></tbody>
-            </table>
+            <div class="max-h-100 stylish-overflow">
+              <table class="ordertable">
+                {{template "thead"}}
+                <tbody id="sellRows"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

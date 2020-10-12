@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,6 +48,7 @@ var (
 	wipeWalletBalance     bool
 	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
 	randomPokes           = false
+	randomNotes           = false
 )
 
 func dummySettings() map[string]string {
@@ -912,6 +914,7 @@ out:
 			for _, o := range c.epochOrders {
 				miniOrder := o.Payload.(*core.MiniOrder)
 				if miniOrder.Rate > 0 {
+					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
 					if miniOrder.Sell {
@@ -929,24 +932,51 @@ out:
 	}
 }
 
+var (
+	randChars = []byte("abcd efgh ijkl mnop qrst uvwx yz123")
+	numChars  = len(randChars)
+)
+
+func randStr(minLen, maxLen int) string {
+	strLen := rand.Intn(maxLen-minLen) + minLen
+	b := make([]byte, 0, strLen)
+	for i := 0; i < strLen; i++ {
+		b = append(b, randChars[rand.Intn(numChars)])
+	}
+	return strings.Trim(string(b), " ")
+}
+
 func (c *TCore) runRandomPokes() {
 	nextWait := func() time.Duration {
 		return time.Duration(float64(time.Second)*rand.Float64()) * 5
 	}
-	chars := []byte("abcd efgh ijkl mnop qrst uvwx yz123")
-	numChars := len(chars)
-	randStr := func(maxLen int) string {
-		strLen := rand.Intn(maxLen)
-		b := make([]byte, 0, strLen)
-		for i := 0; i < strLen; i++ {
-			b = append(b, chars[rand.Intn(numChars)])
+	for {
+		select {
+		case <-time.NewTimer(nextWait()).C:
+			note := db.NewNotification(randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
+			c.noteFeed <- &note
+		case <-tCtx.Done():
+			return
 		}
-		return string(b)
+	}
+}
+
+func (c *TCore) runRandomNotes() {
+	nextWait := func() time.Duration {
+		return time.Duration(float64(time.Second)*rand.Float64()) * 5
 	}
 	for {
 		select {
 		case <-time.NewTimer(nextWait()).C:
-			note := db.NewNotification(randStr(20), randStr(20), randStr(100), db.Poke)
+			roll := rand.Float32()
+			severity := db.Success
+			if roll < 0.05 {
+				severity = db.ErrorLevel
+			} else if roll < 0.10 {
+				severity = db.WarningLevel
+			}
+
+			note := db.NewNotification(randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return
@@ -961,14 +991,15 @@ func TestServer(t *testing.T) {
 	asset.Register(141, &TDriver{}) // kmd
 	asset.Register(3, &TDriver{})   // doge
 
-	numBuys = 0
-	numSells = 0
-	feedPeriod = 2000 * time.Millisecond
+	numBuys = 50
+	numSells = 50
+	feedPeriod = 500 * time.Millisecond
 	initialize := false
 	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true
+	randomNotes = true
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -1001,5 +1032,10 @@ func TestServer(t *testing.T) {
 	if randomPokes {
 		go tCore.runRandomPokes()
 	}
+
+	if randomNotes {
+		go tCore.runRandomNotes()
+	}
+
 	cm.Wait()
 }

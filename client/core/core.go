@@ -1841,7 +1841,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 
 	dexStats := c.initializeDEXConnections(crypter)
-	notes, err := c.db.NotificationsN(10)
+	notes, err := c.db.NotificationsN(100)
 	if err != nil {
 		c.log.Errorf("Login -> NotificationsN error: %v", err)
 	}
@@ -2747,12 +2747,6 @@ func (c *Core) initialize() {
 						"Discarding account.", acct.Host)
 					return
 				}
-				c.log.Infof("Incomplete registration detected for DEX %s. "+
-					"Registration will be completed when the Decred wallet is unlocked.",
-					acct.Host)
-				details := fmt.Sprintf("Unlock your Decred wallet to complete registration for %s", acct.Host)
-				c.notify(newFeePaymentNote("Incomplete registration", details, db.WarningLevel, acct.Host))
-				// checkUnpaidFees will pay the fees if the wallet is unlocked
 			}
 			c.connMtx.Lock()
 			c.conns[host] = dc

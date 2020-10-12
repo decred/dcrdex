@@ -1,5 +1,5 @@
 div.marketlist {
-  width: 200px;
+  width: 175px;
   border-right: 1px solid #626262;
   z-index: 99;
   background-color: #dbdbdb;
@@ -9,11 +9,16 @@ div.marketlist {
     border-width: 1px;
     border-color: #aaa;
   }
+
+  .header {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 div.marketrow {
   font-size: 17px;
-  padding: 0.5em;
+  padding: 0.3em;
   font-family: 'demi-sans', sans-serif;
   cursor: pointer;
 }
@@ -32,6 +37,12 @@ label.market-search {
 
   input {
     border: none;
+    width: 150px;
+  }
+
+  span {
+    width: 25px;
+    text-align: center;
   }
 }
 
@@ -72,10 +83,6 @@ div.popupforms {
   cursor: ns-resize;
 }
 
-.marketorders {
-  overflow: hidden;
-}
-
 table.ordertable {
   border-collapse: collapse;
   border: none;
@@ -94,7 +101,7 @@ table.ordertable {
   td,
   th {
     font-size: 14px;
-    padding: 2px 0;
+    padding: 3px 0;
   }
 
   tr {
