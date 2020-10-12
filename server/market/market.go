@@ -1409,17 +1409,19 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	}
 
 	// Send revoke_order notification to order owner.
+	route := msgjson.RevokeOrderRoute
+	log.Infof("Sending a '%s' notification to %v for order %v", route, user, oid)
 	revMsg := &msgjson.RevokeOrder{
 		OrderID: oid.Bytes(),
 	}
 	m.auth.Sign(revMsg)
-	revNtfn, err := msgjson.NewNotification(msgjson.RevokeOrderRoute, revMsg)
+	revNtfn, err := msgjson.NewNotification(route, revMsg)
 	if err != nil {
-		log.Errorf("Failed to create %s notification for order %v: %v", msgjson.RevokeOrderRoute, oid, err)
+		log.Errorf("Failed to create %s notification for order %v: %v", route, oid, err)
 	} else {
 		err = m.auth.Send(user, revNtfn)
 		if err != nil {
-			log.Debugf("Failed to send %s notification to user %v: %v", msgjson.RevokeOrderRoute, user, err)
+			log.Debugf("Failed to send %s notification to user %v: %v", route, user, err)
 		}
 	}
 

@@ -1013,6 +1013,8 @@ func (t *trackedTrade) revoke() {
 		return
 	}
 
+	t.dc.log.Warnf("Revoking order %v", t.ID())
+
 	metaOrder := t.metaOrder()
 	metaOrder.MetaData.Status = order.OrderStatusRevoked
 	err := t.db.UpdateOrder(metaOrder)
@@ -1054,6 +1056,13 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 
 	// Notify the user of the failed match.
 	corder := t.coreOrderInternal() // no cancel order
+	// For the frontend, call this a complete match so it doesn't say "settling".
+	for _, match := range corder.Matches {
+		if bytes.Equal(match.MatchID, matchID[:]) {
+			match.Status = order.MatchComplete
+			break
+		}
+	}
 	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
 		token(matchID[:])), db.WarningLevel, corder))
 

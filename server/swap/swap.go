@@ -1959,7 +1959,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 // and processing the acknowledgement. Match Sigs and Status are not accessed.
 func (s *Swapper) revoke(match *matchTracker) {
 	route := msgjson.RevokeMatchRoute
-	log.Infof("revoke: sending the '%s' notification to each client for match %v",
+	log.Infof("Sending a '%s' notification to each client for match %v",
 		route, match.ID())
 	// Unlock the maker and taker order coins.
 	s.unlockOrderCoins(match.Taker)
