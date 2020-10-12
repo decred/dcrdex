@@ -138,12 +138,15 @@ func (dc *dexConnection) refreshMarkets() {
 		dc.tradeMtx.RUnlock()
 
 		for _, trade := range mktTrades {
-			market.Orders = append(market.Orders, trade.coreOrder())
 			trade.mtx.RLock()
-			if trade.Trade().Sell {
-				market.QuoteFundsLocked += trade.lockedAmount()
+			ord := trade.coreOrderInternal()
+			market.Orders = append(market.Orders, ord)
+			if ord.Sell {
+				market.BaseOrderLocked += trade.lockedAmount()
+				market.BaseContractLocked += trade.unspentContractAmounts()
 			} else {
-				market.BaseFundsLocked += trade.lockedAmount()
+				market.QuoteOrderLocked += trade.lockedAmount()
+				market.QuoteContractLocked += trade.unspentContractAmounts()
 			}
 			trade.mtx.RUnlock()
 		}
@@ -1045,10 +1048,12 @@ func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
+			tracker.mtx.RLock()
 			if tracker.fromAssetID == assetID {
 				contractLocked += tracker.unspentContractAmounts()
 				orderLocked += tracker.lockedAmount()
 			}
+			tracker.mtx.RUnlock()
 		}
 		dc.tradeMtx.RUnlock()
 	}
@@ -2725,6 +2730,22 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
+
+	// Order, match statuses should now be in sync with the DEX.
+	// Refresh the user's orders for each of the DEX's markets and
+	// log updated locked funds info.
+	dc.refreshMarkets()
+	dc.marketMtx.RLock()
+	for _, mkt := range dc.marketMap {
+		c.log.Infof("%s %s market - %d active orders, %s %s, %s %s locked for swapping, "+
+			"%s %s, %s %s locked in unspent contracts", dc.acct.host, mkt.Name, len(mkt.Orders),
+			amtString(mkt.BaseOrderLocked), mkt.BaseSymbol,
+			amtString(mkt.QuoteOrderLocked), mkt.QuoteSymbol,
+			amtString(mkt.BaseContractLocked), mkt.BaseSymbol,
+			amtString(mkt.QuoteContractLocked), mkt.QuoteSymbol)
+	}
+	dc.marketMtx.RUnlock()
+
 	return nil
 }
 
@@ -3082,9 +3103,12 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			notifyErr("Wallet missing", "Wallet retrieval error for active order %s: %v", tracker.token(), err)
 			continue
 		}
+
+		// Keep mutex locked to set tracker.wallets, match.failErr, match.counterSwap
+		// and tracker.coins below. Lock also required for tracker.unspentContractAmounts().
 		tracker.mtx.Lock()
+
 		tracker.wallets = wallets
-		tracker.mtx.Unlock()
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -3144,6 +3168,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				coinIDs = []order.CoinID{tracker.metaData.ChangeCoin}
 			}
 			if len(coinIDs) == 0 {
+				tracker.mtx.Unlock()
 				notifyErr("No funding coins", "Order %s has no %s funding coins", tracker.token(), unbip(wallets.fromAsset.ID))
 				continue
 			}
@@ -3152,11 +3177,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				byteIDs = append(byteIDs, []byte(cid))
 			}
 			if len(byteIDs) == 0 {
+				tracker.mtx.Unlock()
 				notifyErr("Order coin error", "No coins for loaded order %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
 			coins, err := wallets.fromWallet.FundingCoins(byteIDs)
 			if err != nil {
+				tracker.mtx.Unlock()
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
@@ -3170,6 +3197,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			relocks.count(wallets.fromAsset.ID)
 		}
 
+		tracker.mtx.Unlock()
 		dc.trades[tracker.ID()] = tracker
 	}
 	return relocks
@@ -4244,4 +4272,8 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 		return fmt.Errorf("failed ID match. order abandoned")
 	}
 	return nil
+}
+
+func amtString(amt uint64) string {
+	return strconv.FormatFloat(float64(amt)/conversionFactor, 'f', -1, 64) // -1 removes trailing zeros
 }

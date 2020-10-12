@@ -181,6 +181,9 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 // lockedAmount is the total value of all coins currently locked for this trade.
 // Returns the value sum of the initial funding coins if no swap has been sent,
 // otherwise, the value of the locked change coin is returned.
+// NOTE: This amount only applies to the wallet from which swaps are sent. This
+// is the BASE asset wallet for a SELL order and the QUOTE asset wallet for a
+// BUY order.
 // lockedAmount should be called with the mtx >= RLocked.
 func (t *trackedTrade) lockedAmount() (locked uint64) {
 	if t.coinsLocked { // implies no swap has been sent
@@ -650,9 +653,11 @@ func (t *trackedTrade) activeMatches() []*matchTracker {
 }
 
 // unspentContractAmounts returns the total amount locked in unspent swaps.
+// NOTE: This amount only applies to the wallet from which swaps are sent. This
+// is the BASE asset wallet for a SELL order and the QUOTE asset wallet for a
+// BUY order.
+// unspentContractAmounts should be called with the mtx >= RLocked.
 func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
 	swapSentFromQuoteAsset := t.fromAssetID == t.Quote()
 	for _, match := range t.matches {
 		side, status := match.Match.Side, match.Match.Status

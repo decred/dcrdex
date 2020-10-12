@@ -258,17 +258,19 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 // Market is market info.
 type Market struct {
-	Name             string   `json:"name"`
-	BaseID           uint32   `json:"baseid"`
-	BaseSymbol       string   `json:"basesymbol"`
-	QuoteID          uint32   `json:"quoteid"`
-	QuoteSymbol      string   `json:"quotesymbol"`
-	EpochLen         uint64   `json:"epochlen"`
-	StartEpoch       uint64   `json:"startepoch"`
-	MarketBuyBuffer  float64  `json:"buybuffer"`
-	Orders           []*Order `json:"orders"`
-	BaseFundsLocked  uint64   `json:"basefundslocked"`
-	QuoteFundsLocked uint64   `json:"quotefundslocked"`
+	Name                string   `json:"name"`
+	BaseID              uint32   `json:"baseid"`
+	BaseSymbol          string   `json:"basesymbol"`
+	QuoteID             uint32   `json:"quoteid"`
+	QuoteSymbol         string   `json:"quotesymbol"`
+	EpochLen            uint64   `json:"epochlen"`
+	StartEpoch          uint64   `json:"startepoch"`
+	MarketBuyBuffer     float64  `json:"buybuffer"`
+	Orders              []*Order `json:"orders"`
+	BaseOrderLocked     uint64   `json:"baseorderlocked"`
+	QuoteOrderLocked    uint64   `json:"quoteorderlocked"`
+	BaseContractLocked  uint64   `json:"basecontractlocked"`
+	QuoteContractLocked uint64   `json:"quotecontractlocked"`
 }
 
 // Display returns an ID string suitable for displaying in a UI.
