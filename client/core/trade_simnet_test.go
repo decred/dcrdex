@@ -185,9 +185,7 @@ func TestTradeSuccess(t *testing.T) {
 
 	var qty, rate uint64 = 12 * 1e8, 1.5 * 1e4 // 12 DCR at 0.00015 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
-	if err := simpleTradeTest(qty, rate, order.MatchComplete); err != nil {
-		t.Fatal(err)
-	}
+	simpleTradeTest(t, qty, rate, order.MatchComplete)
 }
 
 // TestNoMakerSwap runs a simple trade test and ensures that the resulting
@@ -203,9 +201,7 @@ func TestNoMakerSwap(t *testing.T) {
 
 	var qty, rate uint64 = 10 * 1e8, 1 * 1e4 // 10 DCR at 0.0001 BTC/DCR
 	client1.isSeller, client2.isSeller = false, true
-	if err := simpleTradeTest(qty, rate, order.NewlyMatched); err != nil {
-		t.Fatal(err)
-	}
+	simpleTradeTest(t, qty, rate, order.NewlyMatched)
 }
 
 // TestNoTakerSwap runs a simple trade test and ensures that the resulting
@@ -222,17 +218,15 @@ func TestNoTakerSwap(t *testing.T) {
 
 	var qty, rate uint64 = 8 * 1e8, 2 * 1e4 // 8 DCR at 0.0002 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
-	if err := simpleTradeTest(qty, rate, order.MakerSwapCast); err != nil {
-		t.Fatal(err)
-	}
+	simpleTradeTest(t, qty, rate, order.MakerSwapCast)
 }
 
-// testNoMakerRedeem runs a simple trade test and ensures that the resulting
+// TestNoMakerRedeem runs a simple trade test and ensures that the resulting
 // trades fail because of Maker not redeeming Taker's swap.
 // Also ensures that both Maker and Taker's funds are refunded after their
 // respective swap locktime expires.
 // A scenario where Maker actually redeemed Taker's swap but did not notify
-// Taker is handled in testMakerGhostingAfterTakerRedeem which ensures that
+// Taker is handled in TestMakerGhostingAfterTakerRedeem which ensures that
 // Taker auto-finds Maker's redeem and completes the trade by redeeming Maker's
 // swap.
 func TestNoMakerRedeem(t *testing.T) {
@@ -244,14 +238,12 @@ func TestNoMakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
+	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5 DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
-	if err := simpleTradeTest(qty, rate, order.TakerSwapCast); err != nil {
-		t.Fatal(err)
-	}
+	simpleTradeTest(t, qty, rate, order.TakerSwapCast)
 }
 
-// testMakerGhostingAfterTakerRedeem places simple orders for clients 1 and 2,
+// TestMakerGhostingAfterTakerRedeem places simple orders for clients 1 and 2,
 // negotiates the resulting trades smoothly till TakerSwapCast, then Maker goes
 // AWOL after redeeming taker's swap without notifying Taker. This test ensures
 // that Taker auto-finds Maker's redeem, extracts the secret key and redeems
@@ -269,7 +261,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
+	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5 DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
 
 	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
@@ -312,7 +304,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 		}
 		tracker.mtx.Unlock()
 		// force next action since trade.tick() will not be called for disconnected dcs.
-		client.core.tick(tracker)
+		client.core.tick(tracker) // err???
 		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, finalStatus)
 	}
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
@@ -379,7 +371,9 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	defer teardown(cancelCtx)
 
 	for _, client := range clients {
-		client.prepareToTrade()
+		if err = client.prepareToTrade(); err != nil {
+			t.Fatal(err)
+		}
 		client.expectBalanceDiffs = nil // not interested in balance checks for this test case
 	}
 
@@ -679,21 +673,21 @@ func TestOrderStatusReconciliation(t *testing.T) {
 // specified final status.
 // Also checks that the changes to the clients wallets balances are within
 // expected range.
-func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
+func simpleTradeTest(t *testing.T, qty, rate uint64, finalStatus order.MatchStatus) {
 	if client1.isSeller && client2.isSeller {
-		return fmt.Errorf("both client 1 and 2 cannot be sellers")
+		t.Fatalf("both client 1 and 2 cannot be sellers")
 	}
 
 	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
 
 	if finalStatus == order.NewlyMatched {
 		// Lock wallets to prevent Maker from sending swap as soon as the orders are matched.
 		for _, client := range clients {
 			if err = client.lockWallets(); err != nil {
-				return fmt.Errorf("client %d lock wallet error: %v", client.id, err)
+				t.Fatalf("client %d lock wallet error: %v", client.id, err)
 			}
 		}
 	}
@@ -706,7 +700,7 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 		return monitorOrderMatchingAndTradeNeg(ctx, client2, c2OrderID, finalStatus)
 	})
 	if err = monitorTrades.Wait(); err != nil {
-		return err
+		t.Fatal(err)
 	}
 
 	// Allow some time for balance changes to be properly reported.
@@ -718,7 +712,7 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
-			return err
+			t.Fatal(err)
 		}
 	}
 
@@ -733,17 +727,18 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 			return checkAndWaitForRefunds(ctx, client2, c2OrderID)
 		})
 		if err = refundsWaiter.Wait(); err != nil {
-			return err
+			t.Fatal(err)
 		}
 	}
 
 	tLog.Infof("Trades ended at %s.", finalStatus)
-	return nil
 }
 
 func placeTestOrders(qty, rate uint64) (string, string, error) {
 	for _, client := range clients {
-		client.prepareToTrade()
+		if err := client.prepareToTrade(); err != nil {
+			return "", "", err
+		}
 		// Reset the expected balance changes for this client, to be updated
 		// later in the monitorTrackedTrade function as swaps and redeems are
 		// executed.
@@ -863,8 +858,8 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				// Our toAsset == counter-party's fromAsset.
 				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
 
-			case side == order.Maker && status == order.MakerRedeemed,
-				side == order.Taker && status == order.MatchComplete:
+			case status == order.MatchComplete, // maker normally jumps MakerRedeemed if 'redeem' succeeds
+				side == order.Maker && status == order.MakerRedeemed:
 				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Match.Quantity, match.Match.Rate)
 				// Mine blocks for redemption since counter-party does not wait
 				// for redeem tx confirmations before performing follow-up action.
@@ -885,7 +880,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 					}
 					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.id.Bytes()))
 				} else {
-					client.log("%s mine error %v", unbip(assetID), err)
+					client.log("%s mine error %v", unbip(assetID), err) // return err???
 				}
 			}
 		}
@@ -1022,7 +1017,9 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	// confirm that balance changes are as expected.
 	for assetID, expectedBalanceDiff := range refundAmts {
 		if expectedBalanceDiff > 0 {
-			mineBlocks(assetID, 1)
+			if err = mineBlocks(assetID, 1); err != nil {
+				return fmt.Errorf("%s mine error %v", unbip(assetID), err)
+			}
 		}
 	}
 	time.Sleep(2 * time.Second)
