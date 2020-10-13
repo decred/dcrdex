@@ -706,6 +706,9 @@ func FindKeyPush(txIn *wire.TxIn, contractHash []byte, segwit bool, chainParams 
 }
 
 func findKeyPush(redeemScript, secret, contractHash []byte, chainParams *chaincfg.Params, hasher func([]byte) []byte) ([]byte, error) {
+	// Doesn't matter what we pass for the bool segwit argument, since we're not
+	// using the addresses, and the contract's 20-byte pubkey hashes are
+	// compatible with both address types.
 	_, _, _, keyHash, err := ExtractSwapDetails(redeemScript, true, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting atomic swap details: %v", err)

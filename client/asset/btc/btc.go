@@ -2030,8 +2030,8 @@ func (btc *ExchangeWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []
 	if err != nil {
 		return nil, nil, err
 	}
-	sig, err = txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx), idx,
-		int64(val), pkScript, txscript.SigHashAll, privKey)
+	sig, err = txscript.RawTxInWitnessSignature(tx, sigHashes, idx, int64(val),
+		pkScript, txscript.SigHashAll, privKey)
 
 	if err != nil {
 		return nil, nil, err
@@ -2221,14 +2221,15 @@ func (btc *ExchangeWallet) externalAddress() (btcutil.Address, error) {
 	return btc.wallet.AddressPKH()
 }
 
-// hashContract hashes the contract. The hash function used depends on whether
-// the wallet is configured for segwit.
+// hashContract hashes the contract for use in a p2sh or p2wsh pubkey script.
+// The hash function used depends on whether the wallet is configured for
+// segwit. Non-segwit uses Hash160, segwit uses SHA256.
 func (btc *ExchangeWallet) hashContract(contract []byte) []byte {
 	if btc.segwit {
-		h := sha256.Sum256(contract)
+		h := sha256.Sum256(contract) // BIP141
 		return h[:]
 	}
-	return btcutil.Hash160(contract)
+	return btcutil.Hash160(contract) // BIP16
 }
 
 // scriptHashAddress returns a new p2sh or p2wsh address, depending on whether
