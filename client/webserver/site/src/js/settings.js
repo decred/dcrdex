@@ -19,8 +19,11 @@ export default class SettingsPage extends BasePage {
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr'
+      'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      // Others
+      'showPokes'
     ])
+
     Doc.bind(page.darkMode, 'click', () => {
       State.dark(page.darkMode.checked)
       if (page.darkMode.checked) {
@@ -29,6 +32,13 @@ export default class SettingsPage extends BasePage {
         document.body.classList.remove('dark')
       }
     })
+
+    Doc.bind(page.showPokes, 'click', () => {
+      const show = page.showPokes.checked
+      State.setCookie('popups', show ? '1' : '0')
+      app.showPopups = show
+    })
+
     page.commitHash.textContent = app.commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())

@@ -8,11 +8,14 @@
   <link rel="icon" href="/img/favicon.png?v=MQq4VTue">
   <meta name="description" content="Decred DEX Client Web Portal">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v=Ueawg" rel="stylesheet">
+  <link href="/css/style.css?v=Ueawh" rel="stylesheet">
 </head>
 <body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
-  <div class="poke-note" id="pokeNote">
-    <span data-tmpl="note"></span>
+  <div class="popup-notes" id="popupNotes">
+    <span data-tmpl="note">
+      <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>
+      <span data-tmpl="text"></span>
+    </span>
   </div>
   <div id="tooltip" class="flex-center"></div>
   {{template "header" .}}
@@ -31,30 +34,11 @@
 
     <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
       <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
-      <div class="note-indicator" id="noteIndicator"></div>
-      <div id="noteBox" class="pl-2 pb-2">
-        <div class="icon fs20 ico-bell p-1"></div>
-        <span class="fs17 demi hoverbright">Notifications</span><br>
-        <div id="noteList">
-          <div id="noteTemplate" class="note fs14 p-2">
-            <div class="d-flex justify-content-center align-items-center px-1">
-              <div class="note-indicator d-inline-block mr-2"></div>
-              <div class="note-subject flex-grow-1 d-inline-block fs16 demi mb-1"></div>
-              <div class="note-time fs14 pr-2"></div> ago
-            </div>
-            <div class="note-details px-2"></div>
-          </div>
-        </div>
-      </div>
+      <div id="noteIndicator" class="d-hide"></div>
     </div>
 
     <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="profileMenuEntry">
       <span class="ico-profile fs20 hoverbright" id="profileIcon"></span>
-      <div id="profileBox" class="pl-2 pt-1 pb-2 fs15">
-        <div class="icon fs20 ico-profile p-1"></div>
-        <span class="demi hoverbright" id="profileSignout">Sign Out</span><br>
-        <a href="/orders" class="demi hoverbright plainlink">Order History</a>
-      </div>
     </div>
 
     <a href="/settings" class="ico-settings hoverbright fs24"></a>
@@ -63,11 +47,45 @@
   <div id="loader" class="fill-abs flex-center d-hide">
     <div class="ico-spinner spinner"></div>
   </div>
+
+  <div id="noteBox" class="d-hide">
+    <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
+    <div class="header d-flex align-items-center justify-content-start fs17 demi hoverbright px-3 py-2">
+      <div id="noteCat" class="active">Notifications</div>
+      <div id="pokeCat" >Recent Activity</div>
+    </div>
+    <div id="noteList" class="flex-grow-1 stylish-overflow">
+      <div id="noteTmpl" class="note firstview p-2">
+        <div class="d-flex justify-content-center align-items-center px-1">
+          <div class="note-indicator d-inline-block mr-2"></div>
+          <div class="note-subject flex-grow-1 d-inline-block fs16 demi"></div>
+          <span class="note-time pr-2"></span>
+        </div>
+        <div class="note-details fs15 px-3"></div>
+      </div>
+    </div>
+    <div id="pokeList" class="d-hide flex-grow-1 stylish-overflow">
+      <div id="pokeTmpl" class="note fs15 p-2">
+        <div class="d-flex justify-content-center align-items-center px-1">
+          <div class="flex-grow-1 d-inline-block fs16" data-tmpl="dateTime"></div>
+          <span class="note-time"></span>
+        </div>
+        <div class="fs15 px-1" data-tmpl="details"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="profileBox" class="d-hide">
+    <div class="icon fs20 ico-profile p-1" id="innerProfileIcon"></div>
+    <span class="demi hoverbright pointer" id="profileSignout">Sign Out</span>
+    <a href="/orders" class="demi hoverbright plainlink pt-2">Order History</a>
+  </div>
+
 </header>
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=nntTxe"></script>
+<script src="/js/entry.js?v=nntTxf"></script>
 </body>
 </html>
 {{end}}

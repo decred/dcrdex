@@ -30,6 +30,11 @@ button {
   outline: none;
 }
 
+// bootstrap override
+.form-check-input {
+  margin-top: 0.4em;
+}
+
 // Hide number arrows.
 // Chrome, Safari, Edge, Opera
 input::-webkit-outer-spin-button,
@@ -112,11 +117,6 @@ button:focus {
   form label {
     font-size: 15px;
     font-family: $demi-sans;
-  }
-
-  // bootstrap override
-  .form-check-input {
-    margin-top: 0.4em;
   }
 }
 
@@ -221,41 +221,60 @@ input[type=number] {
   }
 }
 
+.max-h-100 {
+  max-height: 100%;
+}
+
 div.note-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+
+  &.good {
+    background-color: #2d2e;
+  }
+
+  &.bad {
+    background-color: #d22e;
+  }
+
+  &.warn {
+    background-color: #f82e;
+  }
 }
 
 #noteIndicator {
   position: absolute;
   top: 0;
   left: 20px;
+  font-size: 16px;
+  line-height: 1;
+  font-family: $demi-sans;
   z-index: 2;
+
+  &.good {
+    color: #2d2e;
+  }
+
+  &.bad {
+    color: #d22e;
+  }
+
+  &.warn {
+    color: #f82e;
+  }
 }
 
-div.note-indicator.good {
-  background-color: green;
-}
-
-div.note-indicator.bad {
-  background-color: red;
-}
-
-div.note-indicator.warn {
-  background-color: orange;
-}
-
-div.poke-note {
+div.popup-notes {
   position: fixed;
-  right: 20px;
+  right: 5px;
   bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   border-radius: 4px;
   z-index: 1000;
-  max-width: 90%;
+  max-width: 750px;
 
   & > span {
     display: inline-block;
@@ -269,41 +288,67 @@ div.poke-note {
     padding: 4px 10px;
     line-height: 1;
     margin: 3px 0 0;
+    max-width: 100%;
+  }
+
+  .note-indicator {
+    margin-bottom: 2px;
   }
 }
 
 #noteBox,
 #profileBox {
-  position: absolute;
-  display: none;
-  top: -6px;
-  right: 20px;
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   background-color: white;
-  border: 1px solid black;
-  z-index: 1;
+  border: 1px solid #7777;
+  z-index: 100;
   font-family: $sans;
   min-width: 150px;
-  line-height: 2;
+  line-height: 1.5;
+  max-height: 90%;
 
   .icon {
     position: absolute;
-    right: 5px;
-    top: 5px;
+    right: 15px;
+    top: 8px;
+  }
+
+  .header {
+    border-bottom: 1px solid #7777;
+
+    & > div {
+      margin-right: 20px;
+      opacity: 0.5;
+      cursor: pointer;
+
+      &.active {
+        opacity: 1;
+      }
+    }
   }
 }
 
 #noteBox {
-  min-width: 400px;
+  width: 425px;
+
+  div.note.firstview {
+    background-color: #7772;
+  }
+
+  div.note:not(:last-child) {
+    border-bottom-style: solid;
+    border-width: 1px;
+    border-color: #7777;
+  }
 }
 
 #profileBox {
   min-width: 250px;
-}
-
-div.note:not(:last-child) {
-  border-bottom-style: solid;
-  border-width: 1px;
-  border-color: #aaa;
+  font-size: 15px;
+  padding: 10px;
 }
 
 @keyframes spin {

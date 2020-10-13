@@ -1,5 +1,6 @@
 const darkModeCK = 'darkMode'
 const authCK = 'dexauth'
+const popupsCK = 'popups'
 
 // State is a set of static methods for working with the user state. It has
 // utilities for setting and retrieving cookies and storing user configuration
@@ -70,3 +71,4 @@ export default class State {
 
 // If the dark-mode cookie is not set, set it to dark mode on.
 if (State.getCookie(darkModeCK) === null) State.setCookie(darkModeCK, '1')
+if (State.getCookie(popupsCK) === null) State.setCookie(popupsCK, '1')

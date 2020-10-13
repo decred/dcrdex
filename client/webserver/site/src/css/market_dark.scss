@@ -1,8 +1,4 @@
 body.dark {
-  .marketorders {
-    background-color: black;
-  }
-
   input[type=number] {
     border-color: #444;
   }
@@ -16,6 +12,14 @@ body.dark {
 
     tbody > tr:hover {
       background-color: #1d2936;
+    }
+  }
+
+  div.marketorders {
+    background-color: #080808;
+
+    table.ordertable tr {
+      border-bottom: 1px solid #131313;
     }
   }
 
