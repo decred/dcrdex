@@ -483,7 +483,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// Load the matchTrackers, calling the Contract and Redemption asset.Backend
 	// methods as needed.
 
-	translateSwapStatus := func(ss *swapStatus, ssd *swapStatusData) error {
+	translateSwapStatus := func(ss *swapStatus, ssd *swapStatusData, cpSwapCoin []byte) error {
 		swapCoin := ssd.ContractCoinOut
 		if len(swapCoin) > 0 {
 			assetID := ssd.SwapAsset
@@ -501,7 +501,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 
 		if redeemCoin := ssd.RedeemCoinIn; len(redeemCoin) > 0 {
 			assetID := ssd.RedeemAsset
-			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, swapCoin)
+			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, cpSwapCoin)
 			if err != nil {
 				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %v", redeemCoin, assetID, err)
 			}
@@ -540,11 +540,11 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 			},
 		}
 
-		if err := translateSwapStatus(mt.makerStatus, mtd.MakerStatus); err != nil {
+		if err := translateSwapStatus(mt.makerStatus, mtd.MakerStatus, mtd.TakerStatus.ContractCoinOut); err != nil {
 			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
 			continue
 		}
-		if err := translateSwapStatus(mt.takerStatus, mtd.TakerStatus); err != nil {
+		if err := translateSwapStatus(mt.takerStatus, mtd.TakerStatus, mtd.MakerStatus.ContractCoinOut); err != nil {
 			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
 			continue
 		}

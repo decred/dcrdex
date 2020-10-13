@@ -352,6 +352,11 @@ func (s *TStorage) SetStateHash(h []byte) error {
 	return nil
 }
 
+type redeemKey struct {
+	redemptionCoin       string
+	counterpartySwapCoin string
+}
+
 // This stub satisfies asset.Backend.
 type TAsset struct {
 	mtx           sync.RWMutex
@@ -359,7 +364,7 @@ type TAsset struct {
 	contractErr   error
 	funds         asset.FundingCoin
 	fundsErr      error
-	redemptions   map[string]asset.Coin
+	redemptions   map[redeemKey]asset.Coin
 	redemptionErr error
 	bChan         chan *asset.BlockUpdate // to trigger processBlock and eventually (after up to BroadcastTimeout) checkInaction depending on block time
 	lbl           string
@@ -370,7 +375,7 @@ func newTAsset(lbl string) *TAsset {
 		bChan:       make(chan *asset.BlockUpdate, 5),
 		lbl:         lbl,
 		contracts:   make(map[string]asset.Contract),
-		redemptions: make(map[string]asset.Coin),
+		redemptions: make(map[redeemKey]asset.Coin),
 		fundsErr:    asset.CoinNotFoundError,
 	}
 }
@@ -392,13 +397,13 @@ func (a *TAsset) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	}
 	return contract, nil
 }
-func (a *TAsset) Redemption(redemptionID, _ /*contractID*/ []byte) (asset.Coin, error) {
+func (a *TAsset) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	if a.redemptionErr != nil {
 		return nil, a.redemptionErr
 	}
-	redeem, found := a.redemptions[string(redemptionID)]
+	redeem, found := a.redemptions[redeemKey{string(redemptionID), string(cpSwapCoinID)}]
 	if !found || redeem == nil {
 		return nil, asset.CoinNotFoundError
 	}
@@ -438,9 +443,9 @@ func (a *TAsset) setRedemptionErr(err error) {
 	defer a.mtx.Unlock()
 	a.redemptionErr = err
 }
-func (a *TAsset) setRedemption(redeem asset.Coin, resetErr bool) {
+func (a *TAsset) setRedemption(redeem asset.Coin, cpSwap asset.Coin, resetErr bool) {
 	a.mtx.Lock()
-	a.redemptions[string(redeem.ID())] = redeem
+	a.redemptions[redeemKey{string(redeem.ID()), string(cpSwap.ID())}] = redeem
 	if resetErr {
 		a.redemptionErr = nil
 	}
@@ -956,9 +961,9 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
 		// do not clear redemptionErr yet
-		rig.abcNode.setRedemption(redeem.coin, false)
+		rig.abcNode.setRedemption(redeem.coin, redeem.cpSwapCoin, false)
 	} else {
-		rig.xyzNode.setRedemption(redeem.coin, false)
+		rig.xyzNode.setRedemption(redeem.coin, redeem.cpSwapCoin, false)
 	}
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
@@ -1297,8 +1302,9 @@ func randBytes(len int) []byte {
 
 // tRedeem is the information needed to spoof a redemption transaction.
 type tRedeem struct {
-	req  *msgjson.Message
-	coin *TCoin
+	req        *msgjson.Message
+	coin       *TCoin
+	cpSwapCoin *TCoin
 }
 
 func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
@@ -1309,9 +1315,19 @@ func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 		CoinID:  coinID,
 		//Time:    encode.UnixMilliU(unixMsNow()),
 	})
+	var cpSwapCoin *TCoin
+	switch user.acct {
+	case matchInfo.maker.acct:
+		cpSwapCoin = matchInfo.db.takerSwap.coin
+	case matchInfo.taker.acct:
+		cpSwapCoin = matchInfo.db.makerSwap.coin
+	default:
+		panic("wrong user")
+	}
 	return &tRedeem{
-		req:  req,
-		coin: &TCoin{id: coinID},
+		req:        req,
+		coin:       &TCoin{id: coinID},
+		cpSwapCoin: cpSwapCoin,
 	}
 }
 
@@ -2261,7 +2277,7 @@ func TestState(t *testing.T) {
 	}
 
 	// "broadcast" the redeem and signal a new block.
-	xyz.setRedemption(makerRedeem.coin, true)
+	xyz.setRedemption(makerRedeem.coin, makerRedeem.cpSwapCoin, true)
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	// sendBlock(xyz) // trigger processBlock, redeem status check (not needed!)
 	reqTimeout(recheckInterval * 2) // 'redemption' sent, but no ack resp yet
@@ -2296,6 +2312,9 @@ func TestState(t *testing.T) {
 	defer stop()
 
 	tracker = rig.getTracker()
+	if tracker == nil {
+		t.Fatal("tracker not found")
+	}
 	if tracker.Status != order.MakerRedeemed {
 		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
 	}
@@ -2331,12 +2350,15 @@ func TestState(t *testing.T) {
 
 	// Should still be MakerRedeemed since the taker's redeem has not been bcasted yet.
 	tracker = rig.getTracker()
+	if tracker == nil {
+		t.Fatal("tracker not found")
+	}
 	if tracker.Status != order.MakerRedeemed {
 		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
 	}
 
 	// "broadcast" the redeem and signal a new block.
-	abc.setRedemption(takerRedeem.coin, true)
+	abc.setRedemption(takerRedeem.coin, takerRedeem.cpSwapCoin, true)
 	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	// sendBlock(abc) // trigger processBlock, redeem status check (not needed!)
 	tickMempool() // latencyQ recheck
