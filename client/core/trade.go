@@ -992,7 +992,7 @@ func (c *Core) resendPendingRequests(t *trackedTrade) error {
 		if len(swapCoinID) != 0 && len(auth.InitSig) == 0 { // resend pending `init` request
 			err = c.finalizeSwapAction(t, match, swapCoinID, proof.Script)
 		} else if len(redeemCoinID) != 0 && len(auth.RedeemSig) == 0 { // resend pending `redeem` request
-			err = c.finalizeRedeemAction(t, match, swapCoinID)
+			err = c.finalizeRedeemAction(t, match, redeemCoinID)
 		}
 		if err != nil {
 			errs.addErr(err)

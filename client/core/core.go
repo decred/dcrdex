@@ -3510,7 +3510,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("no order found with id %s", oid.String())
+		return fmt.Errorf("no order found with id %s (not an error if you've completed your side of the swap)", oid.String())
 	}
 
 	if len(revocation.MatchID) != order.MatchIDSize {
