@@ -3294,7 +3294,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
 		URL:      wsURL.String(),
-		PingWait: 60 * time.Second,
+		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
 		Cert:     acctInfo.Cert,
 		ReconnectSync: func() {
 			go c.handleReconnect(host)

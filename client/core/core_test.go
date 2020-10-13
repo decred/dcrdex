@@ -2350,6 +2350,10 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleRevokeOrderMsg error: %v", err)
 	}
+
+	if tracker.metaData.Status != order.OrderStatusRevoked {
+		t.Errorf("expected order status %v, got %v", order.OrderStatusRevoked, tracker.metaData.Status)
+	}
 }
 
 func TestHandleRevokeMatchMsg(t *testing.T) {
