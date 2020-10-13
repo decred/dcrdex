@@ -1341,12 +1341,46 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 	return
 }
 
+// UnbookUserOrders unbooks all orders belonging to a user, unlocks the coins
+// that were used to fund the unbooked orders, changes the orders' statuses to
+// revoked in the DB, and notifies orderbook subscribers.
+func (m *Market) UnbookUserOrders(user account.AccountID) {
+	m.bookMtx.Lock()
+	removedBuys, removedSells := m.book.RemoveUserOrders(user)
+	m.bookMtx.Unlock()
+
+	total := len(removedBuys) + len(removedSells)
+	if total == 0 {
+		return
+	}
+
+	log.Infof("Unbooked %d orders (%d buys, %d sells) from market %v from user %v.",
+		total, len(removedBuys), len(removedSells), m.marketInfo.Name, user)
+
+	// Unlock the order funding coins, update order statuses in DB, and notify
+	// orderbook subscribers.
+	sellIDs := make([]order.OrderID, 0, len(removedSells))
+	for _, lo := range removedSells {
+		sellIDs = append(sellIDs, lo.ID())
+		m.unbookedOrder(lo)
+	}
+	m.coinLockerBase.UnlockOrdersCoins(sellIDs)
+
+	buyIDs := make([]order.OrderID, 0, len(removedBuys))
+	for _, lo := range removedBuys {
+		buyIDs = append(buyIDs, lo.ID())
+		m.unbookedOrder(lo)
+	}
+	m.coinLockerQuote.UnlockOrdersCoins(buyIDs)
+}
+
 // Unbook allows the DEX manager to remove a booked order. This does: (1) remove
-// the order from the in-memory book, (2) set the order's status in the DB to
-// "revoked", (3) inform the auth manager of the action for cancellation ratio
-// accounting, and (4) send an 'unbook' notification to subscribers of this
-// market's order book. Note that this presently treats the user as at-fault by
-// counting the revocation in the user's cancellation statistics.
+// the order from the in-memory book, (2) unlock funding order coins, (3) set
+// the order's status in the DB to "revoked", (4) inform the auth manager of the
+// action for cancellation ratio accounting, and (5) send an 'unbook'
+// notification to subscribers of this market's order book. Note that this
+// presently treats the user as at-fault by counting the revocation in the
+// user's cancellation statistics.
 func (m *Market) Unbook(lo *order.LimitOrder) bool {
 	// Ensure we do not unbook during matching.
 	m.bookMtx.Lock()
@@ -1355,18 +1389,40 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 
 	m.unlockOrderCoins(lo)
 
-	if !removed {
-		return false
+	if removed {
+		// Update the order status in DB, and notify orderbook subscribers.
+		m.unbookedOrder(lo)
 	}
+	return removed
+}
 
-	// Create the server-generated cancel order, and register it with
-	// the AuthManager for cancellation rate computation.
+func (m *Market) unbookedOrder(lo *order.LimitOrder) {
+	// Create the server-generated cancel order, and register it with the
+	// AuthManager for cancellation rate computation if still connected.
+	oid, user := lo.ID(), lo.User()
 	coid, revTime, err := m.storage.RevokeOrder(lo)
 	if err == nil {
-		m.auth.RecordCancel(lo.User(), coid, lo.ID(), revTime)
+		m.auth.RecordCancel(user, coid, oid, revTime)
 	} else {
 		log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 			lo.UID(), err)
+	}
+
+	// Send revoke_order notification to order owner.
+	route := msgjson.RevokeOrderRoute
+	log.Infof("Sending a '%s' notification to %v for order %v", route, user, oid)
+	revMsg := &msgjson.RevokeOrder{
+		OrderID: oid.Bytes(),
+	}
+	m.auth.Sign(revMsg)
+	revNtfn, err := msgjson.NewNotification(route, revMsg)
+	if err != nil {
+		log.Errorf("Failed to create %s notification for order %v: %v", route, oid, err)
+	} else {
+		err = m.auth.Send(user, revNtfn)
+		if err != nil {
+			log.Debugf("Failed to send %s notification to user %v: %v", route, user, err)
+		}
 	}
 
 	// Send "unbook" notification to order book subscribers.
@@ -1377,8 +1433,6 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 			epochIdx: -1, // NOTE: no epoch
 		},
 	})
-
-	return true
 }
 
 // processReadyEpoch performs the following operations for a closed epoch that

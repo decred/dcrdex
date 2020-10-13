@@ -104,6 +104,8 @@ func (auth *AuthManager) checkCancelRate(client *clientInfo) (cancels, completio
 	rate = float64(cancels) / float64(total) // rate will be NaN if total is 0
 	penalize = rate > auth.cancelThresh &&   // NaN cancelRate compares false
 		total > auth.GraceLimit()
+	log.Tracef("User %v cancellation rate is now %.2f%% (%d cancels : %d successes). Violation = %v", client.acct.ID,
+		100*rate, cancels, completions, penalize)
 	return
 }
 
@@ -179,22 +181,25 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
-	anarchy      bool
-	freeCancels  bool
-	banScore     uint32
-	cancelThresh float64
-	storage      Storage
-	signer       Signer
-	regFee       uint64
-	checkFee     FeeChecker
-	feeConfs     int64
+	anarchy        bool
+	freeCancels    bool
+	banScore       uint32
+	cancelThresh   float64
+	storage        Storage
+	signer         Signer
+	regFee         uint64
+	checkFee       FeeChecker
+	feeConfs       int64
+	miaUserTimeout time.Duration
+	unbookFun      func(account.AccountID)
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
 
-	connMtx sync.RWMutex
-	users   map[account.AccountID]*clientInfo
-	conns   map[uint64]*clientInfo
+	connMtx   sync.RWMutex
+	users     map[account.AccountID]*clientInfo
+	conns     map[uint64]*clientInfo
+	unbookers map[account.AccountID]*time.Timer
 
 	violationMtx   sync.Mutex
 	matchOutcomes  map[account.AccountID]*latest
@@ -257,16 +262,6 @@ func (v Violation) String() string {
 	return violations[v].desc
 }
 
-type violationCounter map[Violation]uint32
-
-func (vc violationCounter) score() int32 {
-	var score int32
-	for step, count := range vc {
-		score += step.Score() * int32(count)
-	}
-	return score
-}
-
 // NoActionStep is the action that the user failed to take. This is used to
 // define valid inputs to the Inaction method.
 type NoActionStep uint8
@@ -318,6 +313,11 @@ type Config struct {
 	FeeConfs int64
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
+	// UserUnbooker is a function for unbooking all of a user's orders.
+	UserUnbooker func(account.AccountID)
+	// MiaUserTimeout is how long after a user disconnects until UserUnbooker is
+	// called for that user.
+	MiaUserTimeout time.Duration
 
 	CancelThreshold float64
 	Anarchy         bool
@@ -339,6 +339,9 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		banScore:       banScore,
 		users:          make(map[account.AccountID]*clientInfo),
 		conns:          make(map[uint64]*clientInfo),
+		unbookers:      make(map[account.AccountID]*time.Timer),
+		miaUserTimeout: cfg.MiaUserTimeout,
+		unbookFun:      cfg.UserUnbooker,
 		storage:        cfg.Storage,
 		signer:         cfg.Signer,
 		regFee:         cfg.RegistrationFee,
@@ -356,6 +359,29 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	comms.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
 	comms.Route(msgjson.OrderStatusRoute, auth.handleOrderStatus)
 	return auth
+}
+
+func (auth *AuthManager) unbookUserOrders(user account.AccountID) {
+	log.Tracef("Unbooking all orders for user %v", user)
+	auth.unbookFun(user)
+	auth.connMtx.Lock()
+	delete(auth.unbookers, user)
+	auth.connMtx.Unlock()
+}
+
+// ExpectUsers specifies which users are expected to connect within a certain
+// time or have their orders unbooked (revoked). This should be run prior to
+// starting the AuthManager. This is not part of the constructor since it is
+// convenient to obtain this information from the Market's Books, and Market
+// requires the AuthManager. The same information could be pulled from storage,
+// but the Market is the authoritative book. The AuthManager should be started
+// via Run immediately after calling ExpectUsers so the users can connect.
+func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
+	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
+	for user := range users {
+		user := user // bad go
+		auth.unbookers[user] = time.AfterFunc(within, func() { auth.unbookUserOrders(user) })
+	}
 }
 
 // RecordCancel records a user's executed cancel order, including the canceled
@@ -381,7 +407,8 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, tMS int64) {
 	client := auth.user(user)
 	if client == nil {
-		log.Errorf("unknown client for user %v", user)
+		// It is likely that the user is gone if this is a revoked order.
+		// Regardless, connect will rebuild client's recentOrders from the DB.
 		return
 	}
 
@@ -399,8 +426,6 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
 	client.mtx.Unlock()
-	log.Tracef("User %v cancellation rate is now %.2f%% (%d cancels : %d successes). Violation = %v", user,
-		100*rate, cancels, completions, penalize)
 	if penalize && !auth.freeCancels && !client.isSuspended() {
 		details := fmt.Sprintf("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
@@ -416,6 +441,12 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 func (auth *AuthManager) Run(ctx context.Context) {
 	go auth.latencyQ.Run(ctx)
 	<-ctx.Done()
+	auth.connMtx.Lock()
+	defer auth.connMtx.Unlock()
+	for user, ub := range auth.unbookers {
+		ub.Stop()
+		delete(auth.unbookers, user)
+	}
 	// TODO: wait for latencyQ and running comms route handlers (handleRegister, handleNotifyFee)!
 }
 
@@ -482,7 +513,7 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
 	client := auth.user(user)
 	if client == nil {
-		log.Errorf("Send requested for unknown user %v", user)
+		log.Debugf("Send requested for disconnected user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 
@@ -491,6 +522,7 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) erro
 		log.Debugf("error sending on link: %v", err)
 		// Remove client asssuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
+		// client.conn.Disconnect() // async removal
 	}
 	return err
 }
@@ -514,7 +546,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 
 	client := auth.user(user)
 	if client == nil {
-		log.Errorf("Send requested for unknown user %v", user)
+		log.Debugf("Send requested for disconnected user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 	// log.Tracef("Registering '%s' request ID %d for user %v (auth clientInfo)", msg.Route, msg.ID, user)
@@ -530,6 +562,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 		client.respHandler(msg.ID) // drop the removed handler
 		// Remove client asssuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
+		// client.conn.Disconnect() // async removal
 	}
 	return err
 }
@@ -784,24 +817,64 @@ func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 	return auth.conns[conn.ID()]
 }
 
-// addClient adds the client to the users and conns maps.
+// addClient adds the client to the users and conns maps, and stops any unbook
+// timers started when they last disconnected.
 func (auth *AuthManager) addClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
-	oldClient := auth.users[client.acct.ID]
+	user := client.acct.ID
+	if unbookTimer, found := auth.unbookers[user]; found {
+		if unbookTimer.Stop() {
+			log.Debugf("Stopped unbook timer for user %v", user)
+		}
+		delete(auth.unbookers, user)
+	}
+
+	oldClient := auth.users[user]
+	auth.users[user] = client
+
+	connID := client.conn.ID()
+	auth.conns[connID] = client
+
+	// Now that the new conn ID is registered, disconnect any existing old link
+	// unless it is the same.
 	if oldClient != nil {
+		oldConnID := oldClient.conn.ID()
+		if oldConnID == connID {
+			return // reused conn, just update maps
+		}
+		// When replacing with a new conn, manually deregister the old conn so
+		// that when it disconnects it does not remove the new clientInfo.
+		delete(auth.conns, oldConnID)
 		oldClient.conn.Disconnect()
 	}
-	auth.users[client.acct.ID] = client
-	auth.conns[client.conn.ID()] = client
+
+	// When the conn goes down, automatically unregister the client.
+	go func() {
+		<-client.conn.Done()
+		log.Debugf("Link down: id=%d, ip=%s.", client.conn.ID(), client.conn.IP())
+		auth.removeClient(client) // must stop if connID already removed
+	}()
 }
 
-// removeClient removes the client from the users and conns map.
+// removeClient removes the client from the users and conns map, and sets a
+// timer to unbook all of the user's orders if they do not return within a
+// certain time. This is idempotent for a given conn ID.
 func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
-	delete(auth.users, client.acct.ID)
-	delete(auth.conns, client.conn.ID())
+	connID := client.conn.ID()
+	_, connFound := auth.conns[connID]
+	if !connFound {
+		// conn already removed manually when this user made a new connection.
+		// This user is still in the users map, so return.
+		return
+	}
+	user := client.acct.ID
+	delete(auth.users, user)
+	delete(auth.conns, connID)
+	client.conn.Disconnect() // in case not triggered by disconnect
+	auth.unbookers[user] = time.AfterFunc(auth.miaUserTimeout, func() { auth.unbookUserOrders(user) })
 }
 
 // loadUserScore computes the user's current score from order and swap data
@@ -880,7 +953,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	// score = violationScore + piMissScore + successScore
 	violationScore := score - piMissScore - successScore
 	log.Debugf("User %v score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
-		user, score, violationScore, piMissCount, piMissScore, -successScore, successCount)
+		user, score, violationScore, piMissScore, piMissCount, -successScore, successCount)
 
 	return score, nil
 }
@@ -976,7 +1049,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	// Compute the user's ban score.
 	score, err := auth.loadUserScore(user)
 	if err != nil {
-		log.Errorf("failed to compute user %v score: %v", user, err)
+		log.Errorf("Failed to compute user %v score: %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
@@ -1154,6 +1227,7 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 			if err != nil {
 				log.Tracef("error sending response failure message: %v", err)
 				auth.removeClient(client)
+				// client.conn.Disconnect() // async removal
 			}
 		}
 		return

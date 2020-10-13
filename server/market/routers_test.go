@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1192,6 +1193,8 @@ type TLink struct {
 	sendErr     error
 	sendTrigger chan struct{}
 	banished    bool
+	on          uint32
+	closed      chan struct{}
 }
 
 var linkCounter uint64
@@ -1253,7 +1256,14 @@ func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Mes
 func (conn *TLink) Banish() {
 	conn.banished = true
 }
-func (conn *TLink) Disconnect() {}
+func (conn *TLink) Done() <-chan struct{} {
+	return conn.closed
+}
+func (conn *TLink) Disconnect() {
+	if atomic.CompareAndSwapUint32(&conn.on, 0, 1) {
+		close(conn.closed)
+	}
+}
 
 type testRig struct {
 	router  *BookRouter

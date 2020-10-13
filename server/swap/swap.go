@@ -1342,19 +1342,19 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return
 	}
 
+	switch acker.params.(type) {
+	case *msgjson.Audit, *msgjson.Redemption:
+	default:
+		log.Warnf("unrecognized ack type %T", acker.params)
+		return
+	}
+
 	// Set and store the appropriate signature, based on the current step and
 	// actor.
 	mktMatch := db.MatchID(acker.match.Match)
 
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
-
-	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
-		log.Infof("Received revoke_match ack for match %v, order %v, user %v",
-			rev.MatchID, rev.OrderID, acker.user)
-		// TODO: eliminate this ack, along with the others
-		return // drop the revoke ack sig for now
-	}
 
 	// This is an ack of either contract audit or redemption receipt.
 	if acker.isAudit {
@@ -1955,60 +1955,37 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	return nil
 }
 
-// revocationRequests prepares a match revocation RPC request for each client.
-// Both the request and the *msgjson.RevokeMatchParams are returned, since they
-// cannot be accessed directly from the request (json.RawMessage).
-func (s *Swapper) revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Message, *msgjson.RevokeMatch, *msgjson.Message, error) {
-	takerParams := &msgjson.RevokeMatch{
-		OrderID: idToBytes(match.Taker.ID()),
-		MatchID: idToBytes(match.ID()),
-	}
-	s.authMgr.Sign(takerParams)
-	takerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, takerParams)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	makerParams := &msgjson.RevokeMatch{
-		OrderID: idToBytes(match.Maker.ID()),
-		MatchID: idToBytes(match.ID()),
-	}
-	s.authMgr.Sign(makerParams)
-	makerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, makerParams)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return takerParams, takerReq, makerParams, makerReq, nil
-}
-
 // revoke revokes the match, sending the 'revoke_match' request to each client
 // and processing the acknowledgement. Match Sigs and Status are not accessed.
 func (s *Swapper) revoke(match *matchTracker) {
-	log.Infof("revoke: sending the 'revoke_match' request to each client for match %v", match.ID())
+	route := msgjson.RevokeMatchRoute
+	log.Infof("Sending a '%s' notification to each client for match %v",
+		route, match.ID())
 	// Unlock the maker and taker order coins.
 	s.unlockOrderCoins(match.Taker)
 	s.unlockOrderCoins(match.Maker)
 
-	sendRevReq := func(user account.AccountID, isMaker bool, req *msgjson.Message, params *msgjson.RevokeMatch) {
-		ack := &messageAcker{
-			user:    user,
-			match:   match,
-			params:  params,
-			isMaker: isMaker,
-			// isAudit: false,
+	sendRev := func(mid order.MatchID, ord order.Order) {
+		msg := &msgjson.RevokeMatch{
+			OrderID: ord.ID().Bytes(),
+			MatchID: mid[:],
 		}
-		s.authMgr.Request(user, req, func(_ comms.Link, resp *msgjson.Message) {
-			s.processAck(resp, ack)
-		})
+		s.authMgr.Sign(msg)
+		ntfn, err := msgjson.NewNotification(route, msg)
+		if err != nil {
+			log.Errorf("Failed to create '%s' notification for user %v, match %v: %v",
+				route, ord.User(), mid, err)
+			return
+		}
+		if err = s.authMgr.Send(ord.User(), ntfn); err != nil {
+			log.Debugf("Failed to send '%s' notification to user %v, match %v: %v",
+				route, ord.User(), mid, err)
+		}
 	}
 
-	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
-	if err != nil {
-		log.Errorf("error creating revocation requests: %v", err)
-		return
-	}
-
-	sendRevReq(match.Taker.User(), false, takerReq, takerParams)
-	sendRevReq(match.Maker.User(), true, makerReq, makerParams)
+	mid := match.ID()
+	sendRev(mid, match.Taker)
+	sendRev(mid, match.Maker)
 }
 
 // extractAddress extracts the address from the order. If the order is a cancel

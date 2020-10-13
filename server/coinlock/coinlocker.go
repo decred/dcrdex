@@ -29,6 +29,8 @@ type CoinLocker interface {
 	UnlockAll()
 	// UnlockOrderCoins unlocks all locked coins associated with an order.
 	UnlockOrderCoins(oid order.OrderID)
+	// UnlockOrdersCoins is like UnlockOrderCoins for multiple orders.
+	UnlockOrdersCoins(oids []order.OrderID)
 	// LockOrdersCoins locks all of the coins associated with multiple orders.
 	LockOrdersCoins(orders []order.Order) (failed []order.Order)
 	// LockCoins locks coins associated with certain orders. The input is
@@ -106,6 +108,11 @@ func (bl *bookLocker) UnlockAll() {
 	bl.bookLock.UnlockAll()
 }
 
+// UnlockOrdersCoins unlocks all locked coins associated with an order.
+func (bl *bookLocker) UnlockOrdersCoins(oids []order.OrderID) {
+	bl.bookLock.UnlockOrdersCoins(oids)
+}
+
 // UnlockOrderCoins unlocks all locked coins associated with an order.
 func (bl *bookLocker) UnlockOrderCoins(oid order.OrderID) {
 	bl.bookLock.UnlockOrderCoins(oid)
@@ -135,6 +142,11 @@ func (sl *swapLocker) UnlockAll() {
 // UnlockOrderCoins unlocks all locked coins associated with an order.
 func (sl *swapLocker) UnlockOrderCoins(oid order.OrderID) {
 	sl.swapLock.UnlockOrderCoins(oid)
+}
+
+// UnlockOrdersCoins unlocks all locked coins associated with an order.
+func (sl *swapLocker) UnlockOrdersCoins(oids []order.OrderID) {
+	sl.swapLock.UnlockOrdersCoins(oids)
 }
 
 var _ (CoinLocker) = (*swapLocker)(nil)
@@ -180,12 +192,26 @@ func (ac *AssetCoinLocker) OrderCoinsLocked(oid order.OrderID) []CoinID {
 	return ac.lockedCoinsByOrder[oid]
 }
 
-// UnlockOrderCoins unlocks any coins backing order.
-func (ac *AssetCoinLocker) UnlockOrderCoins(oid order.OrderID) {
-	ac.coinMtx.Lock()
+// unlockOrderCoins should be called with the coinMtx locked.
+func (ac *AssetCoinLocker) unlockOrderCoins(oid order.OrderID) {
 	coins := ac.lockedCoinsByOrder[oid]
 	for i := range coins {
 		delete(ac.lockedCoins, coinIDKey(coins[i]))
+	}
+}
+
+// UnlockOrderCoins unlocks any coins backing the order.
+func (ac *AssetCoinLocker) UnlockOrderCoins(oid order.OrderID) {
+	ac.coinMtx.Lock()
+	ac.unlockOrderCoins(oid)
+	ac.coinMtx.Unlock()
+}
+
+// UnlockOrdersCoins unlocks any coins backing the orders.
+func (ac *AssetCoinLocker) UnlockOrdersCoins(oids []order.OrderID) {
+	ac.coinMtx.Lock()
+	for i := range oids {
+		ac.unlockOrderCoins(oids[i])
 	}
 	ac.coinMtx.Unlock()
 }

@@ -109,6 +109,8 @@ type TAuthManager struct {
 	reqs        map[account.AccountID][]*TRequest
 	newReq      chan struct{}
 	resps       map[account.AccountID][]*msgjson.Message
+	ntfns       map[account.AccountID][]*msgjson.Message
+	newNtfn     chan struct{}
 	suspensions map[account.AccountID]account.Rule
 	newSuspend  chan struct{}
 }
@@ -121,6 +123,7 @@ func newTAuthManager() *TAuthManager {
 	return &TAuthManager{
 		privkey:     dexPrivKey,
 		reqs:        make(map[account.AccountID][]*TRequest),
+		ntfns:       make(map[account.AccountID][]*msgjson.Message),
 		resps:       make(map[account.AccountID][]*msgjson.Message),
 		suspensions: make(map[account.AccountID]account.Rule),
 	}
@@ -133,7 +136,16 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) error 
 	if l == nil {
 		l = make([]*msgjson.Message, 0, 1)
 	}
-	m.resps[user] = append(l, msg)
+	if msg.Route == "" {
+		// response
+		m.resps[user] = append(l, msg)
+	} else {
+		// notification
+		m.ntfns[user] = append(l, msg)
+		if m.newNtfn != nil {
+			m.newNtfn <- struct{}{}
+		}
+	}
 	return nil
 }
 
@@ -231,6 +243,20 @@ func (m *TAuthManager) pushReq(id account.AccountID, req *TRequest) {
 	m.reqs[id] = append([]*TRequest{req}, m.reqs[id]...)
 }
 
+func (m *TAuthManager) getNtfn(id account.AccountID, route string, payload interface{}) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	msgs := m.ntfns[id]
+	if len(msgs) == 0 {
+		return errors.New("no message")
+	}
+	msg := msgs[0]
+	if msg.Route != route {
+		return fmt.Errorf("wrong route: %v", route)
+	}
+	return msg.Unmarshal(payload)
+}
+
 // push front
 func (m *TAuthManager) pushResp(id account.AccountID, msg *msgjson.Message) {
 	m.mtx.Lock()
@@ -238,18 +264,17 @@ func (m *TAuthManager) pushResp(id account.AccountID, msg *msgjson.Message) {
 	m.resps[id] = append([]*msgjson.Message{msg}, m.resps[id]...)
 }
 
-// pop front
-func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson.ResponsePayload) {
+func (m *TAuthManager) getResp(id account.AccountID) (msg *msgjson.Message, resp *msgjson.ResponsePayload) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	msgs := m.resps[id]
 	if len(msgs) == 0 {
-		return nil, nil
+		return
 	}
-	msg := msgs[0]
+	msg = msgs[0]
 	m.resps[id] = msgs[1:]
-	resp, _ := msg.Response()
-	return msg, resp
+	resp, _ = msg.Response()
+	return
 }
 
 type TStorage struct {
@@ -525,6 +550,7 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		statePath = seedRig.statePath
 		ignoreState = seedRig.ignoreState
 		authMgr.newReq = seedRig.auth.newReq
+		authMgr.newNtfn = seedRig.auth.newNtfn
 		authMgr.newSuspend = seedRig.auth.newSuspend
 	} else {
 		abcBackend = newTAsset("abc")
@@ -1595,44 +1621,39 @@ func TestBroadcastTimeouts(t *testing.T) {
 	defer cleanup()
 
 	rig.auth.newSuspend = make(chan struct{}, 1)
-	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+	rig.auth.newReq = make(chan struct{}, 2)  // Negotiate sends 2 requests, one for each party assuming different users matched
+	rig.auth.newNtfn = make(chan struct{}, 2) // 2 revoke_match requests
 
 	ensureNilErr := makeEnsureNilErr(t)
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
-	reqTimeout := func(timeout time.Duration) {
+	ntfnTimeout := func(timeout time.Duration) {
 		t.Helper()
 		select {
-		case <-rig.auth.newReq:
+		case <-rig.auth.newNtfn:
 		case <-time.After(timeout):
-			t.Fatalf("no request received")
+			t.Fatalf("no notification received")
 		}
 	}
 
 	checkRevokeMatch := func(user *tUser, i int) {
 		t.Helper()
-		req := rig.auth.getReq(user.acct)
-		if req == nil {
-			t.Fatalf("no revoke_match")
-		}
-		params := new(msgjson.RevokeMatch)
-		err := json.Unmarshal(req.req.Payload, &params)
+		rev := new(msgjson.RevokeMatch)
+		err := rig.auth.getNtfn(user.acct, msgjson.RevokeMatchRoute, rev)
 		if err != nil {
-			t.Fatalf("unmarshal error for %s at step %d: %s (%v)", user.lbl, i, string(req.req.Payload), err)
+			t.Fatalf("failed to get revoke_match ntfn: %v", err)
 		}
-		if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
+		if err = checkSigS256(rev, rig.auth.privkey.PubKey()); err != nil {
 			t.Fatalf("incorrect server signature: %v", err)
 		}
-		if !bytes.Equal(params.MatchID, rig.matchInfo.matchID[:]) {
+		if !bytes.Equal(rev.MatchID, rig.matchInfo.matchID[:]) {
 			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
-				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
+				user.lbl, i, rig.matchInfo.matchID, rev.MatchID)
 		}
-		if req.req.Route != msgjson.RevokeMatchRoute {
-			t.Fatalf("wrong request method for %s at step %d: expected '%s', got '%s'",
-				user.lbl, i, msgjson.RevokeMatchRoute, req.req.Route)
-		}
+
+		// TODO: expect revoke order for at-fault user
 	}
 
 	// tryExpire will sleep for the duration of a BroadcastTimeout, and then
@@ -1659,8 +1680,8 @@ func TestBroadcastTimeouts(t *testing.T) {
 			t.Fatalf("no penalty at step %d (status %v)", i, step)
 		}
 		// Make sure the specified user has a cancellation for this order
-		reqTimeout(rig.swapper.bTimeout * 2) // wait for both revoke requests, no particular order
-		reqTimeout(rig.swapper.bTimeout * 2)
+		ntfnTimeout(rig.swapper.bTimeout * 2) // wait for both revoke requests, no particular order
+		ntfnTimeout(rig.swapper.bTimeout * 2)
 		checkRevokeMatch(jerk, i)
 		checkRevokeMatch(victim, i)
 		return true

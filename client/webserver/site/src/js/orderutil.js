@@ -39,7 +39,7 @@ export function isMarketBuy (ord) {
 export function hasLiveMatches (order) {
   if (!order.matches) return false
   for (const match of order.matches) {
-    if (match.status < MakerRedeemed) return true
+    if (!match.revoked && match.status < MakerRedeemed) return true
   }
   return false
 }

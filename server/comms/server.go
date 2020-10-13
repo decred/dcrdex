@@ -41,15 +41,16 @@ const (
 )
 
 var (
-	// Time allowed to read the next pong message from the peer. The
-	// default is intended for production, but leaving as a var instead of const
-	// to facilitate testing.
-	pongWait = 60 * time.Second
+	// Time allowed to read the next pong message from the peer. The default is
+	// intended for production, but leaving as a var instead of const to
+	// facilitate testing. This is the websocket read timeout set by the pong
+	// handler. The first read deadline is set by the ws.WSLink.
+	pongWait = 20 * time.Second
 
 	// Send pings to peer with this period. Must be less than pongWait. The
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
-	pingPeriod = (pongWait * 9) / 10
+	pingPeriod = (pongWait * 9) / 10 // i.e. 18 sec
 )
 
 var idCounter uint64

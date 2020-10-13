@@ -558,7 +558,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 //   observes that there are no active matches for the trades.
 // - coins are unlocked either as the affected trades' matches are swapped or
 //   revoked (for trades with active matches), or when the trades are retired.
-// Also purges "stale" cancel orders if the targetted order is returned in the
+// Also purges "stale" cancel orders if the targeted order is returned in the
 // server's `connect` response. See *trackedTrade.deleteStaleCancelOrder for
 // the definition of a stale cancel order.
 func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
@@ -583,7 +583,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
-			dc.log.Warnf("Inactive order %v, status %s reported by DEX %s as active, status %s",
+			dc.log.Warnf("Inactive order %v, status %q reported by DEX %s as active, status %q",
 				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
 		trade.mtx.RUnlock()
@@ -599,9 +599,12 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
 		} else {
-			dc.log.Warnf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+			dc.log.Warnf("Order %v updated from recorded status %q to new status %q reported by DEX %s",
 				oid, previousStatus, newStatus, dc.acct.host)
 		}
+
+		details := fmt.Sprintf("Status of order %v revised from %v to %v", trade.token(), previousStatus, newStatus)
+		dc.notify(newOrderNote("Order status update", details, db.WarningLevel, trade.coreOrderInternal()))
 	}
 
 	// Compare the status reported by the server for each known active trade. Orders
@@ -630,7 +633,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 
 		serverStatus := order.OrderStatus(srvOrderStatus.Status)
 		if trade.metaData.Status == serverStatus {
-			dc.log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
+			dc.log.Tracef("Status reconciliation not required for order %v, status %q, server-reported status %q",
 				oid, trade.metaData.Status, serverStatus)
 		} else if trade.metaData.Status == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
 			// Only standing orders can move from Epoch to Booked. This must have
@@ -638,11 +641,11 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 				updateOrder(trade, srvOrderStatus)
 			} else {
-				dc.log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
+				dc.log.Warnf("Incorrect status %q reported for non-standing order %v by DEX %s, client status = %q",
 					serverStatus, oid, dc.acct.host, trade.metaData.Status)
 			}
 		} else {
-			dc.log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
+			dc.log.Warnf("Inconsistent status %q reported for order %v by DEX %s, client status = %q",
 				serverStatus, oid, dc.acct.host, trade.metaData.Status)
 		}
 
@@ -661,7 +664,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		}
 
 		if len(orderStatusResults) != len(orderStatusRequests) {
-			dc.log.Errorf("Retreived statuses for %d out of %d orders from order_status route",
+			dc.log.Errorf("Retrieved statuses for %d out of %d orders from order_status route",
 				len(orderStatusResults), len(orderStatusRequests))
 		}
 
@@ -3294,7 +3297,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
 		URL:      wsURL.String(),
-		PingWait: 60 * time.Second,
+		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
 		Cert:     acctInfo.Cert,
 		ReconnectSync: func() {
 			go c.handleReconnect(host)
@@ -3476,6 +3479,30 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	return book.ValidateMatchProof(note)
 }
 
+// handleRevokeOrderMsg is called when a revoke_order message is received.
+func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var revocation msgjson.RevokeOrder
+	err := msg.Unmarshal(&revocation)
+	if err != nil {
+		return fmt.Errorf("revoke order unmarshal error: %v", err)
+	}
+
+	var oid order.OrderID
+	copy(oid[:], revocation.OrderID)
+
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("no order found with id %s", oid.String())
+	}
+
+	tracker.revoke()
+
+	// Update market orders, and the balance to account for unlocked coins.
+	dc.refreshMarkets()
+	c.updateAssetBalance(tracker.fromAssetID)
+	return nil
+}
+
 // handleRevokeMatchMsg is called when a revoke_match message is received.
 func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var revocation msgjson.RevokeMatch
@@ -3507,8 +3534,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
 	c.updateAssetBalance(tracker.fromAssetID)
-	// Respond to DEX.
-	return dc.ack(msg.ID, matchID, &revocation)
+	return nil
 }
 
 // handleNotifyMsg is called when a notify notification is received.
@@ -3550,11 +3576,10 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
 var reqHandlers = map[string]routeHandler{
-	msgjson.PreimageRoute:    handlePreimageRequest,
-	msgjson.MatchRoute:       handleMatchRoute,
-	msgjson.AuditRoute:       handleAuditRoute,
-	msgjson.RedemptionRoute:  handleRedemptionRoute,
-	msgjson.RevokeMatchRoute: handleRevokeMatchMsg,
+	msgjson.PreimageRoute:   handlePreimageRequest,
+	msgjson.MatchRoute:      handleMatchRoute,
+	msgjson.AuditRoute:      handleAuditRoute,
+	msgjson.RedemptionRoute: handleRedemptionRoute, // TODO: to ntfn
 }
 
 var noteHandlers = map[string]routeHandler{
@@ -3568,6 +3593,8 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.NotifyRoute:          handleNotifyMsg,
 	msgjson.PenaltyRoute:         handlePenaltyMsg,
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
+	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
+	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 const (
@@ -130,6 +131,12 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	return nil, false
 }
 
+// RemoveUserOrders removes all orders from the book that belong to a user. The
+// removed buy and sell orders are returned.
+func (b *Book) RemoveUserOrders(user account.AccountID) (removedBuys, removedSells []*order.LimitOrder) {
+	return b.buys.RemoveUserOrders(user), b.sells.RemoveUserOrders(user)
+}
+
 // HaveOrder checks if an order is in either the buy or sell side of the book.
 func (b *Book) HaveOrder(oid order.OrderID) bool {
 	b.mtx.RLock()
@@ -146,6 +153,16 @@ func (b *Book) Order(oid order.OrderID) *order.LimitOrder {
 		return lo
 	}
 	return b.sells.Order(oid)
+}
+
+// UserOrderTotals returns the total amount in booked orders and the number of
+// booked orders, for both the buy and sell sides of the book.
+func (b *Book) UserOrderTotals(user account.AccountID) (buyAmt, sellAmt, buyCount, sellCount uint64) {
+	b.mtx.RLock()
+	buyAmt, buyCount = b.buys.UserOrderTotals(user)
+	sellAmt, sellCount = b.sells.UserOrderTotals(user)
+	b.mtx.RUnlock()
+	return
 }
 
 // SellOrders copies out all sell orders in the book, sorted.

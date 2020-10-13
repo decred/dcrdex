@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 type orderEntry struct {
@@ -24,11 +25,12 @@ type orderHeap []*orderEntry
 // price rate. A max-oriented queue with highest rates on top is constructed via
 // NewMaxOrderPQ, while a min-oriented queue is constructed via NewMinOrderPQ.
 type OrderPQ struct {
-	mtx      sync.RWMutex
-	oh       orderHeap
-	capacity uint32
-	lessFn   func(bi, bj *order.LimitOrder) bool
-	orders   map[order.OrderID]*orderEntry
+	mtx        sync.RWMutex
+	oh         orderHeap
+	capacity   uint32
+	lessFn     func(bi, bj *order.LimitOrder) bool
+	orders     map[order.OrderID]*orderEntry
+	userOrders map[account.AccountID]map[order.OrderID]*order.LimitOrder
 }
 
 // Copy makes a deep copy of the OrderPQ. The orders are the same; each
@@ -40,14 +42,19 @@ func (pq *OrderPQ) Copy() *OrderPQ {
 }
 
 // Realloc changes the capacity of the OrderPQ by making a deep copy with the
-// specified capacity.
+// specified capacity. The specified capacity must not be less than current.
 func (pq *OrderPQ) Realloc(newCap uint32) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
+	if newCap < pq.capacity {
+		fmt.Printf("(*OrderPQ).Realloc: new cap %d < old cap %d", newCap, pq.capacity) // maybe even panic
+		return
+	}
 	newPQ := pq.copy(newCap)
 	pq.capacity = newCap
 	pq.orders = newPQ.orders
 	pq.oh = newPQ.oh
+	pq.userOrders = newPQ.userOrders
 }
 
 // copy makes a deep copy of the OrderPQ. The orders are the same; each
@@ -62,17 +69,29 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 		})
 	}
 
-	// Deep copy the orders map.
+	// Deep copy the orders maps.
 	orders := make(map[order.OrderID]*orderEntry, newCap)
+	userOrders := make(map[account.AccountID]map[order.OrderID]*order.LimitOrder)
 	for _, oe := range orderHeap {
-		orders[oe.order.ID()] = oe
+		lo := oe.order
+		oid := lo.ID()
+		orders[oid] = oe
+		uos, found := userOrders[lo.AccountID]
+		if !found {
+			userOrders[lo.AccountID] = map[order.OrderID]*order.LimitOrder{
+				oid: lo,
+			}
+			continue
+		}
+		uos[oid] = lo
 	}
 
 	newPQ := &OrderPQ{
-		oh:       orderHeap,
-		capacity: newCap,
-		lessFn:   pq.lessFn,
-		orders:   orders,
+		oh:         orderHeap,
+		capacity:   newCap,
+		lessFn:     pq.lessFn,
+		orders:     orders,
+		userOrders: userOrders,
 	}
 
 	// Since the heap is copied in the same order, and with the same heap
@@ -147,10 +166,11 @@ func NewMaxOrderPQ(capacity uint32) *OrderPQ {
 
 func newOrderPQ(cap uint32, lessFn func(bi, bj *order.LimitOrder) bool) *OrderPQ {
 	return &OrderPQ{
-		oh:       make(orderHeap, 0, cap),
-		capacity: cap,
-		lessFn:   lessFn,
-		orders:   make(map[order.OrderID]*orderEntry, cap),
+		oh:         make(orderHeap, 0, cap),
+		capacity:   cap,
+		lessFn:     lessFn,
+		orders:     make(map[order.OrderID]*orderEntry, cap),
+		userOrders: make(map[account.AccountID]map[order.OrderID]*order.LimitOrder),
 	}
 }
 
@@ -199,28 +219,51 @@ func (pq *OrderPQ) Push(ord interface{}) {
 		heapIdx: len(pq.oh),
 	}
 
-	oid := entry.order.ID()
+	oid := lo.ID()
 	if pq.orders[oid] != nil {
 		fmt.Printf("Attempted to push existing order: %v", ord)
 		return
 	}
 
 	pq.orders[oid] = entry
+	uos, found := pq.userOrders[lo.AccountID]
+	if !found {
+		uos = map[order.OrderID]*order.LimitOrder{oid: lo}
+		pq.userOrders[lo.AccountID] = uos
+	} else {
+		uos[oid] = lo
+	}
 
 	pq.oh = append(pq.oh, entry)
 }
 
 // Pop will return an interface{} that may be cast to OrderPricer (or the
-// underlying concrete type). Use heap.Pop or OrderPQ.ExtractBest, not this. Pop
-// is required for heap.Interface. It is not thread-safe.
+// underlying concrete type). Use heap.Pop, ExtractBest, or RemoveOrder, not
+// this. Pop is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Pop() interface{} {
+	// heap.Pop put the best value at the end and reheaped without it. Now
+	// actually pop it off the heap's slice.
 	n := pq.Len()
-	old := pq.oh
-	ord := old[n-1] // heap.Pop put the best value at the end and reheaped without it
-	ord.heapIdx = -1
-	pq.oh = old[0 : n-1]
-	delete(pq.orders, ord.order.ID())
-	return ord.order
+	oe := pq.oh[n-1]
+	oe.heapIdx = -1
+	pq.oh[n-1] = nil
+	pq.oh = pq.oh[:n-1]
+
+	// Remove the order from the orders and userOrders maps.
+	lo := oe.order
+	oid := lo.ID()
+	delete(pq.orders, oid)
+	user := lo.AccountID
+	if uos, found := pq.userOrders[user]; found {
+		if len(uos) == 1 {
+			delete(pq.userOrders, user)
+		} else {
+			delete(uos, oid)
+		}
+	} else {
+		fmt.Printf("(*OrderPQ).Pop: no userOrders for %v found when popping order %v!", user, oid)
+	}
+	return lo
 }
 
 // End heap.Inferface.
@@ -356,9 +399,8 @@ func (pq *OrderPQ) Reheap() {
 }
 
 // Insert will add an element, while respecting the queue's capacity.
-// if at capacity, fail
-// else (not at capacity)
-// 		- heap.Push, which is pq.Push (append at bottom) then heapup
+//   if (at capacity) or (have order already), fail
+//   else (not at capacity), push the order onto the heap
 func (pq *OrderPQ) Insert(ord *order.LimitOrder) bool {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
@@ -368,12 +410,7 @@ func (pq *OrderPQ) Insert(ord *order.LimitOrder) bool {
 	}
 
 	if ord == nil {
-		return false
-	}
-
-	oid := ord.ID()
-	if oe, ok := pq.orders[oid]; ok {
-		fmt.Println(oe.order, oid)
+		fmt.Println("(*OrderPQ).Insert: attempting to insert nil *LimitOrder!")
 		return false
 	}
 
@@ -382,39 +419,14 @@ func (pq *OrderPQ) Insert(ord *order.LimitOrder) bool {
 		return false
 	}
 
+	// Have order
+	if _, found := pq.orders[ord.ID()]; found {
+		return false
+	}
+
 	// With room to grow, append at bottom and bubble up. Note that
 	// (*OrderPQ).Push will update the OrderPQ.orders map.
 	heap.Push(pq, ord)
-	return true
-}
-
-// ReplaceOrder will update the specified OrderPricer, which must be in the
-// queue, and then restores heapiness.
-func (pq *OrderPQ) ReplaceOrder(old *order.LimitOrder, new *order.LimitOrder) bool {
-	pq.mtx.Lock()
-	defer pq.mtx.Unlock()
-
-	if old == nil || new == nil {
-		return false
-	}
-
-	oldID := old.ID()
-	entry := pq.orders[oldID]
-	if entry == nil {
-		return false
-	}
-
-	newID := new.ID()
-	// if oldID == newID {
-	// 	return false
-	// }
-	// Above is commented to update regardless of ID.
-
-	delete(pq.orders, oldID)
-	entry.order = new
-	pq.orders[newID] = entry
-
-	heap.Fix(pq, entry.heapIdx)
 	return true
 }
 
@@ -434,11 +446,26 @@ func (pq *OrderPQ) RemoveOrderID(oid order.OrderID) (*order.LimitOrder, bool) {
 	return pq.removeOrder(pq.orders[oid])
 }
 
-// HaveOrder indicates if an order is in the queue.
-func (pq *OrderPQ) HaveOrder(oid order.OrderID) bool {
+// RemoveUserOrders removes all orders from the queue that belong to a user.
+func (pq *OrderPQ) RemoveUserOrders(user account.AccountID) (removed []*order.LimitOrder) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
-	return pq.orders[oid] != nil
+	uos, found := pq.userOrders[user]
+	if !found {
+		return
+	}
+
+	removed = make([]*order.LimitOrder, 0, len(uos))
+	for oid, lo := range uos {
+		pq.removeOrder(pq.orders[oid])
+		removed = append(removed, lo)
+	}
+	return
+}
+
+// HaveOrder indicates if an order is in the queue.
+func (pq *OrderPQ) HaveOrder(oid order.OrderID) bool {
+	return pq.Order(oid) != nil
 }
 
 // Order retrieves any existing order in the queue with the given ID.
@@ -451,6 +478,21 @@ func (pq *OrderPQ) Order(oid order.OrderID) *order.LimitOrder {
 	return nil
 }
 
+// UserOrderTotals returns the total value and number of booked orders.
+func (pq *OrderPQ) UserOrderTotals(user account.AccountID) (amt, count uint64) {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	uos, found := pq.userOrders[user]
+	if !found {
+		return
+	}
+	for _, lo := range uos {
+		amt += lo.Remaining()
+		count++
+	}
+	return
+}
+
 // removeOrder removes the specified orderEntry from the queue. This function is
 // NOT thread-safe.
 func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
@@ -459,19 +501,12 @@ func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
 		oid := o.order.ID()
 		removed := pq.oh[o.heapIdx].order
 		if removed.ID() == oid {
-			delete(pq.orders, oid)
-			pq.removeIndex(o.heapIdx)
+			heap.Remove(pq, o.heapIdx) // heap.Pop => (*OrderPQ).Pop removes map entries
 			return removed, true
 		}
 		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s", oid)
 	}
 	return nil, false
-}
-
-// removeIndex removes the orderEntry at the specified position in the heap.
-// This function is NOT thread-safe.
-func (pq *OrderPQ) removeIndex(idx int) {
-	heap.Remove(pq, idx)
 }
 
 func (pq *OrderPQ) leafNodes() []*orderEntry {

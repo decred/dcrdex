@@ -380,6 +380,14 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %v", err)
 	}
 
+	// Create the user order unbook dispatcher for the AuthManager.
+	markets := make(map[string]*market.Market, len(cfg.Markets))
+	userUnbookFun := func(user account.AccountID) {
+		for _, mkt := range markets {
+			mkt.UnbookUserOrders(user)
+		}
+	}
+
 	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
 		Storage:         storage,
@@ -387,6 +395,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,
+		UserUnbooker:    userUnbookFun,
+		MiaUserTimeout:  cfg.BroadcastTimeout,
 		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
 		FreeCancels:     cfg.FreeCancels,
@@ -394,17 +404,15 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
-	startSubSys("Auth manager", authMgr)
-
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cancelThresh, authMgr.GraceLimit())
+	log.Infof("MIA user order unbook timeout %v", cfg.BroadcastTimeout)
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
 	log.Infof("Ban score threshold is %v", cfg.BanScore)
 
 	// Create an unbook dispatcher for the Swapper.
-	markets := make(map[string]*market.Market, len(cfg.Markets))
 	marketUnbookHook := func(lo *order.LimitOrder) bool {
 		name, err := dex.MarketName(lo.BaseAsset, lo.QuoteAsset)
 		if err != nil {
@@ -436,6 +444,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	// Markets
+	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
@@ -445,12 +454,29 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("NewMarket failed: %v", err)
 		}
 		markets[mktInf.Name] = mkt
+
+		// Having loaded the book, get the accounts owning the orders.
+		_, buys, sells := mkt.Book()
+		for _, lo := range buys {
+			usersWithOrders[lo.AccountID] = struct{}{}
+		}
+		for _, lo := range sells {
+			usersWithOrders[lo.AccountID] = struct{}{}
+		}
 	}
 
-	startSubSys("Swapper", swapper) // after markets map set
+	// Having enumerated all users with booked orders, configure the AuthManager
+	// to expect them to connect in a certain time period.
+	authMgr.ExpectUsers(usersWithOrders, cfg.BroadcastTimeout)
+
+	// Start the AuthManager and Swapper subsystems after populating the markets
+	// map used by the unbook callbacks, and setting the AuthManager's unbook
+	// timers for the users with currently booked orders.
+	startSubSys("Auth manager", authMgr)
+	startSubSys("Swapper", swapper)
 
 	// Set start epoch index for each market. Also create BookSources for the
-	// BookRouter, and MarketTunnels for the OrderRouter
+	// BookRouter, and MarketTunnels for the OrderRouter.
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))

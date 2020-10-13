@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 type Order = order.LimitOrder
@@ -21,15 +22,10 @@ var (
 	}
 )
 
-// func randomBytes(len int) []byte {
-// 	bytes := make([]byte, len)
-// 	rand.Read(bytes)
-// 	return bytes
-// }
-
-// func randomHash() [32]byte {
-// 	return blake256.Sum256(randomBytes(32))
-// }
+func randomAccount() (user account.AccountID) {
+	rand.Read(user[:])
+	return
+}
 
 func newFakeAddr() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -45,9 +41,6 @@ func genBigList(listSize int) {
 	if bigList != nil {
 		return
 	}
-	// var b [8]byte
-	// crand.Read(b[:])
-	// seed := int64(binary.LittleEndian.Uint64(b[:]))
 	seed := int64(-3405439173988651889)
 	rand.Seed(seed)
 
@@ -507,30 +500,6 @@ func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
 	}
 }
 
-func TestOrderPriorityQueue_Replace(t *testing.T) {
-	startLogger()
-
-	pq := NewMinOrderPQ(2)
-
-	ok := pq.Insert(orders[0])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[0])
-	}
-
-	ok = pq.ReplaceOrder(orders[0], orders[1])
-	if !ok {
-		t.Fatalf("failed to ReplaceOrder for %v <- %v", orders[0], orders[1])
-	}
-	if pq.Len() != 1 {
-		t.Fatalf("expected queue length 1, got %d", pq.Len())
-	}
-	best := pq.ExtractBest()
-	if best.UID() != orders[1].UID() {
-		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
-			best.Price(), best.UID())
-	}
-}
-
 func TestResetHeap(t *testing.T) {
 	startLogger()
 
@@ -594,6 +563,86 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 	pq.RemoveOrderID(remainingID)
 	if pq.Len() != 0 {
 		t.Errorf("Expected empty queue, got %d", pq.Len())
+	}
+}
+
+func TestOrderPriorityQueue_RemoveUserOrders(t *testing.T) {
+	startLogger()
+
+	pq := NewMaxOrderPQ(6)
+
+	ok := pq.Insert(orders[0])
+	if !ok {
+		t.Errorf("Failed to insert order %v", orders[0])
+	}
+
+	ok = pq.Insert(orders[1])
+	if !ok {
+		t.Errorf("Failed to insert order %v", orders[1])
+	}
+
+	user0 := orders[0].AccountID
+
+	user1 := randomAccount()
+	other := newLimitOrder(false, 42000000, 2, order.StandingTiF, 0)
+	other.AccountID = user1
+	ok = pq.Insert(other)
+	if !ok {
+		t.Errorf("Failed to insert order %v", other)
+	}
+
+	amt, count := pq.UserOrderTotals(user0)
+	wantAmt := orders[0].Remaining() + orders[1].Remaining()
+	if amt != wantAmt {
+		t.Errorf("wanted %d remaining, got %d", wantAmt, amt)
+	}
+	if count != 2 {
+		t.Errorf("wanted %d orders, got %d", 2, count)
+	}
+
+	amt, count = pq.UserOrderTotals(user1)
+	wantAmt = other.Remaining()
+	if amt != wantAmt {
+		t.Errorf("wanted %d remaining, got %d", wantAmt, amt)
+	}
+	if count != 1 {
+		t.Errorf("wanted %d orders, got %d", 1, count)
+	}
+
+	removed := pq.RemoveUserOrders(user0)
+	if pq.Len() != 1 {
+		t.Errorf("Queue length expected %d, got %d", 1, pq.Len())
+	}
+	if len(removed) != 2 {
+		t.Fatalf("removed %d orders, expected %d", len(removed), 2)
+	}
+	for _, oid := range []order.OrderID{orders[0].ID(), orders[1].ID()} {
+		var found bool
+		for i := range removed {
+			if oid == removed[i].ID() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("didn't remove order %v", oid)
+		}
+	}
+
+	remainingID := pq.PeekBest().ID()
+	if remainingID != other.ID() {
+		t.Errorf("Remaining element expected %s, got %s", other.ID(),
+			remainingID)
+	}
+	removed = pq.RemoveUserOrders(user1)
+	if remain := pq.Len(); remain != 0 {
+		t.Errorf("didn't remove all orders, still have %d", remain)
+	}
+	if len(removed) != 1 {
+		t.Fatalf("removed %d orders, expected %d", len(removed), 1)
+	}
+	if removed[0].ID() != other.ID() {
+		t.Errorf("removed order %v, expected %v", removed[0], other.ID())
 	}
 }
 
@@ -676,8 +725,6 @@ func TestOrderPQMax_Worst(t *testing.T) {
 		}
 		return bigList[i].Price() < bigList[j].Price()
 	})
-
-	//t.Log(bigList[0].Price(), bigList[len(bigList)-1].Price(), pq.PeekBest().Price())
 
 	// Worst for a min queue is highest rate.
 	worst := pq.Worst()

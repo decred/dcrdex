@@ -488,9 +488,6 @@ type TXCWallet struct {
 	mtx               sync.RWMutex
 	payFeeCoin        *tCoin
 	payFeeErr         error
-	fundCoins         asset.Coins
-	fundRedeemScripts []dex.Bytes
-	fundErr           error
 	addrErr           error
 	signCoinErr       error
 	lastSwaps         *asset.Swaps
@@ -508,6 +505,7 @@ type TXCWallet struct {
 	balErr            error
 	bal               *asset.Balance
 	fundingCoins      asset.Coins
+	fundRedeemScripts []dex.Bytes
 	returnedCoins     asset.Coins
 	fundingCoinErr    error
 	lockErr           error
@@ -556,7 +554,7 @@ func (w *TXCWallet) FeeRate() (uint64, error) {
 func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	w.fundedVal = ord.Value
 	w.fundedSwaps = ord.MaxSwapCount
-	return w.fundCoins, w.fundRedeemScripts, w.fundErr
+	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
@@ -1924,7 +1922,7 @@ func TestTrade(t *testing.T) {
 		id:  encode.RandomBytes(36),
 		val: qty * 2,
 	}
-	tDcrWallet.fundCoins = asset.Coins{dcrCoin}
+	tDcrWallet.fundingCoins = asset.Coins{dcrCoin}
 	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	btcVal := calc.BaseToQuote(rate, qty*2)
@@ -1932,7 +1930,7 @@ func TestTrade(t *testing.T) {
 		id:  encode.RandomBytes(36),
 		val: btcVal,
 	}
-	tBtcWallet.fundCoins = asset.Coins{btcCoin}
+	tBtcWallet.fundingCoins = asset.Coins{btcCoin}
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	book := newBookie(tLogger, func() {})
@@ -2078,9 +2076,9 @@ func TestTrade(t *testing.T) {
 	tBtcWallet.addrErr = nil
 
 	// Not enough funds
-	tDcrWallet.fundErr = tErr
+	tDcrWallet.fundingCoinErr = tErr
 	ensureErr("funds error")
-	tDcrWallet.fundErr = nil
+	tDcrWallet.fundingCoinErr = nil
 
 	// Lot size violation
 	ogQty := form.Qty
@@ -2292,6 +2290,72 @@ func TestHandlePreimageRequest(t *testing.T) {
 	rig.ws.sendErr = nil
 }
 
+func TestHandleRevokeOrderMsg(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(rig.crypter, time.Hour)
+
+	fundCoinDcrID := encode.RandomBytes(36)
+	fundCoinDcr := &tCoin{id: fundCoinDcrID}
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(rig.crypter, time.Hour)
+
+	// fundCoinBID := encode.RandomBytes(36)
+	// fundCoinB := &tCoin{id: fundCoinBID}
+
+	qty := 2 * tDCR.LotSize
+	rate := tBTC.RateStep * 10
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, rate) // sell DCR
+	lo.Coins = []order.CoinID{fundCoinDcrID}
+	dbOrder.MetaData.Status = order.OrderStatusBooked
+	oid := lo.ID()
+
+	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
+
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	// Not in dc.trades yet.
+
+	// Send a request for the unknown order.
+	payload := &msgjson.RevokeOrder{
+		OrderID: oid[:],
+	}
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeOrderRoute, payload)
+
+	// Ensure revoking a non-existent order generates an error.
+	err = handleRevokeOrderMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleRevokeOrderMsg] expected a non-existent order")
+	}
+
+	// Now store the order in dc.trades.
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
+		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify)
+	rig.dc.trades[oid] = tracker
+
+	// Success
+	err = handleRevokeOrderMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("handleRevokeOrderMsg error: %v", err)
+	}
+
+	if tracker.metaData.Status != order.OrderStatusRevoked {
+		t.Errorf("expected order status %v, got %v", order.OrderStatusRevoked, tracker.metaData.Status)
+	}
+}
+
 func TestHandleRevokeMatchMsg(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
@@ -2332,7 +2396,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify)
 
 	match := &matchTracker{
 		id: mid,
@@ -4682,7 +4746,7 @@ func TestPreimageSync(t *testing.T) {
 		id:  encode.RandomBytes(36),
 		val: qty * 2,
 	}
-	tDcrWallet.fundCoins = asset.Coins{dcrCoin}
+	tDcrWallet.fundingCoins = asset.Coins{dcrCoin}
 	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	btcVal := calc.BaseToQuote(rate, qty*2)
@@ -4690,7 +4754,7 @@ func TestPreimageSync(t *testing.T) {
 		id:  encode.RandomBytes(36),
 		val: btcVal,
 	}
-	tBtcWallet.fundCoins = asset.Coins{btcCoin}
+	tBtcWallet.fundingCoins = asset.Coins{btcCoin}
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	limitRouteProcessing := make(chan order.OrderID)
