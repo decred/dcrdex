@@ -631,10 +631,6 @@ orders:
 				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
 					"Revoking the order.", coin, lo)
-				// NOTE: Client does not get a non-orderbook subscription
-				// message to signal that the order has been revoked. They're
-				// poking around getting into trouble, so they will have to
-				// restart their client to recheck coins and order statuses.
 				m.Unbook(lo)
 				unbooked = append(unbooked, lo)
 			}
