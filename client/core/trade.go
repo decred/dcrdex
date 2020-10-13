@@ -149,6 +149,8 @@ func (t *trackedTrade) rate() uint64 {
 
 // broadcastTimeout gets associated DEX's configured broadcast timeout.
 func (t *trackedTrade) broadcastTimeout() time.Duration {
+	t.dc.cfgMtx.RLock()
+	defer t.dc.cfgMtx.RUnlock()
 	return time.Millisecond * time.Duration(t.dc.cfg.BroadcastTimeout)
 }
 
@@ -588,8 +590,8 @@ func (t *trackedTrade) isActive() bool {
 // refund or auto-redeem.
 func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 	proof := &match.MetaData.Proof
-	// MatchComplete only means inactive for maker if redeem request was
-	// accepted, but MatchComplete may be set immediately after bcast.
+	// MatchComplete only means inactive if redeem request was accepted, but
+	// MatchComplete is set immediately after bcast for taker.
 	if match.MetaData.Status == order.MatchComplete && len(proof.Auth.RedeemSig) > 0 {
 		return false
 	}
@@ -605,8 +607,10 @@ func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 		// - MakerSwapCast requires no further action from the taker
 		// - (TakerSwapCast requires action on both sides)
 		// - MakerRedeemed requires no further action from the maker
+		// - MatchComplete requires no further action. This happens if taker
+		//   does not have server's ack of their redeem request (RedeemSig).
 		status, side := match.MetaData.Status, match.Match.Side
-		if status == order.NewlyMatched ||
+		if status == order.NewlyMatched || status == order.MatchComplete ||
 			(status == order.MakerSwapCast && side == order.Taker) ||
 			(status == order.MakerRedeemed && side == order.Maker) {
 			t.dc.log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
