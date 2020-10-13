@@ -33,7 +33,6 @@ import (
 )
 
 const (
-	assetName = "btc"
 	// Use RawRequest to get the verbose block header for a blockhash.
 	methodGetBlockHeader = "getblockheader"
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
@@ -1611,18 +1610,18 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Sign it.
 	refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("createSig: %v", err)
 	}
 	redeemSigScript, err := dexbtc.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("RefundP2SHContract: %v", err)
 	}
 	txIn.SignatureScript = redeemSigScript
 	// Send it.
 	checkHash := msgTx.TxHash()
 	refundHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SendRawTransaction: %v", err)
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
@@ -1849,8 +1848,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	if err != nil {
 		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
-	size := msgTx.SerializeSize()
-	minFee := feeRate * uint64(size)
+	vSize := dexbtc.MsgTxVBytes(msgTx)
+	minFee := feeRate * vSize
 	remaining := totalIn - totalOut
 	if minFee > remaining {
 		return makeErr("not enough funds to cover minimum fee rate. %d < %d, raw tx: %x",
@@ -1870,13 +1869,13 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
 	if changeAdded {
 		// Add the change output.
-		size0 := baseTx.SerializeSize()
+		vSize0 := dexbtc.MsgTxVBytes(baseTx)
 		baseTx.AddTxOut(changeOutput)
-		changeSize := baseTx.SerializeSize() - size0 // may be dexbtc.P2WPKHOutputSize
+		changeSize := dexbtc.MsgTxVBytes(baseTx) - vSize0 // may be dexbtc.P2WPKHOutputSize
 		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addr.String())
 
-		size += changeSize
-		fee := feeRate * uint64(size)
+		vSize += changeSize
+		fee := feeRate * vSize
 		changeOutput.Value = int64(remaining - fee)
 
 		// Find the best fee rate by closing in on it in a loop.
@@ -1888,8 +1887,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			if err != nil {
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
-			size = msgTx.SerializeSize() // recompute the size with new tx signature
-			reqFee := feeRate * uint64(size)
+			vSize = dexbtc.MsgTxVBytes(msgTx) // recompute the size with new tx signature
+			reqFee := feeRate * vSize
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
@@ -1923,11 +1922,11 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	}
 
 	fee := totalIn - totalOut
-	actualFeeRate := fee / uint64(size)
+	actualFeeRate := fee / vSize
 	checkHash := msgTx.TxHash()
 	btc.log.Debugf("%d signature cycles to converge on fees for tx %s: "+
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
-		sigCycles, checkHash, feeRate, actualFeeRate, fee, size, changeAdded)
+		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {

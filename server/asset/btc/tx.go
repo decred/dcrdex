@@ -23,7 +23,7 @@ type Tx struct {
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
-	// The calculated transaction fee rate, in satoshis/byte
+	// The calculated transaction fee rate, in satoshis/vbyte
 	feeRate uint64
 }
 

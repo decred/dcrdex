@@ -499,3 +499,65 @@ func TestExtractContractHash(t *testing.T) {
 		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.wsh.ScriptAddress(), checkHash)
 	}
 }
+
+func TestMsgTxVBytes(t *testing.T) {
+	// segwit txn
+	segwitTx := "010000000001015018feb13925a5ea9a548ff1af92bca55d3004dc8b1020" +
+		"d99978878f073142d80000000000ffffffff02406c85000000000017a914" +
+		"1feef1e6f0b360d639dba54c5aa337954f09a48087cba6aa000000000016" +
+		"00147916d4dc770017806a316bd907668429b5778b480247304402203d39" +
+		"c9b8088d19beafae1fbb531ae58d3ff2b4d374304729bd8df9ab1d1047d2" +
+		"022061cb714f12d0b60197da46199ed7151426284ec929a23fe457e65417" +
+		"c9b35b980121030375b9725c21dba1dbb6fdb1627a647357052f09bacdde" +
+		"9fc2d05e1a36e6180e00000000"
+	wantSerSize := 223
+	wantVSize := 142
+
+	txHex, _ := hex.DecodeString(segwitTx)
+	msgTx := wire.NewMsgTx(wire.TxVersion)
+	err := msgTx.Deserialize(bytes.NewBuffer(txHex))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotSerSize := msgTx.SerializeSize()
+	if gotSerSize != wantSerSize {
+		t.Fatalf("wanted serialized tx size %d, got %d", wantSerSize, gotSerSize)
+	}
+	gotVSize := MsgTxVBytes(msgTx)
+	if gotVSize != uint64(wantVSize) {
+		t.Errorf("wanted tx virtual size %d, got %d", wantVSize, gotVSize)
+	}
+
+	// non-segwit txn
+	nonSegwitTX := "01000000019bb9e11de8c39f2102def30807b3124e92a2cb8b2474f85f9e" +
+		"a36d177f74f68100000000f04830450221009f0ea5ba317c1648aefa5864" +
+		"c1bafe9b86b3be742a877a6d362b0fdb7cce81d40220625604c3a0fd89b9" +
+		"3cfc5096fe0af98d32e5e9fe36f65736bee65ea7329641b60121022d099d" +
+		"2055bea94164527afcb0d6bf06a06ddb1186b87331ed48737302b0ec7d20" +
+		"179581e2e2e8abbaadf0231c52071e4f88588fccb78ad5afc0644f88011f" +
+		"a5d4514c616382012088a820c6de3217594af525fb57eaf1f2aae04c305d" +
+		"dc67d465edd325151685fc5a5e428876a914e05c5d2a5f850eee37d12242" +
+		"b64dafdf030a0fb467042609865eb17576a914e9288d333d5a8f343169f0" +
+		"709cb9b577fc758a506888acfeffffff01b860800200000000160014805b" +
+		"83e6b86fc7511f47d4cf95a3048954d3282e00000000"
+
+	wantSerSize = 322
+	wantVSize = 322
+
+	txHex, _ = hex.DecodeString(nonSegwitTX)
+	msgTx = wire.NewMsgTx(wire.TxVersion)
+	err = msgTx.Deserialize(bytes.NewBuffer(txHex))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotSerSize = msgTx.SerializeSize()
+	if gotSerSize != wantSerSize {
+		t.Fatalf("wanted serialized tx size %d, got %d", wantSerSize, gotSerSize)
+	}
+	gotVSize = MsgTxVBytes(msgTx)
+	if gotVSize != uint64(wantVSize) {
+		t.Errorf("wanted tx virtual size %d, got %d", wantVSize, gotVSize)
+	}
+}

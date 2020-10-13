@@ -1494,8 +1494,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.matchMtx.RUnlock()
 
 	log.Debugf("processInit: valid contract %v (%s) received at %v from user %v (%s) for match %v, "+
-		"swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
-		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
+		"fee rate = %d, swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
+		makerTaker(actor.isMaker), matchID, contract.FeeRate(), stepInfo.step, stepInfo.nextStep)
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
