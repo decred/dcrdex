@@ -540,8 +540,7 @@ export default class Application {
     this.pokes.push(note)
     while (this.pokes.length > noteCacheSize) this.pokes.shift()
     const el = this.makePoke(note)
-    const noteList = this.page.pokeList
-    this.prependListElement(noteList, note, el)
+    this.prependListElement(this.page.pokeList, note, el)
   }
 
   prependNoteElement (note) {
@@ -552,7 +551,7 @@ export default class Application {
     this.prependListElement(noteList, note, el)
     this.storeNotes()
     // Set the indicator color.
-    if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(this.page.noteList))) return
+    if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
     var unacked = 0
     const severity = this.notes.reduce((s, note) => {
       if (!note.acked) unacked++

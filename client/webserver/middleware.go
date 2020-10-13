@@ -49,7 +49,7 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 
 // extractBooleanCookie extracts the cookie value with key k from the Request,
 // and interprets the value as true only if it's equal to the string "1".
-func extractBooleanCookie(r *http.Request, k string, deFault bool) bool {
+func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
 	cookie, err := r.Cookie(k)
 	switch err {
 	// Dark mode is the default
@@ -59,7 +59,7 @@ func extractBooleanCookie(r *http.Request, k string, deFault bool) bool {
 	default:
 		log.Errorf("Cookie %q retrieval error: %v", k, err)
 	}
-	return deFault
+	return defaultVal
 }
 
 // requireInit ensures that the core app is initialized before allowing the
