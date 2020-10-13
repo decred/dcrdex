@@ -602,6 +602,9 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			dc.log.Warnf("Order %v updated from recorded status %q to new status %q reported by DEX %s",
 				oid, previousStatus, newStatus, dc.acct.host)
 		}
+
+		details := fmt.Sprintf("Status of order %v revised from %v to %v", trade.token(), previousStatus, newStatus)
+		dc.notify(newOrderNote("Order status update", details, db.WarningLevel, trade.coreOrderInternal()))
 	}
 
 	// Compare the status reported by the server for each known active trade. Orders
