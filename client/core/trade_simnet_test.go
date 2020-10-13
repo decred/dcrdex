@@ -1119,6 +1119,7 @@ func (client *tClient) init(ctx context.Context) error {
 	client.core, err = New(&Config{
 		DBPath: filepath.Join(tmpDir, fmt.Sprintf("dex_%d.db", cNum)),
 		Net:    dex.Regtest,
+		Logger: dex.StdOutLogger("TCORE", dex.LevelTrace),
 	})
 	if err != nil {
 		return err

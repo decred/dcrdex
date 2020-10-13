@@ -375,12 +375,12 @@ func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 // defer to resendPendingRequests to handle it in the next tick.
 func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
-	// If we're not the Taker, we can't do anything about this.
-	if match.Match.Side != order.Taker {
-		dc.log.Errorf("server reporting no taker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
+	// If we're the Maker, we really are done. The server is in MakerRedeemed as
+	// it's waiting on the taker.
+	if match.Match.Side == order.Maker {
 		return
 	}
-	// We are the taker, if we don't have an ack from the server, this will be
+	// We are the taker. If we don't have an ack from the server, this will be
 	// picked up in resendPendingRequests during the next tick.
 	if len(match.MetaData.Proof.Auth.RedeemSig) == 0 {
 		return
