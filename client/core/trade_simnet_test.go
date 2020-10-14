@@ -109,6 +109,7 @@ func readWalletCfgsAndDexCert() error {
 
 func startClients(ctx context.Context) error {
 	for _, c := range clients {
+		c.atFault = false
 		err := c.init(ctx)
 		if err != nil {
 			return err
@@ -481,7 +482,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("waiting %s for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			if isOrderNote && n.Subject() == "Preimage sent" && orderNote.Order.ID.String() == orderID {
+			if isOrderNote && n.Subject() == "preimage sent" && orderNote.Order.ID.String() == orderID {
 				forgetClient2Order(oid)
 				return true
 			}
@@ -516,7 +517,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("waiting %s for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Subject() == "Preimage sent" && orderNote.Order.ID.String() == orderID
+			return isOrderNote && n.Subject() == "preimage sent" && orderNote.Order.ID.String() == orderID
 		})
 		if !preimageRevealed {
 			return fmt.Errorf("preimage not revealed for order %s after %s", tracker.token(), twoEpochs)
@@ -1121,6 +1122,10 @@ func (client *tClient) init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Remove backup database.
+	backup := filepath.Join(tmpDir, "backup")
+	os.RemoveAll(backup)
+
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
 	client.notes = client.startNotificationReader(ctx)
