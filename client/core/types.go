@@ -188,7 +188,7 @@ type Order struct {
 	Canceled     bool              `json:"canceled"`
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
 	FundingCoins []dex.Bytes       `json:"fundingCoins"`
-	LockedAmt    uint64
+	LockedAmt    uint64            `json:"lockedamt"`
 	Rate         uint64            `json:"rate"` // limit only
 	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
 }

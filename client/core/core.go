@@ -2727,24 +2727,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.resolveMatchConflicts(dc, matchConflicts)
 	}
 
-	if len(updatedAssets) > 0 {
-		c.updateBalances(updatedAssets)
-	}
-
 	// Order, match statuses should now be in sync with the DEX.
 	// Refresh the user's orders for each of the DEX's markets and
 	// log updated locked funds info.
 	dc.refreshMarkets()
-	dc.marketMtx.RLock()
-	for _, mkt := range dc.marketMap {
-		c.log.Infof("%s %s market - %d active orders, %s %s, %s %s locked for swapping, "+
-			"%s %s, %s %s locked in unspent contracts", dc.acct.host, mkt.Name, len(mkt.Orders),
-			amtString(mkt.BaseOrderLocked), mkt.BaseSymbol,
-			amtString(mkt.QuoteOrderLocked), mkt.QuoteSymbol,
-			amtString(mkt.BaseContractLocked), mkt.BaseSymbol,
-			amtString(mkt.QuoteContractLocked), mkt.QuoteSymbol)
+
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
 	}
-	dc.marketMtx.RUnlock()
 
 	return nil
 }
@@ -3104,9 +3094,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			continue
 		}
 
-		tracker.mtx.Lock()
 		tracker.wallets = wallets
-		tracker.mtx.Unlock()
 
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
@@ -3189,12 +3177,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Active orders and orders with matches with unsent swaps need the funding
 		// coin(s).
 		// Orders with sent but unspent swaps need to recompute contract-locked amts.
-		hasUnspentContracts := func() bool {
-			tracker.mtx.RLock()
-			defer tracker.mtx.RUnlock()
-			return tracker.unspentContractAmounts() > 0
-		}
-		if isActive || needsCoins || hasUnspentContracts() {
+		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
 			relocks.count(wallets.fromAsset.ID)
 		}
 
@@ -4272,8 +4255,4 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 		return fmt.Errorf("failed ID match. order abandoned")
 	}
 	return nil
-}
-
-func amtString(amt uint64) string {
-	return strconv.FormatFloat(float64(amt)/conversionFactor, 'f', -1, 64) // -1 removes trailing zeros
 }
