@@ -48,8 +48,11 @@ const (
 	minProtocolVersion = 70015
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
-	splitTxBaggage       = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + 2*dexbtc.P2PKHOutputSize
-	splitTxBaggageSegwit = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputVBytes + 2*dexbtc.P2WPKHOutputSize
+	splitTxBaggage = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + 2*dexbtc.P2PKHOutputSize
+	// splitTxBaggageSegwit it the analogue of splitTxBaggage for segwit.
+	// We include the 2 bytes for marker and flag.
+	splitTxBaggageSegwit = dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize +
+		dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
 )
 
 var (
@@ -741,7 +744,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	baggage := nfo.MaxFeeRate * splitTxBaggage
 	if btc.segwit {
 		baggage = nfo.MaxFeeRate * splitTxBaggageSegwit
-		swapInputSize = dexbtc.RedeemP2WPKHInputVBytes
+		swapInputSize = dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
 	}
 
 	var coinSum uint64
@@ -1109,7 +1112,9 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	// Calculate the size and the fees.
 	size := dexbtc.MsgTxVBytes(msgTx)
 	if btc.segwit {
-		size += dexbtc.RedeemSwapWitnessVSize*uint64(len(redemptions)) + dexbtc.P2WPKHOutputSize
+		// Add the marker and flag weight here.
+		witnessVBytes := (dexbtc.RedeemSwapSigScriptSize*uint64(len(redemptions)) + 2 + 3) / 4
+		size += witnessVBytes + dexbtc.P2WPKHOutputSize
 	} else {
 		size += dexbtc.RedeemSwapSigScriptSize*uint64(len(redemptions)) + dexbtc.P2PKHOutputSize
 	}
@@ -1660,9 +1665,11 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	size := dexbtc.MsgTxVBytes(msgTx)
 
 	if btc.segwit {
-		size += dexbtc.RefundSigScriptSize + dexbtc.P2WPKHOutputSize
+		// Add the marker and flag weight too.
+		witnessVBtyes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
+		size += witnessVBtyes + dexbtc.P2WPKHOutputSize
 	} else {
-		size += dexbtc.RefundWitnessVSize + dexbtc.P2PKHOutputSize
+		size += dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize
 	}
 
 	fee := feeRate * size // TODO: use btc.FeeRate in caller and fallback to nfo.MaxFeeRate

@@ -970,11 +970,11 @@ func TestFundEdges(t *testing.T) {
 		t.Fatalf("error when should be enough funding in two utxos: %v", err)
 	}
 
-	// P2WPKH witness: RedeemP2WPKHInputWitnessWeight = 108
-	// P2WPKH input size = overhead(40) + no sigScript(1+0) + witness(ceil(108/4)) = 68 vbytes
-	// backing fees: 68 * fee_rate(34) = 2312 satoshi
-	// total: base_fees(71434) + 2312 = 73746 satoshi
-	backingFees = 73746
+	// P2WPKH witness: RedeemP2WPKHInputWitnessWeight = 109
+	// P2WPKH input size = overhead(40) + no sigScript(1+0) + witness(ceil(109/4)) = 69 vbytes
+	// backing fees: 69 * fee_rate(34) = 2346 satoshi
+	// total: base_fees(71434) + 2346 = 73780 satoshi
+	backingFees = 73780
 	p2wpkhAddr := tP2WPKHAddr
 	p2wpkhPkScript, _ := hex.DecodeString("0014054a40a6aa7c1f6bd15f286debf4f33cef0e21a1")
 	p2wpkhUnspent := &ListUnspentResult{
@@ -1045,10 +1045,9 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// Base Fees
 	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
 
-	// swap_size: 152 bytes (InitTxSizeSegwit)
-	// pw2pk_witness_vbytes = (RedeemP2WPKHInputWitnessWeight + 3) / 4 = 27
-	// p2wpkh input: 68 bytes (RedeemP2WPKHInputVBytes)
-	// swap_size_base: 84 bytes (152 - 68 p2pkh input) (InitTxSizeBaseSegwit)
+	// swap_size: 153 bytes (InitTxSizeSegwit)
+	// p2wpkh input, incl. marker and flag: 69 bytes (RedeemP2WPKHInputSize + ((RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4))
+	// swap_size_base: 84 bytes (153 - 69 p2pkh input) (InitTxSizeBaseSegwit)
 
 	// lot_size: 1e6
 	// swap_value: 1e7
@@ -1058,14 +1057,14 @@ func TestFundEdgesSegwit(t *testing.T) {
 	//   first_swap_size = swap_size_base + backing_bytes
 	//   total_bytes  = swap_size_base + backing_bytes + (lots - 1) * swap_size
 	//   base_tx_bytes = total_bytes - backing_bytes
-	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 152 + 84 = 1452
-	// base_fees = base_tx_bytes * fee_rate = 1452 * 34 = 49401
-	// backing_bytes: 1x P2WPKH-spending input = p2wpkh input = 68 bytes
-	// backing_fees: 68 * fee_rate(34 atoms/byte) = 2312 atoms
-	// total_bytes  = base_tx_bytes + backing_bytes = 1452 + 68 = 1520
-	// total_fees: base_fees + backing_fees = 49402 + 2312 = 51341 atoms
-	//          OR total_bytes * fee_rate = 1521 * 34 = 51714
-	backingFees := uint64(1520) * tBTC.MaxFeeRate // total_bytes * fee_rate
+	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 153 + 84 = 1461
+	// base_fees = base_tx_bytes * fee_rate = 1461 * 34 = 49674
+	// backing_bytes: 1x P2WPKH-spending input = p2wpkh input = 69 bytes
+	// backing_fees: 69 * fee_rate(34 atoms/byte) = 2346 atoms
+	// total_bytes  = base_tx_bytes + backing_bytes = 1461 + 69 = 1530
+	// total_fees: base_fees + backing_fees = 49674 + 2346 = 52020 atoms
+	//          OR total_bytes * fee_rate = 1530 * 34 = 52020
+	backingFees := uint64(1530) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2wpkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       tP2WPKHAddr,
@@ -1102,7 +1101,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
-	backingFees = uint64(1520+splitTxBaggageSegwit) * tBTC.MaxFeeRate
+	backingFees = uint64(1530+splitTxBaggageSegwit) * tBTC.MaxFeeRate
 	v := swapVal + backingFees - 1
 	p2wpkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)

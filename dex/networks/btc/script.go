@@ -62,11 +62,6 @@ const (
 	//   - 97 bytes redeem script
 	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + 97
 
-	// RedeemSwapWitnessVSize is the byte-size of the witness script. It is
-	// identical to the byte size of the non-segwit sig script, but will
-	// receive the segwit discount when evaluating virtual bytes.
-	RedeemSwapWitnessVSize = (RedeemSwapSigScriptSize + 3) / 4
-
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
 	// It is calculated as:
@@ -79,8 +74,6 @@ const (
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract
 	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + 97
-
-	RefundWitnessVSize = (RefundSigScriptSize + 3) / 4
 
 	// Overhead for a wire.TxIn. See wire.TxIn.SerializeSize.
 	// hash 32 bytes + index 4 bytes + sequence 4 bytes.
@@ -165,11 +158,6 @@ const (
 	//   - 0 bytes signature script
 	RedeemP2WPKHInputSize = TxInOverhead + 1
 
-	// RedeemP2WPKHInputVBytes is the size of an input that redeems a p2wpkh
-	// output, in units of virtual bytes.
-	// 41 + 27 = 68
-	RedeemP2WPKHInputVBytes = RedeemP2WPKHInputSize + ((RedeemP2WPKHInputWitnessWeight + 3) / 4)
-
 	// RedeemP2WPKHInputWitnessWeight is the worst case weight of
 	// a witness for spending P2WPKH and nested P2WPKH outputs. It
 	// is calculated as:
@@ -180,7 +168,7 @@ const (
 	//   - 1 wu compact int encoding value 33
 	//   - 33 wu serialized compressed pubkey
 	// NOTE: witness data is not script.
-	RedeemP2WPKHInputWitnessWeight = 1 + DERSigLength + 1 + 33 // 108
+	RedeemP2WPKHInputWitnessWeight = 1 + 1 + DERSigLength + 1 + 33 // 109
 
 	// RedeemP2WSHInputWitnessWeight depends on the number of redeem scrpit and
 	// number of signatures.
@@ -226,10 +214,11 @@ const (
 	InitTxSizeBaseSegwit = MinimumTxOverhead + P2WPKHOutputSize + P2WSHOutputSize
 
 	// InitTxSizeSegwit is InitTxSizeSegwit + 1 P2WPKH input.
-	// RedeemP2WPKHInputWitnessWeight is actually a perfect multiple of 4, but
-	// using the round up formula for good practice.
-	// 84 + 41 + 27 = 152
-	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2WPKHInputVBytes
+	// 84 vbytes base tx
+	// 41 vbytes base tx input
+	// 109wu witness +  2wu segwit marker and flag = 28 vbytes
+	// total = 153 vbytes
+	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2WPKHInputSize + ((RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
 
 	witnessWeight = blockchain.WitnessScaleFactor
 )
