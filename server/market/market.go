@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -41,6 +42,7 @@ const (
 	ErrInvalidCommitment      = Error("order commitment invalid")
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
+	ErrQuantityTooHigh        = Error("order quantity exceeds user limit")
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
@@ -53,6 +55,7 @@ const (
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	CheckUnspent(asset uint32, coinID []byte) error
+	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -953,7 +956,7 @@ func (m *Market) Run(ctx context.Context) {
 				continue
 			}
 
-			// Stamp and process the order in the target epoch queue.
+			// Process the order in the target epoch queue.
 			err := m.processOrder(s.rec, orderEpoch, notifyChan, s.errChan)
 			if err != nil {
 				log.Errorf("Failed to process order %v: %v", s.rec.order, err)
@@ -1040,6 +1043,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// ID, this also prevents orders with the same ID.
 	// TODO: Prevent commitment reuse in general, without expensive DB queries.
 	ord := rec.order
+	user := ord.User()
 	commit := ord.Commitment()
 	m.epochMtx.RLock()
 	otherOid, found := m.epochCommitments[commit]
@@ -1078,6 +1082,43 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			errChan <- ErrInvalidCancelOrder
 			return nil
 		}
+	} else { // Trade order. Check the quantity against user's limit.
+		// Market knows the user's current booked amount.
+		bookedBuyAmt, bookedSellAmt, bookedBuyCount, bookedSellCount := m.book.UserOrderTotals(user)
+
+		// Swapper knows how much is in active swaps for this asset pair.
+		amtInSwaps, activeSwaps := m.swapper.UserSwappingAmt(user, ord.Base(), ord.Quote())
+		totActive := bookedBuyAmt + bookedSellAmt + amtInSwaps
+
+		// AuthManager knows the user's swap outcome amount history, and we know
+		// the current market lot size. Get the adjustment in units of the base
+		// asset from the AuthManager, and combine with the new-user limit.
+		newUserLimit := auth.InitUserLotLimit * int64(m.marketInfo.LotSize)
+		adjustment := m.auth.UserOrderLimitAdjustment(user, ord.Base(), ord.Quote())
+		userLimit := newUserLimit + adjustment
+		// Subtract the user's total active amount from their limit.
+		orderQtyAllowed := userLimit - int64(totActive)
+
+		qty := ord.Trade().Quantity
+		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
+			qty = calc.QuoteToBase(m.MidGap(), qty) // market buy qty is in quote asset
+		}
+		symb := dex.BipIDSymbol(m.marketInfo.Base)
+		log.Debugf("User placing order on market %s worth %d (%s units) of %d allowed. "+
+			"User's unsettled %s amounts: %d in %d buy orders, %d in %d sell orders, "+
+			"%d in %d active swaps => %d (%f x10^8) total in active orders.",
+			m.marketInfo.Name, qty, symb, orderQtyAllowed,
+			symb, bookedBuyAmt, bookedBuyCount, bookedSellAmt, bookedSellCount,
+			amtInSwaps, activeSwaps, totActive, float64(totActive)/1e8)
+
+		if int64(qty) > orderQtyAllowed {
+			log.Infof("Rejecting user %v order %v: qty %d > %d allowed (%d active of %d limit)",
+				user, ord, qty, orderQtyAllowed, totActive, userLimit)
+			errChan <- dex.NewError(ErrQuantityTooHigh,
+				fmt.Sprintf("Order quantity %d too large. Current limit: %d (you have %d booked or settling already)",
+					qty, orderQtyAllowed, totActive))
+			return nil
+		}
 	}
 
 	// Sign the order and prepare the client response. Only after the archiver
@@ -1086,7 +1127,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	respMsg, err := m.orderResponse(rec)
 	if err != nil {
 		log.Errorf("failed to create msgjson.Message for order %v, msgID %v response: %v",
-			rec.order, rec.msgID, err)
+			ord, rec.msgID, err)
 		errChan <- ErrMalformedOrderResponse
 		return nil
 	}
@@ -1147,7 +1188,6 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
-	user := ord.User()
 	if err := m.auth.Send(user, respMsg); err != nil {
 		log.Infof("Failed to send signed new order response to user %v, order %v: %v",
 			user, oid, err)

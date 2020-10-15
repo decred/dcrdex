@@ -125,7 +125,7 @@ const (
 	CompletedOrAtFaultMatchesLastN = `
 		WITH acct (aid) AS ( VALUES($1::BYTEA) )
 
-		SELECT status, (status=4 OR (status=3 AND makerAccount = aid AND takerAccount != aid)) AS success,
+		SELECT matchid, status, quantity, (status=4 OR (status=3 AND makerAccount = aid AND takerAccount != aid)) AS success,
 			GREATEST((epochIdx+1)*epochDur, aContractTime, bContractTime, aRedeemTime, bRedeemTime) AS lastTime
 		FROM %s, acct
 		WHERE takerSell IS NOT NULL      -- exclude cancel order matches

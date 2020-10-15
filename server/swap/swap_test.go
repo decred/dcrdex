@@ -193,8 +193,9 @@ func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
-func (m *TAuthManager) SwapSuccess(id account.AccountID, refTime time.Time) {}
-func (m *TAuthManager) Inaction(id account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID) {
+func (m *TAuthManager) SwapSuccess(id account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
+}
+func (m *TAuthManager) Inaction(id account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 	// banscore of zero => immediate penalize
 	m.penalize(id, account.FailureToAct)
 }
@@ -209,7 +210,6 @@ func (m *TAuthManager) penalize(id account.AccountID, rule account.Rule) {
 
 func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
 func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
-func (m *TAuthManager) Unban(account.AccountID) error                                               { return nil }
 
 func (m *TAuthManager) flushPenalty(user account.AccountID) (found bool, rule account.Rule) {
 	m.mtx.Lock()

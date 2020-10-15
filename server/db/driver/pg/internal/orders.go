@@ -47,7 +47,7 @@ const (
 		commit, coins, quantity, rate, force, filled
 	FROM %s WHERE status = $1;`
 
-	PreimageResultsLastN = `SELECT (preimage IS NULL AND status=$3) AS preimageMiss, 
+	PreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss, 
 		(epoch_idx+1) * epoch_dur as epochCloseTime   -- when preimages are requested
 	FROM %s -- e.g. dcr_btc.orders_archived
 	WHERE account_id = $1
@@ -187,7 +187,7 @@ const (
 		commit, target_order, status
 	FROM %s WHERE oid = $1;`
 
-	CancelPreimageResultsLastN = `SELECT (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
+	CancelPreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
 		(epoch_idx+1) * epoch_dur AS epochCloseTime   -- when preimages are requested
 	FROM %s -- e.g. dcr_btc.cancels_archived
 	WHERE account_id = $1

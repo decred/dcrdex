@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
@@ -229,8 +230,12 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 
 func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID) {}
 func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
-func (a *TAuth) SwapSuccess(user account.AccountID, refTime time.Time)                        {}
-func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID) {
+func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
+}
+func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+}
+func (a *TAuth) UserOrderLimitAdjustment(user account.AccountID, base, quote uint32) int64 {
+	return 0 // everyone gets a clean slate
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
@@ -238,7 +243,6 @@ func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, t t
 	a.cancelOrder = coid
 	a.canceledOrder = oid
 }
-func (a *TAuth) Unban(account.AccountID) error { return nil }
 
 type TMarketTunnel struct {
 	adds       []*orderRecord
