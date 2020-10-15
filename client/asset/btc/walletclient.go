@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -156,7 +155,7 @@ func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		}
 		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg)
 	}
-	outTx, err := msgTxFromHex(res.Hex)
+	outTx, err := msgTxFromBytes(res.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error deserializing transaction response: %v", err)
 	}
@@ -258,10 +257,20 @@ func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// MsgTxFromHex creates a wire.MsgTx by deserializing the hex transaction.
-func msgTxFromHex(txHex dex.Bytes) (*wire.MsgTx, error) {
+// msgTxFromHex creates a wire.MsgTx by deserializing the hex-encoded
+// transaction.
+func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
+	b, err := hex.DecodeString(txHex)
+	if err != nil {
+		return nil, err
+	}
+	return msgTxFromBytes(b)
+}
+
+// msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
+func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	if err := msgTx.Deserialize(bytes.NewReader(txHex)); err != nil {
+	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
 		return nil, err
 	}
 	return msgTx, nil

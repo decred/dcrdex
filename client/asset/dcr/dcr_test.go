@@ -162,6 +162,13 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	return wallet, client, shutdown
 }
 
+func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
+	for i := range msgTx.TxIn {
+		msgTx.TxIn[i].SignatureScript = randBytes(dexdcr.P2PKHSigScriptSize)
+	}
+	return msgTx, true, nil
+}
+
 type tRPCClient struct {
 	sendRawHash    *chainhash.Hash
 	sendRawErr     error
@@ -946,6 +953,35 @@ func TestFundEdges(t *testing.T) {
 		t.Fatalf("should be enough to fund with a single p2pkh utxo: %v", err)
 	}
 
+	// For a split transaction, we would need to cover the splitTxBaggage as
+	// well.
+	wallet.useSplitTx = true
+	node.changeAddr = tPKHAddr
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
+	}
+	fees = uint64(2510+splitTxBaggage) * tDCR.MaxFeeRate
+	v := swapVal + fees - 1
+	node.unspent[0].Amount = float64(v) / 1e8
+	coins, _, err := wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error when skipping split tx because not enough to cover baggage: %v", err)
+	}
+	if coins[0].Value() != v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	// Now get the split.
+	v = swapVal + fees
+	node.unspent[0].Amount = float64(v) / 1e8
+	coins, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding split tx: %v", err)
+	}
+	if coins[0].Value() == v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	wallet.useSplitTx = false
+
 	// TODO: fix the p2sh test so that the redeem script is a p2pk pkScript or a
 	// multisig pkScript, not a p2pkh pkScript.
 
@@ -1022,10 +1058,7 @@ func TestSwap(t *testing.T) {
 			scriptSize -= 2
 		}
 		sigSizer++
-		for i := range msgTx.TxIn {
-			msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
-		}
-		return msgTx, true, nil
+		return signFunc(msgTx, scriptSize)
 	}
 
 	node.signFunc = signFunc
@@ -1049,7 +1082,7 @@ func TestSwap(t *testing.T) {
 
 	// Fees should be returned.
 	minFees := tDCR.MaxFeeRate * uint64(node.sentRawTx.SerializeSize())
-	if feesPaid <= minFees {
+	if feesPaid < minFees {
 		t.Fatalf("sent fees, %d, less than required fees, %d", feesPaid, minFees)
 	}
 

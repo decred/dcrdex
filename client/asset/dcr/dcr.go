@@ -783,7 +783,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
 		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %d > %d.", baggageFees, excess)
-		dcr.log.Infof("Funding %d atom order with coins %v worth", value, coins, coinSum)
+		dcr.log.Infof("Funding %d atom order with coins %v worth %d", value, coins, coinSum)
 		return coins, false, nil
 	}
 
@@ -794,11 +794,15 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
+	feeRate := dcr.feeRateWithFallback()
+	if feeRate > nfo.MaxFeeRate {
+		feeRate = nfo.MaxFeeRate
+	}
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, dcr.feeRateWithFallback(), false)
+	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, feeRate, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("error sending split transaction: %v", err)
 	}

@@ -59,8 +59,13 @@ const (
 	//   - 32 bytes secret key
 	//   - OP_1
 	//   - varint 97
-	//   - 97 bytes secret key
+	//   - 97 bytes redeem script
 	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + 97
+
+	// RedeemSwapWitnessVSize is the byte-size of the witness script. It is
+	// identical to the byte size of the non-segwit sig script, but will
+	// receive the segwit discount when evaluating virtual bytes.
+	RedeemSwapWitnessVSize = (RedeemSwapSigScriptSize + 3) / 4
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
@@ -74,6 +79,8 @@ const (
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract
 	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + 97
+
+	RefundWitnessVSize = (RefundSigScriptSize + 3) / 4
 
 	// Overhead for a wire.TxIn. See wire.TxIn.SerializeSize.
 	// hash 32 bytes + index 4 bytes + sequence 4 bytes.

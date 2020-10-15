@@ -59,7 +59,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete bool) (json.RawMessage, error) {
+func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete, segwit bool) (json.RawMessage, error) {
 	signTxRes := SignTxResult{
 		Complete: sigComplete,
 	}
@@ -77,10 +77,21 @@ func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete
 	}
 	// Set the sigScripts to random bytes of the correct length for spending a
 	// p2pkh output.
-	scriptSize := dexbtc.RedeemP2PKHSigScriptSize + sizeTweak
-	for i := range msgTx.TxIn {
-		msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
+	if segwit {
+		sigSize := 73 + sizeTweak
+		for i := range msgTx.TxIn {
+			msgTx.TxIn[i].Witness = wire.TxWitness{
+				randBytes(sigSize),
+				randBytes(33),
+			}
+		}
+	} else {
+		scriptSize := dexbtc.RedeemP2PKHSigScriptSize + sizeTweak
+		for i := range msgTx.TxIn {
+			msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
+		}
 	}
+
 	buf := new(bytes.Buffer)
 	err = msgTx.Serialize(buf)
 	if err != nil {
@@ -331,7 +342,7 @@ func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte
 		txOut := wire.NewTxOut(100000000, pkScript)
 		msgTx.AddTxOut(txOut)
 	}
-	txBuf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
+	txBuf := bytes.NewBuffer(make([]byte, 0, dexbtc.MsgTxVBytes(msgTx)))
 	err := msgTx.Serialize(txBuf)
 	if err != nil {
 		return nil, err
@@ -668,7 +679,7 @@ func TestAvailableFund(t *testing.T) {
 
 	// With a little more locked, the split should be performed.
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
-		return signFunc(t, params, 0, true)
+		return signFunc(t, params, 0, true, wallet.segwit)
 	}
 	lottaUTXO.Amount += float64(baggageFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -836,6 +847,7 @@ func TestFundEdges(t *testing.T) {
 	defer shutdown()
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
+	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 
 	// Base Fees
 	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
@@ -885,11 +897,42 @@ func TestFundEdges(t *testing.T) {
 	// Now add the needed satoshi and try again.
 	p2pkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2pkh utxo: %v", err)
 	}
+
+	// For a split transaction, we would need to cover the splitTxBaggage as
+	// well.
+	wallet.useSplitTx = true
+	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
+		return signFunc(t, params, 0, true, wallet.segwit)
+	}
+	backingFees = uint64(2250+splitTxBaggage) * tBTC.MaxFeeRate
+	// 1 too few atoms
+	v := swapVal + backingFees - 1
+	p2pkhUnspent.Amount = float64(v) / 1e8
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	coins, _, err := wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error when skipping split tx due to baggage: %v", err)
+	}
+	if coins[0].Value() != v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	// Just enough.
+	v = swapVal + backingFees
+	p2pkhUnspent.Amount = float64(v) / 1e8
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	coins, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding split tx: %v", err)
+	}
+	if coins[0].Value() == v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	wallet.useSplitTx = false
 
 	// P2SH(P2PKH) p2sh pkScript = 23 bytes, p2pkh pkScript (redeemscript) = 25 bytes
 	// sigScript = signature(1 + 73) + pubkey(1 + 33) + redeemscript(1 + 25) = 134
@@ -1051,6 +1094,37 @@ func TestFundEdgesSegwit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
 	}
+
+	// For a split transaction, we would need to cover the splitTxBaggage as
+	// well.
+	wallet.useSplitTx = true
+	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
+		return signFunc(t, params, 0, true, wallet.segwit)
+	}
+	backingFees = uint64(1520+splitTxBaggageSegwit) * tBTC.MaxFeeRate
+	v := swapVal + backingFees - 1
+	p2wpkhUnspent.Amount = float64(v) / 1e8
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	coins, _, err := wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error when skipping split tx because not enough to cover baggage: %v", err)
+	}
+	if coins[0].Value() != v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	// Now get the split.
+	v = swapVal + backingFees
+	p2wpkhUnspent.Amount = float64(v) / 1e8
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	coins, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding split tx: %v", err)
+	}
+	if coins[0].Value() == v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	wallet.useSplitTx = false
 }
 
 func TestSwap(t *testing.T) {
@@ -1103,7 +1177,7 @@ func testSwap(t *testing.T, segwit bool) {
 			sizeTweak = -2
 		}
 		sigSizer++
-		return signFunc(t, params, sizeTweak, signatureComplete)
+		return signFunc(t, params, sizeTweak, signatureComplete, wallet.segwit)
 	}
 
 	// This time should succeed.
@@ -1122,7 +1196,7 @@ func testSwap(t *testing.T, segwit bool) {
 	}
 
 	// Fees should be returned.
-	minFees := tBTC.MaxFeeRate * uint64(node.sentRawTx.SerializeSize())
+	minFees := tBTC.MaxFeeRate * dexbtc.MsgTxVBytes(node.sentRawTx)
 	if feesPaid < minFees {
 		t.Fatalf("sent fees, %d, less than required fees, %d", feesPaid, minFees)
 	}
@@ -1237,7 +1311,7 @@ func testRedeem(t *testing.T, segwit bool) {
 	}
 
 	// Check that fees are returned.
-	minFees := optimalFeeRate * uint64(node.sentRawTx.SerializeSize())
+	minFees := optimalFeeRate * dexbtc.MsgTxVBytes(node.sentRawTx)
 	if feesPaid < minFees {
 		t.Fatalf("sent fees, %d, less than expected minimum fees, %d", feesPaid, minFees)
 	}
