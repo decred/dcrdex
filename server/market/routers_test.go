@@ -1213,8 +1213,9 @@ func tNewLink() *TLink {
 	}
 }
 
-func (conn *TLink) ID() uint64 { return conn.id }
-func (conn *TLink) IP() string { return conn.ip }
+func (conn *TLink) Authorized() {}
+func (conn *TLink) ID() uint64  { return conn.id }
+func (conn *TLink) IP() string  { return conn.ip }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()

@@ -143,6 +143,8 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 	return err
 }
 
+func (conn *wsConnStub) SetReadLimit(int64) {}
+
 func (conn *wsConnStub) SetWriteDeadline(t time.Time) error {
 	return nil // TODO implement and test write timeouts
 }

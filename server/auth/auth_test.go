@@ -139,8 +139,9 @@ type TRPCClient struct {
 	closed     chan struct{}
 }
 
-func (c *TRPCClient) ID() uint64 { return c.id }
-func (c *TRPCClient) IP() string { return c.ip }
+func (c *TRPCClient) ID() uint64  { return c.id }
+func (c *TRPCClient) IP() string  { return c.ip }
+func (c *TRPCClient) Authorized() {}
 func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
