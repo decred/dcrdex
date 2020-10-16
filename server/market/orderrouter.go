@@ -79,6 +79,14 @@ type MarketTunnel interface {
 	// false when suspended, but false does not necessarily mean Run has stopped
 	// since a start epoch may be set.
 	Running() bool
+
+	// CheckUnfilled checks a user's unfilled book orders that are funded by
+	// coins for a given asset to ensure that their funding coins are not spent.
+	// If any of an unfilled order's funding coins are spent, the order is
+	// unbooked (removed from the in-memory book, revoked in the DB, a
+	// cancellation marked against the user, coins unlocked, and orderbook
+	// subscribers notified). See Unbook for details.
+	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -227,7 +235,6 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	copy(commit[:], limit.Commit)
 
 	fundingAsset := coins.funding
-
 	coinIDs := make([]order.CoinID, 0, len(limit.Trade.Coins))
 	coinStrs := make([]string, 0, len(limit.Trade.Coins))
 	for _, coin := range limit.Trade.Coins {
@@ -412,7 +419,6 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	copy(commit[:], market.Commit)
 
 	fundingAsset := assets.funding
-
 	coinIDs := make([]order.CoinID, 0, len(market.Trade.Coins))
 	coinStrs := make([]string, 0, len(market.Trade.Coins))
 	for _, coin := range market.Trade.Coins {
@@ -569,12 +575,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	// Consideration: allow suspended accounts to submit cancel orders? Depends
-	// if their orders get canceled on suspension or if they simply cannot make
-	// new orders.
-	// if _, suspended := r.auth.Suspended(user); suspended {
-	// 	return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit cancel orders")
-	// }
+	// NOTE: Allow suspended accounts to submit cancel orders.
 
 	tunnel, rpcErr := r.extractMarket(&cancel.Prefix)
 	if rpcErr != nil {
@@ -801,6 +802,18 @@ func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
 			))
 		}
 	}
+
+	// Verify all of the user's unfilled book orders have unspent funding coins,
+	// unbooking them as necessary.
+	var user account.AccountID
+	copy(user[:], prefix.AccountID)
+	for mktName, tunnel := range r.tunnels {
+		unbookedUnfunded := tunnel.CheckUnfilled(assets.funding.ID, user)
+		for _, badLo := range unbookedUnfunded {
+			log.Infof("Unbooked unfunded order %v from market %s for user %v", badLo, mktName, user)
+		}
+	}
+
 	return nil
 }
 

@@ -606,6 +606,66 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
 	return false
 }
 
+func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
+orders:
+	for _, lo := range unfilled {
+		log.Tracef("Checking %d funding coins for order %v", len(lo.Coins), lo.ID())
+		for i := range lo.Coins {
+			err := m.swapper.CheckUnspent(assetID, lo.Coins[i])
+			if err == nil {
+				continue // unspent, check next coin
+			}
+
+			if !errors.Is(err, asset.CoinNotFoundError) {
+				// other failure (coinID decode, RPC, etc.)
+				log.Errorf("unexpected error checking coinID %v for order %v: %v",
+					lo.Coins[i], lo, err)
+				continue orders
+				// NOTE: This does not revoke orders from storage since this is
+				// likely to be a configuration or node issue.
+			}
+
+			// Final fill amount check in case it was matched after we pulled
+			// the list of unfilled orders from the book.
+			if lo.Filled() == 0 {
+				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
+				log.Warnf("Coin %s not unspent for unfilled order %v. "+
+					"Revoking the order.", coin, lo)
+				m.Unbook(lo)
+				unbooked = append(unbooked, lo)
+			}
+			continue orders
+		}
+	}
+	return
+}
+
+// CheckUnfilled checks unfilled book orders belonging to a user and funded by
+// coins for a given asset to ensure that their funding coins are not spent. If
+// any of an order's funding coins are spent, the order is unbooked (removed
+// from the in-memory book, revoked in the DB, a cancellation marked against the
+// user, coins unlocked, and orderbook subscribers notified). See Unbook for
+// details.
+func (m *Market) CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder) {
+	base, quote := m.marketInfo.Base, m.marketInfo.Quote
+	if assetID != base && assetID != quote {
+		return
+	}
+	var unfilled []*order.LimitOrder
+	switch assetID {
+	case base:
+		// Sell orders are funded by the base asset.
+		unfilled = m.book.UnfilledUserSells(user)
+	case quote:
+		// Buy orders are funded by the quote asset.
+		unfilled = m.book.UnfilledUserBuys(user)
+	default:
+		return
+	}
+
+	return m.checkUnfilledOrders(assetID, unfilled)
+}
+
 // Book retrieves the market's current order book and the current epoch index.
 // If the Market is not yet running or the start epoch has not yet begun, the
 // epoch index will be zero.
@@ -702,6 +762,7 @@ func (m *Market) Run(ctx context.Context) {
 		// Stop and wait for epoch pump and processing pipeline goroutines.
 		cancel() // may already be done by suspend
 		wgEpochs.Wait()
+		// Book mod goroutines done, may purge if requested.
 
 		// persistBook is set under epochMtx lock.
 		m.epochMtx.Lock()
