@@ -487,7 +487,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "parse error: " + err.Error(),
+			Message: "error parsing orderbook request",
 		}
 	}
 	mkt, err := dex.MarketName(sub.Base, sub.Quote)
@@ -518,7 +518,7 @@ func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "parse error: " + err.Error(),
+			Message: "error parsing unsub_orderbook request",
 		}
 	}
 	book := r.books[unsub.MarketID]

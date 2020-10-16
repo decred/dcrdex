@@ -31,7 +31,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "error parsing register: " + err.Error(),
+			Message: "error parsing register request",
 		}
 	}
 
@@ -57,9 +57,10 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	// Register account and get a fee payment address.
 	feeAddr, err := auth.storage.CreateAccount(acct)
 	if err != nil {
+		log.Debugf("CreateAccount(%v) failed: %v", acct, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
-			Message: "storage error: " + err.Error(),
+			Message: "failed to create new account (already registered?)",
 		}
 	}
 
@@ -108,7 +109,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "error parsing notifyfee: " + err.Error(),
+			Message: "error parsing notifyfee request",
 		}
 	}
 
@@ -166,9 +167,10 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	regAddr, err := auth.storage.AccountRegAddr(acctID)
 	if err != nil {
 		auth.feeWaiterMtx.Unlock()
+		log.Infof("AccountRegAddr failed to load info for account %v: %v", acctID, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
-			Message: "error locating account info: " + err.Error(),
+			Message: "error locating account info",
 		}
 	}
 
@@ -229,7 +231,7 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 	if addr != regAddr {
 		msgErr = &msgjson.Error{
 			Code:    msgjson.FeeError,
-			Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+			Message: "wrong fee address. wanted " + regAddr,
 		}
 		return wait.DontTryAgain
 	}
@@ -237,9 +239,10 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 	// Mark the account as paid
 	err = auth.storage.PayAccount(acctID, coinID)
 	if err != nil {
+		log.Errorf("Failed to mark account %v as paid with coin %x", acctID, coinID)
 		msgErr = &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
-			Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+			Message: "internal error",
 		}
 		return wait.DontTryAgain
 	}

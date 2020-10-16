@@ -1483,11 +1483,9 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	if msgErr.Code != msgjson.RPCParseError {
 		t.Errorf("Expected error code %d, got %d", msgjson.RPCParseError, msgErr.Code)
 	}
-	if !strings.Contains(msgErr.Message, "error parsing preimage notification response") ||
-		!strings.Contains(msgErr.Message, "invalid type") {
-		t.Errorf("Expected error message %q, got %q",
-			"error parsing preimage notification response: invalid type 1 for ResponsePayload",
-			msgErr.Message)
+	wantMsgPrefix := "error parsing preimage notification response"
+	if !strings.Contains(msgErr.Message, wantMsgPrefix) {
+		t.Errorf("Expected error message %q, got %q", wantMsgPrefix, msgErr.Message)
 	}
 
 	// 2. empty preimage from client: InvalidPreimage
@@ -1617,10 +1615,8 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 		t.Errorf("Expected error code %d, got %d", msgjson.RPCParseError, msgErr.Code)
 	}
 	// wrapped json.UnmarshalFieldError
-	if !strings.Contains(msgErr.Message, "error parsing preimage notification response payload result") ||
-		!strings.Contains(msgErr.Message, "json: cannot unmarshal") {
-		t.Errorf("Expected error message %q, got %q",
-			"error parsing preimage notification response payload result: json: cannot unmarshal",
-			msgErr.Message)
+	wantMsgPrefix = "error parsing preimage response payload result"
+	if !strings.Contains(msgErr.Message, wantMsgPrefix) {
+		t.Errorf("Expected error message %q, got %q", wantMsgPrefix, msgErr.Message)
 	}
 }

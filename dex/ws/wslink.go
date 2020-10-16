@@ -263,8 +263,7 @@ out:
 		msg := new(msgjson.Message)
 		err = json.Unmarshal(msgBytes, msg)
 		if err != nil {
-			c.SendError(1, msgjson.NewError(msgjson.RPCParseError,
-				"Failed to parse message: "+err.Error()))
+			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "failed to parse message"))
 			continue
 		}
 		if msg.ID == 0 {

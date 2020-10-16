@@ -110,7 +110,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		// error response but not a disconnect.
 		handler := RouteHandler(msg.Route)
 		if handler == nil {
-			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route "+msg.Route)
+			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
 		// Handle the request.
 		return handler(c, msg)

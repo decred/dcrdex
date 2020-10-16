@@ -1327,8 +1327,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
 	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.RPCParseError,
-			fmt.Sprintf("error parsing audit notification acknowledgment: %v", err))
+		s.respondError(msg.ID, acker.user, msgjson.RPCParseError, "error parsing acknowledgment")
 		return
 	}
 	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
@@ -1875,7 +1874,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "Error decoding 'redeem' method params",
+			Message: "Error decoding 'redeem' request payload",
 		}
 	}
 
@@ -2007,7 +2006,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	err := msg.UnmarshalResult(&acks)
 	if err != nil {
 		s.respondError(msg.ID, user, msgjson.RPCParseError,
-			fmt.Sprintf("error parsing match notification acknowledgment: %v", err))
+			"error parsing match request acknowledgment")
 		return
 	}
 	if len(matches) != len(acks) {
