@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	tStamp        = int64(1574264305)
-	tParams       = &chaincfg.MainNetParams
-	invalidScript = []byte{txscript.OP_DATA_75}
+	tStamp         = int64(1574264305)
+	tParams        = &chaincfg.MainNetParams
+	invalidScript  = []byte{txscript.OP_DATA_75}
+	invalidWitness = [][]byte{{txscript.OP_DATA_75}}
 )
 
 func randBytes(l int) []byte {
@@ -129,44 +130,64 @@ func TestParseScriptType(t *testing.T) {
 }
 
 func TestMakeContract(t *testing.T) {
-	ra, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	t.Run("segwit", func(t *testing.T) {
+		testMakeContract(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testMakeContract(t, false)
+	})
+}
+
+func testMakeContract(t *testing.T, segwit bool) {
+	var ra, sa, p2sh, p2pkh btcutil.Address
+	if segwit {
+		ra, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+		sa, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+		p2sh, _ = btcutil.NewAddressScriptHash(randBytes(50), tParams)
+		p2pkh, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	} else {
+		ra, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+		sa, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+		p2sh, _ = btcutil.NewAddressScriptHash(randBytes(50), tParams)
+		p2pkh, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+	}
+
 	recipient := ra.String()
-	sa, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 	sender := sa.String()
 	badAddr := "notanaddress"
 
 	// Bad recipient
-	_, err := MakeContract(badAddr, sender, randBytes(32), tStamp, tParams)
+	_, err := MakeContract(badAddr, sender, randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad recipient")
 	}
 	// Wrong recipient address type
-	p2sh, _ := btcutil.NewAddressScriptHash(randBytes(50), tParams)
-	_, err = MakeContract(p2sh.String(), sender, randBytes(32), tStamp, tParams)
+
+	_, err = MakeContract(p2sh.String(), sender, randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong recipient address type")
 	}
 
 	// Bad sender
-	_, err = MakeContract(recipient, badAddr, randBytes(32), tStamp, tParams)
+	_, err = MakeContract(recipient, badAddr, randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad sender")
 	}
 	// Wrong sender address type.
-	p2wpkh, _ := btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
-	_, err = MakeContract(recipient, p2wpkh.String(), randBytes(32), tStamp, tParams)
+
+	_, err = MakeContract(recipient, p2pkh.String(), randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong sender address type")
 	}
 
 	// Bad secret hash
-	_, err = MakeContract(recipient, sender, randBytes(10), tStamp, tParams)
+	_, err = MakeContract(recipient, sender, randBytes(10), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad secret hash")
 	}
 
 	// Good to go
-	_, err = MakeContract(recipient, sender, randBytes(32), tStamp, tParams)
+	_, err = MakeContract(recipient, sender, randBytes(32), tStamp, segwit, tParams)
 	if err != nil {
 		t.Fatalf("error for valid contract parameters: %v", err)
 	}
@@ -202,20 +223,20 @@ func TestIsDust(t *testing.T) {
 		{
 			"38 byte public key script with value 584",
 			wire.TxOut{Value: 584, PkScript: pkScript},
-			1000,
+			1,
 			true,
 		},
 		{
 			"38 byte public key script with value 585",
 			wire.TxOut{Value: 585, PkScript: pkScript},
-			1000,
+			1,
 			false,
 		},
 		{
 			// Maximum allowed value is never dust.
 			"max satoshi amount is never dust",
 			wire.TxOut{Value: btcutil.MaxSatoshi, PkScript: pkScript},
-			btcutil.MaxSatoshi,
+			btcutil.MaxSatoshi / 1000,
 			false,
 		},
 		{
@@ -298,17 +319,33 @@ func TestExtractScriptAddrs(t *testing.T) {
 }
 
 func TestExtractSwapDetails(t *testing.T) {
-	rAddr, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	t.Run("segwit", func(t *testing.T) {
+		testExtractSwapDetails(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testExtractSwapDetails(t, false)
+	})
+}
+
+func testExtractSwapDetails(t *testing.T, segwit bool) {
+	var rAddr, sAddr btcutil.Address
+	if segwit {
+		rAddr, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+		sAddr, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+	} else {
+		rAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+		sAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	}
+
 	recipient := rAddr.String()
-	sAddr, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 	sender := sAddr.String()
 	keyHash := randBytes(32)
-	contract, err := MakeContract(recipient, sender, keyHash, tStamp, tParams)
+	contract, err := MakeContract(recipient, sender, keyHash, tStamp, segwit, tParams)
 	if err != nil {
 		t.Fatalf("error creating contract: %v", err)
 	}
 
-	sa, ra, lockTime, secretHash, err := ExtractSwapDetails(contract, tParams)
+	sa, ra, lockTime, secretHash, err := ExtractSwapDetails(contract, segwit, tParams)
 	if err != nil {
 		t.Fatalf("error for valid contract: %v", err)
 	}
@@ -326,7 +363,7 @@ func TestExtractSwapDetails(t *testing.T) {
 	}
 
 	// incorrect length
-	_, _, _, _, err = ExtractSwapDetails(contract[:len(contract)-1], tParams)
+	_, _, _, _, err = ExtractSwapDetails(contract[:len(contract)-1], segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for vandalized contract")
 	} else if !strings.HasPrefix(err.Error(), "incorrect swap contract length") {
@@ -335,7 +372,7 @@ func TestExtractSwapDetails(t *testing.T) {
 
 	// bad secret size
 	contract[3] = 250
-	_, _, _, _, err = ExtractSwapDetails(contract, tParams)
+	_, _, _, _, err = ExtractSwapDetails(contract, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for contract with invalid secret size")
 	} else if !strings.HasPrefix(err.Error(), "invalid secret size") {
@@ -403,21 +440,53 @@ func TestInputInfo(t *testing.T) {
 }
 
 func TestFindKeyPush(t *testing.T) {
-	rAddr, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	t.Run("segwit", func(t *testing.T) {
+		testFindKeyPush(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testFindKeyPush(t, false)
+	})
+}
+
+func testFindKeyPush(t *testing.T, segwit bool) {
+	dummyPrevOut := new(wire.OutPoint)
+	var rAddr, sAddr btcutil.Address
+	if segwit {
+		rAddr, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+		sAddr, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
+	} else {
+		rAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+		sAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
+	}
 	recipient := rAddr.String()
-	sAddr, _ := btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 	sender := sAddr.String()
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
-	contract, _ := MakeContract(recipient, sender, secretHash[:], tStamp, tParams)
-	contractHash := btcutil.Hash160(contract)
-	sigScript, err := RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
-	if err != nil {
-		t.Fatalf("error creating redeem script: %v", err)
+	contract, _ := MakeContract(recipient, sender, secretHash[:], tStamp, segwit, tParams)
+	randomContract, _ := MakeContract(recipient, sender, randBytes(32), tStamp, segwit, tParams)
+
+	var sigScript, contractHash, randoSigScript []byte
+	var witness, randoWitness [][]byte
+	var err error
+	if segwit {
+		witness = RedeemP2WSHContract(contract, randBytes(73), randBytes(33), secret)
+		h := sha256.Sum256(contract)
+		contractHash = h[:]
+		randoWitness = RedeemP2WSHContract(randomContract, randBytes(73), randBytes(33), secret)
+
+	} else {
+		sigScript, err = RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+		if err != nil {
+			t.Fatalf("error creating redeem script: %v", err)
+		}
+		contractHash = btcutil.Hash160(contract)
+		randoSigScript, _ = RedeemP2SHContract(randomContract, randBytes(73), randBytes(33), secret)
 	}
 
-	key, err := FindKeyPush(sigScript, contractHash, tParams)
+	txIn := wire.NewTxIn(dummyPrevOut, sigScript, witness)
+
+	key, err := FindKeyPush(txIn, contractHash, segwit, tParams)
 	if err != nil {
 		t.Fatalf("findKeyPush error: %v", err)
 	}
@@ -426,24 +495,22 @@ func TestFindKeyPush(t *testing.T) {
 	}
 
 	// Empty script is an error.
-	_, err = FindKeyPush([]byte{}, contractHash, tParams)
+	badTx := wire.NewTxIn(dummyPrevOut, nil, nil)
+	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for empty script")
 	}
 
 	// Bad script
-	_, err = FindKeyPush(invalidScript, contractHash, tParams)
+	badTx = wire.NewTxIn(dummyPrevOut, invalidScript, invalidWitness)
+	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}
 
 	// Random but valid contract won't work.
-	contract, _ = MakeContract(recipient, sender, randBytes(32), tStamp, tParams)
-	sigScript, err = RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
-	if err != nil {
-		t.Fatalf("error creating contract: %v", err)
-	}
-	_, err = FindKeyPush(sigScript, contractHash, tParams)
+	badTx = wire.NewTxIn(dummyPrevOut, randoSigScript, randoWitness)
+	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}

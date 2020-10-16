@@ -309,6 +309,15 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 			delete(neededCoins, key) // don't check this coin again
 			valSum += dexCoin.Value()
+			// NOTE: Summing like this is actually not quite sufficient to
+			// estimate the size associated with the input, because if it's a
+			// BTC segwit output, we would also have to account for the marker
+			// and flag weight, but only once per tx. The weight would add
+			// either 0 or 1 byte to the tx virtual size, so we have a chance of
+			// under-estimating by 1 byte to the advantage of the client. It
+			// won't ever cause issues though, because we also require funding
+			// for a change output in the final swap, which is actually not
+			// needed, so there's some buffer.
 			spendSize += dexCoin.SpendSize()
 		}
 
@@ -474,6 +483,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 			delete(neededCoins, key) // don't check this coin again
 			valSum += dexCoin.Value()
+			// SEE NOTE above in handleLimit regarding underestimation for BTC.
 			spendSize += dexCoin.SpendSize()
 		}
 

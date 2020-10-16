@@ -79,6 +79,9 @@ type btcNode interface {
 type Backend struct {
 	// The asset name (e.g. btc), primarily for logging purposes.
 	name string
+	// segwit should be set to true for blockchains that support segregated
+	// witness.
+	segwit bool
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result the (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -121,14 +124,14 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(assetName, configPath, logger, network, params, dexbtc.RPCPorts)
+	return NewBTCClone(assetName, true, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
 // ReadCloneParams, to create a Backend for other assets with minimal coding.
 // See ReadCloneParams and CompatibilityCheck for more info.
-func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network,
+func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger, network dex.Network,
 	params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
 
 	// Read the configuration parameters
@@ -148,7 +151,7 @@ func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network
 		return nil, fmt.Errorf("error creating %q RPC client: %v", name, err)
 	}
 
-	btc := newBTC(name, params, logger, client)
+	btc := newBTC(name, segwit, params, logger, client)
 	// Setting the client field will enable shutdown
 	btc.client = client
 
@@ -184,7 +187,7 @@ func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 	}
 	contract := &Contract{Output: output}
 	// Verify contract and set refundAddress and swapAddress.
-	err = contract.auditContract()
+	err = btc.auditContract(contract)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +196,7 @@ func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 
 // VerifySecret checks that the secret satisfies the contract.
 func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
-	_, _, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	_, _, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		btc.log.Errorf("ValidateSecret->ExtractSwapDetails error: %v\n", err)
 		return false
@@ -250,7 +253,7 @@ func (btc *Backend) ValidateCoinID(coinID []byte) (string, error) {
 // ValidateContract ensures that the swap contract is constructed properly, and
 // contains valid sender and receiver addresses.
 func (btc *Backend) ValidateContract(contract []byte) error {
-	_, _, _, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	_, _, _, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	return err
 }
 
@@ -286,11 +289,17 @@ func (btc *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 // InitTxSize is an asset.Backend method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (btc *Backend) InitTxSize() uint32 {
+	if btc.segwit {
+		return dexbtc.InitTxSizeSegwit
+	}
 	return dexbtc.InitTxSize
 }
 
 // InitTxSizeBase is InitTxSize not including an input.
 func (btc *Backend) InitTxSizeBase() uint32 {
+	if btc.segwit {
+		return dexbtc.InitTxSizeBaseSegwit
+	}
 	return dexbtc.InitTxSizeBase
 }
 
@@ -322,7 +331,7 @@ func (btc *Backend) CheckAddress(addr string) bool {
 }
 
 // Create a *Backend and start the block monitor loop.
-func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
+func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
 	btc := &Backend{
 		name:        name,
 		blockCache:  newBlockCache(),
@@ -330,6 +339,7 @@ func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node b
 		chainParams: chainParams,
 		log:         logger,
 		node:        node,
+		segwit:      segwit,
 	}
 	return btc
 }
@@ -373,11 +383,11 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		if scriptType.IsSegwit() {
 			shash := sha256.Sum256(redeemScript)
 			if !bytes.Equal(shash[:], scriptHash) {
-				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+				return nil, fmt.Errorf("(utxo:segwit) script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		} else {
 			if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
-				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+				return nil, fmt.Errorf("(utxo:non-segwit) script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		}
 	}
@@ -494,11 +504,11 @@ func (btc *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 		if scriptType.IsSegwit() {
 			shash := sha256.Sum256(redeemScript)
 			if !bytes.Equal(shash[:], scriptHash) {
-				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+				return nil, fmt.Errorf("(output:segwit) script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		} else {
 			if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
-				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+				return nil, fmt.Errorf("(output:non-segwit) script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		}
 	}
@@ -674,6 +684,53 @@ func (btc *Backend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error)
 		return nil, fmt.Errorf("error retrieving block %s: %v", blockHash, err)
 	}
 	return btc.blockCache.add(blockVerbose)
+}
+
+// auditContract checks that output is a swap contract and extracts the
+// receiving address and contract value on success.
+func (btc *Backend) auditContract(contract *Contract) error {
+	tx := contract.tx
+	if len(tx.outs) <= int(contract.vout) {
+		return fmt.Errorf("invalid index %d for transaction %s", contract.vout, tx.hash)
+	}
+	output := tx.outs[int(contract.vout)]
+
+	// If it's a pay-to-script-hash, extract the script hash and check it against
+	// the hash of the user-supplied redeem script.
+	scriptType := dexbtc.ParseScriptType(output.pkScript, contract.redeemScript)
+	if scriptType == dexbtc.ScriptUnsupported {
+		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
+	}
+	var scriptHash, hashed []byte
+	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		scriptHash = dexbtc.ExtractScriptHash(output.pkScript)
+		if scriptType.IsSegwit() {
+			if !btc.segwit {
+				return fmt.Errorf("segwit contract, but %s is not configured for segwit", btc.name)
+			}
+			shash := sha256.Sum256(contract.redeemScript)
+			hashed = shash[:]
+		} else {
+			if btc.segwit {
+				return fmt.Errorf("non-segwit contract, but %s is configured for segwit", btc.name)
+			}
+			hashed = btcutil.Hash160(contract.redeemScript)
+		}
+	}
+	if scriptHash == nil {
+		return fmt.Errorf("specified output %s:%d is not P2SH or P2WSH", tx.hash, contract.vout)
+	}
+	if !bytes.Equal(hashed, scriptHash) {
+		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
+	}
+	refund, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
+	if err != nil {
+		return fmt.Errorf("error parsing swap contract for %s:%d: %v", tx.hash, contract.vout, err)
+	}
+	contract.refundAddress = refund.String()
+	contract.swapAddress = receiver.String()
+	contract.lockTime = time.Unix(int64(lockTime), 0)
+	return nil
 }
 
 // Run is responsible for best block polling and checking the application

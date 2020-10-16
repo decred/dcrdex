@@ -5,7 +5,6 @@ package btc
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -338,47 +337,6 @@ func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []
 		}
 	}
 	return matches
-}
-
-// auditContract checks that output is a swap contract and extracts the
-// receiving address and contract value on success.
-func (contract *Contract) auditContract() error {
-	tx := contract.tx
-	if len(tx.outs) <= int(contract.vout) {
-		return fmt.Errorf("invalid index %d for transaction %s", contract.vout, tx.hash)
-	}
-	output := tx.outs[int(contract.vout)]
-
-	// If it's a pay-to-script-hash, extract the script hash and check it against
-	// the hash of the user-supplied redeem script.
-	scriptType := dexbtc.ParseScriptType(output.pkScript, contract.redeemScript)
-	if scriptType == dexbtc.ScriptUnsupported {
-		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
-	}
-	var scriptHash, hashed []byte
-	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
-		scriptHash = dexbtc.ExtractScriptHash(output.pkScript)
-		if scriptType.IsSegwit() {
-			shash := sha256.Sum256(contract.redeemScript)
-			hashed = shash[:]
-		} else {
-			hashed = btcutil.Hash160(contract.redeemScript)
-		}
-	}
-	if scriptHash == nil {
-		return fmt.Errorf("specified output %s:%d is not P2SH or P2WSH", tx.hash, contract.vout)
-	}
-	if !bytes.Equal(hashed, scriptHash) {
-		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
-	}
-	refund, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.chainParams)
-	if err != nil {
-		return fmt.Errorf("error parsing swap contract for %s:%d: %v", tx.hash, contract.vout, err)
-	}
-	contract.refundAddress = refund.String()
-	contract.swapAddress = receiver.String()
-	contract.lockTime = time.Unix(int64(lockTime), 0)
-	return nil
 }
 
 // RefundAddress is the refund address of this swap contract.

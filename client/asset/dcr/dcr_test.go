@@ -162,6 +162,13 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	return wallet, client, shutdown
 }
 
+func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
+	for i := range msgTx.TxIn {
+		msgTx.TxIn[i].SignatureScript = randBytes(dexdcr.P2PKHSigScriptSize)
+	}
+	return msgTx, true, nil
+}
+
 type tRPCClient struct {
 	sendRawHash    *chainhash.Hash
 	sendRawErr     error
@@ -946,6 +953,35 @@ func TestFundEdges(t *testing.T) {
 		t.Fatalf("should be enough to fund with a single p2pkh utxo: %v", err)
 	}
 
+	// For a split transaction, we would need to cover the splitTxBaggage as
+	// well.
+	wallet.useSplitTx = true
+	node.changeAddr = tPKHAddr
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
+	}
+	fees = uint64(2510+splitTxBaggage) * tDCR.MaxFeeRate
+	v := swapVal + fees - 1
+	node.unspent[0].Amount = float64(v) / 1e8
+	coins, _, err := wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error when skipping split tx because not enough to cover baggage: %v", err)
+	}
+	if coins[0].Value() != v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	// Now get the split.
+	v = swapVal + fees
+	node.unspent[0].Amount = float64(v) / 1e8
+	coins, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding split tx: %v", err)
+	}
+	if coins[0].Value() == v {
+		t.Fatalf("split performed when baggage wasn't covered")
+	}
+	wallet.useSplitTx = false
+
 	// TODO: fix the p2sh test so that the redeem script is a p2pk pkScript or a
 	// multisig pkScript, not a p2pkh pkScript.
 
@@ -1022,10 +1058,7 @@ func TestSwap(t *testing.T) {
 			scriptSize -= 2
 		}
 		sigSizer++
-		for i := range msgTx.TxIn {
-			msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
-		}
-		return msgTx, true, nil
+		return signFunc(msgTx, scriptSize)
 	}
 
 	node.signFunc = signFunc
@@ -1049,7 +1082,7 @@ func TestSwap(t *testing.T) {
 
 	// Fees should be returned.
 	minFees := tDCR.MaxFeeRate * uint64(node.sentRawTx.SerializeSize())
-	if feesPaid <= minFees {
+	if feesPaid < minFees {
 		t.Fatalf("sent fees, %d, less than required fees, %d", feesPaid, minFees)
 	}
 
@@ -1684,5 +1717,74 @@ func TestConfirmations(t *testing.T) {
 	_, err = wallet.Confirmations(coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
+	}
+}
+
+func TestSendEdges(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	const feeRate uint64 = 3
+
+	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
+
+	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), chainParams)
+	// See dexdcr.IsDust for the source of this dustCoverage voodoo.
+	dustCoverage := (dexdcr.P2PKHOutputSize + 165) * feeRate * 3
+	dexReqFees := dexdcr.InitTxSize * feeRate
+
+	pkScript, _ := txscript.PayToAddrScript(contractAddr)
+
+	newBaseTx := func(funding uint64) *wire.MsgTx {
+		baseTx := wire.NewMsgTx()
+		baseTx.AddTxIn(wire.NewTxIn(new(wire.OutPoint), int64(funding), nil))
+		baseTx.AddTxOut(wire.NewTxOut(swapVal, pkScript))
+		return baseTx
+	}
+
+	node.signFunc = func(tx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return signFunc(tx, dexdcr.P2PKHSigScriptSize)
+	}
+
+	tests := []struct {
+		name      string
+		funding   uint64
+		expChange bool
+	}{
+		{
+			name:    "not enough for change output",
+			funding: swapVal + dexReqFees - 1,
+		},
+		{
+			// Still dust here, but a different path.
+			name:    "exactly enough for change output",
+			funding: swapVal + dexReqFees,
+		},
+		{
+			name:    "more than enough for change output but still dust",
+			funding: swapVal + dexReqFees + 1,
+		},
+		{
+			name:    "1 atom short to not be dust",
+			funding: swapVal + dexReqFees + dustCoverage - 1,
+		},
+		{
+			name:      "exactly enough to not be dust",
+			funding:   swapVal + dexReqFees + dustCoverage,
+			expChange: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tx, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), tPKHAddr, tt.funding, swapVal, feeRate, nil)
+		if err != nil {
+			t.Fatalf("sendWithReturn error: %v", err)
+		}
+
+		if len(tx.TxOut) == 1 && tt.expChange {
+			t.Fatalf("%s: no change added", tt.name)
+		} else if len(tx.TxOut) == 2 && !tt.expChange {
+			t.Fatalf("%s: change output added for dust. Output value = %d", tt.name, tx.TxOut[1].Value)
+		}
 	}
 }

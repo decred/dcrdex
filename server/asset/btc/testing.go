@@ -128,7 +128,7 @@ out:
 					case txscript.WitnessV0ScriptHashTy:
 						stats.p2wsh++
 					default:
-						_, _, _, _, err = dexbtc.ExtractSwapDetails(redeemScript, btc.chainParams)
+						_, _, _, _, err = dexbtc.ExtractSwapDetails(redeemScript, btc.segwit, btc.chainParams)
 						if err == nil {
 							stats.swaps++
 							continue
