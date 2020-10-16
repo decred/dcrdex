@@ -76,6 +76,19 @@ func (s *WebServer) requireInit(next http.Handler) http.Handler {
 	})
 }
 
+// rejectUninited is like requireInit except that it responds with an error
+// instead of redirecting to the register path.
+func (s *WebServer) rejectUninited(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := extractUserInfo(r)
+		if !user.Initialized {
+			http.Error(w, http.StatusText(http.StatusPreconditionRequired), http.StatusPreconditionRequired)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // requireLogin ensures that the user is authenticated (has logged in) before
 // allowing the incoming request to proceed. Redirects to login page if user is
 // not logged in. This check should typically be performed after checking that
@@ -85,6 +98,19 @@ func (s *WebServer) requireLogin(next http.Handler) http.Handler {
 		user := extractUserInfo(r)
 		if !user.Authed {
 			http.Redirect(w, r, loginRoute, http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// rejectUnauthed is like requireLogin except that it responds with an error
+// instead of redirecting to the login path.
+func (s *WebServer) rejectUnauthed(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := extractUserInfo(r)
+		if !user.Authed {
+			http.Error(w, "not authorized - login first", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
