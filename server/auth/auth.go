@@ -965,7 +965,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "error parsing connect: " + err.Error(),
+			Message: "error parsing connect request",
 		}
 	}
 	if len(connect.AccountID) != account.HashSize {
@@ -1261,7 +1261,7 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	var matchReqs []msgjson.MatchRequest
 	err := json.Unmarshal(msg.Payload, &matchReqs)
 	if err != nil {
-		return msgjson.NewError(msgjson.RPCParseError, "error parsing match_status: %v", err)
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing match_status request")
 	}
 
 	mkts := make(map[string]*marketMatches)
@@ -1365,7 +1365,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 	var orderReqs []*msgjson.OrderStatusRequest
 	err := json.Unmarshal(msg.Payload, &orderReqs)
 	if err != nil {
-		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status: %v", err)
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing order_status request")
 	}
 	if len(orderReqs) == 0 {
 		return msgjson.NewError(msgjson.InvalidRequestError, "no order id provided")

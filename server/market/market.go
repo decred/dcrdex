@@ -1204,14 +1204,14 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	if err != nil {
 		sendPI(nil)
 		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCParseError,
-			fmt.Sprintf("error parsing preimage notification response: %v", err))
+			"error parsing preimage notification response")
 		return
 	}
 	err = json.Unmarshal(resp.Result, &piResp)
 	if err != nil {
 		sendPI(nil)
 		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCParseError,
-			fmt.Sprintf("error parsing preimage notification response payload result: %v", err))
+			"error parsing preimage response payload result")
 		return
 	}
 
