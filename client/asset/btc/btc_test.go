@@ -1988,3 +1988,92 @@ func TestConfirmations(t *testing.T) {
 		t.Fatalf("coin error: %v", err)
 	}
 }
+
+func TestSendEdges(t *testing.T) {
+	t.Run("segwit", func(t *testing.T) {
+		testSendEdges(t, true)
+	})
+	t.Run("non-segwit", func(t *testing.T) {
+		testSendEdges(t, false)
+	})
+}
+
+func testSendEdges(t *testing.T, segwit bool) {
+	wallet, node, shutdown := tNewWallet(segwit)
+	defer shutdown()
+
+	const feeRate uint64 = 3
+
+	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
+
+	var addr, contractAddr btcutil.Address
+	var dexReqFees, dustCoverage uint64
+
+	if segwit {
+		addr, _ = btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
+		contractAddr, _ = btcutil.NewAddressWitnessScriptHash(randBytes(32), &chaincfg.MainNetParams)
+		// See dexbtc.IsDust for the source of this dustCoverage voodoo.
+		dustCoverage = (dexbtc.P2WPKHOutputSize + 41 + (107 / 4)) * feeRate * 3
+		dexReqFees = dexbtc.InitTxSizeSegwit * feeRate
+	} else {
+		addr, _ = btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
+		contractAddr, _ = btcutil.NewAddressScriptHash(randBytes(20), &chaincfg.MainNetParams)
+		dustCoverage = (dexbtc.P2PKHOutputSize + 41 + 107) * feeRate * 3
+		dexReqFees = dexbtc.InitTxSize * feeRate
+	}
+
+	pkScript, _ := txscript.PayToAddrScript(contractAddr)
+
+	newBaseTx := func() *wire.MsgTx {
+		baseTx := wire.NewMsgTx(wire.TxVersion)
+		baseTx.AddTxIn(wire.NewTxIn(new(wire.OutPoint), nil, nil))
+		baseTx.AddTxOut(wire.NewTxOut(swapVal, pkScript))
+		return baseTx
+	}
+
+	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
+		return signFunc(t, params, 0, true, wallet.segwit)
+	}
+
+	tests := []struct {
+		name      string
+		funding   uint64
+		expChange bool
+	}{
+		{
+			name:    "not enough for change output",
+			funding: swapVal + dexReqFees - 1,
+		},
+		{
+			// Still dust here, but a different path.
+			name:    "exactly enough for change output",
+			funding: swapVal + dexReqFees,
+		},
+		{
+			name:    "more than enough for change output but still dust",
+			funding: swapVal + dexReqFees + 1,
+		},
+		{
+			name:    "1 atom short to not be dust",
+			funding: swapVal + dexReqFees + dustCoverage - 1,
+		},
+		{
+			name:      "exactly enough to not be dust",
+			funding:   swapVal + dexReqFees + dustCoverage,
+			expChange: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tx, _, _, err := wallet.sendWithReturn(newBaseTx(), addr, tt.funding, swapVal, feeRate)
+		if err != nil {
+			t.Fatalf("sendWithReturn error: %v", err)
+		}
+
+		if len(tx.TxOut) == 1 && tt.expChange {
+			t.Fatalf("%s: no change added", tt.name)
+		} else if len(tx.TxOut) == 2 && !tt.expChange {
+			t.Fatalf("%s: change output added for dust. Output value = %d", tt.name, tx.TxOut[1].Value)
+		}
+	}
+}

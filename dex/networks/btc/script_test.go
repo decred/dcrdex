@@ -223,20 +223,20 @@ func TestIsDust(t *testing.T) {
 		{
 			"38 byte public key script with value 584",
 			wire.TxOut{Value: 584, PkScript: pkScript},
-			1000,
+			1,
 			true,
 		},
 		{
 			"38 byte public key script with value 585",
 			wire.TxOut{Value: 585, PkScript: pkScript},
-			1000,
+			1,
 			false,
 		},
 		{
 			// Maximum allowed value is never dust.
 			"max satoshi amount is never dust",
 			wire.TxOut{Value: btcutil.MaxSatoshi, PkScript: pkScript},
-			btcutil.MaxSatoshi,
+			btcutil.MaxSatoshi / 1000,
 			false,
 		},
 		{

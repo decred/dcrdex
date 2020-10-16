@@ -2058,10 +2058,16 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// If no subtractee was provided, subtract fees from the change output.
 	if subtractee == nil {
 		subtractee = changeOutput
-		changeOutput.Value -= int64(minFee)
+		changeFees := dexdcr.P2PKHOutputSize * feeRate
+		if changeFees+minFee > remaining { // Catch underflow
+			changeOutput.Value = 0
+		} else {
+			changeOutput.Value -= int64(minFee + changeFees)
+		}
 	} else {
 		reservoir = uint64(subtractee.Value)
 	}
+
 	if minFee > reservoir {
 		return nil, nil, 0, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
 			minFee, reservoir)

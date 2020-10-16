@@ -364,18 +364,20 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, s
 // IsDust returns whether or not the passed transaction output amount is
 // considered dust or not based on the passed minimum transaction relay fee.
 // Dust is defined in terms of the minimum transaction relay fee.
-// Based on btcutil/policy isDust. See btcutil/policy for further documentation.
+// Based on btcd/policy isDust. See btcd/policy for further documentation.
 func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	if txscript.IsUnspendable(txOut.PkScript) {
 		return true
 	}
 	totalSize := txOut.SerializeSize() + 41
 	if txscript.IsWitnessProgram(txOut.PkScript) {
+		// This function is taken from btcd, but noting here that we are not
+		// rounding up and probably should be.
 		totalSize += (107 / witnessWeight)
 	} else {
 		totalSize += 107
 	}
-	return txOut.Value*1000/(3*int64(totalSize)) < int64(minRelayTxFee)
+	return txOut.Value/(3*int64(totalSize)) < int64(minRelayTxFee)
 }
 
 // BtcScriptAddrs is information about the pubkeys or pubkey hashes present in

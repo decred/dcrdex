@@ -1725,7 +1725,10 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 // Address returns a new external address from the wallet.
 func (btc *ExchangeWallet) Address() (string, error) {
 	addr, err := btc.externalAddress()
-	return addr.String(), err
+	if err != nil {
+		return "", err
+	}
+	return addr.String(), nil
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
@@ -1953,9 +1956,15 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	if err != nil {
 		return makeErr("error creating change script: %v", err)
 	}
+	changeFees := dexbtc.P2PKHOutputSize * feeRate
+	if btc.segwit {
+		changeFees = dexbtc.P2WPKHOutputSize * feeRate
+	}
 	changeIdx := len(baseTx.TxOut)
-	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
-
+	changeOutput := wire.NewTxOut(int64(remaining-minFee-changeFees), changeScript)
+	if changeFees+minFee > remaining { // Prevent underflow
+		changeOutput.Value = 0
+	}
 	// If the change is not dust, recompute the signed txn size and iterate on
 	// the fees vs. change amount.
 	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
@@ -1969,7 +1978,6 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		vSize += changeSize
 		fee := feeRate * vSize
 		changeOutput.Value = int64(remaining - fee)
-
 		// Find the best fee rate by closing in on it in a loop.
 		tried := map[uint64]bool{}
 		for {
