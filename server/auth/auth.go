@@ -196,6 +196,9 @@ type AuthManager struct {
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
 
+	feeWaiterMtx sync.Mutex
+	feeWaiterIdx map[account.AccountID]struct{}
+
 	connMtx   sync.RWMutex
 	users     map[account.AccountID]*clientInfo
 	conns     map[uint64]*clientInfo
@@ -349,6 +352,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		feeConfs:       cfg.FeeConfs,
 		cancelThresh:   cfg.CancelThreshold,
 		latencyQ:       wait.NewTickerQueue(recheckInterval),
+		feeWaiterIdx:   make(map[account.AccountID]struct{}),
 		matchOutcomes:  make(map[account.AccountID]*latest),
 		preimgOutcomes: make(map[account.AccountID]*latest),
 	}

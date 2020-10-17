@@ -122,6 +122,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	var acctID account.AccountID
 	copy(acctID[:], notifyFee.AccountID)
+
 	acct, paid, open := auth.storage.Account(acctID)
 	if acct == nil {
 		return &msgjson.Error{
@@ -152,21 +153,45 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
+	auth.feeWaiterMtx.Lock()
+	if _, found := auth.feeWaiterIdx[acctID]; found {
+		auth.feeWaiterMtx.Unlock() // cannot defer since first TryFunc is synchronous and may lock
+		return &msgjson.Error{
+			Code:    msgjson.FeeError,
+			Message: "already looking for your fee coin, try again later",
+		}
+	}
+
 	// Get the registration fee address assigned to the client's account.
 	regAddr, err := auth.storage.AccountRegAddr(acctID)
 	if err != nil {
+		auth.feeWaiterMtx.Unlock()
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "error locating account info: " + err.Error(),
 		}
 	}
 
+	auth.feeWaiterIdx[acctID] = struct{}{}
+	auth.feeWaiterMtx.Unlock()
+
+	removeWaiter := func() {
+		auth.feeWaiterMtx.Lock()
+		delete(auth.feeWaiterIdx, acctID)
+		auth.feeWaiterMtx.Unlock()
+	}
+
 	auth.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			return auth.validateFee(conn, acctID, notifyFee, msg.ID, notifyFee.CoinID, regAddr)
+			res := auth.validateFee(conn, acctID, notifyFee, msg.ID, notifyFee.CoinID, regAddr)
+			if res == wait.DontTryAgain {
+				removeWaiter()
+			}
+			return res
 		},
 		ExpireFunc: func() {
+			removeWaiter()
 			auth.coinNotFound(acctID, msg.ID, notifyFee.CoinID)
 		},
 	})
