@@ -257,6 +257,7 @@ export default class Application {
         }
       }
       this.setNoteTimes(pg.noteList)
+      this.setNoteTimes(pg.pokeList)
       this.storeNotes()
     })
 
@@ -270,6 +271,7 @@ export default class Application {
     bind(pg.profileSignout, 'click', async e => await this.signOut())
 
     bind(pg.pokeCat, 'click', () => {
+      this.setNoteTimes(pg.pokeList)
       pg.pokeCat.classList.add('active')
       pg.noteCat.classList.remove('active')
       Doc.hide(pg.noteList)
@@ -278,6 +280,7 @@ export default class Application {
     })
 
     bind(pg.noteCat, 'click', () => {
+      this.setNoteTimes(pg.noteList)
       pg.noteCat.classList.add('active')
       pg.pokeCat.classList.remove('active')
       Doc.hide(pg.pokeList)

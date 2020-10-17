@@ -411,7 +411,6 @@ export default class MarketsPage extends BasePage {
     }
     this.page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
-
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()

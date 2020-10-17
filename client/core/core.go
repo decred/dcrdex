@@ -1821,12 +1821,14 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		wg.Add(1)
 		go func(wallet *xcWallet) {
 			defer wg.Done()
-			err := wallet.Connect(c.ctx)
-			if err != nil {
-				return
+			if !wallet.connected() {
+				err := wallet.Connect(c.ctx)
+				if err != nil {
+					return
+				}
 			}
 			atomic.AddUint32(&connectCount, 1)
-			_, err = c.walletBalances(wallet)
+			_, err := c.walletBalances(wallet)
 			if err == nil {
 				atomic.AddUint32(&balanceCount, 1)
 			}
@@ -1998,19 +2000,24 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		result := &DEXBrief{
 			Host:     dc.acct.host,
 			TradeIDs: tradeIDs,
+			// AcctID might be set to a zeroed string here, but will be reset
+			// below if we have to auth.
+			AcctID: dc.acct.ID().String(),
 		}
 		results = append(results, result)
-		// Copy the iterator for use in the authDEX goroutine.
-		if dc.acct.authed() {
-			result.Authed = true
-			result.AcctID = dc.acct.ID().String()
-			continue
-		}
+		// Unlock before checking auth and continuing, because if the user
+		// logged out and didn't shut down, the account is still authed, but
+		// locked, and needs unlocked.
 		err := dc.acct.unlock(crypter)
 		if err != nil {
 			details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.host, err)
 			c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel, dc.acct.host))
 			result.AuthErr = details
+			continue
+		}
+		if dc.acct.authed() {
+			result.Authed = true
+			result.AcctID = dc.acct.ID().String()
 			continue
 		}
 		result.AcctID = dc.acct.ID().String()
@@ -3420,10 +3427,13 @@ func (c *Core) handleReconnect(host string) {
 
 	// For each market, resubscribe to any market books.
 	dc.marketMtx.RLock()
-	defer dc.marketMtx.RUnlock()
 	for _, mkt := range dc.marketMap {
 		resubMkt(mkt)
 	}
+	dc.marketMtx.RUnlock()
+
+	dc.refreshMarkets()
+	c.refreshUser()
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
