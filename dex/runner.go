@@ -108,13 +108,14 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 
 // Disconnect closes the connection and waits for shutdown.
 func (c *ConnectionMaster) Disconnect() {
-	c.mtx.RLock()
 	c.cancel()
-	defer c.mtx.RUnlock()
+	c.mtx.RLock()
 	c.wg.Wait()
+	c.mtx.RUnlock()
 }
 
 // Wait waits for the the WaitGroup returned by Connect.
 func (c *ConnectionMaster) Wait() {
 	c.wg.Wait()
+	c.cancel() // if not called from Disconnect, would leak context
 }
