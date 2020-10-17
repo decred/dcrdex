@@ -127,8 +127,7 @@ class MessageSocket {
         // Ensure websocket is open when executing queued requests
         // to avoid infinite request/queue loops.
         while (this.queue.length &&
-                this.connection &&
-                this.connection.readyState === window.WebSocket.OPEN) {
+                conn.readyState === window.WebSocket.OPEN) {
           const [route, message] = this.queue.shift()
           this.request(route, message)
         }
