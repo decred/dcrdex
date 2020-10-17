@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -177,16 +179,15 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &c.wg, nil
 }
 
-func (c *WSLink) stop() bool {
+func (c *WSLink) stop() {
 	// Flip the switch into the off position and cancel the context.
 	if !atomic.CompareAndSwapUint32(&c.on, 1, 0) {
-		return false
+		return
 	}
 	// Signal to senders we are done.
 	close(c.stopped)
 	// Begin shutdown of goroutines, and ultimately connection closure.
 	c.quit()
-	return true
 }
 
 // Done returns a channel that is closed when the link goes down.
@@ -220,11 +221,19 @@ out:
 		// Block until a message is received or an error occurs.
 		_, msgBytes, err := c.conn.ReadMessage()
 		if err != nil {
-			// Log the error if it's not due to disconnecting.
-			if !websocket.IsCloseError(err, websocket.CloseGoingAway,
+			// Only log the error if it is unexpected (not a disconnect).
+			if websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
-				c.log.Errorf("Websocket receive error from peer %s: %v", c.ip, err)
+				break out // clean Close from client
 			}
+			var opErr *net.OpError
+			if errors.As(err, &opErr) && opErr.Op == "read" &&
+				(strings.Contains(opErr.Err.Error(), "use of closed network connection") || // we hung up
+					strings.Contains(opErr.Err.Error(), "connection reset by peer")) { // they hung up
+				break out
+			}
+
+			c.log.Errorf("Websocket receive error from peer %s: %v (%T)", c.ip, err, err)
 			break out
 		}
 		// Attempt to unmarshal the request. Only requests that successfully decode
@@ -408,6 +417,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 func (c *WSLink) pingHandler(ctx context.Context) {
 	defer c.wg.Done()
 	ticker := time.NewTicker(c.pingPeriod)
+	defer ticker.Stop()
 	ping := []byte{}
 out:
 	for {
