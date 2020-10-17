@@ -294,7 +294,7 @@ func (s *Server) banish(ip string) {
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
 func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip string) {
-	log.Debugf("New websocket client %s", ip)
+	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence

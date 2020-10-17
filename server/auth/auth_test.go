@@ -1396,9 +1396,10 @@ func TestHandleNotifyFee(t *testing.T) {
 	// the first attempt is actually synchronous, so not need for synchronization
 	// as long as there is no PayFee error.
 	doWaiter := func(msg *msgjson.Message) *msgjson.Error {
+		t.Helper()
 		msgErr := rig.mgr.handleNotifyFee(user.conn, msg)
 		if msgErr != nil {
-			t.Fatal("never made it to the waiter", msgErr.Code, msgErr.Message)
+			t.Fatalf("never made it to the waiter: %d: %v", msgErr.Code, msgErr.Message)
 		}
 		sent := user.conn.getSend()
 		if sent == nil {
