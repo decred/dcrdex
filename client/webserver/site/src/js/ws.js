@@ -125,8 +125,10 @@ class MessageSocket {
           return
         }
         forward('open', null, this.handlers)
-        const [route, message] = this.queue.shift()
-        this.request(route, message)
+        while (this.queue.length) {
+          const [route, message] = this.queue.shift()
+          this.request(route, message)
+        }
       }
 
       conn.onerror = (evt) => {
