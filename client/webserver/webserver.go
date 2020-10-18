@@ -226,18 +226,18 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
-		r.Post("/getfee", s.apiGetFee)
 		r.Post("/init", s.apiInit)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
-			apiInit.Post("/register", s.apiRegister)
+			apiInit.Post("/getfee", s.apiGetFee)
 			apiInit.Get("/user", s.apiUser)
 		})
 
 		r.Group(func(apiAuth chi.Router) {
 			apiAuth.Use(s.rejectUnauthed)
+			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/closewallet", s.apiCloseWallet)
