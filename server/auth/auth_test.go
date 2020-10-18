@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,7 +22,8 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 func noop() {}
@@ -113,13 +113,12 @@ func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (oids, t
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
-	sig    *secp256k1.Signature
-	err    error
+	sig    *ecdsa.Signature
 	pubkey *secp256k1.PublicKey
 }
 
-func (s *TSigner) Sign(hash []byte) (*secp256k1.Signature, error) { return s.sig, s.err }
-func (s *TSigner) PubKey() *secp256k1.PublicKey                   { return s.pubkey }
+func (s *TSigner) Sign(hash []byte) *ecdsa.Signature { return s.sig }
+func (s *TSigner) PubKey() *secp256k1.PublicKey      { return s.pubkey }
 
 type tReq struct {
 	msg      *msgjson.Message
@@ -224,9 +223,8 @@ func tNewUser(t *testing.T) *tUser {
 	}
 }
 
-func (u *tUser) randomSignature() *secp256k1.Signature {
-	sig, _ := u.privKey.Sign(randBytes(20))
-	return sig
+func (u *tUser) randomSignature() *ecdsa.Signature {
+	return ecdsa.Sign(u.privKey, randBytes(20))
 }
 
 type testRig struct {
@@ -275,10 +273,7 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	connect := tNewConnect(user)
 	sigMsg := connect.Serialize()
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("error signing message of length %d", len(sigMsg))
-	}
+	sig := ecdsa.Sign(user.privKey, sigMsg)
 	connect.SetSig(sig.Serialize())
 	msg, _ := msgjson.NewRequest(comms.NextID(), msgjson.ConnectRoute, connect)
 	return msg
@@ -965,21 +960,15 @@ func TestAuth(t *testing.T) {
 	connectUser(t, user)
 
 	msgBytes := randBytes(50)
-	sig, err := user.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, msgBytes)
 	sigBytes := sig.Serialize()
-	err = rig.mgr.Auth(user.acctID, msgBytes, sigBytes)
+	err := rig.mgr.Auth(user.acctID, msgBytes, sigBytes)
 	if err != nil {
 		t.Fatalf("unexpected auth error: %v", err)
 	}
 
 	foreigner := tNewUser(t)
-	sig, err = foreigner.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("foreigner signing error: %v", err)
-	}
+	sig = ecdsa.Sign(foreigner.privKey, msgBytes)
 	sigBytes = sig.Serialize()
 	err = rig.mgr.Auth(foreigner.acctID, msgBytes, sigBytes)
 	if err == nil {
@@ -994,28 +983,16 @@ func TestAuth(t *testing.T) {
 }
 
 func TestSign(t *testing.T) {
-	// Test a Sign error
-	rig.signer.err = fmt.Errorf("test error 2")
-	s := &tSignable{b: randBytes(25)}
-	err := rig.mgr.Sign(s)
-	if err == nil {
-		t.Fatalf("no error for forced key signing error")
-	}
-	if !strings.Contains(err.Error(), "test error 2") {
-		t.Fatalf("wrong error for forced key signing error: %v", err)
-	}
-
-	rig.signer.err = nil
 	sig1 := tNewUser(t).randomSignature()
 	sig1Bytes := sig1.Serialize()
 	rig.signer.sig = sig1
-	s = &tSignable{b: randBytes(25)}
-	err = rig.mgr.Sign(s)
+	s := &tSignable{b: randBytes(25)}
+	err := rig.mgr.Sign(s)
 	if err != nil {
 		t.Fatalf("unexpected error for valid signable: %v", err)
 	}
 	if !bytes.Equal(sig1Bytes, s.SigBytes()) {
-		t.Fatalf("incorrect signature. expected %x, got %x", sig1, s.SigBytes())
+		t.Fatalf("incorrect signature. expected %x, got %x", sig1.Serialize(), s.SigBytes())
 	}
 
 	// Try two at a time
@@ -1170,10 +1147,7 @@ func TestConnectErrors(t *testing.T) {
 	// saved to the map.
 	// need to "register" the user first
 	msgBytes := connect.Serialize()
-	sig, err := user.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("error signing 'connect': %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, msgBytes)
 	connect.SetSig(sig.Serialize())
 	encodeMsg()
 	user.conn.sendErr = fmt.Errorf("test error")
@@ -1273,7 +1247,7 @@ func TestHandleRegister(t *testing.T) {
 			Time:   encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg := reg.Serialize()
-		sig, _ := user.privKey.Sign(sigMsg)
+		sig := ecdsa.Sign(user.privKey, sigMsg)
 		reg.SetSig(sig.Serialize())
 		return reg
 	}
@@ -1311,15 +1285,9 @@ func TestHandleRegister(t *testing.T) {
 	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
 	rig.storage.acctErr = nil
 
-	// Sign error
-	rig.signer.err = dummyError
-	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
-	rig.signer.err = nil
-
-	rig.signer.sig = user.randomSignature()
-
 	// Send a valid registration and check the response.
 	// Before starting, make sure there are no responses in the queue.
+	rig.signer.sig = user.randomSignature()
 	respMsg := user.conn.getSend()
 	if respMsg != nil {
 		b, _ := json.Marshal(respMsg)
@@ -1374,7 +1342,7 @@ func TestHandleNotifyFee(t *testing.T) {
 			Time:      encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg := notify.Serialize()
-		sig, _ := user.privKey.Sign(sigMsg)
+		sig := ecdsa.Sign(user.privKey, sigMsg)
 		notify.SetSig(sig.Serialize())
 		return notify
 	}
@@ -1456,13 +1424,8 @@ func TestHandleNotifyFee(t *testing.T) {
 	ensureErr(doWaiter(goodMsg), "PayAccount", msgjson.RPCInternalError)
 	rig.storage.payErr = nil
 
-	// Sign error
-	rig.signer.err = dummyError
-	ensureErr(doWaiter(goodMsg), "DEX signature", msgjson.RPCInternalError)
-	rig.signer.err = nil
-	rig.signer.sig = user.randomSignature()
-
 	// Send a valid notifyfee, and check the response.
+	rig.signer.sig = user.randomSignature()
 	rpcErr := doWaiter(goodMsg)
 	if rpcErr != nil {
 		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
@@ -1640,4 +1603,12 @@ func TestOrderStatus(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for bad order ID")
 	}
+}
+
+func Test_checkSigS256(t *testing.T) {
+	sig := []byte{0x30, 0, 0x02, 0x01, 9, 0x2, 0x01, 10}
+	ecdsa.ParseDERSignature(sig) // panic on line 132: sigStr[2] != 0x02 after trimming to sigStr[:(1+2)]
+
+	sig = []byte{0x30, 1, 0x02, 0x01, 9, 0x2, 0x01, 10}
+	ecdsa.ParseDERSignature(sig) // panic on line 139: rLen := int(sigStr[index]) with index=3 and len = 3
 }

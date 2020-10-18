@@ -21,15 +21,17 @@ import (
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/chaincfg/v2"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/schnorr"
 	"github.com/decred/dcrd/dcrutil/v2"
+	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/hdkeychain/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/txscript/v2"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -353,8 +355,9 @@ type testMsgTx struct {
 
 // Generate a public key on the secp256k1 curve.
 func genPubkey() ([]byte, []byte) {
-	_, pub := secp256k1.PrivKeyFromBytes(randomBytes(32))
-	pubkey := pub.Serialize()
+	priv := secp256k1.PrivKeyFromBytes(randomBytes(32))
+	pub := priv.PubKey()
+	pubkey := pub.SerializeCompressed()
 	pkHash := dcrutil.Hash160(pubkey)
 	return pubkey, pkHash
 }
@@ -364,14 +367,11 @@ func s256Auth(msg []byte) *testAuth {
 	if err != nil {
 		fmt.Printf("s256Auth error: %v\n", err)
 	}
-	pubkey := priv.PubKey().Serialize()
+	pubkey := priv.PubKey().SerializeCompressed()
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig, err := priv.Sign(msg)
-	if err != nil {
-		fmt.Printf("s256Auth sign error: %v\n", err)
-	}
+	sig := ecdsa.Sign(priv, msg)
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: dcrutil.Hash160(pubkey),
@@ -406,15 +406,14 @@ func schnorrAuth(msg []byte) *testAuth {
 	if err != nil {
 		fmt.Printf("schnorrAuth error: %v\n", err)
 	}
-	pubkey := priv.PubKey().Serialize()
+	pubkey := priv.PubKey().SerializeCompressed()
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	r, s, err := schnorr.Sign(priv, msg)
+	sig, err := schnorr.Sign(priv, msg)
 	if err != nil {
 		fmt.Printf("schnorrAuth sign error: %v\n", err)
 	}
-	sig := schnorr.NewSignature(r, s)
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: dcrutil.Hash160(pubkey),
@@ -436,7 +435,7 @@ func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
 	default:
 		fmt.Printf("NewAddressPubKeyHash unknown sigType")
 	}
-	addr, err := dcrutil.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
+	addr, err := dcrutilv3.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
 	if err != nil {
 		fmt.Printf("NewAddressPubKeyHash error: %v\n", err)
 		return nil, nil
@@ -593,6 +592,15 @@ type testMsgTxP2SH struct {
 	m      int
 }
 
+func multiSigScript(pubkeys []*dcrutil.AddressSecpPubKey, numReq int64) ([]byte, error) {
+	builder := txscript.NewScriptBuilder().AddInt64(numReq)
+	for _, key := range pubkeys {
+		builder.AddData(key.ScriptAddress())
+	}
+	builder.AddInt64(int64(len(pubkeys))).AddOp(txscript.OP_CHECKMULTISIG)
+	return builder.Script()
+}
+
 // An M-of-N mutli-sig script. This script is pay-to-pubkey.
 func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 	// serialized compressed pubkey used for multisig
@@ -613,7 +621,7 @@ func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 		}
 		addrs = append(addrs, addr)
 	}
-	script, err := txscript.MultiSigScript(addrs, m)
+	script, err := multiSigScript(addrs, int64(m))
 	if err != nil {
 		fmt.Printf("error creating MultiSigScript: %v", err)
 		return nil, nil

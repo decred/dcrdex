@@ -16,7 +16,8 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.
@@ -436,7 +437,8 @@ func (a *dexAccount) unlock(crypter encrypt.Crypter) error {
 	if err != nil {
 		return err
 	}
-	privKey, pubKey := secp256k1.PrivKeyFromBytes(keyB)
+	privKey := secp256k1.PrivKeyFromBytes(keyB)
+	pubKey := privKey.PubKey()
 	a.keyMtx.Lock()
 	a.privKey = privKey
 	a.id = account.NewID(pubKey.SerializeCompressed())
@@ -511,16 +513,13 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 	if a.privKey == nil {
 		return nil, fmt.Errorf("account locked")
 	}
-	sig, err := a.privKey.Sign(msg)
-	if err != nil {
-		return nil, err
-	}
+	sig := ecdsa.Sign(a.privKey, msg)
 	return sig.Serialize(), nil
 }
 
 // checkSig checks the signature against the message and the DEX pubkey.
 func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
-	_, err := checkSigS256(msg, a.dexPubKey.Serialize(), sig)
+	_, err := checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
 	return err
 }
 

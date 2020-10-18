@@ -12,7 +12,7 @@ import (
 
 	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 var (

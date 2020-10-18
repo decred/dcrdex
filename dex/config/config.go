@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"gopkg.in/go-ini/ini.v1"
+	"gopkg.in/ini.v1"
 )
 
 func loadINIConfig(cfgPathOrData interface{}) (*ini.File, error) {

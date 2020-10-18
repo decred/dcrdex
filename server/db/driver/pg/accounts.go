@@ -224,7 +224,7 @@ func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.
 // createAccount creates an entry for the account in the accounts table.
 func createAccount(dbe sqlExecutor, tableName string, acct *account.Account, regAddr string) error {
 	stmt := fmt.Sprintf(internal.CreateAccount, tableName)
-	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.Serialize(), regAddr)
+	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), regAddr)
 	return err
 }
 

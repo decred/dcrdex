@@ -31,7 +31,8 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 const (
@@ -1652,7 +1653,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Prepare and sign the registration payload.
 	// The account ID is generated from the public key.
 	dexReg := &msgjson.Register{
-		PubKey: privKey.PubKey().Serialize(),
+		PubKey: privKey.PubKey().SerializeCompressed(),
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
@@ -4099,7 +4100,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
 	}
-	signature, err := secp256k1.ParseDERSignature(sigBytes)
+	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}
@@ -4112,10 +4113,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 // sign signs the msgjson.Signable with the provided private key.
 func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 	sigMsg := payload.Serialize()
-	sig, err := privKey.Sign(sigMsg)
-	if err != nil {
-		return fmt.Errorf("message signing error: %v", err)
-	}
+	sig := ecdsa.Sign(privKey, sigMsg) // should we be signing the *hash* of the payload?
 	payload.SetSig(sig.Serialize())
 	return nil
 }

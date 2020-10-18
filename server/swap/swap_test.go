@@ -31,7 +31,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 const (
@@ -174,10 +175,7 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 }
 func (m *TAuthManager) Sign(signables ...msgjson.Signable) error {
 	for _, signable := range signables {
-		sig, err := m.privkey.Sign(signable.Serialize())
-		if err != nil {
-			return fmt.Errorf("signature error: %v", err)
-		}
+		sig := ecdsa.Sign(m.privkey, signable.Serialize())
 		signable.SetSig(sig.Serialize())
 	}
 	return nil
@@ -841,7 +839,7 @@ func (rig *testRig) auditSwap_maker() error {
 // checkSigS256 checks that the message's signature was created with the
 // private key for the provided secp256k1 public key.
 func checkSigS256(msg msgjson.Signable, pubKey *secp256k1.PublicKey) error {
-	signature, err := secp256k1.ParseDERSignature(msg.SigBytes())
+	signature, err := ecdsa.ParseDERSignature(msg.SigBytes())
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}

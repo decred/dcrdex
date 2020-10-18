@@ -135,8 +135,8 @@ func TestAccountsBackupAndRestore(t *testing.T) {
 
 		if !dexAcct.DEXPubKey.IsEqual(acct.DEXPubKey) {
 			t.Fatalf("expected restored account %s with dex public key %x, "+
-				"got %x", dexAcct.Host, dexAcct.DEXPubKey.Serialize(),
-				acct.DEXPubKey.Serialize())
+				"got %x", dexAcct.Host, dexAcct.DEXPubKey.SerializeCompressed(),
+				acct.DEXPubKey.SerializeCompressed())
 		}
 	}
 }

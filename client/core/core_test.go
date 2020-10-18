@@ -37,7 +37,8 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 var (
@@ -97,7 +98,7 @@ func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg 
 	return func(msg *msgjson.Message, f msgFunc) error {
 		signable := serializer(msg)
 		sigMsg := signable.Serialize()
-		sig, _ := tDexPriv.Sign(sigMsg)
+		sig := ecdsa.Sign(tDexPriv, sigMsg)
 		ack := &msgjson.Acknowledgement{
 			Sig: sig.Serialize(),
 		}
@@ -765,7 +766,7 @@ func (rig *testRig) queueNotifyFee() {
 		req := new(msgjson.NotifyFee)
 		json.Unmarshal(msg.Payload, req)
 		sigMsg := req.Serialize()
-		sig, _ := tDexPriv.Sign(sigMsg)
+		sig := ecdsa.Sign(tDexPriv, sigMsg)
 		// Shouldn't Sig be dex.Bytes?
 		result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
@@ -1246,7 +1247,7 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    rig.acct.dexPubKey.Serialize(),
+		DEXPubKey:    rig.acct.dexPubKey.SerializeCompressed(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,
