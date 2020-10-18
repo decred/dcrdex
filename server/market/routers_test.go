@@ -25,7 +25,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/slog"
 )
 
@@ -414,7 +415,7 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 	}
 	pk := u.privKey.PubKey().SerializeCompressed()
 	for i := 0; i < numSigs; i++ {
-		sig, _ := u.privKey.Sign(coin.ID)
+		sig := ecdsa.Sign(u.privKey, coin.ID)
 		coin.Sigs = append(coin.Sigs, sig.Serialize())
 		coin.PubKeys = append(coin.PubKeys, pk)
 	}

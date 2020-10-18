@@ -14,6 +14,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v2"
+	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
 )
 
 const ErrReorgDetected = dex.ErrorKind("reorg detected")
@@ -349,13 +350,13 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 				}
 				var sigType dcrec.SignatureType
 				switch a := addr.(type) {
-				case *dcrutil.AddressPubKeyHash:
+				case *dcrutilv3.AddressPubKeyHash:
 					sigType = a.DSA()
-				case *dcrutil.AddressSecpPubKey:
+				case *dcrutilv3.AddressSecpPubKey:
 					sigType = dcrec.STEcdsaSecp256k1
-				case *dcrutil.AddressEdwardsPubKey:
+				case *dcrutilv3.AddressEdwardsPubKey:
 					sigType = dcrec.STEd25519
-				case *dcrutil.AddressSecSchnorrPubKey:
+				case *dcrutilv3.AddressSecSchnorrPubKey:
 					sigType = dcrec.STSchnorrSecp256k1
 				default:
 					return nil, fmt.Errorf("unsupported signature type")

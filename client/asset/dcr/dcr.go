@@ -27,12 +27,14 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v2"
+	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
-	"github.com/decred/dcrd/txscript/v2"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	walletjson "github.com/decred/dcrwallet/rpc/jsonrpc/types"
 )
@@ -814,6 +816,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %v", err)
 	}
+	addrV3, _ := dcrutilv3.DecodeAddress(addr.String(), chainParams)
 
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
 	feeRate := dcr.feeRateWithFallback(1)
@@ -824,7 +827,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, feeRate, false)
+	msgTx, net, err := dcr.sendCoins(addrV3, coins, reqFunds, feeRate, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("error sending split transaction: %v", err)
 	}
@@ -1022,20 +1025,20 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Add the contract outputs.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
-		// revokeAddr is the address that will receive the refund if the contract is
-		// abandoned.
-		revokeAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
+		// revokeAddrV2 is the address that will receive the refund if the
+		// contract is abandoned.
+		revokeAddrV2, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %v", err)
 		}
 		// Create the contract, a P2SH redeem script.
-		contractScript, err := dexdcr.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), chainParams)
+		contractScript, err := dexdcr.MakeContract(contract.Address, revokeAddrV2.String(), contract.SecretHash, int64(contract.LockTime), chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("unable to create pubkey script for address %s: %v", contract.Address, err)
 		}
 		contracts = append(contracts, contractScript)
 		// Make the P2SH address and pubkey script.
-		scriptAddr, err := dcrutil.NewAddressScriptHash(contractScript, chainParams)
+		scriptAddr, err := dcrutilv3.NewAddressScriptHash(contractScript, chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error encoding script address: %v", err)
 		}
@@ -1062,11 +1065,12 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating change address: %v", err)
 	}
+	changeAddrV3, _ := dcrutilv3.DecodeAddress(changeAddr.String(), chainParams)
 
 	// Add change, sign, and send the transaction.
 	dcr.fundingMtx.Lock()         // before generating change output
 	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
-	msgTx, change, fees, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate, nil)
+	msgTx, change, fees, err := dcr.sendWithReturn(baseTx, changeAddrV3, totalIn, totalOut, swaps.FeeRate, nil)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1156,7 +1160,8 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
-	pkScript, err := txscript.PayToAddrScript(redeemAddr)
+	redeemAddrv3, _ := dcrutilv3.DecodeAddress(redeemAddr.String(), chainParams)
+	pkScript, err := txscript.PayToAddrScript(redeemAddrv3)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating redemption script for address '%s': %v", redeemAddr, err)
 	}
@@ -1244,10 +1249,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if err != nil {
 		return nil, nil, err
 	}
-	signature, err := priv.Sign(msg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("signing error: %v", err)
-	}
+	signature := ecdsa.Sign(priv, msg)
 	pubkeys = append(pubkeys, pub.SerializeCompressed())
 	sigs = append(sigs, signature.Serialize())
 	return pubkeys, sigs, nil
@@ -1280,7 +1282,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 			txOut.ScriptPubKey.Hex, err)
 	}
 	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, chainParams)
+	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, chainParams, false)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %v", pkScript, err)
 	}
@@ -1691,13 +1693,14 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 
-	refundAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
+	refundAddrV2, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
-	pkScript, err := txscript.PayToAddrScript(refundAddr)
+	refundAddrV3, _ := dcrutilv3.DecodeAddress(refundAddrV2.String(), chainParams)
+	pkScript, err := txscript.PayToAddrScript(refundAddrV3)
 	if err != nil {
-		return nil, fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
+		return nil, fmt.Errorf("error creating refund script for address '%v': %v", refundAddrV2, err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
@@ -1977,7 +1980,8 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 	if err != nil {
 		return nil, 0, err
 	}
-	payScript, err := txscript.PayToAddrScript(addr)
+	addrV3, _ := dcrutilv3.DecodeAddress(addr.String(), chainParams)
+	payScript, err := txscript.PayToAddrScript(addrV3)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error creating P2SH script: %v", err)
 	}
@@ -1988,6 +1992,7 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 	if err != nil {
 		return nil, 0, fmt.Errorf("error creating change address: %v", err)
 	}
+	changeAddrV3, _ := dcrutilv3.DecodeAddress(changeAddr.String(), chainParams)
 	// A nil subtractee indicates that fees should be taken from the change
 	// output.
 	var subtractee *wire.TxOut
@@ -1995,7 +2000,7 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 		subtractee = txOut
 	}
 
-	tx, _, _, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, val, feeRate, subtractee)
+	tx, _, _, err := dcr.sendWithReturn(baseTx, changeAddrV3, totalIn, val, feeRate, subtractee)
 	return tx, uint64(txOut.Value), err
 }
 
@@ -2054,7 +2059,7 @@ func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 // dust) for the change. If a subtractee output is specified, fees will be
 // subtracted from that output, otherwise they will be subtracted from the
 // change output.
-func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Address,
+func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutilv3.Address,
 	totalIn, totalOut, feeRate uint64, subtractee *wire.TxOut) (*wire.MsgTx, *output, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
@@ -2204,7 +2209,7 @@ type signatureTyper interface {
 }
 
 // createSig creates and returns the serialized raw signature and compressed
-// pubkey for a transaction input signature.
+// pubkey for a transaction input signature. addr must be dcrutil/v2.
 func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr dcrutil.Address) (sig, pubkey []byte, err error) {
 	sigTyper, ok := addr.(signatureTyper)
 	if !ok {
@@ -2217,12 +2222,7 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 	}
 
 	sigType := sigTyper.DSA()
-	switch sigType {
-	case dcrec.STEcdsaSecp256k1:
-		sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv)
-	default:
-		sig, err = txscript.RawTxInSignatureAlt(tx, idx, pkScript, txscript.SigHashAll, priv, sigType)
-	}
+	sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv.Serialize(), sigType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2230,15 +2230,17 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 	return sig, pub.SerializeCompressed(), nil
 }
 
-// getKeys fetches the private/public key pair for the specified address.
+// getKeys fetches the private/public key pair for the specified address. addr
+// must be dcrutil/v2.
 func (dcr *ExchangeWallet) getKeys(addr dcrutil.Address) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
-	wif, err := dcr.node.DumpPrivKey(addr, chainParams.PrivateKeyID)
+	addrV2, _ := dcrutil.DecodeAddress(addr.String(), chainParams) // just be sure it's dcrutil/v2
+	wif, err := dcr.node.DumpPrivKey(addrV2, chainParams.PrivateKeyID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	priv, pub := secp256k1.PrivKeyFromBytes(wif.PrivKey.Serialize())
-	return priv, pub, nil
+	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey.Serialize())
+	return priv, priv.PubKey(), nil
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

@@ -11,10 +11,11 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	"github.com/decred/dcrd/chaincfg/v2"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrd/txscript/v2"
+	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3" // for txscript/v3
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/dcrwallet/wallet/v3/txsizes"
 )
@@ -420,7 +421,7 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
 // contract. If the provided script is not a swap contract, an error will be
-// returned.
+// returned. The returned addresses are dcrutil/v2 types.
 func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 	sender, receiver dcrutil.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
@@ -568,7 +569,7 @@ func ExtractScriptHashByType(scriptType DCRScriptType, pkScript []byte) ([]byte,
 // non-nil errors are only returned if the script cannot be parsed. See also
 // InputInfo for additional signature script size data
 func ExtractScriptData(script []byte, chainParams *chaincfg.Params) (DCRScriptType, []string, int, error) {
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams, false)
 	if err != nil {
 		return ScriptUnsupported, nil, 0, err
 	}
@@ -610,7 +611,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScript
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams, false)
 	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
 		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %v", err)
@@ -621,9 +622,9 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScript
 	for _, addr := range addrs {
 		// If the address is an unhashed public key, is won't need a pubkey as part
 		// of its sigScript, so count them separately.
-		_, isPubkey := addr.(*dcrutil.AddressSecpPubKey)
+		_, isPubkey := addr.(*dcrutilv3.AddressSecpPubKey)
 		if isPubkey {
-			pubkeys = append(pubkeys, addr)
+			pubkeys = append(pubkeys, addr) // dcrutil/v2.Address(dcrutil/v3.Address)
 		} else {
 			pkHashes = append(pkHashes, addr)
 		}

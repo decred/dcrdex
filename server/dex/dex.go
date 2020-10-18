@@ -26,7 +26,8 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg"
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/swap"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID, has Network
@@ -74,6 +75,14 @@ type DexConf struct {
 	CommsCfg         *RPCConfig
 	IgnoreState      bool
 	StatePath        string
+}
+
+type signer struct {
+	*secp256k1.PrivateKey
+}
+
+func (s signer) Sign(hash []byte) *ecdsa.Signature {
+	return ecdsa.Sign(s.PrivateKey, hash)
 }
 
 type subsystem struct {
@@ -391,7 +400,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
 		Storage:         storage,
-		Signer:          cfg.DEXPrivKey,
+		Signer:          signer{cfg.DEXPrivKey},
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,

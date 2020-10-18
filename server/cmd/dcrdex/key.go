@@ -10,7 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 func dexKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {
@@ -63,8 +63,7 @@ func loadKeyFile(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	privKey, _ := secp256k1.PrivKeyFromBytes(keyB)
-	return privKey, nil
+	return secp256k1.PrivKeyFromBytes(keyB), nil
 }
 
 func createAndStoreKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {

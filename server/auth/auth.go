@@ -19,7 +19,8 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 const (
@@ -63,7 +64,7 @@ type Storage interface {
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
 type Signer interface {
-	Sign(hash []byte) (*secp256k1.Signature, error)
+	Sign(hash []byte) *ecdsa.Signature
 	PubKey() *secp256k1.PublicKey
 }
 
@@ -498,10 +499,7 @@ func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended boo
 func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 	for _, signable := range signables {
 		sigMsg := signable.Serialize()
-		sig, err := auth.signer.Sign(sigMsg)
-		if err != nil {
-			return fmt.Errorf("signature error: %v", err)
-		}
+		sig := auth.signer.Sign(sigMsg)
 		signable.SetSig(sig.Serialize())
 	}
 	return nil
@@ -724,10 +722,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,
 	}
-	sig, err := auth.signer.Sign(penaltyNote.Serialize())
-	if err != nil {
-		return fmt.Errorf("signature error: %v", err)
-	}
+	sig := auth.signer.Sign(penaltyNote.Serialize())
 	penaltyNote.Sig = sig.Serialize()
 	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 	if err != nil {
@@ -1139,18 +1134,10 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		msgMatchForSide(match, order.Taker)
 	}
 
-	// Sign and send the connect response.
-	sig, err := auth.signer.Sign(sigMsg)
-	if err != nil {
-		log.Errorf("handleConnect signature error: %v", err)
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal error",
-		}
-	}
-
 	conn.Authorized()
 
+	// Sign and send the connect response.
+	sig := auth.signer.Sign(sigMsg)
 	resp := &msgjson.ConnectResult{
 		Sig:                 sig.Serialize(),
 		ActiveOrderStatuses: msgOrderStatuses,
@@ -1450,7 +1437,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 // checkSigS256 checks that the message's signature was created with the
 // private key for the provided secp256k1 public key.
 func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
-	signature, err := secp256k1.ParseDERSignature(sig)
+	signature, err := ecdsa.ParseDERSignature(sig)
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}

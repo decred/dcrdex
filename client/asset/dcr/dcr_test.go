@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"os"
 	"sync"
@@ -20,13 +21,15 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/chaincfg/v2"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v2"
+	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
-	"github.com/decred/dcrd/txscript/v2"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	walletjson "github.com/decred/dcrwallet/rpc/jsonrpc/types"
 )
@@ -1144,6 +1147,27 @@ func (ai *TAuditInfo) Coin() asset.Coin      { return &tCoin{} }
 func (ai *TAuditInfo) Contract() dex.Bytes   { return nil }
 func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
+// secp256k1/v3.PrivateKey no longer implements chainec.PrivateKey
+type privKeyAdaptor struct {
+	*secp256k1.PrivateKey
+}
+
+func (pka privKeyAdaptor) GetD() *big.Int {
+	return pka.ToECDSA().D
+}
+
+func (pka privKeyAdaptor) GetType() int {
+	return 0
+}
+
+func (pka privKeyAdaptor) Public() (*big.Int, *big.Int) {
+	return pka.PubKey().X(), pka.PubKey().Y()
+}
+
+func (pka privKeyAdaptor) SerializeSecret() []byte {
+	return pka.Serialize()
+}
+
 func TestRedeem(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
@@ -1171,10 +1195,10 @@ func TestRedeem(t *testing.T) {
 	}
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, _ := secp256k1.PrivKeyFromBytes(privBytes)
+	privKey := secp256k1.PrivKeyFromBytes(privBytes)
 
 	node.changeAddr = tPKHAddr
-	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
 	_, _, feesPaid, err := wallet.Redeem([]*asset.Redemption{redemption})
 	if err != nil {
@@ -1266,14 +1290,12 @@ func TestSignMessage(t *testing.T) {
 
 	vout := uint32(5)
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, pubKey := secp256k1.PrivKeyFromBytes(privBytes)
+	privKey := secp256k1.PrivKeyFromBytes(privBytes)
+	pubKey := privKey.PubKey()
 
 	msg := randBytes(36)
 	pk := pubKey.SerializeCompressed()
-	signature, err := privKey.Sign(msg)
-	if err != nil {
-		t.Fatalf("signature error: %v", err)
-	}
+	signature := ecdsa.Sign(privKey, msg)
 	sig := signature.Serialize()
 
 	node.walletTx = &walletjson.GetTransactionResult{
@@ -1286,7 +1308,7 @@ func TestSignMessage(t *testing.T) {
 		},
 	}
 
-	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
 	op := newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular)
 
@@ -1322,7 +1344,7 @@ func TestSignMessage(t *testing.T) {
 
 	// gettransaction error
 	node.txOutErr = tErr
-	_, _, err = wallet.SignMessage(op, msg)
+	_, _, err := wallet.SignMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for gettxout rpc error")
 	}
@@ -1355,8 +1377,11 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	addr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
-	pkScript, _ := txscript.PayToAddrScript(addr)
+	addr, _ := dcrutilv3.NewAddressScriptHash(contract, chainParams)
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		t.Fatalf("bad address %s (%T)", addr, addr)
+	}
 
 	node.txOutRes[newOutPoint(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
 
@@ -1390,8 +1415,11 @@ func TestAuditContract(t *testing.T) {
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
-	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
-	badContract, _ := txscript.PayToAddrScript(wrongAddr)
+	wrongAddr, _ := dcrutilv3.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
+	badContract, err := txscript.PayToAddrScript(wrongAddr)
+	if err != nil {
+		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
+	}
 	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
@@ -1431,10 +1459,17 @@ func TestFindRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	contractAddr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
-	pkScript, _ := txscript.PayToAddrScript(contractAddr)
+	contractAddr, _ := dcrutilv3.NewAddressScriptHash(contract, chainParams)
+	pkScript, err := txscript.PayToAddrScript(contractAddr)
+	if err != nil {
+		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
+	}
 
-	otherScript, _ := txscript.PayToAddrScript(tPKHAddr)
+	tPKHAddrV3, _ := dcrutilv3.DecodeAddress(tPKHAddr.String(), chainParams)
+	otherScript, err := txscript.PayToAddrScript(tPKHAddrV3)
+	if err != nil {
+		t.Fatalf("bad address %s (%T)", tPKHAddrV3, tPKHAddrV3)
+	}
 
 	redemptionScript, _ := dexdcr.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
 	otherSpendScript, _ := txscript.NewScriptBuilder().
@@ -1550,8 +1585,8 @@ func TestRefund(t *testing.T) {
 	node.newAddr = tPKHAddr
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, _ := secp256k1.PrivKeyFromBytes(privBytes)
-	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	privKey := secp256k1.PrivKeyFromBytes(privBytes)
+	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
 	contractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular)
 	_, err = wallet.Refund(contractOutput.ID(), contract)
@@ -1728,12 +1763,15 @@ func TestSendEdges(t *testing.T) {
 
 	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
 
-	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), chainParams)
+	contractAddr, _ := dcrutilv3.NewAddressScriptHash(randBytes(20), chainParams)
 	// See dexdcr.IsDust for the source of this dustCoverage voodoo.
 	dustCoverage := (dexdcr.P2PKHOutputSize + 165) * feeRate * 3
 	dexReqFees := dexdcr.InitTxSize * feeRate
 
-	pkScript, _ := txscript.PayToAddrScript(contractAddr)
+	pkScript, err := txscript.PayToAddrScript(contractAddr)
+	if err != nil {
+		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
+	}
 
 	newBaseTx := func(funding uint64) *wire.MsgTx {
 		baseTx := wire.NewMsgTx()
@@ -1775,8 +1813,10 @@ func TestSendEdges(t *testing.T) {
 		},
 	}
 
+	tPKHAddrV3, _ := dcrutilv3.DecodeAddress(tPKHAddr.String(), chainParams)
+
 	for _, tt := range tests {
-		tx, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), tPKHAddr, tt.funding, swapVal, feeRate, nil)
+		tx, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), tPKHAddrV3, tt.funding, swapVal, feeRate, nil)
 		if err != nil {
 			t.Fatalf("sendWithReturn error: %v", err)
 		}
