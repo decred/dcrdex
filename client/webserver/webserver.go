@@ -228,11 +228,16 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/init", s.apiInit)
 
+		// TODO: Allow register page to not require /user and /defaultwalletcfg
+		// until authorized with a cookie. These currently must be accessible to
+		// set the app password on the browser.
+		r.Get("/user", s.apiUser)
+		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
+
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
 			apiInit.Post("/getfee", s.apiGetFee)
-			apiInit.Get("/user", s.apiUser)
 		})
 
 		r.Group(func(apiAuth chi.Router) {
@@ -250,7 +255,6 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			apiAuth.Post("/reconfigurewallet", s.apiReconfig)
 			apiAuth.Post("/walletsettings", s.apiWalletSettings)
 			apiAuth.Post("/setwalletpass", s.apiSetWalletPass)
-			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/orders", s.apiOrders)
 			apiAuth.Post("/order", s.apiOrder)
 			apiAuth.Post("/withdraw", s.apiWithdraw)
