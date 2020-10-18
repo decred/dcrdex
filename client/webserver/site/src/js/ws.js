@@ -122,15 +122,11 @@ class MessageSocket {
         if (retrys > 0) {
           retrys = 0
           reloader()
+          return
         }
         forward('open', null, this.handlers)
-        // Ensure websocket is open when executing queued requests
-        // to avoid infinite request/queue loops.
-        while (this.queue.length &&
-                conn.readyState === window.WebSocket.OPEN) {
-          const [route, message] = this.queue.shift()
-          this.request(route, message)
-        }
+        const [route, message] = this.queue.shift()
+        this.request(route, message)
       }
 
       conn.onerror = (evt) => {
