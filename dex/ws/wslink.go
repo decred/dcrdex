@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,7 +139,7 @@ func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
 	return nil
 }
 
-// SendError sends the msgjson.Error to the peer.
+// SendError sends the msgjson.Error to the peer in a ResponsePayload.
 func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	msg, err := msgjson.NewResponse(id, nil, rpcErr)
 	if err != nil {
@@ -146,7 +147,7 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	}
 	err = c.Send(msg)
 	if err != nil {
-		c.log.Debug("SendError: failed to send message to peer %s: %v", c.ip, err)
+		c.log.Debugf("SendError: failed to send message to peer %s: %v", c.ip, err)
 	}
 }
 
@@ -206,6 +207,26 @@ func (c *WSLink) Disconnect() {
 	// NOTE: outHandler closes the c.conn on its return.
 }
 
+// handleMessage wraps the configured message handler so that it recovers from
+// panics and responds to the peer.
+func (c *WSLink) handleMessage(msg *msgjson.Message) {
+	defer func() {
+		if pv := recover(); pv != nil {
+			c.log.Criticalf("Uh-oh! Panic while handling message from %v.\n\n"+
+				"Message:\n\n%#v\n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n", c.ip, msg, pv, string(debug.Stack()))
+			if msg.Type == msgjson.Request {
+				c.SendError(msg.ID, msgjson.NewError(msgjson.RPCInternalError, "internal error"))
+			}
+		}
+	}()
+	rpcErr := c.handler(msg)
+	if rpcErr != nil {
+		// TODO: figure out how to fix this not making sense when the msg is
+		// a response, not a request!
+		c.SendError(msg.ID, rpcErr)
+	}
+}
+
 // inHandler handles all incoming messages for the websocket connection. It must
 // be run as a goroutine.
 func (c *WSLink) inHandler(ctx context.Context) {
@@ -250,12 +271,7 @@ out:
 			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero"))
 			continue
 		}
-		rpcErr := c.handler(msg)
-		if rpcErr != nil {
-			// TODO: figure out how to fix this not making sense when the msg is
-			// a response, not a request!
-			c.SendError(msg.ID, rpcErr)
-		}
+		c.handleMessage(msg)
 	}
 }
 

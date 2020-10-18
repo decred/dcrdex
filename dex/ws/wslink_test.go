@@ -100,6 +100,36 @@ func (c *ConnStub) WriteControl(messageType int, data []byte, deadline time.Time
 	return nil
 }
 
+func TestWSLink_handleMessageRecover(t *testing.T) {
+	defer func() {
+		if pv := recover(); pv != nil {
+			t.Errorf("A panic made it through: %v", pv)
+		}
+	}()
+
+	inMsgHandler := func(msg *msgjson.Message) *msgjson.Error {
+		panic("oh snap")
+	}
+
+	conn := &ConnStub{
+		inMsg: make(chan []byte, 1),
+		inErr: make(chan error, 1),
+	}
+	wsLink := NewWSLink("127.0.0.1", conn, time.Second, inMsgHandler, tLogger)
+
+	msg := new(msgjson.Message)
+	wsLink.handleMessage(msg)
+
+	wsLink.handler = func(msg *msgjson.Message) *msgjson.Error {
+		var v []int
+		_ = v[0]
+		return nil
+	}
+
+	msg, _ = msgjson.NewRequest(123, "bad", `stuff`)
+	wsLink.handleMessage(msg)
+}
+
 func TestWSLink_send(t *testing.T) {
 	defer os.Stdout.Sync()
 
