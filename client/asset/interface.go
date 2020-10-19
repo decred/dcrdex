@@ -159,8 +159,8 @@ type Balance struct {
 	// Immature is the balance that is not ready, but will be after some
 	// confirmations.
 	Immature uint64 `json:"immature"`
-	// Locked is the balance that that is currently locked for swap, but
-	// not actually swapped yet.
+	// Locked is the total amount locked in the wallet which includes but
+	// is not limited to funds locked for swap but not actually swapped yet.
 	Locked uint64 `json:"locked"`
 }
 

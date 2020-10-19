@@ -170,11 +170,30 @@ func (t *trackedTrade) coreOrder() *Order {
 func (t *trackedTrade) coreOrderInternal() *Order {
 	corder := coreOrderFromTrade(t.Order, t.metaData)
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
+	corder.LockedAmt = t.lockedAmount()
 
 	for _, mt := range t.matches {
 		corder.Matches = append(corder.Matches, matchFromMetaMatch(&mt.MetaMatch))
 	}
 	return corder
+}
+
+// lockedAmount is the total value of all coins currently locked for this trade.
+// Returns the value sum of the initial funding coins if no swap has been sent,
+// otherwise, the value of the locked change coin is returned.
+// NOTE: This amount only applies to the wallet from which swaps are sent. This
+// is the BASE asset wallet for a SELL order and the QUOTE asset wallet for a
+// BUY order.
+// lockedAmount should be called with the mtx >= RLocked.
+func (t *trackedTrade) lockedAmount() (locked uint64) {
+	if t.coinsLocked { // implies no swap has been sent
+		for _, coin := range t.coins {
+			locked += coin.Value()
+		}
+	} else if t.changeLocked && t.change != nil { // change may be returned but unlocked if the last swap has been sent
+		locked = t.change.Value()
+	}
+	return
 }
 
 // token is a shortened representation of the order ID.
@@ -634,13 +653,11 @@ func (t *trackedTrade) activeMatches() []*matchTracker {
 }
 
 // unspentContractAmounts returns the total amount locked in unspent swaps.
-func (t *trackedTrade) unspentContractAmounts(assetID uint32) (amount uint64) {
-	if t.fromAssetID != assetID {
-		// Only swaps sent from the specified assetID should count.
-		return 0
-	}
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
+// NOTE: This amount only applies to the wallet from which swaps are sent. This
+// is the BASE asset wallet for a SELL order and the QUOTE asset wallet for a
+// BUY order.
+// unspentContractAmounts should be called with the mtx >= RLocked.
+func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 	swapSentFromQuoteAsset := t.fromAssetID == t.Quote()
 	for _, match := range t.matches {
 		side, status := match.Match.Side, match.Match.Status

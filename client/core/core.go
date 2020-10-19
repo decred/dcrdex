@@ -138,7 +138,17 @@ func (dc *dexConnection) refreshMarkets() {
 		dc.tradeMtx.RUnlock()
 
 		for _, trade := range mktTrades {
-			market.Orders = append(market.Orders, trade.coreOrder())
+			trade.mtx.RLock()
+			ord := trade.coreOrderInternal()
+			market.Orders = append(market.Orders, ord)
+			if ord.Sell {
+				market.BaseOrderLocked += trade.lockedAmount()
+				market.BaseContractLocked += trade.unspentContractAmounts()
+			} else {
+				market.QuoteOrderLocked += trade.lockedAmount()
+				market.QuoteContractLocked += trade.unspentContractAmounts()
+			}
+			trade.mtx.RUnlock()
 		}
 		marketMap[mid] = market
 	}
@@ -1010,12 +1020,14 @@ func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	if err != nil {
 		return nil, err
 	}
+	contractLockedAmt, orderLockedAmt := c.lockedAmounts(wallet.AssetID)
 	walletBal := &WalletBalance{
 		Balance: &db.Balance{
 			Balance: *bal,
 			Stamp:   time.Now(),
 		},
-		ContractLocked: c.unspentContractAmounts(wallet.AssetID),
+		ContractLocked: contractLockedAmt,
+		OrderLocked:    orderLockedAmt,
 	}
 	wallet.setBalance(walletBal)
 	err = c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
@@ -1026,17 +1038,26 @@ func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	return walletBal, nil
 }
 
-// unspentContractAmounts returns the total amount locked in unspent swaps.
-// connMtx lock MUST be held for reads.
-func (c *Core) unspentContractAmounts(assetID uint32) (amount uint64) {
+// lockedAmounts returns the total amount locked in unredeemed and unrefunded
+// swaps (contractLocked) and the total amount locked by orders for future
+// swaps (orderLocked). Only applies to trades where the specified assetID is
+// the fromAssetID.
+//
+// The connMtx lock MUST be held for reads.
+func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64) {
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
-			amount += tracker.unspentContractAmounts(assetID)
+			tracker.mtx.RLock()
+			if tracker.fromAssetID == assetID {
+				contractLocked += tracker.unspentContractAmounts()
+				orderLocked += tracker.lockedAmount()
+			}
+			tracker.mtx.RUnlock()
 		}
 		dc.tradeMtx.RUnlock()
 	}
-	return amount
+	return
 }
 
 // updateBalances updates the balance for every key in the counter map.
@@ -1238,11 +1259,13 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	c.connMtx.RLock() // required to calculate contractlocked amount
 	defer c.connMtx.RUnlock()
+	contractLockedAmt, orderLockedAmt := c.lockedAmounts(dbWallet.AssetID)
 	wallet := &xcWallet{
 		AssetID: dbWallet.AssetID,
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
-			ContractLocked: c.unspentContractAmounts(dbWallet.AssetID),
+			ContractLocked: contractLockedAmt,
+			OrderLocked:    orderLockedAmt,
 		},
 		encPW:   dbWallet.EncryptedPW,
 		address: dbWallet.Address,
@@ -2711,9 +2734,15 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.resolveMatchConflicts(dc, matchConflicts)
 	}
 
+	// Order, match statuses should now be in sync with the DEX.
+	// Refresh the user's orders for each of the DEX's markets and
+	// log updated locked funds info.
+	dc.refreshMarkets()
+
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
+
 	return nil
 }
 
@@ -3071,9 +3100,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			notifyErr("Wallet missing", "Wallet retrieval error for active order %s: %v", tracker.token(), err)
 			continue
 		}
-		tracker.mtx.Lock()
+
 		tracker.wallets = wallets
-		tracker.mtx.Unlock()
+
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -3155,7 +3184,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Active orders and orders with matches with unsent swaps need the funding
 		// coin(s).
 		// Orders with sent but unspent swaps need to recompute contract-locked amts.
-		if isActive || needsCoins || tracker.unspentContractAmounts(wallets.fromAsset.ID) > 0 {
+		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
 			relocks.count(wallets.fromAsset.ID)
 		}
 
