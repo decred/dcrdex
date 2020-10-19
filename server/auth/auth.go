@@ -741,9 +741,27 @@ func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Ti
 	}
 }
 
-// Penalize closes the user's account, and notifies them of this action while
-// citing the provided rule that corresponds to their most recent infraction.
+// Penalize closes the user's account, unbooks all of their orders, and notifies
+// them of this action while citing the provided rule that corresponds to their
+// most recent infraction.
 func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule, extraDetails string) error {
+	if !auth.anarchy {
+		// If the user is connected, flag the client as suspended.
+		client := auth.user(user)
+		if client != nil {
+			client.suspend()
+		}
+
+		// Unbook all of the user's orders across all markets.
+		auth.unbookUserOrders(user)
+
+		// Market the account as closed in the DB.
+		// TODO: option to close permanently or suspend for a certain time.
+		if err := auth.storage.CloseAccount(user /*client.acct.ID*/, lastRule); err != nil {
+			return err
+		}
+	}
+
 	// Notify user of penalty.
 	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
 	if auth.anarchy {
@@ -773,23 +791,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 		return err
 	}
 
-	// TODO: option to close permanently or suspend for a certain time.
-
-	client := auth.user(user)
-	if client != nil {
-		client.suspend()
-	}
-
-	if err := auth.storage.CloseAccount(user /*client.acct.ID*/, lastRule); err != nil {
-		return err
-	}
-
 	log.Debugf("User %v account closed. Last rule broken = %v. Detail: %s", user, lastRule, extraDetails)
-
-	// We do NOT want to do disconnect if the user has active swaps.  However,
-	// we do not want the user to initiate a swap or place a new order, so there
-	// should be appropriate checks on order submission and match/swap
-	// initiation (TODO).
 
 	return nil
 }
