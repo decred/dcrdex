@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package main
+package version
 
 import (
 	"bytes"
@@ -22,13 +22,13 @@ const (
 // These constants define the application version and follow the semantic
 // versioning 2.0.0 spec (http://semver.org/).
 const (
-	AppName  string = "dcrdex"
+	AppName  string = "dexc"
 	AppMajor uint   = 0
 	AppMinor uint   = 1
 	AppPatch uint   = 0
 )
 
-// go build -v -ldflags "-X main.appPreRelease= -X main.appBuild=$(git rev-parse --short HEAD)"
+// go build -v -ldflags "-X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=$(git rev-parse --short HEAD)"
 var (
 	// appPreRelease is defined as a variable so it can be overridden during the
 	// build process. It MUST only contain characters from semanticAlphabet per

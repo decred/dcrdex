@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
@@ -72,6 +73,7 @@ type Config struct {
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
 	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	LocalLogs  bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
+	ShowVer    bool   `short:"V" long:"version" description:"Display version information and exit"`
 	Net        dex.Network
 }
 
@@ -103,6 +105,13 @@ func Configure() (*Config, error) {
 			os.Exit(0)
 		}
 		return nil, flagerr
+	}
+
+	// Show the version and exit if the version flag was specified.
+	if preCfg.ShowVer {
+		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
+			version.AppName, version.Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		os.Exit(0)
 	}
 
 	// If the app directory has been changed, but the config file path hasn't,
