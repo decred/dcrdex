@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/client/asset/ltc" // register ltc asset
 	"decred.org/dcrdex/client/cmd/dexc/ui"
+	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
@@ -62,6 +64,7 @@ func main() {
 	}
 	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel, utc)
 	log = logMaker.Logger("DEXC")
+	log.Infof("%s version %v (Go version %s)", version.AppName, version.Version(), runtime.Version())
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
