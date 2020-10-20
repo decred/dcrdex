@@ -623,8 +623,8 @@ const (
 	// UserOrderLimitAdjustment based on the cumulative amounts in the different
 	// match outcomes.
 	successWeight    int64 = 2
-	stuckLongWeight  int64 = -6
-	stuckShortWeight int64 = -3
+	stuckLongWeight  int64 = -4
+	stuckShortWeight int64 = -2
 	spoofedWeight    int64 = -1
 )
 
