@@ -36,6 +36,7 @@ type AuthManager interface {
 	PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID)
 	MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
+	UserOrderLimitAdjustment(user account.AccountID, base, quote uint32) int64
 }
 
 const (
@@ -43,8 +44,7 @@ const (
 	fundingTxWait  = time.Minute
 )
 
-// MarketTunnel is a connection to a market and information about existing
-// swaps.
+// MarketTunnel is a connection to a market.
 type MarketTunnel interface {
 	// SubmitOrder submits the order to the market for insertion into the epoch
 	// queue.
@@ -354,8 +354,17 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			// Send the order to the epoch queue where it will be time stamped.
 			log.Tracef("Found and validated %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
 			if err := tunnel.SubmitOrder(oRecord); err != nil {
-				log.Warnf("Market failed to SubmitOrder: %v", err)
-				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order"))
+				code := msgjson.UnknownMarketError
+				switch {
+				case errors.Is(err, ErrInternalServer):
+					log.Errorf("Market failed to SubmitOrder: %v", err)
+				case errors.Is(err, ErrQuantityTooHigh):
+					code = msgjson.OrderQuantityTooHigh
+					fallthrough
+				default:
+					log.Debugf("Market failed to SubmitOrder: %v", err)
+				}
+				r.respondError(msg.ID, user, msgjson.NewError(code, err.Error()))
 			}
 			return wait.DontTryAgain
 		},
@@ -544,8 +553,12 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			// Send the order to the epoch queue where it will be time stamped.
 			log.Tracef("Found and validated %s coins %v for new market order", fundingAsset.Symbol, coinStrs)
 			if err := tunnel.SubmitOrder(oRecord); err != nil {
-				log.Warnf("Market failed to SubmitOrder: %v", err)
-				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order"))
+				if errors.Is(err, ErrInternalServer) {
+					log.Errorf("Market failed to SubmitOrder: %v", err)
+				} else {
+					log.Debugf("Market failed to SubmitOrder: %v", err)
+				}
+				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, err.Error()))
 			}
 			return wait.DontTryAgain
 		},
@@ -635,8 +648,10 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		msgID: msg.ID,
 	}
 	if err := tunnel.SubmitOrder(oRecord); err != nil {
-		log.Warnf("Market failed to SubmitOrder: %v", err)
-		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+		if errors.Is(err, ErrInternalServer) {
+			log.Errorf("Market failed to SubmitOrder: %v", err)
+		}
+		return msgjson.NewError(msgjson.UnknownMarketError, err.Error())
 	}
 	return nil
 }

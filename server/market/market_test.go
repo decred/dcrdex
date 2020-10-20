@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
+	srvauth "decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap"
@@ -747,7 +748,7 @@ func TestMarket_Run(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := 10
+	lots := srvauth.InitUserTakerLotLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -1325,7 +1326,7 @@ func TestMarket_Cancelable(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := 10
+	lots := srvauth.InitUserTakerLotLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -1393,7 +1394,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	// Submit the standing limit order into the current epoch.
 	err = mkt.SubmitOrder(&oRecord)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	if !mkt.Cancelable(lo.ID()) {

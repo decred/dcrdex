@@ -53,11 +53,11 @@ func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
 func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	var outcomes []*db.MatchOutcome
 
-	for m := range a.markets {
+	for m, mkt := range a.markets {
 		matchesTableName := fullMatchesTableName(a.dbName, m)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 		defer cancel()
-		matchOutcomes, err := completedAndAtFaultMatches(ctx, a.db, matchesTableName, aid, lastN)
+		matchOutcomes, err := completedAndAtFaultMatches(ctx, a.db, matchesTableName, aid, lastN, mkt.Base, mkt.Quote)
 		if err != nil {
 			return nil, err
 		}
@@ -75,7 +75,7 @@ func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN in
 }
 
 func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName string,
-	aid account.AccountID, lastN int) (outcomes []*db.MatchOutcome, err error) {
+	aid account.AccountID, lastN int, base, quote uint32) (outcomes []*db.MatchOutcome, err error) {
 	stmt := fmt.Sprintf(internal.CompletedOrAtFaultMatchesLastN, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid, lastN)
 	if err != nil {
@@ -87,7 +87,9 @@ func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName stri
 		var status uint8
 		var success bool
 		var refTime sql.NullInt64
-		err = rows.Scan(&status, &success, &refTime)
+		var mid order.MatchID
+		var value uint64
+		err = rows.Scan(&mid, &status, &value, &success, &refTime)
 		if err != nil {
 			return
 		}
@@ -114,8 +116,12 @@ func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName stri
 
 		outcomes = append(outcomes, &db.MatchOutcome{
 			Status: order.MatchStatus(status),
+			ID:     mid,
 			Fail:   !success,
 			Time:   refTime.Int64,
+			Value:  value,
+			Base:   base,
+			Quote:  quote,
 		})
 	}
 

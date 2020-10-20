@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -33,6 +34,8 @@ func randBytes(l int) []byte {
 	rand.Read(b)
 	return b
 }
+
+var randomMatchID = ordertest.RandomMatchID
 
 type ratioData struct {
 	oidsCompleted  []order.OrderID
@@ -460,7 +463,7 @@ func nextTime() int64 {
 	return t0
 }
 
-func newMatchOutcome(status order.MatchStatus, fail bool, t int64) *db.MatchOutcome {
+func newMatchOutcome(status order.MatchStatus, mid order.MatchID, fail bool, val uint64, t int64) *db.MatchOutcome {
 	switch status {
 	case order.NewlyMatched, order.MakerSwapCast, order.TakerSwapCast:
 		if !fail {
@@ -473,8 +476,10 @@ func newMatchOutcome(status order.MatchStatus, fail bool, t int64) *db.MatchOutc
 	}
 	return &db.MatchOutcome{
 		Status: status,
+		ID:     mid,
 		Fail:   fail,
 		Time:   t,
+		Value:  val,
 	}
 }
 
@@ -487,15 +492,15 @@ func newPreimageResult(miss bool, t int64) *db.PreimageResult {
 
 func setViolations() (wantScore int32) {
 	rig.storage.userMatchOutcomes = []*db.MatchOutcome{
-		newMatchOutcome(order.NewlyMatched, true, nextTime()),
-		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
-		newMatchOutcome(order.NewlyMatched, true, nextTime()),
-		newMatchOutcome(order.MakerSwapCast, true, nextTime()), // noSwapAsTaker at index 3
-		newMatchOutcome(order.TakerSwapCast, true, nextTime()),
-		newMatchOutcome(order.MakerRedeemed, false, nextTime()), // success (for maker)
-		newMatchOutcome(order.MakerRedeemed, true, nextTime()),
-		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
-		newMatchOutcome(order.MatchComplete, false, nextTime()), // success
+		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
+		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()), // noSwapAsTaker at index 3
+		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MakerRedeemed, randomMatchID(), false, 7, nextTime()), // success (for maker)
+		newMatchOutcome(order.MakerRedeemed, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
+		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
 	}
 	t0 -= 4000
 	rig.storage.userPreimageResults = []*db.PreimageResult{newPreimageResult(true, nextTime())}
@@ -525,7 +530,7 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 
 	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes,
-		newMatchOutcome(order.MakerSwapCast, true, nextTime()))
+		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()))
 	wantScore += noSwapAsTakerScore
 
 	score, err = rig.mgr.loadUserScore(user.acctID)
@@ -547,10 +552,10 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 			name: "negative",
 			user: user.acctID,
 			matchOutcomes: []*db.MatchOutcome{
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
 			wantScore: -4,
 		},
@@ -564,10 +569,10 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 			name: "balance",
 			user: user.acctID,
 			matchOutcomes: []*db.MatchOutcome{
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
 			preimageMisses: []*db.PreimageResult{
 				newPreimageResult(true, nextTime()),
@@ -579,15 +584,15 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 			name: "tipping red",
 			user: user.acctID,
 			matchOutcomes: []*db.MatchOutcome{
-				newMatchOutcome(order.NewlyMatched, true, nextTime()),
-				newMatchOutcome(order.MakerSwapCast, true, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.NewlyMatched, true, nextTime()),
-				newMatchOutcome(order.MakerRedeemed, true, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
-				newMatchOutcome(order.MatchComplete, false, nextTime()),
+				newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
+				newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
+				newMatchOutcome(order.MakerRedeemed, randomMatchID(), true, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
+				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
 			preimageMisses: []*db.PreimageResult{
 				newPreimageResult(true, nextTime()),

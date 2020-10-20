@@ -58,11 +58,10 @@ type AuthManager interface {
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
-	SwapSuccess(user account.AccountID, refTime time.Time)
-	Inaction(user account.AccountID, step auth.NoActionStep, refTime time.Time, oid order.OrderID, mid order.MatchID)
+	SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time)
+	Inaction(user account.AccountID, misstep auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
-	Unban(user account.AccountID) error
 }
 
 // Storage updates match data in what is presumably a database.
@@ -301,8 +300,9 @@ type Swapper struct {
 	// actions.
 	unbookHook func(lo *order.LimitOrder) bool
 	// The matches map and the contained matches are protected by the matchMtx.
-	matchMtx sync.RWMutex
-	matches  map[order.MatchID]*matchTracker
+	matchMtx    sync.RWMutex
+	matches     map[order.MatchID]*matchTracker
+	userMatches map[account.AccountID]map[order.MatchID]*matchTracker
 	// orders tracks order status and active swaps.
 	orders *orderSwapTracker
 	// The broadcast timeout.
@@ -389,6 +389,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		unbookHook:    cfg.UnbookHook,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
+		userMatches:   make(map[account.AccountID]map[order.MatchID]*matchTracker),
 		orders:        newOrderSwapTracker(),
 		bTimeout:      cfg.BroadcastTimeout,
 		lockTimeTaker: cfg.LockTimeTaker,
@@ -465,6 +466,70 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	return swapper, nil
 }
 
+// addMatch registers a match. The matchMtx must be locked.
+func (s *Swapper) addMatch(mt *matchTracker) {
+	mid := mt.ID()
+	s.matches[mid] = mt
+
+	// Add the match to both maker's and taker's match maps.
+	maker, taker := mt.Maker.User(), mt.Taker.User()
+	for _, user := range []account.AccountID{maker, taker} {
+		userMatches, found := s.userMatches[user]
+		if !found {
+			s.userMatches[user] = map[order.MatchID]*matchTracker{
+				mid: mt,
+			}
+		} else {
+			userMatches[mid] = mt // may overwrite for self-match (ok)
+		}
+		if maker == taker {
+			break
+		}
+	}
+}
+
+// deleteMatch unregisters a match. The matchMtx must be locked.
+func (s *Swapper) deleteMatch(mt *matchTracker) {
+	mid := mt.ID()
+	delete(s.matches, mid)
+
+	// Remove the match from both maker's and taker's match maps.
+	maker, taker := mt.Maker.User(), mt.Taker.User()
+	for _, user := range []account.AccountID{maker, taker} {
+		userMatches, found := s.userMatches[user]
+		if !found {
+			// Should not happen if consistently using addMatch.
+			log.Errorf("deleteMatch: No matches for user %v found!", user)
+			continue
+		}
+		delete(userMatches, mid)
+		if len(userMatches) == 0 {
+			delete(s.userMatches, user)
+		}
+		if maker == taker {
+			break
+		}
+	}
+}
+
+// UserSwappingAmt gets the total amount in active swaps for a user in a
+// specified market. This helps the market compute a user's order size limit.
+func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64) {
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+	um, found := s.userMatches[user]
+	if !found {
+		return
+	}
+	for _, mt := range um {
+		if mt.Maker.BaseAsset == base && mt.Maker.QuoteAsset == quote {
+			amt += mt.Quantity
+			count++
+		}
+	}
+	return
+}
+
 func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// State binary version check should be done when State is loaded.
 
@@ -513,6 +578,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	}
 
 	s.matches = make(map[order.MatchID]*matchTracker, len(state.MatchTrackers))
+	s.userMatches = make(map[account.AccountID]map[order.MatchID]*matchTracker)
 	for mid, mtd := range state.MatchTrackers {
 		// Check and skip matches for missing assets.
 		makerSwapAsset := mtd.MakerStatus.SwapAsset
@@ -549,7 +615,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 			continue
 		}
 
-		s.matches[mid] = mt
+		s.addMatch(mt)
 	}
 
 	// Order completion/failure tracking data
@@ -1005,7 +1071,7 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	}
 
 	// Register the failure to act violation, adjusting the user's score.
-	s.authMgr.Inaction(orderAtFault.User(), misstep, refTime, orderAtFault.ID(), match.ID())
+	s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match), match.Quantity, refTime, orderAtFault.ID())
 
 	// Send the revoke_match messages, and solicit acks.
 	s.revoke(match)
@@ -1071,7 +1137,7 @@ func (s *Swapper) checkInactionEventBased() {
 	}
 
 	for _, match := range deletions {
-		delete(s.matches, match.ID())
+		s.deleteMatch(match)
 	}
 }
 
@@ -1135,7 +1201,7 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 	}
 
 	for _, match := range deletions {
-		delete(s.matches, match.ID())
+		s.deleteMatch(match)
 	}
 }
 
@@ -1625,14 +1691,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if newStatus == order.MatchComplete { // actor is taker
 		log.Debugf("Deleting completed match %v", matchID)
 		s.matchMtx.Lock()
-		delete(s.matches, matchID)
+		s.deleteMatch(match)
 		s.matchMtx.Unlock()
 		// SaveRedeemB flags the match as inactive in the DB.
 	}
 
 	// Credit the user for completing the swap, adjusting the user's score.
 	if actor.user != counterParty.user || newStatus == order.MatchComplete { // is user is both sides, only credit on MatchComplete (taker done too)
-		s.authMgr.SwapSuccess(actor.user, redeemTime)
+		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime)
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
@@ -2395,10 +2461,10 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 		s.orders.canceled(lo)
 	}
 
-	// Add the matches to the map.
+	// Add the matches to the matches/userMatches maps.
 	s.matchMtx.Lock()
 	for _, match := range toMonitor {
-		s.matches[match.ID()] = match
+		s.addMatch(match)
 	}
 	s.matchMtx.Unlock()
 

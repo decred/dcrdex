@@ -69,6 +69,7 @@ const (
 	AccountNotFoundError              // 50
 	UnpaidAccountError                // 51
 	InvalidRequestError               // 52
+	OrderQuantityTooHigh              // 53
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

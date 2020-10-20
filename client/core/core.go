@@ -2451,7 +2451,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
 		unlockCoins()
-		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
+		return nil, 0, fmt.Errorf("new order request with DEX server %v market %v failed: %w", dc.acct.host, mktID, err)
 	}
 
 	// If we encounter an error, perform some basic logging.

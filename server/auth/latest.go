@@ -4,40 +4,52 @@
 package auth
 
 import (
+	"bytes"
 	"sort"
 	"sync"
+
+	"decred.org/dcrdex/dex/order"
 )
 
-type stampedFlag struct {
+type matchOutcome struct {
+	// sorting is done by time and match ID
 	time int64
-	flag int64
+	mid  order.MatchID
+
+	// match outcome and value
+	outcome     Violation
+	base, quote uint32 // market
+	value       uint64
 }
 
-func lessByTime(ti, tj *stampedFlag) bool {
+func lessByTimeThenMID(ti, tj *matchOutcome) bool {
+	if ti.time == tj.time {
+		return bytes.Compare(ti.mid[:], tj.mid[:]) < 0 // ascending (smaller ID first)
+	}
 	return ti.time < tj.time // ascending (newest last in slice)
 }
 
-type latest struct {
+type latestMatchOutcomes struct {
 	mtx      sync.Mutex
 	cap      int16
-	stampeds []*stampedFlag
+	outcomes []*matchOutcome
 }
 
-func newLatest(cap int16) *latest {
-	return &latest{
+func newLatestMatchOutcomes(cap int16) *latestMatchOutcomes {
+	return &latestMatchOutcomes{
 		cap:      cap,
-		stampeds: make([]*stampedFlag, 0, cap+1), // cap+1 since an old item is popped *after* a new one is pushed
+		outcomes: make([]*matchOutcome, 0, cap+1), // cap+1 since an old item is popped *after* a new one is pushed
 	}
 }
 
-func (la *latest) add(t *stampedFlag) {
+func (la *latestMatchOutcomes) add(mo *matchOutcome) {
 	la.mtx.Lock()
 	defer la.mtx.Unlock()
 
 	// Use sort.Search and insert it at the right spot.
-	n := len(la.stampeds)
+	n := len(la.outcomes)
 	i := sort.Search(n, func(i int) bool {
-		return lessByTime(la.stampeds[n-1-i], t)
+		return lessByTimeThenMID(la.outcomes[n-1-i], mo)
 	})
 	if i == int(la.cap) /* i == n && n == int(la.cap) */ {
 		// The new one is the oldest/smallest, but already at capacity.
@@ -45,20 +57,123 @@ func (la *latest) add(t *stampedFlag) {
 	}
 	// Insert at proper location.
 	i = n - i // i-1 is first location that stays
-	la.stampeds = append(la.stampeds[:i], append([]*stampedFlag{t}, la.stampeds[i:]...)...)
+	la.outcomes = append(la.outcomes[:i], append([]*matchOutcome{mo}, la.outcomes[i:]...)...)
 
 	// Pop one stamped if the slice was at capacity prior to pushing the new one.
-	if len(la.stampeds) > int(la.cap) {
+	if len(la.outcomes) > int(la.cap) {
 		// pop front, the oldest stamped
-		la.stampeds[0] = nil // avoid memory leak
-		la.stampeds = la.stampeds[1:]
+		la.outcomes[0] = nil // avoid memory leak
+		la.outcomes = la.outcomes[1:]
 	}
 }
 
-func (la *latest) bin() map[int64]int64 {
-	bins := make(map[int64]int64)
-	for _, th := range la.stampeds {
-		bins[th.flag]++
+func (la *latestMatchOutcomes) binViolations() map[Violation]int64 {
+	bins := make(map[Violation]int64)
+	for _, mo := range la.outcomes {
+		bins[mo.outcome]++
 	}
 	return bins
+}
+
+// SwapAmounts breaks down the quantities of completed swaps in four rough
+// categories: successfully swapped (Swapped), failed with counterparty funds
+// locked for the long/maker lock time (StuckLong), failed with counterparty
+// funds locked for the short/taker lock time (StuckShort), and failed to
+// initiate swap following match with no funds locked in contracts (Spoofed).
+type SwapAmounts struct {
+	Swapped    int64
+	StuckLong  int64
+	StuckShort int64
+	Spoofed    int64
+}
+
+func (sa *SwapAmounts) addAmt(v Violation, value int64) {
+	switch v {
+	case ViolationSwapSuccess:
+		sa.Swapped += value
+	case ViolationNoSwapAsTaker:
+		sa.StuckLong += value
+	case ViolationNoRedeemAsMaker:
+		sa.StuckShort += value
+	case ViolationNoSwapAsMaker, ViolationPreimageMiss: // ! preimage misses are presently in preimageOutcome
+		sa.Spoofed += value
+	}
+}
+
+// func (la *latestMatchOutcomes) swapAmounts() *SwapAmounts {
+// 	sa := new(SwapAmounts)
+// 	for _, mo := range la.outcomes {
+// 		sa.addAmt(mo.outcome, int64(mo.value)) // must be same units (e.g. lots)!
+// 	}
+// 	return sa
+// }
+
+func (la *latestMatchOutcomes) mktSwapAmounts(base, quote uint32) *SwapAmounts {
+	sa := new(SwapAmounts)
+	for _, mo := range la.outcomes {
+		if mo.base == base && mo.quote == quote {
+			sa.addAmt(mo.outcome, int64(mo.value))
+		}
+	}
+	return sa
+}
+
+type preimageOutcome struct {
+	time int64
+	oid  order.OrderID
+	miss bool
+}
+
+func lessByTimeThenOID(ti, tj *preimageOutcome) bool {
+	if ti.time == tj.time {
+		return bytes.Compare(ti.oid[:], tj.oid[:]) < 0 // ascending (smaller ID first)
+	}
+	return ti.time < tj.time // ascending (newest last in slice)
+}
+
+type latestPreimageOutcomes struct {
+	mtx      sync.Mutex
+	cap      int16
+	outcomes []*preimageOutcome
+}
+
+func newLatestPreimageOutcomes(cap int16) *latestPreimageOutcomes {
+	return &latestPreimageOutcomes{
+		cap:      cap,
+		outcomes: make([]*preimageOutcome, 0, cap+1), // cap+1 since an old item is popped *after* a new one is pushed
+	}
+}
+
+func (la *latestPreimageOutcomes) add(po *preimageOutcome) {
+	la.mtx.Lock()
+	defer la.mtx.Unlock()
+
+	// Use sort.Search and insert it at the right spot.
+	n := len(la.outcomes)
+	i := sort.Search(n, func(i int) bool {
+		return lessByTimeThenOID(la.outcomes[n-1-i], po)
+	})
+	if i == int(la.cap) /* i == n && n == int(la.cap) */ {
+		// The new one is the oldest/smallest, but already at capacity.
+		return
+	}
+	// Insert at proper location.
+	i = n - i // i-1 is first location that stays
+	la.outcomes = append(la.outcomes[:i], append([]*preimageOutcome{po}, la.outcomes[i:]...)...)
+
+	// Pop one stamped if the slice was at capacity prior to pushing the new one.
+	if len(la.outcomes) > int(la.cap) {
+		// pop front, the oldest stamped
+		la.outcomes[0] = nil // avoid memory leak
+		la.outcomes = la.outcomes[1:]
+	}
+}
+
+func (la *latestPreimageOutcomes) misses() (misses int32) {
+	for _, th := range la.outcomes {
+		if th.miss {
+			misses++
+		}
+	}
+	return
 }

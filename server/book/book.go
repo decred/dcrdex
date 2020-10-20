@@ -156,7 +156,8 @@ func (b *Book) Order(oid order.OrderID) *order.LimitOrder {
 }
 
 // UserOrderTotals returns the total amount in booked orders and the number of
-// booked orders, for both the buy and sell sides of the book.
+// booked orders, for both the buy and sell sides of the book. Both amounts are
+// in units of the base asset, and should be multiples of the market's lot size.
 func (b *Book) UserOrderTotals(user account.AccountID) (buyAmt, sellAmt, buyCount, sellCount uint64) {
 	b.mtx.RLock()
 	buyAmt, buyCount = b.buys.UserOrderTotals(user)

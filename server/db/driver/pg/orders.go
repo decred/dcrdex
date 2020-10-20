@@ -753,13 +753,15 @@ func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.Preim
 		for rows.Next() {
 			var miss bool
 			var time int64
-			err = rows.Scan(&miss, &time)
+			var oid order.OrderID
+			err = rows.Scan(&oid, &miss, &time)
 			if err != nil {
 				return err
 			}
 			outcomes = append(outcomes, &db.PreimageResult{
 				Miss: miss,
 				Time: time,
+				ID:   oid,
 			})
 		}
 

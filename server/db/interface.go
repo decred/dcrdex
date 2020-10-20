@@ -37,10 +37,7 @@ type OrderStatus struct {
 type PreimageResult struct {
 	Miss bool
 	Time int64
-	// NOTE: There can be multiple results with the same time (same epoch) but
-	// since there is unlikely to be a mix of misses and successes in the same
-	// epoch, the sorting ambiguity is acceptable. If that proves to be a
-	// problem, order ID can be added to this struct.
+	ID   order.OrderID
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with
@@ -295,9 +292,12 @@ func MatchID(match *order.Match) MarketMatchID {
 // confirms. These times must match the reference times provided to the auth
 // manager when registering new swap outcomes.
 type MatchOutcome struct {
-	Status order.MatchStatus
-	Fail   bool // taker must reach MatchComplete, maker succeeds at MakerRedeemed
-	Time   int64
+	Status      order.MatchStatus
+	ID          order.MatchID
+	Fail        bool // taker must reach MatchComplete, maker succeeds at MakerRedeemed
+	Time        int64
+	Value       uint64
+	Base, Quote uint32 // the market
 }
 
 // MatchArchiver is the interface required for storage and retrieval of all

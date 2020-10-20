@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -41,6 +43,7 @@ const (
 	ErrInvalidCommitment      = Error("order commitment invalid")
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
+	ErrQuantityTooHigh        = Error("order quantity exceeds user limit")
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
@@ -53,6 +56,7 @@ const (
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	CheckUnspent(asset uint32, coinID []byte) error
+	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -540,16 +544,22 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 // orders, the best order rate on other side is returned. If both sides have no
 // orders, 0 is returned.
 func (m *Market) MidGap() uint64 {
+	_, mid, _ := m.rates()
+	return mid
+}
+
+func (m *Market) rates() (bestBuyRate, mid, bestSellRate uint64) {
 	bestBuy, bestSell := m.book.Best()
 	if bestBuy == nil {
 		if bestSell == nil {
-			return 0
+			return
 		}
-		return bestSell.Rate
+		return 0, bestSell.Rate, bestSell.Rate
 	} else if bestSell == nil {
-		return bestBuy.Rate
+		return bestBuy.Rate, bestBuy.Rate, math.MaxUint64
 	}
-	return (bestBuy.Rate + bestSell.Rate) / 2 // note downward bias on truncate
+	mid = (bestBuy.Rate + bestSell.Rate) / 2 // note downward bias on truncate
+	return bestBuy.Rate, mid, bestSell.Rate
 }
 
 // CoinLocked checks if a coin is locked. The asset is specified since we should
@@ -953,7 +963,7 @@ func (m *Market) Run(ctx context.Context) {
 				continue
 			}
 
-			// Stamp and process the order in the target epoch queue.
+			// Process the order in the target epoch queue.
 			err := m.processOrder(s.rec, orderEpoch, notifyChan, s.errChan)
 			if err != nil {
 				log.Errorf("Failed to process order %v: %v", s.rec.order, err)
@@ -1040,15 +1050,95 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// ID, this also prevents orders with the same ID.
 	// TODO: Prevent commitment reuse in general, without expensive DB queries.
 	ord := rec.order
+	oid := ord.ID()
+	user := ord.User()
 	commit := ord.Commitment()
 	m.epochMtx.RLock()
 	otherOid, found := m.epochCommitments[commit]
 	m.epochMtx.RUnlock()
 	if found {
 		log.Debugf("Received order %v with commitment %x also used in previous order %v!",
-			ord, commit, otherOid)
+			oid, commit, otherOid)
 		errChan <- ErrInvalidCommitment
 		return nil
+	}
+
+	// Whether an order is a taker depends on type, and for limit orders it
+	// depends on force and rates.
+	bestBuy, midGap, bestSell := m.rates()
+	likelyTaker := func(ord order.Order) bool {
+		lo, ok := ord.(*order.LimitOrder)
+		if !ok || lo.Force == order.ImmediateTiF {
+			return true
+		}
+		// Must cross the spread to be a taker (not so conservative).
+		switch {
+		case midGap == 0:
+			return false // empty market: could be taker, but assume not
+		case lo.Sell:
+			return lo.Rate <= bestBuy
+		default:
+			return lo.Rate >= bestSell
+		}
+	}
+	// Note: bestSell and bestBuy do not include other epoch orders with
+	// standing force that might become booked. Doing so would only make this
+	// order less likely to be assumed a taker by moving bestSell down or
+	// bestBuy up, so be conservative and only consider current book.
+
+	// helper to compute an order's quantity in base asset units, using current
+	// midGap rate for market buys.
+	baseQty := func(ord order.Order) uint64 {
+		if ord.Type() == order.CancelOrderType {
+			return 0
+		}
+		qty := ord.Trade().Quantity
+		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
+			// Market buy qty is in quote asset. Convert to base.
+			if midGap == 0 {
+				qty = m.marketInfo.LotSize // no orders on the book; call it 1 lot
+			} else {
+				qty = calc.QuoteToBase(midGap, qty)
+			}
+		}
+		return qty
+	}
+
+	// Include user's own epoch orders when enforcing both booked order and
+	// taker settling amount limits.
+	var userStandingEpochQty, userTakerEpochQty uint64
+	m.epochMtx.RLock()
+	for _, epOrd := range m.epochOrders {
+		if epOrd.User() != user || epOrd.Type() == order.CancelOrderType {
+			continue
+		}
+
+		// For purposes of the user's book qty limit, assumed standing limits
+		// will be booked.
+		if lo, ok := epOrd.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+			userStandingEpochQty += lo.Quantity
+		}
+
+		// Even if standing, may count as taker for purposes of taker qty limit.
+		if likelyTaker(epOrd) {
+			userTakerEpochQty += baseQty(epOrd)
+		}
+	}
+	m.epochMtx.RUnlock()
+
+	// Now that epoch orders are considered, check this candidate order.
+	if lo, ok := ord.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+		// Check the user's current booked amount.
+		bookedBuyAmt, bookedSellAmt, _, _ := m.book.UserOrderTotals(user)
+		bookedAmt := bookedBuyAmt + bookedSellAmt + userStandingEpochQty
+		qty := lo.Quantity
+		if (qty+bookedAmt)/m.marketInfo.LotSize > auth.BookedLotLimit {
+			log.Debugf("Rejecting user %v order %v: too much in booked orders", user, oid)
+			errChan <- dex.NewError(ErrQuantityTooHigh,
+				fmt.Sprintf("Order quantity %d (%d lots) too large. User book limit is %d lots, and you have %d lots booked already).",
+					qty, qty/m.marketInfo.LotSize, auth.BookedLotLimit, bookedAmt/m.marketInfo.LotSize))
+			return nil
+		}
 	}
 
 	// Verify that another cancel order targeting the same order is not already
@@ -1078,6 +1168,45 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			errChan <- ErrInvalidCancelOrder
 			return nil
 		}
+	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
+		// NOTE: We can entirely change this so that the taker limit is not
+		// based on just this market. Also so that it's based on lots rather
+		// than amount, but we risk comparing apples to oranges. Further, I'm
+		// open to going even simpler and scaling an absolute max by the user's
+		// current score, but that takes swapped value entirely out of the
+		// picture; adding swapped value into the users score is another
+		// possibility, but which has the same units selection challenge.
+
+		// Swapper knows how much is in active swaps for this asset pair.
+		amtInSwaps, activeSwaps := m.swapper.UserSwappingAmt(user, ord.Base(), ord.Quote()) // swapper knows nothing of lots, and we know nothing of other markets
+
+		// AuthManager knows the user's swap outcome amount history, and we know
+		// the current market lot size. Get the adjustment in units of the base
+		// asset from the AuthManager, and combine with the new-user limit.
+		newUserLimit := auth.InitUserTakerLotLimit * int64(m.marketInfo.LotSize)
+		adjustment := m.auth.UserOrderLimitAdjustment(user, ord.Base(), ord.Quote()) // hard to make this lots across all markets
+		userLimit := newUserLimit + adjustment
+		if userLimit/int64(m.marketInfo.LotSize) >= auth.AbsTakerLotLimit {
+			userLimit = auth.AbsTakerLotLimit * int64(m.marketInfo.LotSize)
+		}
+		// Subtract the user's total active amount from their limit.
+		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
+
+		qty := baseQty(ord)
+		symb := dex.BipIDSymbol(m.marketInfo.Base)
+		log.Debugf("User placing likely-taker order on market %s worth %d (%s units) of %d allowed. "+
+			"User has %d (%s units) in %d active swaps, %d in epoch taker orders.",
+			m.marketInfo.Name, qty, symb, orderQtyAllowed,
+			amtInSwaps, symb, activeSwaps, userTakerEpochQty)
+
+		if int64(qty) > orderQtyAllowed {
+			log.Infof("Rejecting user %v likely-taker order %v: qty %d > %d allowed (%d active of %d limit)",
+				user, oid, qty, orderQtyAllowed, amtInSwaps, userLimit)
+			errChan <- dex.NewError(ErrQuantityTooHigh,
+				fmt.Sprintf("Order quantity %d too large. Current likely-taker order limit: %d (you have %d settling already and %d in epoch taker orders)",
+					qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty))
+			return nil
+		}
 	}
 
 	// Sign the order and prepare the client response. Only after the archiver
@@ -1086,7 +1215,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	respMsg, err := m.orderResponse(rec)
 	if err != nil {
 		log.Errorf("failed to create msgjson.Message for order %v, msgID %v response: %v",
-			rec.order, rec.msgID, err)
+			ord, rec.msgID, err)
 		errChan <- ErrMalformedOrderResponse
 		return nil
 	}
@@ -1135,7 +1264,6 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Insert the order into the epoch queue.
 	epoch.Insert(ord)
 
-	oid := ord.ID()
 	m.epochMtx.Lock()
 	m.epochOrders[oid] = ord
 	m.epochCommitments[commit] = oid
@@ -1147,7 +1275,6 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
-	user := ord.User()
 	if err := m.auth.Send(user, respMsg); err != nil {
 		log.Infof("Failed to send signed new order response to user %v, order %v: %v",
 			user, oid, err)
