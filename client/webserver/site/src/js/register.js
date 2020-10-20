@@ -22,10 +22,12 @@ export default class RegistrationPage extends BasePage {
       // Form 3: Unlock Decred wallet
       'unlockWalletForm',
       // Form 4: Configure DEX server
-      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
-      'submitDEXAddr', 'dexAddrErr',
+      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert',
+      'addCert', 'submitDEXAddr', 'dexAddrErr', 'dexCertFile', 'dexNeedCert',
+      'dexShowMore',
       // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr'
+      'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      'dexCertBox'
     ])
 
     // SET APP PASSWORD
@@ -51,8 +53,12 @@ export default class RegistrationPage extends BasePage {
     page.selectedCert.textContent = this.defaultTLSText
     Doc.bind(page.certFile, 'change', () => this.readCert())
     Doc.bind(page.removeCert, 'click', () => this.resetCert())
-    Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
+    Doc.bind(page.addCert, 'click', () => page.certFile.click())
     bindForm(page.dexAddrForm, page.submitDEXAddr, () => { this.checkDEX() })
+    Doc.bind(page.dexShowMore, 'click', () => {
+      Doc.hide(page.dexShowMore)
+      Doc.show(page.dexCertBox)
+    })
 
     // SUBMIT DEX REGISTRATION
     bindForm(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
@@ -136,9 +142,15 @@ export default class RegistrationPage extends BasePage {
       cert: cert
     })
     app.loaded()
-    if (!app.checkResponse(res)) {
-      page.dexAddrErr.textContent = res.msg
-      Doc.show(page.dexAddrErr)
+    if (!app.checkResponse(res, true)) {
+      if (res.msg === 'certificate required') {
+        Doc.hide(page.dexShowMore)
+        Doc.show(page.dexCertBox, page.dexNeedCert)
+      } else {
+        page.regErr.textContent = res.msg
+        Doc.show(page.regErr)
+      }
+
       return
     }
     this.fee = res.fee

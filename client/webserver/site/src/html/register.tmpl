@@ -36,14 +36,19 @@
 
     {{- /* DEX ADDRESS FORM */ -}}
     <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="dexAddrForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Add a DEX</div>
+      <div class="bg2 px-2 pt-1 mb-3 text-center fs18">Add a DEX</div>
       <div class="p-4">
         <div>
           <label for="dexAddr" class="pl-1 mb-1">DEX Address</label>
           <input type="text" class="form-control select" id="dexAddr">
         </div>
-        <div>
-          <div class="pl-1 mb-1 mt-4 pointer">TLS Certificate</div>
+        <div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center" id="dexShowMore"><span class="ico-plus fs11"></span> <div class="pl-2">Show more options</div></div>
+        <div class="d-hide pt-3" id="dexCertBox">
+          <div class="px-1 my-1 mb-2 fs14 d-hide" id="dexNeedCert">
+            Looks like we don't have an SSL certificate for this DEX.
+            Add the server's certificate to continue.
+          </div>
+          <div class="pl-1 mb-1 my-1 pointer">TLS Certificate</div>
           <input type="file" class="form-control select d-none" id="certFile">
           <div class="pl-1 mt-2 fs15">
             <span id="selectedCert"></span>
