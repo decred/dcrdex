@@ -226,27 +226,39 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
-		r.Post("/getfee", s.apiGetFee)
-		r.Post("/newwallet", s.apiNewWallet)
-		r.Post("/openwallet", s.apiOpenWallet)
-		r.Post("/closewallet", s.apiCloseWallet)
-		r.Post("/register", s.apiRegister)
 		r.Post("/init", s.apiInit)
-		r.Post("/login", s.apiLogin)
-		r.Post("/withdraw", s.apiWithdraw)
+
+		// TODO: Allow register page to not require /user and /defaultwalletcfg
+		// until authorized with a cookie. These currently must be accessible to
+		// set the app password on the browser.
 		r.Get("/user", s.apiUser)
-		r.Post("/connectwallet", s.apiConnectWallet)
-		r.Post("/trade", s.apiTrade)
-		r.Post("/cancel", s.apiCancel)
-		r.Post("/logout", s.apiLogout)
-		r.Post("/balance", s.apiGetBalance)
-		r.Post("/parseconfig", s.apiParseConfig)
-		r.Post("/reconfigurewallet", s.apiReconfig)
-		r.Post("/walletsettings", s.apiWalletSettings)
-		r.Post("/setwalletpass", s.apiSetWalletPass)
 		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
-		r.Post("/orders", s.apiOrders)
-		r.Post("/order", s.apiOrder)
+
+		r.Group(func(apiInit chi.Router) {
+			apiInit.Use(s.rejectUninited)
+			apiInit.Post("/login", s.apiLogin)
+			apiInit.Post("/getfee", s.apiGetFee)
+		})
+
+		r.Group(func(apiAuth chi.Router) {
+			apiAuth.Use(s.rejectUnauthed)
+			apiAuth.Post("/register", s.apiRegister)
+			apiAuth.Post("/newwallet", s.apiNewWallet)
+			apiAuth.Post("/openwallet", s.apiOpenWallet)
+			apiAuth.Post("/closewallet", s.apiCloseWallet)
+			apiAuth.Post("/connectwallet", s.apiConnectWallet)
+			apiAuth.Post("/trade", s.apiTrade)
+			apiAuth.Post("/cancel", s.apiCancel)
+			apiAuth.Post("/logout", s.apiLogout)
+			apiAuth.Post("/balance", s.apiGetBalance)
+			apiAuth.Post("/parseconfig", s.apiParseConfig)
+			apiAuth.Post("/reconfigurewallet", s.apiReconfig)
+			apiAuth.Post("/walletsettings", s.apiWalletSettings)
+			apiAuth.Post("/setwalletpass", s.apiSetWalletPass)
+			apiAuth.Post("/orders", s.apiOrders)
+			apiAuth.Post("/order", s.apiOrder)
+			apiAuth.Post("/withdraw", s.apiWithdraw)
+		})
 	})
 
 	// Files
