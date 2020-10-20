@@ -1076,9 +1076,9 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		case midGap == 0:
 			return false // empty market: could be taker, but assume not
 		case lo.Sell:
-			return lo.Rate < bestBuy
+			return lo.Rate <= bestBuy
 		default:
-			return lo.Rate > bestSell
+			return lo.Rate >= bestSell
 		}
 	}
 	// Note: bestSell and bestBuy do not include other epoch orders with
