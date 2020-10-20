@@ -473,7 +473,7 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 
 	// Add the match to both maker's and taker's match maps.
 	maker, taker := mt.Maker.User(), mt.Taker.User()
-	for _, user := range []account.AccountID{mt.Maker.User(), mt.Taker.User()} {
+	for _, user := range []account.AccountID{maker, taker} {
 		userMatches, found := s.userMatches[user]
 		if !found {
 			s.userMatches[user] = map[order.MatchID]*matchTracker{
@@ -513,7 +513,7 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 }
 
 // UserSwappingAmt gets the total amount in active swaps for a user in a
-// specified market. This help the market compute a user's order size limit.
+// specified market. This helps the market compute a user's order size limit.
 func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64) {
 	s.matchMtx.RLock()
 	defer s.matchMtx.RUnlock()

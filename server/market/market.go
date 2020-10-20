@@ -1073,6 +1073,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		}
 		// Infer from best buy/sell to be conservative, ignoring other side.
 		switch {
+		case midGap == 0:
+			return false // empty market: could be taker, but assume not
 		case lo.Sell:
 			return lo.Rate < bestSell
 		default:
