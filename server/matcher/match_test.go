@@ -1935,6 +1935,15 @@ func TestQuoteToBase(t *testing.T) {
 			wantBase: 4200000000,
 		},
 		{
+			name: "don't panic on 0 rate",
+			args: args{
+				rate:      0,
+				rateFloat: 0,
+				quote:     51833544,
+			},
+			wantBase: 0,
+		},
+		{
 			name: "ok >>1",
 			args: args{
 				rate:      19900000022,

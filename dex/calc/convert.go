@@ -25,6 +25,9 @@ func BaseToQuote(rate uint64, base uint64) (quote uint64) {
 // and an integer representation of the price rate. That is,
 //    baseAmt = quoteAmt * atomsPerCoin / rate
 func QuoteToBase(rate uint64, quote uint64) (base uint64) {
+	if rate == 0 {
+		return 0 // caller handle rate==0, but don't panic
+	}
 	bigRate := big.NewInt(int64(rate))
 	bigQuote := big.NewInt(int64(quote))
 	bigQuote.Mul(bigQuote, bigAtomsPerCoin)

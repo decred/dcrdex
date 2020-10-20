@@ -1086,6 +1086,24 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// order less likely to be assumed a taker by moving bestSell down or
 	// bestBuy up, so be conservative and only consider current book.
 
+	// helper to compute an order's quantity in base asset units, using current
+	// midGap rate for market buys.
+	baseQty := func(ord order.Order) uint64 {
+		if ord.Type() == order.CancelOrderType {
+			return 0
+		}
+		qty := ord.Trade().Quantity
+		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
+			// Market buy qty is in quote asset. Convert to base.
+			if midGap == 0 {
+				qty = m.marketInfo.LotSize // no orders on the book; call it 1 lot
+			} else {
+				qty = calc.QuoteToBase(midGap, qty)
+			}
+		}
+		return qty
+	}
+
 	// Include user's own epoch orders when enforcing both booked order and
 	// taker settling amount limits.
 	var userStandingEpochQty, userTakerEpochQty uint64
@@ -1103,7 +1121,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		// Even if standing, may count as taker for purposes of taker qty limit.
 		if likelyTaker(epOrd) {
-			userTakerEpochQty += epOrd.Trade().Quantity
+			userTakerEpochQty += baseQty(epOrd)
 		}
 	}
 	m.epochMtx.RUnlock()
@@ -1174,10 +1192,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		// Subtract the user's total active amount from their limit.
 		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
 
-		qty := ord.Trade().Quantity
-		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
-			qty = calc.QuoteToBase(midGap, qty) // market buy qty is in quote asset
-		}
+		qty := baseQty(ord)
 		symb := dex.BipIDSymbol(m.marketInfo.Base)
 		log.Debugf("User placing likely-taker order on market %s worth %d (%s units) of %d allowed. "+
 			"User has %d (%s units) in %d active swaps, %d in epoch taker orders.",
