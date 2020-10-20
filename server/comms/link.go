@@ -93,8 +93,8 @@ func (c *wsLink) IP() string {
 // Authorized should be called from a request handler when the connection
 // becomes authorized. Unless it is run in a request handler synchronous with
 // other reads or prior to starting the link, it will be a data race with the
-// link's input loop. dex/ws.(*WsLink).inHandler odes does not run request
-// handlers concurrently with reads.
+// link's input loop. dex/ws.(*WsLink).inHandler does not run request handlers
+// concurrently with reads.
 func (c *wsLink) Authorized() {
 	c.SetReadLimit(readLimitAuthorized)
 }
