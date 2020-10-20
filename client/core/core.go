@@ -877,13 +877,15 @@ func (c *Core) Run(ctx context.Context) {
 	c.log.Infof("DEX client core off")
 }
 
+const defaultDEXPort = "7232"
+
 // addrHost returns the host or url:port pair for an address.
 func addrHost(addr string) (string, error) {
 	const defaultHost = "localhost"
 	const missingPort = "missing port in address"
 	// Empty addresses are localhost.
 	if addr == "" {
-		return defaultHost, nil
+		return defaultHost + ":" + defaultDEXPort, nil
 	}
 	host, port, splitErr := net.SplitHostPort(addr)
 	_, portErr := strconv.ParseUint(port, 10, 16)
@@ -893,10 +895,10 @@ func addrHost(addr string) (string, error) {
 	// such as in the scheme.
 	// If the port isn't a port, it must also be parsed.
 	if splitErr != nil || portErr != nil {
-		// Any address with no colons is returned as is.
+		// Any address with no colons is appended with the default port.
 		var addrErr *net.AddrError
 		if errors.As(splitErr, &addrErr) && addrErr.Err == missingPort {
-			return addr, nil
+			return addr + ":" + defaultDEXPort, nil
 		}
 		// These are addresses with at least one colon in an unexpected
 		// position.
@@ -906,10 +908,9 @@ func addrHost(addr string) (string, error) {
 			return "", fmt.Errorf("addrHost: unable to parse address '%s'", addr)
 		}
 		host, port = a.Hostname(), a.Port()
-		// If the address parses but there is no port, return just the
-		// host.
+		// If the address parses but there is no port, append the default port.
 		if port == "" {
-			return host, nil
+			return host + ":" + defaultDEXPort, nil
 		}
 	}
 	// We have a port but no host. Replace with localhost.
@@ -1554,7 +1555,7 @@ func (c *Core) isRegistered(host string) bool {
 // GetFee creates a connection to the specified DEX Server and fetches the
 // registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX.
-func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
+func (c *Core) GetFee(dexAddr, certStr string) (uint64, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
 		return 0, newError(addressParseErr, "error parsing address: %v", err)
@@ -1562,9 +1563,15 @@ func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
 	if c.isRegistered(host) {
 		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
+
+	cert := []byte(certStr)
+	if len(cert) == 0 {
+		cert = CertStore[host]
+	}
+
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
-		Cert: []byte(cert),
+		Cert: cert,
 	})
 	if err != nil {
 		return 0, codedError(connectionErr, err)
@@ -1622,9 +1629,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	}
 
+	cert := []byte(form.Cert)
+	if len(cert) == 0 {
+		cert = CertStore[host]
+	}
+
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
-		Cert: []byte(form.Cert),
+		Cert: cert,
 	})
 	if err != nil {
 		return nil, codedError(connectionErr, err)

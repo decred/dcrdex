@@ -68,7 +68,7 @@ var (
 	tDexKey             *secp256k1.PublicKey
 	tPW                        = []byte("dexpw")
 	wPW                        = "walletpw"
-	tDexHost                   = "somedex.tld"
+	tDexHost                   = "somedex.tld:7232"
 	tDcrBtcMktName             = "dcr_btc"
 	tErr                       = fmt.Errorf("test error")
 	tFee                uint64 = 1e8
@@ -4044,26 +4044,26 @@ func TestAddrHost(t *testing.T) {
 	}, {
 		name: "just host",
 		addr: "thatonedex.com",
-		want: "thatonedex.com",
+		want: "thatonedex.com:7232",
 	}, {
 		name: "scheme and host",
 		addr: "https://thatonedex.com",
-		want: "thatonedex.com",
+		want: "thatonedex.com:7232",
 	}, {
 		name: "scheme, host, and path",
 		addr: "https://thatonedex.com/any/path",
-		want: "thatonedex.com",
+		want: "thatonedex.com:7232",
 	}, {
 		name: "ipv6 host",
 		addr: "[1:2::]",
-		want: "[1:2::]",
+		want: "[1:2::]:7232",
 	}, {
 		name: "ipv6 host and port",
 		addr: "[1:2::]:5758",
 		want: "[1:2::]:5758",
 	}, {
 		name: "empty address",
-		want: "localhost",
+		want: "localhost:7232",
 	}, {
 		name:    "invalid host",
 		addr:    "https://\n:1234",
