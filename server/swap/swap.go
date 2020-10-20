@@ -472,6 +472,7 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 	s.matches[mid] = mt
 
 	// Add the match to both maker's and taker's match maps.
+	maker, taker := mt.Maker.User(), mt.Taker.User()
 	for _, user := range []account.AccountID{mt.Maker.User(), mt.Taker.User()} {
 		userMatches, found := s.userMatches[user]
 		if !found {
@@ -480,6 +481,9 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 			}
 		} else {
 			userMatches[mid] = mt // may overwrite for self-match (ok)
+		}
+		if maker == taker {
+			break
 		}
 	}
 }
@@ -490,17 +494,20 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 	delete(s.matches, mid)
 
 	// Remove the match from both maker's and taker's match maps.
-	for _, user := range []account.AccountID{mt.Maker.User(), mt.Taker.User()} {
+	maker, taker := mt.Maker.User(), mt.Taker.User()
+	for _, user := range []account.AccountID{maker, taker} {
 		userMatches, found := s.userMatches[user]
 		if !found {
 			// Should not happen if consistently using addMatch.
 			log.Errorf("deleteMatch: No matches for user %v found!", user)
 			continue
 		}
-		if len(userMatches) == 1 {
+		delete(userMatches, mid)
+		if len(userMatches) == 0 {
 			delete(s.userMatches, user)
-		} else {
-			delete(userMatches, mid)
+		}
+		if maker == taker {
+			break
 		}
 	}
 }
