@@ -109,6 +109,8 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 		return
 	}
 
+	// wsConn.SetReadLimit(65536) // if websocket reads need to be larger than ws.defaultReadLimit
+
 	// Launch the handler for the upgraded connection. Shutdown will wait for
 	// these to return.
 	s.wg.Add(1)

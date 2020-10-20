@@ -18,11 +18,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// outBufferSize is the size of the WSLink's buffered channel for outgoing
-// messages.
-const outBufferSize = 128
-
-const writeWait = 5 * time.Second
+const (
+	// outBufferSize is the size of the WSLink's buffered channel for outgoing
+	// messages.
+	outBufferSize    = 128
+	defaultReadLimit = 4096
+	writeWait        = 5 * time.Second
+)
 
 // websocket.Upgrader is the preferred method of upgrading a request to a
 // websocket connection.
@@ -44,6 +46,7 @@ type Connection interface {
 
 	SetReadDeadline(t time.Time) error
 	ReadMessage() (int, []byte, error)
+	SetReadLimit(limit int64)
 
 	SetWriteDeadline(t time.Time) error
 	WriteMessage(int, []byte) error
@@ -435,6 +438,13 @@ func (c *WSLink) IP() string {
 	return c.ip
 }
 
+// SetReadLimit should only be called before starting the Connection, or in a
+// request or response handler that is run synchronously with other text or
+// binary frame reads (e.g. ReadMessage).
+func (c *WSLink) SetReadLimit(limit int64) {
+	c.conn.SetReadLimit(limit)
+}
+
 // NewConnection attempts to to upgrade the http connection to a websocket
 // Connection. If the upgrade fails, a reply will be sent with an appropriate
 // error code.
@@ -465,6 +475,9 @@ func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Dura
 	ws.SetPongHandler(func(string) error {
 		return ws.SetReadDeadline(time.Now().Add(readTimeout))
 	})
+
+	// Unauthenticated connections have a small read limit.
+	ws.SetReadLimit(defaultReadLimit)
 
 	// Do not set an initial read deadline until pinging begins.
 

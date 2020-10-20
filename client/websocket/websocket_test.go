@@ -87,6 +87,8 @@ func (c *TConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
+func (c *TConn) SetReadLimit(int64) {}
+
 func (c *TConn) WriteMessage(_ int, msg []byte) error {
 	c.msg = msg
 	select {

@@ -11,6 +11,8 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
+const readLimitAuthorized = 65536
+
 // Link is an interface for a communication channel with an API client. The
 // reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
@@ -33,6 +35,10 @@ type Link interface {
 	Banish()
 	// Disconnect closes the link.
 	Disconnect()
+	// Authorized should be called from a request handler when the connection
+	// becomes authorized. Request handlers must be run synchronous with other
+	// reads or it will be a data race with the link's input loop.
+	Authorized()
 }
 
 // When the DEX sends a request to the client, a responseHandler is created
@@ -82,6 +88,15 @@ func (c *wsLink) ID() uint64 {
 // IP returns the IP address of the peer.
 func (c *wsLink) IP() string {
 	return c.WSLink.IP()
+}
+
+// Authorized should be called from a request handler when the connection
+// becomes authorized. Unless it is run in a request handler synchronous with
+// other reads or prior to starting the link, it will be a data race with the
+// link's input loop. dex/ws.(*WsLink).inHandler does not run request handlers
+// concurrently with reads.
+func (c *wsLink) Authorized() {
+	c.SetReadLimit(readLimitAuthorized)
 }
 
 // The WSLink.handler for WSLink.inHandler

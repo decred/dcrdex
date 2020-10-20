@@ -1145,6 +1145,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 
+	conn.Authorized()
+
 	resp := &msgjson.ConnectResult{
 		Sig:                 sig.Serialize(),
 		ActiveOrderStatuses: msgOrderStatuses,

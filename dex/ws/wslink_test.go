@@ -37,6 +37,7 @@ func (c *ConnStub) Close() error {
 	}
 	return nil
 }
+func (c *ConnStub) SetReadLimit(int64) {}
 func (c *ConnStub) SetReadDeadline(t time.Time) error {
 	return nil
 }
