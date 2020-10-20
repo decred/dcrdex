@@ -124,8 +124,9 @@ class MessageSocket {
           reloader()
         }
         forward('open', null, this.handlers)
-        while (this.queue.length) {
-          const [route, message] = this.queue.shift()
+        const queue = this.queue
+        this.queue = []
+        for (const [route, message] of queue) {
           this.request(route, message)
         }
       }
