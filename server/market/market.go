@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -543,16 +544,22 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 // orders, the best order rate on other side is returned. If both sides have no
 // orders, 0 is returned.
 func (m *Market) MidGap() uint64 {
+	_, mid, _ := m.rates()
+	return mid
+}
+
+func (m *Market) rates() (bestBuyRate, mid, bestSellRate uint64) {
 	bestBuy, bestSell := m.book.Best()
 	if bestBuy == nil {
 		if bestSell == nil {
-			return 0
+			return
 		}
-		return bestSell.Rate
+		return 0, bestSell.Rate, bestSell.Rate
 	} else if bestSell == nil {
-		return bestBuy.Rate
+		return bestBuy.Rate, bestBuy.Rate, math.MaxUint64
 	}
-	return (bestBuy.Rate + bestSell.Rate) / 2 // note downward bias on truncate
+	mid = (bestBuy.Rate + bestSell.Rate) / 2 // note downward bias on truncate
+	return bestBuy.Rate, mid, bestSell.Rate
 }
 
 // CoinLocked checks if a coin is locked. The asset is specified since we should
@@ -1043,6 +1050,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// ID, this also prevents orders with the same ID.
 	// TODO: Prevent commitment reuse in general, without expensive DB queries.
 	ord := rec.order
+	oid := ord.ID()
 	user := ord.User()
 	commit := ord.Commitment()
 	m.epochMtx.RLock()
@@ -1050,9 +1058,67 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	m.epochMtx.RUnlock()
 	if found {
 		log.Debugf("Received order %v with commitment %x also used in previous order %v!",
-			ord, commit, otherOid)
+			oid, commit, otherOid)
 		errChan <- ErrInvalidCommitment
 		return nil
+	}
+
+	// Whether an order is a taker depends on type, and for limit orders it
+	// depends on force and rates.
+	bestBuy, midGap, bestSell := m.rates()
+	likelyTaker := func(ord order.Order) bool {
+		lo, ok := ord.(*order.LimitOrder)
+		if !ok || lo.Force == order.ImmediateTiF {
+			return true
+		}
+		// Infer from best buy/sell to be conservative, ignoring other side.
+		switch {
+		case lo.Sell:
+			return lo.Rate < bestSell
+		default:
+			return lo.Rate > bestBuy
+		}
+	}
+	// Note: bestSell and bestBuy do not include other epoch orders with
+	// standing force that might become booked. Doing so would only make this
+	// order less likely to be assumed a taker by moving bestSell down or
+	// bestBuy up, so be conservative and only consider current book.
+
+	// Include user's own epoch orders when enforcing both booked order and
+	// taker settling amount limits.
+	var userStandingEpochQty, userTakerEpochQty uint64
+	m.epochMtx.RLock()
+	for _, epOrd := range m.epochOrders {
+		if epOrd.User() != user || epOrd.Type() == order.CancelOrderType {
+			continue
+		}
+
+		// For purposes of the user's book qty limit, assumed standing limits
+		// will be booked.
+		if lo, ok := epOrd.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+			userStandingEpochQty += lo.Quantity
+		}
+
+		// Even if standing, may count as taker for purposes of taker qty limit.
+		if likelyTaker(epOrd) {
+			userTakerEpochQty += epOrd.Trade().Quantity
+		}
+	}
+	m.epochMtx.RUnlock()
+
+	// Now that epoch orders are considered, check this candidate order.
+	if lo, ok := ord.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+		// Check the user's current booked amount.
+		bookedBuyAmt, bookedSellAmt, _, _ := m.book.UserOrderTotals(user)
+		bookedAmt := bookedBuyAmt + bookedSellAmt + userStandingEpochQty
+		qty := lo.Quantity
+		if (qty+bookedAmt)/m.marketInfo.LotSize > auth.BookedLotLimit {
+			log.Debugf("Rejecting user %v order %v: too much in booked orders", user, oid)
+			errChan <- dex.NewError(ErrQuantityTooHigh,
+				fmt.Sprintf("Order quantity %d (%d lots) too large. User book limit is %d lots, and you have %d lots booked already).",
+					qty, qty/m.marketInfo.LotSize, auth.BookedLotLimit, bookedAmt/m.marketInfo.LotSize))
+			return nil
+		}
 	}
 
 	// Verify that another cancel order targeting the same order is not already
@@ -1082,41 +1148,46 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			errChan <- ErrInvalidCancelOrder
 			return nil
 		}
-	} else { // Trade order. Check the quantity against user's limit.
-		// Market knows the user's current booked amount.
-		bookedBuyAmt, bookedSellAmt, bookedBuyCount, bookedSellCount := m.book.UserOrderTotals(user)
+	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
+		// NOTE: We can entirely change this so that the taker limit is not
+		// based on just this market. Also so that it's based on lots rather
+		// than amount, but we risk comparing apples to oranges. Further, I'm
+		// open to going even simpler and scaling an absolute max by the user's
+		// current score, but that takes swapped value entirely out of the
+		// picture; adding swapped value into the users score is another
+		// possibility, but which has the same units selection challenge.
 
 		// Swapper knows how much is in active swaps for this asset pair.
-		amtInSwaps, activeSwaps := m.swapper.UserSwappingAmt(user, ord.Base(), ord.Quote())
-		totActive := bookedBuyAmt + bookedSellAmt + amtInSwaps
+		amtInSwaps, activeSwaps := m.swapper.UserSwappingAmt(user, ord.Base(), ord.Quote()) // swapper knows nothing of lots, and we know nothing of other markets
 
 		// AuthManager knows the user's swap outcome amount history, and we know
 		// the current market lot size. Get the adjustment in units of the base
 		// asset from the AuthManager, and combine with the new-user limit.
-		newUserLimit := auth.InitUserLotLimit * int64(m.marketInfo.LotSize)
-		adjustment := m.auth.UserOrderLimitAdjustment(user, ord.Base(), ord.Quote())
+		newUserLimit := auth.InitUserTakerLotLimit * int64(m.marketInfo.LotSize)
+		adjustment := m.auth.UserOrderLimitAdjustment(user, ord.Base(), ord.Quote()) // hard to make this lots across all markets
 		userLimit := newUserLimit + adjustment
+		if userLimit/int64(m.marketInfo.LotSize) >= auth.AbsTakerLotLimit {
+			userLimit = auth.AbsTakerLotLimit * int64(m.marketInfo.LotSize)
+		}
 		// Subtract the user's total active amount from their limit.
-		orderQtyAllowed := userLimit - int64(totActive)
+		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
 
 		qty := ord.Trade().Quantity
 		if ord.Type() == order.MarketOrderType && !ord.Trade().Sell {
-			qty = calc.QuoteToBase(m.MidGap(), qty) // market buy qty is in quote asset
+			qty = calc.QuoteToBase(midGap, qty) // market buy qty is in quote asset
 		}
 		symb := dex.BipIDSymbol(m.marketInfo.Base)
-		log.Debugf("User placing order on market %s worth %d (%s units) of %d allowed. "+
-			"User's unsettled %s amounts: %d in %d buy orders, %d in %d sell orders, "+
-			"%d in %d active swaps => %d (%f x10^8) total in active orders.",
+		log.Debugf("User placing likely-taker order on market %s worth %d (%s units) of %d allowed. "+
+			"User has %d (%s units) in %d active swaps, %d in epoch taker orders.",
 			m.marketInfo.Name, qty, symb, orderQtyAllowed,
-			symb, bookedBuyAmt, bookedBuyCount, bookedSellAmt, bookedSellCount,
-			amtInSwaps, activeSwaps, totActive, float64(totActive)/1e8)
+			amtInSwaps, symb, activeSwaps, userTakerEpochQty)
 
 		if int64(qty) > orderQtyAllowed {
-			log.Infof("Rejecting user %v order %v: qty %d > %d allowed (%d active of %d limit)",
-				user, ord, qty, orderQtyAllowed, totActive, userLimit)
+			log.Infof("Rejecting user %v likely-taker order %v: qty %d > %d allowed (%d active of %d limit)",
+				user, oid, qty, orderQtyAllowed, amtInSwaps, userLimit)
 			errChan <- dex.NewError(ErrQuantityTooHigh,
-				fmt.Sprintf("Order quantity %d too large. Current limit: %d (you have %d booked or settling already)",
-					qty, orderQtyAllowed, totActive))
+				fmt.Sprintf("Order quantity %d too large. Current likely-taker order limit: %d (you have %d settling already and %d in epoch taker orders)",
+					qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty))
 			return nil
 		}
 	}
@@ -1176,7 +1247,6 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Insert the order into the epoch queue.
 	epoch.Insert(ord)
 
-	oid := ord.ID()
 	m.epochMtx.Lock()
 	m.epochOrders[oid] = ord
 	m.epochCommitments[commit] = oid

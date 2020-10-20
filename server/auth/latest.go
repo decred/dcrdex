@@ -83,10 +83,18 @@ func (sa *SwapAmounts) addAmt(v Violation, value int64) {
 		sa.StuckLong += value
 	case ViolationNoRedeemAsMaker:
 		sa.StuckShort += value
-	case ViolationNoSwapAsMaker:
+	case ViolationNoSwapAsMaker, ViolationPreimageMiss: // ! preimage misses are presently in preimageOutcome
 		sa.Spoofed += value
 	}
 }
+
+// func (la *latestMatchOutcomes) swapAmounts() *SwapAmounts {
+// 	sa := new(SwapAmounts)
+// 	for _, mo := range la.outcomes {
+// 		sa.addAmt(mo.outcome, int64(mo.value)) // must be same units (e.g. lots)!
+// 	}
+// 	return sa
+// }
 
 func (la *latestMatchOutcomes) mktSwapAmounts(base, quote uint32) *SwapAmounts {
 	sa := new(SwapAmounts)

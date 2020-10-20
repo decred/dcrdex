@@ -615,7 +615,9 @@ const (
 	// active orders and swaps. The market should multiply their lot size by
 	// this number to get the limit in units of the base asset. This is
 	// potentially a per-market setting instead of an auth constant.
-	InitUserLotLimit = 6
+	InitUserTakerLotLimit = 6
+	AbsTakerLotLimit      = 40
+	BookedLotLimit        = 1200
 
 	// These coefficients are used to compute a user's swap limit adjustment via
 	// UserOrderLimitAdjustment based on the cumulative amounts in the different
@@ -675,6 +677,8 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 }
 
 // SwapSuccess registers the successful completion of a swap by the given user.
+// TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
+// has no clue about lot size, and neither does DB!
 func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
 	auth.registerMatchOutcome(user, SwapSuccess, mmid, value, redeemTime)
 }
@@ -685,6 +689,8 @@ func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatch
 // the maker's redeem time, which is recorded in the DB when the server
 // validates the maker's redemption and informs the taker, and is roughly when
 // the actor was first able to take the missed action.
+// TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
+// has no clue about lot size, and neither does DB!
 func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 	if misstep.Violation() == ViolationInvalid {
 		log.Errorf("Invalid inaction step %d", misstep)
@@ -972,7 +978,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 			time:    mo.Time,
 			mid:     mo.ID,
 			outcome: v,
-			value:   mo.Value,
+			value:   mo.Value, // Note: DB knows value, not number of lots!
 			base:    mo.Base,
 			quote:   mo.Quote,
 		})

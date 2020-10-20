@@ -748,7 +748,7 @@ func TestMarket_Run(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := srvauth.InitUserLotLimit
+	lots := srvauth.InitUserTakerLotLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -1326,7 +1326,7 @@ func TestMarket_Cancelable(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := srvauth.InitUserLotLimit
+	lots := srvauth.InitUserTakerLotLimit
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
