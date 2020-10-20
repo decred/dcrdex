@@ -1071,14 +1071,14 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		if !ok || lo.Force == order.ImmediateTiF {
 			return true
 		}
-		// Infer from best buy/sell to be conservative, ignoring other side.
+		// Must cross the spread to be a taker (not so conservative).
 		switch {
 		case midGap == 0:
 			return false // empty market: could be taker, but assume not
 		case lo.Sell:
-			return lo.Rate < bestSell
+			return lo.Rate < bestBuy
 		default:
-			return lo.Rate > bestBuy
+			return lo.Rate > bestSell
 		}
 	}
 	// Note: bestSell and bestBuy do not include other epoch orders with
