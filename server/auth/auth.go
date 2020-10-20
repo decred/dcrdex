@@ -616,7 +616,7 @@ const (
 	// this number to get the limit in units of the base asset. This is
 	// potentially a per-market setting instead of an auth constant.
 	InitUserTakerLotLimit = 6
-	AbsTakerLotLimit      = 40
+	AbsTakerLotLimit      = 150
 	BookedLotLimit        = 1200
 
 	// These coefficients are used to compute a user's swap limit adjustment via
