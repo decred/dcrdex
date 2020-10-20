@@ -75,6 +75,18 @@ func (la *latestMatchOutcomes) binViolations() map[Violation]int64 {
 	return bins
 }
 
+// SwapAmounts breaks down the quantities of completed swaps in four rough
+// categories: successfully swapped (Swapped), failed with counterparty funds
+// locked for the long/maker lock time (StuckLong), failed with counterparty
+// funds locked for the short/taker lock time (StuckShort), and failed to
+// initiate swap following match with no funds locked in contracts (Spoofed).
+type SwapAmounts struct {
+	Swapped    int64
+	StuckLong  int64
+	StuckShort int64
+	Spoofed    int64
+}
+
 func (sa *SwapAmounts) addAmt(v Violation, value int64) {
 	switch v {
 	case ViolationSwapSuccess:

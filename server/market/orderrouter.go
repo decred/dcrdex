@@ -354,12 +354,17 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			// Send the order to the epoch queue where it will be time stamped.
 			log.Tracef("Found and validated %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
 			if err := tunnel.SubmitOrder(oRecord); err != nil {
-				if errors.Is(err, ErrInternalServer) {
+				code := msgjson.UnknownMarketError
+				switch {
+				case errors.Is(err, ErrInternalServer):
 					log.Errorf("Market failed to SubmitOrder: %v", err)
-				} else {
+				case errors.Is(err, ErrQuantityTooHigh):
+					code = msgjson.OrderQuantityTooHigh
+					fallthrough
+				default:
 					log.Debugf("Market failed to SubmitOrder: %v", err)
 				}
-				r.respondError(msg.ID, user, msgjson.NewError(msgjson.UnknownMarketError, err.Error()))
+				r.respondError(msg.ID, user, msgjson.NewError(code, err.Error()))
 			}
 			return wait.DontTryAgain
 		},

@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -34,10 +35,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func randomMatchID() (mid order.MatchID) {
-	rand.Read(mid[:])
-	return
-}
+var randomMatchID = ordertest.RandomMatchID
 
 type ratioData struct {
 	oidsCompleted  []order.OrderID
