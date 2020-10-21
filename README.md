@@ -42,36 +42,64 @@ privileges and forfeiture of registration fee.
 
 ## Client Quick Start Installation
 
-If you don't already have blockchains synced and you want a default
-setup, you can use the quick-start installer. See the
-[instructions here](../../wiki/Quick-Start-Installation).
+You can use the 
+[**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
+install everything you need. **dcrinstall** will guide you through installation
+of all needed software and help set up your Decred wallet.
+
+**dcrinstall** will create a directory for your decred binaries.
+For Linux and Mac, the directory is at *~/decred*. For Windows, it's 
+*%HOMEPATH%\decred*. Any commands listed below are assumed be run from this
+directory. Instructions are for Linux. For Windows, you will drop the
+`./` prefix for commands.
+
+Once installed, begin syncing your blockchains. In a new console, run 
+
+`cd ~/decred`
+
+`./dcrd`
+
+Decred should sync within a couple of hours.
+
+In a different console, start syncing Bitcoin.
+
+`./bitcoind`
+
+The initial Bitcoin sync duration will vary, but more than a day is not
+atypical. By default, Bitcoin will run with **pruning** enabled. This will keep
+your blockchain storage down to a few GB, rather than the 400+ GB required to
+store the full blockchain. Note that you will download and validate the entire
+400+ GB blockchain, but pruning will discard all but the critical parts.
+
+You can modify **bitcoin.conf** to disable pruning. If this is all gibberish to
+you, you probably don't need to worry about it.
 
 
 ## Client First Steps
 
 These instructions assume you've used the
 [Client Quick Start Installation](#client-quick-start-installation). If you've
-used an [Advanced Client Installation](#advanced-client-installation), adjust
-these instructions as necessary.
+used a [custom installation](#advanced-client-installation) for the client
+and/or blockchain software, adapt these instructions as necessary.
+
+All commands listed below are of the Linux variety, and assume you already
+`cd` into the `~/decred` directory created by **dcrinstall**.
 
 ### Prerequisites
 
-1. Decred and Bitcoin daemons should be running and synced. 
+1. Decred, dcrwallet, and Bitcoin daemons should be running and synced.
+
 2. It is highly recommended that you create separate accounts for trading. 
 
 #### Creating a trading account for Decred
 
 For Decred, start dcrwallet and create an account in your terminal or console
-using the **dcrctl** utility. If you used the quick-start installer, **dcrctl**
-was installed with the blockchain daemons. On Linux, it's in 
-**~/.decred**. On Windows, it'll be in **%APPDATA%\Local\Decred**. These
-instructions are for Linux. Adjust as needed for advanced setup.
-
-`cd ~/.decred`
+using the **dcrctl** utility.
 
 `./dcrctl --wallet createnewaccount dex`
 
-Your dex trading account uses the wallet password.
+Your dex trading account uses the wallet password you've set up with
+**dcrinstall** or `./dcrwallet --create`.
 
 #### Creating a trading wallet for Bitcoin
 
@@ -82,13 +110,12 @@ will assume you chose `dex`.
 
 `./bitcoin-cli createwallet dex`
 
-It is recommended that you password-encrypt your bitcoin trading wallet,
-substituting your own password for `yourpass`.
+It is recommended that you password-protect your Bitcoin trading wallet.
 
-`./bitcoin-cli encryptwallet yourpass`
+`./promptsecret | ./bitcoin-cli encryptwallet -`
 
-You'll also want to instruct bitcoind to load the wallet at startup. Modify your
-**bitcoin.conf** file, located in the **~/.bitcoin** directory on Linux,
+You'll also want to instruct **bitcoind** to load the wallet at startup. Modify
+your **bitcoin.conf** file, located in the **~/.bitcoin** directory on Linux,
 **%APPDATA%\Bitcoin** on Windows, and **~/Library/Application Support/Bitcoin**
 on Mac OS. Open the file in a text editor and add the following line at the end
 of the file.
@@ -97,7 +124,7 @@ of the file.
 
 ### Connect Wallets and Register
 
-1. Start the client. `dexc`
+1. Start the client. `./dexc`
 2. In your browser, navigate to **localhost:5758**
 
 <img src="docs/images/omnibar-client.png" width="250">
