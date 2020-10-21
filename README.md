@@ -32,7 +32,7 @@ privileges and forfeiture of registration fee.
 ## Contents
 
 - [Client Quick Start Installation](#client-quick-start-installation)
-- [Client First Steps](#client-first-steps)
+- [Client Configuration](#client-configuration)
 - [Advanced Client Installation](#advanced-client-installation)
 - [DEX Specification](#dex-specification)
 - [Client Applications and the Core Package](#client-applications-and-the-core-package)
@@ -46,6 +46,8 @@ You can use the
 [**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
 install everything you need. **dcrinstall** will guide you through installation
 of all needed software and help set up your Decred wallet.
+
+`./dcrinstall --dcrdex`
 
 **dcrinstall** will create a directory for your decred binaries.
 For Linux and Mac, the directory is at *~/decred*. For Windows, it's 
@@ -75,7 +77,7 @@ You can modify **bitcoin.conf** to disable pruning. If this is all gibberish to
 you, you probably don't need to worry about it.
 
 
-## Client First Steps
+## Client Configuration
 
 These instructions assume you've used the
 [Client Quick Start Installation](#client-quick-start-installation). If you've
