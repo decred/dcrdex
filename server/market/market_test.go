@@ -51,6 +51,12 @@ func (ta *TArchivist) BookOrders(base, quote uint32) ([]*order.LimitOrder, error
 	defer ta.mtx.Unlock()
 	return ta.bookedOrders, nil
 }
+func (ta *TArchivist) EpochOrders(base, quote uint32) ([]order.Order, error) {
+	return nil, nil
+}
+func (ta *TArchivist) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
+	return nil, nil
+}
 func (ta *TArchivist) FlushBook(base, quote uint32) (sells, buys []order.OrderID, err error) {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()

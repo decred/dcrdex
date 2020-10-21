@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/market"
 	"github.com/go-chi/chi"
 )
 
@@ -105,6 +106,103 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 		mktStatus.PersistBook = &persist
 	}
 	writeJSON(w, mktStatus)
+}
+
+// apiMarketOrderBook is the handler for the '/market/{marketName}/orderbook'
+// API request.
+func (s *Server) apiMarketOrderBook(w http.ResponseWriter, r *http.Request) {
+	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
+	status := s.core.MarketStatus(mkt)
+	if status == nil {
+		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
+		return
+	}
+	orders, err := s.core.BookOrders(status.Base, status.Quote)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to obtain order book: %v", err), http.StatusInternalServerError)
+		return
+	}
+	msgBook := make([]*msgjson.BookOrderNote, 0, len(orders))
+	for _, o := range orders {
+		msgOrder, err := market.OrderToMsgOrder(o, mkt)
+		if err != nil {
+			log.Errorf("unable to encode order: %w", err)
+			continue
+		}
+		msgBook = append(msgBook, msgOrder)
+	}
+	// This is a msgjson.OrderBook without the seq field.
+	res := &struct {
+		MarketID string                   `json:"marketid"`
+		Epoch    uint64                   `json:"epoch"`
+		Orders   []*msgjson.BookOrderNote `json:"orders"`
+	}{
+		MarketID: mkt,
+		Epoch:    uint64(status.ActiveEpoch),
+		Orders:   msgBook,
+	}
+	writeJSON(w, res)
+}
+
+// hander for route '/market/{marketName}/epochorders' API request.
+func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
+	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
+	status := s.core.MarketStatus(mkt)
+	if status == nil {
+		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
+		return
+	}
+	orders, err := s.core.EpochOrders(status.Base, status.Quote)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to obtain epoch orders: %v", err), http.StatusInternalServerError)
+		return
+	}
+	msgBook := make([]*msgjson.BookOrderNote, 0, len(orders))
+	for _, o := range orders {
+		msgOrder, err := market.OrderToMsgOrder(o, mkt)
+		if err != nil {
+			log.Errorf("unable to encode order: %w", err)
+			continue
+		}
+		msgBook = append(msgBook, msgOrder)
+	}
+	// This is a msgjson.OrderBook without the seq field.
+	res := &struct {
+		MarketID string                   `json:"marketid"`
+		Epoch    uint64                   `json:"epoch"`
+		Orders   []*msgjson.BookOrderNote `json:"orders"`
+	}{
+		MarketID: mkt,
+		Epoch:    uint64(status.ActiveEpoch),
+		Orders:   msgBook,
+	}
+	writeJSON(w, res)
+}
+
+// hander for route '/market/{marketName}/matches?includeinactive=BOOL' API
+// request.
+func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
+	var includeInactive bool
+	if includeInactiveStr := r.URL.Query().Get(includeInactiveToken); includeInactiveStr != "" {
+		var err error
+		includeInactive, err = strconv.ParseBool(includeInactiveStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid include inactive boolean %q: %v", includeInactiveStr, err), http.StatusBadRequest)
+			return
+		}
+	}
+	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
+	status := s.core.MarketStatus(mkt)
+	if status == nil {
+		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
+		return
+	}
+	matches, err := s.core.MarketMatches(status.Base, status.Quote, includeInactive)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to obtain match data: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, matches)
 }
 
 // hander for route '/market/{marketName}/resume?t=UNIXMS'

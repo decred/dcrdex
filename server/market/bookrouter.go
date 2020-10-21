@@ -6,6 +6,7 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"decred.org/dcrdex/dex"
@@ -642,4 +643,17 @@ func marketOrderToMsgOrder(o *order.MarketOrder, mkt string) *msgjson.BookOrderN
 			// Rate and TiF not set for market orders.
 		},
 	}
+}
+
+// OrderToMsgOrder converts an order.Order into a *msgjson.BookOrderNote.
+func OrderToMsgOrder(ord order.Order, mkt string) (*msgjson.BookOrderNote, error) {
+	switch o := ord.(type) {
+	case *order.LimitOrder:
+		return limitOrderToMsgOrder(o, mkt), nil
+	case *order.MarketOrder:
+		return marketOrderToMsgOrder(o, mkt), nil
+	case *order.CancelOrder:
+		return cancelOrderToMsgOrder(o, mkt), nil
+	}
+	return nil, fmt.Errorf("unknown order type for %v: %T", ord.ID(), ord)
 }

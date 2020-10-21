@@ -9,6 +9,7 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -48,6 +49,12 @@ func IDFromHex(sid string) (OrderID, error) {
 // fmt.Stringer.
 func (oid OrderID) String() string {
 	return hex.EncodeToString(oid[:])
+}
+
+// MarshalJSON satisfies the json.Marshaller interface, and will marshal the
+// id to a hex string.
+func (oid OrderID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(oid.String())
 }
 
 // Bytes returns the order ID as a []byte.

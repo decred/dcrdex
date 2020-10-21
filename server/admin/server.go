@@ -34,11 +34,12 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	marketNameKey = "market"
-	accountIDKey  = "account"
-	matchIDKey    = "match"
-	ruleToken     = "rule"
-	timeoutToken  = "timeout"
+	marketNameKey        = "market"
+	accountIDKey         = "account"
+	matchIDKey           = "match"
+	ruleToken            = "rule"
+	timeoutToken         = "timeout"
+	includeInactiveToken = "includeinactive"
 )
 
 var (
@@ -60,6 +61,9 @@ type SvrCore interface {
 	Penalize(aid account.AccountID, rule account.Rule, details string) error
 	Unban(aid account.AccountID) error
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
+	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
+	EpochOrders(base, quote uint32) (orders []order.Order, err error)
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error)
 }
 
 // Server is a multi-client https server.
@@ -147,6 +151,9 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiMarketInfo)
+			rm.Get("/orderbook", s.apiMarketOrderBook)
+			rm.Get("/epochorders", s.apiMarketEpochOrders)
+			rm.Get("/matches", s.apiMarketMatches)
 			rm.Get("/suspend", s.apiSuspend)
 			rm.Get("/resume", s.apiResume)
 		})

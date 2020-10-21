@@ -707,7 +707,7 @@ func TestOrderStatusUnknown(t *testing.T) {
 	}
 }
 
-// Test both ActiveOrderCoins and BookOrders.
+// Test ActiveOrderCoins, BookOrders, and EpochOrders.
 func TestActiveOrderCoins(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -717,6 +717,9 @@ func TestActiveOrderCoins(t *testing.T) {
 
 	multiCoinLO := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0)
 	multiCoinLO.Coins = append(multiCoinLO.Coins, order.CoinID{0x22, 0x23})
+
+	epochLO := newLimitOrder(true, 1, 1, order.StandingTiF, 0)
+	epochCO := newCancelOrder(multiCoinLO.ID(), AssetDCR, AssetBTC, 0)
 
 	orderStatuses := []struct {
 		ord         order.Order
@@ -737,6 +740,16 @@ func TestActiveOrderCoins(t *testing.T) {
 			newMarketSellOrder(2, 0),
 			order.OrderStatusEpoch, // active, sell, epoch
 			1,
+		},
+		{
+			epochLO,
+			order.OrderStatusEpoch, // active, buy, epoch
+			1,
+		},
+		{
+			epochCO,
+			order.OrderStatusEpoch, // cancel, epoch
+			0,
 		},
 		{
 			newMarketSellOrder(1, 0),
@@ -811,6 +824,46 @@ func TestActiveOrderCoins(t *testing.T) {
 			bookOrders[0].ID(), multiCoinLO.ID())
 	}
 
+	los, mos, cos, err := archie.epochOrders(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		t.Fatalf("epochOrders failed: %v", err)
+	}
+
+	if len(los) != 1 || len(mos) != 2 || len(cos) != 1 {
+		t.Fatalf("got %d epoch limit orders, %d epoch market orders, and %d epoch cancel orders, expected 1, 2, and 1",
+			len(los), len(mos), len(cos))
+	}
+
+	// Verify the order ID of the loaded order is correct. This ensures the
+	// order is being loaded with all the fields to provide and identical
+	// serialization.
+	if epochLO.ID() != los[0].ID() {
+		t.Errorf("epoch limit order has an incorrect order ID. Got %v, expected %v",
+			los[0].ID(), epochLO.ID())
+	}
+	if epochCO.ID() != cos[0].ID() {
+		t.Errorf("epoch cancel order has an incorrect order ID. Got %v, expected %v",
+			cos[0].ID(), epochCO.ID())
+	}
+
+	// The exported version should return the same orders.
+	orders, err := archie.EpochOrders(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		t.Fatalf("EpochOrders failed: %v", err)
+	}
+
+	if len(orders) != 4 {
+		t.Fatalf("got %d epoch orders, expected 4", len(orders))
+	}
+	for _, o := range orders {
+		if o.ID() == los[0].ID() ||
+			o.ID() == mos[0].ID() ||
+			o.ID() == mos[1].ID() ||
+			o.ID() == cos[0].ID() {
+			continue
+		}
+		t.Fatalf("order %v in EpochOrders but not epochOrders", o.ID())
+	}
 }
 
 func TestOrderStatus(t *testing.T) {

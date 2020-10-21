@@ -80,6 +80,9 @@ type OrderArchiver interface {
 	// BookOrders returns all book orders for a market.
 	BookOrders(base, quote uint32) ([]*order.LimitOrder, error)
 
+	// EpochOrders returns all epoch orders for a market.
+	EpochOrders(base, quote uint32) ([]order.Order, error)
+
 	// FlushBook revokes all booked orders for a market.
 	FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []order.OrderID, err error)
 
@@ -309,6 +312,7 @@ type MatchArchiver interface {
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*MatchOutcome, error)
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*MatchStatus, error)
 }
 
