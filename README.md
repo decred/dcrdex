@@ -42,9 +42,7 @@ privileges and forfeiture of registration fee.
 
 ## Client Quick Start Installation
 
-It is recommended to have at least 2 GB of available system memory and 25 GB of
-free disk space to run the DEX client. For the most secure setup, you can also
-install in a fresh virtual machine.
+- It is recommended to have at least 2 GB of available system memory and 25 GB of free disk space to run the DEX client. For the most secure setup, you can also install in a fresh virtual machine.
 
 You can use the 
 [**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
@@ -58,6 +56,8 @@ For Linux and Mac, the directory is at *~/decred*. For Windows, it's
 *%HOMEPATH%\decred*. Any commands listed below are assumed be run from this
 directory. Instructions are for Linux. For Windows, you will drop the
 `./` prefix for commands.
+
+### Sync Blockchains
 
 Once installed, begin syncing your blockchains. In a new console, run 
 
@@ -80,6 +80,15 @@ store the full blockchain. Note that you will download and validate the entire
 You can modify **bitcoin.conf** to disable pruning. If this is all gibberish to
 you, you probably don't need to worry about it.
 
+### Important Notes on Wallets
+
+- **If you already have Decrediton installed**, upgrade Decrediton before running **dcrinstall**.
+
+- The DEX client is not yet compatible with **dcrwallet**'s SPV-mode or CSPP mixed accounts.
+
+- You must keep **dcrd**, **dcrwallet**, and **bitcoind** running while the client is running. Do not shut down, lock, unlock, or otherwise modify your wallet settings while the client is running.
+
+- Because of the way fee estimation works, you should give **bitcoind** at least 6 blocks worth of run time before trading. Failing to allow **bitcoind** to "warm up" may result in higher transactions fees for your redemption transactions.
 
 ## Client Configuration
 
