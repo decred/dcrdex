@@ -42,6 +42,10 @@ privileges and forfeiture of registration fee.
 
 ## Client Quick Start Installation
 
+It is recommended to have at least 2 GB of available system memory and 25 GB of
+free disk space to run the DEX client. For the most secure setup, you can also
+install in a fresh virtual machine.
+
 You can use the 
 [**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
 install everything you need. **dcrinstall** will guide you through installation
@@ -89,7 +93,7 @@ All commands listed below are of the Linux variety, and assume you already
 
 ### Prerequisites
 
-1. Decred, dcrwallet, and Bitcoin daemons should be running and synced.
+1. dcrd, dcrwallet, and bitcoind should be running and synced.
 
 2. It is highly recommended that you create separate accounts for trading. 
 
