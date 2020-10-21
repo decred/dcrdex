@@ -31,23 +31,227 @@ privileges and forfeiture of registration fee.
 
 ## Contents
 
-- [Market API](#market-api)
+- [Client Quick Start Installation](#client-quick-start-installation)
+- [Client Configuration](#client-configuration)
+- [Important Stuff to Know](#important-stuff-to-know)
+- [Advanced Client Installation](#advanced-client-installation)
+- [DEX Specification](#dex-specification)
 - [Client Applications and the Core Package](#client-applications-and-the-core-package)
-- [Using Decred DEX](#using-decred-dex)
 - [Server Installation](#server-installation)
-- [Client Installation](#client-installation)
 - [Contribute](#contribute)
 
-## Market API
 
-DEX services are offered via the **Market API**. The
-[DEX specification](spec/README.mediawiki) details the messaging and trading
-protocols required to use the Market API.
+## Client Quick Start Installation
 
-In order to be accessible to the widest range of applications and languages, the
-Market API is accessed using JSON messages over WebSockets.
-A basic client application can be implemented in most popular programming
-languages with little more than the standard library.
+- It is recommended to have at least 2 GB of available system memory and 25 GB of free disk space to run the DEX client. For the most secure setup, you can also install in a fresh virtual machine.
+
+You can use the 
+[**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
+install everything you need. **dcrinstall** will guide you through installation
+of all needed software and help set up your Decred wallet.
+
+`./dcrinstall --dcrdex`
+
+**dcrinstall** will create a directory for your decred binaries.
+For Linux and Mac, the directory is at *~/decred*. For Windows, it's 
+*%HOMEPATH%\decred*. Any commands listed below are assumed be run from this
+directory. Instructions are for Linux. For Windows, you will drop the
+`./` prefix for commands.
+
+### Sync Blockchains
+
+Once installed, begin syncing your blockchains. In a new console, run 
+
+`cd ~/decred`
+
+`./dcrd`
+
+Decred should sync within a couple of hours.
+
+In a different console, start syncing Bitcoin.
+
+`./bitcoind`
+
+The initial Bitcoin sync duration will vary, but more than a day is not
+atypical. By default, Bitcoin will run with **pruning** enabled. This will keep
+your blockchain storage down to a few GB, rather than the 400+ GB required to
+store the full blockchain. Note that you will download and validate the entire
+400+ GB blockchain, but pruning will discard all but the critical parts.
+
+You can modify **bitcoin.conf** to disable pruning. If this is all gibberish to
+you, you probably don't need to worry about it.
+
+### Important Notes on Wallets
+
+- **If you already have Decrediton installed**, upgrade Decrediton before running **dcrinstall**.
+
+- The DEX client is not yet compatible with **dcrwallet**'s SPV-mode or CSPP mixed accounts.
+
+- You must keep **dcrd**, **dcrwallet**, and **bitcoind** running while the client is running. Do not shut down, lock, unlock, or otherwise modify your wallet settings while the client is running.
+
+- Because of the way fee estimation works, you should give **bitcoind** at least 6 blocks worth of run time before trading. Failing to allow **bitcoind** to "warm up" may result in higher transactions fees for your redemption transactions.
+
+## Client Configuration
+
+These instructions assume you've used the
+[Client Quick Start Installation](#client-quick-start-installation). If you've
+used a [custom installation](#advanced-client-installation) for the client
+and/or blockchain software, adapt as necessary.
+
+All commands listed below are of the Linux variety, and assume you already
+`cd` into the `~/decred` directory created by **dcrinstall**.
+
+### Prerequisites
+
+1. dcrd, dcrwallet, and bitcoind should be running and synced.
+
+2. It is highly recommended that you create separate accounts for trading. 
+
+#### Creating a trading account for Decred
+
+For Decred, start dcrwallet and create an account in your terminal or console
+using the **dcrctl** utility.
+
+`./dcrctl --wallet createnewaccount dex`
+
+Your dex trading account uses the wallet password you've set up with
+**dcrinstall** or `./dcrwallet --create`.
+
+Get an address for the new account, and transfer some funds. You'll need to
+deposit at least enough to cover the registration fee and on-chain fees for the
+registration transaction. The registration process will inform you how much to
+pay. At the time of writing, it was 1 DCR. Of course, if you plan to sell any
+DCR, you should deposit that too.
+
+`./dcrctl --wallet getnewaddress dex`
+
+Alternatively, you can get a deposit address during registration right after
+creating your wallet, from the wallets view link at the top right of the screen.
+
+
+#### Creating a trading wallet for Bitcoin
+
+For Bitcoin, you can create a trading wallet using the bitcoin-cli utility.
+**bitcoin-cli** will be included in the quick-start installation as well. You
+can replace `dex` with whatever name you want. The rest of the instructions
+will assume you chose `dex`.
+
+`./bitcoin-cli createwallet dex`
+
+It is recommended that you password-protect your Bitcoin trading wallet.
+We'll use `read` to prevent echoing the password.
+
+`read -s BTCPASS`
+
+Type your password and hit enter, then do
+
+`./bitcoin-cli -rpcwallet=dex encryptwallet $BTCPASS`
+
+You'll also want to instruct **bitcoind** to load the wallet at startup. Modify
+your **bitcoin.conf** file, located in the **~/.bitcoin** directory on Linux,
+**%APPDATA%\Bitcoin** on Windows, and **~/Library/Application Support/Bitcoin**
+on Mac OS. Open the file in a text editor and add the following line at the end
+of the file.
+
+`wallet=dex`
+
+
+### Connect Wallets and Register
+
+1. Start the client. `./dexc`
+2. In your browser, navigate to **localhost:5758**
+
+<img src="docs/images/omnibar-client.png" width="250">
+
+3. Create your **client application password**. You will use this password to perform all future security-sensitive client operations, including registering, signing in, and trading.
+
+<img src="docs/images/client-pw.png" width="250">
+
+4. Connect to your Decred wallet. The client will auto-fill most of your wallet settings, but you will need to specify the account name. If you haven't already, follow the instructions above to create a trading account. If you really, really want to trade on the default wallet account, the account name is `default`. Enter the wallet password, which is the password you set up with **dcrwallet**. Enter the app password you created in step 3.
+
+<img src="docs/images/decred-reg.png" width="250">
+
+5. Enter the dex address, probably **dex.decred.org**.
+
+<img src="docs/images/add-dex-reg.png" width="250">
+
+6. Check the registration fee, and enter your password one more time to authorize payment.
+
+<img src="docs/images/confirm-reg.png" width="250">
+
+7. On the **markets view**, while you're waiting for confirmations on your registration fee, add a Bitcoin wallet. You'll need to specify the wallet name. If you haven't already, follow the instructions above to create a trading wallet. If you really, really want to trade on the default wallet, leave the wallet name blank. Enter the wallet password you set up with **bitcoin-cli**. If you really, really want to trade on an unencrypted wallet, you can leave the wallet password blank. Enter the app password you created in step 3.
+
+<img src="docs/images/create-btc.png" width="250">
+
+8. And that's it! Once your registration fee has enough confirmations, you can begin trading.
+
+
+## Important Stuff to Know
+
+Trades settle on-chain and require block confirmations. Trades do not settle instantly.
+In some cases, they may take hours to settle.
+**The client software should not be shut down until you are absolutely certain that your trades have settled**.
+
+**The client has to stay connected for the full duration of trade settlement**.
+Losses of connectivity of a couple minutes are fine, but don't push it.
+A loss of internet connectivity for more than 20 hours during trade settlement has the potential to result in lost funds.
+Simply losing your connection to the DEX server does not put funds at risk.
+You would have to lose connection to an entire blockchain network.
+
+**There are initially limits on the amount of ordering you can do**. 
+We'll get these limits displayed somewhere soon, but in the meantime,
+start with some smaller orders to build up your reputation. As you complete
+orders, your limit will go up.
+
+**If your account is suspended**, you can appeal the suspension.
+You may be asked to provide client log files to the operator for review.
+For dex.decred.org, reach out 
+[on Element](https://matrix.to/#/!mlRZqBtfWHrcmgdTWB:decred.org?via=decred.org&via=matrix.org&via=planetdecred.org)
+to appeal.
+
+
+## Advanced Client Installation
+
+### Dependencies
+
+1. [Go >= 1.14](https://golang.org/doc/install)
+2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
+3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
+4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
+4. At least 2 GB of available system memory.
+
+See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
+
+**Build the web assets** from *client/webserver/site/*.
+
+```
+npm clean-install
+npm run build
+```
+
+**Build and run the client** from *client/cmd/dexc*.
+
+```
+go build
+./dexc --testnet
+```
+
+Connect to the client from your browser at `localhost:5758`.
+
+While `dexc` may be run from within the git workspace as described above, the
+`dexc` binary executable generated with `go build` and the entire `site` folder
+may be copied into a different folder as long as `site` is in the same directory
+as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
+
+
+## DEX Specification
+
+The [DEX specification](spec/README.mediawiki) details the messaging and trading
+protocols required to use the Market API. Not only is the code in
+in the **decred/dcrdex** repository open-source, but the entire protocol is
+open-source. So anyone can, in principle, write their own client or server based
+on the specification. Such an endeavor would be ill-advised in these early
+stages, while the protocols are undergoing constant change.
 
 ## Client Applications and the Core Package
 
@@ -67,15 +271,6 @@ managed by the **dexc** utility in *client/cmd/dexc*.
 The **dexcctl** utility enables trading via CLI. Commands are parsed and
 issued to **Core** for execution. **dexcctl** also requires **dexc**.
 
-## Using Decred DEX
-
-**The Decred DEX is in early stages of development, and should not be used to
-conduct trades on mainnet.** For those who would like to contribute, or just
-poke around and offer feedback, there are a number of ways to do that.
-
-- [Run **dcrdex** and **dexc** on simnet](../../wiki/Simnet-Testing). Recommended for development.
-- [Run **dexc** on testnet](../../wiki/Testnet-Testing). Recommended for poking around.
-- [Run the test app server](../../wiki/Test-App-Server). Useful for GUI development, or just to try everything out without needing to create wallets or connect to a **dcrdex** server.
 
 ## Server Installation
 
@@ -154,41 +349,6 @@ additional information on a few key options.
 
 from **server/cmd/dcrdex**.
 
-## Client Installation
-
-The client is still immature and changing rapidly, but it is mostly functional.
-There are a few incomplete items, so **do not use it on Mainnet yet**.
-Please ensure you are building from a current snapshot of the master branch.
-
-### Dependencies
-
-1. [Go >= 1.14](https://golang.org/doc/install)
-2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
-3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
-4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
-
-See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
-
-**Build the web assets** from *client/webserver/site/*.
-
-```
-npm clean-install
-npm run build
-```
-
-**Build and run the client** from *client/cmd/dexc*.
-
-```
-go build
-./dexc --testnet
-```
-
-Connect to the client from your browser at `localhost:5758`.
-
-While `dexc` may be run from within the git workspace as described above, the
-`dexc` binary executable generated with `go build` and the entire `site` folder
-may be copied into a different folder as long as `site` is in the same directory
-as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
 
 ## Contribute
 
@@ -206,7 +366,9 @@ Check out these wiki pages for more information.
 
 - [Getting Started Contributing](../../wiki/Contribution-Guide)
 - [Backend Development](../../wiki/Backend-Development)
-- [Front-end Development](../../wiki/Frontend-Development)
+- [Run **dcrdex** and **dexc** on simnet](../../wiki/Simnet-Testing). Recommended for development.
+- [Run **dexc** on testnet](../../wiki/Testnet-Testing). Recommended for poking around.
+- [Run the test app server](../../wiki/Test-App-Server). Useful for GUI development, or just to try everything out without needing to create wallets or connect to a **dcrdex** server.
 
 ## Source
 
