@@ -215,7 +215,7 @@ to appeal.
 ### Dependencies
 
 1. [Go >= 1.14](https://golang.org/doc/install)
-2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
+2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
 3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
 4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
 4. At least 2 GB of available system memory.
