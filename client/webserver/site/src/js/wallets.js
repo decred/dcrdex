@@ -29,7 +29,8 @@ export default class WalletsPage extends BasePage {
       'walletRepw', 'repwAssetLogo', 'repwAssetName', 'repwNewPw', 'repwAppPw',
       'submitRepw', 'repwErr',
       // Deposit
-      'deposit', 'depositName', 'depositAddress',
+      'deposit', 'depositName', 'depositAddress', 'newDepAddrBttn',
+      'depositErr',
       // Withdraw
       'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
       'withdrawAmt', 'withdrawAvail', 'submitWithdraw', // 'withdrawFee',
@@ -116,6 +117,9 @@ export default class WalletsPage extends BasePage {
       bind(a.lock, 'click', async e => { run(e, this.lock.bind(this)) })
       bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
     }
+
+    // New deposit address button.
+    bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
 
     // Clicking on the available amount on the withdraw form populates the
     // amount field.
@@ -291,9 +295,11 @@ export default class WalletsPage extends BasePage {
   /* Display a deposit address. */
   async showDeposit (assetID) {
     const page = this.page
+    Doc.hide(page.depositErr)
     const box = page.deposit
     const asset = app.assets[assetID]
     const wallet = app.walletMap[assetID]
+    this.depositAsset = assetID
     if (!wallet) {
       app.notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR))
       return
@@ -302,6 +308,23 @@ export default class WalletsPage extends BasePage {
     page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
     this.animation = this.showBox(box)
+  }
+
+  /* Fetch a new address from the wallet. */
+  async newDepositAddress () {
+    const page = this.page
+    Doc.hide(page.depositErr)
+    app.loading(page.deposit)
+    const res = await postJSON('/api/depositaddress', {
+      assetID: this.depositAsset
+    })
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.depositErr.textContent = res.msg
+      Doc.show(page.depositErr)
+      return
+    }
+    page.depositAddress.textContent = res.address
   }
 
   /* Show the form to withdraw funds. */

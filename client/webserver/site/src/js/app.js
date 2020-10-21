@@ -478,7 +478,8 @@ export default class Application {
       case 'feepayment':
         this.handleFeePaymentNote(note)
         break
-      case 'walletstate': {
+      case 'walletstate':
+      case 'walletconfig': {
         const wallet = note.wallet
         this.assets[wallet.assetID].wallet = wallet
         this.walletMap[wallet.assetID] = wallet

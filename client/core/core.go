@@ -1419,7 +1419,6 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
 		EncryptedPW: oldWallet.encPW,
-		Address:     oldWallet.address,
 	}
 	if oldWallet.balance != nil {
 		dbWallet.Balance = oldWallet.balance.Balance
@@ -1434,6 +1433,15 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return newError(connectErr, "error connecting wallet: %v", err)
 	}
+	// Get a new address. Definitely want this when the account changes, and
+	// maybe other settings as well.
+	addr, err := wallet.Address()
+	if err != nil {
+		wallet.Disconnect()
+		return newError(addrErr, "error getting wallet address: %v", err)
+	}
+	dbWallet.Address = addr
+	wallet.address = addr
 	if oldWallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
@@ -1537,6 +1545,44 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	c.notify(newWalletConfigNote("Wallet Password Updated", details, db.Success, wallet.state()))
 
 	return nil
+}
+
+// NewDepositAddress retrieves a new deposit address from the specified wallet
+// and saves it to the database.
+func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
+	w, exists := c.wallet(assetID)
+	if !exists {
+		return "", fmt.Errorf("no wallet found for %s", unbip(assetID))
+	}
+
+	if !w.connected() {
+		return "", fmt.Errorf("cannot get address from unconnected %s wallet", unbip(assetID))
+	}
+
+	addr, err := w.Address()
+	if err != nil {
+		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(assetID), err)
+	}
+
+	c.walletMtx.Lock()
+	w.address = addr
+	c.walletMtx.Unlock()
+
+	dbWallet, err := c.db.Wallet(w.dbID)
+	if err != nil {
+		return "", fmt.Errorf("error retreiving DB wallet: %w", err)
+	}
+	dbWallet.Address = addr
+	err = c.db.UpdateWallet(dbWallet)
+	if err != nil {
+		return "", fmt.Errorf("UpdateWallet error for %s: %w", unbip(assetID), err)
+	}
+
+	c.refreshUser()
+
+	c.notify(newWalletStateNote(w.state()))
+
+	return addr, nil
 }
 
 // AutoWalletConfig attempts to load setting from a wallet package's
