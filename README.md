@@ -33,6 +33,7 @@ privileges and forfeiture of registration fee.
 
 - [Client Quick Start Installation](#client-quick-start-installation)
 - [Client Configuration](#client-configuration)
+- [Important Stuff to Know](#important-stuff-to-know)
 - [Advanced Client Installation](#advanced-client-installation)
 - [DEX Specification](#dex-specification)
 - [Client Applications and the Core Package](#client-applications-and-the-core-package)
@@ -183,6 +184,30 @@ of the file.
 <img src="docs/images/create-btc.png" width="250">
 
 8. And that's it! Once your registration fee has enough confirmations, you can begin trading.
+
+
+## Important Stuff to Know
+
+Trades settle on-chain and require block confirmations. Trades do not settle instantly.
+In some cases, they may take hours to settle.
+**The client software should not be shut down until you are absolutely certain that your trades have settled**.
+
+**The client has to stay connected for the full duration of trade settlement**.
+Losses of connectivity of a couple minutes are fine, but don't push it.
+A loss of internet connectivity for more than 20 hours during trade settlement has the potential to result in lost funds.
+Simply losing your connection to the DEX server does not put funds at risk.
+You would have to lose connection to an entire blockchain network.
+
+**There are initially limits on the amount of ordering you can do**. 
+We'll get these limits displayed somewhere soon, but in the meantime,
+start with some smaller orders to build up your reputation. As you complete
+orders, your limit will go up.
+
+**If your account is suspended**, you can appeal the suspension.
+You may be asked to provide client log files to the operator for review.
+For dex.decred.org, reach out 
+[on Element](https://matrix.to/#/!mlRZqBtfWHrcmgdTWB:decred.org?via=decred.org&via=matrix.org&via=planetdecred.org)
+to appeal.
 
 
 ## Advanced Client Installation
