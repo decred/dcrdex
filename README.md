@@ -80,7 +80,7 @@ you, you probably don't need to worry about it.
 These instructions assume you've used the
 [Client Quick Start Installation](#client-quick-start-installation). If you've
 used a [custom installation](#advanced-client-installation) for the client
-and/or blockchain software, adapt these instructions as necessary.
+and/or blockchain software, adapt as necessary.
 
 All commands listed below are of the Linux variety, and assume you already
 `cd` into the `~/decred` directory created by **dcrinstall**.
@@ -101,6 +101,18 @@ using the **dcrctl** utility.
 Your dex trading account uses the wallet password you've set up with
 **dcrinstall** or `./dcrwallet --create`.
 
+Get an address for the new account, and transfer some funds. You'll need to
+deposit at least enough to cover the registration fee and on-chain fees for the
+registration transaction. The registration process will inform you how much to
+pay. At the time of writing, it was 1 DCR. Of course, if you plan to sell any
+DCR, you should deposit that too.
+
+`./dcrctl --wallet getnewaddress dex`
+
+Alternatively, you can get a deposit address during registration right after
+creating your wallet, from the wallets view link at the top right of the screen.
+
+
 #### Creating a trading wallet for Bitcoin
 
 For Bitcoin, you can create a trading wallet using the bitcoin-cli utility.
@@ -111,8 +123,13 @@ will assume you chose `dex`.
 `./bitcoin-cli createwallet dex`
 
 It is recommended that you password-protect your Bitcoin trading wallet.
+We'll use `read` to prevent echoing the password.
 
-`./promptsecret | ./bitcoin-cli encryptwallet -`
+`read -s BTCPASS`
+
+Type your password and hit enter, then do
+
+`./bitcoin-cli -rpcwallet=dex encryptwallet $BTCPASS`
 
 You'll also want to instruct **bitcoind** to load the wallet at startup. Modify
 your **bitcoin.conf** file, located in the **~/.bitcoin** directory on Linux,
@@ -121,6 +138,7 @@ on Mac OS. Open the file in a text editor and add the following line at the end
 of the file.
 
 `wallet=dex`
+
 
 ### Connect Wallets and Register
 
