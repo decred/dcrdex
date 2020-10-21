@@ -187,6 +187,10 @@ const (
 		commit, target_order, status
 	FROM %s WHERE oid = $1;`
 
+	SelectCancelOrdersByStatus = `SELECT account_id, client_time, server_time,
+		commit, target_order
+	FROM %s WHERE status = $1;`
+
 	CancelPreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
 		(epoch_idx+1) * epoch_dur AS epochCloseTime   -- when preimages are requested
 	FROM %s -- e.g. dcr_btc.cancels_archived

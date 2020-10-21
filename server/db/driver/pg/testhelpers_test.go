@@ -93,6 +93,10 @@ func newLimitOrderRevealed(sell bool, rate, quantityLots uint64, force order.Tim
 }
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
+	return newLimitOrderWithAssets(sell, rate, quantityLots, force, timeOffset, AssetDCR, AssetBTC)
+}
+
+func newLimitOrderWithAssets(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64, base, quote uint32) *order.LimitOrder {
 	addr := "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui"
 	if sell {
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
@@ -100,8 +104,8 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 	return &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  randomAccountID(),
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
+			BaseAsset:  base,
+			QuoteAsset: quote,
 			OrderType:  order.LimitOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),

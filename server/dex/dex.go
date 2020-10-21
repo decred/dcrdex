@@ -755,3 +755,18 @@ func (dm *DEX) Notify(acctID account.AccountID, msg *msgjson.Message) {
 func (dm *DEX) NotifyAll(msg *msgjson.Message) {
 	dm.server.Broadcast(msg)
 }
+
+// BookOrders returns booked orders for market with base and quote.
+func (dm *DEX) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
+	return dm.storage.BookOrders(base, quote)
+}
+
+// EpochOrders returns epoch orders for market with base and quote.
+func (dm *DEX) EpochOrders(base, quote uint32) ([]order.Order, error) {
+	return dm.storage.EpochOrders(base, quote)
+}
+
+// MarketMatches returns matches for market with base and quote.
+func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
+	return dm.storage.MarketMatches(base, quote, includeInactive)
+}

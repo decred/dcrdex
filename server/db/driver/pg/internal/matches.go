@@ -117,6 +117,23 @@ const (
 	WHERE (takerAccount = $1 OR makerAccount = $1)
 		AND active;`
 
+	RetrieveMarketMatches = `SELECT matchid, active, takerSell,
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+	FROM %s
+	WHERE takerSell IS NOT NULL -- not a cancel order
+	ORDER BY epochIdx * epochDur DESC;`
+
+	RetrieveActiveMarketMatches = `SELECT matchid, takerSell,
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+	FROM %s
+	WHERE takerSell IS NOT NULL -- not a cancel order
+		AND active
+	ORDER BY epochIdx * epochDur DESC;`
+
 	// CompletedOrAtFaultMatchesLastN retrieves inactive matches for a user that
 	// are either successfully completed by the user (MatchComplete or
 	// MakerRedeemed with user as maker), or failed because of this user's

@@ -498,6 +498,73 @@ func TestUserMatches(t *testing.T) {
 	}
 }
 
+func TestMarketMatches(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Make a perfect 1 lot match.
+	limitBuyStanding := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+
+	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
+
+	// Store it.
+	epochID := order.EpochID{132412341, 10}
+	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
+	err := archie.InsertMatch(match)
+	if err != nil {
+		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	// Make another perfect 1 lot match.
+	limitBuyStanding = newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	limitSellImmediate = newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+
+	// Store it.
+	match = newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
+	err = archie.InsertMatch(match)
+	if err != nil {
+		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	archie.SetMatchInactive(db.MarketMatchID{
+		MatchID: match.ID(),
+		Base:    base,
+		Quote:   quote,
+	})
+	// Make another perfect 1 lot match on another market.
+	limitBuyStanding = newLimitOrderWithAssets(false, 4500000, 1, order.StandingTiF, 0, AssetBTC, AssetLTC)
+	limitSellImmediate = newLimitOrderWithAssets(true, 4490000, 1, order.ImmediateTiF, 10, AssetBTC, AssetLTC)
+
+	// Store it.
+	match = newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
+	err = archie.InsertMatch(match)
+	if err != nil {
+		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	// Don't include inactive.
+	matchData, err := archie.MarketMatches(base, quote, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matchData) != 1 {
+		t.Errorf("Retrieved %d matches for market, expected 1.", len(matchData))
+	}
+	// Include inactive.
+	matchData, err = archie.MarketMatches(base, quote, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matchData) != 2 {
+		t.Errorf("Retrieved %d matches for market, expected 2.", len(matchData))
+	}
+	// Bad Market.
+	matchData, err = archie.MarketMatches(base, base, true)
+	noMktErr := new(db.ArchiveError)
+	if !errors.As(err, noMktErr) || noMktErr.Code != db.ErrUnsupportedMarket {
+		t.Fatalf("incorrect error for unsupported market: %v", err)
+	}
+}
+
 type matchPair struct {
 	match  *order.Match
 	status *db.MatchStatus

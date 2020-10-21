@@ -52,13 +52,19 @@ type TMarket struct {
 }
 
 type TCore struct {
-	markets     map[string]*TMarket
-	accounts    []*db.Account
-	accountsErr error
-	account     *db.Account
-	accountErr  error
-	penalizeErr error
-	unbanErr    error
+	markets          map[string]*TMarket
+	accounts         []*db.Account
+	accountsErr      error
+	account          *db.Account
+	accountErr       error
+	penalizeErr      error
+	unbanErr         error
+	book             []*order.LimitOrder
+	bookErr          error
+	epochOrders      []order.Order
+	epochOrdersErr   error
+	marketMatches    []*db.MatchData
+	marketMatchesErr error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -112,6 +118,18 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 		SuspendEpoch:  suspendEpoch,
 		PersistBook:   mkt.persist,
 	}
+}
+
+func (c *TCore) BookOrders(_, _ uint32) ([]*order.LimitOrder, error) {
+	return c.book, c.bookErr
+}
+
+func (c *TCore) EpochOrders(_, _ uint32) ([]order.Order, error) {
+	return c.epochOrders, c.epochOrdersErr
+}
+
+func (c *TCore) MarketMatches(_, _ uint32, _ bool) ([]*db.MatchData, error) {
+	return c.marketMatches, c.marketMatchesErr
 }
 
 func (c *TCore) MarketStatuses() map[string]*market.Status {
@@ -491,6 +509,197 @@ func TestMarketInfo(t *testing.T) {
 	}
 	if !mktStatus.Running {
 		t.Errorf("market should have been reported as running")
+	}
+}
+
+func TestMarketOrderBook(t *testing.T) {
+	core := new(TCore)
+	core.markets = make(map[string]*TMarket)
+	srv := &Server{
+		core: core,
+	}
+	tMkt := &TMarket{
+		dur:         1234,
+		startEpoch:  12340,
+		activeEpoch: 12343,
+	}
+	core.markets["dcr_btc"] = tMkt
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}/orderbook", srv.apiMarketOrderBook)
+	tests := []struct {
+		name, mkt string
+		running   bool
+		book      []*order.LimitOrder
+		bookErr   error
+		wantCode  int
+	}{{
+		name:     "ok",
+		mkt:      "dcr_btc",
+		running:  true,
+		book:     []*order.LimitOrder{},
+		wantCode: http.StatusOK,
+	}, {
+		name:     "no market",
+		mkt:      "btc_dcr",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "core.OrderBook error",
+		mkt:      "dcr_btc",
+		running:  true,
+		bookErr:  errors.New(""),
+		wantCode: http.StatusInternalServerError,
+	}}
+	for _, test := range tests {
+		core.book = test.book
+		core.bookErr = test.bookErr
+		tMkt.running = test.running
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/orderbook", nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiMarketOrderBook returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new(*msgjson.BookOrderNote)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
+	}
+}
+
+func TestMarketEpochOrders(t *testing.T) {
+	core := new(TCore)
+	core.markets = make(map[string]*TMarket)
+	srv := &Server{
+		core: core,
+	}
+	tMkt := &TMarket{
+		dur:         1234,
+		startEpoch:  12340,
+		activeEpoch: 12343,
+	}
+	core.markets["dcr_btc"] = tMkt
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}/epochorders", srv.apiMarketEpochOrders)
+	tests := []struct {
+		name, mkt      string
+		running        bool
+		orders         []order.Order
+		epochOrdersErr error
+		wantCode       int
+	}{{
+		name:     "ok",
+		mkt:      "dcr_btc",
+		running:  true,
+		orders:   []order.Order{},
+		wantCode: http.StatusOK,
+	}, {
+		name:     "no market",
+		mkt:      "btc_dcr",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:           "core.OrderBook error",
+		mkt:            "dcr_btc",
+		running:        true,
+		epochOrdersErr: errors.New(""),
+		wantCode:       http.StatusInternalServerError,
+	}}
+	for _, test := range tests {
+		core.epochOrders = test.orders
+		core.epochOrdersErr = test.epochOrdersErr
+		tMkt.running = test.running
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/epochorders", nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiMarketEpochOrders returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new(*msgjson.BookOrderNote)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
+	}
+}
+
+func TestMarketMatches(t *testing.T) {
+	core := new(TCore)
+	core.markets = make(map[string]*TMarket)
+	srv := &Server{
+		core: core,
+	}
+	tMkt := &TMarket{
+		dur:         1234,
+		startEpoch:  12340,
+		activeEpoch: 12343,
+	}
+	core.markets["dcr_btc"] = tMkt
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}/matches", srv.apiMarketMatches)
+	tests := []struct {
+		name, mkt, token    string
+		running, tokenValue bool
+		marketMatches       []*db.MatchData
+		marketMatchesErr    error
+		wantCode            int
+	}{{
+		name:          "ok no token",
+		mkt:           "dcr_btc",
+		running:       true,
+		marketMatches: []*db.MatchData{},
+		wantCode:      http.StatusOK,
+	}, {
+		name:          "ok with token",
+		mkt:           "dcr_btc",
+		running:       true,
+		token:         "?" + includeInactiveToken + "=true",
+		marketMatches: []*db.MatchData{},
+		wantCode:      http.StatusOK,
+	}, {
+		name:          "bad token",
+		mkt:           "dcr_btc",
+		running:       true,
+		token:         "?" + includeInactiveToken + "=blue",
+		marketMatches: []*db.MatchData{},
+		wantCode:      http.StatusBadRequest,
+	}, {
+		name:     "no market",
+		mkt:      "btc_dcr",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:             "core.OrderBook error",
+		mkt:              "dcr_btc",
+		running:          true,
+		marketMatchesErr: errors.New(""),
+		wantCode:         http.StatusInternalServerError,
+	}}
+	for _, test := range tests {
+		core.marketMatches = test.marketMatches
+		core.marketMatchesErr = test.marketMatchesErr
+		tMkt.running = test.running
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/matches"+test.token, nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiMarketMatches returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new([]*db.MatchData)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
 	}
 }
 

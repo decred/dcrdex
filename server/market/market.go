@@ -390,6 +390,7 @@ type Status struct {
 	StartEpoch    int64
 	SuspendEpoch  int64
 	PersistBook   bool
+	Base, Quote   uint32
 }
 
 // Status returns the current operating state of the Market.
@@ -403,6 +404,8 @@ func (m *Market) Status() *Status {
 		StartEpoch:    m.startEpochIdx,
 		SuspendEpoch:  m.suspendEpochIdx,
 		PersistBook:   m.persistBook,
+		Base:          m.marketInfo.Base,
+		Quote:         m.marketInfo.Quote,
 	}
 }
 

@@ -325,6 +325,64 @@ func (a *Archiver) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
 	return limits, nil
 }
 
+// EpochOrders retrieves all epoch orders for the specified market returns them
+// as a slice of order.Order.
+func (a *Archiver) EpochOrders(base, quote uint32) ([]order.Order, error) {
+	los, mos, cos, err := a.epochOrders(base, quote)
+	if err != nil {
+		return nil, err
+	}
+	orders := make([]order.Order, 0, len(los)+len(mos)+len(cos))
+	for _, o := range los {
+		orders = append(orders, o)
+	}
+	for _, o := range mos {
+		orders = append(orders, o)
+	}
+	for _, o := range cos {
+		orders = append(orders, o)
+	}
+	return orders, nil
+}
+
+// epochOrders retrieves all epoch orders for the specified market.
+func (a *Archiver) epochOrders(base, quote uint32) ([]*order.LimitOrder, []*order.MarketOrder, []*order.CancelOrder, error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
+
+	// no query timeout here, only explicit cancellation
+	ords, err := ordersByStatusFromTable(a.ctx, a.db, tableName, base, quote, orderStatusEpoch)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Verify loaded order type and add to correct slice.
+	var limits []*order.LimitOrder
+	var markets []*order.MarketOrder
+	for _, ord := range ords {
+		switch o := ord.(type) {
+		case *order.LimitOrder:
+			limits = append(limits, o)
+		case *order.MarketOrder:
+			markets = append(markets, o)
+		default:
+			log.Errorf("loaded epoch order %v that was not a limit or market order: %T", ord.ID(), ord)
+		}
+	}
+
+	tableName = fullCancelOrderTableName(a.dbName, marketSchema, true) // active(true)
+	cancels, err := cancelOrdersByStatusFromTable(a.ctx, a.db, tableName, base, quote, orderStatusEpoch)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return limits, markets, cancels, nil
+}
+
 // ActiveOrderCoins retrieves a CoinID slice for each active order.
 func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	var marketSchema string
@@ -1389,6 +1447,35 @@ func (a *Archiver) userOrders(ctx context.Context, base, quote uint32, aid accou
 	statuses = append(statuses, statusesArchived...)
 
 	return orders, statuses, nil
+}
+
+func cancelOrdersByStatusFromTable(ctx context.Context, dbe *sql.DB, fullTable string, base, quote uint32, status pgOrderStatus) ([]*order.CancelOrder, error) {
+	stmt := fmt.Sprintf(internal.SelectCancelOrdersByStatus, fullTable)
+	rows, err := dbe.QueryContext(ctx, stmt, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cos []*order.CancelOrder
+
+	for rows.Next() {
+		var co order.CancelOrder
+		co.OrderType = order.CancelOrderType
+		err := rows.Scan(&co.AccountID, &co.ClientTime,
+			&co.ServerTime, &co.Commit, &co.TargetOrderID)
+		if err != nil {
+			return nil, err
+		}
+		co.BaseAsset, co.QuoteAsset = base, quote
+		cos = append(cos, &co)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return cos, nil
 }
 
 // base and quote are used to set the prefix, not specify which table to search.

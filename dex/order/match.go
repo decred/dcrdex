@@ -7,6 +7,7 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -24,6 +25,12 @@ type MatchID [MatchIDSize]byte
 // MatchID implements fmt.Stringer.
 func (id MatchID) String() string {
 	return hex.EncodeToString(id[:])
+}
+
+// MarshalJSON satisfies the json.Marshaller interface, and will marshal the
+// id to a hex string.
+func (id MatchID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(id.String())
 }
 
 // Bytes returns the match ID as a []byte.
