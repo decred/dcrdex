@@ -719,6 +719,7 @@ func newTestRig() *testRig {
 	return &testRig{
 		core: &Core{
 			ctx:      tCtx,
+			cfg:      &Config{},
 			db:       tdb,
 			log:      tLogger,
 			latencyQ: queue,

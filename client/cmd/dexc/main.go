@@ -71,9 +71,11 @@ func main() {
 	}
 
 	clientCore, err := core.New(&core.Config{
-		DBPath: cfg.DBPath, // global set in config.go
-		Net:    cfg.Net,
-		Logger: logMaker.Logger("CORE"),
+		DBPath:       cfg.DBPath, // global set in config.go
+		Net:          cfg.Net,
+		Logger:       logMaker.Logger("CORE"),
+		TorProxy:     cfg.TorProxy,
+		TorIsolation: cfg.TorIsolation,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)
