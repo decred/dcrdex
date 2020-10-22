@@ -452,7 +452,7 @@ func fileServer(r chi.Router, pathRoot, fsRoot, contentType string) {
 		// Ran into a Windows quirk where net was setting the content-type
 		// incorrectly based on a bad registry value or something. This should
 		// prevent that. It's most important for javascript files, because we
-		// add a nosniff header and the browser would refust to execute a js
+		// add a nosniff header and the browser would refuse to execute a js
 		// file with the wrong header.
 		if contentType != "" {
 			w.Header().Set("Content-Type", contentType)
