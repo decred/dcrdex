@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/go-socks/socks"
 )
 
 const (
@@ -784,6 +785,10 @@ type Config struct {
 	// Logger is the Core's logger and is also used to create the sub-loggers
 	// for the asset backends.
 	Logger dex.Logger
+	// TorProxy specifies the address of a Tor proxy server.
+	TorProxy string
+	// TorIsolation specifies whether to enable Tor circuit isolation.
+	TorIsolation bool
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -831,6 +836,12 @@ func New(cfg *Config) (*Core, error) {
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
+	if cfg.TorProxy != "" {
+		if _, _, err = net.SplitHostPort(cfg.TorProxy); err != nil {
+			return nil, err
+		}
+	}
+
 	core := &Core{
 		cfg:           cfg,
 		log:           cfg.Logger,
@@ -3337,8 +3348,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("error parsing ws address %s: %v", wsAddr, err)
 	}
 
-	// Create a websocket connection to the server.
-	conn, err := c.wsConstructor(&comms.WsCfg{
+	wsCfg := comms.WsCfg{
 		URL:      wsURL.String(),
 		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
 		Cert:     acctInfo.Cert,
@@ -3349,7 +3359,17 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			go c.handleConnectEvent(host, connected)
 		},
 		Logger: c.log.SubLogger(wsURL.String()),
-	})
+	}
+	if c.cfg.TorProxy != "" {
+		proxy := &socks.Proxy{
+			Addr:         c.cfg.TorProxy,
+			TorIsolation: c.cfg.TorIsolation,
+		}
+		wsCfg.NetDialContext = proxy.DialContext
+	}
+
+	// Create a websocket connection to the server.
+	conn, err := c.wsConstructor(&wsCfg)
 	if err != nil {
 		return nil, err
 	}
