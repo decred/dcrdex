@@ -1654,9 +1654,6 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("final Login error: %v", err)
 	}
 
-	if tracker.matches[missingID].failErr == nil {
-		t.Errorf("failErr not set for missing match tracker")
-	}
 	if !tracker.matches[missingID].MetaData.Proof.SelfRevoked {
 		t.Errorf("SelfRevoked not true for missing match tracker")
 	}

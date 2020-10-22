@@ -1494,6 +1494,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 		proof.MakerRedeem = []byte(redemptionCoinID)
 		proof.Secret = secret
 		proof.SelfRevoked = true // Set match as revoked.
+		match.failErr = nil
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			t.dc.log.Errorf("waitForRedemptions: error storing match info in database: %v", err)

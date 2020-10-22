@@ -2733,7 +2733,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		for _, match := range missing {
 			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
 				dc.acct.host, match.id, oid)
-			match.failErr = fmt.Errorf("order not reported by the server on connect")
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
 			match.MetaData.Proof.SelfRevoked = true
