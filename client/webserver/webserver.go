@@ -262,10 +262,10 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	})
 
 	// Files
-	fileServer(mux, "/js", filepath.Join(siteDir, "dist"))
-	fileServer(mux, "/css", filepath.Join(siteDir, "dist"))
-	fileServer(mux, "/img", filepath.Join(siteDir, "src/img"))
-	fileServer(mux, "/font", filepath.Join(siteDir, "src/font"))
+	fileServer(mux, "/js", filepath.Join(siteDir, "dist"), "text/javascript")
+	fileServer(mux, "/css", filepath.Join(siteDir, "dist"), "text/css")
+	fileServer(mux, "/img", filepath.Join(siteDir, "src/img"), "")
+	fileServer(mux, "/font", filepath.Join(siteDir, "src/font"), "")
 
 	return s, nil
 }
@@ -405,10 +405,10 @@ func extractUserInfo(r *http.Request) *userInfo {
 	return user
 }
 
-// FileServer sets up a http.FileServer handler to serve static files from a
+// fileServer sets up a http.FileServer handler to serve static files from a
 // path on the file system. Directory listings are denied, as are URL paths
 // containing "..".
-func fileServer(r chi.Router, pathRoot, fsRoot string) {
+func fileServer(r chi.Router, pathRoot, fsRoot, contentType string) {
 	if strings.ContainsAny(pathRoot, "{}*") {
 		panic("FileServer does not permit URL parameters.")
 	}
@@ -447,6 +447,15 @@ func fileServer(r chi.Router, pathRoot, fsRoot string) {
 		if fi.IsDir() {
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
+		}
+
+		// Ran into a Windows quirk where net was setting the content-type
+		// incorrectly based on a bad registry value or something. This should
+		// prevent that. It's most important for javascript files, because we
+		// add a nosniff header and the browser would refuse to execute a js
+		// file with the wrong header.
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
 		}
 
 		http.ServeFile(w, r, fullFilePath)
