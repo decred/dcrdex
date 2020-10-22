@@ -20,6 +20,10 @@ import (
 	"golang.org/x/crypto/blake2s"
 )
 
+const (
+	ErrNotificationNotFound = dex.ErrorKind("notification not found")
+)
+
 // Severity indicates the level of required action for a notification. The DEX
 // db only stores notifications with Severity >= Success.
 type Severity uint8

@@ -4,6 +4,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
@@ -71,7 +72,9 @@ func (c *Core) NotificationFeed() <-chan Notification {
 func (c *Core) AckNotes(ids []dex.Bytes) {
 	for _, id := range ids {
 		err := c.db.AckNotification(id)
-		if err != nil {
+		// It's OK if the notification is not found. This can happen if the
+		// browser's local storage has old notifications that it tries to ack.
+		if err != nil && !errors.Is(err, db.ErrNotificationNotFound) {
 			c.log.Errorf("error saving notification acknowledgement for %s: %v", id, err)
 		}
 	}
