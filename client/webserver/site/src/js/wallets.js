@@ -451,7 +451,7 @@ export default class WalletsPage extends BasePage {
   }
 
   handleWalletStateNote (note) {
-    this.rowInfos[note.assetID].stateIcons.readWallet(note)
+    this.rowInfos[note.wallet.assetID].stateIcons.readWallet(note)
   }
 }
 

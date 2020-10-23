@@ -119,14 +119,20 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 // apiNewDepositAddress gets a new deposit address from a wallet.
 func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
-		AssetID uint32 `json:"assetID"`
+		AssetID *uint32 `json:"assetID"`
 	}{}
 	if !readPost(w, r, form) {
 		return
 	}
-	addr, err := s.core.NewDepositAddress(form.AssetID)
+	if form.AssetID == nil {
+		s.writeAPIError(w, "missing asset ID")
+		return
+	}
+	assetID := *form.AssetID
+
+	addr, err := s.core.NewDepositAddress(assetID)
 	if err != nil {
-		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
+		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(assetID), err)
 		return
 	}
 
