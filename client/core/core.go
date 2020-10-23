@@ -3218,6 +3218,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
+			// NOTE: change and changeLocked are not set even if the funding
+			// coins were loaded from the DB's ChangeCoin.
+			tracker.coinsLocked = true
 			tracker.coins = mapifyCoins(coins)
 		}
 
