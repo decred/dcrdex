@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -571,7 +572,7 @@ func (fs filterSet) check(oidB []byte, oBkt *bbolt.Bucket) bool {
 
 // Orders fetches a slice of orders, sorted by descending time, and filtered
 // with the provided OrderFilter. Orders does not return cancel orders.
-func (db *BoltDB) Orders(orderFilter *dexdb.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
+func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
 	// Default filter is just to exclude cancel orders.
 	filters := filterSet{
 		func(oidB []byte, oBkt *bbolt.Bucket) bool {
@@ -679,7 +680,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 }
 
 // UpdateOrderMetaData updates the order metadata, not including the Host.
-func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *dexdb.OrderMetaData) error {
+func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) error {
 	return db.ordersUpdate(func(master *bbolt.Bucket) error {
 		oBkt := master.Bucket(oid[:])
 		if oBkt == nil {
@@ -973,7 +974,7 @@ func (db *BoltDB) SetWalletPassword(wid []byte, newPW []byte) error {
 }
 
 // UpdateBalance updates balance in the wallet bucket.
-func (db *BoltDB) UpdateBalance(wid []byte, bal *dexdb.Balance) error {
+func (db *BoltDB) UpdateBalance(wid []byte, bal *db.Balance) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
@@ -1022,7 +1023,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	}
 	balB := getCopy(wBkt, balanceKey)
 	if balB != nil {
-		bal, err := dexdb.DecodeBalance(balB)
+		bal, err := db.DecodeBalance(balB)
 		if err != nil {
 			return nil, err
 		}
@@ -1044,7 +1045,7 @@ func (db *BoltDB) walletsUpdate(f bucketFunc) error {
 // SaveNotification saves the notification.
 func (db *BoltDB) SaveNotification(note *dexdb.Notification) error {
 	if note.Severeness < dexdb.Success {
-		return fmt.Errorf("storage of notification with severity %s is forbidden", note.Severeness)
+		return fmt.Errorf("Storage of notification with severity %s is forbidden.", note.Severeness)
 	}
 	return db.notesUpdate(func(master *bbolt.Bucket) error {
 		noteB := note.Encode()
@@ -1070,7 +1071,7 @@ func (db *BoltDB) AckNotification(id []byte) error {
 	return db.notesUpdate(func(master *bbolt.Bucket) error {
 		noteBkt := master.Bucket(id)
 		if noteBkt == nil {
-			return dexdb.ErrNotificationNotFound
+			return fmt.Errorf("notification not found")
 		}
 		return noteBkt.Put(ackKey, byteTrue)
 	})
