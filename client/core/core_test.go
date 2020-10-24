@@ -493,11 +493,15 @@ type TXCWallet struct {
 	signCoinErr       error
 	lastSwaps         *asset.Swaps
 	swapReceipts      []asset.Receipt
+	swapCounter       int
+	swapErr           error
 	auditInfo         asset.AuditInfo
 	auditErr          error
 	refundCoin        dex.Bytes
 	refundErr         error
 	redeemCoins       []dex.Bytes
+	redeemCounter     int
+	redeemErr         error
 	badSecret         bool
 	fundedVal         uint64
 	fundedSwaps       uint64
@@ -583,11 +587,19 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 }
 
 func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	w.swapCounter++
 	w.lastSwaps = swaps
+	if w.swapErr != nil {
+		return nil, nil, 0, w.swapErr
+	}
 	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
 func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
+	w.redeemCounter++
+	if w.redeemErr != nil {
+		return nil, nil, 0, w.redeemErr
+	}
 	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, tRedemptionFeesPaid, nil
 }
 
@@ -4572,6 +4584,29 @@ func TestReconfigureWallet(t *testing.T) {
 	}
 	tXyzWallet.unlockErr = nil
 
+	// For the last success, make sure that we also clear any related
+	// tickMeterers.
+	match := &matchTracker{
+		suspectSwap: true,
+		tickMeterer: time.NewTimer(time.Hour),
+	}
+	tCore.conns[tDexHost].trades[order.OrderID{}] = &trackedTrade{
+		Order: &order.LimitOrder{
+			P: order.Prefix{
+				BaseAsset: assetID,
+			},
+		},
+		wallets: &walletSet{
+			fromAsset:  &dex.Asset{ID: assetID},
+			fromWallet: &xcWallet{AssetID: assetID},
+			toAsset:    &dex.Asset{},
+			toWallet:   &xcWallet{},
+		},
+		matches: map[order.MatchID]*matchTracker{
+			order.MatchID{}: match,
+		},
+	}
+
 	// Success
 	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
 	if err != nil {
@@ -4581,6 +4616,10 @@ func TestReconfigureWallet(t *testing.T) {
 	settings := rig.db.wallet.Settings
 	if len(settings) != 1 || settings["def"] != "456" {
 		t.Fatalf("settings not stored")
+	}
+
+	if match.tickMeterer != nil {
+		t.Fatalf("tickMeterer not removed")
 	}
 }
 
@@ -5234,5 +5273,188 @@ func TestMatchStatusResolution(t *testing.T) {
 		if !match.MetaData.Proof.SelfRevoked {
 			t.Fatalf("(%s) match not self-revoked during nonsense resolution", testName(tt))
 		}
+	}
+}
+
+func TestSuspectTrades(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	tCore := rig.core
+
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+	oid := lo.ID()
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[oid] = tracker
+
+	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
+		return &matchTracker{
+			id:     ordertest.RandomMatchID(),
+			prefix: lo.Prefix(),
+			trade:  lo.Trade(),
+			MetaMatch: db.MetaMatch{
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						Auth: db.MatchAuth{
+							MatchStamp: encode.UnixMilliU(time.Now()),
+							AuditStamp: encode.UnixMilliU(time.Now()),
+						},
+					},
+					Status: status,
+				},
+				Match: &order.UserMatch{
+					Side:    side,
+					Address: ordertest.RandomAddress(),
+					Status:  status,
+				},
+			},
+		}
+	}
+
+	var swappableMatch1, swappableMatch2 *matchTracker
+	setSwaps := func() {
+		swappableMatch1 = newMatch(order.Maker, order.NewlyMatched)
+		swappableMatch2 = newMatch(order.Taker, order.MakerSwapCast)
+		_, auditInfo := tMsgAudit(oid, swappableMatch2.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
+		auditInfo.coin.confs = tDCR.SwapConf
+		swappableMatch2.counterSwap = auditInfo
+		tDcrWallet.swapCounter = 0
+		tracker.matches = map[order.MatchID]*matchTracker{
+			swappableMatch1.id: swappableMatch1,
+			swappableMatch2.id: swappableMatch2,
+		}
+	}
+	setSwaps()
+
+	// Initial success
+	_, err := tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("swap tick error: %v", err)
+	}
+
+	setSwaps()
+	tDcrWallet.swapErr = tErr
+	_, err = tCore.tick(tracker)
+	if err == nil {
+		t.Fatalf("swap error not propagated")
+	}
+	if tDcrWallet.swapCounter != 1 {
+		t.Fatalf("never swapped")
+	}
+
+	// Both matches should be marked as suspect and have tickMeterers in place.
+	tracker.mtx.Lock()
+	for i, m := range []*matchTracker{swappableMatch1, swappableMatch2} {
+		if !m.suspectSwap {
+			t.Fatalf("swappable match %d not suspect after failed swap", i+1)
+		}
+		if m.tickMeterer == nil {
+			t.Fatalf("swappable match %d has no tick meterer set", i+1)
+		}
+	}
+	tracker.mtx.Unlock()
+
+	// Ticking right away again should do nothing.
+	tDcrWallet.swapErr = nil
+	_, err = tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("tick error during metered swap tick: %v", err)
+	}
+	if tDcrWallet.swapCounter != 1 {
+		t.Fatalf("swapped during metered tick")
+	}
+
+	// But once the tickMeterers expire, we should succeed with two separate
+	// requests.
+	tracker.mtx.Lock()
+	swappableMatch1.tickMeterer = nil
+	swappableMatch2.tickMeterer = nil
+	tracker.mtx.Unlock()
+	_, err = tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("tick error while swapping suspect matches: %v", err)
+	}
+	if tDcrWallet.swapCounter != 3 {
+		t.Fatalf("suspect swap matches not run or not run separately. expected 2 new calls to Swap, got %d", tDcrWallet.swapCounter-1)
+	}
+
+	var redeemableMatch1, redeemableMatch2 *matchTracker
+	setRedeems := func() {
+		redeemableMatch1 = newMatch(order.Maker, order.TakerSwapCast)
+		redeemableMatch2 = newMatch(order.Taker, order.MakerRedeemed)
+		_, auditInfo := tMsgAudit(oid, redeemableMatch1.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
+		auditInfo.coin.confs = tBTC.SwapConf
+		redeemableMatch1.counterSwap = auditInfo
+		tBtcWallet.redeemCounter = 0
+		tracker.matches = map[order.MatchID]*matchTracker{
+			redeemableMatch1.id: redeemableMatch1,
+			redeemableMatch2.id: redeemableMatch2,
+		}
+		rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+		rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+	}
+	setRedeems()
+
+	// Initial success
+	tBtcWallet.redeemCoins = []dex.Bytes{encode.RandomBytes(36), encode.RandomBytes(36)}
+	_, err = tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("redeem tick error: %v", err)
+	}
+	if tBtcWallet.redeemCounter != 1 {
+		t.Fatalf("never redeemed")
+	}
+
+	setRedeems()
+	tBtcWallet.redeemErr = tErr
+	_, err = tCore.tick(tracker)
+	if err == nil {
+		t.Fatalf("redeem error not propagated")
+	}
+	if tBtcWallet.redeemCounter != 1 {
+		t.Fatalf("never redeemed")
+	}
+
+	// Both matches should be marked as suspect and have tickMeterers in place.
+	tracker.mtx.Lock()
+	for i, m := range []*matchTracker{redeemableMatch1, redeemableMatch2} {
+		if !m.suspectRedeem {
+			t.Fatalf("redeemable match %d not suspect after failed swap", i+1)
+		}
+		if m.tickMeterer == nil {
+			t.Fatalf("redeemable match %d has no tick meterer set", i+1)
+		}
+	}
+	tracker.mtx.Unlock()
+
+	// Ticking right away again should do nothing.
+	tBtcWallet.redeemErr = nil
+	_, err = tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("tick error during metered redeem tick: %v", err)
+	}
+	if tBtcWallet.redeemCounter != 1 {
+		t.Fatalf("redeemed during metered tick %d", tBtcWallet.redeemCounter)
+	}
+
+	// But once the tickMeterers expire, we should succeed with two separate
+	// requests.
+	tracker.mtx.Lock()
+	redeemableMatch1.tickMeterer = nil
+	redeemableMatch2.tickMeterer = nil
+	tracker.mtx.Unlock()
+	_, err = tCore.tick(tracker)
+	if err != nil {
+		t.Fatalf("tick error while redeeming suspect matches: %v", err)
+	}
+	if tBtcWallet.redeemCounter != 3 {
+		t.Fatalf("suspect redeem matches not run or not run separately. expected 2 new calls to Redeem, got %d", tBtcWallet.redeemCounter-1)
 	}
 }

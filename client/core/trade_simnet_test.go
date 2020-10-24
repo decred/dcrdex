@@ -301,7 +301,6 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 			} else {
 				client.log("%s: resuming trade negotiations to audit Maker's redeem", side)
 			}
-			match.failErr = nil // remove next action blocker on match
 		}
 		tracker.mtx.Unlock()
 		// force next action since trade.tick() will not be called for disconnected dcs.

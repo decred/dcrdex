@@ -1479,6 +1479,30 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	details := fmt.Sprintf("Configuration for %s wallet has been updated.", unbip(assetID))
 	c.notify(newWalletConfigNote("Wallet Configuration Updated", details, db.Success, wallet.state()))
 
+	// Clear any existing tickMeterers for suspect matches.
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, t := range dc.trades {
+			if t.Base() != assetID && t.Quote() != assetID {
+				continue
+			}
+			t.mtx.Lock()
+			for _, m := range t.matches {
+				if m.tickMeterer != nil &&
+					(m.suspectSwap && t.wallets.fromAsset.ID == assetID ||
+						(m.suspectRedeem && t.wallets.toAsset.ID == assetID)) {
+
+					m.tickMeterer.Stop()
+					m.tickMeterer = nil
+				}
+			}
+			t.mtx.Unlock()
+		}
+		dc.tradeMtx.RUnlock()
+	}
+
 	return nil
 }
 
@@ -3214,6 +3238,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 			}
 			if needsAuditInfo {
+				// Check for unresolvable states.
 				if len(counterSwap) == 0 {
 					match.failErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match.id)
 					notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap coin.", dbMatch.Side, tracker.token(), dbMatch.Status)
@@ -3227,9 +3252,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
 				if err != nil {
-					c.log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status,
-						len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked())
+					c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
+						match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked(), err)
 					match.failErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
+					match.MetaData.Proof.SelfRevoked = true
 					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v",
 						tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
 					continue

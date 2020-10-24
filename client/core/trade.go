@@ -34,12 +34,15 @@ func (err ExpirationErr) Error() string { return string(err) }
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
-	id          order.MatchID
-	failErr     error
-	refundErr   error
-	prefix      *order.Prefix
-	trade       *order.Trade
-	counterSwap asset.AuditInfo
+	id            order.MatchID
+	failErr       error
+	tickMeterer   *time.Timer
+	suspectRedeem bool
+	suspectSwap   bool
+	refundErr     error
+	prefix        *order.Prefix
+	trade         *order.Trade
+	counterSwap   asset.AuditInfo
 
 	// cancelRedemptionSearch should be set when taker starts searching for
 	// maker's redemption. Required to cancel a find redemption attempt if
@@ -62,10 +65,15 @@ type matchTracker struct {
 
 // parts is a getter for pointers to commonly used struct fields in the
 // matchTracker.
-func (match *matchTracker) parts() (*order.UserMatch, *db.MatchMetaData, *db.MatchProof, *db.MatchAuth) {
-	dbMatch, metaData := match.Match, match.MetaData
+func (m *matchTracker) parts() (*order.UserMatch, *db.MatchMetaData, *db.MatchProof, *db.MatchAuth) {
+	dbMatch, metaData := m.Match, m.MetaData
 	proof, auth := &metaData.Proof, &metaData.Proof.Auth
 	return dbMatch, metaData, proof, auth
+}
+
+// matchTime returns the match's match time as a time.Time.
+func (m *matchTracker) matchTime() time.Time {
+	return encode.UnixTimeMilli(int64(m.MetaData.Proof.Auth.MatchStamp)).UTC()
 }
 
 // trackedCancel is information necessary to track a cancel order. A
@@ -689,9 +697,9 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // mutex lock held for reads.
 func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	dbMatch, metaData, proof, _ := match.parts()
-	if match.failErr != nil || proof.IsRevoked() {
-		t.dc.log.Tracef("Match %v not swappable: failErr = %v, revoked = %v",
-			match.id, match.failErr, proof.IsRevoked())
+	if match.failErr != nil || proof.IsRevoked() || match.tickMeterer != nil {
+		t.dc.log.Tracef("Match %v not swappable: failErr = %v, revoked = %v, metered = %t",
+			match.id, match.failErr, proof.IsRevoked(), match.tickMeterer != nil)
 		return false
 	}
 
@@ -725,9 +733,9 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 // mutex lock held for reads.
 func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	dbMatch, metaData, proof, _ := match.parts()
-	if match.failErr != nil || len(proof.RefundCoin) != 0 {
-		t.dc.log.Tracef("Match %v not redeemable: failErr = %v, RefundCoin = %v",
-			match.id, match.failErr, proof.RefundCoin)
+	if match.failErr != nil || len(proof.RefundCoin) != 0 || match.tickMeterer != nil {
+		t.dc.log.Tracef("Match %v not redeemable: failErr = %v, RefundCoin = %v, metered = %t",
+			match.id, match.failErr, proof.RefundCoin, match.tickMeterer != nil)
 		return false
 	}
 
@@ -1092,26 +1100,46 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 	return nil
 }
 
-// swapMatches will send a transaction with swap outputs for the specified
-// matches.
+// swapMatches will send a transaction with swaps for the specified matches.
+// The matches will be de-grouped so that matches marked as suspect are swapped
+// individually and separate from the non-suspect group.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
+	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
+	for _, m := range matches {
+		if !m.suspectSwap {
+			groupables = append(groupables, m)
+			continue
+		}
+		c.swapMatchGroup(t, []*matchTracker{m}, errs)
+	}
+	if len(groupables) > 0 {
+		c.swapMatchGroup(t, groupables, errs)
+	}
+	return errs.ifAny()
+}
 
+// swapMatchGroup will send a transaction with swap outputs for the specified
+// matches.
+//
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
 	// Prepare the asset.Contracts.
 	contracts := make([]*asset.Contract, len(matches))
 	// These matches may have different fee rates, matched in different epochs.
 	var highestFeeRate uint64
 	var includesMakerSwap bool
 	for i, match := range matches {
-		dbMatch, _, proof, auth := match.parts()
+		dbMatch, proof := match.Match, &match.MetaData.Proof
 		value := dbMatch.Quantity
 		if !match.trade.Sell {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
-		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+		matchTime := match.matchTime()
 		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
 		if dbMatch.Side == order.Maker {
 			proof.Secret = encode.RandomBytes(32)
@@ -1167,13 +1195,15 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 	for i, coinID := range coinIDs {
 		coin, found := t.coins[hex.EncodeToString(coinID)]
 		if !found {
-			return errs.add("%s coin %s not found", fromAsset.Symbol, coinIDString(fromAsset.ID, coinID))
+			errs.add("%s coin %s not found", fromAsset.Symbol, coinIDString(fromAsset.ID, coinID))
+			return
 		}
 		inputs[i] = coin
 	}
 
 	if t.dc.IsDown() {
-		return errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
+		errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
+		return
 	}
 	// swapMatches is no longer idempotent after this point.
 
@@ -1188,11 +1218,35 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
-		// Set the error on the matches.
 		for _, match := range matches {
-			match.failErr = err
+			// Mark the matches as suspect to prevent them being grouped again.
+			match.suspectSwap = true
+			// If we can still swap before the broadcast timeout, allow retries
+			// soon.
+			lastActionTime := match.matchTime()
+			if match.Match.Side == order.Taker {
+				// It is possible that AuditStamp could be zero if we're
+				// recovering during startup. The implications of this is that
+				// if we are 1) already in start up recovery, and 2) we fail
+				// again, we will not try again even if we have time before the
+				// broadcast timeout.
+				lastActionTime = encode.UnixTimeMilli(int64(match.MetaData.Proof.Auth.AuditStamp))
+			}
+			if time.Since(lastActionTime) < t.broadcastTimeout() {
+				m := match // Scoped for the AfterFunc.
+				match.tickMeterer = time.AfterFunc(t.dc.tickInterval*3/4, func() {
+					t.mtx.Lock()
+					defer t.mtx.Unlock()
+					m.tickMeterer = nil
+				})
+			} else {
+				// If we can't get a swap out before the broadcast timeout, just
+				// quit.
+				match.failErr = err
+			}
 		}
-		return errs.add("error sending swap transaction: %v", err)
+		errs.add("error sending swap transaction: %v", err)
+		return
 	}
 
 	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v",
@@ -1239,8 +1293,6 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 			errs.addErr(err)
 		}
 	}
-
-	return errs.ifAny()
 }
 
 // finalizeSwapAction sends an `init` request for the specified match, waits
@@ -1311,11 +1363,32 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 }
 
 // redeemMatches will send a transaction redeeming the specified matches.
+// The matches will be de-grouped so that matches marked as suspect are redeemed
+// individually and separate from the non-suspect group.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
-	errs := newErrorSet("redeemMatches - order %s - ", t.ID())
+	errs := newErrorSet("redeemMatches order %s - ", t.ID())
+	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
+	for _, m := range matches {
+		if !m.suspectRedeem {
+			groupables = append(groupables, m)
+			continue
+		}
+		c.redeemMatchGroup(t, []*matchTracker{m}, errs)
+	}
+	if len(groupables) > 0 {
+		c.redeemMatchGroup(t, groupables, errs)
+	}
+	return errs.ifAny()
+}
+
+// redeemMatchGroup will send a transaction redeeming the specified matches.
+//
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
 	// Collect a asset.Redemption for each match into a slice of redemptions that
 	// will be grouped into a single transaction.
 	redemptions := make([]*asset.Redemption, 0, len(matches))
@@ -1332,10 +1405,41 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
+		// The caller will notify the user that there is a problem. We really
+		// have no way of knowing whether this is recoverable (so we can't set
+		// failErr), but we do want to prevent redemptions every tick.
 		for _, match := range matches {
-			match.failErr = err
+			// Mark these matches as suspect. Suspect matches will not be
+			// grouped for redemptions in future attempts.
+			match.suspectRedeem = true
+			// If we can still make a broadcast timeout, allow retries soon. It
+			// is possible that RedemptionStamp or AuditStamp is be zero if
+			// we're recovering during startup. The implications of this is that
+			// if we are 1) already in start up recovery, and 2) we fail again,
+			// we will not try again for an hour even if we have time before the
+			// broadcast timeout.
+			lastActionStamp := match.MetaData.Proof.Auth.AuditStamp
+			if match.Match.Side == order.Taker {
+				lastActionStamp = match.MetaData.Proof.Auth.RedemptionStamp
+			}
+			lastActionTime := encode.UnixTimeMilli(int64(lastActionStamp))
+			// Try to wait until about the next auto-tick to try again.
+			meterDuration := t.dc.tickInterval * 3 / 4
+			if time.Since(lastActionTime) > t.broadcastTimeout() {
+				// If we already missed the broadcast timeout, we're not in as
+				// much of a hurry. but keep trying and sending errors, because
+				// we do want the user to recover.
+				meterDuration = time.Hour
+			}
+			m := match // Scoped for the AfterFunc.
+			match.tickMeterer = time.AfterFunc(meterDuration, func() {
+				t.mtx.Lock()
+				defer t.mtx.Unlock()
+				m.tickMeterer = nil
+			})
 		}
-		return errs.addErr(err)
+		errs.addErr(err)
+		return
 	}
 
 	c.log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s (%s)",
@@ -1361,8 +1465,6 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 			errs.addErr(err)
 		}
 	}
-
-	return errs.ifAny()
 }
 
 // finalizeRedeemAction sends a `redeem` request for the specified match,
@@ -1494,7 +1596,6 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 		proof.MakerRedeem = []byte(redemptionCoinID)
 		proof.Secret = secret
 		proof.SelfRevoked = true // Set match as revoked.
-		match.failErr = nil
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			t.dc.log.Errorf("waitForRedemptions: error storing match info in database: %v", err)
@@ -1549,7 +1650,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
 		if err != nil {
 			match.refundErr = err
-			if err == asset.CoinNotFoundError {
+			if err == asset.CoinNotFoundError && dbMatch.Side == order.Taker {
 				// Could not find the contract coin, which means it has been spent.
 				// We should have already started FindRedemption for this contract,
 				// but let's do it again to ensure we find the secret.
@@ -1668,7 +1769,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	// 1. Recipient Address
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
-	dbMatch, _, proof, auth := match.parts()
+	dbMatch, proof := match.Match, &match.MetaData.Proof
 	match.counterSwap = auditInfo
 	if auditInfo.Recipient() != t.Trade().Address {
 		return fmt.Errorf("swap recipient %s is not the order address %s.", auditInfo.Recipient(), t.Trade().Address)
@@ -1693,7 +1794,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	// Check or store the secret hash and update the database.
 	match.MetaData.Proof.CounterScript = contract
 
-	matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+	matchTime := match.matchTime()
 	reqLockTime := encode.DropMilliseconds(matchTime.Add(t.lockTimeMaker)) // counterparty = maker
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
