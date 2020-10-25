@@ -116,6 +116,35 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiNewDepositAddress gets a new deposit address from a wallet.
+func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID *uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, "missing asset ID")
+		return
+	}
+	assetID := *form.AssetID
+
+	addr, err := s.core.NewDepositAddress(assetID)
+	if err != nil {
+		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(assetID), err)
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK      bool   `json:"ok"`
+		Address string `json:"address"`
+	}{
+		OK:      true,
+		Address: addr,
+	}, s.indent)
+}
+
 // apiConnectWallet is the handler for the '/connectwallet' API request.
 // Connects to a specified wallet, but does not unlock it.
 func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {

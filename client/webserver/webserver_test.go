@@ -104,6 +104,7 @@ func (c *TCore) Wallets() []*core.WalletState                                   
 func (c *TCore) WalletSettings(uint32) (map[string]string, error)                         { return nil, nil }
 func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]string) error { return nil }
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error       { return nil }
+func (c *TCore) NewDepositAddress(assetID uint32) (string, error)                         { return "", nil }
 func (c *TCore) AutoWalletConfig(assetID uint32) (map[string]string, error)               { return nil, nil }
 func (c *TCore) User() *core.User                                                         { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {

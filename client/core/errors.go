@@ -31,6 +31,7 @@ const (
 	encryptionErr
 	marketErr
 	addressParseErr
+	addrErr
 )
 
 // Error is an error message and an error code.

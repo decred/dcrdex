@@ -111,7 +111,11 @@
     {{- /* DEPOSIT ADDRESS */ -}}
     <div class="card bg1 text-center fs20 p-2 d-hide" id="deposit">
       Deposit <span id="depositName"></span> to
-      <div class="mono d-inline bg0 p-1 mb-1 fs14" id="depositAddress"></div>
+      <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
+      <div class="my-3">
+        <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">New Deposit Address</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
     </div>
 
     {{- /* WITHDRAW */ -}}
