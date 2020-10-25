@@ -144,13 +144,13 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 	if resolver != nil {
 		resolver(dc, trade, match, srvData)
 	} else {
-		// We don't know how to handle this. Set the failErr, and self-revoke
+		// We don't know how to handle this. Set the swapErr, and self-revoke
 		// the match. This condition would be virtually impossible, because it
 		// would mean that the client and server were at least two steps out of
 		// sync.
-		match.failErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
+		match.swapErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
 			match.MetaData.Status, srvStatus, logID)
-		c.log.Error(match.failErr)
+		c.log.Error(match.swapErr)
 		match.MetaData.Proof.SelfRevoked = true
 		err := c.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {

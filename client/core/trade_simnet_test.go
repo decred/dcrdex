@@ -549,7 +549,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		// revocation due to match inaction.
 		var isTaker bool
 		for _, match := range tracker.matches {
-			match.failErr = fmt.Errorf("ditch match")
+			match.swapErr = fmt.Errorf("ditch match")
 			isTaker = match.Match.Side == order.Taker
 			break // only interested in first match
 		}
@@ -827,9 +827,9 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
 				// We've done the needful for this match,
-				// - prevent further action by blocking the match with a failErr
+				// - prevent further action by blocking the match with a swapErr
 				// - check if this client will be suspended for inaction
-				match.failErr = fmt.Errorf("take no further action")
+				match.swapErr = fmt.Errorf("take no further action")
 				if (side == order.Maker && makerAtFault) || (side == order.Taker && takerAtFault) {
 					client.atFault = true
 				}

@@ -1669,8 +1669,8 @@ func TestLogin(t *testing.T) {
 	if !tracker.matches[missingID].MetaData.Proof.SelfRevoked {
 		t.Errorf("SelfRevoked not true for missing match tracker")
 	}
-	if tracker.matches[matchID].failErr != nil {
-		t.Errorf("failErr set for non-missing match tracker")
+	if tracker.matches[matchID].swapErr != nil {
+		t.Errorf("swapErr set for non-missing match tracker")
 	}
 	if tracker.matches[matchID].MetaData.Proof.IsRevoked() {
 		t.Errorf("IsRevoked true for non-missing match tracker")
@@ -4585,10 +4585,10 @@ func TestReconfigureWallet(t *testing.T) {
 	tXyzWallet.unlockErr = nil
 
 	// For the last success, make sure that we also clear any related
-	// tickMeterers.
+	// tickGovernors.
 	match := &matchTracker{
-		suspectSwap: true,
-		tickMeterer: time.NewTimer(time.Hour),
+		suspectSwap:  true,
+		tickGovernor: time.NewTimer(time.Hour),
 	}
 	tCore.conns[tDexHost].trades[order.OrderID{}] = &trackedTrade{
 		Order: &order.LimitOrder{
@@ -4618,8 +4618,8 @@ func TestReconfigureWallet(t *testing.T) {
 		t.Fatalf("settings not stored")
 	}
 
-	if match.tickMeterer != nil {
-		t.Fatalf("tickMeterer not removed")
+	if match.tickGovernor != nil {
+		t.Fatalf("tickGovernor not removed")
 	}
 }
 
@@ -5349,13 +5349,13 @@ func TestSuspectTrades(t *testing.T) {
 		t.Fatalf("never swapped")
 	}
 
-	// Both matches should be marked as suspect and have tickMeterers in place.
+	// Both matches should be marked as suspect and have tickGovernors in place.
 	tracker.mtx.Lock()
 	for i, m := range []*matchTracker{swappableMatch1, swappableMatch2} {
 		if !m.suspectSwap {
 			t.Fatalf("swappable match %d not suspect after failed swap", i+1)
 		}
-		if m.tickMeterer == nil {
+		if m.tickGovernor == nil {
 			t.Fatalf("swappable match %d has no tick meterer set", i+1)
 		}
 	}
@@ -5371,11 +5371,11 @@ func TestSuspectTrades(t *testing.T) {
 		t.Fatalf("swapped during metered tick")
 	}
 
-	// But once the tickMeterers expire, we should succeed with two separate
+	// But once the tickGovernors expire, we should succeed with two separate
 	// requests.
 	tracker.mtx.Lock()
-	swappableMatch1.tickMeterer = nil
-	swappableMatch2.tickMeterer = nil
+	swappableMatch1.tickGovernor = nil
+	swappableMatch2.tickGovernor = nil
 	tracker.mtx.Unlock()
 	_, err = tCore.tick(tracker)
 	if err != nil {
@@ -5422,13 +5422,13 @@ func TestSuspectTrades(t *testing.T) {
 		t.Fatalf("never redeemed")
 	}
 
-	// Both matches should be marked as suspect and have tickMeterers in place.
+	// Both matches should be marked as suspect and have tickGovernors in place.
 	tracker.mtx.Lock()
 	for i, m := range []*matchTracker{redeemableMatch1, redeemableMatch2} {
 		if !m.suspectRedeem {
 			t.Fatalf("redeemable match %d not suspect after failed swap", i+1)
 		}
-		if m.tickMeterer == nil {
+		if m.tickGovernor == nil {
 			t.Fatalf("redeemable match %d has no tick meterer set", i+1)
 		}
 	}
@@ -5444,11 +5444,11 @@ func TestSuspectTrades(t *testing.T) {
 		t.Fatalf("redeemed during metered tick %d", tBtcWallet.redeemCounter)
 	}
 
-	// But once the tickMeterers expire, we should succeed with two separate
+	// But once the tickGovernors expire, we should succeed with two separate
 	// requests.
 	tracker.mtx.Lock()
-	redeemableMatch1.tickMeterer = nil
-	redeemableMatch2.tickMeterer = nil
+	redeemableMatch1.tickGovernor = nil
+	redeemableMatch2.tickGovernor = nil
 	tracker.mtx.Unlock()
 	_, err = tCore.tick(tracker)
 	if err != nil {
