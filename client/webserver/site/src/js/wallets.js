@@ -139,7 +139,8 @@ export default class WalletsPage extends BasePage {
 
     this.notifiers = {
       balance: note => { this.handleBalanceNote(note) },
-      walletstate: note => { this.handleWalletStateNote(note) }
+      walletstate: note => { this.handleWalletStateNote(note) },
+      walletconfig: note => { this.handleWalletStateNote(note) }
     }
   }
 
@@ -450,8 +451,12 @@ export default class WalletsPage extends BasePage {
     td.textContent = (note.balance.available / 1e8).toFixed(8)
   }
 
+  /*
+   * handleWalletStateNote is a handler for both the 'walletstate' and
+   * 'walletconfig' notifications.
+   */
   handleWalletStateNote (note) {
-    this.rowInfos[note.wallet.assetID].stateIcons.readWallet(note)
+    this.rowInfos[note.wallet.assetID].stateIcons.readWallet(note.wallet)
   }
 }
 
