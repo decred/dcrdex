@@ -201,11 +201,12 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Fee: tFee,
 		},
-		notify:    func(Notification) {},
-		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
-		trades:    make(map[order.OrderID]*trackedTrade),
-		epoch:     map[string]uint64{tDcrBtcMktName: 0},
-		connected: true,
+		tickInterval: time.Millisecond * 1000 / 3,
+		notify:       func(Notification) {},
+		marketMap:    map[string]*Market{tDcrBtcMktName: mkt},
+		trades:       make(map[order.OrderID]*trackedTrade),
+		epoch:        map[string]uint64{tDcrBtcMktName: 0},
+		connected:    true,
 	}, conn, acct
 }
 
@@ -5342,8 +5343,8 @@ func TestSuspectTrades(t *testing.T) {
 	setSwaps()
 	tDcrWallet.swapErr = tErr
 	_, err = tCore.tick(tracker)
-	if err == nil {
-		t.Fatalf("swap error not propagated")
+	if err == nil || !strings.Contains(err.Error(), "error sending swap transaction") {
+		t.Fatalf("swap error not propagated, err = %v", err)
 	}
 	if tDcrWallet.swapCounter != 1 {
 		t.Fatalf("never swapped")
@@ -5415,8 +5416,8 @@ func TestSuspectTrades(t *testing.T) {
 	setRedeems()
 	tBtcWallet.redeemErr = tErr
 	_, err = tCore.tick(tracker)
-	if err == nil {
-		t.Fatalf("redeem error not propagated")
+	if err == nil || !strings.Contains(err.Error(), "error sending redeem transaction") {
+		t.Fatalf("redeem error not propagated. err = %v", err)
 	}
 	if tBtcWallet.redeemCounter != 1 {
 		t.Fatalf("never redeemed")

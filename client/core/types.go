@@ -43,7 +43,7 @@ func (set *errorSet) addErr(err error) *errorSet {
 	return set
 }
 
-// If any returns the error set if there are any errors, else nil.
+// ifAny returns the error set if there are any errors, else nil.
 func (set *errorSet) ifAny() error {
 	if len(set.errs) > 0 {
 		return set

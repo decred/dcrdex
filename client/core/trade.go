@@ -1457,7 +1457,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			}
 			t.delayTicks(match, waitTime)
 		}
-		errs.addErr(err)
+		errs.add("error sending redeem transaction: %v", err)
 		return
 	}
 
