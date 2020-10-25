@@ -797,6 +797,10 @@ func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]stri
 	return nil
 }
 
+func (c *TCore) NewDepositAddress(assetID uint32) (string, error) {
+	return ordertest.RandomAddress(), nil
+}
+
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 
 func (c *TCore) User() *core.User {

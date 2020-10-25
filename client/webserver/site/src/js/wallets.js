@@ -29,7 +29,8 @@ export default class WalletsPage extends BasePage {
       'walletRepw', 'repwAssetLogo', 'repwAssetName', 'repwNewPw', 'repwAppPw',
       'submitRepw', 'repwErr',
       // Deposit
-      'deposit', 'depositName', 'depositAddress',
+      'deposit', 'depositName', 'depositAddress', 'newDepAddrBttn',
+      'depositErr',
       // Withdraw
       'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
       'withdrawAmt', 'withdrawAvail', 'submitWithdraw', // 'withdrawFee',
@@ -117,6 +118,9 @@ export default class WalletsPage extends BasePage {
       bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
     }
 
+    // New deposit address button.
+    bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
+
     // Clicking on the available amount on the withdraw form populates the
     // amount field.
     bind(page.withdrawAvail, 'click', () => {
@@ -135,7 +139,8 @@ export default class WalletsPage extends BasePage {
 
     this.notifiers = {
       balance: note => { this.handleBalanceNote(note) },
-      walletstate: note => { this.handleWalletStateNote(note) }
+      walletstate: note => { this.handleWalletStateNote(note) },
+      walletconfig: note => { this.handleWalletStateNote(note) }
     }
   }
 
@@ -291,9 +296,11 @@ export default class WalletsPage extends BasePage {
   /* Display a deposit address. */
   async showDeposit (assetID) {
     const page = this.page
+    Doc.hide(page.depositErr)
     const box = page.deposit
     const asset = app.assets[assetID]
     const wallet = app.walletMap[assetID]
+    this.depositAsset = assetID
     if (!wallet) {
       app.notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR))
       return
@@ -302,6 +309,23 @@ export default class WalletsPage extends BasePage {
     page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
     this.animation = this.showBox(box)
+  }
+
+  /* Fetch a new address from the wallet. */
+  async newDepositAddress () {
+    const page = this.page
+    Doc.hide(page.depositErr)
+    app.loading(page.deposit)
+    const res = await postJSON('/api/depositaddress', {
+      assetID: this.depositAsset
+    })
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.depositErr.textContent = res.msg
+      Doc.show(page.depositErr)
+      return
+    }
+    page.depositAddress.textContent = res.address
   }
 
   /* Show the form to withdraw funds. */
@@ -427,8 +451,12 @@ export default class WalletsPage extends BasePage {
     td.textContent = (note.balance.available / 1e8).toFixed(8)
   }
 
+  /*
+   * handleWalletStateNote is a handler for both the 'walletstate' and
+   * 'walletconfig' notifications.
+   */
   handleWalletStateNote (note) {
-    this.rowInfos[note.assetID].stateIcons.readWallet(note)
+    this.rowInfos[note.wallet.assetID].stateIcons.readWallet(note.wallet)
   }
 }
 
