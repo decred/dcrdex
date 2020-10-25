@@ -442,7 +442,7 @@ export default class Application {
    */
   setNotes (notes) {
     this.log('notes', 'setNotes', notes)
-    // this.notes = notes
+    this.notes = []
     Doc.empty(this.page.noteList)
     for (let i = 0; i < notes.length; i++) {
       this.prependNoteElement(notes[i])
