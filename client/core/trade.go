@@ -127,8 +127,8 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		wallets:       wallets,
 		preImg:        preImg,
 		mktID:         marketName(ord.Base(), ord.Quote()),
-		coins:         mapifyCoins(coins),
-		coinsLocked:   true,
+		coins:         mapifyCoins(coins), // must not be nil even if empty
+		coinsLocked:   len(coins) > 0,
 		lockTimeTaker: lockTimeTaker,
 		lockTimeMaker: lockTimeMaker,
 		matches:       make(map[order.MatchID]*matchTracker),
@@ -186,7 +186,10 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 // BUY order.
 // lockedAmount should be called with the mtx >= RLocked.
 func (t *trackedTrade) lockedAmount() (locked uint64) {
-	if t.coinsLocked { // implies no swap has been sent
+	if t.coinsLocked {
+		// This implies either no swap has been sent, or the trade has been
+		// resumed on restart after a swap that produced locked change (partial
+		// fill and still booked) since restarting loads into coins/coinsLocked.
 		for _, coin := range t.coins {
 			locked += coin.Value()
 		}

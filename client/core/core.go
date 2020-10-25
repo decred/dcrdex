@@ -2784,7 +2784,7 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 func (c *Core) initialize() {
 	accts, err := c.db.Accounts()
 	if err != nil {
-		c.log.Errorf("Error retrieve accounts from database: %v", err)
+		c.log.Errorf("Error retrieving accounts from database: %v", err) // panic?
 	}
 	var wg sync.WaitGroup
 	for _, acct := range accts {
@@ -2793,7 +2793,7 @@ func (c *Core) initialize() {
 			defer wg.Done()
 			host, err := addrHost(acct.Host)
 			if err != nil {
-				c.log.Errorf("skipping loading of %s due to address parse error: %w", acct.Host, err)
+				c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
 				return
 			}
 			dc, err := c.connectDEX(acct)
@@ -2844,6 +2844,12 @@ func (c *Core) initialize() {
 	wg.Wait()
 	c.connMtx.RLock()
 	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
+	for dexName, dc := range c.conns {
+		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
+		if n := len(activeOrders); n > 0 {
+			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active orders on %s. LOGIN immediately!  **** \n", n, dexName)
+		}
+	}
 	c.connMtx.RUnlock()
 	c.refreshUser()
 }
@@ -2930,11 +2936,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	c.verifyRegistrationFee(dcrWallet.AssetID, dc, acctInfo.FeeCoin, confs)
 }
 
-// dbTrackers prepares trackedTrades based on active orders and matches in the
-// database. Since dbTrackers runs before sign in when wallets are not connected
-// or unlocked, wallets and coins are not added to the returned trackers. Use
-// resumeTrades with the app Crypter to prepare wallets and coins.
-func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
+func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 	// Prepare active orders, according to the DB.
 	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.host)
 	if err != nil {
@@ -2967,6 +2969,20 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 			return nil, fmt.Errorf("database error fetching order %s for %s: %v", oid, dc.acct.host, err)
 		}
 		dbOrders = append(dbOrders, dbOrder)
+	}
+
+	return dbOrders, nil
+}
+
+// dbTrackers prepares trackedTrades based on active orders and matches in the
+// database. Since dbTrackers may run before sign in when wallets are not
+// connected or unlocked, wallets and coins are not added to the returned
+// trackers. Use resumeTrades with the app Crypter to prepare wallets and coins.
+func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
+	// Prepare active orders, according to the DB.
+	dbOrders, err := c.dbOrders(dc)
+	if err != nil {
+		return nil, err
 	}
 
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
@@ -3026,7 +3042,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		copy(pimg[:], metaCancel.MetaData.Proof.Preimage)
 		err = tracker.cancelTrade(co, pimg)
 		if err != nil {
-			c.log.Errorf("error setting cancel order info %s: %w", co.ID(), err)
+			c.log.Errorf("Error setting cancel order info %s: %v", co.ID(), err)
 		}
 		// TODO: The trackedTrade.cancel.matches is not being repopulated on
 		// startup. The consequences are that the Filled value will not include
@@ -3202,6 +3218,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
+			// NOTE: change and changeLocked are not set even if the funding
+			// coins were loaded from the DB's ChangeCoin.
+			tracker.coinsLocked = true
 			tracker.coins = mapifyCoins(coins)
 		}
 
