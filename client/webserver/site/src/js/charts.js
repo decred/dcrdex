@@ -78,7 +78,8 @@ export class DepthChart {
     }
 
     bind(this.canvas, 'wheel', e => { this.wheel(e) })
-    bind(window, 'resize', e => { this.resize(e) })
+    this.resize = e => { this.resize_(e) }
+    bind(window, 'resize', this.resize)
     bind(this.canvas, 'click', e => { this.click(e) })
     this.resize()
   }
@@ -89,7 +90,7 @@ export class DepthChart {
   }
 
   // resize_ is a 'resize' event handler.
-  resize () {
+  resize_ () {
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = this.parent.clientHeight
     const xLblHeight = 30
