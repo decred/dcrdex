@@ -45,6 +45,10 @@ type matchTracker struct {
 	// being attempted for a match. Typically, the *Timer comes from an
 	// AfterFunc that itself nils the tickGovernor.
 	tickGovernor *time.Timer
+	// swapErrCount counts the swap attempts. It is used in recovery.
+	swapErrCount int
+	// redeemErrCount counts the redeem attempts. It is used in recovery.
+	redeemErrCount int
 	// suspectSwap is a flag to indicate that there was a problem encountered
 	// trying to send a swap contract for this match. If suspectSwap is true,
 	// the match will not be grouped when attempting future swaps.
@@ -179,7 +183,7 @@ func (t *trackedTrade) broadcastTimeout() time.Duration {
 	return time.Millisecond * time.Duration(t.dc.cfg.BroadcastTimeout)
 }
 
-// delayTicks sets the tickGovernor to prevent retrying to quickly after an
+// delayTicks sets the tickGovernor to prevent retrying too quickly after an
 // error.
 func (t *trackedTrade) delayTicks(m *matchTracker, waitTime time.Duration) {
 	m.tickGovernor = time.AfterFunc(waitTime, func() {
@@ -1136,15 +1140,19 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
+	var suspects []*matchTracker
 	for _, m := range matches {
-		if !m.suspectSwap {
+		if m.suspectSwap {
+			suspects = append(suspects, m)
+		} else {
 			groupables = append(groupables, m)
-			continue
 		}
-		c.swapMatchGroup(t, []*matchTracker{m}, errs)
 	}
 	if len(groupables) > 0 {
 		c.swapMatchGroup(t, groupables, errs)
+	}
+	for _, m := range suspects {
+		c.swapMatchGroup(t, []*matchTracker{m}, errs)
 	}
 	return errs.ifAny()
 }
@@ -1248,18 +1256,20 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		for _, match := range matches {
 			// Mark the matches as suspect to prevent them being grouped again.
 			match.suspectSwap = true
+			match.swapErrCount++
 			// If we can still swap before the broadcast timeout, allow retries
 			// soon.
+			auditStamp := match.MetaData.Proof.Auth.AuditStamp
 			lastActionTime := match.matchTime()
 			if match.Match.Side == order.Taker {
 				// It is possible that AuditStamp could be zero if we're
-				// recovering during startup. The implications of this is that
-				// if we are 1) already in start up recovery, and 2) we fail
-				// again, we will not try again even if we have time before the
-				// broadcast timeout.
-				lastActionTime = encode.UnixTimeMilli(int64(match.MetaData.Proof.Auth.AuditStamp))
+				// recovering during startup or after a DEX reconnect. In that
+				// case, allow three retries before giving up.
+				lastActionTime = encode.UnixTimeMilli(int64(auditStamp))
 			}
-			if time.Since(lastActionTime) < t.broadcastTimeout() {
+			if time.Since(lastActionTime) < t.broadcastTimeout() ||
+				(auditStamp == 0 && match.swapErrCount < tickCheckDivisions) {
+
 				t.delayTicks(match, t.dc.tickInterval*3/4)
 			} else {
 				// If we can't get a swap out before the broadcast timeout, just
@@ -1395,15 +1405,19 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 	errs := newErrorSet("redeemMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
+	var suspects []*matchTracker
 	for _, m := range matches {
-		if !m.suspectRedeem {
+		if m.suspectRedeem {
+			suspects = append(suspects, m)
+		} else {
 			groupables = append(groupables, m)
-			continue
 		}
-		c.redeemMatchGroup(t, []*matchTracker{m}, errs)
 	}
 	if len(groupables) > 0 {
 		c.redeemMatchGroup(t, groupables, errs)
+	}
+	for _, m := range suspects {
+		c.redeemMatchGroup(t, []*matchTracker{m}, errs)
 	}
 	return errs.ifAny()
 }
@@ -1436,12 +1450,11 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			// Mark these matches as suspect. Suspect matches will not be
 			// grouped for redemptions in future attempts.
 			match.suspectRedeem = true
+			match.redeemErrCount++
 			// If we can still make a broadcast timeout, allow retries soon. It
-			// is possible that RedemptionStamp or AuditStamp is be zero if
-			// we're recovering during startup. The implications of this is that
-			// if we are 1) already in start up recovery, and 2) we fail again,
-			// we will not try again for an hour even if we have time before the
-			// broadcast timeout.
+			// is possible for RedemptionStamp or AuditStamp to be zero if we're
+			// recovering during startup or after a DEX reconnect. In that case,
+			// allow three retries before giving up.
 			lastActionStamp := match.MetaData.Proof.Auth.AuditStamp
 			if match.Match.Side == order.Taker {
 				lastActionStamp = match.MetaData.Proof.Auth.RedemptionStamp
@@ -1449,11 +1462,12 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			lastActionTime := encode.UnixTimeMilli(int64(lastActionStamp))
 			// Try to wait until about the next auto-tick to try again.
 			waitTime := t.dc.tickInterval * 3 / 4
-			if time.Since(lastActionTime) > t.broadcastTimeout() {
+			if time.Since(lastActionTime) > t.broadcastTimeout() ||
+				(lastActionStamp == 0 && match.redeemErrCount >= tickCheckDivisions) {
 				// If we already missed the broadcast timeout, we're not in as
 				// much of a hurry. but keep trying and sending errors, because
 				// we do want the user to recover.
-				waitTime = 5 * time.Minute
+				waitTime = 15 * time.Minute
 			}
 			t.delayTicks(match, waitTime)
 		}

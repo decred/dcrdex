@@ -44,6 +44,7 @@ const (
 	// regConfirmationsPaid is used to indicate completed registration to
 	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
+	tickCheckDivisions          = 3
 )
 
 var (
@@ -1488,11 +1489,11 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 			if t.Base() != assetID && t.Quote() != assetID {
 				continue
 			}
+			isFromAsset := t.wallets.fromAsset.ID == assetID
 			t.mtx.Lock()
 			for _, m := range t.matches {
 				if m.tickGovernor != nil &&
-					(m.suspectSwap && t.wallets.fromAsset.ID == assetID ||
-						(m.suspectRedeem && t.wallets.toAsset.ID == assetID)) {
+					((m.suspectSwap && isFromAsset) || (m.suspectRedeem && !isFromAsset)) {
 
 					m.tickGovernor.Stop()
 					m.tickGovernor = nil
@@ -3495,7 +3496,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		connMaster:   connMaster,
 		assets:       assets,
 		cfg:          dexCfg,
-		tickInterval: bTimeout / 3,
+		tickInterval: bTimeout / tickCheckDivisions,
 		books:        make(map[string]*bookie),
 		acct:         newDEXAccount(acctInfo),
 		marketMap:    marketMap,
