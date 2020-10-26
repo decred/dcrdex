@@ -55,6 +55,9 @@ type Backend interface {
 	VerifyUnspentCoin(coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
 	FeeRate() (uint64, error)
+	// Synced should return true when the blockchain is synced and ready for
+	// fee rate estimation.
+	Synced() (bool, error)
 }
 
 // Coin represents a transaction input or output.

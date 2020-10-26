@@ -57,6 +57,7 @@ type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	CheckUnspent(asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
+	ChainsSynced(base, quote uint32) (bool, error)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -878,19 +879,27 @@ func (m *Market) Run(ctx context.Context) {
 		m.activeEpochIdx = currentEpoch.Epoch
 
 		if !running {
-			// Open up SubmitOrderAsync.
-			close(m.running)
-			running = true
-			log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
-				currentEpoch.Epoch, epochDuration)
-			// Signal to the book router if this is a resume.
-			if m.suspendEpochIdx != 0 {
-				notifyChan <- &updateSignal{
-					action: resumeAction,
-					data: sigDataResume{
-						epochIdx: currentEpoch.Epoch,
-						// TODO: signal config or new config
-					},
+			// Check that both blockchains are synced before actually starting.
+			synced, err := m.swapper.ChainsSynced(m.marketInfo.Base, m.marketInfo.Quote)
+			if err != nil {
+				log.Errorf("Not starting %s market because of ChainsSynced error: %v", m.marketInfo.Name, err)
+			} else if !synced {
+				log.Debugf("Delaying start of %s market because chains aren't synced", m.marketInfo.Name)
+			} else {
+				// Open up SubmitOrderAsync.
+				close(m.running)
+				running = true
+				log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
+					currentEpoch.Epoch, epochDuration)
+				// Signal to the book router if this is a resume.
+				if m.suspendEpochIdx != 0 {
+					notifyChan <- &updateSignal{
+						action: resumeAction,
+						data: sigDataResume{
+							epochIdx: currentEpoch.Epoch,
+							// TODO: signal config or new config
+						},
+					}
 				}
 			}
 		}

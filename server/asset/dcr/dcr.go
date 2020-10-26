@@ -75,6 +75,7 @@ type dcrNode interface {
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
+	GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error)
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching output
@@ -82,6 +83,8 @@ type dcrNode interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
+	// net is the dex.Network.
+	net dex.Network
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -115,7 +118,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(logger)
+	dcr := unconnectedDCR(logger, network)
 	// When the exported constructor is used, the node will be an
 	// rpcclient.Client.
 	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
@@ -249,6 +252,26 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 	}
 	h := sha256.Sum256(secret)
 	return bytes.Equal(h[:], secretHash)
+}
+
+// Synced is true if the blockchain is ready for action.
+func (dcr *Backend) Synced() (bool, error) {
+	chainInfo, err := dcr.node.GetBlockChainInfo()
+	if err != nil {
+		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
+	}
+	if chainInfo.Headers-chainInfo.Blocks > 1 {
+		return false, nil
+	}
+	if dcr.net == dex.Mainnet {
+		_, err = dcr.FeeRate()
+		if err != nil {
+			dcr.log.Debugf("Synced = false because of FeeRate error = %v", err)
+		}
+	} else {
+		dcr.log.Tracef("skipped estimatesmartfee check because network = %q", dcr.net)
+	}
+	return err == nil, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -493,11 +516,12 @@ func (dcr *Backend) shutdown() {
 
 // unconnectedDCR returns a Backend without a node. The node should be set
 // before use.
-func unconnectedDCR(logger dex.Logger) *Backend {
+func unconnectedDCR(logger dex.Logger, network dex.Network) *Backend {
 	return &Backend{
 		blockCache: newBlockCache(logger),
 		log:        logger,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+		net:        network,
 	}
 }
 

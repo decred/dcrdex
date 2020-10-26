@@ -324,12 +324,15 @@ type TBackend struct {
 	utxoErr    error
 	utxos      map[string]uint64
 	addrChecks bool
+	synced     bool
+	syncedErr  error
 }
 
 func tNewBackend() *TBackend {
 	return &TBackend{
 		utxos:      make(map[string]uint64),
 		addrChecks: true,
+		synced:     true,
 	}
 }
 
@@ -372,6 +375,13 @@ func (b *TBackend) VerifyUnspentCoin(coinID []byte) error {
 }
 func (b *TBackend) FeeRate() (uint64, error) {
 	return 9, nil
+}
+
+func (b *TBackend) Synced() (bool, error) {
+	if b.syncedErr != nil {
+		return false, b.syncedErr
+	}
+	return b.synced, nil
 }
 
 type tUTXO struct {

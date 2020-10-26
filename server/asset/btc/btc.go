@@ -70,6 +70,7 @@ type btcNode interface {
 	GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
+	GetBlockChainInfo() (*btcjson.GetBlockChainInfoResult, error)
 }
 
 // Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
@@ -82,6 +83,8 @@ type Backend struct {
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
 	segwit bool
+	// net is the dex.Network.
+	net dex.Network
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result the (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -151,7 +154,7 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 		return nil, fmt.Errorf("error creating %q RPC client: %v", name, err)
 	}
 
-	btc := newBTC(name, segwit, params, logger, client)
+	btc := newBTC(name, segwit, params, logger, client, network)
 	// Setting the client field will enable shutdown
 	btc.client = client
 
@@ -203,6 +206,26 @@ func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 	}
 	h := sha256.Sum256(secret)
 	return bytes.Equal(h[:], secretHash)
+}
+
+// Synced is true if the blockchain is ready for action.
+func (btc *Backend) Synced() (bool, error) {
+	chainInfo, err := btc.node.GetBlockChainInfo()
+	if err != nil {
+		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
+	}
+	if chainInfo.Headers-chainInfo.Blocks > 1 {
+		return false, nil
+	}
+	if btc.net == dex.Mainnet {
+		_, err = btc.FeeRate()
+		if err != nil {
+			btc.log.Debugf("Synced = false because of FeeRate error = %v", err)
+		}
+	} else {
+		btc.log.Tracef("skipped estimatesmartfee check because network = %q", btc.net)
+	}
+	return err == nil, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -331,7 +354,7 @@ func (btc *Backend) CheckAddress(addr string) bool {
 }
 
 // Create a *Backend and start the block monitor loop.
-func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
+func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode, network dex.Network) *Backend {
 	btc := &Backend{
 		name:        name,
 		blockCache:  newBlockCache(),
@@ -340,6 +363,7 @@ func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.L
 		log:         logger,
 		node:        node,
 		segwit:      segwit,
+		net:         network,
 	}
 	return btc
 }
