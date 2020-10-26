@@ -516,20 +516,27 @@ type TXCWallet struct {
 	fundingCoinErr    error
 	lockErr           error
 	changeCoin        *tCoin
+	synced            bool
+	syncProgress      float32
+	syncErr           error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
-		changeCoin: &tCoin{id: encode.RandomBytes(36)},
+		changeCoin:   &tCoin{id: encode.RandomBytes(36)},
+		synced:       true,
+		syncProgress: 1,
 	}
 	return &xcWallet{
-		Wallet:    w,
-		connector: dex.NewConnectionMaster(w),
-		AssetID:   assetID,
-		lockTime:  time.Now().Add(time.Hour),
-		hookedUp:  true,
-		dbID:      encode.Uint32Bytes(assetID),
-		encPW:     []byte{0x01},
+		Wallet:       w,
+		connector:    dex.NewConnectionMaster(w),
+		AssetID:      assetID,
+		lockTime:     time.Now().Add(time.Hour),
+		hookedUp:     true,
+		dbID:         encode.Uint32Bytes(assetID),
+		encPW:        []byte{0x01},
+		synced:       true,
+		syncProgress: 1,
 	}, w
 }
 
@@ -660,6 +667,13 @@ func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
 
 func (w *TXCWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return !w.badSecret
+}
+
+func (w *TXCWallet) SyncStatus() (synced bool, progress float32, err error) {
+	if w.syncErr != nil {
+		return false, 0, w.syncErr
+	}
+	return w.synced, w.syncProgress, nil
 }
 
 func (w *TXCWallet) setConfs(confs uint32) {
@@ -2102,6 +2116,15 @@ func TestTrade(t *testing.T) {
 	tDcrWallet.signCoinErr = tErr
 	ensureErr("signature error")
 	tDcrWallet.signCoinErr = nil
+
+	// Sync-in-progress error
+	dcrWallet.synced = false
+	ensureErr("base not synced")
+	dcrWallet.synced = true
+
+	btcWallet.synced = false
+	ensureErr("quote not synced")
+	btcWallet.synced = true
 
 	// LimitRoute error
 	rig.ws.reqErr = tErr

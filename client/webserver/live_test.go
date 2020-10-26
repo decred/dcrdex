@@ -144,14 +144,16 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:    unbip(assetID),
-			AssetID:   assetID,
-			Open:      state.open,
-			Running:   state.running,
-			Address:   ordertest.RandomAddress(),
-			Balance:   bal,
-			Units:     winfo.Units,
-			Encrypted: true,
+			Symbol:       unbip(assetID),
+			AssetID:      assetID,
+			Open:         state.open,
+			Running:      state.running,
+			Address:      ordertest.RandomAddress(),
+			Balance:      bal,
+			Units:        winfo.Units,
+			Encrypted:    true,
+			Synced:       false,
+			SyncProgress: 0.5,
 		}
 	}
 	return &core.SupportedAsset{

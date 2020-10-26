@@ -2077,3 +2077,46 @@ func testSendEdges(t *testing.T, segwit bool) {
 		}
 	}
 }
+
+func TestSyncStatus(t *testing.T) {
+	wallet, node, shutdown := tNewWallet(false)
+	defer shutdown()
+	node.rawRes[methodGetBlockchainInfo] = mustMarshal(t, &getBlockchainInfoResult{
+		Headers: 100,
+		Blocks:  99,
+	})
+
+	synced, progress, err := wallet.SyncStatus()
+	if err != nil {
+		t.Fatalf("SyncStatus error (synced expected): %v", err)
+	}
+	if !synced {
+		t.Fatalf("synced = false for 1 block to go")
+	}
+	if progress < 1 {
+		t.Fatalf("progress not complete when loading last block")
+	}
+
+	node.rawErr[methodGetBlockchainInfo] = tErr
+	_, _, err = wallet.SyncStatus()
+	if err == nil {
+		t.Fatalf("SyncStatus error not propagated")
+	}
+	node.rawErr[methodGetBlockchainInfo] = nil
+
+	wallet.tipAtConnect = 100
+	node.rawRes[methodGetBlockchainInfo] = mustMarshal(t, &getBlockchainInfoResult{
+		Headers: 200,
+		Blocks:  150,
+	})
+	synced, progress, err = wallet.SyncStatus()
+	if err != nil {
+		t.Fatalf("SyncStatus error (half-synced): %v", err)
+	}
+	if synced {
+		t.Fatalf("synced = true for 50 blocks to go")
+	}
+	if progress > 0.500001 || progress < 0.4999999 {
+		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	}
+}
