@@ -875,6 +875,8 @@ func (auth *AuthManager) addClient(client *clientInfo) {
 		if oldConnID == connID {
 			return // reused conn, just update maps
 		}
+		log.Warnf("User %v reauthorized from %v (id %d) with an existing connection from %v (id %d). Disconnecting the old one.",
+			user, client.conn.IP(), connID, oldClient.conn.IP(), oldConnID)
 		// When replacing with a new conn, manually deregister the old conn so
 		// that when it disconnects it does not remove the new clientInfo.
 		delete(auth.conns, oldConnID)
