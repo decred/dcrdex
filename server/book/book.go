@@ -13,9 +13,9 @@ import (
 
 const (
 	// DefaultBookHalfCapacity is the default capacity of one side (buy or sell)
-	// of the order book. It is set to 2^21 orders (2 mebiorders = 2,097,152
+	// of the order book. It is set to 2^20 orders (1 mebiorders = 1,048,576
 	// orders) per book side.
-	DefaultBookHalfCapacity uint32 = 1 << 21 // 4 * 2 MiB
+	DefaultBookHalfCapacity uint32 = 1 << 20
 )
 
 // Book is a market's order book. The Book uses a configurable lot size, of
@@ -50,8 +50,9 @@ func New(lotSize uint64, halfCapacity ...uint32) *Book {
 // Clear reset the order book with configured capacity.
 func (b *Book) Clear() {
 	b.mtx.Lock()
+	b.buys, b.sells = nil, nil
 	b.buys = NewMaxOrderPQ(b.halfCap)
-	b.sells = NewMaxOrderPQ(b.halfCap)
+	b.sells = NewMinOrderPQ(b.halfCap)
 	b.mtx.Unlock()
 }
 
