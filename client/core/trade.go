@@ -272,11 +272,10 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		// This is a cancel order. Cancel status goes to executed, but the trade
 		// status will not be canceled. Remove the trackedCancel and remove the
 		// DB linked order from the trade, but not the cancel.
-		cid := t.cancel.ID()
-		t.dc.log.Warnf("cancel order %s did not match for order %s.", cid, t.ID())
+		t.dc.log.Warnf("Cancel order %s targeting trade %s did not match.", oid, t.ID())
 		err := t.db.LinkOrder(t.ID(), order.OrderID{})
 		if err != nil {
-			t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %w", cid, t.ID(), err)
+			t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %w", oid, t.ID(), err)
 		}
 		// Clearing the trackedCancel allows this order to be canceled again.
 		t.cancel = nil
@@ -284,8 +283,9 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
 		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, t.coreOrderInternal()))
-		return assets, t.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
+		return assets, t.db.UpdateOrderStatus(oid, order.OrderStatusExecuted)
 	}
+
 	// This is the trade. Return coins and set status based on whether this is
 	// a standing limit order or not.
 	if t.metaData.Status != order.OrderStatusEpoch {
@@ -579,6 +579,32 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 	return
 }
 
+// deleteCancelOrder will clear any associated trackedCancel, and set the status
+// of the cancel order as revoked in the DB so that it will not be loaded with
+// other active orders on startup. The trackedTrade's OrderMetaData.LinkedOrder
+// is also zeroed, but the caller is responsible for updating the trade's DB
+// entry in a way that is appropriate for the caller (e.g. with LinkOrder,
+// UpdateOrder, or UpdateOrderStatus).
+//
+// This is to be used in trade status resolution only, since normally the fate
+// of cancel orders is determined by match/nomatch and status set to executed
+// (see nomatch and negotiate)
+//
+// This method MUST be called with the trackedTrade mutex lock held for writes.
+func (t *trackedTrade) deleteCancelOrder() {
+	if t.cancel == nil {
+		return
+	}
+	cid := t.cancel.ID()
+	err := t.db.UpdateOrderStatus(cid, order.OrderStatusRevoked) // could actually be OrderStatusExecuted
+	if err != nil {
+		t.dc.log.Errorf("Error updating status in db for cancel order %v to revoked", cid)
+	}
+	// Unlink the cancel order from the trade.
+	t.cancel = nil
+	t.metaData.LinkedOrder = order.OrderID{} // NOTE: caller may wish to update the trades's DB entry
+}
+
 // deleteStaleCancelOrder checks if this trade has an associated cancel order,
 // and deletes the cancel order if the cancel order stays at Epoch status for
 // more than 2 epochs. Deleting the stale cancel order from this trade makes
@@ -608,13 +634,13 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	t.dc.log.Infof("Cancel order %v in epoch status with server time stamp %v, epoch end %v (%v ago) considered executed and unmatched.",
 		t.cancel.ID(), t.cancel.ServerTime, epochEnd, time.Since(epochEnd))
 
+	// Clear the trackedCancel, allowing this order to be canceled again, and
+	// set the cancel order's status as revoked.
+	t.deleteCancelOrder()
 	err := t.db.LinkOrder(t.ID(), order.OrderID{})
 	if err != nil {
 		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %w", t.cancel.ID(), t.ID(), err)
 	}
-	// Clearing the trackedCancel allows this order to be canceled again.
-	t.cancel = nil
-	t.metaData.LinkedOrder = order.OrderID{}
 
 	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
 	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, t.coreOrderInternal()))

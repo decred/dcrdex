@@ -614,16 +614,8 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		trade.metaData.Status = newStatus
 		// If there is an associated cancel order, and we are revising the
 		// status of the targeted order, we can infer the cancel order is done.
-		if trade.cancel != nil {
-			cid := trade.cancel.ID()
-			err := trade.db.UpdateOrderStatus(cid, order.OrderStatusRevoked)
-			if err != nil {
-				dc.log.Errorf("Error updating status in db for cancel order %v to executed", cid)
-			}
-			// Unlink the cancel order from the trade.
-			trade.cancel = nil
-			trade.metaData.LinkedOrder = order.OrderID{}
-		}
+		// Update the status of the cancel order and unlink it from the trade.
+		trade.deleteCancelOrder()
 		// Now update the trade.
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
 			dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
