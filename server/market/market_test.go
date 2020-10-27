@@ -851,14 +851,10 @@ func TestMarket_Run(t *testing.T) {
 	atomic.StoreUint32(&oRig.dcr.synced, 1)
 
 	<-time.After(time.Until(startEpochTime.Add(halfEpoch)))
+	<-storage.epochInserted
 
 	if !mkt.Running() {
 		t.Errorf("market not running after backend sync finished")
-	}
-
-	mktStatus = mkt.Status()
-	if !mktStatus.Running {
-		t.Fatalf("Market should be running now")
 	}
 
 	// Submit again
@@ -938,8 +934,8 @@ func TestMarket_Run(t *testing.T) {
 	err = mkt.SubmitOrder(&coRecordWrongAccount)
 	if err == nil {
 		t.Errorf("An invalid order was processed, but it should not have been.")
-	} else if !errors.Is(err, ErrInvalidCancelOrder) {
-		t.Errorf(`expected ErrInvalidCancelOrder ("%v"), got "%v"`, ErrInvalidCancelOrder, err)
+	} else if !errors.Is(err, ErrCancelNotPermitted) {
+		t.Errorf(`expected ErrCancelNotPermitted ("%v"), got "%v"`, ErrCancelNotPermitted, err)
 	}
 
 	// Valid cancel order

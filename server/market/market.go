@@ -46,7 +46,9 @@ const (
 	ErrQuantityTooHigh        = Error("order quantity exceeds user limit")
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
-	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
+	ErrCancelNotPermitted     = Error("cancel order account does not match targeted order account")
+	ErrTargetNotActive        = Error("target order not active on this market")
+	ErrTargetNotCancelable    = Error("targeted order is not a limit order with immediate time-in-force")
 	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
@@ -600,10 +602,13 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 // means: (1) an order in the book or epoch queue, (2) type limit with
 // time-in-force standing (implied for book orders), and (3) AccountID field
 // matching the provided account ID.
-func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
+func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, error) {
 	// All book orders are standing limit orders.
 	if lo := m.book.Order(oid); lo != nil {
-		return lo.AccountID == aid
+		if lo.AccountID == aid {
+			return true, nil
+		}
+		return false, ErrCancelNotPermitted
 	}
 
 	// Check the active epochs (includes current and next).
@@ -611,10 +616,21 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
 	ord := m.epochOrders[oid]
 	m.epochMtx.RUnlock()
 
-	if lo, ok := ord.(*order.LimitOrder); ok {
-		return lo.Force == order.StandingTiF && lo.AccountID == aid
+	if ord == nil {
+		return false, ErrTargetNotActive
 	}
-	return false
+
+	lo, ok := ord.(*order.LimitOrder)
+	if !ok {
+		return false, ErrTargetNotCancelable
+	}
+	if lo.Force == order.StandingTiF {
+		return false, ErrTargetNotCancelable
+	}
+	if lo.AccountID == aid {
+		return false, ErrCancelNotPermitted
+	}
+	return true, nil
 }
 
 func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
@@ -1171,10 +1187,11 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		// Verify that the target order is on the books or in the epoch queue,
 		// and that the account of the CancelOrder is the same as the account of
 		// the target order.
-		if !m.CancelableBy(co.TargetOrderID, co.AccountID) {
-			log.Debugf("Cancel order %v (account=%v) does not own target order %v.",
-				co, co.AccountID, co.TargetOrderID)
-			errChan <- ErrInvalidCancelOrder
+		cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID)
+		if !cancelable {
+			log.Debugf("Cancel order %v (account=%v) target order %v: %v",
+				co, co.AccountID, co.TargetOrderID, err)
+			errChan <- err
 			return nil
 		}
 	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
