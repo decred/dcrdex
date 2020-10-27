@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -741,7 +742,7 @@ func TestMarket_Run(t *testing.T) {
 
 	// Check that start is delayed by an unsynced backend. Tell the Market to
 	// start
-	oRig.dcr.synced = false
+	atomic.StoreUint32(&oRig.dcr.synced, 0)
 	nowEpochIdx := encode.UnixMilli(time.Now())/epochDurationMSec + 1
 
 	unsyncedEpochIdx := nowEpochIdx + 1
@@ -847,7 +848,7 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf("market running with an unsynced backend")
 	}
 
-	oRig.dcr.synced = true
+	atomic.StoreUint32(&oRig.dcr.synced, 1)
 
 	<-time.After(time.Until(startEpochTime.Add(halfEpoch)))
 

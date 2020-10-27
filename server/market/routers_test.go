@@ -324,7 +324,7 @@ type TBackend struct {
 	utxoErr    error
 	utxos      map[string]uint64
 	addrChecks bool
-	synced     bool
+	synced     uint32
 	syncedErr  error
 }
 
@@ -332,7 +332,7 @@ func tNewBackend() *TBackend {
 	return &TBackend{
 		utxos:      make(map[string]uint64),
 		addrChecks: true,
-		synced:     true,
+		synced:     1,
 	}
 }
 
@@ -381,7 +381,7 @@ func (b *TBackend) Synced() (bool, error) {
 	if b.syncedErr != nil {
 		return false, b.syncedErr
 	}
-	return b.synced, nil
+	return atomic.LoadUint32(&oRig.dcr.synced) == 1, nil
 }
 
 type tUTXO struct {

@@ -26,14 +26,13 @@ require (
 	github.com/decred/dcrwallet/wallet/v3 v3.2.1
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
-	github.com/gcash/bchd v0.17.0
 	github.com/go-chi/chi v4.0.2+incompatible
-	github.com/gorilla/websocket v1.4.2
+	github.com/gorilla/websocket v1.4.1
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lib/pq v1.2.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	go.etcd.io/bbolt v1.3.5
-	golang.org/x/crypto v0.0.0-20201016220609-9e8e0b390897
+	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37
 	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	gopkg.in/ini.v1 v1.55.0
 )
