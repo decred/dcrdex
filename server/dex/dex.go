@@ -475,14 +475,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		}
 	}
 
-	// Client comms RPC server.
-	server, err := comms.NewServer(cfg.CommsCfg)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("NewServer failed: %v", err)
-	}
-	startSubSys("Comms Server", server)
-
 	// Having enumerated all users with booked orders, configure the AuthManager
 	// to expect them to connect in a certain time period.
 	authMgr.ExpectUsers(usersWithOrders, cfg.BroadcastTimeout)
@@ -532,6 +524,14 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Markets:     marketTunnels,
 	})
 	startSubSys("OrderRouter", orderRouter)
+
+	// Client comms RPC server.
+	server, err := comms.NewServer(cfg.CommsCfg)
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("NewServer failed: %v", err)
+	}
+	startSubSys("Comms Server", server)
 
 	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
 	if err != nil {
