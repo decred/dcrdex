@@ -24,7 +24,7 @@ const (
 	defaultRPCKeyFile  = "rpc.key"
 	defaultWebAddr     = "localhost:5758"
 	configFilename     = "dexc.conf"
-	defaultLogLevel    = "info"
+	defaultLogLevel    = "debug"
 )
 
 var (
