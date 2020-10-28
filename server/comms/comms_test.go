@@ -11,11 +11,13 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -827,4 +829,34 @@ func TestParseListeners(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error with invalid address")
 	}
+}
+
+type tHTTPHandler struct {
+	count uint32
+}
+
+func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
+	atomic.AddUint32(&h.count, 1)
+}
+
+func TestRateLimiter(t *testing.T) {
+	tHandler := &tHTTPHandler{}
+	f := limitRate(tHandler)
+	ip := "ip"
+	req := &http.Request{RemoteAddr: ip}
+	recorder := httptest.NewRecorder()
+	for i := 0; i < ipMaxBurstSize; i++ {
+		f.ServeHTTP(recorder, req)
+	}
+	time.Sleep(100 * time.Millisecond)
+	f.ServeHTTP(recorder, req)
+	successes := atomic.LoadUint32(&tHandler.count)
+	if successes != ipMaxBurstSize {
+		t.Fatalf("expected %d requests. got %d", ipMaxBurstSize, successes)
+	}
+	statusCode := recorder.Result().StatusCode
+	if statusCode != http.StatusTooManyRequests {
+		t.Fatalf("wrong status code. wanted %d, got %d", http.StatusTooManyRequests, statusCode)
+	}
+
 }

@@ -70,6 +70,7 @@ const (
 	UnpaidAccountError                // 51
 	InvalidRequestError               // 52
 	OrderQuantityTooHigh              // 53
+	HTTPRouteError                    // 54
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -170,6 +171,12 @@ const (
 	// PenaltyRoute is the DEX-originating notification-type message
 	// informing of a broken rule and the resulting penalty.
 	PenaltyRoute = "penalty"
+	// SpotsRoute is the HTTP or WebSocket request to get the spot price and
+	// volume for the DEX's markets.
+	SpotsRoute = "spots"
+	// CandlesRoute is the HTTP request to get the set of candlesticks
+	// representing market activity history.
+	CandlesRoute = "candles"
 )
 
 type Bytes = dex.Bytes
@@ -1004,6 +1011,87 @@ type ConfigResult struct {
 	Assets           []*Asset  `json:"assets"`
 	Markets          []*Market `json:"markets"`
 	Fee              uint64    `json:"fee"`
+	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
+}
+
+// Spot is a snapshot of a market at the end of a match cycle. A slice of Spot
+// are sent as the response to the SpotsRoute request.
+type Spot struct {
+	Stamp      uint64 `json:"stamp"`
+	BaseID     uint32 `json:"baseID"`
+	QuoteID    uint32 `json:"quoteID"`
+	Rate       uint64 `json:"rate"`
+	BookVolume uint64 `json:"bookVolume"`
+}
+
+// CandlesRequest is a data API request for market history.
+type CandlesRequest struct {
+	BaseID     uint32 `json:"baseID"`
+	QuoteID    uint32 `json:"quoteID"`
+	BinSize    string `json:"binSize"`
+	NumCandles int    `json:"numCandles,omitempty"` // default and max defined in apidata.
+}
+
+// Candle is a statistical history of a specified period of market activity.
+type Candle struct {
+	StartStamp  uint64 `json:"startStamp"`
+	EndStamp    uint64 `json:"endStamp"`
+	MatchVolume uint64 `json:"matchVolume"`
+	BookVolume  uint64 `json:"bookVolume"`
+	OrderVolume uint64 `json:"orderVolume"`
+	HighRate    uint64 `json:"highRate"`
+	LowRate     uint64 `json:"lowRate"`
+	StartRate   uint64 `json:"startRate"`
+	EndRate     uint64 `json:"endRate"`
+}
+
+// WireCandles are Candles encoded as a series of integer arrays, as opposed to
+// an array of candles. WireCandles encode smaller than []Candle, since the
+// property names are not repeated for each candle.
+type WireCandles struct {
+	StartStamps  []uint64 `json:"startStamps"`
+	EndStamps    []uint64 `json:"endStamps"`
+	MatchVolumes []uint64 `json:"matchVolumes"`
+	BookVolumes  []uint64 `json:"bookVolumes"`
+	OrderVolumes []uint64 `json:"orderVolumes"`
+	HighRates    []uint64 `json:"highRates"`
+	LowRates     []uint64 `json:"lowRates"`
+	StartRates   []uint64 `json:"startRates"`
+	EndRates     []uint64 `json:"endRates"`
+}
+
+// NewWireCandles prepares a *WireCandles with slices of capacity n.
+func NewWireCandles(n int) *WireCandles {
+	return &WireCandles{
+		StartStamps:  make([]uint64, 0, n),
+		EndStamps:    make([]uint64, 0, n),
+		MatchVolumes: make([]uint64, 0, n),
+		BookVolumes:  make([]uint64, 0, n),
+		OrderVolumes: make([]uint64, 0, n),
+		HighRates:    make([]uint64, 0, n),
+		LowRates:     make([]uint64, 0, n),
+		StartRates:   make([]uint64, 0, n),
+		EndRates:     make([]uint64, 0, n),
+	}
+}
+
+// Candles converts the WireCandles to []*Candle.
+func (wc *WireCandles) Candles() []*Candle {
+	candles := make([]*Candle, 0, len(wc.StartStamps))
+	for i := range wc.StartStamps {
+		candles = append(candles, &Candle{
+			StartStamp:  wc.StartStamps[i],
+			EndStamp:    wc.EndStamps[i],
+			MatchVolume: wc.MatchVolumes[i],
+			BookVolume:  wc.BookVolumes[i],
+			OrderVolume: wc.OrderVolumes[i],
+			HighRate:    wc.HighRates[i],
+			LowRate:     wc.LowRates[i],
+			StartRate:   wc.StartRates[i],
+			EndRate:     wc.EndRates[i],
+		})
+	}
+	return candles
 }
 
 // Convert uint64 to 8 bytes.

@@ -4,6 +4,7 @@
 package pg
 
 import (
+	"context"
 	"database/sql/driver"
 	"fmt"
 
@@ -64,6 +65,53 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 		orderIDs(ed.OrdersRevealed), orderIDs(ed.OrdersMissed))
 	if err != nil {
 		a.fatalBackendErr(err)
+		return err
 	}
+
+	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
+	stmt = fmt.Sprintf(internal.InsertEpochReport, epochReportsTableName)
+	epochEnd := (ed.Idx + 1) * ed.Dur
+	_, err = a.db.Exec(stmt, epochEnd, ed.Dur, ed.MatchVolume, ed.BookVolume, ed.OrderVolume, ed.HighRate, ed.LowRate, ed.StartRate, ed.EndRate)
+	if err != nil {
+		a.fatalBackendErr(err)
+	}
+
+	return err
+}
+
+// LoadEpochStats reads all market epoch history from the database, updating the
+// provided caches along the way.
+func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) error {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return err
+	}
+	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
+
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	defer cancel()
+
+	stmt := fmt.Sprintf(internal.SelectAllEpochReports, epochReportsTableName)
+	rows, err := a.db.QueryContext(ctx, stmt, 0)
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		candle := new(db.Candle)
+		var epochDur uint64
+		err = rows.Scan(&candle.EndStamp, &epochDur, &candle.MatchVolume, &candle.BookVolume,
+			&candle.OrderVolume, &candle.HighRate, &candle.LowRate, &candle.StartRate, &candle.EndRate)
+		if err != nil {
+			return err
+		}
+		candle.StartStamp = candle.EndStamp - epochDur
+		for _, set := range caches {
+			set.Add(candle)
+		}
+	}
+
 	return err
 }

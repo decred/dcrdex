@@ -242,6 +242,19 @@ func (set *MatchSet) Matches() []*Match {
 	return matches
 }
 
+// HighLowRates gets the highest and lowest rate from all matches.
+func (set *MatchSet) HighLowRates() (high uint64, low uint64) {
+	for _, rate := range set.Rates {
+		if rate > high {
+			high = rate
+		}
+		if rate < low || low == 0 {
+			low = rate
+		}
+	}
+	return
+}
+
 func appendUint64Bytes(b []byte, i uint64) []byte {
 	iBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(iBytes, i)

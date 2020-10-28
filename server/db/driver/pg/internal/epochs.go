@@ -16,4 +16,28 @@ const (
 
 	InsertEpoch = `INSERT INTO %s (epoch_idx, epoch_dur, match_time, csum, seed, revealed, missed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
+
+	// CreateEpochReportTable creates a table that hold sepoch-end
+	// reports that can be used to contruct market history data sets.
+	CreateEpochReportTable = `CREATE TABLE IF NOT EXISTS %s (
+		epoch_end INT8 PRIMARY KEY, -- using timestamp instead of index to facilitate sorting and filtering with less math
+		epoch_dur INT4,             -- epoch duration in milliseconds
+		match_volume INT8,          -- total matched during epoch's match cycle
+		book_volume INT8,           -- book volume after matching
+		order_volume INT8,          -- epoch order volume
+		high_rate INT8,             -- the highest rate matched
+		low_rate INT8,              -- the lowest rate matched
+		start_rate INT8,            -- the mid-gap rate at the beginning of the match cycle
+		end_rate INT8               -- the mid-gap rate at the end of the match cycle
+	);`
+
+	InsertEpochReport = `INSERT INTO %s (epoch_end, epoch_dur, match_volume, 
+			book_volume, order_volume, high_rate, low_rate, start_rate, end_rate)
+			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9);`
+
+	SelectAllEpochReports = `SELECT epoch_end, epoch_dur, match_volume,
+		book_volume, order_volume, high_rate, low_rate, start_rate, end_rate
+		FROM %s
+		WHERE epoch_end >= $1
+		ORDER BY epoch_end;`
 )

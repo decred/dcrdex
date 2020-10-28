@@ -106,14 +106,60 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
 		}
-		// Look for a registered handler. Failure to find a handler results in an
-		// error response but not a disconnect.
+		// Look for a registered route handler.
 		handler := RouteHandler(msg.Route)
-		if handler == nil {
+		if handler != nil {
+			// Handle the request.
+			return handler(c, msg)
+		}
+
+		// Look for an HTTP handler.
+		httpHandler := httpRoutes[msg.Route]
+		if httpHandler == nil {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
-		// Handle the request.
-		return handler(c, msg)
+
+		// Check HTTP rate limiters.
+		if !globalHTTPRateLimiter.Allow() {
+			return msgjson.NewError(msgjson.RPCParseError, "too many global requests")
+		}
+		ipLimiter := getIPLimiter(c.IP())
+		if !ipLimiter.Allow() {
+			return msgjson.NewError(msgjson.RPCParseError, "too many requests")
+		}
+
+		// Prepare the thing and unmarshal.
+		var thing interface{}
+		switch msg.Route {
+		case msgjson.CandlesRoute:
+			thing = new(msgjson.CandlesRequest)
+		case msgjson.OrderBookRoute:
+			thing = new(msgjson.OrderBookSubscription)
+		}
+		if thing != nil {
+			err := msg.Unmarshal(thing)
+			if err != nil {
+				return msgjson.NewError(msgjson.RPCParseError, "json parse error")
+			}
+		}
+
+		// Process request.
+		resp, err := httpHandler(thing)
+		if err != nil {
+			return msgjson.NewError(msgjson.HTTPRouteError, err.Error())
+		}
+
+		// Respond.
+		msg, err := msgjson.NewResponse(msg.ID, resp, nil)
+		if err == nil {
+			err = c.Send(msg)
+		}
+
+		if err != nil {
+			log.Errorf("Error sending response to %s for requested route %q: %v", c.IP(), msg.Route, err)
+		}
+		return nil
+
 	case msgjson.Response:
 		// NOTE: In the event of an error, we respond to a response, which makes
 		// no sense. A new mechanism is needed with appropriate client handling.

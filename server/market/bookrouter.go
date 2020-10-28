@@ -446,27 +446,27 @@ out:
 	}
 }
 
+// Book creates a copy of the book as a *msgjson.OrderBook.
+func (r *BookRouter) Book(mktName string) (*msgjson.OrderBook, error) {
+	book := r.books[mktName]
+	if book == nil {
+		return nil, fmt.Errorf("market %s unknown", mktName)
+	}
+	msgOB := r.msgOrderBook(book)
+	if msgOB == nil {
+		return nil, fmt.Errorf("market %s not ruhning", mktName)
+	}
+	return msgOB, nil
+}
+
 // sendBook encodes and sends the the entire order book to the specified client.
 func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
-	book.mtx.RLock() // book.orders and book.running
-	if !book.running {
-		book.mtx.RUnlock()
+	msgOB := r.msgOrderBook(book)
+	if msgOB == nil {
 		conn.SendError(msgID, msgjson.NewError(msgjson.MarketNotRunningError, "market not running"))
 		return
 	}
-	msgBook := make([]*msgjson.BookOrderNote, 0, len(book.orders))
-	for _, o := range book.orders {
-		msgBook = append(msgBook, o)
-	}
-	epochIdx := book.epochIdx // instead of book.epoch() while already locked
-	book.mtx.RUnlock()
-
-	msg, err := msgjson.NewResponse(msgID, &msgjson.OrderBook{
-		Seq:      book.subs.lastSeq(),
-		MarketID: book.name,
-		Epoch:    uint64(epochIdx),
-		Orders:   msgBook,
-	}, nil)
+	msg, err := msgjson.NewResponse(msgID, msgOB, nil)
 	if err != nil {
 		log.Errorf("error encoding 'orderbook' response: %v", err)
 		return
@@ -475,6 +475,27 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 	err = conn.Send(msg) // consider a synchronous send here
 	if err != nil {
 		log.Debugf("error sending 'orderbook' response: %v", err)
+	}
+}
+
+func (r *BookRouter) msgOrderBook(book *msgBook) *msgjson.OrderBook {
+	book.mtx.RLock() // book.orders and book.running
+	if !book.running {
+		book.mtx.RUnlock()
+		return nil
+	}
+	ords := make([]*msgjson.BookOrderNote, 0, len(book.orders))
+	for _, o := range book.orders {
+		ords = append(ords, o)
+	}
+	epochIdx := book.epochIdx // instead of book.epoch() while already locked
+	book.mtx.RUnlock()
+
+	return &msgjson.OrderBook{
+		Seq:      book.subs.lastSeq(),
+		MarketID: book.name,
+		Epoch:    uint64(epochIdx),
+		Orders:   ords,
 	}
 }
 

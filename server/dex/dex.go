@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/apidata"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
@@ -138,6 +139,7 @@ func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*m
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
 		Fee:              cfg.RegFeeAmount,
+		BinSizes:         apidata.BinSizes,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -150,17 +152,10 @@ func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*m
 	if err != nil {
 		return nil, err
 	}
-	payload := &msgjson.ResponsePayload{
-		Result: encResult,
-	}
-	encPayload, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
 
 	return &configResponse{
 		configMsg: configMsg,
-		configEnc: encPayload,
+		configEnc: encResult,
 	}, nil
 }
 
@@ -195,15 +190,7 @@ func (cr *configResponse) remarshal() {
 		log.Errorf("failed to marshal config message: %v", err)
 		return
 	}
-	payload := &msgjson.ResponsePayload{
-		Result: encResult,
-	}
-	encPayload, err := json.Marshal(payload)
-	if err != nil {
-		log.Errorf("failed to marshal config message payload: %v", err)
-		return
-	}
-	cr.configEnc = encPayload
+	cr.configEnc = encResult
 }
 
 // Stop shuts down the DEX. Stop returns only after all components have
@@ -224,21 +211,10 @@ func marketSubSysName(name string) string {
 	return fmt.Sprintf("Market[%s]", name)
 }
 
-func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
-
-	ack := &msgjson.Message{
-		Type:    msgjson.Response,
-		ID:      msg.ID,
-		Payload: dm.configResp.configEnc,
-	}
-
-	if err := conn.Send(ack); err != nil {
-		log.Debugf("error sending config response: %v", err)
-	}
-
-	return nil
+	return dm.configResp.configEnc, nil
 }
 
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
@@ -420,6 +396,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
+	dataAPI := apidata.NewDataAPI(ctx, storage)
+
 	// Create the user order unbook dispatcher for the AuthManager.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
 	userUnbookFun := func(user account.AccountID) {
@@ -489,12 +467,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	for _, mktInf := range cfg.Markets {
 		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
-		mkt, err := market.NewMarket(mktInf, storage, swapper, authMgr, baseCoinLocker, quoteCoinLocker)
+		mkt, err := market.NewMarket(mktInf, storage, swapper, authMgr, baseCoinLocker, quoteCoinLocker, dataAPI)
 		if err != nil {
 			abort()
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
+		err = dataAPI.AddMarketSource(mkt)
+		if err != nil {
+			abort()
+			return nil, fmt.Errorf("DataSource.AddMarket: %w", err)
+		}
 
 		// Having loaded the book, get the accounts owning the orders.
 		_, buys, sells := mkt.Book()
@@ -543,6 +526,9 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	bookRouter := market.NewBookRouter(bookSources)
 	startSubSys("BookRouter", bookRouter)
 
+	// The data API gets the order book from the book router.
+	dataAPI.SetBookSource(bookRouter)
+
 	// Market, now that book router is running.
 	for name, mkt := range markets {
 		startSubSys(marketSubSysName(name), mkt)
@@ -584,7 +570,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		configResp:  cfgResp,
 	}
 
-	comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 
 	return dexMgr, nil
 }

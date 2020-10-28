@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/elliptic"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -38,6 +40,10 @@ const (
 
 	// banishTime is the default duration of a client quarantine.
 	banishTime = time.Hour
+
+	// Per-ip rate limits for HTTP routes.
+	ipMaxRatePerSec = 1
+	ipMaxBurstSize  = 5
 )
 
 var (
@@ -51,9 +57,41 @@ var (
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
 	pingPeriod = (pongWait * 9) / 10 // i.e. 18 sec
+
+	// globalHTTPRateLimiter is a limit on the global HTTP request limit. The
+	// global rate limiter is like a rudimentary auto-spam filter for
+	// non-critical routes, including all routes registered as HTTP routes.
+	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
+
+	// ipRateLimiter is a per-client rate limiter.
+	ipHTTPRateLimiter = make(map[string]*ipRateLimiter)
+	rateLimiterMtx    sync.RWMutex
 )
 
 var idCounter uint64
+
+// ipRateLimiter is used to track an IPs HTTP request rate.
+type ipRateLimiter struct {
+	*rate.Limiter
+	lastHit time.Time
+}
+
+// Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist.
+func getIPLimiter(ip string) *ipRateLimiter {
+	rateLimiterMtx.Lock()
+	defer rateLimiterMtx.Unlock()
+	limiter := ipHTTPRateLimiter[ip]
+	if limiter != nil {
+		limiter.lastHit = time.Now()
+		return limiter
+	}
+	limiter = &ipRateLimiter{
+		Limiter: rate.NewLimiter(ipMaxRatePerSec, ipMaxBurstSize),
+		lastHit: time.Now(),
+	}
+	ipHTTPRateLimiter[ip] = limiter
+	return limiter
+}
 
 // NextID returns a unique ID to identify a request-type message.
 func NextID() uint64 {
@@ -65,6 +103,12 @@ type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]MsgHandler)
+
+// HTTPHandler describes a handler for an HTTP route.
+type HTTPHandler func(thing interface{}) (interface{}, error)
+
+// rpcRoutes maps HTTP routes to the handlers.
+var httpRoutes = make(map[string]HTTPHandler)
 
 // Route registers a handler for a specified route. The handler map is global
 // and has no mutex protection. All calls to Route should be done before the
@@ -84,6 +128,17 @@ func Route(route string, handler MsgHandler) {
 // exists.
 func RouteHandler(route string) MsgHandler {
 	return rpcRoutes[route]
+}
+
+func RegisterHTTP(route string, handler HTTPHandler) {
+	if route == "" {
+		panic("RegisterHTTP: route is empty string")
+	}
+	_, alreadyHave := httpRoutes[route]
+	if alreadyHave {
+		panic(fmt.Sprintf("RegisterHTTP: double registration: %s", route))
+	}
+	httpRoutes[route] = handler
 }
 
 // The RPCConfig is the server configuration settings and the only argument
@@ -232,6 +287,16 @@ func (s *Server) Run(ctx context.Context) {
 		}()
 	})
 
+	// Data API endpoints.
+	mux.Route("/api", func(rr chi.Router) {
+		rr.Use(limitRate)
+		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
+		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", routeHandler(msgjson.CandlesRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", routeHandler(msgjson.CandlesRoute))
+		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", routeHandler(msgjson.OrderBookRoute))
+	})
+
 	// Start serving.
 	for _, listener := range s.listeners {
 		wg.Add(1)
@@ -245,6 +310,25 @@ func (s *Server) Run(ctx context.Context) {
 			wg.Done()
 		}(listener)
 	}
+
+	// Run a periodic routine to keep the ipHTTPRateLimiter map clean.
+	go func() {
+		ticker := time.NewTicker(time.Minute * 5)
+		for {
+			select {
+			case <-ticker.C:
+				rateLimiterMtx.Lock()
+				for ip, limiter := range ipHTTPRateLimiter {
+					if time.Since(limiter.lastHit) > time.Minute {
+						delete(ipHTTPRateLimiter, ip)
+					}
+				}
+				rateLimiterMtx.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	<-ctx.Done()
 
@@ -451,4 +535,41 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 		}
 	}
 	return ipv4ListenAddrs, ipv6ListenAddrs, haveWildcard, nil
+}
+
+// handleHTTP handles an HTTP request by finding and calling the appropriate
+// handler. The caller of handleHTTP should have already parsed and request
+// data into the right type for the handler.
+func handleHTTP(w http.ResponseWriter, r *http.Request, route string, thing interface{}) {
+	handler := httpRoutes[route]
+	if handler == nil {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+	resp, err := handler(thing)
+	if err != nil {
+		writeJSONWithStatus(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+		return
+	}
+	writeJSONWithStatus(w, resp, http.StatusOK)
+}
+
+// routeHandler creeates a HandlerFunc for a route. Middleware should have
+// already processed the request and added the request struct to the Context.
+func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleHTTP(w, r, route, r.Context().Value(ctxThing))
+	}
+}
+
+// writeJSONWithStatus writes the JSON response with the specified HTTP response
+// code.
+func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	encoder := json.NewEncoder(w)
+	// encoder.SetIndent("", indent)
+	if err := encoder.Encode(thing); err != nil {
+		log.Infof("JSON encode error: %v", err)
+	}
 }
