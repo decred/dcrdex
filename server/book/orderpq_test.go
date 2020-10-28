@@ -1,7 +1,9 @@
 package book
 
 import (
+	"flag"
 	"math/rand"
+	"os"
 	"sort"
 	"testing"
 
@@ -44,7 +46,7 @@ func genBigList(listSize int) {
 	seed := int64(-3405439173988651889)
 	rand.Seed(seed)
 
-	dupRate := 400
+	dupRate := 800
 	if listSize < dupRate {
 		dupRate = listSize / 10
 	}
@@ -61,22 +63,29 @@ func genBigList(listSize int) {
 			order.Rate = bigList[i/2].Rate
 			order.Quantity = bigList[i/2].Quantity + 1
 		}
-		_ = order.ID()
+		_ = order.ID() // compute and cache the OrderID
 		bigList = append(bigList, order)
 	}
 }
 
-func TestLargeOrderMaxPriorityQueue(t *testing.T) {
-	startLogger()
+const (
+	shortListLen = 12_000
+	longListLen  = 400_000
+)
 
+func TestMain(m *testing.M) {
+	flag.Parse() // for -short
 	if testing.Short() {
-		genBigList(10000)
+		genBigList(shortListLen)
 	} else {
-		genBigList(1000000)
+		genBigList(longListLen)
 	}
+	os.Exit(m.Run())
+}
 
+func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	// Max oriented queue
-	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
+	pq := NewMaxOrderPQ(uint32(len(bigList) - len(bigList)/16)) // a little smaller to force a realloc
 	for i, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -151,16 +160,8 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 }
 
 func TestLargeOrderMinPriorityQueue(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
 	// Min oriented queue
-	pq := NewMinOrderPQ(uint32(len(bigList) * 3 / 2))
+	pq := NewMinOrderPQ(uint32(len(bigList) - len(bigList)/16)) // a little smaller to force a realloc
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -235,16 +236,8 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 }
 
 func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
 	// Max oriented queue (sell book)
-	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
+	pq := NewMaxOrderPQ(uint32(len(bigList)))
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -310,17 +303,9 @@ func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
 	}
 }
 
-func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
+func TestLargeOrderMaxPriorityQueue_realloc(t *testing.T) {
 	// Max oriented queue (sell book)
-	pq := NewMaxOrderPQ(uint32(len(bigList)))
+	pq := NewMaxOrderPQ(uint32(len(bigList))) // no realloc for initial inserts
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -333,7 +318,7 @@ func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
 	}
 
 	newCap := pq.capacity * 3 / 2
-	pq.Realloc(newCap)
+	pq.realloc(newCap)
 
 	if pq.capacity != newCap {
 		t.Errorf("Reallocated capacity incorrect. Expected %d, got %d",
@@ -344,8 +329,13 @@ func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
 	}
 
-	// Extract all orders, sorted.
+	// Extract all orders, sorted. This should realloc and decrease cap on the way.
 	ordersSorted := pq.ExtractN(pq.Count())
+
+	if !testing.Short() && pq.Cap() >= newCap { // only long list is big enough to trigger dealloc
+		t.Errorf("expected a capacity decrease")
+	}
+	t.Logf("OrderPQ capacity decreased from %d to %d after extracting all entries", newCap, pq.Cap())
 
 	// Ensure sorted in a different way.
 	sorted := sort.SliceIsSorted(ordersSorted, func(i, j int) bool {
@@ -371,10 +361,8 @@ func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
 	}
 }
 
-func TestMinOrderPriorityQueue(t *testing.T) {
-	startLogger()
-
-	pq := NewMinOrderPQ(5)
+func TestMinOrderPQ(t *testing.T) {
+	pq := NewMinOrderPQ(0) // zero cap to force a realloc right away
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -390,10 +378,8 @@ func TestMinOrderPriorityQueue(t *testing.T) {
 	}
 }
 
-func TestMaxOrderPriorityQueue(t *testing.T) {
-	startLogger()
-
-	pq := NewMaxOrderPQ(5)
+func TestMaxOrderPQ(t *testing.T) {
+	pq := NewMaxOrderPQ(0)
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -409,9 +395,7 @@ func TestMaxOrderPriorityQueue(t *testing.T) {
 	}
 }
 
-func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
-	startLogger()
-
+func TestMaxOrderPQ_TieRate(t *testing.T) {
 	pq := NewMaxOrderPQ(4)
 
 	for _, o := range orders[:3] {
@@ -428,9 +412,7 @@ func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
 	}
 }
 
-func TestMaxOrderPriorityQueue_TieRateAndTime(t *testing.T) {
-	startLogger()
-
+func TestMaxOrderPQ_TieRateAndTime(t *testing.T) {
 	pq := NewMaxOrderPQ(4)
 
 	// 7f9200eedcf2fa868173cdfc2101ee4d71ec024c1c052589b3371442aaa26c2d
@@ -452,9 +434,7 @@ func TestMaxOrderPriorityQueue_TieRateAndTime(t *testing.T) {
 	}
 }
 
-func TestOrderPriorityQueueCapacity(t *testing.T) {
-	startLogger()
-
+func TestOrderPQCapacity(t *testing.T) {
 	pq := NewMaxOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -468,20 +448,26 @@ func TestOrderPriorityQueueCapacity(t *testing.T) {
 	}
 
 	ok = pq.Insert(orders[2])
-	if ok {
-		t.Errorf("Should have failed to insert order %v, but succeeded", orders[2])
+	if !ok {
+		t.Errorf("Failed to insert order %v", orders[2])
+	}
+
+	if pq.Cap() <= 2 {
+		t.Errorf("Failed to grow capacity")
+	}
+
+	if pq.Len() != 3 {
+		t.Errorf("Failed to insert order with capacity growth")
 	}
 
 	best := pq.PeekBest()
-	if best.UID() != orders[0].UID() {
+	if best.UID() != orders[2].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
-func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
-	startLogger()
-
+func TestOrderPQ_Insert_negative(t *testing.T) {
 	pq := NewMinOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -500,45 +486,7 @@ func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
 	}
 }
 
-func TestResetHeap(t *testing.T) {
-	startLogger()
-
-	pq := NewMaxOrderPQ(2)
-
-	orderEntries := []*orderEntry{
-		{
-			order:   orders[0],
-			heapIdx: -1,
-		},
-		{
-			order:   orders[1],
-			heapIdx: -1,
-		},
-	}
-
-	pq.resetHeap(orderEntries)
-
-	best := pq.ExtractBest()
-	if best.UID() != orders[0].UID() {
-		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
-			best.Price(), best.UID())
-	}
-
-	best = pq.ExtractBest()
-	if best.UID() != orders[1].UID() {
-		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
-			best.Price(), best.UID())
-	}
-
-	best = pq.ExtractBest()
-	if best != nil {
-		t.Errorf("Order returned, but queue should be empty.")
-	}
-}
-
-func TestOrderPriorityQueue_Remove(t *testing.T) {
-	startLogger()
-
+func TestOrderPQ_Remove(t *testing.T) {
 	pq := NewMaxOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -566,9 +514,7 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 	}
 }
 
-func TestOrderPriorityQueue_RemoveUserOrders(t *testing.T) {
-	startLogger()
-
+func TestOrderPQ_RemoveUserOrders(t *testing.T) {
 	pq := NewMaxOrderPQ(6)
 
 	ok := pq.Insert(orders[0])
@@ -647,14 +593,6 @@ func TestOrderPriorityQueue_RemoveUserOrders(t *testing.T) {
 }
 
 func TestOrderPQMin_Worst(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
 	pq0 := NewMinOrderPQ(4)
 	worst := pq0.Worst()
 	if worst != nil {
@@ -671,7 +609,7 @@ func TestOrderPQMin_Worst(t *testing.T) {
 	}
 
 	// Min oriented queue
-	pq := NewMinOrderPQ(uint32(len(bigList) * 3 / 2))
+	pq := NewMinOrderPQ(uint32(len(bigList) - len(bigList)/16))
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -698,16 +636,8 @@ func TestOrderPQMin_Worst(t *testing.T) {
 }
 
 func TestOrderPQMax_Worst(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
 	// Max oriented queue
-	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
+	pq := NewMaxOrderPQ(uint32(len(bigList)))
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -734,17 +664,9 @@ func TestOrderPQMax_Worst(t *testing.T) {
 }
 
 func TestOrderPQMax_leafNodes(t *testing.T) {
-	startLogger()
-
-	if testing.Short() {
-		genBigList(10000)
-	} else {
-		genBigList(1000000)
-	}
-
 	// Max oriented queue
 	newQ := func(list []*Order) *OrderPQ {
-		pq := NewMaxOrderPQ(uint32(len(list) * 3 / 2))
+		pq := NewMaxOrderPQ(uint32(len(bigList)))
 		for _, o := range list {
 			ok := pq.Insert(o)
 			if !ok {

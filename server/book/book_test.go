@@ -91,7 +91,7 @@ var (
 func newBook(t *testing.T) *Book {
 	resetMakers()
 
-	b := New(LotSize, DefaultBookHalfCapacity)
+	b := New(LotSize)
 
 	for _, o := range bookBuyOrders {
 		if ok := b.Insert(o); !ok {
@@ -156,7 +156,9 @@ func TestBook(t *testing.T) {
 			len(buys), b.BuyCount())
 	}
 
-	b.Realloc(DefaultBookHalfCapacity * 2)
+	// Hit the OrderPQ's Realloc function manually.
+	b.buys.realloc(initBookHalfCapacity * 2)
+	b.sells.realloc(initBookHalfCapacity * 2)
 
 	buys2 := b.BuyOrders()
 	if len(buys) != len(buys2) {
