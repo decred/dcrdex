@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	// DefaultBookHalfCapacity is the default capacity of one side (buy or sell)
-	// of the order book. It is set to 2^20 orders (1 mebiorders = 1,048,576
-	// orders) per book side.
-	DefaultBookHalfCapacity uint32 = 1 << 20
+	// initBookHalfCapacity is the default capacity of one side (buy or sell) of
+	// the order book. It is set to 2^16 orders (65536 orders) per book side.
+	initBookHalfCapacity uint32 = 1 << 16
 )
 
 // Book is a market's order book. The Book uses a configurable lot size, of
@@ -26,24 +25,16 @@ const (
 type Book struct {
 	mtx     sync.RWMutex
 	lotSize uint64
-	halfCap uint32
 	buys    *OrderPQ
 	sells   *OrderPQ
 }
 
-// New creates a new order book with the given lot size, and optional order
-// capacity of each side of the book. To change capacity of an existing Book,
-// use the Realloc method.
-func New(lotSize uint64, halfCapacity ...uint32) *Book {
-	halfCap := DefaultBookHalfCapacity
-	if len(halfCapacity) > 0 {
-		halfCap = halfCapacity[0]
-	}
+// New creates a new order book with the given lot size.
+func New(lotSize uint64) *Book {
 	return &Book{
 		lotSize: lotSize,
-		halfCap: halfCap,
-		buys:    NewMaxOrderPQ(halfCap),
-		sells:   NewMinOrderPQ(halfCap),
+		buys:    NewMaxOrderPQ(initBookHalfCapacity),
+		sells:   NewMinOrderPQ(initBookHalfCapacity),
 	}
 }
 
@@ -51,17 +42,8 @@ func New(lotSize uint64, halfCapacity ...uint32) *Book {
 func (b *Book) Clear() {
 	b.mtx.Lock()
 	b.buys, b.sells = nil, nil
-	b.buys = NewMaxOrderPQ(b.halfCap)
-	b.sells = NewMinOrderPQ(b.halfCap)
-	b.mtx.Unlock()
-}
-
-// Realloc changes the capacity of the order book given the specified capacity
-// of both buy and sell sides of the book.
-func (b *Book) Realloc(newHalfCap uint32) {
-	b.mtx.Lock()
-	b.buys.Realloc(newHalfCap)
-	b.sells.Realloc(newHalfCap)
+	b.buys = NewMaxOrderPQ(initBookHalfCapacity)
+	b.sells = NewMinOrderPQ(initBookHalfCapacity)
 	b.mtx.Unlock()
 }
 
@@ -107,8 +89,7 @@ func (b *Book) Best() (bestBuy, bestSell *order.LimitOrder) {
 // integer multiple of the Book's lot size, the order will not be inserted.
 func (b *Book) Insert(o *order.LimitOrder) bool {
 	if o.Quantity%b.lotSize != 0 {
-		log.Warnf("(*Book).Insert: Refusing to insert an order with a " +
-			"quantity that is not a multiple of lot size.")
+		log.Warnf("(*Book).Insert: Refusing to insert an order with a quantity that is not a multiple of lot size.")
 		return false
 	}
 	b.mtx.Lock()

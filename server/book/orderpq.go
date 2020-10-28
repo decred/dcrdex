@@ -41,14 +41,14 @@ func (pq *OrderPQ) Copy() *OrderPQ {
 	return pq.copy(pq.capacity)
 }
 
-// Realloc changes the capacity of the OrderPQ by making a deep copy with the
-// specified capacity. The specified capacity must not be less than current.
-func (pq *OrderPQ) Realloc(newCap uint32) {
-	pq.mtx.Lock()
-	defer pq.mtx.Unlock()
-	if newCap < pq.capacity {
-		fmt.Printf("(*OrderPQ).Realloc: new cap %d < old cap %d", newCap, pq.capacity) // maybe even panic
-		return
+// realloc changes the capacity of the OrderPQ by making a deep copy with the
+// specified capacity. The specified capacity must not be less the current queue
+// length. Truncation is not supported; the consumer should first extract
+// entries before attempting to reallocate to a smaller capacity.
+func (pq *OrderPQ) realloc(newCap uint32) {
+	if len(pq.oh) > int(newCap) {
+		panic(fmt.Sprintf("(*OrderPQ).Realloc: new cap %d < current utilization %d",
+			newCap, len(pq.oh)))
 	}
 	newPQ := pq.copy(newCap)
 	pq.capacity = newCap
@@ -57,41 +57,48 @@ func (pq *OrderPQ) Realloc(newCap uint32) {
 	pq.userOrders = newPQ.userOrders
 }
 
+// Cap returns the current capacity of the OrderPQ.
+func (pq *OrderPQ) Cap() uint32 {
+	pq.mtx.RLock()
+	defer pq.mtx.RUnlock()
+	return pq.capacity
+}
+
+func (pq *OrderPQ) push(oe *orderEntry) {
+	// Append the entry to the heap slice.
+	pq.oh = append(pq.oh, oe)
+	// Store it in the orders and userOrders maps.
+	lo := oe.order
+	oid := lo.ID()
+	pq.orders[oid] = oe
+	if uos, found := pq.userOrders[lo.AccountID]; found {
+		uos[oid] = lo // alloc_space hot spot
+	} else {
+		pq.userOrders[lo.AccountID] = map[order.OrderID]*order.LimitOrder{oid: lo}
+	}
+}
+
 // copy makes a deep copy of the OrderPQ. The orders are the same; each
 // orderEntry is new. The lessFn is the same. This function is not thread-safe.
+// The CALLER (e.g. realloc) must be sure the new capacity is sufficient.
 func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
-	// Deep copy the order heap.
-	orderHeap := make(orderHeap, 0, newCap)
+	if len(pq.oh) > int(newCap) {
+		panic(fmt.Sprintf("len %d > newCap %d", len(pq.oh), int(newCap)))
+	}
+	// Initialize the new OrderPQ.
+	newPQ := newOrderPQ(newCap, pq.lessFn)
+	newPQ.userOrders = make(map[account.AccountID]map[order.OrderID]*order.LimitOrder, len(pq.userOrders))
+	for aid, uos := range pq.userOrders {
+		newPQ.userOrders[aid] = make(map[order.OrderID]*order.LimitOrder, len(uos)) // actual *LimitOrders copied in push
+	}
+
+	// Deep copy the order heap, and recreate the maps.
 	for _, oe := range pq.oh {
-		orderHeap = append(orderHeap, &orderEntry{
+		entry := &orderEntry{ // alloc_objects hot spot
 			oe.order,
 			oe.heapIdx,
-		})
-	}
-
-	// Deep copy the orders maps.
-	orders := make(map[order.OrderID]*orderEntry, newCap)
-	userOrders := make(map[account.AccountID]map[order.OrderID]*order.LimitOrder)
-	for _, oe := range orderHeap {
-		lo := oe.order
-		oid := lo.ID()
-		orders[oid] = oe
-		uos, found := userOrders[lo.AccountID]
-		if !found {
-			userOrders[lo.AccountID] = map[order.OrderID]*order.LimitOrder{
-				oid: lo,
-			}
-			continue
 		}
-		uos[oid] = lo
-	}
-
-	newPQ := &OrderPQ{
-		oh:         orderHeap,
-		capacity:   newCap,
-		lessFn:     pq.lessFn,
-		orders:     orders,
-		userOrders: userOrders,
+		newPQ.push(entry)
 	}
 
 	// Since the heap is copied in the same order, and with the same heap
@@ -187,6 +194,21 @@ func newOrderPQ(cap uint32, lessFn func(bi, bj *order.LimitOrder) bool) *OrderPQ
 	}
 }
 
+const (
+	minCapIncrement = 4096
+	deallocThresh   = 10 * minCapIncrement
+)
+
+// capForUtilization suggests a capacity for a certain utilization. It is
+// computed as sz plus the larger of sz/8 and minCapIncrement.
+func capForUtilization(sz int) uint32 {
+	inc := sz / 8
+	if inc < minCapIncrement {
+		inc = minCapIncrement
+	}
+	return uint32(sz + inc)
+}
+
 // Count returns the number of orders in the queue.
 func (pq *OrderPQ) Count() int {
 	pq.mtx.Lock()
@@ -196,7 +218,7 @@ func (pq *OrderPQ) Count() int {
 
 // Satisfy heap.Inferface (Len, Less, Swap, Push, Pop). These functions are only
 // to be used by the container/heap functions via other thread-safe OrderPQ
-// methods. These are not thread safe.
+// methods. These are not safe for concurrent use.
 
 // Len is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Len() int {
@@ -218,7 +240,7 @@ func (pq *OrderPQ) Swap(i, j int) {
 	pq.oh[j].heapIdx = j
 }
 
-// Push an order, which must be an OrderPricer. Use heap.Push, not this directly.
+// Push an order, which must be a *LimitOrder. Use heap.Push, not this directly.
 // Push is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Push(ord interface{}) {
 	lo, ok := ord.(*order.LimitOrder)
@@ -227,32 +249,21 @@ func (pq *OrderPQ) Push(ord interface{}) {
 		return
 	}
 
-	entry := &orderEntry{
-		order:   lo,
-		heapIdx: len(pq.oh),
-	}
-
-	oid := lo.ID()
-	if pq.orders[oid] != nil {
+	if pq.orders[lo.ID()] != nil {
 		fmt.Printf("Attempted to push existing order: %v", ord)
 		return
 	}
 
-	pq.orders[oid] = entry
-	uos, found := pq.userOrders[lo.AccountID]
-	if !found {
-		uos = map[order.OrderID]*order.LimitOrder{oid: lo}
-		pq.userOrders[lo.AccountID] = uos
-	} else {
-		uos[oid] = lo
+	entry := &orderEntry{
+		order:   lo,
+		heapIdx: len(pq.oh),
 	}
-
-	pq.oh = append(pq.oh, entry)
+	pq.push(entry)
 }
 
-// Pop will return an interface{} that may be cast to OrderPricer (or the
-// underlying concrete type). Use heap.Pop, ExtractBest, or RemoveOrder, not
-// this. Pop is required for heap.Interface. It is not thread-safe.
+// Pop will return an interface{} that may be cast to *LimitOrder. Use heap.Pop,
+// Extract*, or Remove*, not this method. Pop is required for heap.Interface. It
+// is not thread-safe.
 func (pq *OrderPQ) Pop() interface{} {
 	// heap.Pop put the best value at the end and reheaped without it. Now
 	// actually pop it off the heap's slice.
@@ -276,6 +287,18 @@ func (pq *OrderPQ) Pop() interface{} {
 	} else {
 		fmt.Printf("(*OrderPQ).Pop: no userOrders for %v found when popping order %v!", user, oid)
 	}
+
+	// If the heap has shrunk well below capacity, realloc smaller.
+	if pq.capacity > deallocThresh {
+		capTarget := capForUtilization(len(pq.oh)) // new cap if we realloc for this utilization
+		if pq.capacity > capTarget {               // don't increase
+			savings := pq.capacity - capTarget
+			if savings > deallocThresh && savings > pq.capacity/3 { // only reduce cap for significant savings
+				pq.realloc(capTarget)
+			}
+		}
+	}
+
 	return lo
 }
 
@@ -292,18 +315,18 @@ func (pq *OrderPQ) SetLessFn(lessFn func(bi, bj *order.LimitOrder) bool) {
 
 // LessByPrice defines a higher priority as having a lower price rate.
 func LessByPrice(bi, bj *order.LimitOrder) bool {
-	return bi.Price() < bj.Price()
+	return bi.Rate < bj.Rate
 }
 
 // GreaterByPrice defines a higher priority as having a higher price rate.
 func GreaterByPrice(bi, bj *order.LimitOrder) bool {
-	return bi.Price() > bj.Price()
+	return bi.Rate > bj.Rate
 }
 
 // LessByPriceThenTime defines a higher priority as having a lower price rate,
 // with older orders breaking any tie, then OrderID as a last tie breaker.
 func LessByPriceThenTime(bi, bj *order.LimitOrder) bool {
-	if bi.Price() == bj.Price() {
+	if bi.Rate == bj.Rate {
 		ti, tj := bi.Time(), bj.Time()
 		if ti == tj {
 			// Lexicographical comparison of the OrderIDs requires a slice. This
@@ -320,7 +343,7 @@ func LessByPriceThenTime(bi, bj *order.LimitOrder) bool {
 // GreaterByPriceThenTime defines a higher priority as having a higher price
 // rate, with older orders breaking any tie, then OrderID as a last tie breaker.
 func GreaterByPriceThenTime(bi, bj *order.LimitOrder) bool {
-	if bi.Price() == bj.Price() {
+	if bi.Rate == bj.Rate {
 		ti, tj := bi.Time(), bj.Time()
 		if ti == tj {
 			// Lexicographical comparison of the OrderIDs requires a slice. This
@@ -359,48 +382,24 @@ func (pq *OrderPQ) PeekBest() *order.LimitOrder {
 	return pq.oh[0].order
 }
 
-// Reset creates a fresh queue given the input []OrderPricer. For every element
-// in the queue, Reset resets the heap index. The heap is then heapified. The
-// input slice is not modifed.
+// Reset creates a fresh queue given the input LimitOrder slice. For every
+// element in the queue, this resets the heap index. The heap is then heapified.
+// The input slice is not modifed.
 func (pq *OrderPQ) Reset(orders []*order.LimitOrder) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
 	pq.oh = make([]*orderEntry, 0, len(orders))
 	pq.orders = make(map[order.OrderID]*orderEntry, len(pq.oh))
-	for i, o := range orders {
+	pq.userOrders = make(map[account.AccountID]map[order.OrderID]*order.LimitOrder)
+	for i, lo := range orders {
 		entry := &orderEntry{
-			order:   o,
+			order:   lo,
 			heapIdx: i,
 		}
-		pq.oh = append(pq.oh, entry)
-		pq.orders[o.ID()] = entry
+		pq.push(entry)
 	}
 
-	heap.Init(pq)
-}
-
-// resetHeap creates a fresh queue given the input []*orderEntry. For every
-// element in the queue, resetHeap resets the heap index. The heap is then
-// heapified. NOTE: the input slice is modifed, but not reordered. A fresh slice
-// is created for PQ internal use.
-func (pq *OrderPQ) resetHeap(oh []*orderEntry) {
-	pq.mtx.Lock()
-	defer pq.mtx.Unlock()
-
-	for i := range oh {
-		oh[i].heapIdx = i
-	}
-
-	pq.oh = make([]*orderEntry, len(oh))
-	copy(pq.oh, oh)
-
-	pq.orders = make(map[order.OrderID]*orderEntry, len(oh))
-	for _, oe := range oh {
-		pq.orders[oe.order.ID()] = oe
-	}
-
-	// Do not call Reheap unless you want a deadlock.
 	heap.Init(pq)
 }
 
@@ -412,29 +411,28 @@ func (pq *OrderPQ) Reheap() {
 }
 
 // Insert will add an element, while respecting the queue's capacity.
-//   if (at capacity) or (have order already), fail
+//   if (have order already), fail
 //   else (not at capacity), push the order onto the heap
+//
+// If the queue is at capacity, it will automatically reallocate with an
+// increased capacity. See the Cap method.
 func (pq *OrderPQ) Insert(ord *order.LimitOrder) bool {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
-
-	if pq.capacity == 0 {
-		return false
-	}
 
 	if ord == nil {
 		fmt.Println("(*OrderPQ).Insert: attempting to insert nil *LimitOrder!")
 		return false
 	}
 
-	// At capacity
-	if int(pq.capacity) <= pq.Len() {
-		return false
-	}
-
 	// Have order
 	if _, found := pq.orders[ord.ID()]; found {
 		return false
+	}
+
+	// At capacity, reallocate larger.
+	if int(pq.capacity) <= len(pq.oh) {
+		pq.realloc(capForUtilization(len(pq.oh)))
 	}
 
 	// With room to grow, append at bottom and bubble up. Note that
@@ -517,7 +515,7 @@ func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
 			heap.Remove(pq, o.heapIdx) // heap.Pop => (*OrderPQ).Pop removes map entries
 			return removed, true
 		}
-		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s", oid)
+		fmt.Printf("Tried to remove an order that was NOT in the PQ. ID: %s", oid)
 	}
 	return nil, false
 }
