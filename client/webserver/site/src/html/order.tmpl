@@ -144,35 +144,35 @@
             {{if len $match.Swap}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Swap ({{$ord.FromSymbol}}, you)</span><br>
-              <a class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.SwapString}}">{{$match.SwapString}}</a>
             </div>
             {{end}}
             {{if len $match.CounterSwap}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Swap ({{$ord.ToSymbol}}, them)</span><br>
-              <a class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
                 data-explorer-coin="{{$match.CounterSwapString}}">{{$match.CounterSwapString}}</a>
             </div>
             {{end}}
             {{if len $match.Redeem}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Redemption ({{$ord.ToSymbol}}, you)</span><br>
-              <a class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
                 data-explorer-coin="{{$match.RedeemString}}">{{$match.RedeemString}}</a>
             </div>
             {{end}}
             {{if len $match.CounterRedeem}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Redemption ({{$ord.FromSymbol}}, them)</span><br>
-              <a class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.CounterRedeemString}}">{{$match.CounterRedeemString}}</a>
             </div>
             {{end}}
             {{if len $match.Refund}}
             <div class="px-3 pb-3">
               <span class="match-data-label red">Refund ({{$ord.FromSymbol}}, you)</span><br>
-              <a class="mono plainlink red" data-explorer-id="{{$ord.FromID}}"
+              <a target="_blank" class="mono plainlink red" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.RefundString}}">{{$match.RefundString}}</a>
             </div>
             {{end}}
