@@ -2424,11 +2424,16 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify)
 	rig.dc.trades[oid] = tracker
 
+	orderNotes, feedDone := orderNoteFeed(tCore)
+	defer feedDone()
+
 	// Success
 	err = handleRevokeOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handleRevokeOrderMsg error: %v", err)
 	}
+
+	verifyRevokeNotification(orderNotes, "Order Revoked", t)
 
 	if tracker.metaData.Status != order.OrderStatusRevoked {
 		t.Errorf("expected order status %v, got %v", order.OrderStatusRevoked, tracker.metaData.Status)
@@ -4327,11 +4332,17 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	payload = newPayload()
 	payload.SuspendTime = 0 // now
+
+	orderNotes, feedDone := orderNoteFeed(tCore)
+	defer feedDone()
+
 	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
 	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
+
+	verifyRevokeNotification(orderNotes, "Order Auto-revoked", t)
 
 	// Check that the funding coin was returned. Use the tradeMtx for
 	// synchronization.
@@ -4406,6 +4417,54 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	_, err = rig.core.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("expected a suspension market error")
+	}
+}
+
+func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
+	orderNotes = make(chan *OrderNote, 1)
+
+	ntfnFeed := tCore.NotificationFeed()
+	feedDone := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case n := <-ntfnFeed:
+				ordNote, ok := n.(*OrderNote)
+				if ok {
+					orderNotes <- ordNote
+					return // just one OrderNote and done
+				}
+			case <-tCtx.Done():
+				return
+			case <-feedDone:
+				return
+			}
+		}
+	}()
+
+	done = func() {
+		close(feedDone) // close first on return
+		wg.Wait()
+	}
+	return orderNotes, done
+}
+
+func verifyRevokeNotification(ch chan *OrderNote, expectedSubject string, t *testing.T) {
+	select {
+	case actualOrderNote := <-ch:
+		if expectedSubject != actualOrderNote.SubjectText {
+			t.Fatalf("SubjectText mismatch. %s != %s", actualOrderNote.SubjectText,
+				expectedSubject)
+		}
+		return
+	case <-tCtx.Done():
+		return
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for OrderNote notification")
+		return
 	}
 }
 

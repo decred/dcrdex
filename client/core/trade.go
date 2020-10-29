@@ -1183,8 +1183,6 @@ func (t *trackedTrade) revoke() {
 		t.dc.log.Errorf("unable to update order: %v", err)
 	}
 
-	t.notify(newOrderNote(SubjectRevoke, "", db.Data, t.coreOrderInternal()))
-
 	// Return coins if there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
 }
