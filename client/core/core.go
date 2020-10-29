@@ -821,6 +821,9 @@ type Core struct {
 	waiterMtx    sync.Mutex
 	blockWaiters map[uint64]*blockWaiter
 
+	tickSchedMtx sync.Mutex
+	tickSched    map[order.OrderID]*time.Timer
+
 	userMtx sync.RWMutex
 	user    *User
 
@@ -857,6 +860,7 @@ func New(cfg *Config) (*Core, error) {
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[uint64]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
+		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -4056,6 +4060,45 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	return err
 }
 
+func (c *Core) schedTradeTick(tracker *trackedTrade) {
+	oid := tracker.ID()
+	c.tickSchedMtx.Lock()
+	defer c.tickSchedMtx.Unlock()
+	if _, found := c.tickSched[oid]; found {
+		return // already going to tick this trade
+	}
+
+	tick := func() {
+		assets, err := c.tick(tracker)
+		if len(assets) > 0 {
+			tracker.dc.refreshMarkets()
+			c.updateBalances(assets)
+		}
+		if err != nil {
+			c.log.Errorf("tick error for order %v: %v", oid, err)
+		}
+	}
+
+	numMatches := len(tracker.activeMatches())
+	if numMatches == 1 {
+		go tick()
+		return
+	}
+
+	// Schedule a tick for this trade.
+	delay := time.Duration(numMatches) * time.Second / 10 // 1 sec delay for every 10 active matches
+	if delay > 5*time.Second {
+		delay = 5 * time.Second
+	}
+	c.log.Debugf("Waiting %v to tick trade %v with %d active matches", delay, oid, numMatches)
+	c.tickSched[oid] = time.AfterFunc(delay, func() {
+		c.tickSchedMtx.Lock()
+		defer c.tickSchedMtx.Unlock()
+		defer delete(c.tickSched, oid)
+		tick()
+	})
+}
+
 // handleAuditRoute handles the DEX-originating audit request, which is sent
 // when a match counter-party reports their initiation transaction.
 func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
@@ -4075,12 +4118,9 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return err
 	}
-	assets, err := c.tick(tracker)
-	if len(assets) > 0 {
-		dc.refreshMarkets()
-		c.updateBalances(assets)
-	}
-	return err
+	// Are we ticking this trade after an audit in case it's mined already?
+	c.schedTradeTick(tracker)
+	return nil
 }
 
 // handleRedemptionRoute handles the DEX-originating redemption request, which
@@ -4102,12 +4142,8 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return err
 	}
-	assets, err := c.tick(tracker)
-	if len(assets) > 0 {
-		dc.refreshMarkets()
-		c.updateBalances(assets)
-	}
-	return err
+	c.schedTradeTick(tracker)
+	return nil
 }
 
 // removeWaiter removes a blockWaiter from the map.
