@@ -65,7 +65,7 @@ func (c *CandleCache) Add(candle *Candle) {
 
 // WireCandles encodes up to 'count' most recent candles as
 // *msgjson.WireCandles. If the CandleCache contains fewer than 'count', only
-// those available will be returned with no indication of error.
+// those available will be returned, with no indication of error.
 func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 	n := count
 	sz := len(c.candles)

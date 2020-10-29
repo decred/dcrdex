@@ -14,11 +14,12 @@ const (
 		PRIMARY KEY(epoch_idx, epoch_dur)  -- epoch idx:dur is unique and the primary key
 	);`
 
+	// InsertEpoch inserts the epoch's match proof data into the epoch table.
 	InsertEpoch = `INSERT INTO %s (epoch_idx, epoch_dur, match_time, csum, seed, revealed, missed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
-	// CreateEpochReportTable creates a table that hold sepoch-end
-	// reports that can be used to contruct market history data sets.
+	// CreateEpochReportTable creates an epoch_reports table that holds
+	// epoch-end reports that can be used to contruct market history data sets.
 	CreateEpochReportTable = `CREATE TABLE IF NOT EXISTS %s (
 		epoch_end INT8 PRIMARY KEY, -- using timestamp instead of index to facilitate sorting and filtering with less math
 		epoch_dur INT4,             -- epoch duration in milliseconds
@@ -31,10 +32,13 @@ const (
 		end_rate INT8               -- the mid-gap rate at the end of the match cycle
 	);`
 
+	// InsertEpochReport inserts a row into the epoch_reports table.
 	InsertEpochReport = `INSERT INTO %s (epoch_end, epoch_dur, match_volume, 
 			book_volume, order_volume, high_rate, low_rate, start_rate, end_rate)
 			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9);`
 
+	// SelectAllEpochReports selects all rows from the epoch_reports table sorted
+	// by ascending time.
 	SelectAllEpochReports = `SELECT epoch_end, epoch_dur, match_volume,
 		book_volume, order_volume, high_rate, low_rate, start_rate, end_rate
 		FROM %s
