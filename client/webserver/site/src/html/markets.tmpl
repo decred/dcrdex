@@ -111,11 +111,11 @@
 
                     {{- /* BUY - SELL SELECTOR */ -}}
                     <div class="d-flex justify-content-start pt-4 pb-2 fs14">
-                      <button id="buyBttn" type="button" class="bg2 selected">
+                      <button id="buyBttn" type="button" class="bg2 buygreen selected">
                         Buy
                         <span data-unit="base"></span>
                       </button>
-                      <button id="sellBttn" type="button" class="bg2 ml-2">
+                      <button id="sellBttn" type="button" class="bg2 sellred ml-2">
                         Sell
                         <span data-unit="base"></span>
                       </button>
@@ -182,16 +182,17 @@
                     <div class="mt-2 fs14 text-right" id="orderPreview"></div>
 
                     {{- /* TIME-IN-FORCE CHECK BOX */ -}}
-                    <div class="mt-2 text-left pl-4" id="tifBox">
+                    <div class="my-1 text-left pl-4" id="tifBox">
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
                       <label class="form-check-label" for="tifNow">
-                        Match for one epoch only
+                        Immediate or cancel
+                        <span class="ico-info fs12" data-tooltip="If the order doesn't fully match during the next match cycle, any unmatched quantity will not be booked or matched again. Taker-only order."></span>
                       </label>
                     </div>
 
                     {{- /* SUBMIT ORDER BUTTON */ -}}
                     <div class="text-right">
-                      <button id="submitBttn" type="button" class="my-1 fs14 submit text-center">Submit Order</button>
+                      <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen"></button> {{/* textContent set by script */}}
                     </div>
                   </div>
                   <div class="fs15 pt-3 text-center d-hide errcolor" id="orderErr"></div>
@@ -284,7 +285,7 @@
         </div>
       </div>
 
-      {{- /* USER ORDERS: TODO */ -}}
+      {{- /* USER ORDERS */ -}}
       <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">
           Your Orders
@@ -352,34 +353,36 @@
 
     {{- /* VERIFY ORDER */ -}}
     <form class="card bg1 p-4 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-      You are submitting an order to
-      <div class="fs20 demi py-1">
-        <span id="vSide"></span>
-        <span id="vQty"></span>
-        <span id="vBase"></span>
-      </div>
-      <div id="verifyLimit">
-        at a rate of
+      <div class="echo-data">
+        You are submitting an order to
         <div class="fs20 demi py-1">
-          <span id="vRate"></span>
-          <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+          <span id="vSide"></span>
+          <span id="vQty"></span>
+          <span id="vBase"></span>
         </div>
-        for a total of
-        <div class="fs20 demi py-1">
-          <span id="vTotal"></span>
-          <span id="vQuote"></span>
+        <div id="verifyLimit">
+          at a rate of
+          <div class="fs20 demi py-1">
+            <span id="vRate"></span>
+            <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+          </div>
+          for a total of
+          <div class="fs20 demi py-1">
+            <span id="vTotal"></span>
+            <span id="vQuote"></span>
+          </div>
+        </div>
+        <div id="verifyMarket">
+          This is a market order and will match the best available order(s) on the
+          book. Based on the current market mid-gap rate, you might receive about
+          <div class="fs20 demi py-1">
+            <span id="vmTotal"></span>
+            <span id="vmAsset"></span>
+            <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lots)</span>
+          </div>
         </div>
       </div>
-      <div id="verifyMarket">
-        This is a market order and will match the best available order(s) on the
-        book. Based on the current market mid-gap rate, you might receive about
-        <div class="fs20 demi py-1">
-          <span id="vmTotal"></span>
-          <span id="vmAsset"></span>
-          <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lots)</span>
-        </div>
-      </div>
-      <hr class="dashed my-4 mx-4">
+      <hr class="dashed my-4">
       <div class="fs16 text-center">Authorize this order with your app password.</div>
       <div class="d-flex mt-3">
         <div class="col-12 p-0 text-left">
@@ -390,6 +393,12 @@
           <div>&nbsp;</div>
           <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Submit</button>
         </div>
+      </div>
+      <hr class="dashed my-4">
+      <div class="disclaimer mt-3 fs14">
+        <span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
+        or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
+        settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.
       </div>
     </form>
 

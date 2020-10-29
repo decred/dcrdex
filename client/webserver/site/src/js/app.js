@@ -445,8 +445,9 @@ export default class Application {
     this.notes = []
     Doc.empty(this.page.noteList)
     for (let i = 0; i < notes.length; i++) {
-      this.prependNoteElement(notes[i])
+      this.prependNoteElement(notes[i], true)
     }
+    this.storeNotes()
   }
 
   /*
@@ -547,13 +548,13 @@ export default class Application {
     this.prependListElement(this.page.pokeList, note, el)
   }
 
-  prependNoteElement (note) {
+  prependNoteElement (note, skipSave) {
     this.notes.push(note)
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
     const el = this.makeNote(note)
     this.prependListElement(noteList, note, el)
-    this.storeNotes()
+    if (!skipSave) this.storeNotes()
     // Set the indicator color.
     if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
     var unacked = 0

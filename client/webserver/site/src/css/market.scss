@@ -308,7 +308,8 @@ table.balance-table button:hover {
     color: #555;
   }
 
-  button:hover {
+  button:hover,
+  button.selected {
     color: black;
   }
 
@@ -316,10 +317,15 @@ table.balance-table button:hover {
     background-color: #5cba8b;
   }
 
-  button.selected {
-    background-color: #b6c2da;
-    border: 1px solid black;
-    color: black;
+  button.selected,
+  button.submit {
+    &.buygreen {
+      background-color: #207a4699;
+    }
+
+    &.sellred {
+      background-color: #99302b99;
+    }
   }
 
   .ico-unlocked {
@@ -331,8 +337,18 @@ table.balance-table button:hover {
   }
 }
 
-#verifyForm span {
-  margin: 0 5px;
+#verifyForm {
+  .echo-data span {
+    margin: 0 5px;
+  }
+
+  .disclaimer {
+    text-align: justify;
+
+    .red {
+      color: #f55a;
+    }
+  }
 }
 
 #liveTable {

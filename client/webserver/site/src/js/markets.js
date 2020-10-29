@@ -114,10 +114,16 @@ export default class MarketsPage extends BasePage {
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => {
       swapBttns(page.sellBttn, page.buyBttn)
+      page.submitBttn.classList.remove('sellred')
+      page.submitBttn.classList.add('buygreen')
+      this.setOrderBttnText()
       this.setOrderVisibility()
     })
     bind(page.sellBttn, 'click', () => {
       swapBttns(page.buyBttn, page.sellBttn)
+      page.submitBttn.classList.add('sellred')
+      page.submitBttn.classList.remove('buygreen')
+      this.setOrderBttnText()
       this.setOrderVisibility()
     })
     // const tifCheck = tifDiv.querySelector('input[type=checkbox]')
@@ -392,6 +398,12 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  setOrderBttnText () {
+    if (this.isSell()) {
+      this.page.submitBttn.textContent = `Place order to sell ${this.market.base.symbol.toUpperCase()}`
+    } else this.page.submitBttn.textContent = `Place order to buy  ${this.market.base.symbol.toUpperCase()}`
+  }
+
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
@@ -414,6 +426,7 @@ export default class MarketsPage extends BasePage {
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
+    this.setOrderBttnText()
   }
 
   /*

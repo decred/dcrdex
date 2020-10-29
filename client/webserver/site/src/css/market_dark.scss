@@ -82,21 +82,28 @@ body.dark {
     color: #a1a1a1;
 
     button {
-      color: #bbb;
+      color: #aaa;
     }
 
-    button:hover {
-      color: white;
-    }
-
+    button:hover,
     button.selected {
-      background-color: #000017;
-      border: 1px solid #555;
-      color: white;
+      color: #eee;
     }
 
     button.submit {
       background-color: #0b5831;
+      color: #eee;
+    }
+
+    button.selected,
+    button.submit {
+      &.buygreen {
+        background-color: #05a35a99;
+      }
+
+      &.sellred {
+        background-color: #ae333399;
+      }
     }
   }
 }
