@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -25,6 +26,8 @@ import (
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcutil"
 )
+
+const methodGetBlockchainInfo = "getblockchaininfo"
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -70,7 +73,7 @@ type btcNode interface {
 	GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
-	GetBlockChainInfo() (*btcjson.GetBlockChainInfoResult, error)
+	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
 }
 
 // Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
@@ -210,22 +213,11 @@ func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (btc *Backend) Synced() (bool, error) {
-	chainInfo, err := btc.node.GetBlockChainInfo()
+	chainInfo, err := btc.getBlockchainInfo()
 	if err != nil {
 		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
 	}
-	if chainInfo.Headers-chainInfo.Blocks > 1 {
-		return false, nil
-	}
-	if btc.net == dex.Mainnet {
-		_, err = btc.FeeRate()
-		if err != nil {
-			btc.log.Debugf("Synced = false because of FeeRate error = %v", err)
-		}
-	} else {
-		btc.log.Tracef("skipped estimatesmartfee check because network = %q", btc.net)
-	}
-	return err == nil, nil
+	return !chainInfo.InitialBlockDownload && chainInfo.Headers-chainInfo.Blocks <= 1, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -385,6 +377,51 @@ func (btc *Backend) blockInfo(verboseTx *btcjson.TxRawResult) (blockHeight uint3
 		blockHash = blk.hash
 	}
 	return
+}
+
+// anylist is a list of RPC parameters to be converted to []json.RawMessage and
+// sent via RawRequest.
+type anylist []interface{}
+
+// call is used internally to  marshal parmeters and send requests to  the RPC
+// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
+// will be marshaled into `thing`.
+func (btc *Backend) call(method string, args anylist, thing interface{}) error {
+	params := make([]json.RawMessage, 0, len(args))
+	for i := range args {
+		p, err := json.Marshal(args[i])
+		if err != nil {
+			return err
+		}
+		params = append(params, p)
+	}
+	b, err := btc.node.RawRequest(method, params)
+	if err != nil {
+		return fmt.Errorf("rawrequest error: %v", err)
+	}
+	if thing != nil {
+		return json.Unmarshal(b, thing)
+	}
+	return nil
+}
+
+// getBlockchainInfoResult models the data returned from the getblockchaininfo
+// command.
+type getBlockchainInfoResult struct {
+	Blocks               int64  `json:"blocks"`
+	Headers              int64  `json:"headers"`
+	BestBlockHash        string `json:"bestblockhash"`
+	InitialBlockDownload bool   `json:"initialblockdownload"`
+}
+
+// getBlockchainInfo sends the getblockchaininfo request and returns the result.
+func (btc *Backend) getBlockchainInfo() (*getBlockchainInfoResult, error) {
+	var chainInfo *getBlockchainInfoResult
+	err := btc.call(methodGetBlockchainInfo, nil, &chainInfo)
+	if err != nil {
+		return nil, err
+	}
+	return chainInfo, nil
 }
 
 // Get the UTXO data and perform some checks for script support.
@@ -761,6 +798,11 @@ func (btc *Backend) auditContract(contract *Contract) error {
 // context to trigger a clean shutdown.
 func (btc *Backend) Run(ctx context.Context) {
 	defer btc.shutdown()
+
+	_, err := btc.FeeRate()
+	if err != nil {
+		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
+	}
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()

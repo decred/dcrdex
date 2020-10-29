@@ -624,10 +624,10 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, e
 	if !ok {
 		return false, ErrTargetNotCancelable
 	}
-	if lo.Force == order.StandingTiF {
+	if lo.Force != order.StandingTiF {
 		return false, ErrTargetNotCancelable
 	}
-	if lo.AccountID == aid {
+	if lo.AccountID != aid {
 		return false, ErrCancelNotPermitted
 	}
 	return true, nil

@@ -548,9 +548,10 @@ func (btc *ExchangeWallet) shutdown() {
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
 // command.
 type getBlockchainInfoResult struct {
-	Blocks        int64  `json:"blocks"`
-	Headers       int64  `json:"headers"`
-	BestBlockHash string `json:"bestblockhash"`
+	Blocks               int64  `json:"blocks"`
+	Headers              int64  `json:"headers"`
+	BestBlockHash        string `json:"bestblockhash"`
+	InitialBlockDownload bool   `json:"initialblockdownload"`
 }
 
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
@@ -570,7 +571,7 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 		return false, 0, fmt.Errorf("getblockchaininfo error: %w", err)
 	}
 	toGo := chainInfo.Headers - chainInfo.Blocks
-	if toGo > 1 {
+	if chainInfo.InitialBlockDownload || toGo > 1 {
 		ogTip := atomic.LoadInt64(&btc.tipAtConnect)
 		totalToSync := chainInfo.Headers - ogTip
 		progress := 1 - (float32(toGo) / float32(totalToSync))

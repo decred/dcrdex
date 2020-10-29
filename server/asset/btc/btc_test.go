@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -293,8 +294,8 @@ func cleanTestChain() {
 
 // A stub to replace rpcclient.Client for offline testing.
 type testNode struct {
-	blockchainInfo    *btcjson.GetBlockChainInfoResult
-	blockchainInfoErr error
+	rawResult []byte
+	rawErr    error
 }
 
 // Encode utxo info as a concatenated string hash:vout.
@@ -364,11 +365,11 @@ func (t *testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 	return &bbHash, nil
 }
 
-func (t *testNode) GetBlockChainInfo() (*btcjson.GetBlockChainInfoResult, error) {
-	if t.blockchainInfoErr != nil {
-		return nil, t.blockchainInfoErr
+func (t *testNode) RawRequest(string, []json.RawMessage) (json.RawMessage, error) {
+	if t.rawErr != nil {
+		return nil, t.rawErr
 	}
-	return t.blockchainInfo, nil
+	return t.rawResult, nil
 }
 
 // Create a btcjson.GetTxOutResult such as is returned from GetTxOut.
@@ -1444,10 +1445,10 @@ func TestSynced(t *testing.T) {
 	btc, shutdown := testBackend(true)
 	defer shutdown()
 	tNode := btc.node.(*testNode)
-	tNode.blockchainInfo = &btcjson.GetBlockChainInfoResult{
+	tNode.rawResult, _ = json.Marshal(&btcjson.GetBlockChainInfoResult{
 		Headers: 100,
 		Blocks:  99,
-	}
+	})
 	synced, err := btc.Synced()
 	if err != nil {
 		t.Fatalf("Synced error: %v", err)
@@ -1456,10 +1457,10 @@ func TestSynced(t *testing.T) {
 		t.Fatalf("not synced when should be synced")
 	}
 
-	tNode.blockchainInfo = &btcjson.GetBlockChainInfoResult{
+	tNode.rawResult, _ = json.Marshal(&btcjson.GetBlockChainInfoResult{
 		Headers: 100,
 		Blocks:  50,
-	}
+	})
 	synced, err = btc.Synced()
 	if err != nil {
 		t.Fatalf("Synced error: %v", err)
@@ -1468,10 +1469,10 @@ func TestSynced(t *testing.T) {
 		t.Fatalf("synced when shouldn't be synced")
 	}
 
-	tNode.blockchainInfoErr = fmt.Errorf("test error")
+	tNode.rawErr = fmt.Errorf("test error")
 	_, err = btc.Synced()
 	if err == nil {
 		t.Fatalf("getblockchaininfo error not propagated")
 	}
-	tNode.blockchainInfoErr = nil
+	tNode.rawErr = nil
 }

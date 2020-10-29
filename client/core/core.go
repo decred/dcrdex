@@ -1022,25 +1022,27 @@ func (c *Core) connectWallet(w *xcWallet) error {
 			cancel()
 		}()
 		go func() {
-			timer := time.NewTimer(10 * time.Second)
-			select {
-			case <-timer.C:
-				synced, progress, err := w.SyncStatus()
-				if err != nil {
-					c.log.Errorf("error monitoring sync status for %s", unbip(w.AssetID))
-					return
-				}
-				w.mtx.Lock()
-				w.synced = synced
-				w.syncProgress = progress
-				w.mtx.Unlock()
-				if synced {
-					return
-				}
-				c.notify(newWalletStateNote(w.state()))
+			for {
+				ticker := time.NewTicker(10 * time.Second)
+				select {
+				case <-ticker.C:
+					synced, progress, err := w.SyncStatus()
+					if err != nil {
+						c.log.Errorf("error monitoring sync status for %s", unbip(w.AssetID))
+						return
+					}
+					w.mtx.Lock()
+					w.synced = synced
+					w.syncProgress = progress
+					w.mtx.Unlock()
+					if synced {
+						return
+					}
+					c.notify(newWalletStateNote(w.state()))
 
-			case <-innerCtx.Done():
-				return
+				case <-innerCtx.Done():
+					return
+				}
 			}
 		}()
 	}

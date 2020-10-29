@@ -260,18 +260,7 @@ func (dcr *Backend) Synced() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
 	}
-	if chainInfo.Headers-chainInfo.Blocks > 1 {
-		return false, nil
-	}
-	if dcr.net == dex.Mainnet {
-		_, err = dcr.FeeRate()
-		if err != nil {
-			dcr.log.Debugf("Synced = false because of FeeRate error = %v", err)
-		}
-	} else {
-		dcr.log.Tracef("skipped estimatesmartfee check because network = %q", dcr.net)
-	}
-	return err == nil, nil
+	return !chainInfo.InitialBlockDownload && chainInfo.Headers-chainInfo.Blocks <= 1, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -537,6 +526,12 @@ func (dcr *Backend) Run(ctx context.Context) {
 		dcr.shutdown()
 		wg.Done()
 	}()
+
+	_, err = dcr.FeeRate()
+	if err != nil {
+		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
+	}
+
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *chainjson.GetBlockVerboseResult, reorg bool) {
