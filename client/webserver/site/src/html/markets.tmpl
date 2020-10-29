@@ -186,7 +186,7 @@
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
                       <label class="form-check-label" for="tifNow">
                         Immediate or cancel
-                        <span class="ico-info fs12" data-tooltip="If the order doesn't fully match during the next match cycle, any unmatched quantity will be canceled."></span>
+                        <span class="ico-info fs12" data-tooltip="If the order doesn't fully match during the next match cycle, any unmatched quantity will not be booked or matched again. Taker-only order."></span>
                       </label>
                     </div>
 
@@ -396,11 +396,10 @@
       </div>
       <hr class="dashed my-4">
       <div class="disclaimer mt-3 fs14">
-        <span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software, or
-        the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain daemons, until settlement is complete.
-        Settlement can complete as quickly as a few minutes or as long as a few hours.
+        <span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
+        or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
+        settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.
       </div>
-
     </form>
 
     <form class="card bg1 d-hide" id="cancelForm" autocomplete="off">
