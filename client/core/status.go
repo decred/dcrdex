@@ -5,6 +5,7 @@ package core
 
 import (
 	"fmt"
+	"sync"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex/msgjson"
@@ -17,37 +18,27 @@ func statusResolutionID(dc *dexConnection, trade *trackedTrade, match *matchTrac
 	return fmt.Sprintf("host = %s, order = %s, match = %s", dc.acct.host, trade.ID(), match.id)
 }
 
-// resolveMatchConflicts accepts a dexConnection and a slice of match status
-// conflicts. resolveMatchConflicts will block until the call to match_status
-// returns, but then goroutines are started to handle the actual resolution.
-// The trackedTrades' mutexes will remain locked until resolution completes.
-func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts []*matchStatusConflict) {
+// resolveMatchConflicts attempts to resolve conflicts between the server's
+// reported match status and our own. This involves a 'match_status' request to
+// the server and possibly some wallet operations. ResolveMatchConflicts will
+// block until resolution is complete.
+func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[order.OrderID]*matchStatusConflict) {
 
 	statusRequests := make([]*msgjson.MatchRequest, 0, len(statusConflicts))
-	// Lock the trade mutexes now until we're done. The other option would be
-	// to lock the trade mutexes in resolveConflictWithServerData, but that
-	// might allow a tick to occur between the match_status request and
-	// resolveConflictWithServerData. Our resolvers never send any requests or
-	// or responses. The longest running functions only request some wallet
-	// data, so I wouldn't expect these locks to be held for long. Regardless,
-	// we'll run each resolveConflictWithServerData below as a goroutine just to
-	// make sure we're not stacking those wallet calls.
 	for _, conflict := range statusConflicts {
-		conflict.trade.mtx.Lock()
-		statusRequests = append(statusRequests, &msgjson.MatchRequest{
-			Base:    conflict.trade.Base(),
-			Quote:   conflict.trade.Quote(),
-			MatchID: conflict.match.id[:],
-		})
+		for _, match := range conflict.matches {
+			statusRequests = append(statusRequests, &msgjson.MatchRequest{
+				Base:    conflict.trade.Base(),
+				Quote:   conflict.trade.Quote(),
+				MatchID: match.id[:],
+			})
+		}
 	}
 
 	var msgStatuses []*msgjson.MatchStatusResult
 	err := sendRequest(dc.WsConn, msgjson.MatchStatusRoute, statusRequests, &msgStatuses, DefaultResponseTimeout)
 	if err != nil {
-		for _, conflict := range statusConflicts {
-			conflict.trade.mtx.Unlock()
-		}
-		c.log.Errorf("match_status request error for %s requesting %d match statuses. %s: %v", dc.acct.host, len(statusRequests), err)
+		c.log.Errorf("match_status request error for %s requesting %d match statuses: %v", dc.acct.host, len(statusRequests), err)
 		return
 	}
 
@@ -59,32 +50,31 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts []*match
 		resMap[matchID] = msgStatus
 	}
 
+	var wg sync.WaitGroup
 	for _, conflict := range statusConflicts {
-		srvData := resMap[conflict.match.id]
-		if srvData == nil {
-			// I don't really know how this would happen, considering the server
-			// reported the match as active in the connect response. I'm also
-			// not sure what action to take. Maybe just revoke the match.
-			c.log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, conflict.trade, conflict.match))
-			// revokeMatch only returns an error for a missing match ID,
-			// and we already checked in compareServerMatches.
-			conflict.trade.revokeMatch(conflict.match.id, false)
-			conflict.trade.mtx.Unlock()
-			continue
-		}
-
-		if order.MatchStatus(srvData.Status) != order.MatchComplete && !srvData.Active {
-			// Server has revoked the match. We'll still go through
-			// resolveConflictWithServerData to collect any extra data the
-			// server has, but setting ServerRevoked will prevent us from
-			// trying to update the state with the server.
-			conflict.match.MetaData.Proof.ServerRevoked = true
-		}
-		go func(trade *trackedTrade, match *matchTracker) {
-			c.resolveConflictWithServerData(dc, trade, match, srvData)
-			trade.mtx.Unlock()
-		}(conflict.trade, conflict.match)
+		wg.Add(1)
+		go func(trade *trackedTrade, matches []*matchTracker) {
+			defer wg.Done()
+			trade.mtx.Lock()
+			defer trade.mtx.Unlock()
+			for _, match := range matches {
+				srvData := resMap[match.id]
+				if srvData == nil {
+					// I don't really know how this would happen, considering the server
+					// reported the match as active in the connect response. I'm also
+					// not sure what action to take. Maybe just revoke the match.
+					c.log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, trade, match))
+					// revokeMatch only returns an error for a missing match ID,
+					// and we already checked in compareServerMatches.
+					trade.revokeMatch(match.id, false)
+					continue
+				}
+				c.resolveConflictWithServerData(dc, trade, match, srvData)
+			}
+		}(conflict.trade, conflict.matches)
 	}
+
+	wg.Wait()
 }
 
 // The matchConflictResolver is unique to a MatchStatus pair and handles
@@ -128,6 +118,14 @@ func conflictResolver(ours, servers order.MatchStatus) matchConflictResolver {
 // self-revoked.
 func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	srvStatus := order.MatchStatus(srvData.Status)
+
+	if srvStatus != order.MatchComplete && !srvData.Active {
+		// Server has revoked the match. We'll still go through
+		// resolveConflictWithServerData to collect any extra data the
+		// server has, but setting ServerRevoked will prevent us from
+		// trying to update the state with the server.
+		match.MetaData.Proof.ServerRevoked = true
+	}
 
 	if srvStatus == match.MetaData.Status || match.MetaData.Proof.IsRevoked() {
 		// On startup, there's no chance for a tick between the connect request
