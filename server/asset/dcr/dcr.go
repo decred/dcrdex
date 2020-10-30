@@ -527,7 +527,7 @@ func (dcr *Backend) Run(ctx context.Context) {
 		wg.Done()
 	}()
 
-	_, err = dcr.FeeRate()
+	_, err := dcr.FeeRate()
 	if err != nil {
 		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
 	}

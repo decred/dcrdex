@@ -52,6 +52,9 @@ var (
 	aYear = time.Hour * 24 * 365
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
+	// When waiting for a wallet to sync, a SyncStatus check will be performed
+	// ever syncTickerPeriod. var instead of const for testing purposes.
+	syncTickerPeriod = 10 * time.Second
 )
 
 // dexConnection is the websocket connection and the DEX configuration.
@@ -1016,14 +1019,17 @@ func (c *Core) connectWallet(w *xcWallet) error {
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
 	if !w.synced {
+		// If the wallet is shut down before sync is complete, exit the syncer
+		// loop.
 		innerCtx, cancel := context.WithCancel(c.ctx)
 		go func() {
 			w.connector.Wait()
 			cancel()
 		}()
+		// The syncer loop.
 		go func() {
 			for {
-				ticker := time.NewTicker(10 * time.Second)
+				ticker := time.NewTicker(syncTickerPeriod)
 				select {
 				case <-ticker.C:
 					synced, progress, err := w.SyncStatus()
@@ -1035,10 +1041,10 @@ func (c *Core) connectWallet(w *xcWallet) error {
 					w.synced = synced
 					w.syncProgress = progress
 					w.mtx.Unlock()
+					c.notify(newWalletStateNote(w.state()))
 					if synced {
 						return
 					}
-					c.notify(newWalletStateNote(w.state()))
 
 				case <-innerCtx.Done():
 					return
