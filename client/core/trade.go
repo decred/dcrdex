@@ -1167,7 +1167,6 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	contracts := make([]*asset.Contract, len(matches))
 	// These matches may have different fee rates, matched in different epochs.
 	var highestFeeRate uint64
-	var includesMakerSwap bool
 	for i, match := range matches {
 		dbMatch, proof := match.Match, &match.MetaData.Proof
 		value := dbMatch.Quantity
@@ -1181,7 +1180,6 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			secretHash := sha256.Sum256(proof.Secret)
 			proof.SecretHash = secretHash[:]
 			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
-			includesMakerSwap = true
 		}
 
 		contracts[i] = &asset.Contract{
@@ -1301,13 +1299,9 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			coinIDString(fromAsset.ID, t.metaData.ChangeCoin), fromAsset.Symbol, t.ID())
 	}
 	t.change = change
-	t.db.UpdateOrderMetaData(t.ID(), t.metaData)
-
-	// Workaround for server recording match ack sig, to avoid an 'init' retry.
-	// A proper solution will involve a communication dialog with the 'match'
-	// request where the server signals acceptance of the ack signature.
-	if includesMakerSwap {
-		time.Sleep(250 * time.Millisecond)
+	err = t.db.UpdateOrderMetaData(t.ID(), t.metaData)
+	if err != nil {
+		c.log.Errorf("error updating order metadata for order %s: %w", t.ID(), err)
 	}
 
 	// Process the swap for each match by sending the `init` request
