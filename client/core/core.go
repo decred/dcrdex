@@ -1029,6 +1029,7 @@ func (c *Core) connectWallet(w *xcWallet) error {
 		// The syncer loop.
 		go func() {
 			ticker := time.NewTicker(syncTickerPeriod)
+			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
