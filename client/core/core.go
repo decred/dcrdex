@@ -2779,29 +2779,31 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, trade.coreOrderInternal()))
 		}
 
-		// Send a "Match resolution error" if there are extra match messages.
+		// Start negotiation for extra matches for this trade.
 		if len(extras) > 0 {
-			for _, extra := range extras {
-				c.log.Debugf("DEX %s reported match %s which is not a known active match for order %s",
-					dc.acct.host, extra.MatchID, extra.OrderID)
-
-				err := trade.negotiate(extras)
-				if err != nil {
-					c.log.Errorf("error negotiating previously unknown match %s, order %s from %s reported on connect: %v",
-						extra.MatchID, extra.OrderID, dc.acct.host, err)
-
-					details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
-						len(extras), dc.acct.host, trade.token())
-					c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, trade.coreOrderInternal()))
-				} else if order.MatchSide(extra.Side) == order.Taker && order.MatchStatus(extra.Status) == order.MakerSwapCast {
-					// Have the conflict resolver run resolveMissedMakerAudit
-					// to grab the maker's contract, coin, and secret hash.
-					var matchID order.MatchID
-					copy(matchID[:], extra.MatchID)
-					matchConflicts = append(matchConflicts, &matchStatusConflict{
-						trade: trade,
-						match: trade.matches[matchID],
-					})
+			err := trade.negotiate(extras)
+			if err != nil {
+				c.log.Errorf("Error negotiating one or more previously unknown matches for order %s reported by %s on connect: %v",
+					oid, dc.acct.host, err)
+				details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
+					len(extras), dc.acct.host, trade.token())
+				c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, trade.coreOrderInternal()))
+			} else {
+				// For taker matches in MakerSwapCast, queue up match status
+				// resolution to retrieve the maker's contract and coin.
+				for _, extra := range extras {
+					if order.MatchSide(extra.Side) == order.Taker && order.MatchStatus(extra.Status) == order.MakerSwapCast {
+						var matchID order.MatchID
+						copy(matchID[:], extra.MatchID)
+						match, found := trade.matches[matchID]
+						if !found {
+							c.log.Errorf("Extra match %v was not registered by negotiate (db error?)", matchID)
+							continue
+						}
+						c.log.Infof("Queueing match status resolution for newly discovered match %v (%s) "+
+							"as taker to MakerSwapCast status.", matchID, match.Match.Status) // had better be NewlyMatched!
+						matchConflicts = append(matchConflicts, &matchStatusConflict{trade, match})
+					}
 				}
 			}
 		}
@@ -2825,6 +2827,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	if len(matchConflicts) > 0 {
+		c.log.Warnf("Beginning match status resolution for %d matches...", len(matchConflicts))
 		c.resolveMatchConflicts(dc, matchConflicts)
 	}
 

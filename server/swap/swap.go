@@ -1279,14 +1279,14 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 			nextStep = order.MakerSwapCast
 			isBaseAsset = maker.Sell // maker swap: base asset if sell
 			if len(match.Sigs.MakerMatch) == 0 {
-				log.Debugf("swap %v at status %v missing MakerMatch signature(s) needed for NewlyMatched->MakerSwapCast",
+				log.Debugf("swap %v at status %v missing MakerMatch signature(s) expected before NewlyMatched->MakerSwapCast",
 					match.ID(), match.Status)
 			}
 		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
 			isBaseAsset = !maker.Sell // maker redeem: base asset if buy
 			if len(match.Sigs.MakerAudit) == 0 {
-				log.Debugf("swap %v at status %v missing MakerAudit signature(s) needed for TakerSwapCast->MakerRedeemed",
+				log.Debugf("Swap %v at status %v missing MakerAudit signature(s) expected before TakerSwapCast->MakerRedeemed",
 					match.ID(), match.Status)
 			}
 		}
@@ -1301,11 +1301,11 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 			nextStep = order.TakerSwapCast
 			isBaseAsset = !maker.Sell // taker swap: base asset if sell (maker buy)
 			if len(match.Sigs.TakerMatch) == 0 {
-				log.Debugf("swap %v at status %v missing TakerMatch signature(s) needed for MakerSwapCast->TakerSwapCast",
+				log.Debugf("Swap %v at status %v missing TakerMatch signature(s) expected before MakerSwapCast->TakerSwapCast",
 					match.ID(), match.Status)
 			}
 			if len(match.Sigs.TakerAudit) == 0 {
-				log.Debugf("swap %v at status %v missing TakerAudit signature(s) needed for MakerSwapCast->TakerSwapCast",
+				log.Debugf("Swap %v at status %v missing TakerAudit signature(s) expected before MakerSwapCast->TakerSwapCast",
 					match.ID(), match.Status)
 			}
 		} else /* MakerRedeemed */ {
@@ -1314,7 +1314,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 			// counterparties acknowledge the redemptions.
 			isBaseAsset = maker.Sell // taker redeem: base asset if buy (maker sell)
 			if len(match.Sigs.TakerRedeem) == 0 {
-				log.Debugf("swap %v at status %v missing TakerRedeem signature(s) needed for MakerRedeemed->MatchComplete",
+				log.Debugf("Swap %v at status %v missing TakerRedeem signature(s) expected before MakerRedeemed->MatchComplete",
 					match.ID(), match.Status)
 			}
 		}
