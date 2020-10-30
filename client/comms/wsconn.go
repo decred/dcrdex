@@ -514,8 +514,8 @@ func (conn *wsConn) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Mes
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
-		conn.log.Debugf("(*wsConn).Request(route '%s') Send error, unregistering msg ID %d handler",
-			msg.Route, msg.ID)
+		conn.log.Errorf("(*wsConn).Request(route '%s') Send error (%v), unregistering msg ID %d handler",
+			msg.Route, err, msg.ID)
 		conn.respHandler(msg.ID) // drop the responseHandler logged by logReq that is no longer necessary
 	}
 	return err
