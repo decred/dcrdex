@@ -160,19 +160,21 @@ export default class MarketsPage extends BasePage {
     // Cancel order form
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
 
+    const closePopups = () => {
+      Doc.hide(page.forms)
+      page.vPass.value = ''
+      page.cancelPass.value = ''
+    }
+
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
       if (!Doc.mouseInElement(e, this.currentForm)) {
-        Doc.hide(page.forms)
-        switch (this.currentForm.id) {
-          case 'verifyForm':
-            page.vPass.value = ''
-            break
-          case 'cancelForm':
-            page.cancelPass.value = ''
-            break
-        }
+        closePopups()
       }
+    })
+
+    page.forms.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => { closePopups() })
     })
 
     // Event listeners for interactions with the various input fields.

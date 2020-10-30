@@ -46,11 +46,18 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+
+    const closePopups = () => {
+      Doc.hide(page.forms)
+      page.appPass.value = ''
+    }
+
     Doc.bind(page.forms, 'mousedown', e => {
-      if (!Doc.mouseInElement(e, this.currentForm)) {
-        Doc.hide(page.forms)
-        page.appPass.value = ''
-      }
+      if (!Doc.mouseInElement(e, this.currentForm)) { closePopups() }
+    })
+
+    page.forms.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => { closePopups() })
     })
   }
 
