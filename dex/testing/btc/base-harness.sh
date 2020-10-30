@@ -187,6 +187,7 @@ if [ "$CHAIN_LOADED" ] ; then
   tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
   # Get the median block time up to date.
   tmux send-keys -t $SESSION:2 "./mine-alpha 12${DONE}" C-m\; ${WAIT}
+  tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 
 else
   tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
@@ -279,6 +280,15 @@ else
 
 # End of new wallet setup
 fi
+
+# Have alpha share a little more wealth, esp. for trade_simnet_test.go
+tmux send-keys -t $SESSION:2 "./alpha walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
+RECIPIENTS="{\"${BETA_MINING_ADDR}\":12,\"${GAMMA_ADDRESS}\":12,\"${DELTA_ADDRESS}\":12}"
+for i in {1..30}; do
+  tmux send-keys -t $SESSION:2 "./alpha sendmany \"\" '${RECIPIENTS}'${DONE}" C-m\; ${WAIT}
+done
+
+tmux send-keys -t $SESSION:2 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
 
 # Reenable history and attach to the control session.

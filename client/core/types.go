@@ -464,7 +464,7 @@ func (a *dexAccount) locked() bool {
 }
 
 // authed will be true if the account has been authenticated i.e. the 'connect'
-// request has been succesfully sent.
+// request has been successfully sent.
 func (a *dexAccount) authed() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()

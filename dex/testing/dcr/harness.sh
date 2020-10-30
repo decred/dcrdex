@@ -275,13 +275,16 @@ if [ "$MINE" = "1" ]; then
     RECIPIENTS="{\"${BETA_MINING_ADDR}\":${i},\"${TRADING_WALLET1_ADDRESS}\":${i},\"${TRADING_WALLET2_ADDRESS}\":${i}}"
     tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
   done
-  sleep 0.5
-  tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
-
-else
-  tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
-
 fi
+
+# Have alpha share a little more wealth, esp. for trade_simnet_test.go
+RECIPIENTS="{\"${TRADING_WALLET1_ADDRESS}\":24,\"${TRADING_WALLET2_ADDRESS}\":24,\"${BETA_MINING_ADDR}\":24}"
+for i in {1..60}; do
+  tmux send-keys -t $SESSION:0 "./alpha sendmany default '${RECIPIENTS}'${WAIT}" C-m\; wait-for donedcr
+done
+
+sleep 0.5
+tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:0 "set -o history" C-m
