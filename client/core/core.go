@@ -465,8 +465,8 @@ type matchDiscreps struct {
 // matchStatusConflict is a conflict between our status, and the status returned
 // by the server in the connect response.
 type matchStatusConflict struct {
-	trade *trackedTrade
-	match *matchTracker
+	trade   *trackedTrade
+	matches []*matchTracker
 }
 
 // compareServerMatches resolves the matches reported by the server in the
@@ -476,13 +476,14 @@ type matchStatusConflict struct {
 // but we also must check for incomplete matches that the server is not
 // reporting.
 func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (
-	exceptions map[order.OrderID]*matchDiscreps, statusConflicts []*matchStatusConflict) {
+	exceptions map[order.OrderID]*matchDiscreps, statusConflicts map[order.OrderID]*matchStatusConflict) {
 
 	exceptions = make(map[order.OrderID]*matchDiscreps)
+	statusConflicts = make(map[order.OrderID]*matchStatusConflict)
 
 	// Identify extra matches named by the server response that we do not
 	// recognize.
-	for _, match := range srvMatches {
+	for oid, match := range srvMatches {
 		var extra []*msgjson.Match
 		match.tracker.mtx.RLock()
 		for _, msgMatch := range match.msgMatches {
@@ -494,10 +495,12 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				continue
 			}
 			if mt.Match.Status != order.MatchStatus(msgMatch.Status) {
-				statusConflicts = append(statusConflicts, &matchStatusConflict{
-					trade: match.tracker,
-					match: mt,
-				})
+				conflict := statusConflicts[oid]
+				if conflict == nil {
+					conflict = &matchStatusConflict{trade: match.tracker}
+					statusConflicts[oid] = conflict
+				}
+				conflict.matches = append(conflict.matches, mt)
 			}
 		}
 		match.tracker.mtx.RUnlock()
@@ -2802,7 +2805,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 						}
 						c.log.Infof("Queueing match status resolution for newly discovered match %v (%s) "+
 							"as taker to MakerSwapCast status.", matchID, match.Match.Status) // had better be NewlyMatched!
-						matchConflicts = append(matchConflicts, &matchStatusConflict{trade, match})
+
+						oid := trade.ID()
+						conflicts := matchConflicts[oid]
+						if conflicts == nil {
+							conflicts = &matchStatusConflict{trade: trade}
+							matchConflicts[oid] = conflicts
+						}
+						conflicts.matches = append(conflicts.matches, trade.matches[matchID])
 					}
 				}
 			}
@@ -2827,7 +2837,11 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	if len(matchConflicts) > 0 {
-		c.log.Warnf("Beginning match status resolution for %d matches...", len(matchConflicts))
+		var n int
+		for _, c := range matchConflicts {
+			n += len(c.matches)
+		}
+		c.log.Warnf("Beginning match status resolution for %d matches...", n)
 		c.resolveMatchConflicts(dc, matchConflicts)
 	}
 
@@ -3686,7 +3700,9 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var matchID order.MatchID
 	copy(matchID[:], revocation.MatchID)
 
+	tracker.mtx.Lock()
 	err = tracker.revokeMatch(matchID, true)
+	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %v", matchID, tracker.ID(), err)
 	}

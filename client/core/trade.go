@@ -1091,10 +1091,9 @@ func (t *trackedTrade) revoke() {
 	t.maybeReturnCoins()
 }
 
-// revokeMatch sets the status as revoked for the specified match.
+// revokeMatch sets the status as revoked for the specified match. revokeMatch
+// must be called with the mtx write-locked.
 func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	var revokedMatch *matchTracker
 	for _, match := range t.matches {
 		if match.id == matchID {
@@ -1360,10 +1359,11 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 		var msgErr *msgjson.Error
 		if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
 			// Try resolving the match status conflict.
-			go c.resolveMatchConflicts(t.dc, []*matchStatusConflict{{
-				trade: t,
-				match: match,
-			}})
+			go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+				t.ID(): {
+					trade:   t,
+					matches: []*matchTracker{match},
+				}})
 		}
 		errs.add("error sending 'init' message for match %s: %v", match.id, err)
 	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
@@ -1527,10 +1527,11 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 			var msgErr *msgjson.Error
 			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
 				// Try resolving the match status conflict.
-				go c.resolveMatchConflicts(t.dc, []*matchStatusConflict{{
-					trade: t,
-					match: match,
-				}})
+				go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+					t.ID(): {
+						trade:   t,
+						matches: []*matchTracker{match},
+					}})
 			}
 			ack.Sig = nil // in case of partial unmarshal
 			errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
