@@ -4874,9 +4874,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	match := &matchTracker{
 		id: matchID,
 		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{
-				Proof: db.MatchProof{},
-			},
+			MetaData: &db.MatchMetaData{},
 			Match: &order.UserMatch{
 				Address: addr,
 			},
@@ -4938,7 +4936,7 @@ func TestMatchStatusResolution(t *testing.T) {
 		}
 	}
 
-	// Call setProof before setAuth
+	// Call setProof before setAuthSigs
 	setProof := func(status order.MatchStatus) {
 		isMaker := match.Match.Side == order.Maker
 		match.SetStatus(status)
@@ -5098,11 +5096,6 @@ func TestMatchStatusResolution(t *testing.T) {
 			ours:    order.MatchComplete,
 			servers: order.MakerRedeemed,
 			side:    order.Taker,
-		},
-		{ // Same status should behave the same way.
-			ours:    order.MakerSwapCast,
-			servers: order.MakerSwapCast,
-			side:    order.Maker,
 		},
 	}
 
@@ -5274,6 +5267,52 @@ func TestMatchStatusResolution(t *testing.T) {
 		if !match.MetaData.Proof.SelfRevoked {
 			t.Fatalf("(%s) match not self-revoked during nonsense resolution", testName(tt))
 		}
+	}
+
+	// Run two matches for the same order.
+	match2ID := ordertest.RandomMatchID()
+	match2 := &matchTracker{
+		id: match2ID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match: &order.UserMatch{
+				Address: addr,
+			},
+		},
+	}
+	trade.matches[match2ID] = match2
+	setAuthSigs(order.NewlyMatched)
+	setProof(order.NewlyMatched)
+	match2.Match.Side = order.Taker
+	match2.MetaData.Proof = match.MetaData.Proof
+
+	srvMatches := connectMatches(order.MakerSwapCast)
+	srvMatches = append(srvMatches, &msgjson.Match{OrderID: oid[:],
+		MatchID: match2ID[:],
+		Status:  uint8(order.MakerSwapCast),
+		Side:    uint8(order.Taker),
+	})
+
+	res1 := setMatchResults(order.MakerSwapCast)
+	res2 := setMatchResults(order.MakerSwapCast)
+	res2.MatchID = match2ID[:]
+
+	rig.queueConnect(nil, srvMatches, nil)
+	rig.ws.queueResponse(msgjson.MatchStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, []*msgjson.MatchStatusResult{res1, res2}, nil)
+		f(resp)
+		return nil
+	})
+	tCore.authDEX(dc)
+	trade.mtx.Lock()
+	newStatus1 := match.MetaData.Status
+	newStatus2 := match2.MetaData.Status
+	trade.mtx.Unlock()
+	if newStatus1 != order.MakerSwapCast {
+		t.Fatalf("wrong status for match 1: %s", newStatus1)
+	}
+	if newStatus2 != order.MakerSwapCast {
+		t.Fatalf("wrong status for match 2: %s", newStatus2)
 	}
 }
 
