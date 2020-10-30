@@ -30,7 +30,7 @@ export default class WalletsPage extends BasePage {
       'submitRepw', 'repwErr',
       // Deposit
       'deposit', 'depositName', 'depositAddress', 'newDepAddrBttn',
-      'depositErr',
+      'depositErr', 'depositLogo',
       // Withdraw
       'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
       'withdrawAmt', 'withdrawAvail', 'submitWithdraw', // 'withdrawFee',
@@ -100,6 +100,12 @@ export default class WalletsPage extends BasePage {
         this.showMarkets(rowInfo.assetID)
       })
     }
+
+    page.rightBox.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => {
+        this.showMarkets(this.lastFormAsset)
+      })
+    })
 
     // Bind buttons
     for (const [k, asset] of Object.entries(rowInfos)) {
@@ -214,7 +220,7 @@ export default class WalletsPage extends BasePage {
     const box = page.walletForm
     const asset = app.assets[assetID]
     await this.hideBox()
-    this.walletAsset = assetID
+    this.walletAsset = this.lastFormAsset = assetID
     this.walletForm.setAsset(asset)
     this.animation = this.showBox(box)
     await this.walletForm.loadDefaults()
@@ -223,7 +229,7 @@ export default class WalletsPage extends BasePage {
   /* Show the form used to unlock a wallet. */
   async showOpen (assetID) {
     const page = this.page
-    this.openAsset = assetID
+    this.openAsset = this.lastFormAsset = assetID
     await this.hideBox()
     page.openForm.setAsset(app.assets[assetID])
     this.animation = this.showBox(page.openForm, page.walletPass)
@@ -237,7 +243,7 @@ export default class WalletsPage extends BasePage {
     this.walletReconfig.update(asset.info)
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
-    this.reconfigAsset = assetID
+    this.reconfigAsset = this.lastFormAsset = assetID
     await this.hideBox()
     this.animation = this.showBox(page.walletReconfig)
     app.loading(page.walletReconfig)
@@ -257,7 +263,7 @@ export default class WalletsPage extends BasePage {
   async showChangePW () {
     const page = this.page
     Doc.hide(page.repwErr)
-    const assetID = this.reconfigAsset
+    const assetID = this.lastFormAsset = this.reconfigAsset
     const asset = app.assets[assetID]
     page.repwAssetLogo.src = Doc.logoPath(asset.symbol)
     page.repwAssetName.textContent = asset.info.name
@@ -299,8 +305,9 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.depositErr)
     const box = page.deposit
     const asset = app.assets[assetID]
+    page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app.walletMap[assetID]
-    this.depositAsset = assetID
+    this.depositAsset = this.lastFormAsset = assetID
     if (!wallet) {
       app.notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR))
       return
@@ -345,7 +352,7 @@ export default class WalletsPage extends BasePage {
     page.withdrawName.textContent = asset.info.name
     // page.withdrawFee.textContent = wallet.feerate
     // page.withdrawUnit.textContent = wallet.units
-    box.dataset.assetID = assetID
+    box.dataset.assetID = this.lastFormAsset = assetID
     this.animation = this.showBox(box, page.walletPass)
   }
 
