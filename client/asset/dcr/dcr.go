@@ -2160,7 +2160,7 @@ func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 
 	for i := range res.Errors {
 		sigErr := &res.Errors[i]
-		dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v",
+		dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v (is wallet locked?)",
 			sigErr.TxID, sigErr.Vout, sigErr.Sequence, sigErr.ScriptSig, sigErr.Error)
 		// Will be incomplete below, so log each SignRawTransactionError and move on.
 	}
@@ -2173,7 +2173,7 @@ func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 	if !res.Complete {
 		dcr.log.Errorf("Incomplete raw transaction signatures (input tx: %x / incomplete signed tx: %x): ",
 			dcr.wireBytes(baseTx), dcr.wireBytes(signedTx))
-		return nil, fmt.Errorf("incomplete raw tx signatures")
+		return nil, fmt.Errorf("incomplete raw tx signatures (is wallet locked?)")
 	}
 
 	return signedTx, nil
@@ -2379,7 +2379,7 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 func (dcr *ExchangeWallet) getKeys(addr dcrutil.Address) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
 	wif, err := dcr.node.DumpPrivKey(dcr.ctx, addr)
 	if err != nil {
-		return nil, nil, translateRPCCancelErr(err)
+		return nil, nil, fmt.Errorf("%w (is wallet locked?)", translateRPCCancelErr(err))
 	}
 
 	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey())

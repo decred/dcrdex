@@ -33,7 +33,7 @@ type xcWallet struct {
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if len(w.encPW) == 0 {
 		if w.Locked() {
-			return fmt.Errorf("Wallet reporting as locked, but no password has been set.")
+			return fmt.Errorf("wallet reporting as locked, but no password has been set")
 		}
 		return nil
 	}
