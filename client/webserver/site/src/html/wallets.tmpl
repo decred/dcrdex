@@ -109,21 +109,29 @@
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <div class="card bg1 text-center fs20 p-2 d-hide" id="deposit">
-      Deposit <span id="depositName"></span> to
-      <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
-      <div class="my-3">
-        <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">New Deposit Address</button>
+    <div class="card bg1 text-center fs20 d-hide" id="deposit">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+        Deposit
+        <img id="depositLogo" class="micro-icon mx-1">
+        <span id="depositName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
+      <div class="p-2">
+        <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
+        <div class="my-3">
+          <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">New Deposit Address</button>
+        </div>
+        <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
+      </div>
     </div>
 
     {{- /* WITHDRAW */ -}}
     <form class="card bg1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
         Withdraw
         <img id="withdrawLogo" class="micro-icon mx-1">
         <span id="withdrawName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="px-4 mt-3">
         <label for="withdrawAddr" class="pl-1 mb-1">Address</label>
@@ -156,11 +164,12 @@
     
     {{- /* RECONFIGURE WALLET */ -}}
     <form class="card bg1 pb-3 d-hide mt-3" id="walletReconfig" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
         Reconfigure
         <img id="recfgAssetLogo" class="micro-icon mx-1">
         <span id="recfgAssetName"></span>
         Wallet
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="px-3 py-1" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
@@ -190,11 +199,12 @@
 
     {{- /* CHANGE WALLET PASSWORD */ -}}
     <form class="card bg1 pb-3 d-hide mt-3" id="walletRepw" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
         Change
         <img id="repwAssetLogo" class="micro-icon mx-1">
         <span id="repwAssetName"></span>
         Wallet Password
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="px-4 pt-3 fs15">
         Changing the password below does not change the password for your wallet software.

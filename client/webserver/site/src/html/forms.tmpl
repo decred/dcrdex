@@ -33,11 +33,12 @@
 {{end}}
 
 {{define "newWalletForm"}}
-<div class="bg2 px-2 py-1 text-center fs18">
+<div class="bg2 px-2 py-1 text-center fs18 position-relative">
   Add a
   <img id="nwAssetLogo" class="micro-icon mx-1">
   <span id="nwAssetName"></span>
   Wallet
+  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   {{if .}}
@@ -78,11 +79,12 @@
 {{end}}
 
 {{define "unlockWalletForm"}}
-<div class="bg2 px-2 py-1 text-center fs18">
+<div class="bg2 px-2 py-1 text-center fs18 position-relative">
   Unlock
   <img id="uwAssetLogo" class="micro-icon mx-1">
   <span id="uwAssetName"></span>
   Wallet
+  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   {{if .}}
@@ -102,7 +104,10 @@
 {{end}}
 
 {{define "dexAddrForm"}}
-<div class="bg2 px-2 py-1 text-center fs18">Add a DEX</div>
+<div class="bg2 px-2 py-1 text-center position-relative fs18">
+  Add a DEX
+  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+</div>
 <div class="p-4">
   <div>
     <label for="dexAddr" class="pl-1 mb-1">DEX Address</label>
@@ -125,7 +130,10 @@
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-<div class="bg2 px-2 py-1 text-center fs18">Confirm Registration</div>
+<div class="bg2 px-2 py-1 text-center position-relative fs18">
+  Confirm Registration
+  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+</div>
 <div class="p-4">
   <div class="fs16">
     Enter your app password to confirm DEX registration.
@@ -145,8 +153,9 @@
 {{end}}
 
 {{define "cancelOrderForm"}}
-<div class="bg2 px-2 py-1 text-center fs18">
+<div class="bg2 px-2 py-1 text-center fs18 position-relative">
   Cancel Order
+  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-3">
   Enter your password to submit a cancel order for the remaining

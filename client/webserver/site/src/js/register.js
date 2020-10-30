@@ -30,6 +30,9 @@ export default class RegistrationPage extends BasePage {
       'dexCertBox'
     ])
 
+    // Hide the form closers for the registration process.
+    body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))
+
     // SET APP PASSWORD
     bindForm(page.appPWForm, page.appPWSubmit, () => { this.setAppPass() })
 

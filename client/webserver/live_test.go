@@ -952,7 +952,7 @@ func randStr(minLen, maxLen int) string {
 
 func (c *TCore) runRandomPokes() {
 	nextWait := func() time.Duration {
-		return time.Duration(float64(time.Second)*rand.Float64()) * 5
+		return time.Duration(float64(time.Second)*rand.Float64()) * 10
 	}
 	for {
 		select {
@@ -999,7 +999,7 @@ func TestServer(t *testing.T) {
 	numSells = 50
 	feedPeriod = 500 * time.Millisecond
 	initialize := false
-	register := true
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true
