@@ -1925,7 +1925,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 	// data are updated.
 	go func() {
 		// Search until it's known to be revoked.
-		err := t.auditContract(match, audit.CoinID, audit.Contract)
+		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
 			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %v: %v",
@@ -1969,7 +1969,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 // counterparty contract data again except on reconnect. This may block for a
 // long time and should be run in a goroutine. The trackedTrade mtx must NOT be
 // locked.
-func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract []byte) (*asset.AuditInfo, error) {
+func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract, txData []byte) (*asset.AuditInfo, error) {
 	errChan := make(chan error, 1)
 	var auditInfo *asset.AuditInfo
 	var tries int
@@ -1978,7 +1978,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract)
+			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData)
 			if err == nil {
 				// Success.
 				errChan <- nil
@@ -2029,8 +2029,8 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 // fields are set. This may block for a long period, and should be run in a
 // goroutine. The trackedTrade mtx must NOT be locked. The match is updated in
 // the DB if the audit succeeds.
-func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte) error {
-	auditInfo, err := t.searchAuditInfo(match, coinID, contract)
+func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txData []byte) error {
+	auditInfo, err := t.searchAuditInfo(match, coinID, contract, txData)
 	if err != nil {
 		return err
 	}
@@ -2090,7 +2090,8 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 		match.SetStatus(order.MakerSwapCast)
 		proof.MakerSwap = coinID
 	}
-	proof.CounterScript = contract
+	proof.CounterTxData = txData
+	proof.CounterContract = contract
 	match.counterSwap = auditInfo
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
@@ -2098,8 +2099,8 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 		t.dc.log.Errorf("Error updating database for match %v: %v", match.id, err)
 	}
 
-	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s",
-		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match.id)
+	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match.id, len(txData) > 0)
 
 	return nil
 }

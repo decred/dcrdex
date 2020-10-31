@@ -294,7 +294,7 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract())
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}

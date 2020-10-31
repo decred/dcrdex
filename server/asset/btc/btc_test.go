@@ -372,6 +372,8 @@ func (t *testNode) RawRequest(string, []json.RawMessage) (json.RawMessage, error
 	return t.rawResult, nil
 }
 
+func (t testNode) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) { return nil, nil }
+
 // Create a btcjson.GetTxOutResult such as is returned from GetTxOut.
 func testGetTxOut(confirmations, value int64, pkScript []byte) *btcjson.GetTxOutResult {
 	return &btcjson.GetTxOutResult{

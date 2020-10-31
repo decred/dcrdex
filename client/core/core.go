@@ -3812,18 +3812,26 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap coin.", dbMatch.Side, tracker.token(), dbMatch.Status)
 					continue
 				}
-				counterContract := metaData.Proof.CounterScript
+				counterContract := metaData.Proof.CounterContract
 				if len(counterContract) == 0 {
 					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match.id)
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", dbMatch.Side, tracker.token(), dbMatch.Status)
 					continue
 				}
+				counterTxData := metaData.Proof.CounterTxData
+
+				// if len(counterTxData) == 0 {
+				// 	match.swapErr = fmt.Errorf("missing counter-tx-data, order %s, match %s", tracker.ID(), match.id)
+				// 	notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap tx data.", dbMatch.Side, tracker.token(), dbMatch.Status)
+				// 	continue
+				// }
+
 				// Obtaining AuditInfo will fail if it's unmined AND gone from
 				// mempool, or the wallet is otherwise not ready. Note that this
 				// does not actually audit the contract's value, recipient,
 				// expiration, or secret hash (if maker), as that was already
 				// done when it was initially stored as CounterScript.
-				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
+				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData)
 				if err != nil {
 					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
 					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(wallets.toAsset.ID))
@@ -3832,7 +3840,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					// searching since matchTracker.counterSwap is not yet set.
 					match.swapErr = fmt.Errorf("audit in progress, please wait") // don't frighten the users
 					go func(tracker *trackedTrade, match *matchTracker) {
-						auditInfo, err := tracker.searchAuditInfo(match, counterSwap, counterContract)
+						auditInfo, err := tracker.searchAuditInfo(match, counterSwap, counterContract, counterTxData)
 						tracker.mtx.Lock()
 						defer tracker.mtx.Unlock()
 						if err != nil {

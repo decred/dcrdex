@@ -470,6 +470,7 @@ type MatchStatusResult struct {
 	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
 	Secret        Bytes `json:"secret,omitempty"`
 	Active        bool  `json:"active"`
+	TxData        Bytes `json:"txdata,omitempty"`
 }
 
 // OrderStatusRequest details an order for the OrderStatusRoute request. The
@@ -516,6 +517,7 @@ type Audit struct {
 	Time     uint64 `json:"timestamp"`
 	CoinID   Bytes  `json:"coinid"`
 	Contract Bytes  `json:"contract"`
+	TxData   Bytes  `json:"txdata"`
 }
 
 var _ Signable = (*Audit)(nil)

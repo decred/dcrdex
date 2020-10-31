@@ -1479,7 +1479,7 @@ func TestAuditContract(t *testing.T) {
 
 	node.txOutRes[newOutPoint(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract)
+	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1494,14 +1494,14 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, nil)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
 	// GetTxOut error
 	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
@@ -1514,7 +1514,7 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
 	}
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}

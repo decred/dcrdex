@@ -214,7 +214,7 @@ const (
 	SetSwapDone = `UPDATE %s SET active = FALSE
 		WHERE matchid = $1;`
 
-	SelectMatchStatuses = `SELECT matchid, status, aContract, bContract, aContractCoinID,
+	SelectMatchStatuses = `SELECT takerSell, (takerAccount = $1) AS isTaker, (makerAccount = $1) AS isMaker, matchid, status, aContract, bContract, aContractCoinID,
 		bContractCoinID, aRedeemCoinID, bRedeemCoinID, aRedeemSecret, active
 		FROM %s
 		WHERE matchid = ANY($2)

@@ -145,6 +145,16 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 			return nil
 		})
 	})
+
+	if err != nil {
+		t.Fatalf("error upgrading database to v2: %v", err)
+	}
+}
+
+func verifyV3Upgrade(t *testing.T, db *bbolt.DB) {
+	err := db.View(func(dbtx *bbolt.Tx) error {
+		return checkVersion(dbtx, 3)
+	})
 	if err != nil {
 		t.Error(err)
 	}

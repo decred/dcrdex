@@ -247,18 +247,19 @@ type MatchAuth struct {
 // MatchProof is information related to the progression of the swap negotiation
 // process.
 type MatchProof struct {
-	Script        []byte
-	CounterScript []byte
-	SecretHash    []byte
-	Secret        []byte
-	MakerSwap     order.CoinID
-	MakerRedeem   order.CoinID
-	TakerSwap     order.CoinID
-	TakerRedeem   order.CoinID
-	RefundCoin    order.CoinID
-	Auth          MatchAuth
-	ServerRevoked bool
-	SelfRevoked   bool
+	Script          []byte
+	CounterContract []byte
+	CounterTxData   []byte
+	SecretHash      []byte
+	Secret          []byte
+	MakerSwap       order.CoinID
+	MakerRedeem     order.CoinID
+	TakerSwap       order.CoinID
+	TakerRedeem     order.CoinID
+	RefundCoin      order.CoinID
+	Auth            MatchAuth
+	ServerRevoked   bool
+	SelfRevoked     bool
 }
 
 // Encode encodes the MatchProof to a versioned blob.
@@ -273,9 +274,9 @@ func (p *MatchProof) Encode() []byte {
 		selfRevoked = encode.ByteTrue
 	}
 
-	return dbBytes{1}.
+	return dbBytes{2}.
 		AddData(p.Script).
-		AddData(p.CounterScript).
+		AddData(p.CounterContract).
 		AddData(p.SecretHash).
 		AddData(p.Secret).
 		AddData(p.MakerSwap).
@@ -294,7 +295,8 @@ func (p *MatchProof) Encode() []byte {
 		AddData(auth.RedemptionSig).
 		AddData(uint64Bytes(auth.RedemptionStamp)).
 		AddData(srvRevoked).
-		AddData(selfRevoked)
+		AddData(selfRevoked).
+		AddData(p.CounterTxData)
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
@@ -304,10 +306,12 @@ func DecodeMatchProof(b []byte) (*MatchProof, error) {
 		return nil, err
 	}
 	switch ver {
-	case 0:
-		return decodeMatchProof_v0(pushes)
+	case 2:
+		return decodeMatchProof_v2(pushes)
 	case 1:
 		return decodeMatchProof_v1(pushes)
+	case 0:
+		return decodeMatchProof_v0(pushes)
 	}
 	return nil, fmt.Errorf("unknown MatchProof version %d", ver)
 }
@@ -318,19 +322,25 @@ func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v1(pushes [][]byte) (*MatchProof, error) {
-	if len(pushes) != 21 {
+	pushes = append(pushes, nil)
+	return decodeMatchProof_v2(pushes)
+}
+
+func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
+	if len(pushes) != 22 {
 		return nil, fmt.Errorf("DecodeMatchProof: expected 21 pushes, got %d", len(pushes))
 	}
 	return &MatchProof{
-		Script:        pushes[0],
-		CounterScript: pushes[1],
-		SecretHash:    pushes[2],
-		Secret:        pushes[3],
-		MakerSwap:     pushes[4],
-		MakerRedeem:   pushes[5],
-		TakerSwap:     pushes[6],
-		TakerRedeem:   pushes[7],
-		RefundCoin:    pushes[8],
+		Script:          pushes[0],
+		CounterContract: pushes[1],
+		CounterTxData:   pushes[21],
+		SecretHash:      pushes[2],
+		Secret:          pushes[3],
+		MakerSwap:       pushes[4],
+		MakerRedeem:     pushes[5],
+		TakerSwap:       pushes[6],
+		TakerRedeem:     pushes[7],
+		RefundCoin:      pushes[8],
 		Auth: MatchAuth{
 			MatchSig:        pushes[9],
 			MatchStamp:      intCoder.Uint64(pushes[10]),

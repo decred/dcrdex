@@ -268,7 +268,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		// Alpha should be able to redeem.
-		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract())
+		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}

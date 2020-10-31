@@ -1613,7 +1613,7 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract on the blockchain.
 // AuditContract would be used to audit the counter-party's contract during a
 // swap.
-func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (*asset.AuditInfo, error) {
+func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err

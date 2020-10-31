@@ -302,9 +302,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
 	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
 	assetLogger := cfg.LogBackend.Logger("ASSET")
+	txDataSources := make(map[uint32]auth.TxDataSource)
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
-		ID := assetIDs[i]
+		assetID := assetIDs[i]
 
 		// Create a new asset backend. An asset driver with a name matching the
 		// asset symbol must be available.
@@ -335,7 +336,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		initTxSizeBase := uint64(be.InitTxSizeBase())
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
-				ID:           ID,
+				ID:           assetID,
 				Symbol:       symbol,
 				LotSize:      assetConf.LotSize,
 				RateStep:     assetConf.RateStep,
@@ -347,16 +348,16 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			Backend: be,
 		}
 
-		backedAssets[ID] = ba
-		lockableAssets[ID] = &swap.LockableAsset{
+		backedAssets[assetID] = ba
+		lockableAssets[assetID] = &swap.LockableAsset{
 			BackedAsset: ba,
-			CoinLocker:  dexCoinLocker.AssetLocker(ID).Swap(),
+			CoinLocker:  dexCoinLocker.AssetLocker(assetID).Swap(),
 		}
 
 		// Prepare assets portion of config response.
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
 			Symbol:       assetConf.Symbol,
-			ID:           ID,
+			ID:           assetID,
 			LotSize:      assetConf.LotSize,
 			RateStep:     assetConf.RateStep,
 			MaxFeeRate:   assetConf.MaxFeeRate,
@@ -364,6 +365,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			SwapSizeBase: initTxSizeBase,
 			SwapConf:     uint16(assetConf.SwapConf),
 		})
+
+		txDataSources[assetID] = be.TxData
 	}
 
 	// Ensure their is a DCR asset backend.
@@ -424,6 +427,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		BanScore:          cfg.BanScore,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,
 		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
+		TxDataSources:     txDataSources,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)

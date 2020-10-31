@@ -25,6 +25,8 @@ type Tx struct {
 	lastLookup *chainhash.Hash
 	// The calculated transaction fee rate, in satoshis/vbyte
 	feeRate uint64
+	// raw is the raw tx bytes.
+	raw []byte
 }
 
 // A txIn holds information about a transaction input, mainly to verify which
@@ -43,7 +45,7 @@ type txOut struct {
 
 // A getter for a new Tx.
 func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
-	blockHeight int64, isCoinbase bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
+	blockHeight int64, isCoinbase bool, ins []txIn, outs []txOut, feeRate uint64, rawTx []byte) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
 	if hash == nil {
@@ -59,5 +61,6 @@ func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 		isCoinbase: isCoinbase,
 		lastLookup: lastLookup,
 		feeRate:    feeRate,
+		raw:        rawTx,
 	}
 }

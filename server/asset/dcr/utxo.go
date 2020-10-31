@@ -392,5 +392,6 @@ func auditContract(op *Output) (*asset.Contract, error) {
 		SwapAddress:  receiver.String(),
 		RedeemScript: op.redeemScript,
 		LockTime:     time.Unix(int64(lockTime), 0),
+		TxData:       op.tx.raw,
 	}, nil
 }

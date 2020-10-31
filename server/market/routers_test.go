@@ -389,6 +389,8 @@ func (b *TBackend) Synced() (bool, error) {
 	return atomic.LoadUint32(&oRig.dcr.synced) == 1, nil
 }
 
+func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
+
 type tUTXO struct {
 	val     uint64
 	decoded string
@@ -412,6 +414,7 @@ func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
 func (u *tUTXO) RedeemScript() []byte            { return nil }
 func (u *tUTXO) LockTime() time.Time             { return time.Time{} }
+func (u *tUTXO) TxData() []byte                  { return nil }
 
 type tUser struct {
 	acct    account.AccountID

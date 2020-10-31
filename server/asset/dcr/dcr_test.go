@@ -259,6 +259,11 @@ func (t *testNode) GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainI
 	return t.blockchainInfo, nil
 }
 
+// Part of the dcrNode interface.
+func (testNode) GetRawTransaction(_ context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
+	return nil, nil
+}
+
 // Create a chainjson.GetTxOutResult such as is returned from GetTxOut.
 func testGetTxOut(confirmations int64, pkScript []byte) *chainjson.GetTxOutResult {
 	return &chainjson.GetTxOutResult{
