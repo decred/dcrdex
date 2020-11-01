@@ -4086,7 +4086,7 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	}
 
 	// Schedule a tick for this trade.
-	delay := time.Duration(numMatches) * time.Second / 10 // 1 sec delay for every 10 active matches
+	delay := 2*time.Second + time.Duration(numMatches)*time.Second/10 // 1 sec extra delay for every 10 active matches
 	if delay > 5*time.Second {
 		delay = 5 * time.Second
 	}
