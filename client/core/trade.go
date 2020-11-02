@@ -275,7 +275,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		t.dc.log.Warnf("Cancel order %s targeting trade %s did not match.", oid, t.ID())
 		err := t.db.LinkOrder(t.ID(), order.OrderID{})
 		if err != nil {
-			t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %w", oid, t.ID(), err)
+			t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", oid, t.ID(), err)
 		}
 		// Clearing the trackedCancel allows this order to be canceled again.
 		t.cancel = nil
@@ -598,7 +598,7 @@ func (t *trackedTrade) deleteCancelOrder() {
 	cid := t.cancel.ID()
 	err := t.db.UpdateOrderStatus(cid, order.OrderStatusRevoked) // could actually be OrderStatusExecuted
 	if err != nil {
-		t.dc.log.Errorf("Error updating status in db for cancel order %v to revoked", cid)
+		t.dc.log.Errorf("Error updating status in db for cancel order %v to revoked: %v", cid, err)
 	}
 	// Unlink the cancel order from the trade.
 	t.cancel = nil
@@ -639,7 +639,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	t.deleteCancelOrder()
 	err := t.db.LinkOrder(t.ID(), order.OrderID{})
 	if err != nil {
-		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %w", t.cancel.ID(), t.ID(), err)
+		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", t.cancel.ID(), t.ID(), err)
 	}
 
 	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
@@ -1326,7 +1326,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	t.change = change
 	err = t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 	if err != nil {
-		c.log.Errorf("error updating order metadata for order %s: %w", t.ID(), err)
+		c.log.Errorf("Error updating order metadata for order %s: %v", t.ID(), err)
 	}
 
 	// Process the swap for each match by sending the `init` request
@@ -1502,7 +1502,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 
 	err = t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 	if err != nil {
-		c.log.Errorf("error updating order metadata for order %s: %w", t.ID(), err)
+		c.log.Errorf("Error updating order metadata for order %s: %v", t.ID(), err)
 	}
 
 	for _, match := range matches {
