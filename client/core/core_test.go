@@ -418,11 +418,12 @@ func (tdb *TDB) Backup() error {
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
-	id       []byte
-	confsMtx sync.RWMutex
-	confs    uint32
-	confsErr error
-	val      uint64
+	id        []byte
+	confsMtx  sync.RWMutex
+	confs     uint32
+	confsErr  error
+	confCheck chan struct{}
+	val       uint64
 }
 
 func (c *tCoin) setConfs(confs uint32) {
@@ -446,6 +447,11 @@ func (c *tCoin) Value() uint64 {
 func (c *tCoin) Confirmations() (uint32, error) {
 	c.confsMtx.RLock()
 	defer c.confsMtx.RUnlock()
+	defer func() {
+		if c.confCheck != nil {
+			c.confCheck <- struct{}{}
+		}
+	}()
 	return c.confs, c.confsErr
 }
 
@@ -2584,6 +2590,7 @@ func TestTradeTracking(t *testing.T) {
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeTaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	tBtcWallet.auditInfo = auditInfo
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
@@ -2658,7 +2665,9 @@ func TestTradeTracking(t *testing.T) {
 	if auth.AuditStamp != audit.Time {
 		t.Fatalf("audit time not set")
 	}
-	time.Sleep(250 * time.Millisecond) // let async tick do nothing
+	// There's an async tick that's going to check the swap's confirms. Wait for
+	// that before setting SwapConf and redeemCoins below.
+	<-auditInfo.coin.confCheck
 
 	// Confirming the counter-swap triggers a redemption.
 	auditInfo.coin.setConfs(tBTC.SwapConf)
@@ -2723,12 +2732,13 @@ func TestTradeTracking(t *testing.T) {
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("taker's match message error: %v", err)
 	}
-	time.Sleep(250 * time.Millisecond) // let async tick do nothing
+	<-auditInfo.coin.confCheck
 
 	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -2789,10 +2799,6 @@ func TestTradeTracking(t *testing.T) {
 
 	tBtcWallet.redeemErrChan = make(chan error, 1)
 	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
-	defer func() {
-		rig.db.updateMatchChan = nil
-		tBtcWallet.redeemErrChan = nil
-	}()
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	err = handleRedemptionRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -3289,6 +3295,7 @@ func TestRefunds(t *testing.T) {
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	tBtcWallet.auditErr = nil
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -3296,7 +3303,8 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
-	time.Sleep(250 * time.Millisecond) // let async tick from successful handleAuditRoute do nothing
+	<-auditInfo.coin.confCheck
+	// note: there's a noop tick scheduled that we don't care to wait for
 	auditInfo.coin.setConfs(tBTC.SwapConf)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
