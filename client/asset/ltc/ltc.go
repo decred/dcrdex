@@ -18,8 +18,10 @@ const (
 	BipID = 2
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultFee        = 8
-	minNetworkVersion = 180100
+	defaultFee             = 8
+	minNetworkVersion      = 180100
+	newSendrawtxNetVersion = 190000 // but LTC seems like they will jump straight from 0.18 to 0.20
+	newBalanceNetVersion   = 190000
 )
 
 var (
@@ -141,8 +143,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		ChainParams:        params,
 		Ports:              ports,
 		DefaultFallbackFee: defaultFee,
-		LegacyBalance:      true,
 		Segwit:             false,
+		NewBalanceNetVer:   newBalanceNetVersion,
+		NewSendRawTxNetVer: newSendrawtxNetVersion,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

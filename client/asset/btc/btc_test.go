@@ -411,6 +411,8 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
 	wallet.tipMtx.Lock()
 	wallet.currentTip = &block{height: client.GetBestBlockHeight(), hash: bestHash.String()}
 	wallet.tipMtx.Unlock()
+	wallet.useNewBalanceCmd = true // normally set on Connect
+	wallet.useNewSendRawTxCmd = true
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown

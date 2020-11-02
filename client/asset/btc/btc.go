@@ -51,9 +51,8 @@ const (
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
 
-	minNetworkVersion      = 190000
-	minProtocolVersion     = 70015
-	newSendrawtxNetVersion = 190000
+	minNetworkVersion  = 190000
+	minProtocolVersion = 70015
 
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
@@ -172,12 +171,13 @@ type BTCCloneCFG struct {
 	ChainParams        *chaincfg.Params
 	Ports              dexbtc.NetPorts
 	DefaultFallbackFee uint64 // sats/byte
-	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
-	// call.
-	LegacyBalance bool
+
 	// If segwit is false, legacy addresses and contracts will be used. This
 	// setting must match the configuration of the server's asset backend.
 	Segwit bool
+
+	NewBalanceNetVer   uint64
+	NewSendRawTxNetVer uint64
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -363,21 +363,24 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client             *rpcclient.Client
-	node               rpcClient
-	wallet             *walletClient
-	walletInfo         *asset.WalletInfo
-	chainParams        *chaincfg.Params
-	log                dex.Logger
-	symbol             string
-	tipChange          func(error)
+	client           *rpcclient.Client
+	node             rpcClient
+	wallet           *walletClient
+	walletInfo       *asset.WalletInfo
+	chainParams      *chaincfg.Params
+	log              dex.Logger
+	symbol           string
+	tipChange        func(error)
+	fallbackFeeRate  uint64
+	redeemConfTarget uint64
+	useSplitTx       bool
+
 	minNetworkVersion  uint64
-	fallbackFeeRate    uint64
-	redeemConfTarget   uint64
-	useSplitTx         bool
-	useLegacyBalance   bool
-	useLegacySendRawTx bool
 	segwit             bool
+	newBalanceVer      uint64
+	useNewBalanceCmd   bool // set on Connect
+	newSendRawTxVer    uint64
+	useNewSendRawTxCmd bool // set on Connect
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -440,6 +443,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Ports:              dexbtc.RPCPorts,
 		DefaultFallbackFee: defaultFee,
 		Segwit:             true,
+		NewBalanceNetVer:   minNetworkVersion, // all supported BTC versions use new getbalances RPC
+		NewSendRawTxNetVer: minNetworkVersion, // all supported BTC versoins use new sendrawtransaction syntax
 	}
 
 	return BTCCloneWallet(cloneCFG)
@@ -495,19 +500,20 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 	return &ExchangeWallet{
 		node:                node,
 		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
-		symbol:              cfg.Symbol,
+		walletInfo:          cfg.WalletInfo,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
+		symbol:              cfg.Symbol,
 		tipChange:           cfg.WalletCFG.TipChange,
-		fundingCoins:        make(map[outPoint]*utxo),
-		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
-		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          btcCfg.UseSplitTx,
-		useLegacyBalance:    cfg.LegacyBalance,
+		minNetworkVersion:   cfg.MinNetworkVersion,
 		segwit:              cfg.Segwit,
-		walletInfo:          cfg.WalletInfo,
+		newBalanceVer:       cfg.NewBalanceNetVer,
+		newSendRawTxVer:     cfg.NewSendRawTxNetVer, // useNewSendRawTxCmd is set after Connect
+		fundingCoins:        make(map[outPoint]*utxo),
+		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 	}
 }
 
@@ -532,12 +538,19 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if codeVer < minProtocolVersion {
 		return nil, fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
-	if netVer < newSendrawtxNetVersion {
+	if netVer < btc.newSendRawTxVer {
 		btc.log.Debugf("Using legacy sendrawtransaction syntax.")
-		btc.useLegacySendRawTx = true
+		btc.useNewSendRawTxCmd = false
 	} else {
 		btc.log.Debugf("Using new sendrawtransaction syntax.")
-		btc.useLegacySendRawTx = false
+		btc.useNewSendRawTxCmd = true
+	}
+	if netVer < btc.newBalanceVer {
+		btc.log.Debugf("Using legacy balance RPCs (getbalance).")
+		btc.useNewBalanceCmd = false
+	} else {
+		btc.log.Debugf("Using new balance RPCs (getbalances).")
+		btc.useNewBalanceCmd = true
 	}
 	// Initialize the best block.
 	h, err := btc.node.GetBestBlockHash()
@@ -575,7 +588,7 @@ func (btc *ExchangeWallet) shutdown() {
 // Balance returns the total available funds in the wallet. Part of the
 // asset.Wallet interface.
 func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
-	if btc.useLegacyBalance {
+	if !btc.useNewBalanceCmd {
 		return btc.legacyBalance()
 	}
 	balances, err := btc.wallet.Balances()
@@ -638,13 +651,13 @@ func (btc *ExchangeWallet) SendRawTransaction(msgTx *wire.MsgTx, allowHighFees b
 	}
 
 	args := anylist{txHexBytes}
-	if btc.useLegacySendRawTx {
-		// Default is false, but always be explicit with this form
-		args = append(args, allowHighFees)
-	} else if allowHighFees {
+	if btc.useNewSendRawTxCmd {
 		// maxfeerate of 0 means accept any fee rate. When omitted, a
 		// node-defined default max is used (bitcoind says 0.1).
 		args = append(args, 0.0)
+	} else if allowHighFees {
+		// Default is false, but always be explicit with this form.
+		args = append(args, allowHighFees)
 	}
 
 	var txid string
