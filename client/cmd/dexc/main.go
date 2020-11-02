@@ -156,6 +156,6 @@ func main() {
 
 done:
 	wg.Wait()
-	ui.Close()
 	log.Info("Exiting dexc main.")
+	ui.Close()
 }
