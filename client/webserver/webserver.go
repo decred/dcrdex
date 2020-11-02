@@ -319,7 +319,7 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}()
 
 	log.Infof("Web server listening on %s", s.addr)
-	fmt.Printf("\n\t****  OPEN IN YOUR BROWSER TO TRADE  --->  http://%s  ****\n\n", s.addr)
+	fmt.Printf("\n\t****  OPEN IN YOUR BROWSER TO LOGIN AND TRADE  --->  http://%s  ****\n\n", s.addr)
 	return &wg, nil
 }
 
