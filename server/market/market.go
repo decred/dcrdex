@@ -790,6 +790,21 @@ func (m *Market) Run(ctx context.Context) {
 		}
 		m.persistBook = true // future resume default
 		m.activeEpochIdx = 0
+
+		// Revoke any unmatched epoch orders (if context was canceled, not a
+		// clean suspend stopped the market).
+		for oid, ord := range m.epochOrders {
+			log.Infof("Dropping epoch order %v", oid)
+			if co, ok := ord.(*order.CancelOrder); ok {
+				if err := m.storage.FailCancelOrder(co); err != nil {
+					log.Errorf("Failed to set orphaned epoch cancel order %v as executed: %v", oid, err)
+				}
+				continue
+			}
+			if err := m.storage.ExecuteOrder(ord); err != nil {
+				log.Errorf("Failed to set orphaned epoch trade order %v as executed: %v", oid, err)
+			}
+		}
 		m.epochMtx.Unlock()
 
 		// Stop and wait for the order feed goroutine.

@@ -195,11 +195,12 @@ func (cr *configResponse) remarshal() {
 // Stop shuts down the DEX. Stop returns only after all components have
 // completed their shutdown.
 func (dm *DEX) Stop() {
-	log.Infof("Stopping subsystems...")
+	log.Infof("Stopping all DEX subsystems.")
 	for _, ssw := range dm.stopWaiters {
+		log.Infof("Stopping %s...", ssw.name)
 		ssw.Stop()
 		ssw.WaitForShutdown()
-		log.Infof("%s shutdown.", ssw.name)
+		log.Infof("%s is now shut down.", ssw.name)
 	}
 	if err := dm.storage.Close(); err != nil {
 		log.Errorf("DEXArchivist.Close: %v", err)
@@ -250,7 +251,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	startSubSys := func(name string, r dex.Runner) {
 		ssw := dex.NewStartStopWaiter(r)
 		ssw.Start(ctx)
-		stopWaiters = append([]subsystem{{ssw, name}}, stopWaiters...)
+		stopWaiters = append([]subsystem{{ssw, name}}, stopWaiters...) // top of stack
 	}
 
 	abort := func() {
@@ -493,7 +494,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
-		startSubSys(marketSubSysName(name), mkt)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
@@ -511,6 +511,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	// Book router
 	bookRouter := market.NewBookRouter(bookSources)
 	startSubSys("BookRouter", bookRouter)
+
+	// Market, now that book router is running.
+	for name, mkt := range markets {
+		startSubSys(marketSubSysName(name), mkt)
+	}
 
 	// Order router
 	orderRouter := market.NewOrderRouter(&market.OrderRouterConfig{
