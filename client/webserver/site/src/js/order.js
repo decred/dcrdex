@@ -10,14 +10,14 @@ const Testnet = 1
 
 const animationLength = 500
 
-var app
+var app, net
 
 export default class OrderPage extends BasePage {
   constructor (application, main) {
     super()
     app = application
     const stampers = main.querySelectorAll('[data-stamp]')
-    const net = parseInt(main.dataset.net)
+    net = parseInt(main.dataset.net)
     // Find the order
     this.orderID = main.dataset.oid
     this.order = app.order(this.orderID)
@@ -26,7 +26,7 @@ export default class OrderPage extends BasePage {
     if (!this.order) this.fetchOrder()
     const page = this.page = Doc.parsePage(main, [
       'cancelBttn', 'cancelRemain', 'cancelUnit', 'cancelForm', 'forms',
-      'cancelSubmit', 'cancelPass', 'status'
+      'cancelSubmit', 'cancelPass', 'status', 'matchBox', 'matchesLabel'
     ])
 
     if (page.cancelBttn) {
@@ -47,13 +47,7 @@ export default class OrderPage extends BasePage {
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
 
     main.querySelectorAll('[data-explorer-id]').forEach(link => {
-      const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId)]
-      if (!assetExplorer) return
-      const formatter = assetExplorer[net]
-      if (!formatter) return
-      link.classList.remove('plainlink')
-      link.classList.add('subtlelink')
-      link.href = formatter(link.dataset.explorerCoin)
+      setCoinHref(link)
     })
 
     const setStamp = () => {
@@ -68,7 +62,8 @@ export default class OrderPage extends BasePage {
     }, 10000) // update every 10 seconds
 
     this.notifiers = {
-      order: note => { this.handleOrderNote(note) }
+      order: note => { this.handleOrderNote(note) },
+      match: note => { this.handleMatchNote(note) }
     }
   }
 
@@ -138,7 +133,103 @@ export default class OrderPage extends BasePage {
       if (bttn && order.status > Order.StatusBooked) Doc.hide(bttn)
       this.page.status.textContent = Order.statusString(order)
     }
+    for (const m of order.matches || []) this.processMatch(m)
   }
+
+  /* handleMatchNote handles a 'match' notification. */
+  handleMatchNote (note) {
+    if (note.orderID !== this.orderID) return
+    this.processMatch(note.match)
+  }
+
+  /*
+   * processMatch synchronizes a match's card with a match received in a
+   * 'order' or 'match' notification.
+   */
+  processMatch (m) {
+    var card
+    for (const div of Array.from(this.page.matchBox.querySelectorAll('.match-card'))) {
+      if (div.dataset.matchID === m.matchID) {
+        card = div
+        break
+      }
+    }
+    if (!card) {
+      // TO DO: Create a new card from template.
+      return
+    }
+
+    const setCoin = (divName, linkName, coin) => {
+      if (!coin) return
+      Doc.show(Doc.tmplElement(card, divName))
+      const coinLink = Doc.tmplElement(card, linkName)
+      coinLink.textContent = coin.stringID
+      coinLink.dataset.explorerCoin = coin.stringID
+      setCoinHref(coinLink)
+    }
+
+    setCoin('swap', 'swapCoin', m.swap)
+    setCoin('counterSwap', 'counterSwapCoin', m.counterSwap)
+    setCoin('redeem', 'redeemCoin', m.redeem)
+    setCoin('counterRedeem', 'counterRedeemCoin', m.counterRedeem)
+    setCoin('refund', 'refundCoin', m.refund)
+
+    const swapSpan = Doc.tmplElement(card, 'swapMsg')
+    const cSwapSpan = Doc.tmplElement(card, 'counterSwapMsg')
+
+    if (inCounterSwapCast(m)) {
+      cSwapSpan.textContent = confirmationString(m.counterSwap)
+      Doc.hide(Doc.tmplElement(card, 'swapMsg'))
+      Doc.show(cSwapSpan)
+    } else if (inSwapCast(m)) {
+      swapSpan.textContent = confirmationString(m.swap)
+      Doc.hide(Doc.tmplElement(card, 'counterSwapMsg'))
+      Doc.show(swapSpan)
+    } else {
+      Doc.hide(swapSpan, cSwapSpan)
+    }
+
+    Doc.tmplElement(card, 'status').textContent = Order.matchStatusString(m.status, m.side)
+  }
+}
+
+/*
+ * confirmationString is a string describing the state of confirmations for a
+ * coin
+ * */
+function confirmationString (coin) {
+  if (!coin.confs) return ''
+  return `${coin.confs.count} / ${coin.confs.required} confirmations`
+}
+
+/*
+ * inCounterSwapCast will be true if we are waiting on confirmations for the
+ * counterparty's swap.
+ */
+function inCounterSwapCast (m) {
+  return (m.side === Order.Taker && m.status === Order.MakerSwapCast) || (m.side === Order.Maker && m.status === Order.TakerSwapCast)
+}
+
+/*
+ * inCounterSwapCast will be true if we are waiting on confirmations for our own
+ * swap.
+ */
+function inSwapCast (m) {
+  return (m.side === Order.Maker && m.status === Order.MakerSwapCast) || (m.side === Order.Taker && m.status === Order.TakerSwapCast)
+}
+
+/*
+ * setCoinHref sets the hyperlink element's href attribute based on its
+ * data-explorer-id and data-explorer-coin values.
+ */
+function setCoinHref (link) {
+  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId)]
+  if (!assetExplorer) return
+  const formatter = assetExplorer[net]
+  if (!formatter) return
+  link.classList.remove('plainlink')
+  link.classList.add('subtlelink')
+  link.href = formatter(link.dataset.explorerCoin)
 }
 
 const CoinExplorers = {

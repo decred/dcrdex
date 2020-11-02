@@ -72,3 +72,26 @@ export function settled (order) {
     return redeemed ? settled + qty(match) : settled
   }, 0)
 }
+
+/*
+ * matchStatusString is a string used to create a displayable string describing
+ * describing the match status.
+ */
+export function matchStatusString (status, side) {
+  switch (status) {
+    case NewlyMatched:
+      return '(0 / 4) Newly Matched'
+    case MakerSwapCast:
+      return '(1 / 4) First Swap Sent'
+    case TakerSwapCast:
+      return '(2 / 4) Second Swap Sent'
+    case MakerRedeemed:
+      if (side === Maker) {
+        return 'Match Complete'
+      }
+      return '(3 / 4) Maker Redeemed'
+    case MatchComplete:
+      return 'Match Complete'
+  }
+  return 'Unknown Order Status'
+}

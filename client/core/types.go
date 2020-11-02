@@ -128,41 +128,126 @@ type Match struct {
 	Qty           uint64            `json:"qty"`
 	Side          order.MatchSide   `json:"side"`
 	FeeRate       uint64            `json:"feeRate"`
-	Swap          dex.Bytes         `json:"swap"`
-	CounterSwap   dex.Bytes         `json:"counterSwap"`
-	Redeem        dex.Bytes         `json:"redeem"`
-	CounterRedeem dex.Bytes         `json:"counterRedeem"`
-	Refund        dex.Bytes         `json:"refund"`
+	Swap          *Coin             `json:"swap,omitempty"`
+	CounterSwap   *Coin             `json:"counterSwap,omitempty"`
+	Redeem        *Coin             `json:"redeem,omitempty"`
+	CounterRedeem *Coin             `json:"counterRedeem,omitempty"`
+	Refund        *Coin             `json:"refund,omitempty"`
 	Stamp         uint64            `json:"stamp"`
 	IsCancel      bool              `json:"isCancel"`
 }
 
-// matchFromMetaMatch constructs a *Match from an *db.MetaMatch
-func matchFromMetaMatch(metaMatch *db.MetaMatch) *Match {
-	userMatch, proof := metaMatch.Match, &metaMatch.MetaData.Proof
-	match := &Match{
-		MatchID:  userMatch.MatchID[:],
-		Status:   userMatch.Status,
-		Revoked:  proof.IsRevoked(),
-		Rate:     userMatch.Rate,
-		Qty:      userMatch.Quantity,
-		Side:     userMatch.Side,
-		FeeRate:  userMatch.FeeRateSwap,
-		Refund:   []byte(proof.RefundCoin),
-		Stamp:    metaMatch.MetaData.Stamp,
-		IsCancel: userMatch.Address == "",
+// A coin encodes both the coin ID and the asset-dependent string representation
+// of the coin ID.
+type Coin struct {
+	ID       dex.Bytes `json:"id"`
+	StringID string    `json:"stringID"`
+	AssetID  uint32    `json:"assetID"`
+	Symbol   string    `json:"symbol"`
+	// Confs is populated only if this is a swap coin and we are waiting for
+	// confirmations e.g. when this is the maker's swap and we're in
+	// MakerSwapCast, or this is the takers swap, and we're in TakerSwapCast.
+	Confs *Confirmations `json:"confs,omitempty"`
+}
+
+// NewCoin constructs a new Coin.
+func NewCoin(assetID uint32, coinID []byte) *Coin {
+	return &Coin{
+		ID:       coinID,
+		StringID: coinIDString(assetID, coinID),
+		AssetID:  assetID,
+		Symbol:   unbip(assetID),
+	}
+}
+
+// Confirmations is the confirmation count and confirmation requirement of a
+// SwapCoin.
+type Confirmations struct {
+	Count    int64 `json:"count"`
+	Required int64 `json:"required"`
+}
+
+// SetConfirmations sets the Confs field of the Coin.
+func (c *Coin) SetConfirmations(confs, confReq int64) {
+	c.Confs = &Confirmations{
+		Count:    confs,
+		Required: confReq,
+	}
+}
+
+// matchFromMetaMatch constructs a *Match from an Order and a *MetaMatch.
+// This function is intended for use with inactive matches. For active matches,
+// use matchFromMetaMatchWithConfs.
+func matchFromMetaMatch(ord order.Order, metaMatch *db.MetaMatch) *Match {
+	return matchFromMetaMatchWithConfs(ord, metaMatch, 0, 0, 0, 0)
+}
+
+// matchFromMmatchFromMetaMatchWithConfs constructs a *Match from a *MetaMatch,
+// and sets the confirmations for swaps-in-waiting.
+func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapConfs, swapReq, counterSwapConfs, counterReq int64) *Match {
+	side := metaMatch.Match.Side
+	sell := ord.Trade().Sell
+	status := metaMatch.Match.Status
+
+	fromID, toID := ord.Quote(), ord.Base()
+	if sell {
+		fromID, toID = ord.Base(), ord.Quote()
 	}
 
-	if userMatch.Side == order.Maker {
-		match.Swap = []byte(proof.MakerSwap)
-		match.CounterSwap = []byte(proof.TakerSwap)
-		match.Redeem = []byte(proof.MakerRedeem)
-		match.CounterRedeem = []byte(proof.TakerRedeem)
-	} else {
-		match.Swap = []byte(proof.TakerSwap)
-		match.CounterSwap = []byte(proof.MakerSwap)
-		match.Redeem = []byte(proof.TakerRedeem)
-		match.CounterRedeem = []byte(proof.MakerRedeem)
+	proof := &metaMatch.MetaData.Proof
+
+	swapCoin, counterSwapCoin := proof.MakerSwap, proof.TakerSwap
+	redeemCoin, counterRedeemCoin := proof.MakerRedeem, proof.TakerRedeem
+	if side == order.Taker {
+		swapCoin, counterSwapCoin = proof.TakerSwap, proof.MakerSwap
+		redeemCoin, counterRedeemCoin = proof.TakerRedeem, proof.MakerRedeem
+	}
+
+	var refund, redeem, counterRedeem, swap, counterSwap *Coin
+	if len(proof.RefundCoin) > 0 {
+		refund = NewCoin(fromID, proof.RefundCoin)
+	}
+	if len(swapCoin) > 0 {
+		swap = NewCoin(fromID, swapCoin)
+		if (side == order.Taker && status == order.TakerSwapCast) ||
+			(side == order.Maker && status == order.MakerSwapCast) &&
+				!proof.IsRevoked() && swapReq > 0 {
+
+			swap.SetConfirmations(swapConfs, swapReq)
+		}
+	}
+	if len(counterSwapCoin) > 0 {
+		counterSwap = NewCoin(toID, counterSwapCoin)
+		if (side == order.Maker && status == order.TakerSwapCast) ||
+			(side == order.Taker && status == order.MakerSwapCast) &&
+				!proof.IsRevoked() && counterReq > 0 {
+
+			counterSwap.SetConfirmations(counterSwapConfs, counterReq)
+		}
+	}
+	if len(redeemCoin) > 0 {
+		redeem = NewCoin(toID, redeemCoin)
+	}
+	if len(counterRedeemCoin) > 0 {
+		counterRedeem = NewCoin(fromID, counterRedeemCoin)
+	}
+
+	userMatch, proof := metaMatch.Match, &metaMatch.MetaData.Proof
+	match := &Match{
+		MatchID:       userMatch.MatchID[:],
+		Status:        userMatch.Status,
+		Revoked:       proof.IsRevoked(),
+		Rate:          userMatch.Rate,
+		Qty:           userMatch.Quantity,
+		Side:          userMatch.Side,
+		FeeRate:       userMatch.FeeRateSwap,
+		Stamp:         metaMatch.MetaData.Stamp,
+		IsCancel:      userMatch.Address == "",
+		Swap:          swap,
+		CounterSwap:   counterSwap,
+		Redeem:        redeem,
+		CounterRedeem: counterRedeem,
+		Refund:        refund,
 	}
 
 	return match
@@ -190,7 +275,7 @@ type Order struct {
 	Cancelling   bool              `json:"cancelling"`
 	Canceled     bool              `json:"canceled"`
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
-	FundingCoins []dex.Bytes       `json:"fundingCoins"`
+	FundingCoins []*Coin           `json:"fundingCoins"`
 	LockedAmt    uint64            `json:"lockedamt"`
 	Rate         uint64            `json:"rate"` // limit only
 	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
@@ -223,12 +308,16 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		}
 	}
 
-	fundingCoins := make([]dex.Bytes, 0, len(trade.Coins))
-	for i := range trade.Coins {
-		fundingCoins = append(fundingCoins, []byte(trade.Coins[i]))
+	baseID, quoteID := ord.Base(), ord.Quote()
+	fromID := quoteID
+	if trade.Sell {
+		fromID = baseID
 	}
 
-	baseID, quoteID := ord.Base(), ord.Quote()
+	fundingCoins := make([]*Coin, 0, len(trade.Coins))
+	for i := range trade.Coins {
+		fundingCoins = append(fundingCoins, NewCoin(fromID, trade.Coins[i]))
+	}
 
 	corder := &Order{
 		Host:        metaData.Host,

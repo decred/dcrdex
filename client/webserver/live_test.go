@@ -380,13 +380,17 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	return cords, nil
 }
 
-func utxoID() []byte {
-	vout := uint32(rand.Intn(15))
-	txHash := encode.RandomBytes(32)
+func coreCoin() *core.Coin {
 	b := make([]byte, 36)
-	copy(b[:], txHash)
-	binary.BigEndian.PutUint32(b[32:], vout)
-	return b
+	copy(b[:], encode.RandomBytes(32))
+	binary.BigEndian.PutUint32(b[32:], uint32(rand.Intn(15)))
+	return core.NewCoin(0, b)
+}
+
+func coreSwapCoin() *core.Coin {
+	c := coreCoin()
+	c.SetConfirmations(int64(rand.Intn(3)), 2)
+	return c
 }
 
 func makeCoreOrder() *core.Order {
@@ -423,12 +427,12 @@ func makeCoreOrder() *core.Order {
 	}
 
 	numCoins := rand.Intn(5) + 1
-	fundingCoins := make([]dex.Bytes, 0, numCoins)
+	fundingCoins := make([]*core.Coin, 0, numCoins)
 	for i := 0; i < numCoins; i++ {
 		coinID := make([]byte, 36)
 		copy(coinID[:], encode.RandomBytes(32))
 		coinID[35] = byte(rand.Intn(8))
-		fundingCoins = append(fundingCoins, coinID)
+		fundingCoins = append(fundingCoins, core.NewCoin(0, coinID))
 	}
 
 	status := order.OrderStatus(rand.Intn(int(order.OrderStatusRevoked-1))) + 1
@@ -467,6 +471,8 @@ func makeCoreOrder() *core.Order {
 		if i == numMatches-1 {
 			matchQty = baseQty - (matchQ * (uint64(numMatches) - 1))
 		}
+		status := userMatch.Status
+		side := userMatch.Side
 		match := &core.Match{
 			MatchID: userMatch.MatchID[:],
 			Status:  userMatch.Status,
@@ -476,16 +482,32 @@ func makeCoreOrder() *core.Order {
 			Stamp:   stamp(),
 		}
 
-		if rand.Float32() < 0.75 {
-			match.Swap = utxoID()
-			if rand.Float32() < 0.75 {
-				match.CounterSwap = utxoID()
-				if rand.Float32() < 0.75 {
-					match.Redeem = utxoID()
-					match.CounterRedeem = utxoID()
-				} else if rand.Float32() < 0.2 {
-					match.Refund = utxoID()
-				}
+		if (status >= order.MakerSwapCast && side == order.Maker) ||
+			(status >= order.TakerSwapCast && side == order.Taker) {
+
+			match.Swap = coreSwapCoin()
+		}
+
+		refund := rand.Float32() < 0.1
+		if refund {
+			match.Refund = coreCoin()
+		} else {
+			if (status >= order.TakerSwapCast && side == order.Maker) ||
+				(status >= order.MakerSwapCast && side == order.Taker) {
+
+				match.CounterSwap = coreSwapCoin()
+			}
+
+			if (status >= order.MakerRedeemed && side == order.Maker) ||
+				(status >= order.MatchComplete && side == order.Taker) {
+
+				match.Redeem = coreCoin()
+			}
+
+			if (status >= order.MakerRedeemed && side == order.Taker) ||
+				(status >= order.MatchComplete && side == order.Maker) {
+
+				match.CounterRedeem = coreCoin()
 			}
 		}
 

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -337,7 +336,7 @@ func (ord *orderReader) RedemptionFeesString() string {
 func (ord *orderReader) FundingCoinIDs() []string {
 	ids := make([]string, 0, len(ord.FundingCoins))
 	for i := range ord.FundingCoins {
-		ids = append(ids, decodeCoinID(ord.FromID(), ord.FundingCoins[i]))
+		ids = append(ids, ord.FundingCoins[i].StringID)
 	}
 	return ids
 }
@@ -397,67 +396,6 @@ func (m *matchReader) ToQuantityString() string {
 	return precision8(m.Qty)
 }
 
-// SwapString is the outgoing swap coin ID, formatted according to asset.
-func (m *matchReader) SwapString() string {
-	if len(m.Swap) == 0 {
-		return ""
-	}
-	fromID := m.ord.QuoteID
-	if m.ord.Sell {
-		fromID = m.ord.BaseID
-	}
-	return decodeCoinID(fromID, m.Swap)
-}
-
-// CounterSwapString is the incoming swap coin ID, formatted according to asset.
-func (m *matchReader) CounterSwapString() string {
-	if len(m.CounterSwap) == 0 {
-		return ""
-	}
-	toID := m.ord.BaseID
-	if m.ord.Sell {
-		toID = m.ord.QuoteID
-	}
-	return decodeCoinID(toID, m.CounterSwap)
-}
-
-// RedeemString is the redemption coin ID, formatted according to asset.
-func (m *matchReader) RedeemString() string {
-	if len(m.Redeem) == 0 {
-		return ""
-	}
-	toID := m.ord.BaseID
-	if m.ord.Sell {
-		toID = m.ord.QuoteID
-	}
-	return decodeCoinID(toID, m.Redeem)
-}
-
-// CounterRedeemString is the counter-party's redemption coin ID, formatted
-// according to asset.
-func (m *matchReader) CounterRedeemString() string {
-	if len(m.CounterRedeem) == 0 {
-		return ""
-	}
-	fromID := m.ord.QuoteID
-	if m.ord.Sell {
-		fromID = m.ord.BaseID
-	}
-	return decodeCoinID(fromID, m.CounterRedeem)
-}
-
-// RefundString is the refund coin ID, formatted according to asset.
-func (m *matchReader) RefundString() string {
-	if len(m.Refund) == 0 {
-		return ""
-	}
-	fromID := m.ord.QuoteID
-	if m.ord.Sell {
-		fromID = m.ord.BaseID
-	}
-	return decodeCoinID(fromID, m.Refund)
-}
-
 // OrderPortion is the percent of the order that this match represents, without
 // percent sign.
 func (m *matchReader) OrderPortion() string {
@@ -475,13 +413,52 @@ func (m *matchReader) TimeString() string {
 	return t.Format("Jan 2 2008, 15:04:05 MST")
 }
 
-func decodeCoinID(assetID uint32, coinID []byte) string {
-	cid, err := asset.DecodeCoinID(assetID, coinID)
-	if err != nil {
-		log.Errorf("assetDecodeCoinID error: %v", err)
-		return "invalid coin ID"
+// InSwapCast will be true if the last match step was us broadcasting our swap
+// transaction.
+func (m *matchReader) InSwapCast() bool {
+	if m.Revoked {
+		return false
 	}
-	return cid
+	return (m.Match.Status == order.TakerSwapCast && m.Match.Side == order.Taker) ||
+		(m.Match.Status == order.MakerSwapCast && m.Match.Side == order.Maker)
+}
+
+// SwapConfirmString returns a string indicating the current confirmation
+// progress of the our swap contract, if and only if the counter-party has not
+// yet redeemed the swap, otherwise, and empty string is returned.
+func (m *matchReader) SwapConfirmString() string {
+	if !m.InSwapCast() || m.Swap == nil {
+		return ""
+	}
+	confs := m.Swap.Confs
+	if confs == nil || confs.Required == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
+}
+
+// InCounterSwapCast will be true if the last match step was the counter-party
+// broadcasting their swap transaction.
+func (m *matchReader) InCounterSwapCast() bool {
+	if m.Revoked {
+		return false
+	}
+	return (m.Match.Status == order.MakerSwapCast && m.Match.Side == order.Taker) ||
+		(m.Match.Status == order.TakerSwapCast && m.Match.Side == order.Maker)
+}
+
+// CounterSwapConfirmString returns a string indicating the current confirmation
+// progress of the other party's swap contract, if and only if we have not yet
+// redeemed the swap, otherwise, and empty string is returned.
+func (m *matchReader) CounterSwapConfirmString() string {
+	if !m.InCounterSwapCast() || m.CounterSwap == nil {
+		return ""
+	}
+	confs := m.CounterSwap.Confs
+	if confs == nil || confs.Required == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
 }
 
 func precision8(v uint64) string {

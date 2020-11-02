@@ -4,6 +4,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
@@ -15,6 +16,7 @@ const (
 	NoteTypeFeePayment   = "feepayment"
 	NoteTypeWithdraw     = "withdraw"
 	NoteTypeOrder        = "order"
+	NoteTypeMatch        = "match"
 	NoteTypeEpoch        = "epoch"
 	NoteTypeConnEvent    = "conn"
 	NoteTypeBalance      = "balance"
@@ -45,6 +47,11 @@ func (c *Core) notify(n Notification) {
 	}
 	logFun("notify: %v", n)
 
+	switch nt := n.(type) {
+	case *MatchNote:
+		c.updateCoreMatch(nt)
+	}
+
 	c.noteMtx.RLock()
 	for _, ch := range c.noteChans {
 		select {
@@ -54,6 +61,26 @@ func (c *Core) notify(n Notification) {
 		}
 	}
 	c.noteMtx.RUnlock()
+}
+
+// updateCoreMatch performs a targeted update of a match in the User struct.
+func (c *Core) updateCoreMatch(n *MatchNote) {
+	c.userMtx.Lock()
+	defer c.userMtx.Unlock()
+	xc := c.user.Exchanges[n.Host]
+	mkt := xc.Markets[n.MarketID]
+	for _, cord := range mkt.Orders {
+		if !bytes.Equal(cord.ID, n.OrderID) {
+			continue
+		}
+		for i, m := range cord.Matches {
+			if bytes.Equal(m.MatchID, n.Match.MatchID) {
+				cord.Matches[i] = n.Match
+				return
+			}
+		}
+		cord.Matches = append(cord.Matches, n.Match)
+	}
 }
 
 // NotificationFeed returns a new receiving channel for notifications. The
@@ -152,6 +179,27 @@ func newOrderNote(subject, details string, severity db.Severity, corder *Order) 
 	return &OrderNote{
 		Notification: db.NewNotification(NoteTypeOrder, subject, details, severity),
 		Order:        corder,
+	}
+}
+
+// MatchNote is a notification about a match.
+type MatchNote struct {
+	db.Notification
+	OrderID  dex.Bytes `json:"orderID"`
+	Match    *Match    `json:"match"`
+	Host     string    `json:"host"`
+	MarketID string    `json:"marketID"`
+}
+
+func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
+	oid := t.ID()
+	return &MatchNote{
+		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
+		OrderID:      oid[:],
+		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
+			int64(t.wallets.fromAsset.SwapConf), match.counterConfirms, int64(t.wallets.toAsset.SwapConf)),
+		Host:     t.dc.acct.host,
+		MarketID: marketName(t.Base(), t.Quote()),
 	}
 }
 
