@@ -556,8 +556,8 @@ type getBlockchainInfoResult struct {
 
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
 func (btc *ExchangeWallet) getBlockchainInfo() (*getBlockchainInfoResult, error) {
-	var chainInfo *getBlockchainInfoResult
-	err := btc.wallet.call(methodGetBlockchainInfo, nil, &chainInfo)
+	chainInfo := new(getBlockchainInfoResult)
+	err := btc.wallet.call(methodGetBlockchainInfo, nil, chainInfo)
 	if err != nil {
 		return nil, err
 	}

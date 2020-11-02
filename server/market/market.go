@@ -48,7 +48,7 @@ const (
 	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
 	ErrCancelNotPermitted     = Error("cancel order account does not match targeted order account")
 	ErrTargetNotActive        = Error("target order not active on this market")
-	ErrTargetNotCancelable    = Error("targeted order is not a limit order with immediate time-in-force")
+	ErrTargetNotCancelable    = Error("targeted order is not a limit order with standing time-in-force")
 	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")

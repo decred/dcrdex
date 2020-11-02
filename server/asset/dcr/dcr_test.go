@@ -695,7 +695,7 @@ func testMsgTxRevocation() *testMsgTx {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	dcr := unconnectedDCR(tLogger, dex.Mainnet)
+	dcr := unconnectedDCR(tLogger)
 	dcr.node = &testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())

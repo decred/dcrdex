@@ -83,8 +83,6 @@ type dcrNode interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	// net is the dex.Network.
-	net dex.Network
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -118,7 +116,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(logger, network)
+	dcr := unconnectedDCR(logger)
 	// When the exported constructor is used, the node will be an
 	// rpcclient.Client.
 	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
@@ -505,12 +503,11 @@ func (dcr *Backend) shutdown() {
 
 // unconnectedDCR returns a Backend without a node. The node should be set
 // before use.
-func unconnectedDCR(logger dex.Logger, network dex.Network) *Backend {
+func unconnectedDCR(logger dex.Logger) *Backend {
 	return &Backend{
 		blockCache: newBlockCache(logger),
 		log:        logger,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
-		net:        network,
 	}
 }
 

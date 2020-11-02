@@ -86,8 +86,6 @@ type Backend struct {
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
 	segwit bool
-	// net is the dex.Network.
-	net dex.Network
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result the (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -157,7 +155,7 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 		return nil, fmt.Errorf("error creating %q RPC client: %v", name, err)
 	}
 
-	btc := newBTC(name, segwit, params, logger, client, network)
+	btc := newBTC(name, segwit, params, logger, client)
 	// Setting the client field will enable shutdown
 	btc.client = client
 
@@ -346,7 +344,7 @@ func (btc *Backend) CheckAddress(addr string) bool {
 }
 
 // Create a *Backend and start the block monitor loop.
-func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode, network dex.Network) *Backend {
+func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
 	btc := &Backend{
 		name:        name,
 		blockCache:  newBlockCache(),
@@ -355,7 +353,6 @@ func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.L
 		log:         logger,
 		node:        node,
 		segwit:      segwit,
-		net:         network,
 	}
 	return btc
 }
@@ -416,8 +413,8 @@ type getBlockchainInfoResult struct {
 
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
 func (btc *Backend) getBlockchainInfo() (*getBlockchainInfoResult, error) {
-	var chainInfo *getBlockchainInfoResult
-	err := btc.call(methodGetBlockchainInfo, nil, &chainInfo)
+	chainInfo := new(getBlockchainInfoResult)
+	err := btc.call(methodGetBlockchainInfo, nil, chainInfo)
 	if err != nil {
 		return nil, err
 	}

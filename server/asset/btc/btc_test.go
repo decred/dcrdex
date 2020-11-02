@@ -739,7 +739,7 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 // Make a backend that logs to stdout.
 func testBackend(segwit bool) (*Backend, func()) {
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
-	btc := newBTC("btc", segwit, testParams, logger, &testNode{}, dex.Mainnet)
+	btc := newBTC("btc", segwit, testParams, logger, &testNode{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	shutdown := func() {
