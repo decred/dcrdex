@@ -1929,7 +1929,7 @@ func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secr
 	secretHash := proof.SecretHash
 	wallet := t.wallets.toWallet
 	if !wallet.ValidateSecret(secret, secretHash) {
-		return fmt.Errorf("secret %s received does not hash to the reported secret hash, %s",
+		return fmt.Errorf("secret %x received does not hash to the reported secret hash, %x",
 			secret, secretHash)
 	}
 

@@ -264,6 +264,7 @@ type TDB struct {
 	activeDEXOrders    []*db.MetaOrder
 	matchesForOID      []*db.MetaMatch
 	matchesForOIDErr   error
+	updateMatchChan    chan order.MatchStatus
 	activeMatchOIDs    []order.OrderID
 	activeMatchOIDSErr error
 	lastStatusID       order.OrderID
@@ -349,6 +350,9 @@ func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
 }
 
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
+	if tdb.updateMatchChan != nil {
+		tdb.updateMatchChan <- m.Match.Status
+	}
 	return nil
 }
 
@@ -414,10 +418,18 @@ func (tdb *TDB) Backup() error {
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
-	id       []byte
-	confs    uint32
-	confsErr error
-	val      uint64
+	id        []byte
+	confsMtx  sync.RWMutex
+	confs     uint32
+	confsErr  error
+	confCheck chan struct{}
+	val       uint64
+}
+
+func (c *tCoin) setConfs(confs uint32) {
+	c.confsMtx.Lock()
+	c.confs = confs
+	c.confsMtx.Unlock()
 }
 
 func (c *tCoin) ID() dex.Bytes {
@@ -433,6 +445,13 @@ func (c *tCoin) Value() uint64 {
 }
 
 func (c *tCoin) Confirmations() (uint32, error) {
+	c.confsMtx.RLock()
+	defer c.confsMtx.RUnlock()
+	defer func() {
+		if c.confCheck != nil {
+			c.confCheck <- struct{}{}
+		}
+	}()
 	return c.confs, c.confsErr
 }
 
@@ -503,6 +522,7 @@ type TXCWallet struct {
 	redeemCoins       []dex.Bytes
 	redeemCounter     int
 	redeemErr         error
+	redeemErrChan     chan error
 	badSecret         bool
 	fundedVal         uint64
 	fundedSwaps       uint64
@@ -597,6 +617,11 @@ func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 }
 
 func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
+	defer func() {
+		if w.redeemErrChan != nil {
+			w.redeemErrChan <- w.redeemErr
+		}
+	}()
 	w.redeemCounter++
 	if w.redeemErr != nil {
 		return nil, nil, 0, w.redeemErr
@@ -744,6 +769,7 @@ func newTestRig() *testRig {
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[uint64]*blockWaiter),
 			piSyncers:     make(map[order.OrderID]chan struct{}),
+			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -2564,6 +2590,7 @@ func TestTradeTracking(t *testing.T) {
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeTaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	tBtcWallet.auditInfo = auditInfo
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
@@ -2638,9 +2665,14 @@ func TestTradeTracking(t *testing.T) {
 	if auth.AuditStamp != audit.Time {
 		t.Fatalf("audit time not set")
 	}
+	// There's an async tick that's going to check the swap's confirms. Wait for
+	// that before setting SwapConf and redeemCoins below.
+	<-auditInfo.coin.confCheck
+
 	// Confirming the counter-swap triggers a redemption.
-	auditInfo.coin.confs = tBTC.SwapConf
+	auditInfo.coin.setConfs(tBTC.SwapConf)
 	redeemCoin := encode.RandomBytes(36)
+	//<-tBtcWallet.redeemErrChan
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	tCore.tickAsset(dc, tBTC.ID)
@@ -2700,11 +2732,13 @@ func TestTradeTracking(t *testing.T) {
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("taker's match message error: %v", err)
 	}
+	<-auditInfo.coin.confCheck
 
 	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -2732,7 +2766,7 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("swap broadcast before confirmations")
 	}
 	// Now with the confirmations.
-	auditInfo.coin.confs = tBTC.SwapConf
+	auditInfo.coin.setConfs(tBTC.SwapConf)
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -2763,18 +2797,36 @@ func TestTradeTracking(t *testing.T) {
 	}
 	tBtcWallet.badSecret = false
 
+	tBtcWallet.redeemErrChan = make(chan error, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	err = handleRedemptionRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("redemption message error: %v", err)
 	}
-	checkStatus("taker complete", order.MatchComplete)
+	err = <-tBtcWallet.redeemErrChan
+	if err != nil {
+		t.Fatalf("should have worked, got: %v", err)
+	}
+	// For taker there's one status update to MakerRedeemed on bcast...
+	status := <-rig.db.updateMatchChan
+	if status != order.MakerRedeemed {
+		t.Fatalf("wrong match status wanted %v, got %v", order.MakerRedeemed, status)
+	}
+	// and another to MatchComplete when the 'redeem' request back to the server
+	// succeeds.
+	status = <-rig.db.updateMatchChan
+	if status != order.MatchComplete {
+		t.Fatalf("wrong match status wanted %v, got %v", order.MatchComplete, status)
+	}
 	if !bytes.Equal(proof.MakerRedeem, redemptionCoin) {
 		t.Fatalf("redemption coin ID not logged")
 	}
 	if len(proof.TakerRedeem) == 0 {
 		t.Fatalf("taker redemption not sent")
 	}
+	rig.db.updateMatchChan = nil
+	tBtcWallet.redeemErrChan = nil
 
 	// CANCEL ORDER MATCH
 	//
@@ -3243,6 +3295,7 @@ func TestRefunds(t *testing.T) {
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.coin.confCheck = make(chan struct{}, 1)
 	tBtcWallet.auditErr = nil
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -3250,7 +3303,9 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
-	auditInfo.coin.confs = tBTC.SwapConf
+	<-auditInfo.coin.confCheck
+	// note: there's a noop tick scheduled that we don't care to wait for
+	auditInfo.coin.setConfs(tBTC.SwapConf)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
@@ -4604,7 +4659,7 @@ func TestReconfigureWallet(t *testing.T) {
 			toWallet:   &xcWallet{},
 		},
 		matches: map[order.MatchID]*matchTracker{
-			order.MatchID{}: match,
+			{}: match,
 		},
 	}
 
