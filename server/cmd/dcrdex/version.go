@@ -25,7 +25,7 @@ const (
 	AppName  string = "dcrdex"
 	AppMajor uint   = 0
 	AppMinor uint   = 1
-	AppPatch uint   = 0
+	AppPatch uint   = 1
 )
 
 // go build -v -ldflags "-X main.appPreRelease= -X main.appBuild=$(git rev-parse --short HEAD)"
