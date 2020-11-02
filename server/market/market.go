@@ -797,12 +797,12 @@ func (m *Market) Run(ctx context.Context) {
 			log.Infof("Dropping epoch order %v", oid)
 			if co, ok := ord.(*order.CancelOrder); ok {
 				if err := m.storage.FailCancelOrder(co); err != nil {
-					log.Errorf("Failed set orphaned epoch cancel order %v as executed: %v", oid, err)
+					log.Errorf("Failed to set orphaned epoch cancel order %v as executed: %v", oid, err)
 				}
 				continue
 			}
 			if err := m.storage.ExecuteOrder(ord); err != nil {
-				log.Errorf("Failed set orphaned epoch trade order %v as executed: %v", oid, err)
+				log.Errorf("Failed to set orphaned epoch trade order %v as executed: %v", oid, err)
 			}
 		}
 		m.epochMtx.Unlock()
