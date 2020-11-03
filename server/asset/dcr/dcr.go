@@ -75,6 +75,7 @@ type dcrNode interface {
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
+	GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error)
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching output
@@ -249,6 +250,15 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 	}
 	h := sha256.Sum256(secret)
 	return bytes.Equal(h[:], secretHash)
+}
+
+// Synced is true if the blockchain is ready for action.
+func (dcr *Backend) Synced() (bool, error) {
+	chainInfo, err := dcr.node.GetBlockChainInfo()
+	if err != nil {
+		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
+	}
+	return !chainInfo.InitialBlockDownload && chainInfo.Headers-chainInfo.Blocks <= 1, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -513,6 +523,12 @@ func (dcr *Backend) Run(ctx context.Context) {
 		dcr.shutdown()
 		wg.Done()
 	}()
+
+	_, err := dcr.FeeRate()
+	if err != nil {
+		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
+	}
+
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *chainjson.GetBlockVerboseResult, reorg bool) {

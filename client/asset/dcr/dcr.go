@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -131,6 +132,7 @@ var (
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
 	EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
+	GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(account string, minConfirms int) (*walletjson.GetBalanceResult, error)
@@ -352,6 +354,7 @@ type ExchangeWallet struct {
 	log              dex.Logger
 	acct             string
 	tipChange        func(error)
+	tipAtConnect     int64
 	fallbackFeeRate  uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
@@ -521,6 +524,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for DCR: %v", err)
 	}
+	atomic.StoreInt64(&dcr.tipAtConnect, dcr.currentTip.height)
 
 	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 		walletSemver, nodeSemver, curnet)
@@ -1845,6 +1849,22 @@ func (dcr *ExchangeWallet) shutdown() {
 		dcr.client.Shutdown()
 		dcr.client.WaitForShutdown()
 	}
+}
+
+// SyncStatus is information about the blockchain sync status.
+func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
+	chainInfo, err := dcr.node.GetBlockChainInfo()
+	if err != nil {
+		return false, 0, fmt.Errorf("getblockchaininfo error: %w", err)
+	}
+	toGo := chainInfo.Headers - chainInfo.Blocks
+	if chainInfo.InitialBlockDownload || toGo > 1 {
+		ogTip := atomic.LoadInt64(&dcr.tipAtConnect)
+		totalToSync := chainInfo.Headers - ogTip
+		progress := 1 - (float32(toGo) / float32(totalToSync))
+		return false, progress, nil
+	}
+	return true, 1, nil
 }
 
 // Combines the RPC type with the spending input information.

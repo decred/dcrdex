@@ -232,19 +232,20 @@ var Easing = {
 /* WalletIcons are used for controlling wallets in various places. */
 export class WalletIcons {
   constructor (box) {
-    const stateElement = (row, name) => row.querySelector(`[data-state=${name}]`)
+    const stateElement = (name) => box.querySelector(`[data-state=${name}]`)
     this.icons = {}
-    this.icons.sleeping = stateElement(box, 'sleeping')
-    this.icons.locked = stateElement(box, 'locked')
-    this.icons.unlocked = stateElement(box, 'unlocked')
-    this.icons.nowallet = stateElement(box, 'nowallet')
-    this.status = stateElement(box, 'status')
+    this.icons.sleeping = stateElement('sleeping')
+    this.icons.locked = stateElement('locked')
+    this.icons.unlocked = stateElement('unlocked')
+    this.icons.nowallet = stateElement('nowallet')
+    this.icons.syncing = stateElement('syncing')
+    this.status = stateElement('status')
   }
 
   /* sleeping sets the icons to indicate that the wallet is not connected. */
   sleeping () {
     const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.nowallet)
+    Doc.hide(i.locked, i.unlocked, i.nowallet, i.syncing)
     Doc.show(i.sleeping)
     if (this.status) this.status.textContent = 'off'
   }
@@ -273,13 +274,26 @@ export class WalletIcons {
   /* sleeping sets the icons to indicate that no wallet exists. */
   nowallet () {
     const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.sleeping)
+    Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing)
     Doc.show(i.nowallet)
     if (this.status) this.status.textContent = 'no wallet'
   }
 
+  setSyncing (wallet) {
+    const icon = this.icons.syncing
+    if (!wallet || !wallet.running) {
+      Doc.hide(icon)
+      return
+    }
+    if (!wallet.synced) {
+      Doc.show(icon)
+      icon.dataset.tooltip = `wallet is ${(wallet.syncProgress * 100).toFixed(1)}% synced`
+    } else Doc.hide(icon)
+  }
+
   /* reads the core.Wallet state and sets the icon visibility. */
   readWallet (wallet) {
+    this.setSyncing(wallet)
     switch (true) {
       case (!wallet):
         this.nowallet()

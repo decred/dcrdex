@@ -421,6 +421,7 @@ func (a *TAsset) CheckAddress(string) bool                        { return true 
 func (a *TAsset) Run(context.Context)                             {}
 func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
 func (a *TAsset) VerifyUnspentCoin(coinID []byte) error           { return nil }
+func (a *TAsset) Synced() (bool, error)                           { return true, nil }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()

@@ -155,4 +155,7 @@ var templateFuncs = template.FuncMap{
 			return "off"
 		}
 	},
+	"x100": func(v float32) float32 {
+		return v * 100
+	},
 }

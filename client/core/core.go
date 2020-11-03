@@ -52,6 +52,9 @@ var (
 	aYear = time.Hour * 24 * 365
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
+	// When waiting for a wallet to sync, a SyncStatus check will be performed
+	// ever syncTickerPeriod. var instead of const for testing purposes.
+	syncTickerPeriod = 10 * time.Second
 )
 
 // dexConnection is the websocket connection and the DEX configuration.
@@ -1031,13 +1034,58 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
+func (c *Core) connectWallet(w *xcWallet) error {
+	err := w.Connect(c.ctx)
+	if err != nil {
+		return newError(walletErr, "error connecting %s wallet: %v", unbip(w.AssetID), err)
+	}
+	// If the wallet is not synced, start a loop to check the sync status until
+	// it is.
+	if !w.synced {
+		// If the wallet is shut down before sync is complete, exit the syncer
+		// loop.
+		innerCtx, cancel := context.WithCancel(c.ctx)
+		go func() {
+			w.connector.Wait()
+			cancel()
+		}()
+		// The syncer loop.
+		go func() {
+			ticker := time.NewTicker(syncTickerPeriod)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					synced, progress, err := w.SyncStatus()
+					if err != nil {
+						c.log.Errorf("error monitoring sync status for %s", unbip(w.AssetID))
+						return
+					}
+					w.mtx.Lock()
+					w.synced = synced
+					w.syncProgress = progress
+					w.mtx.Unlock()
+					c.notify(newWalletStateNote(w.state()))
+					if synced {
+						return
+					}
+
+				case <-innerCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+	return nil
+}
+
 // Connect to the wallet if not already connected. Unlock the wallet if not
 // already unlocked.
 func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
 	if !wallet.connected() {
-		err := wallet.Connect(c.ctx)
+		err := c.connectWallet(wallet)
 		if err != nil {
-			return newError(walletErr, "error connecting %s wallet: %v", unbip(wallet.AssetID), err)
+			return err
 		}
 	}
 	if !wallet.unlocked() {
@@ -2423,15 +2471,28 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if err != nil {
 		return nil, 0, err
 	}
-
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
-	err = c.connectAndUnlock(crypter, fromWallet)
-	if err != nil {
-		return nil, 0, fmt.Errorf("%s connectAndUnlock error: %w", wallets.fromAsset.Symbol, err)
+
+	prepareWallet := func(w *xcWallet) error {
+		err := c.connectAndUnlock(crypter, w)
+		if err != nil {
+			return fmt.Errorf("%s connectAndUnlock error: %w", wallets.fromAsset.Symbol, err)
+		}
+		w.mtx.RLock()
+		defer w.mtx.RUnlock()
+		if !w.synced {
+			return fmt.Errorf("%s still syncing. progress = %.2f", unbip(w.AssetID), w.syncProgress)
+		}
+		return nil
 	}
-	err = c.connectAndUnlock(crypter, toWallet)
+
+	err = prepareWallet(fromWallet)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s connectAndUnlock error: %w", wallets.toAsset.Symbol, err)
+		return nil, 0, err
+	}
+	err = prepareWallet(toWallet)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	// Get an address for the swap contract.

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -39,6 +40,7 @@ const (
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
 	methodGetNetworkInfo    = "getnetworkinfo"
+	methodGetBlockchainInfo = "getblockchaininfo"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
 
@@ -348,6 +350,7 @@ type ExchangeWallet struct {
 	log               dex.Logger
 	symbol            string
 	tipChange         func(error)
+	tipAtConnect      int64
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	redeemConfTarget  uint64
@@ -519,6 +522,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %v", btc.symbol, err)
 	}
+	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -539,6 +543,41 @@ func (btc *ExchangeWallet) shutdown() {
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
+}
+
+// getBlockchainInfoResult models the data returned from the getblockchaininfo
+// command.
+type getBlockchainInfoResult struct {
+	Blocks               int64  `json:"blocks"`
+	Headers              int64  `json:"headers"`
+	BestBlockHash        string `json:"bestblockhash"`
+	InitialBlockDownload bool   `json:"initialblockdownload"`
+}
+
+// getBlockchainInfo sends the getblockchaininfo request and returns the result.
+func (btc *ExchangeWallet) getBlockchainInfo() (*getBlockchainInfoResult, error) {
+	chainInfo := new(getBlockchainInfoResult)
+	err := btc.wallet.call(methodGetBlockchainInfo, nil, chainInfo)
+	if err != nil {
+		return nil, err
+	}
+	return chainInfo, nil
+}
+
+// SyncStatus is information about the blockchain sync status.
+func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
+	chainInfo, err := btc.getBlockchainInfo()
+	if err != nil {
+		return false, 0, fmt.Errorf("getblockchaininfo error: %w", err)
+	}
+	toGo := chainInfo.Headers - chainInfo.Blocks
+	if chainInfo.InitialBlockDownload || toGo > 1 {
+		ogTip := atomic.LoadInt64(&btc.tipAtConnect)
+		totalToSync := chainInfo.Headers - ogTip
+		progress := 1 - (float32(toGo) / float32(totalToSync))
+		return false, progress, nil
+	}
+	return true, 1, nil
 }
 
 // Balance returns the total available funds in the wallet. Part of the
