@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -738,12 +739,23 @@ func TestMarket_Run(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
+
+	// Check that start is delayed by an unsynced backend. Tell the Market to
+	// start
+	atomic.StoreUint32(&oRig.dcr.synced, 0)
+	nowEpochIdx := encode.UnixMilli(time.Now())/epochDurationMSec + 1
+
+	unsyncedEpochIdx := nowEpochIdx + 1
+	unsyncedEpochTime := encode.UnixTimeMilli(unsyncedEpochIdx * epochDurationMSec)
+
+	startEpochIdx := unsyncedEpochIdx + 1
+	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		mkt.Start(ctx, startEpochIdx)
+		mkt.Start(ctx, unsyncedEpochIdx)
 	}()
 
 	// Make an order for the first epoch.
@@ -828,11 +840,21 @@ func TestMarket_Run(t *testing.T) {
 		t.Fatalf("Market should not be running yet")
 	}
 
-	mkt.waitForEpochOpen()
+	halfEpoch := time.Duration(epochDurationMSec/2) * time.Millisecond
 
-	mktStatus = mkt.Status()
-	if !mktStatus.Running {
-		t.Fatalf("Market should be running now")
+	<-time.After(time.Until(unsyncedEpochTime.Add(halfEpoch)))
+
+	if mkt.Running() {
+		t.Errorf("market running with an unsynced backend")
+	}
+
+	atomic.StoreUint32(&oRig.dcr.synced, 1)
+
+	<-time.After(time.Until(startEpochTime.Add(halfEpoch)))
+	<-storage.epochInserted
+
+	if !mkt.Running() {
+		t.Errorf("market not running after backend sync finished")
 	}
 
 	// Submit again
@@ -912,8 +934,8 @@ func TestMarket_Run(t *testing.T) {
 	err = mkt.SubmitOrder(&coRecordWrongAccount)
 	if err == nil {
 		t.Errorf("An invalid order was processed, but it should not have been.")
-	} else if !errors.Is(err, ErrInvalidCancelOrder) {
-		t.Errorf(`expected ErrInvalidCancelOrder ("%v"), got "%v"`, ErrInvalidCancelOrder, err)
+	} else if !errors.Is(err, ErrCancelNotPermitted) {
+		t.Errorf(`expected ErrCancelNotPermitted ("%v"), got "%v"`, ErrCancelNotPermitted, err)
 	}
 
 	// Valid cancel order
@@ -968,9 +990,7 @@ func TestMarket_Run(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		mkt.Run(ctx) // begin on next epoch start
-		// /startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-		//mkt.Start(ctx, startEpochIdx)
+		mkt.Run(ctx)
 	}()
 	mkt.waitForEpochOpen()
 

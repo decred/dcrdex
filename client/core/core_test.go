@@ -536,20 +536,26 @@ type TXCWallet struct {
 	fundingCoinErr    error
 	lockErr           error
 	changeCoin        *tCoin
+	syncStatus        func() (bool, float32, error)
+	connectWG         *sync.WaitGroup
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
 		changeCoin: &tCoin{id: encode.RandomBytes(36)},
+		syncStatus: func() (synced bool, progress float32, err error) { return true, 1, nil },
+		connectWG:  &sync.WaitGroup{},
 	}
 	return &xcWallet{
-		Wallet:    w,
-		connector: dex.NewConnectionMaster(w),
-		AssetID:   assetID,
-		lockTime:  time.Now().Add(time.Hour),
-		hookedUp:  true,
-		dbID:      encode.Uint32Bytes(assetID),
-		encPW:     []byte{0x01},
+		Wallet:       w,
+		connector:    dex.NewConnectionMaster(w),
+		AssetID:      assetID,
+		lockTime:     time.Now().Add(time.Hour),
+		hookedUp:     true,
+		dbID:         encode.Uint32Bytes(assetID),
+		encPW:        []byte{0x01},
+		synced:       true,
+		syncProgress: 1,
 	}, w
 }
 
@@ -558,7 +564,7 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 }
 
 func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	return &sync.WaitGroup{}, w.connectErr
+	return w.connectWG, w.connectErr
 }
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
@@ -685,6 +691,10 @@ func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
 
 func (w *TXCWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return !w.badSecret
+}
+
+func (w *TXCWallet) SyncStatus() (synced bool, progress float32, err error) {
+	return w.syncStatus()
 }
 
 func (w *TXCWallet) setConfs(confs uint32) {
@@ -2128,6 +2138,15 @@ func TestTrade(t *testing.T) {
 	tDcrWallet.signCoinErr = tErr
 	ensureErr("signature error")
 	tDcrWallet.signCoinErr = nil
+
+	// Sync-in-progress error
+	dcrWallet.synced = false
+	ensureErr("base not synced")
+	dcrWallet.synced = true
+
+	btcWallet.synced = false
+	ensureErr("quote not synced")
+	btcWallet.synced = true
 
 	// LimitRoute error
 	rig.ws.reqErr = tErr
@@ -5551,5 +5570,59 @@ func TestSuspectTrades(t *testing.T) {
 	}
 	if tBtcWallet.redeemCounter != 3 {
 		t.Fatalf("suspect redeem matches not run or not run separately. expected 2 new calls to Redeem, got %d", tBtcWallet.redeemCounter-1)
+	}
+}
+
+func TestWalletSyncing(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	noteFeed := tCore.NotificationFeed()
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tDcrWallet.connectWG.Add(1)
+	defer tDcrWallet.connectWG.Done()
+	dcrWallet.synced = false
+	dcrWallet.syncProgress = 0
+	dcrWallet.Connect(tCtx)
+
+	tStart := time.Now()
+	testDuration := 100 * time.Millisecond
+	syncTickerPeriod = 10 * time.Millisecond
+
+	tDcrWallet.syncStatus = func() (bool, float32, error) {
+		progress := float32(float64(time.Since(tStart)) / float64(testDuration))
+		if progress >= 1 {
+			return true, 1, nil
+		}
+		return false, progress, nil
+	}
+
+	err := tCore.connectWallet(dcrWallet)
+	if err != nil {
+		t.Fatalf("connectWallet error: %v", err)
+	}
+
+	timeout := time.NewTimer(time.Second).C
+	var progressNotes int
+out:
+	for {
+		select {
+		case note := <-noteFeed:
+			walletNote, ok := note.(*WalletStateNote)
+			if !ok {
+				continue
+			}
+			if walletNote.Wallet.Synced {
+				break out
+			}
+			progressNotes++
+		case <-timeout:
+			t.Fatalf("timed out waiting for synced wallet note. Received %d progress notes", progressNotes)
+		}
+	}
+	// Should get 9 notes, but just make sure we get at least half of them to
+	// avoid github vm false positives.
+	if progressNotes < 5 {
+		t.Fatalf("expected 23 progress notes, got %d", progressNotes)
 	}
 }

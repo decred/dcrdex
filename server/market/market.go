@@ -46,7 +46,9 @@ const (
 	ErrQuantityTooHigh        = Error("order quantity exceeds user limit")
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrTooManyCancelOrders    = Error("too many cancel orders in current epoch")
-	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
+	ErrCancelNotPermitted     = Error("cancel order account does not match targeted order account")
+	ErrTargetNotActive        = Error("target order not active on this market")
+	ErrTargetNotCancelable    = Error("targeted order is not a limit order with standing time-in-force")
 	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
@@ -57,6 +59,7 @@ type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	CheckUnspent(asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
+	ChainsSynced(base, quote uint32) (bool, error)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -599,10 +602,13 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 // means: (1) an order in the book or epoch queue, (2) type limit with
 // time-in-force standing (implied for book orders), and (3) AccountID field
 // matching the provided account ID.
-func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
+func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, error) {
 	// All book orders are standing limit orders.
 	if lo := m.book.Order(oid); lo != nil {
-		return lo.AccountID == aid
+		if lo.AccountID == aid {
+			return true, nil
+		}
+		return false, ErrCancelNotPermitted
 	}
 
 	// Check the active epochs (includes current and next).
@@ -610,10 +616,21 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
 	ord := m.epochOrders[oid]
 	m.epochMtx.RUnlock()
 
-	if lo, ok := ord.(*order.LimitOrder); ok {
-		return lo.Force == order.StandingTiF && lo.AccountID == aid
+	if ord == nil {
+		return false, ErrTargetNotActive
 	}
-	return false
+
+	lo, ok := ord.(*order.LimitOrder)
+	if !ok {
+		return false, ErrTargetNotCancelable
+	}
+	if lo.Force != order.StandingTiF {
+		return false, ErrTargetNotCancelable
+	}
+	if lo.AccountID != aid {
+		return false, ErrCancelNotPermitted
+	}
+	return true, nil
 }
 
 func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
@@ -893,19 +910,27 @@ func (m *Market) Run(ctx context.Context) {
 		m.activeEpochIdx = currentEpoch.Epoch
 
 		if !running {
-			// Open up SubmitOrderAsync.
-			close(m.running)
-			running = true
-			log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
-				currentEpoch.Epoch, epochDuration)
-			// Signal to the book router if this is a resume.
-			if m.suspendEpochIdx != 0 {
-				notifyChan <- &updateSignal{
-					action: resumeAction,
-					data: sigDataResume{
-						epochIdx: currentEpoch.Epoch,
-						// TODO: signal config or new config
-					},
+			// Check that both blockchains are synced before actually starting.
+			synced, err := m.swapper.ChainsSynced(m.marketInfo.Base, m.marketInfo.Quote)
+			if err != nil {
+				log.Errorf("Not starting %s market because of ChainsSynced error: %v", m.marketInfo.Name, err)
+			} else if !synced {
+				log.Debugf("Delaying start of %s market because chains aren't synced", m.marketInfo.Name)
+			} else {
+				// Open up SubmitOrderAsync.
+				close(m.running)
+				running = true
+				log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
+					currentEpoch.Epoch, epochDuration)
+				// Signal to the book router if this is a resume.
+				if m.suspendEpochIdx != 0 {
+					notifyChan <- &updateSignal{
+						action: resumeAction,
+						data: sigDataResume{
+							epochIdx: currentEpoch.Epoch,
+							// TODO: signal config or new config
+						},
+					}
 				}
 			}
 		}
@@ -1177,10 +1202,11 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		// Verify that the target order is on the books or in the epoch queue,
 		// and that the account of the CancelOrder is the same as the account of
 		// the target order.
-		if !m.CancelableBy(co.TargetOrderID, co.AccountID) {
-			log.Debugf("Cancel order %v (account=%v) does not own target order %v.",
-				co, co.AccountID, co.TargetOrderID)
-			errChan <- ErrInvalidCancelOrder
+		cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID)
+		if !cancelable {
+			log.Debugf("Cancel order %v (account=%v) target order %v: %v",
+				co, co.AccountID, co.TargetOrderID, err)
+			errChan <- err
 			return nil
 		}
 	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.

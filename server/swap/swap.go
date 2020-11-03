@@ -530,6 +530,30 @@ func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (a
 	return
 }
 
+// ChainsSynced will return true if both specified asset's backends are synced.
+func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
+	b, found := s.coins[base]
+	if !found {
+		return false, fmt.Errorf("No backend found for %d", base)
+	}
+	baseSynced, err := b.Backend.Synced()
+	if err != nil {
+		return false, fmt.Errorf("Error checking sync status for %d", base)
+	}
+	if !baseSynced {
+		return false, nil
+	}
+	q, found := s.coins[quote]
+	if !found {
+		return false, fmt.Errorf("No backend found for %d", base)
+	}
+	quoteSynced, err := q.Backend.Synced()
+	if err != nil {
+		return false, fmt.Errorf("Error checking sync status for %d", base)
+	}
+	return quoteSynced, nil
+}
+
 func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// State binary version check should be done when State is loaded.
 

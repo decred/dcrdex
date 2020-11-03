@@ -17,15 +17,17 @@ import (
 // xcWallet is a wallet.
 type xcWallet struct {
 	asset.Wallet
-	connector *dex.ConnectionMaster
-	AssetID   uint32
-	mtx       sync.RWMutex
-	lockTime  time.Time
-	hookedUp  bool
-	balance   *WalletBalance
-	encPW     []byte
-	address   string
-	dbID      []byte
+	connector    *dex.ConnectionMaster
+	AssetID      uint32
+	mtx          sync.RWMutex
+	lockTime     time.Time
+	hookedUp     bool
+	balance      *WalletBalance
+	encPW        []byte
+	address      string
+	dbID         []byte
+	synced       bool
+	syncProgress float32
 }
 
 // Unlock unlocks the wallet.
@@ -74,14 +76,16 @@ func (w *xcWallet) state() *WalletState {
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
 	return &WalletState{
-		Symbol:    unbip(w.AssetID),
-		AssetID:   w.AssetID,
-		Open:      w.unlocked(),
-		Running:   w.connector.On(),
-		Balance:   w.balance,
-		Address:   w.address,
-		Units:     winfo.Units,
-		Encrypted: len(w.encPW) > 0,
+		Symbol:       unbip(w.AssetID),
+		AssetID:      w.AssetID,
+		Open:         w.unlocked(),
+		Running:      w.connector.On(),
+		Balance:      w.balance,
+		Address:      w.address,
+		Units:        winfo.Units,
+		Encrypted:    len(w.encPW) > 0,
+		Synced:       w.synced,
+		SyncProgress: w.syncProgress,
 	}
 }
 
@@ -113,8 +117,14 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	synced, progress, err := w.SyncStatus()
+	if err != nil {
+		return err
+	}
 	w.mtx.Lock()
 	w.hookedUp = true
+	w.synced = synced
+	w.syncProgress = progress
 	w.mtx.Unlock()
 	return nil
 }

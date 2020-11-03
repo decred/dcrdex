@@ -176,7 +176,10 @@ func cleanTestChain() {
 }
 
 // A stub to replace rpcclient.Client for offline testing.
-type testNode struct{}
+type testNode struct {
+	blockchainInfo    *chainjson.GetBlockChainInfoResult
+	blockchainInfoErr error
+}
 
 // Store utxo info as a concatenated string hash:vout.
 func txOutID(txHash *chainhash.Hash, index uint32) string {
@@ -185,14 +188,14 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 
 const optimalFeeRate uint64 = 22
 
-func (testNode) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
+func (*testNode) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
 	optimalRate := float64(optimalFeeRate) * 1e-5
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
+func (*testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
@@ -202,7 +205,7 @@ func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjs
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
+func (*testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	tx, found := testChain.txRaws[*txHash]
@@ -213,7 +216,7 @@ func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxR
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+func (*testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	block, found := testChain.blocks[*blockHash]
@@ -224,7 +227,7 @@ func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*cha
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (*testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	hash, found := testChain.hashes[blockHeight]
@@ -235,7 +238,7 @@ func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBestBlockHash() (*chainhash.Hash, error) {
+func (*testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
 	if len(testChain.hashes) == 0 {
@@ -248,6 +251,13 @@ func (testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 		}
 	}
 	return testChain.hashes[bestHeight], nil
+}
+
+func (t *testNode) GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error) {
+	if t.blockchainInfoErr != nil {
+		return nil, t.blockchainInfoErr
+	}
+	return t.blockchainInfo, nil
 }
 
 // Create a chainjson.GetTxOutResult such as is returned from GetTxOut.
@@ -686,7 +696,7 @@ func testMsgTxRevocation() *testMsgTx {
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
 	dcr := unconnectedDCR(tLogger)
-	dcr.node = testNode{}
+	dcr.node = &testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -1568,4 +1578,40 @@ func TestDriver_DecodeCoinID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSynced(t *testing.T) {
+	dcr, shutdown := testBackend()
+	defer shutdown()
+	tNode := dcr.node.(*testNode)
+	tNode.blockchainInfo = &chainjson.GetBlockChainInfoResult{
+		Headers: 100,
+		Blocks:  99,
+	}
+	synced, err := dcr.Synced()
+	if err != nil {
+		t.Fatalf("Synced error: %v", err)
+	}
+	if !synced {
+		t.Fatalf("not synced when should be synced")
+	}
+
+	tNode.blockchainInfo = &chainjson.GetBlockChainInfoResult{
+		Headers: 100,
+		Blocks:  50,
+	}
+	synced, err = dcr.Synced()
+	if err != nil {
+		t.Fatalf("Synced error: %v", err)
+	}
+	if synced {
+		t.Fatalf("synced when shouldn't be synced")
+	}
+
+	tNode.blockchainInfoErr = fmt.Errorf("test error")
+	_, err = dcr.Synced()
+	if err == nil {
+		t.Fatalf("getblockchaininfo error not propagated")
+	}
+	tNode.blockchainInfoErr = nil
 }

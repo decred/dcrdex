@@ -150,6 +150,8 @@ type Wallet interface {
 	Withdraw(address string, value uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
+	// SyncStatus is information about the blockchain sync status.
+	SyncStatus() (synced bool, progress float32, err error)
 }
 
 // Balance is categorized information about a wallet's balance.

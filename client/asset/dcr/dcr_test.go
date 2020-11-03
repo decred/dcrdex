@@ -173,41 +173,43 @@ func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
 }
 
 type tRPCClient struct {
-	sendRawHash    *chainhash.Hash
-	sendRawErr     error
-	sentRawTx      *wire.MsgTx
-	txOutRes       map[outPoint]*chainjson.GetTxOutResult
-	txOutErr       error
-	bestBlockErr   error
-	mempool        []*chainhash.Hash
-	mempoolErr     error
-	rawTx          *chainjson.TxRawResult
-	rawTxErr       error
-	unspent        []walletjson.ListUnspentResult
-	unspentErr     error
-	balanceResult  *walletjson.GetBalanceResult
-	balanceErr     error
-	lockUnspentErr error
-	changeAddr     dcrutil.Address
-	changeAddrErr  error
-	newAddr        dcrutil.Address
-	newAddrErr     error
-	signFunc       func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
-	privWIF        *dcrutil.WIF
-	privWIFErr     error
-	walletTx       *walletjson.GetTransactionResult
-	walletTxErr    error
-	lockErr        error
-	passErr        error
-	disconnected   bool
-	rawRes         map[string]json.RawMessage
-	rawErr         map[string]error
-	blockchainMtx  sync.RWMutex
-	verboseBlocks  map[string]*chainjson.GetBlockVerboseResult
-	mainchain      map[int64]*chainhash.Hash
-	lluCoins       []walletjson.ListUnspentResult // Returned from ListLockUnspent
-	lockedCoins    []*wire.OutPoint               // Last submitted to LockUnspent
-	listLockedErr  error
+	sendRawHash       *chainhash.Hash
+	sendRawErr        error
+	sentRawTx         *wire.MsgTx
+	txOutRes          map[outPoint]*chainjson.GetTxOutResult
+	txOutErr          error
+	bestBlockErr      error
+	mempool           []*chainhash.Hash
+	mempoolErr        error
+	rawTx             *chainjson.TxRawResult
+	rawTxErr          error
+	unspent           []walletjson.ListUnspentResult
+	unspentErr        error
+	balanceResult     *walletjson.GetBalanceResult
+	balanceErr        error
+	lockUnspentErr    error
+	changeAddr        dcrutil.Address
+	changeAddrErr     error
+	newAddr           dcrutil.Address
+	newAddrErr        error
+	signFunc          func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
+	privWIF           *dcrutil.WIF
+	privWIFErr        error
+	walletTx          *walletjson.GetTransactionResult
+	walletTxErr       error
+	lockErr           error
+	passErr           error
+	disconnected      bool
+	rawRes            map[string]json.RawMessage
+	rawErr            map[string]error
+	blockchainMtx     sync.RWMutex
+	verboseBlocks     map[string]*chainjson.GetBlockVerboseResult
+	mainchain         map[int64]*chainhash.Hash
+	lluCoins          []walletjson.ListUnspentResult // Returned from ListLockUnspent
+	lockedCoins       []*wire.OutPoint               // Last submitted to LockUnspent
+	listLockedErr     error
+	blockchainInfo    *chainjson.GetBlockChainInfoResult
+	blockchainInfoErr error
 }
 
 func defaultSignFunc(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil }
@@ -234,6 +236,10 @@ func (c *tRPCClient) EstimateSmartFee(confirmations int64, mode chainjson.Estima
 	optimalRate := float64(optimalFeeRate) * 1e-5
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
+}
+
+func (c *tRPCClient) GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error) {
+	return c.blockchainInfo, c.blockchainInfoErr
 }
 
 func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
@@ -1826,5 +1832,48 @@ func TestSendEdges(t *testing.T) {
 		} else if len(tx.TxOut) == 2 && !tt.expChange {
 			t.Fatalf("%s: change output added for dust. Output value = %d", tt.name, tx.TxOut[1].Value)
 		}
+	}
+}
+
+func TestSyncStatus(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
+		Headers: 100,
+		Blocks:  99,
+	}
+
+	synced, progress, err := wallet.SyncStatus()
+	if err != nil {
+		t.Fatalf("SyncStatus error (synced expected): %v", err)
+	}
+	if !synced {
+		t.Fatalf("synced = false for 1 block to go")
+	}
+	if progress < 1 {
+		t.Fatalf("progress not complete when loading last block")
+	}
+
+	node.blockchainInfoErr = tErr
+	_, _, err = wallet.SyncStatus()
+	if err == nil {
+		t.Fatalf("SyncStatus error not propagated")
+	}
+	node.blockchainInfoErr = nil
+
+	wallet.tipAtConnect = 100
+	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
+		Headers: 200,
+		Blocks:  150,
+	}
+	synced, progress, err = wallet.SyncStatus()
+	if err != nil {
+		t.Fatalf("SyncStatus error (half-synced): %v", err)
+	}
+	if synced {
+		t.Fatalf("synced = true for 50 blocks to go")
+	}
+	if progress > 0.500001 || progress < 0.4999999 {
+		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
 	}
 }
