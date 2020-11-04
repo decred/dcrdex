@@ -18,10 +18,11 @@ import (
 
 type marketConfig struct {
 	Markets []*struct {
-		Base     string  `json:"base"`
-		Quote    string  `json:"quote"`
-		Duration uint64  `json:"epochDuration"`
-		MBBuffer float64 `json:"marketBuyBuffer"`
+		Base           string  `json:"base"`
+		Quote          string  `json:"quote"`
+		Duration       uint64  `json:"epochDuration"`
+		MBBuffer       float64 `json:"marketBuyBuffer"`
+		BookedLotLimit uint32  `json:"userBookedLotLimit"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -125,6 +126,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 			baseConf.LotSize, mktConf.Duration, mktConf.MBBuffer)
 		if err != nil {
 			return nil, nil, err
+		}
+		if mktConf.BookedLotLimit != 0 {
+			mkt.BookedLotLimit = mktConf.BookedLotLimit
 		}
 		markets = append(markets, mkt)
 	}

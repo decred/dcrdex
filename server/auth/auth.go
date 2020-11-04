@@ -182,10 +182,6 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
-	anarchy        bool
-	freeCancels    bool
-	banScore       uint32
-	cancelThresh   float64
 	storage        Storage
 	signer         Signer
 	regFee         uint64
@@ -193,6 +189,13 @@ type AuthManager struct {
 	feeConfs       int64
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
+
+	anarchy           bool
+	freeCancels       bool
+	banScore          uint32
+	cancelThresh      float64
+	initTakerLotLimit int64
+	absTakerLotLimit  int64
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
@@ -328,7 +331,19 @@ type Config struct {
 	FreeCancels     bool
 	// BanScore defines the penalty score when an account gets closed.
 	BanScore uint32
+
+	// InitTakerLotLimit is the number of lots per-market a new user is
+	// permitted to have in active orders and swaps.
+	InitTakerLotLimit uint32
+	// AbsTakerLotLimit is a cap on the per-market taker lot limit regardless of
+	// how good the user's swap history is.
+	AbsTakerLotLimit uint32
 }
+
+const (
+	defaultInitTakerLotLimit = 6
+	defaultAbsTakerLotLimit  = 375
+)
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
@@ -337,25 +352,35 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	if banScore == 0 {
 		banScore = defaultBanScore
 	}
+	initTakerLotLimit := int64(cfg.InitTakerLotLimit)
+	if initTakerLotLimit == 0 {
+		initTakerLotLimit = defaultInitTakerLotLimit
+	}
+	absTakerLotLimit := int64(cfg.AbsTakerLotLimit)
+	if absTakerLotLimit == 0 {
+		absTakerLotLimit = defaultAbsTakerLotLimit
+	}
 	auth := &AuthManager{
-		anarchy:        cfg.Anarchy,
-		freeCancels:    cfg.FreeCancels || cfg.Anarchy,
-		banScore:       banScore,
-		users:          make(map[account.AccountID]*clientInfo),
-		conns:          make(map[uint64]*clientInfo),
-		unbookers:      make(map[account.AccountID]*time.Timer),
-		miaUserTimeout: cfg.MiaUserTimeout,
-		unbookFun:      cfg.UserUnbooker,
-		storage:        cfg.Storage,
-		signer:         cfg.Signer,
-		regFee:         cfg.RegistrationFee,
-		checkFee:       cfg.FeeChecker,
-		feeConfs:       cfg.FeeConfs,
-		cancelThresh:   cfg.CancelThreshold,
-		latencyQ:       wait.NewTickerQueue(recheckInterval),
-		feeWaiterIdx:   make(map[account.AccountID]struct{}),
-		matchOutcomes:  make(map[account.AccountID]*latestMatchOutcomes),
-		preimgOutcomes: make(map[account.AccountID]*latestPreimageOutcomes),
+		storage:           cfg.Storage,
+		signer:            cfg.Signer,
+		regFee:            cfg.RegistrationFee,
+		checkFee:          cfg.FeeChecker,
+		feeConfs:          cfg.FeeConfs,
+		miaUserTimeout:    cfg.MiaUserTimeout,
+		unbookFun:         cfg.UserUnbooker,
+		anarchy:           cfg.Anarchy,
+		freeCancels:       cfg.FreeCancels || cfg.Anarchy,
+		banScore:          banScore,
+		cancelThresh:      cfg.CancelThreshold,
+		initTakerLotLimit: initTakerLotLimit,
+		absTakerLotLimit:  absTakerLotLimit,
+		latencyQ:          wait.NewTickerQueue(recheckInterval),
+		users:             make(map[account.AccountID]*clientInfo),
+		conns:             make(map[uint64]*clientInfo),
+		unbookers:         make(map[account.AccountID]*time.Timer),
+		feeWaiterIdx:      make(map[account.AccountID]struct{}),
+		matchOutcomes:     make(map[account.AccountID]*latestMatchOutcomes),
+		preimgOutcomes:    make(map[account.AccountID]*latestPreimageOutcomes),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -444,6 +469,9 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 // Run runs the AuthManager until the context is canceled. Satisfies the
 // dex.Runner interface.
 func (auth *AuthManager) Run(ctx context.Context) {
+	log.Infof("Allowing %d settling + taker order lots per market for new users.", auth.initTakerLotLimit)
+	log.Infof("Allowing up to %d settling + taker order lots per market for established users.", auth.absTakerLotLimit)
+
 	go auth.latencyQ.Run(ctx)
 	<-ctx.Done()
 	auth.connMtx.Lock()
@@ -599,29 +627,27 @@ func (auth *AuthManager) userSwapAmountHistory(user account.AccountID, base, quo
 }
 
 const (
-	// InitUserLotLimit is the number of lots a new user is permitted to have in
-	// active orders and swaps. The market should multiply their lot size by
-	// this number to get the limit in units of the base asset. This is
-	// potentially a per-market setting instead of an auth constant.
-	InitUserTakerLotLimit = 6
-	AbsTakerLotLimit      = 150
-	BookedLotLimit        = 1200
-
 	// These coefficients are used to compute a user's swap limit adjustment via
 	// UserOrderLimitAdjustment based on the cumulative amounts in the different
 	// match outcomes.
-	successWeight    int64 = 2
-	stuckLongWeight  int64 = -4
-	stuckShortWeight int64 = -2
+	successWeight    int64 = 3
+	stuckLongWeight  int64 = -5
+	stuckShortWeight int64 = -3
 	spoofedWeight    int64 = -1
 )
 
-// UserOrderLimitAdjustment returns a delta in units of the base asset to the
-// user's allowed order quantity. This should be added to the market's base
-// order size limit.
-func (auth *AuthManager) UserOrderLimitAdjustment(user account.AccountID, base, quote uint32) int64 {
-	sa := auth.userSwapAmountHistory(user, base, quote)
-	return sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
+// UserSettlingLimit returns a user's settling amount limit for the given market
+// in units of the base asset. The limit may be negative for accounts with poor
+// swap history.
+func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
+	currentLotSize := int64(mkt.LotSize)
+	base := currentLotSize * auth.initTakerLotLimit
+	sa := auth.userSwapAmountHistory(user, mkt.Base, mkt.Quote)
+	limit := base + sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
+	if limit/currentLotSize >= auth.absTakerLotLimit {
+		limit = auth.absTakerLotLimit * currentLotSize
+	}
+	return limit
 }
 
 // userScore computes the user score from the user's recent match outcomes and

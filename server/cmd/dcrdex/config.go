@@ -39,7 +39,7 @@ const (
 	defaultLogLevel            = "debug"
 	defaultLogDirname          = "logs"
 	defaultMarketsConfFilename = "markets.json"
-	defaultMaxLogZips          = 16
+	defaultMaxLogZips          = 32
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
 	defaultPGDBName            = "dcrdex_{netname}"
@@ -53,7 +53,7 @@ const (
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
-	defaultBroadcastTimeout = 5 * time.Minute
+	defaultBroadcastTimeout = 12 * time.Minute // accommodate certain known long block download timeouts
 )
 
 var (
@@ -67,36 +67,38 @@ type procOpts struct {
 
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
-	DataDir          string
-	Network          dex.Network
-	DBName           string
-	DBUser           string
-	DBPass           string
-	DBHost           string
-	DBPort           uint16
-	ShowPGConfig     bool
-	MarketsConfPath  string
-	RegFeeXPub       string
-	RegFeeConfirms   int64
-	RegFeeAmount     uint64
-	CancelThreshold  float64
-	Anarchy          bool
-	FreeCancels      bool
-	MaxUserCancels   uint32
-	BanScore         uint32
-	DEXPrivKeyPath   string
-	RPCCert          string
-	RPCKey           string
-	RPCListen        []string
-	BroadcastTimeout time.Duration
-	AltDNSNames      []string
-	LogMaker         *dex.LoggerMaker
-	SigningKeyPW     []byte
-	AdminSrvOn       bool
-	AdminSrvAddr     string
-	AdminSrvPW       []byte
-	IgnoreState      bool
-	StatePath        string
+	DataDir           string
+	Network           dex.Network
+	DBName            string
+	DBUser            string
+	DBPass            string
+	DBHost            string
+	DBPort            uint16
+	ShowPGConfig      bool
+	MarketsConfPath   string
+	RegFeeXPub        string
+	RegFeeConfirms    int64
+	RegFeeAmount      uint64
+	CancelThreshold   float64
+	Anarchy           bool
+	FreeCancels       bool
+	MaxUserCancels    uint32
+	BanScore          uint32
+	InitTakerLotLimit uint32
+	AbsTakerLotLimit  uint32
+	DEXPrivKeyPath    string
+	RPCCert           string
+	RPCKey            string
+	RPCListen         []string
+	BroadcastTimeout  time.Duration
+	AltDNSNames       []string
+	LogMaker          *dex.LoggerMaker
+	SigningKeyPW      []byte
+	AdminSrvOn        bool
+	AdminSrvAddr      string
+	AdminSrvPW        []byte
+	IgnoreState       bool
+	StatePath         string
 }
 
 type flagsData struct {
@@ -120,15 +122,18 @@ type flagsData struct {
 
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"How long clients have to broadcast expected swap transactions following new blocks"`
+	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
-	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
-	Anarchy          bool          `long:"anarchy" description:"Do not enforce any rules."`
-	FreeCancels      bool          `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders). Implied by --anarchy."`
-	MaxUserCancels   uint32        `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
-	BanScore         uint32        `long:"banscore" description:"The accumulated penalty score at which when an account gets closed."`
-	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
+
+	Anarchy           bool    `long:"anarchy" description:"Do not enforce any rules."`
+	CancelThreshold   float64 `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
+	FreeCancels       bool    `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders). Implied by --anarchy."`
+	MaxUserCancels    uint32  `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
+	BanScore          uint32  `long:"banscore" description:"The accumulated penalty score at which when an account gets closed."`
+	InitTakerLotLimit uint32  `long:"inittakerlotlimit" description:"The starting limit on the number of settling lots per-market for new users. Used to limit size of likely-taker orders."`
+	AbsTakerLotLimit  uint32  `long:"abstakerlotlimit" description:"The upper limit on the number of settling lots per-market for a user regardless of their swap history. Used to limit size of likely-taker orders."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
 	CPUProfile  string `long:"cpuprofile" description:"File for CPU profiling."`
@@ -564,36 +569,38 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	cfg.PGDBName = strings.ReplaceAll(cfg.PGDBName, "{netname}", network.String())
 
 	dexCfg := &dexConf{
-		DataDir:          cfg.DataDir,
-		Network:          network,
-		DBName:           cfg.PGDBName,
-		DBHost:           dbHost,
-		DBPort:           dbPort,
-		DBUser:           cfg.PGUser,
-		DBPass:           cfg.PGPass,
-		ShowPGConfig:     cfg.ShowPGConfig,
-		MarketsConfPath:  cfg.MarketsConfPath,
-		RegFeeAmount:     cfg.RegFeeAmount,
-		RegFeeConfirms:   cfg.RegFeeConfirms,
-		RegFeeXPub:       cfg.RegFeeXPub,
-		CancelThreshold:  cfg.CancelThreshold,
-		MaxUserCancels:   cfg.MaxUserCancels,
-		Anarchy:          cfg.Anarchy,
-		FreeCancels:      cfg.FreeCancels || cfg.Anarchy,
-		BanScore:         cfg.BanScore,
-		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
-		RPCCert:          cfg.RPCCert,
-		RPCKey:           cfg.RPCKey,
-		RPCListen:        RPCListen,
-		BroadcastTimeout: cfg.BroadcastTimeout,
-		AltDNSNames:      cfg.AltDNSNames,
-		LogMaker:         logMaker,
-		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
-		AdminSrvAddr:     adminSrvAddr,
-		AdminSrvOn:       cfg.AdminSrvOn,
-		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
-		IgnoreState:      cfg.IgnorePrevState,
-		StatePath:        cfg.PrevStatePath,
+		DataDir:           cfg.DataDir,
+		Network:           network,
+		DBName:            cfg.PGDBName,
+		DBHost:            dbHost,
+		DBPort:            dbPort,
+		DBUser:            cfg.PGUser,
+		DBPass:            cfg.PGPass,
+		ShowPGConfig:      cfg.ShowPGConfig,
+		MarketsConfPath:   cfg.MarketsConfPath,
+		RegFeeAmount:      cfg.RegFeeAmount,
+		RegFeeConfirms:    cfg.RegFeeConfirms,
+		RegFeeXPub:        cfg.RegFeeXPub,
+		CancelThreshold:   cfg.CancelThreshold,
+		MaxUserCancels:    cfg.MaxUserCancels,
+		Anarchy:           cfg.Anarchy,
+		FreeCancels:       cfg.FreeCancels || cfg.Anarchy,
+		BanScore:          cfg.BanScore,
+		InitTakerLotLimit: cfg.InitTakerLotLimit,
+		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
+		DEXPrivKeyPath:    cfg.DEXPrivKeyPath,
+		RPCCert:           cfg.RPCCert,
+		RPCKey:            cfg.RPCKey,
+		RPCListen:         RPCListen,
+		BroadcastTimeout:  cfg.BroadcastTimeout,
+		AltDNSNames:       cfg.AltDNSNames,
+		LogMaker:          logMaker,
+		SigningKeyPW:      []byte(cfg.SigningKeyPassword),
+		AdminSrvAddr:      adminSrvAddr,
+		AdminSrvOn:        cfg.AdminSrvOn,
+		AdminSrvPW:        []byte(cfg.AdminSrvPassword),
+		IgnoreState:       cfg.IgnorePrevState,
+		StatePath:         cfg.PrevStatePath,
 	}
 
 	opts := &procOpts{

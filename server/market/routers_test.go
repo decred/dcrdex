@@ -33,10 +33,11 @@ import (
 
 const (
 	dummySize    = 50
-	btcLotSize   = 100_000
+	btcLotSize   = 10_0000 // 0.001
 	btcRateStep  = 1_000
-	dcrLotSize   = 10_000_000
+	dcrLotSize   = 1000_0000 // 0.1
 	dcrRateStep  = 100_000
+	initLotLimit = 2
 	btcID        = 0
 	dcrID        = 42
 	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
@@ -234,8 +235,8 @@ func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value
 }
 func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 }
-func (a *TAuth) UserOrderLimitAdjustment(user account.AccountID, base, quote uint32) int64 {
-	return 0 // everyone gets a clean slate
+func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
+	return dcrLotSize * initLotLimit // everyone gets a clean slate
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
