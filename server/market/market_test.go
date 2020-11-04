@@ -26,7 +26,6 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
-	srvauth "decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap"
@@ -760,7 +759,7 @@ func TestMarket_Run(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := srvauth.InitUserTakerLotLimit
+	lots := 6
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
@@ -870,6 +869,57 @@ func TestMarket_Run(t *testing.T) {
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
+
+	// Submit an immediate taker sell (taker) over user taker limit
+	piSell := test.RandomPreimage()
+	commitSell := piSell.Commit()
+	oRecordSell := newOR()
+	limit.Commit = commitSell[:]
+	loSell := oRecordSell.order.(*order.LimitOrder)
+	loSell.P.Commit = commitSell
+	loSell.Force = order.ImmediateTiF // likely taker
+	loSell.Quantity = dcrLotSize * (initLotLimit + 1)
+
+	storMsgPI(oRecordSell.msgID, pi)
+	err = mkt.SubmitOrder(oRecordSell)
+	if err == nil {
+		t.Fatal("should have rejected too large likely-taker")
+	}
+
+	// Submit a taker buy that is over user taker limit
+	// loSell := oRecord.order.(*order.LimitOrder)
+	piBuy := test.RandomPreimage()
+	commitBuy := piBuy.Commit()
+	oRecordBuy := newOR()
+	limit.Commit = commitBuy[:]
+	loBuy := oRecordBuy.order.(*order.LimitOrder)
+	loBuy.P.Commit = commitBuy
+	loBuy.Sell = false
+	loBuy.Quantity = dcrLotSize * (initLotLimit + 1)
+	// rate matches with the booked sell = likely taker
+
+	storMsgPI(oRecordBuy.msgID, pi)
+	err = mkt.SubmitOrder(oRecordBuy)
+	if err == nil {
+		t.Fatal("should have rejected too large likely-taker")
+	}
+
+	// Submit a likely taker with an acceptable limit
+	loSell.Quantity = dcrLotSize * initLotLimit // the limit
+
+	storMsgPI(oRecordBuy.msgID, pi)
+	err = mkt.SubmitOrder(oRecordSell)
+	if err != nil {
+		t.Fatalf("should have allowed that likely-taker: %v", err)
+	}
+
+	// Another in the same epoch will push over the limit
+	loBuy.Quantity = dcrLotSize // just one lot
+	storMsgPI(oRecordBuy.msgID, pi)
+	err = mkt.SubmitOrder(oRecordBuy)
+	if err == nil {
+		t.Fatalf("should have rejected too likely-taker that pushed the limit with existing epoch status takers")
+	}
 
 	// Submit a valid cancel order.
 	loID := oRecord.order.ID()
@@ -1346,7 +1396,7 @@ func TestMarket_Cancelable(t *testing.T) {
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
-	lots := srvauth.InitUserTakerLotLimit
+	lots := 8
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()

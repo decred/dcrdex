@@ -57,24 +57,26 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
-	DataDir          string
-	LogBackend       *dex.LoggerMaker
-	Markets          []*dex.MarketInfo
-	Assets           []*AssetConf
-	Network          dex.Network
-	DBConf           *DBConf
-	RegFeeXPub       string
-	RegFeeConfirms   int64
-	RegFeeAmount     uint64
-	BroadcastTimeout time.Duration
-	CancelThreshold  float64
-	Anarchy          bool
-	FreeCancels      bool
-	BanScore         uint32
-	DEXPrivKey       *secp256k1.PrivateKey
-	CommsCfg         *RPCConfig
-	IgnoreState      bool
-	StatePath        string
+	DataDir           string
+	LogBackend        *dex.LoggerMaker
+	Markets           []*dex.MarketInfo
+	Assets            []*AssetConf
+	Network           dex.Network
+	DBConf            *DBConf
+	RegFeeXPub        string
+	RegFeeConfirms    int64
+	RegFeeAmount      uint64
+	BroadcastTimeout  time.Duration
+	CancelThreshold   float64
+	Anarchy           bool
+	FreeCancels       bool
+	BanScore          uint32
+	InitTakerLotLimit uint32
+	AbsTakerLotLimit  uint32
+	DEXPrivKey        *secp256k1.PrivateKey
+	CommsCfg          *RPCConfig
+	IgnoreState       bool
+	StatePath         string
 }
 
 type signer struct {
@@ -398,24 +400,25 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		}
 	}
 
-	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
-		Storage:         storage,
-		Signer:          signer{cfg.DEXPrivKey},
-		RegistrationFee: cfg.RegFeeAmount,
-		FeeConfs:        cfg.RegFeeConfirms,
-		FeeChecker:      dcrBackend.FeeCoin,
-		UserUnbooker:    userUnbookFun,
-		MiaUserTimeout:  cfg.BroadcastTimeout,
-		CancelThreshold: cancelThresh,
-		Anarchy:         cfg.Anarchy,
-		FreeCancels:     cfg.FreeCancels,
-		BanScore:        cfg.BanScore,
+		Storage:           storage,
+		Signer:            signer{cfg.DEXPrivKey},
+		RegistrationFee:   cfg.RegFeeAmount,
+		FeeConfs:          cfg.RegFeeConfirms,
+		FeeChecker:        dcrBackend.FeeCoin,
+		UserUnbooker:      userUnbookFun,
+		MiaUserTimeout:    cfg.BroadcastTimeout,
+		CancelThreshold:   cfg.CancelThreshold,
+		Anarchy:           cfg.Anarchy,
+		FreeCancels:       cfg.FreeCancels,
+		BanScore:          cfg.BanScore,
+		InitTakerLotLimit: cfg.InitTakerLotLimit,
+		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
-		cancelThresh, authMgr.GraceLimit())
+		cfg.CancelThreshold, authMgr.GraceLimit())
 	log.Infof("MIA user order unbook timeout %v", cfg.BroadcastTimeout)
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")

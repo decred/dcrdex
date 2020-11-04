@@ -36,7 +36,7 @@ type AuthManager interface {
 	PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID)
 	MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
-	UserOrderLimitAdjustment(user account.AccountID, base, quote uint32) int64
+	UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64
 }
 
 const (

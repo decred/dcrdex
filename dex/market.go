@@ -18,6 +18,7 @@ type MarketInfo struct {
 	EpochDuration          uint64 // msec
 	MarketBuyBuffer        float64
 	MaxUserCancelsPerEpoch uint32
+	BookedLotLimit         uint32
 }
 
 func marketName(base, quote string) string {
@@ -59,6 +60,7 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyB
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,
+		BookedLotLimit:         math.MaxUint32,
 	}, nil
 }
 
@@ -86,5 +88,6 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64,
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,
+		BookedLotLimit:         math.MaxUint32,
 	}, nil
 }
