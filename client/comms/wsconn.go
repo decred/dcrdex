@@ -99,10 +99,12 @@ type WsCfg struct {
 
 // wsConn represents a client websocket connection.
 type wsConn struct {
+	// 64-bit atomic variables first. See
+	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
+	rID    uint64
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	log    dex.Logger
-	rID    uint64
 	cfg    *WsCfg
 	tlsCfg *tls.Config
 	readCh chan *msgjson.Message
