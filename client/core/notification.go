@@ -57,10 +57,10 @@ func (c *Core) notify(n Notification) {
 }
 
 // NotificationFeed returns a new receiving channel for notifications. The
-// channel has capacity 16, and should be monitored for the lifetime of the
+// channel has capacity 1024, and should be monitored for the lifetime of the
 // Core. Blocking channels are silently ignored.
 func (c *Core) NotificationFeed() <-chan Notification {
-	ch := make(chan Notification, 16)
+	ch := make(chan Notification, 1024)
 	c.noteMtx.Lock()
 	c.noteChans = append(c.noteChans, ch)
 	c.noteMtx.Unlock()
