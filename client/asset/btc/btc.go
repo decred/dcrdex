@@ -342,6 +342,9 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
+	// 64-bit atomic variables first. See
+	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
+	tipAtConnect      int64
 	client            *rpcclient.Client
 	node              rpcClient
 	wallet            *walletClient
@@ -350,7 +353,6 @@ type ExchangeWallet struct {
 	log               dex.Logger
 	symbol            string
 	tipChange         func(error)
-	tipAtConnect      int64
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	redeemConfTarget  uint64
