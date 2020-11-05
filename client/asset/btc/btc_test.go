@@ -1857,12 +1857,12 @@ func TestLockUnlock(t *testing.T) {
 	// just checking that the errors come through.
 	node.rawRes[methodUnlock] = mustMarshal(t, true)
 	node.rawRes[methodLockUnspent] = []byte(`true`)
-	err := wallet.Unlock("pass", time.Hour*24*365)
+	err := wallet.Unlock("pass")
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
 	node.rawErr[methodUnlock] = tErr
-	err = wallet.Unlock("pass", time.Hour*24*365)
+	err = wallet.Unlock("pass")
 	if err == nil {
 		t.Fatalf("no error for walletpassphrase error")
 	}

@@ -135,9 +135,11 @@ type Wallet interface {
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// Unlock unlocks the exchange wallet.
-	Unlock(pw string, dur time.Duration) error
+	Unlock(pw string) error
 	// Lock locks the exchange wallet.
 	Lock() error
+	// Locked will be true if the wallet is currently locked.
+	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)

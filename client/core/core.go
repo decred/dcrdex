@@ -1297,7 +1297,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf(s, a...)
 	}
 
-	err = wallet.Unlock(crypter, aYear)
+	err = wallet.Unlock(crypter)
 	if err != nil {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
@@ -1421,7 +1421,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 
 // unlockWallet unlocks the wallet with the crypter.
 func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
-	err := wallet.Unlock(crypter, aYear)
+	err := wallet.Unlock(crypter)
 	if err != nil {
 		return fmt.Errorf("unlockWallet unlock error: %v", err)
 	}
@@ -1609,7 +1609,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	// this step, since an empty password signifies an unencrypted wallet.
 	wasUnlocked := wallet.unlocked()
 	if newPasswordSet {
-		err = wallet.Wallet.Unlock(string(newPW), aYear)
+		err = wallet.Wallet.Unlock(string(newPW))
 		if err != nil {
 			return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
 		}

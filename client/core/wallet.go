@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -20,10 +19,10 @@ type xcWallet struct {
 	connector    *dex.ConnectionMaster
 	AssetID      uint32
 	mtx          sync.RWMutex
-	lockTime     time.Time
 	hookedUp     bool
 	balance      *WalletBalance
 	encPW        []byte
+	pw           string
 	address      string
 	dbID         []byte
 	synced       bool
@@ -31,43 +30,71 @@ type xcWallet struct {
 }
 
 // Unlock unlocks the wallet.
-func (w *xcWallet) Unlock(crypter encrypt.Crypter, dur time.Duration) error {
+func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if len(w.encPW) == 0 {
+		if w.Locked() {
+			return fmt.Errorf("Wallet reporting as locked, but no password has been set.")
+		}
 		return nil
 	}
 	pwB, err := crypter.Decrypt(w.encPW)
 	if err != nil {
 		return fmt.Errorf("unlockWallet decryption error: %v", err)
 	}
-	err = w.Wallet.Unlock(string(pwB), dur)
+	pw := string(pwB)
+	err = w.Wallet.Unlock(pw)
 	if err != nil {
 		return err
 	}
 	w.mtx.Lock()
-	w.lockTime = time.Now().Add(dur)
+	w.pw = pw
 	w.mtx.Unlock()
 	return nil
 }
 
-// Lock the wallet. The lockTime is zeroed so that unlocked will return false.
+// refreshUnlock checks that the wallet is unlocked, and if not, uses the cached
+// password to attempt unlocking.
+func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
+	// Check if the wallet is already unlocked.
+	if !w.Locked() {
+		return false, nil
+	}
+	if len(w.encPW) == 0 {
+		return false, fmt.Errorf("%s wallet reporting as locked but no password has been set", unbip(w.AssetID))
+	}
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	if len(w.pw) == 0 {
+		return false, fmt.Errorf("cannot refresh unlock on a locked %s wallet", unbip(w.AssetID))
+	}
+	return true, w.Wallet.Unlock(w.pw)
+}
+
+// Lock the wallet.
 func (w *xcWallet) Lock() error {
 	if len(w.encPW) == 0 {
 		return nil
 	}
 	w.mtx.Lock()
-	w.lockTime = time.Time{}
+	w.pw = ""
 	w.mtx.Unlock()
 	return w.Wallet.Lock()
 }
 
-// unlocked will return true if the lockTime has not passed.
+// unlocked will return true if the wallet is unlocked. The wallet is queried
+// directly, likely involving an RPC call. Use locallyUnlocked if it's not
+// critical.
 func (w *xcWallet) unlocked() bool {
-	if len(w.encPW) == 0 {
-		return true
-	}
+	return !w.Locked()
+}
+
+// locallyUnlocked checks whether we think the wallet is unlocked, but without
+// asking the wallet itself. Use this to prevent spamming the RPC every time
+// refreshUser is called.
+func (w *xcWallet) locallyUnlocked() bool {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	return w.lockTime.After(time.Now())
+	return len(w.encPW) == 0 || len(w.pw) > 0
 }
 
 // state returns the current WalletState.
@@ -78,7 +105,7 @@ func (w *xcWallet) state() *WalletState {
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
-		Open:         w.unlocked(),
+		Open:         w.locallyUnlocked(),
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,

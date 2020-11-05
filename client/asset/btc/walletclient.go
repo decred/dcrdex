@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -188,8 +187,9 @@ func (wc *walletClient) GetTransaction(txid string) (*GetTransactionResult, erro
 }
 
 // Unlock unlocks the wallet.
-func (wc *walletClient) Unlock(pass string, dur time.Duration) error {
-	return wc.call(methodUnlock, anylist{pass, dur / time.Second}, nil)
+func (wc *walletClient) Unlock(pass string) error {
+	// 100000000 comes from bitcoin-cli help walletpassphrase
+	return wc.call(methodUnlock, anylist{pass, 100000000}, nil)
 }
 
 // Lock locks the wallet.
