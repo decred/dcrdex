@@ -23,6 +23,10 @@ export const TakerSwapCast = 2
 export const MakerRedeemed = 3
 export const MatchComplete = 4
 
+/* The match sides are a mirror of dex/order.MatchSide. */
+export const Maker = 0
+export const Taker = 1
+
 export function sellString (ord) { return ord.sell ? 'sell' : 'buy' }
 export function typeString (ord) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
 export function rateString (ord) { return ord.type === Market ? 'market' : Doc.formatCoinValue(ord.rate / 1e8) }
@@ -62,10 +66,9 @@ export function settled (order) {
   if (!order.matches) return 0
   const qty = isMarketBuy(order) ? m => m.qty * m.rate * 1e-8 : m => m.qty
   return order.matches.reduce((settled, match) => {
-    // >= makerRedeemed is used because the maker never actually goes to
-    // matchComplete (once at makerRedeemed, nothing left to do), and the taker
-    // never goes to makerRedeemed, since at that point, they just complete the
-    // swap.
-    return (match.status >= MakerRedeemed) ? settled + qty(match) : settled
+    if (match.isCancel) return settled
+    const redeemed = (match.side === Maker && match.status >= MakerRedeemed) ||
+      (match.side === Taker && match.status >= MatchComplete)
+    return redeemed ? settled + qty(match) : settled
   }, 0)
 }

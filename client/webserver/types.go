@@ -186,12 +186,12 @@ func (ord *orderReader) SettledPercent() string {
 
 // FilledFrom is the sum filled in units of the outgoing asset.
 func (ord *orderReader) FilledFrom() string {
-	return precision8(ord.sumFrom(filledFilter))
+	return precision8(ord.sumFrom(filledNonCancelFilter))
 }
 
 // FilledTo is the sum filled in units of the incoming asset.
 func (ord *orderReader) FilledTo() string {
-	return precision8(ord.sumTo(filledFilter))
+	return precision8(ord.sumTo(filledNonCancelFilter))
 }
 
 // FilledPercent is the percent of the order that has filled, without percent
@@ -211,6 +211,9 @@ func (ord *orderReader) percent(filter func(match *core.Match) bool) string {
 }
 
 func settledFilter(match *core.Match) bool {
+	if match.IsCancel {
+		return false
+	}
 	return (match.Side == order.Taker && match.Status == order.MatchComplete) ||
 		(match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete))
 }
@@ -221,6 +224,10 @@ func settlingFilter(match *core.Match) bool {
 }
 
 func filledFilter(match *core.Match) bool { return true }
+
+func filledNonCancelFilter(match *core.Match) bool {
+	return !match.IsCancel
+}
 
 // sumFrom will sum the match quantities in units of the outgoing asset.
 func (ord *orderReader) sumFrom(filter func(match *core.Match) bool) uint64 {
