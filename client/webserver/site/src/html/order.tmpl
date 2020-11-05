@@ -93,9 +93,8 @@
       {{range $match := $ord.MatchReaders}}
         <div class="match-card">
           <div class="match-header">
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-start align-items-center">
               <span class="match-data-label ml-3">Match ID</span>
-              {{if $match.IsCancel}}<span class="red mr-3">cancellation</span>{{end}}
             </div>
             <div class="mono mx-3 fs15">{{$match.MatchID}}</div>
           </div>
@@ -115,30 +114,35 @@
 
           </div>
 
-          <div class="text-center demi fs20 py-2">
-            {{$match.FromQuantityString}}  {{template "microIcon" $ord.FromSymbol}}
-            &rarr;
-            {{$match.ToQuantityString}} {{template "microIcon" $ord.ToSymbol}}
-          </div>
+          {{if $match.IsCancel}}
+            <div class="text-center fs20 red">Cancellation</div>
+            <div class="text-center fs16">{{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}} ({{$match.OrderPortion}}%)</div>
+          {{else}}
+            <div class="text-center demi fs20 py-2">
+              {{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}}
+              &rarr;
+              {{$match.ToQuantityString}} {{template "microIcon" $ord.ToSymbol}}
+            </div>
 
-          <div class="row py-2">
-            <div class="col-10 text-center">
-              <span class="match-data-label">Rate</span><br>
-              <span class="fs15">
-                {{$match.RateString}}
-              </span>
+            <div class="row py-2">
+              <div class="col-10 text-center">
+                <span class="match-data-label">Rate</span><br>
+                <span class="fs15">
+                  {{$match.RateString}}
+                </span>
+              </div>
+              <div class="col-7 text-center">
+                <span class="match-data-label">Side</span><br>
+                <span class="fs15">{{$match.Side}}</span>
+              </div>
+              <div class="col-7 text-center">
+                <span class="match-data-label">Order Portion</span><br>
+                <span class="fs15">
+                  {{$match.OrderPortion}}%
+                </span>
+              </div>
             </div>
-            <div class="col-7 text-center">
-              <span class="match-data-label">Side</span><br>
-              <span class="fs15">{{$match.Side}}</span>
-            </div>
-            <div class="col-7 text-center">
-              <span class="match-data-label">Order Portion</span><br>
-              <span class="fs15">
-                {{$match.OrderPortion}}%
-              </span>
-            </div>
-          </div>
+          {{end}}
 
           <div class="pt-3">
             {{if len $match.Swap}}
