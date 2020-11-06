@@ -134,7 +134,9 @@ type TWebsocket struct {
 	reqErr     error
 	connectErr error
 	msgs       <-chan *msgjson.Message
-	handlers   map[string][]func(*msgjson.Message, msgFunc) error
+	// handlers simulates a peer (server) response for request, and handles the
+	// response with the msgFunc.
+	handlers map[string][]func(*msgjson.Message, msgFunc) error
 }
 
 func newTWebsocket() *TWebsocket {
@@ -4972,6 +4974,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	secretHash := sha256.Sum256(secret)
 
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
+	dbOrder.MetaData.Status = order.OrderStatusExecuted // so there is no order_status request for this
 	oid := lo.ID()
 	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify)
