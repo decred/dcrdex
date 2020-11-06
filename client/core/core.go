@@ -358,10 +358,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	if dc.acct.locked() {
 		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
 	}
-	err := sign(dc.acct.privKey, signable)
-	if err != nil {
-		return fmt.Errorf("error signing %s message: %w", route, err)
-	}
+	sign(dc.acct.privKey, signable)
 	return sendRequest(dc.WsConn, route, signable, result, timeout)
 }
 
@@ -2345,10 +2342,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		CoinID:    coinID,
 	}
 	// Timestamp and sign the request.
-	err := stampAndSign(dc.acct.privKey, req)
-	if err != nil {
-		return err
-	}
+	stampAndSign(dc.acct.privKey, req)
 	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.NotifyFeeRoute, req)
 	if err != nil {
 		return fmt.Errorf("failed to create notifyfee request: %w", err)
@@ -3825,9 +3819,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var matchID order.MatchID
 	copy(matchID[:], revocation.MatchID)
 
-	tracker.mtx.Lock()
 	err = tracker.revokeMatch(matchID, true)
-	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
 	}
@@ -4236,13 +4228,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
-	err = tracker.processAudit(msg.ID, audit)
-	if err != nil {
-		return err
-	}
-	// Are we ticking this trade after an audit in case it's mined already?
-	c.schedTradeTick(tracker)
-	return nil
+	return tracker.processAuditMsg(msg.ID, audit)
 }
 
 // handleRedemptionRoute handles the DEX-originating redemption request, which
@@ -4411,18 +4397,17 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 }
 
 // sign signs the msgjson.Signable with the provided private key.
-func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
+func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) {
 	sigMsg := payload.Serialize()
 	sig := ecdsa.Sign(privKey, sigMsg) // should we be signing the *hash* of the payload?
 	payload.SetSig(sig.Serialize())
-	return nil
 }
 
 // stampAndSign time stamps the msgjson.Stampable, and signs it with the given
 // private key.
-func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
+func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
 	payload.Stamp(encode.UnixMilliU(time.Now()))
-	return sign(privKey, payload)
+	sign(privKey, payload)
 }
 
 // sendRequest sends a request via the specified ws connection and unmarshals

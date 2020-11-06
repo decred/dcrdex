@@ -6,6 +6,7 @@ package core
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex/msgjson"
@@ -21,9 +22,9 @@ func statusResolutionID(dc *dexConnection, trade *trackedTrade, match *matchTrac
 // resolveMatchConflicts attempts to resolve conflicts between the server's
 // reported match status and our own. This involves a 'match_status' request to
 // the server and possibly some wallet operations. ResolveMatchConflicts will
-// block until resolution is complete.
+// block until resolution is complete. Trades are processed concurrently, with
+// matches resolved sequentially for a given trade.
 func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[order.OrderID]*matchStatusConflict) {
-
 	statusRequests := make([]*msgjson.MatchRequest, 0, len(statusConflicts))
 	for _, conflict := range statusConflicts {
 		for _, match := range conflict.matches {
@@ -38,7 +39,8 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 	var msgStatuses []*msgjson.MatchStatusResult
 	err := sendRequest(dc.WsConn, msgjson.MatchStatusRoute, statusRequests, &msgStatuses, DefaultResponseTimeout)
 	if err != nil {
-		c.log.Errorf("match_status request error for %s requesting %d match statuses: %v", dc.acct.host, len(statusRequests), err)
+		c.log.Errorf("match_status request error for %s requesting %d match statuses: %v",
+			dc.acct.host, len(statusRequests), err)
 		return
 	}
 
@@ -55,21 +57,19 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 		wg.Add(1)
 		go func(trade *trackedTrade, matches []*matchTracker) {
 			defer wg.Done()
-			trade.mtx.Lock()
-			defer trade.mtx.Unlock()
 			for _, match := range matches {
 				srvData := resMap[match.id]
-				if srvData == nil {
-					// I don't really know how this would happen, considering the server
-					// reported the match as active in the connect response. I'm also
-					// not sure what action to take. Maybe just revoke the match.
-					c.log.Errorf("Server did not report a status for match during resolution. %s", statusResolutionID(dc, trade, match))
-					// revokeMatch only returns an error for a missing match ID,
-					// and we already checked in compareServerMatches.
-					trade.revokeMatch(match.id, false)
+				if srvData != nil {
+					c.resolveConflictWithServerData(dc, trade, match, srvData)
 					continue
 				}
-				c.resolveConflictWithServerData(dc, trade, match, srvData)
+				// Server reported the match as active in the connect response,
+				// but it was revoked in the short period since then.
+				c.log.Errorf("Server did not report a status for match during resolution. %s",
+					statusResolutionID(dc, trade, match))
+				// revokeMatch only returns an error for a missing match ID, and
+				// we already checked in compareServerMatches.
+				_ = trade.revokeMatch(match.id, false)
 			}
 		}(conflict.trade, conflict.matches)
 	}
@@ -113,21 +113,20 @@ func conflictResolver(ours, servers order.MatchStatus) matchConflictResolver {
 }
 
 // resolveConflictWithServerData compares the match status with the server's
-// match_status data. The trackedTrade.mtx is locked for the duration of
-// resolution. If the conflict cannot be resolved, the match will be
+// match_status data. If the conflict cannot be resolved, the match will be
 // self-revoked.
 func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	srvStatus := order.MatchStatus(srvData.Status)
-
 	if srvStatus != order.MatchComplete && !srvData.Active {
 		// Server has revoked the match. We'll still go through
 		// resolveConflictWithServerData to collect any extra data the
 		// server has, but setting ServerRevoked will prevent us from
 		// trying to update the state with the server.
-		match.MetaData.Proof.ServerRevoked = true
+		trade.SelfRevokeMatch(match)
 	}
 
-	if srvStatus == match.MetaData.Status || match.MetaData.Proof.IsRevoked() {
+	status := trade.MatchStatus(match)
+	if srvStatus == status || trade.MatchIsRevoked(match) {
 		// On startup, there's no chance for a tick between the connect request
 		// and the match_status request, so this would be unlikely. But if not
 		// during startup, and a tick has snuck in and resolved our status
@@ -138,28 +137,30 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 
 	logID := statusResolutionID(dc, trade, match)
 
-	resolver := conflictResolver(match.MetaData.Status, srvStatus)
-	if resolver != nil {
+	if resolver := conflictResolver(status, srvStatus); resolver != nil {
 		resolver(dc, trade, match, srvData)
-	} else {
-		// We don't know how to handle this. Set the swapErr, and self-revoke
-		// the match. This condition would be virtually impossible, because it
-		// would mean that the client and server were at least two steps out of
-		// sync.
-		match.swapErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
-			match.MetaData.Status, srvStatus, logID)
-		c.log.Error(match.swapErr)
-		match.MetaData.Proof.SelfRevoked = true
+		trade.mtx.RLock() // ok with not not atomic update and store?
+		defer trade.mtx.RUnlock()
 		err := c.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
-			c.log.Errorf("error updating database after self revocation for no conflict handler for %s: %v", logID, err)
+			c.log.Errorf("error updating database after successful match resolution for %s: %v", logID, err)
 		}
+		return
 	}
 
-	err := c.db.UpdateMatch(&match.MetaMatch)
-	if err != nil {
-		c.log.Errorf("error updating database after successful match resolution for %s: %v", logID, err)
+	// We don't know how to handle this. Set the swapErr, and self-revoke the
+	// match. This condition would be virtually impossible, because it would
+	// mean that the client and server were at least two steps out of sync.
+	trade.mtx.Lock()
+	defer trade.mtx.Unlock()
+	match.swapErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
+		status, srvStatus, logID)
+	c.log.Error(match.swapErr)
+	match.MetaData.Proof.SelfRevoked = true
+	if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+		c.log.Errorf("error updating database after self revocation for no conflict handler for %s: %v", logID, err)
 	}
+
 }
 
 // resolveMissedMakerAudit is a matchConflictResolver to handle the case when
@@ -171,7 +172,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	var err error
 	defer func() {
 		if err != nil {
-			match.MetaData.Proof.SelfRevoked = true
+			trade.SelfRevokeMatch(match)
 			dc.log.Error(err)
 		}
 	}()
@@ -191,9 +192,10 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		return
 	}
 
-	err = trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract)
+	err = trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract, 20*time.Second)
 	if err != nil {
-		err = fmt.Errorf("auditContract error during match status resolution. %s: %w", logID, err)
+		err = fmt.Errorf("auditContract error during match status resolution. "+
+			"Check your internet and wallet and restart! %s: %w", logID, err) // TODO: alt to restart, try in background?
 	}
 }
 
@@ -206,7 +208,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	var err error
 	defer func() {
 		if err != nil {
-			match.MetaData.Proof.SelfRevoked = true
+			trade.SelfRevokeMatch(match)
 			dc.log.Error(err)
 		}
 	}()
@@ -224,9 +226,10 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		err = fmt.Errorf("Server is reporting a match with status TakerSwapCast, but didn't include the contract data. %s", logID)
 		return
 	}
-	err = trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract)
+	err = trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract, 20*time.Second)
 	if err != nil {
-		err = fmt.Errorf("auditContract error during match status resolution. %s: %w", logID, err)
+		err = fmt.Errorf("auditContract error during match status resolution. "+
+			"Check your internet and wallet and restart! %s: %w", logID, err)
 	}
 }
 
@@ -236,6 +239,8 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 // so we'll defer to resendPendingRequests to handle it in the next tick.
 func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
+	trade.mtx.Lock() // InitSig check and SelfRevoked set
+	defer trade.mtx.Unlock()
 	// If we're not the maker, there's nothing we can do.
 	if match.Match.Side != order.Maker {
 		dc.log.Errorf("Server reporting no maker swap, but they've already sent us the swap info. self-revoking. %s", logID)
@@ -261,6 +266,8 @@ func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match 
 // resendPendingRequests to handle it in the next tick.
 func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
+	trade.mtx.Lock() // InitSig check and SelfRevoked set
+	defer trade.mtx.Unlock()
 	// If we're not the taker, there's nothing we can do.
 	if match.Match.Side != order.Taker {
 		dc.log.Errorf("Server reporting no taker swap, but they've already sent us the swap info. self-revoking. %s", logID)
@@ -285,6 +292,8 @@ func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match 
 // and we can process the match_status data to get caught up.
 func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
+	trade.mtx.Lock() // processMakersRedemption writes and SelfRevoked set
+	defer trade.mtx.Unlock()
 	var err error
 	defer func() {
 		if err != nil {
@@ -323,18 +332,14 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 // indicates the match status was just not updated after sending our redeem.
 func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
-	var err error
-	defer func() {
-		if err != nil {
-			match.MetaData.Proof.SelfRevoked = true
-			dc.log.Error(err)
-		}
-	}()
+	trade.mtx.Lock() // Status and SelfRevoked set
+	defer trade.mtx.Unlock()
 	// If we're the taker, this state is nonsense. Just revoke the match for
 	// good measure.
 	if match.Match.Side == order.Taker {
 		coinStr, _ := asset.DecodeCoinID(trade.wallets.toAsset.ID, srvData.TakerRedeem)
-		err = fmt.Errorf("server reported match status MatchComplete, but we're the taker and we don't have redemption data."+
+		match.MetaData.Proof.SelfRevoked = true
+		dc.log.Error("server reported match status MatchComplete, but we're the taker and we don't have redemption data."+
 			" self-revoking. %s, reported coin = %s", logID, coinStr)
 		return
 	}
@@ -350,6 +355,8 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 // defer to resendPendingRequests to handle it in the next tick.
 func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
+	trade.mtx.Lock() // RedeemSig check and SelfRevoked set
+	defer trade.mtx.Unlock()
 	// If we're not the maker, we can't do anything about this.
 	if match.Match.Side != order.Maker {
 		dc.log.Errorf("server reporting no maker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
@@ -378,6 +385,9 @@ func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	if match.Match.Side == order.Maker {
 		return
 	}
+	trade.mtx.Lock() // RedeemSig check and SelfRevoked set
+	defer trade.mtx.Unlock()
+
 	// We are the taker. If we don't have an ack from the server, this will be
 	// picked up in resendPendingRequests during the next tick.
 	if len(match.MetaData.Proof.Auth.RedeemSig) == 0 {
