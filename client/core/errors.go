@@ -32,6 +32,7 @@ const (
 	marketErr
 	addressParseErr
 	addrErr
+	fileReadErr
 )
 
 // Error is an error message and an error code.

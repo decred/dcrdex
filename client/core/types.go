@@ -116,7 +116,9 @@ type RegisterForm struct {
 	Addr    string           `json:"url"`
 	AppPass encode.PassBytes `json:"appPass"`
 	Fee     uint64           `json:"fee"`
-	Cert    string           `json:"cert"`
+	// Cert can be a string, which is interpreted as a filepath, or a []byte,
+	// which is interpreted as the file contents of the certificate.
+	Cert interface{} `json:"cert"`
 }
 
 // Match represents a match on an order. An order may have many matches.

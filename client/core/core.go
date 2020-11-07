@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"net"
 	"net/url"
@@ -1708,18 +1709,17 @@ func (c *Core) isRegistered(host string) bool {
 // GetFee creates a connection to the specified DEX Server and fetches the
 // registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX.
-func (c *Core) GetFee(dexAddr, certStr string) (uint64, error) {
+func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
 		return 0, newError(addressParseErr, "error parsing address: %v", err)
 	}
+	cert, err := parseCert(host, certI)
+	if err != nil {
+		return 0, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
+	}
 	if c.isRegistered(host) {
 		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
-	}
-
-	cert := []byte(certStr)
-	if len(cert) == 0 {
-		cert = CertStore[host]
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -1782,9 +1782,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	}
 
-	cert := []byte(form.Cert)
-	if len(cert) == 0 {
-		cert = CertStore[host]
+	cert, err := parseCert(host, form.Cert)
+	if err != nil {
+		return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -4541,4 +4541,28 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 		return fmt.Errorf("failed ID match. order abandoned")
 	}
 	return nil
+}
+
+// parseCert returns the (presumed to be) TLS certificate. If the certI is a
+// string, it will be treated as a filepath and the raw file contents returned.
+// if certI is already a []byte, it is presumed to be the raw file contents, and
+// is returned unmodified.
+func parseCert(host string, certI interface{}) ([]byte, error) {
+	switch c := certI.(type) {
+	case string:
+		if len(c) == 0 {
+			return CertStore[host], nil
+		}
+		cert, err := ioutil.ReadFile(c)
+		if err != nil {
+			return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", c, err)
+		}
+		return cert, nil
+	case []byte:
+		if len(c) == 0 {
+			return CertStore[host], nil
+		}
+		return c, nil
+	}
+	return nil, fmt.Errorf("not a valid certificate type %T", certI)
 }

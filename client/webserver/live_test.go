@@ -349,7 +349,7 @@ func (c *TCore) InitializeClient(pw []byte) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) GetFee(host, cert string) (uint64, error) {
+func (c *TCore) GetFee(host string, cert interface{}) (uint64, error) {
 	return 1e8, nil
 }
 

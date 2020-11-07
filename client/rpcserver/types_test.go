@@ -281,7 +281,7 @@ func TestParseRegisterArgs(t *testing.T) {
 		if fmt.Sprint(reg.Fee) != test.params.Args[1] {
 			t.Fatalf("fee doesn't match")
 		}
-		if fmt.Sprint(reg.Cert) != test.params.Args[2] {
+		if string(reg.Cert.([]byte)) != test.params.Args[2] {
 			t.Fatalf("cert doesn't match")
 		}
 	}

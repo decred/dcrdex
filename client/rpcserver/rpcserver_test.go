@@ -91,7 +91,7 @@ func (c *TCore) Logout() error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) GetFee(url, cert string) (uint64, error) {
+func (c *TCore) GetFee(url string, cert interface{}) (uint64, error) {
 	return c.regFee, c.getFeeErr
 }
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
