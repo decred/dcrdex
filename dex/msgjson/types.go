@@ -138,6 +138,10 @@ const (
 	// UpdateRemainingRoute is the DEX-originating notification-type message that
 	// updates the remaining amount of unfilled quantity on a standing limit order.
 	UpdateRemainingRoute = "update_remaining"
+	// EpochReportRoute is the DEX-originating notification-type message that
+	// indicates the end of an epoch's book updates and provides stats for
+	// maintaining a candlestick cache.
+	EpochReportRoute = "epoch_report"
 	// ConnectRoute is a client-originating request-type message seeking
 	// authentication so that the connection can be used for trading.
 	ConnectRoute = "connect"
@@ -1037,6 +1041,7 @@ type Candle struct {
 	StartStamp  uint64 `json:"startStamp"`
 	EndStamp    uint64 `json:"endStamp"`
 	MatchVolume uint64 `json:"matchVolume"`
+	QuoteVolume uint64 `json:"quoteVolume"`
 	BookVolume  uint64 `json:"bookVolume"`
 	OrderVolume uint64 `json:"orderVolume"`
 	HighRate    uint64 `json:"highRate"`
@@ -1052,6 +1057,7 @@ type WireCandles struct {
 	StartStamps  []uint64 `json:"startStamps"`
 	EndStamps    []uint64 `json:"endStamps"`
 	MatchVolumes []uint64 `json:"matchVolumes"`
+	QuoteVolumes []uint64 `json:"quoteVolumes"`
 	BookVolumes  []uint64 `json:"bookVolumes"`
 	OrderVolumes []uint64 `json:"orderVolumes"`
 	HighRates    []uint64 `json:"highRates"`
@@ -1066,6 +1072,7 @@ func NewWireCandles(n int) *WireCandles {
 		StartStamps:  make([]uint64, 0, n),
 		EndStamps:    make([]uint64, 0, n),
 		MatchVolumes: make([]uint64, 0, n),
+		QuoteVolumes: make([]uint64, 0, n),
 		BookVolumes:  make([]uint64, 0, n),
 		OrderVolumes: make([]uint64, 0, n),
 		HighRates:    make([]uint64, 0, n),
@@ -1083,6 +1090,7 @@ func (wc *WireCandles) Candles() []*Candle {
 			StartStamp:  wc.StartStamps[i],
 			EndStamp:    wc.EndStamps[i],
 			MatchVolume: wc.MatchVolumes[i],
+			QuoteVolume: wc.QuoteVolumes[i],
 			BookVolume:  wc.BookVolumes[i],
 			OrderVolume: wc.OrderVolumes[i],
 			HighRate:    wc.HighRates[i],
@@ -1092,6 +1100,15 @@ func (wc *WireCandles) Candles() []*Candle {
 		})
 	}
 	return candles
+}
+
+// EpochReportNote is a report about an epoch sent after all of the epoch's
+// book updates.
+type EpochReportNote struct {
+	Seq      uint64 `json:"seq"`
+	MarketID string `json:"marketid"`
+	Epoch    uint64 `json:"epoch"`
+	Candle
 }
 
 // Convert uint64 to 8 bytes.

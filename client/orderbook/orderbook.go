@@ -344,6 +344,12 @@ func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 	return ob.updateRemaining(note, false)
 }
 
+// LogEpochReport just checks the notification sequence.
+func (ob *OrderBook) LogEpochReport(note *msgjson.EpochReportNote) error {
+	ob.setSeq(note.Seq)
+	return nil
+}
+
 // unbook is the workhorse of the exported Unbook function. It allows unbooking
 // cached and uncached order notes.
 func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {

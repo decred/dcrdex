@@ -168,6 +168,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 		if low < stats.LowRate || stats.LowRate == 0 {
 			stats.LowRate = low
 		}
+		stats.QuoteVolume += matchSet.QuoteVolume()
 	}
 
 	// Store partially filled limit orders in a map to avoid duplicate

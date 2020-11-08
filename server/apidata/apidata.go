@@ -139,6 +139,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			StartStamp:  startStamp,
 			EndStamp:    endStamp,
 			MatchVolume: stats.MatchVolume,
+			QuoteVolume: stats.QuoteVolume,
 			BookVolume:  stats.BookVolume,
 			OrderVolume: stats.OrderVolume,
 			HighRate:    stats.HighRate,

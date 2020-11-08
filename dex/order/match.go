@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"github.com/decred/dcrd/crypto/blake256"
 )
@@ -251,6 +252,14 @@ func (set *MatchSet) HighLowRates() (high uint64, low uint64) {
 		if rate < low || low == 0 {
 			low = rate
 		}
+	}
+	return
+}
+
+// QuoteVolume is the matched quantity in terms of the quote asset.
+func (set *MatchSet) QuoteVolume() (v uint64) {
+	for i := range set.Rates {
+		v += calc.BaseToQuote(set.Rates[i], set.Amounts[i])
 	}
 	return
 }

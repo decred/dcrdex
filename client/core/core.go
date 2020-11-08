@@ -3911,6 +3911,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
+	msgjson.EpochReportRoute:     handleEpochReportMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,

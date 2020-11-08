@@ -25,6 +25,7 @@ type EpochResults struct {
 	OrdersRevealed    []order.OrderID
 	OrdersMissed      []order.OrderID
 	MatchVolume       uint64
+	QuoteVolume       uint64
 	BookVolume        uint64
 	OrderVolume       uint64
 	HighRate          uint64

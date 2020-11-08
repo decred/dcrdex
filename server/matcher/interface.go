@@ -21,6 +21,7 @@ type Booker interface {
 // MatchCycleStats is data about the results of a match cycle.
 type MatchCycleStats struct {
 	MatchVolume uint64
+	QuoteVolume uint64
 	BookVolume  uint64
 	OrderVolume uint64
 	HighRate    uint64

@@ -119,7 +119,7 @@ func TestCandleCache(t *testing.T) {
 	}
 	// The cache becomes circular, so the most recent will be at the previously
 	// oldest index, 0.
-	if cache.last() != cache.candles[0] {
+	if cache.last() != &cache.candles[0] {
 		t.Fatalf("cache didn't wrap")
 	}
 

@@ -14,6 +14,7 @@ type Candle struct {
 	StartStamp  uint64
 	EndStamp    uint64
 	MatchVolume uint64
+	QuoteVolume uint64
 	BookVolume  uint64
 	OrderVolume uint64
 	HighRate    uint64
@@ -27,7 +28,7 @@ type Candle struct {
 // slice until it reaches capacity, when it becomes a "circular array" to avoid
 // re-allocations.
 type CandleCache struct {
-	candles []*Candle
+	candles []Candle
 	cap     int
 	// cursor will be the index of the last inserted candle.
 	cursor  int
@@ -46,20 +47,21 @@ func NewCandleCache(cap int, binSize uint64) *CandleCache {
 // responsible to ensure that candles added with Add are always newer than
 // the last candle added.
 func (c *CandleCache) Add(candle *Candle) {
+
 	sz := len(c.candles)
 	if sz == 0 {
-		c.candles = append(c.candles, candle)
+		c.candles = append(c.candles, *candle)
 		return
 	}
-	if combineCandles(c.last(), candle, c.binSize) {
+	if c.combineCandles(c.last(), candle) {
 		return
 	}
 	if sz == c.cap { // circular mode
 		c.cursor = (c.cursor + 1) % c.cap
-		c.candles[c.cursor] = candle
+		c.candles[c.cursor] = *candle
 		return
 	}
-	c.candles = append(c.candles, candle)
+	c.candles = append(c.candles, *candle)
 	c.cursor = sz // len(c.candles) - 1
 }
 
@@ -75,10 +77,11 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 
 	wc := msgjson.NewWireCandles(n)
 	for i := sz - n; i < sz; i++ {
-		candle := c.candles[(c.cursor+1+i)%sz]
+		candle := &c.candles[(c.cursor+1+i)%sz]
 		wc.StartStamps = append(wc.StartStamps, candle.StartStamp)
 		wc.EndStamps = append(wc.EndStamps, candle.EndStamp)
 		wc.MatchVolumes = append(wc.MatchVolumes, candle.MatchVolume)
+		wc.QuoteVolumes = append(wc.QuoteVolumes, candle.QuoteVolume)
 		wc.BookVolumes = append(wc.BookVolumes, candle.BookVolume)
 		wc.OrderVolumes = append(wc.OrderVolumes, candle.OrderVolume)
 		wc.HighRates = append(wc.HighRates, candle.HighRate)
@@ -92,13 +95,13 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 
 // last gets the most recent candle in the cache.
 func (c *CandleCache) last() *Candle {
-	return c.candles[c.cursor]
+	return &c.candles[c.cursor]
 }
 
 // combineCandles attempts to add the candidate candle to the target candle
 // in-place, if they're in the same bin, otherwise returns false.
-func combineCandles(target, candidate *Candle, binSize uint64) bool {
-	if target.EndStamp/binSize != candidate.EndStamp/binSize {
+func (c *CandleCache) combineCandles(target, candidate *Candle) bool {
+	if target.EndStamp/c.binSize != candidate.EndStamp/c.binSize {
 		// The candidate candle cannot be added.
 		return false
 	}
@@ -112,6 +115,7 @@ func combineCandles(target, candidate *Candle, binSize uint64) bool {
 	}
 	target.BookVolume = candidate.BookVolume
 	target.MatchVolume += candidate.MatchVolume
+	target.QuoteVolume += candidate.QuoteVolume
 	target.OrderVolume += candidate.OrderVolume
 	return true
 }

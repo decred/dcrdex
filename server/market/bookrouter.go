@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/matcher"
 )
 
 // A updateAction classifies updates into how they affect the book or epoch
@@ -39,6 +40,14 @@ const (
 	// newEpochAction is an internal signal to the routers main loop that
 	// indicates when a new epoch has opened.
 	newEpochAction
+	// epochReportAction is sent when all bookAction, unbookAction, and
+	// updateRemainingAction signals are sent for a completed epoch.
+	// This signal performs a couple of important roles. First, it informs the
+	// client that the book updates are done, and the book will be static until
+	// the end of the epoch. Second, it sends the candlestick data, so a
+	// subscriber can maintain a up-to-date CandleCache without repeatedly
+	// querying the HTTP API for the data.
+	epochReportAction
 	// matchProofAction means the matching has been performed and will result in
 	// a msgjson.MatchProofNote being sent to subscribers.
 	matchProofAction
@@ -94,6 +103,12 @@ type sigDataBookedOrder sigDataOrder
 type sigDataUnbookedOrder sigDataOrder
 type sigDataEpochOrder sigDataOrder
 type sigDataUpdateRemaining sigDataOrder
+
+type sigDataEpochReport struct {
+	epochIdx int64
+	epochDur int64
+	stats    *matcher.MatchCycleStats
+}
 
 type sigDataNewEpoch struct {
 	idx int64
@@ -359,6 +374,30 @@ out:
 				}
 				n.Seq = subs.nextSeq()
 				note = n
+
+			case sigDataEpochReport:
+				route = msgjson.EpochReportRoute
+				startStamp := sigData.epochIdx * sigData.epochDur
+				endStamp := startStamp + sigData.epochDur
+				stats := sigData.stats
+
+				note = &msgjson.EpochReportNote{
+					Seq:      subs.nextSeq(),
+					MarketID: book.name,
+					Epoch:    uint64(sigData.epochIdx),
+					Candle: msgjson.Candle{
+						StartStamp:  uint64(startStamp),
+						EndStamp:    uint64(endStamp),
+						MatchVolume: stats.MatchVolume,
+						QuoteVolume: stats.QuoteVolume,
+						BookVolume:  stats.BookVolume,
+						OrderVolume: stats.OrderVolume,
+						HighRate:    stats.HighRate,
+						LowRate:     stats.LowRate,
+						StartRate:   stats.StartRate,
+						EndRate:     stats.EndRate,
+					},
+				}
 
 			case sigDataEpochOrder:
 				route = msgjson.EpochOrderRoute

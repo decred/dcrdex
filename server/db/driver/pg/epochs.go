@@ -71,7 +71,7 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
 	stmt = fmt.Sprintf(internal.InsertEpochReport, epochReportsTableName)
 	epochEnd := (ed.Idx + 1) * ed.Dur
-	_, err = a.db.Exec(stmt, epochEnd, ed.Dur, ed.MatchVolume, ed.BookVolume, ed.OrderVolume, ed.HighRate, ed.LowRate, ed.StartRate, ed.EndRate)
+	_, err = a.db.Exec(stmt, epochEnd, ed.Dur, ed.MatchVolume, ed.QuoteVolume, ed.BookVolume, ed.OrderVolume, ed.HighRate, ed.LowRate, ed.StartRate, ed.EndRate)
 	if err != nil {
 		a.fatalBackendErr(err)
 	}
@@ -102,7 +102,7 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) 
 	for rows.Next() {
 		candle := new(db.Candle)
 		var epochDur uint64
-		err = rows.Scan(&candle.EndStamp, &epochDur, &candle.MatchVolume, &candle.BookVolume,
+		err = rows.Scan(&candle.EndStamp, &epochDur, &candle.MatchVolume, &candle.QuoteVolume, &candle.BookVolume,
 			&candle.OrderVolume, &candle.HighRate, &candle.LowRate, &candle.StartRate, &candle.EndRate)
 		if err != nil {
 			return err

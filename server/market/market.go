@@ -1746,6 +1746,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		OrdersRevealed: oidsRevealed,
 		OrdersMissed:   oidsMissed,
 		MatchVolume:    stats.MatchVolume,
+		QuoteVolume:    stats.QuoteVolume,
 		BookVolume:     stats.BookVolume,
 		OrderVolume:    stats.OrderVolume,
 		HighRate:       stats.HighRate,
@@ -1943,6 +1944,16 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		if err := m.auth.Send(ord.Order.User(), msg); err != nil {
 			log.Infof("Failed to send nomatch to user %s: %v", ord.Order.User(), err)
 		}
+	}
+
+	// Send "epoch_report" notifications.
+	notifyChan <- &updateSignal{
+		action: epochReportAction,
+		data: sigDataEpochReport{
+			epochIdx: epoch.Epoch,
+			epochDur: epoch.Duration,
+			stats:    stats,
+		},
 	}
 
 	// Initiate the swaps.

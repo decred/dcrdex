@@ -1276,17 +1276,24 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 				{bookAction, sigDataBookedOrder{lo, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestBuy, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestSell, epochIdx}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
 			},
 		},
 		{
-			"ok no matches, on book updates",
+			"ok no matches or book updates",
 			eq2,
-			[]*updateSignal{{matchProofAction, sigDataMatchProof{mp2}}},
+			[]*updateSignal{
+				{matchProofAction, sigDataMatchProof{mp2}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+			},
 		},
 		{
 			"ok empty queue",
 			NewEpoch(epochIdx, epochDur),
-			[]*updateSignal{{matchProofAction, sigDataMatchProof{mp0}}},
+			[]*updateSignal{
+				{matchProofAction, sigDataMatchProof{mp0}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -1375,6 +1382,17 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 					if wantIdx != sigData.idx {
 						t.Errorf("new epoch signal #%d (action %v) has epoch index %d, expected %d",
 							i, s.action, sigData.idx, wantIdx)
+					}
+
+				case sigDataEpochReport:
+					expSig := exp.data.(sigDataEpochReport)
+					if expSig.epochIdx != sigData.epochIdx {
+						t.Errorf("epoch report signal #%d (action %v) has epoch index %d, expected %d",
+							i, s.action, sigData.epochIdx, expSig.epochIdx)
+					}
+					if expSig.epochDur != sigData.epochDur {
+						t.Errorf("epoch report signal #%d (action %v) has epoch duration %d, expected %d",
+							i, s.action, sigData.epochDur, expSig.epochDur)
 					}
 				}
 
