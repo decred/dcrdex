@@ -192,10 +192,9 @@ type MatchNote struct {
 }
 
 func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
-	oid := t.ID()
 	return &MatchNote{
 		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
-		OrderID:      oid[:],
+		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
 			int64(t.wallets.fromAsset.SwapConf), match.counterConfirms, int64(t.wallets.toAsset.SwapConf)),
 		Host:     t.dc.acct.host,

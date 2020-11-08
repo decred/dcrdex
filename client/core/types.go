@@ -161,7 +161,7 @@ func NewCoin(assetID uint32, coinID []byte) *Coin {
 }
 
 // Confirmations is the confirmation count and confirmation requirement of a
-// SwapCoin.
+// Coin.
 type Confirmations struct {
 	Count    int64 `json:"count"`
 	Required int64 `json:"required"`
@@ -182,9 +182,13 @@ func matchFromMetaMatch(ord order.Order, metaMatch *db.MetaMatch) *Match {
 	return matchFromMetaMatchWithConfs(ord, metaMatch, 0, 0, 0, 0)
 }
 
-// matchFromMmatchFromMetaMatchWithConfs constructs a *Match from a *MetaMatch,
+// matchFromMetaMatchWithConfs constructs a *Match from a *MetaMatch,
 // and sets the confirmations for swaps-in-waiting.
 func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapConfs, swapReq, counterSwapConfs, counterReq int64) *Match {
+	if _, isCancel := ord.(*order.CancelOrder); isCancel {
+		fmt.Println("matchFromMetaMatchWithConfs got a cancel order for match", metaMatch.Match.MatchID)
+		return &Match{}
+	}
 	side := metaMatch.Match.Side
 	sell := ord.Trade().Sell
 	status := metaMatch.Match.Status
@@ -294,9 +298,13 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 	var rate uint64
 	var tif order.TimeInForce
-	if lo, ok := ord.(*order.LimitOrder); ok {
-		rate = lo.Rate
-		tif = lo.Force
+	switch ot := ord.(type) {
+	case *order.LimitOrder:
+		rate = ot.Rate
+		tif = ot.Force
+	case *order.CancelOrder:
+		fmt.Println("coreOrderFromTrade got a cancel order", ord.ID())
+		return &Order{}
 	}
 
 	var cancelling, canceled bool

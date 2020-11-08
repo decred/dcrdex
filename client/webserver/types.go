@@ -416,7 +416,7 @@ func (m *matchReader) TimeString() string {
 // InSwapCast will be true if the last match step was us broadcasting our swap
 // transaction.
 func (m *matchReader) InSwapCast() bool {
-	if m.Revoked {
+	if m.Revoked || m.Refund != nil {
 		return false
 	}
 	return (m.Match.Status == order.TakerSwapCast && m.Match.Side == order.Taker) ||
@@ -425,7 +425,7 @@ func (m *matchReader) InSwapCast() bool {
 
 // SwapConfirmString returns a string indicating the current confirmation
 // progress of the our swap contract, if and only if the counter-party has not
-// yet redeemed the swap, otherwise, and empty string is returned.
+// yet redeemed the swap, otherwise an empty string is returned.
 func (m *matchReader) SwapConfirmString() string {
 	if !m.InSwapCast() || m.Swap == nil {
 		return ""
@@ -440,7 +440,7 @@ func (m *matchReader) SwapConfirmString() string {
 // InCounterSwapCast will be true if the last match step was the counter-party
 // broadcasting their swap transaction.
 func (m *matchReader) InCounterSwapCast() bool {
-	if m.Revoked {
+	if m.Revoked || m.Refund != nil {
 		return false
 	}
 	return (m.Match.Status == order.MakerSwapCast && m.Match.Side == order.Taker) ||
@@ -449,7 +449,7 @@ func (m *matchReader) InCounterSwapCast() bool {
 
 // CounterSwapConfirmString returns a string indicating the current confirmation
 // progress of the other party's swap contract, if and only if we have not yet
-// redeemed the swap, otherwise, and empty string is returned.
+// redeemed the swap, otherwise an empty string is returned.
 func (m *matchReader) CounterSwapConfirmString() string {
 	if !m.InCounterSwapCast() || m.CounterSwap == nil {
 		return ""

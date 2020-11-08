@@ -784,16 +784,15 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 					match.id, confs, req)
 			}
 			return ready
-		} else {
-			// If we're the maker, check the confirmations anyway so we can
-			// notify.
-			confs, err := wallet.Confirmations([]byte(metaData.Proof.MakerSwap))
-			if err != nil {
-				t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
-			}
-			match.swapConfirms = int64(confs)
-			t.notify(newMatchNote("confirms", "", db.Data, t, match))
 		}
+		// If we're the maker, check the confirmations anyway so we can
+		// notify.
+		confs, err := wallet.Confirmations([]byte(metaData.Proof.MakerSwap))
+		if err != nil {
+			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		match.swapConfirms = int64(confs)
+		t.notify(newMatchNote("confirms", "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
@@ -832,14 +831,13 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 					match.id, confs, req)
 			}
 			return ready
-		} else {
-			confs, err := t.wallets.fromWallet.Confirmations([]byte(metaData.Proof.TakerSwap))
-			if err != nil {
-				t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
-			}
-			match.swapConfirms = int64(confs)
-			t.notify(newMatchNote("confirms", "", db.Data, t, match))
 		}
+		confs, err := t.wallets.fromWallet.Confirmations([]byte(metaData.Proof.TakerSwap))
+		if err != nil {
+			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		match.swapConfirms = int64(confs)
+		t.notify(newMatchNote("confirms", "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
