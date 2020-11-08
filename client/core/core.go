@@ -49,7 +49,6 @@ const (
 
 var (
 	unbip = dex.BipIDSymbol
-	aYear = time.Hour * 24 * 365
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
