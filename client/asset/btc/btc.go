@@ -988,13 +988,28 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 // Unlock unlocks the ExchangeWallet. The pw supplied should be the same as the
 // password for the underlying bitcoind wallet which will also be unlocked.
-func (btc *ExchangeWallet) Unlock(pw string, dur time.Duration) error {
-	return btc.wallet.Unlock(pw, dur)
+func (btc *ExchangeWallet) Unlock(pw string) error {
+	return btc.wallet.Unlock(pw)
 }
 
 // Lock locks the ExchangeWallet and the underlying bitcoind wallet.
 func (btc *ExchangeWallet) Lock() error {
 	return btc.wallet.Lock()
+}
+
+// Locked will be true if the wallet is currently locked.
+func (btc *ExchangeWallet) Locked() bool {
+	walletInfo, err := btc.wallet.GetWalletInfo()
+	if err != nil {
+		btc.log.Errorf("GetWalletInfo error: %w", err)
+		return false
+	}
+	if walletInfo.UnlockedUntil == nil {
+		// This wallet is not encrypted.
+		return false
+	}
+
+	return time.Unix(*walletInfo.UnlockedUntil, 0).Before(time.Now())
 }
 
 // fundedTx creates and returns a new MsgTx with the provided coins as inputs.

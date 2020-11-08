@@ -164,7 +164,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 
 	// Unlock the wallet for use.
-	err := rig.gamma().Unlock(walletPassword, time.Hour*24)
+	err := rig.gamma().Unlock(walletPassword)
 	if err != nil {
 		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}

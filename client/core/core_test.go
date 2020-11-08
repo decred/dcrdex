@@ -535,6 +535,7 @@ type TXCWallet struct {
 	returnedCoins     asset.Coins
 	fundingCoinErr    error
 	lockErr           error
+	locked            bool
 	changeCoin        *tCoin
 	syncStatus        func() (bool, float32, error)
 	connectWG         *sync.WaitGroup
@@ -550,12 +551,12 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		Wallet:       w,
 		connector:    dex.NewConnectionMaster(w),
 		AssetID:      assetID,
-		lockTime:     time.Now().Add(time.Hour),
 		hookedUp:     true,
 		dbID:         encode.Uint32Bytes(assetID),
 		encPW:        []byte{0x01},
 		synced:       true,
 		syncProgress: 1,
+		pw:           string(tPW),
 	}, w
 }
 
@@ -659,12 +660,16 @@ func (w *TXCWallet) Address() (string, error) {
 	return "", w.addrErr
 }
 
-func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
+func (w *TXCWallet) Unlock(pw string) error {
 	return w.unlockErr
 }
 
 func (w *TXCWallet) Lock() error {
 	return w.lockErr
+}
+
+func (w *TXCWallet) Locked() bool {
+	return w.locked
 }
 
 func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
@@ -1442,12 +1447,13 @@ func TestRegister(t *testing.T) {
 
 	// Unlock wallet error
 	tWallet.unlockErr = tErr
-	wallet.lockTime = time.Time{}
+	tWallet.locked = true
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, walletAuthErr) {
 		t.Fatalf("wrong wallet auth error: %v", err)
 	}
 	tWallet.unlockErr = nil
+	tWallet.locked = false
 
 	// connectDEX error
 	form.Addr = tUnparseableHost
@@ -1944,12 +1950,12 @@ func TestTrade(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	var lots uint64 = 10
 	qty := tDCR.LotSize * lots
@@ -2354,7 +2360,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundCoinDcr := &tCoin{id: fundCoinDcrID}
@@ -2362,7 +2368,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	// fundCoinBID := encode.RandomBytes(36)
 	// fundCoinB := &tCoin{id: fundCoinBID}
@@ -2420,7 +2426,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundCoinDcr := &tCoin{id: fundCoinDcrID}
@@ -2428,7 +2434,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	// fundCoinBID := encode.RandomBytes(36)
 	// fundCoinB := &tCoin{id: fundCoinBID}
@@ -2492,12 +2498,12 @@ func TestTradeTracking(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	matchSize := 4 * tDCR.LotSize
 	cancelledQty := tDCR.LotSize
@@ -3210,12 +3216,12 @@ func TestRefunds(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	matchSize := 4 * tDCR.LotSize
 	qty := 3 * matchSize
@@ -3504,8 +3510,10 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	// Base wallet unlock errors
 	tDcrWallet.unlockErr = tErr
+	tDcrWallet.locked = true
 	ensureFail("base unlock")
 	tDcrWallet.unlockErr = nil
+	tDcrWallet.locked = false
 
 	// No quote wallet
 	delete(tCore.wallets, tBTC.ID)
@@ -3514,8 +3522,10 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	// Quote wallet unlock errors
 	tBtcWallet.unlockErr = tErr
+	tBtcWallet.locked = true
 	ensureFail("quote unlock")
 	tBtcWallet.unlockErr = nil
+	tBtcWallet.locked = false
 
 	// Funding coin error.
 	tDcrWallet.fundingCoinErr = tErr
@@ -4225,11 +4235,11 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	dc := rig.dc
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	mkt := dc.market(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
@@ -4367,11 +4377,11 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	tCore := rig.core
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	epochLen := rig.dc.market(tDcrBtcMktName).EpochLen
 
@@ -4651,7 +4661,7 @@ func TestReconfigureWallet(t *testing.T) {
 	tXyzWallet.connectErr = nil
 
 	// Unlock error
-	tXyzWallet.Unlock(wPW, time.Hour)
+	tXyzWallet.Unlock(wPW)
 	tXyzWallet.unlockErr = tErr
 	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
 	if !errorHasCode(err, walletAuthErr) {
@@ -4834,11 +4844,11 @@ func TestPreimageSync(t *testing.T) {
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.Unlock(rig.crypter, time.Hour)
+	dcrWallet.Unlock(rig.crypter)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.Unlock(rig.crypter, time.Hour)
+	btcWallet.Unlock(rig.crypter)
 
 	var lots uint64 = 10
 	qty := tDCR.LotSize * lots
