@@ -150,6 +150,7 @@ type rpcClient interface {
 	WalletPassphrase(passphrase string, timeoutSecs int64) error
 	Disconnected() bool
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
+	WalletInfo() (*walletjson.WalletInfoResult, error)
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -1747,13 +1748,23 @@ func (dcr *ExchangeWallet) Address() (string, error) {
 }
 
 // Unlock unlocks the exchange wallet.
-func (dcr *ExchangeWallet) Unlock(pw string, dur time.Duration) error {
-	return dcr.node.WalletPassphrase(pw, int64(dur/time.Second))
+func (dcr *ExchangeWallet) Unlock(pw string) error {
+	return dcr.node.WalletPassphrase(pw, int64(time.Duration(math.MaxInt64)/time.Second))
 }
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
 	return dcr.node.WalletLock()
+}
+
+// Locked will be true if the wallet is currently locked.
+func (dcr *ExchangeWallet) Locked() bool {
+	walletInfo, err := dcr.node.WalletInfo()
+	if err != nil {
+		dcr.log.Errorf("walletinfo error: %v", err)
+		return false
+	}
+	return !walletInfo.Unlocked
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to

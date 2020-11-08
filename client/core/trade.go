@@ -761,7 +761,9 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	}
 
 	wallet := t.wallets.fromWallet
-	if !wallet.unlocked() {
+	// Just a quick check here. We'll perform a more thorough check if there are
+	// actually swappables.
+	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
 			t.ID(), match.id, unbip(wallet.AssetID))
 		return false
@@ -797,7 +799,9 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	}
 
 	wallet := t.wallets.toWallet
-	if !wallet.unlocked() {
+	// Just a quick check here. We'll perform a more thorough check if there are
+	// actually redeemables.
+	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
 			t.ID(), match.id, unbip(wallet.AssetID))
 		return false
@@ -840,7 +844,9 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	wallet := t.wallets.fromWallet
-	if !wallet.unlocked() {
+	// Just a quick check here. We'll perform a more thorough check if there are
+	// actually refundables.
+	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
 			t.ID(), match.id, unbip(wallet.AssetID))
 		return false
@@ -986,11 +992,19 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(swaps) > 0 {
+		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
+		if err != nil {
+			// Just log it and try anyway.
+			c.log.Errorf("refreshUnlock error swapping %s: %v", t.wallets.fromAsset.Symbol, err)
+		}
+		if didUnlock {
+			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a swap", t.wallets.fromAsset.Symbol)
+		}
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
 		}
-		err := c.swapMatches(t, swaps)
+		err = c.swapMatches(t, swaps)
 
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
@@ -1008,6 +1022,14 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(redeems) > 0 {
+		didUnlock, err := t.wallets.toWallet.refreshUnlock()
+		if err != nil {
+			// Just log it and try anyway.
+			c.log.Errorf("refreshUnlock error redeeming %s: %v", t.wallets.toAsset.Symbol, err)
+		}
+		if didUnlock {
+			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.fromAsset.Symbol)
+		}
 		toAsset := t.wallets.toAsset.ID
 		assets.count(toAsset)
 		assets.count(t.fromAssetID) // update the from wallet balance to reduce contractlocked balance
@@ -1015,7 +1037,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if t.Trade().Sell {
 			qty = quoteReceived
 		}
-		err := c.redeemMatches(t, redeems)
+		err = c.redeemMatches(t, redeems)
 		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
@@ -1030,6 +1052,14 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(refunds) > 0 {
+		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
+		if err != nil {
+			// Just log it and try anyway.
+			c.log.Errorf("refreshUnlock error refunding %s: %v", t.wallets.fromAsset.Symbol, err)
+		}
+		if didUnlock {
+			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a refund", t.wallets.fromAsset.Symbol)
+		}
 		refunded, err := t.refundMatches(refunds)
 		corder := t.coreOrderInternal()
 		details := fmt.Sprintf("Refunded %.8f %s on order %s",

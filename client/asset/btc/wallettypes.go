@@ -109,6 +109,10 @@ type GetWalletInfoResult struct {
 	KeyPoolSizeHDInternal uint32  `json:"keypoolsize_hd_internal"`
 	PayTxFee              float64 `json:"paytxfee"`
 	HdSeedID              string  `json:"hdseedid"`
+	// UnlockedUntil is a pointer because for encrypted locked wallets, it will
+	// be zero, but for unencrypted wallets the field won't be present in the
+	// response.
+	UnlockedUntil *int64 `json:"unlocked_until"`
 	// HDMasterKeyID is dropped in Bitcoin Core 0.18
 	HdMasterKeyID     string `json:"hdmasterkeyid"`
 	PriveyKeysEnabled bool   `json:"private_keys_enabled"`

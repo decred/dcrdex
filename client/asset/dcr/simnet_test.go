@@ -185,7 +185,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	// Unlock the wallet for use.
-	err := rig.beta().Unlock(walletPassword, time.Hour*24)
+	err := rig.beta().Unlock(walletPassword)
 	if err != nil {
 		t.Fatalf("error unlocking beta wallet: %v", err)
 	}
@@ -284,7 +284,7 @@ func runTest(t *testing.T, splitTx bool) {
 	checkConfs(0)
 
 	// Unlock the wallet for use.
-	err = rig.alpha().Unlock(walletPassword, time.Hour*24)
+	err = rig.alpha().Unlock(walletPassword)
 	if err != nil {
 		t.Fatalf("error unlocking alpha wallet: %v", err)
 	}

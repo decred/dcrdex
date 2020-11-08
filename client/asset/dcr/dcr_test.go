@@ -361,6 +361,12 @@ func (c *tRPCClient) WalletPassphrase(passphrase string, timeoutSecs int64) erro
 	return c.passErr
 }
 
+func (c *tRPCClient) WalletInfo() (*walletjson.WalletInfoResult, error) {
+	return &walletjson.WalletInfoResult{
+		Unlocked: true,
+	}, nil
+}
+
 func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
 }
