@@ -416,12 +416,12 @@ func (a *dexAccount) setupEncryption(crypter encrypt.Crypter) (*secp256k1.Privat
 	// Create a new private key for the account.
 	privKey, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("error creating acct private key: %v", err)
+		return nil, fmt.Errorf("error creating acct private key: %w", err)
 	}
 	// Encrypt the private key.
 	encKey, err := crypter.Encrypt(privKey.Serialize())
 	if err != nil {
-		return nil, fmt.Errorf("error encrypting acct private key: %v", err)
+		return nil, fmt.Errorf("error encrypting acct private key: %w", err)
 	}
 
 	a.keyMtx.Lock()

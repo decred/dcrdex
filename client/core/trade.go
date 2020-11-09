@@ -1733,7 +1733,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
 		if err != nil {
-			if err == asset.CoinNotFoundError && dbMatch.Side == order.Taker {
+			if errors.Is(err, asset.CoinNotFoundError) && dbMatch.Side == order.Taker {
 				match.refundErr = err
 				// Could not find the contract coin, which means it has been spent.
 				// We should have already started FindRedemption for this contract,
@@ -1830,7 +1830,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 			var err error
 			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract)
 			if err != nil {
-				if err == asset.CoinNotFoundError {
+				if errors.Is(err, asset.CoinNotFoundError) {
 					return wait.TryAgain
 				}
 				errChan <- err

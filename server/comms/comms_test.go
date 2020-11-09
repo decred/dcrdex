@@ -210,7 +210,7 @@ func sendReplace(t *testing.T, conn *wsConnStub, thing interface{}, old, new str
 func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, error) {
 	uri, err := url.Parse(addr)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing url: %v", err)
+		return nil, fmt.Errorf("error parsing url: %w", err)
 	}
 
 	dialer := &websocket.Dialer{

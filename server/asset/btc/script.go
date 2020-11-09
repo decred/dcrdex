@@ -14,11 +14,11 @@ import (
 func checkSig(msg, pkBytes, sigBytes []byte) error {
 	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
 	if err != nil {
-		return fmt.Errorf("error decoding PublicKey from bytes: %v", err)
+		return fmt.Errorf("error decoding PublicKey from bytes: %w", err)
 	}
 	signature, err := btcec.ParseDERSignature(sigBytes, btcec.S256())
 	if err != nil {
-		return fmt.Errorf("error decoding Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return fmt.Errorf("signature verification failed")

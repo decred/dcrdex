@@ -56,7 +56,7 @@ func DecodeMatchID(matchIDStr string) (MatchID, error) {
 		return matchID, errors.New("match id has incorrect length")
 	}
 	if _, err := hex.Decode(matchID[:], []byte(matchIDStr)); err != nil {
-		return matchID, fmt.Errorf("could not decode match id: %v", err)
+		return matchID, fmt.Errorf("could not decode match id: %w", err)
 	}
 	return matchID, nil
 }

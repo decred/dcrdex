@@ -168,7 +168,7 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c.stopped = make(chan struct{}) // control signal to block send
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
+		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %w", c.ip, err)
 	}
 
 	c.log.Tracef("Starting websocket messaging with peer %s", c.ip)

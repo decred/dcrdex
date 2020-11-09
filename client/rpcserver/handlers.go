@@ -52,7 +52,7 @@ const (
 func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.ResponsePayload {
 	encodedRes, err := json.Marshal(res)
 	if err != nil {
-		err := fmt.Errorf("unable to marshal data for %s: %v", op, err)
+		err := fmt.Errorf("unable to marshal data for %s: %w", op, err)
 		panic(err)
 	}
 	return &msgjson.ResponsePayload{Result: encodedRes, Error: resErr}
@@ -62,8 +62,7 @@ func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.
 // *msgjson.ResponsePayload.
 func usage(route string, err error) *msgjson.ResponsePayload {
 	usage, _ := commandUsage(route, false)
-	err = fmt.Errorf("%v\n\n%s", err, usage)
-	resErr := msgjson.NewError(msgjson.RPCArgumentsError, err.Error())
+	resErr := msgjson.NewError(msgjson.RPCArgumentsError, "%v\n\n%s", err, usage)
 	return createResponse(route, nil, resErr)
 }
 

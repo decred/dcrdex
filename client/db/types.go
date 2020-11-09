@@ -451,7 +451,7 @@ func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
 	}
 	bal, err := decodeAssetBalance(pushes[0])
 	if err != nil {
-		return nil, fmt.Errorf("decodeBalances_v0: error decoding zero conf balance: %v", err)
+		return nil, fmt.Errorf("decodeBalances_v0: error decoding zero conf balance: %w", err)
 	}
 
 	return &Balance{

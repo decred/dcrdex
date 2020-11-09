@@ -51,7 +51,7 @@ type Config struct {
 func loadConfig(settings map[string]string, network dex.Network) (*Config, error) {
 	cfg := new(Config)
 	if err := config.Unmapify(settings, cfg); err != nil {
-		return nil, fmt.Errorf("error parsing config: %v", err)
+		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
 
 	missing := ""

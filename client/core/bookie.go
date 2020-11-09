@@ -231,7 +231,7 @@ func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, erro
 		Quote: quote,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error encoding 'orderbook' request: %v", err)
+		return nil, fmt.Errorf("error encoding 'orderbook' request: %w", err)
 	}
 	errChan := make(chan error, 1)
 	result := new(msgjson.OrderBook)
@@ -241,7 +241,7 @@ func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, erro
 		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.OrderBookRoute)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error subscribing to %s orderbook: %v", mkt, err)
+		return nil, fmt.Errorf("error subscribing to %s orderbook: %w", mkt, err)
 	}
 	err = <-errChan
 	if err != nil {
@@ -338,7 +338,7 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	if !found {
 		snap, err := dc.subscribe(base, quote)
 		if err != nil {
-			return nil, fmt.Errorf("unable to subscribe to book: %v", err)
+			return nil, fmt.Errorf("unable to subscribe to book: %w", err)
 		}
 		err = dc.unsubscribe(base, quote)
 		if err != nil {
@@ -346,7 +346,7 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 		}
 		ob = orderbook.NewOrderBook(c.log.SubLogger(mkt))
 		if err = ob.Sync(snap); err != nil {
-			return nil, fmt.Errorf("unable to sync book: %v", err)
+			return nil, fmt.Errorf("unable to sync book: %w", err)
 		}
 	} else {
 		ob = &book.OrderBook
@@ -379,7 +379,7 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	note := new(msgjson.BookOrderNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
-		return fmt.Errorf("book order note unmarshal error: %v", err)
+		return fmt.Errorf("book order note unmarshal error: %w", err)
 	}
 
 	dc.booksMtx.RLock()
@@ -453,7 +453,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	var sp msgjson.TradeSuspension
 	err := msg.Unmarshal(&sp)
 	if err != nil {
-		return fmt.Errorf("trade suspension unmarshal error: %v", err)
+		return fmt.Errorf("trade suspension unmarshal error: %w", err)
 	}
 
 	// Ensure the provided market exists for the dex.
@@ -546,7 +546,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	var rs msgjson.TradeResumption
 	err := msg.Unmarshal(&rs)
 	if err != nil {
-		return fmt.Errorf("trade resumption unmarshal error: %v", err)
+		return fmt.Errorf("trade resumption unmarshal error: %w", err)
 	}
 
 	// Ensure the provided market exists for the dex.
@@ -603,7 +603,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 
 	assets, markets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
 	if err != nil {
-		return fmt.Errorf("Inconsistent 'config' response: %v", err)
+		return fmt.Errorf("Inconsistent 'config' response: %w", err)
 	}
 
 	// Update dc.{marketMap,epoch,assets}
@@ -628,7 +628,7 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	note := new(msgjson.UnbookOrderNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
-		return fmt.Errorf("unbook order note unmarshal error: %v", err)
+		return fmt.Errorf("unbook order note unmarshal error: %w", err)
 	}
 
 	dc.booksMtx.RLock()
@@ -659,7 +659,7 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	note := new(msgjson.UpdateRemainingNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
-		return fmt.Errorf("book order note unmarshal error: %v", err)
+		return fmt.Errorf("book order note unmarshal error: %w", err)
 	}
 
 	dc.booksMtx.RLock()
@@ -692,7 +692,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	note := new(msgjson.EpochOrderNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
-		return fmt.Errorf("epoch order note unmarshal error: %v", err)
+		return fmt.Errorf("epoch order note unmarshal error: %w", err)
 	}
 
 	if dc.setEpoch(note.MarketID, note.Epoch) {
@@ -710,7 +710,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 
 	err = book.Enqueue(note)
 	if err != nil {
-		return fmt.Errorf("failed to Enqueue epoch order: %v", err)
+		return fmt.Errorf("failed to Enqueue epoch order: %w", err)
 	}
 
 	// Send a mini-order for book updates.

@@ -89,7 +89,7 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 			// Remove this with actual upgrades.
 			nameSpacedTable := marketUID + "." + c.name
 			if _, err = db.Exec(fmt.Sprintf(update, nameSpacedTable)); err != nil {
-				return fmt.Errorf("failed to update table %v: %v", nameSpacedTable, err)
+				return fmt.Errorf("failed to update table %v: %w", nameSpacedTable, err)
 			}
 		}
 	}

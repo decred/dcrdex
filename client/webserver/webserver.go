@@ -277,7 +277,7 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Start serving.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
+		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %w", s.addr, err)
 	}
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
@@ -343,10 +343,10 @@ func (s *WebServer) authorize() string {
 func (s *WebServer) isAuthed(r *http.Request) bool {
 	var authToken string
 	cookie, err := r.Cookie(authCK)
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		authToken = cookie.Value
-	case http.ErrNoCookie:
+	case errors.Is(err, http.ErrNoCookie):
 	default:
 		log.Errorf("authToken retrieval error: %v", err)
 	}

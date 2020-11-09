@@ -52,7 +52,7 @@ type Config struct {
 func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
 	if err := config.ParseInto(cfgPath, cfg); err != nil {
-		return nil, fmt.Errorf("error parsing config file: %v", err)
+		return nil, fmt.Errorf("error parsing config file: %w", err)
 	}
 	return checkConfig(cfg, name, network, ports)
 }
@@ -61,7 +61,7 @@ func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports 
 func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
 	if err := config.Unmapify(settings, cfg); err != nil {
-		return nil, fmt.Errorf("error parsing connection settings: %v", err)
+		return nil, fmt.Errorf("error parsing connection settings: %w", err)
 	}
 	return checkConfig(cfg, name, network, ports)
 }

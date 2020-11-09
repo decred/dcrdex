@@ -37,7 +37,7 @@ func (a *Archiver) setAccountRule(aid account.AccountID, rule account.Rule) erro
 		if !errors.Is(err, errNoRows) {
 			a.fatalBackendErr(err)
 		}
-		return fmt.Errorf("error setting account rule %s: %v", aid, err)
+		return fmt.Errorf("error setting account rule %s: %w", aid, err)
 	}
 	return nil
 }
@@ -46,10 +46,10 @@ func (a *Archiver) setAccountRule(aid account.AccountID, rule account.Rule) erro
 // whether the account is open, in that order.
 func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
 	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		return nil, false, false
-	case nil:
+	case err == nil:
 	default:
 		log.Errorf("getAccount error: %v", err)
 		return nil, false, false
@@ -100,7 +100,7 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
 	regAddr, err := a.getNextAddress()
 	if err != nil {
-		return "", fmt.Errorf("error creating registration address: %v", err)
+		return "", fmt.Errorf("error creating registration address: %w", err)
 	}
 	err = createAccount(a.db, a.tables.accounts, acct, regAddr)
 	if err != nil {
@@ -152,10 +152,10 @@ out:
 			return "", err
 		}
 		childExtKey, err = a.feeKeyBranch.Child(child)
-		switch err {
-		case hdkeychain.ErrInvalidChild:
+		switch {
+		case errors.Is(err, hdkeychain.ErrInvalidChild):
 			continue
-		case nil:
+		case err == nil:
 			break out
 		default:
 			log.Errorf("error creating child key: %v", err)

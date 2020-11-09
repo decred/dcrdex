@@ -775,7 +775,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	penaltyNote.Sig = sig.Serialize()
 	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 	if err != nil {
-		return fmt.Errorf("error creating penalty notification: %v", err)
+		return fmt.Errorf("error creating penalty notification: %w", err)
 	}
 	// TODO: verify that we are not sending a note over max uint16 as it
 	// cannot be sent over ws.
@@ -1482,7 +1482,7 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
 	signature, err := ecdsa.ParseDERSignature(sig)
 	if err != nil {
-		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return fmt.Errorf("secp256k1 signature verification failed")

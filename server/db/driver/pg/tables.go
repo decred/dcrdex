@@ -116,7 +116,7 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 	// Create the meta table in the public schema.
 	created, err := CreateTable(db, publicSchema, metaTableName)
 	if err != nil {
-		return fmt.Errorf("failed to create meta table: %v", err)
+		return fmt.Errorf("failed to create meta table: %w", err)
 	}
 	if created {
 		log.Trace("Creating new meta table.")
@@ -129,7 +129,7 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 	// Create the markets table in the public schema.
 	created, err = CreateTable(db, publicSchema, marketsTableName)
 	if err != nil {
-		return fmt.Errorf("failed to create markets table: %v", err)
+		return fmt.Errorf("failed to create markets table: %w", err)
 	}
 	if created {
 		log.Trace("Creating new markets table.")
@@ -156,7 +156,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 	// Load existing markets and ensure there aren't multiple with the same ID.
 	mkts, err := loadMarkets(db, marketsTableName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read markets table: %v", err)
+		return nil, fmt.Errorf("failed to read markets table: %w", err)
 	}
 	marketMap := make(map[string]*dex.MarketInfo, len(mkts))
 	for _, mkt := range mkts {
@@ -176,7 +176,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 			log.Tracef("New market specified in config: %s", mkt.Name)
 			err = newMarket(db, marketsTableName, mkt)
 			if err != nil {
-				return nil, fmt.Errorf("newMarket failed: %v", err)
+				return nil, fmt.Errorf("newMarket failed: %w", err)
 			}
 		} else {
 			// TODO: check params, inc. lot size
@@ -188,7 +188,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 		// Create the tables in the markets schema.
 		err = createMarketTables(db, mkt.Name)
 		if err != nil {
-			return nil, fmt.Errorf("createMarketTables failed: %v", err)
+			return nil, fmt.Errorf("createMarketTables failed: %w", err)
 		}
 	}
 

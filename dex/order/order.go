@@ -37,7 +37,7 @@ func IDFromHex(sid string) (OrderID, error) {
 	}
 	oidB, err := hex.DecodeString(sid)
 	if err != nil {
-		return OrderID{}, fmt.Errorf("order ID decode error: %v", err)
+		return OrderID{}, fmt.Errorf("order ID decode error: %w", err)
 	}
 	var oid OrderID
 	copy(oid[OrderIDSize-len(oidB):], oidB)

@@ -132,7 +132,7 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 
 		uri, err := url.Parse(cfg.URL)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing URL: %v", err)
+			return nil, fmt.Errorf("error parsing URL: %w", err)
 		}
 
 		rootCAs, _ := x509.SystemCertPool()
@@ -193,7 +193,8 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	}
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
-		if _, isUnknownAuthError := err.(x509.UnknownAuthorityError); isUnknownAuthError {
+		var e x509.UnknownAuthorityError
+		if errors.As(err, &e) {
 			if conn.tlsCfg == nil {
 				return ErrCertRequired
 			}

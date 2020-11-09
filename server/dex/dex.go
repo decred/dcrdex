@@ -312,7 +312,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		be, err := asset.Setup(symbol, assetConf.ConfigPath, logger, cfg.Network)
 		if err != nil {
 			abort()
-			return nil, fmt.Errorf("failed to setup asset %q: %v", symbol, err)
+			return nil, fmt.Errorf("failed to setup asset %q: %w", symbol, err)
 		}
 
 		if symbol == "dcr" {
@@ -387,7 +387,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	storage, err := db.Open(ctx, "pg", pgCfg)
 	if err != nil {
 		abort()
-		return nil, fmt.Errorf("db.Open: %v", err)
+		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
 	// Create the user order unbook dispatcher for the AuthManager.
@@ -450,7 +450,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	swapper, err := swap.NewSwapper(swapperCfg)
 	if err != nil {
 		abort()
-		return nil, fmt.Errorf("NewSwapper: %v", err)
+		return nil, fmt.Errorf("NewSwapper: %w", err)
 	}
 
 	// Markets
@@ -461,7 +461,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		mkt, err := market.NewMarket(mktInf, storage, swapper, authMgr, baseCoinLocker, quoteCoinLocker)
 		if err != nil {
 			abort()
-			return nil, fmt.Errorf("NewMarket failed: %v", err)
+			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
 
@@ -529,7 +529,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	server, err := comms.NewServer(cfg.CommsCfg)
 	if err != nil {
 		abort()
-		return nil, fmt.Errorf("NewServer failed: %v", err)
+		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 	startSubSys("Comms Server", server)
 

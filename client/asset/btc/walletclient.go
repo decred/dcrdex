@@ -138,12 +138,12 @@ func (wc *walletClient) address(aType string) (btcutil.Address, error) {
 func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	txBytes, err := serializeMsgTx(inTx)
 	if err != nil {
-		return nil, fmt.Errorf("tx serialization error: %v", err)
+		return nil, fmt.Errorf("tx serialization error: %w", err)
 	}
 	res := new(SignTxResult)
 	err = wc.call(methodSignTx, anylist{hex.EncodeToString(txBytes)}, res)
 	if err != nil {
-		return nil, fmt.Errorf("tx signing error: %v", err)
+		return nil, fmt.Errorf("tx signing error: %w", err)
 	}
 	if !res.Complete {
 		sep := ""
@@ -156,7 +156,7 @@ func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	}
 	outTx, err := msgTxFromBytes(res.Hex)
 	if err != nil {
-		return nil, fmt.Errorf("error deserializing transaction response: %v", err)
+		return nil, fmt.Errorf("error deserializing transaction response: %w", err)
 	}
 	return outTx, nil
 }
@@ -204,7 +204,7 @@ func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, sub
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
 	if err != nil {
-		return nil, fmt.Errorf("error setting transaction fee: %v", err)
+		return nil, fmt.Errorf("error setting transaction fee: %w", err)
 	}
 	if !success {
 		return nil, fmt.Errorf("failed to set transaction fee")
@@ -239,7 +239,7 @@ func (wc *walletClient) call(method string, args anylist, thing interface{}) err
 	}
 	b, err := wc.node.RawRequest(method, params)
 	if err != nil {
-		return fmt.Errorf("rawrequest error: %v", err)
+		return fmt.Errorf("rawrequest error: %w", err)
 	}
 	if thing != nil {
 		return json.Unmarshal(b, thing)

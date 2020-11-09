@@ -6,6 +6,7 @@ package bolt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -296,11 +297,11 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		}
 		err = acct.Put(accountKey, ai.Encode())
 		if err != nil {
-			return fmt.Errorf("accountKey put error: %v", err)
+			return fmt.Errorf("accountKey put error: %w", err)
 		}
 		err = acct.Put(activeKey, byteTrue)
 		if err != nil {
-			return fmt.Errorf("activeKey put error: %v", err)
+			return fmt.Errorf("activeKey put error: %w", err)
 		}
 		return nil
 	})
@@ -329,7 +330,7 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	}
 	err = db.deleteAccount(ai.Host)
 	if err != nil {
-		if err == bbolt.ErrBucketNotFound {
+		if errors.Is(err, bbolt.ErrBucketNotFound) {
 			db.log.Warnf("Cannot delete account from active accounts"+
 				" table. Host: not found. %s err: %v", ai.Host, err)
 		} else {
@@ -403,7 +404,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		oid := ord.ID()
 		oBkt, err := master.CreateBucketIfNotExists(oid[:])
 		if err != nil {
-			return fmt.Errorf("order bucket error: %v", err)
+			return fmt.Errorf("order bucket error: %w", err)
 		}
 		var linkedB []byte
 		if !md.LinkedOrder.IsZero() {
@@ -651,7 +652,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 	ord, err := order.DecodeOrder(orderB)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding order %x: %v", oid, err)
+		return nil, fmt.Errorf("error decoding order %x: %w", oid, err)
 	}
 	proofB := getCopy(oBkt, proofKey)
 	if proofB == nil {
@@ -659,7 +660,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 	proof, err := dexdb.DecodeOrderProof(proofB)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
+		return nil, fmt.Errorf("error decoding order proof for %x: %w", oid, err)
 	}
 
 	var linkedID order.OrderID
@@ -754,7 +755,7 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		metaID := m.ID()
 		mBkt, err := master.CreateBucketIfNotExists(metaID)
 		if err != nil {
-			return fmt.Errorf("order bucket error: %v", err)
+			return fmt.Errorf("order bucket error: %w", err)
 		}
 		return newBucketPutter(mBkt).
 			put(baseKey, uint32Bytes(md.Base)).
@@ -898,7 +899,7 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 				}
 				match, err := order.DecodeMatch(matchB)
 				if err != nil {
-					return fmt.Errorf("error decoding match %x: %v", k, err)
+					return fmt.Errorf("error decoding match %x: %w", k, err)
 				}
 				proofB := getCopy(mBkt, proofKey)
 				if len(proofB) == 0 {
@@ -906,7 +907,7 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 				}
 				proof, err = dexdb.DecodeMatchProof(proofB)
 				if err != nil {
-					return fmt.Errorf("error decoding proof: %v", err)
+					return fmt.Errorf("error decoding proof: %w", err)
 				}
 				statusB := mBkt.Get(statusKey)
 				if len(statusB) != 1 {
@@ -1156,7 +1157,7 @@ func (db *BoltDB) Backup() error {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err := os.Mkdir(dir, 0700)
 		if err != nil {
-			return fmt.Errorf("unable to create backup directory: %v", err)
+			return fmt.Errorf("unable to create backup directory: %w", err)
 		}
 	}
 

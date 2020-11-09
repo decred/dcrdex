@@ -128,12 +128,12 @@ func newArgonPolyCrypter(pw []byte) *argonPolyCrypter {
 func (c *argonPolyCrypter) Encrypt(plainText []byte) ([]byte, error) {
 	boxer, err := chacha20poly1305.NewX(c.key[:])
 	if err != nil {
-		return nil, fmt.Errorf("aead error: %v", err)
+		return nil, fmt.Errorf("aead error: %w", err)
 	}
 	nonce := make([]byte, boxer.NonceSize())
 	_, err = rand.Read(nonce)
 	if err != nil {
-		return nil, fmt.Errorf("nonce generation error: %v", err)
+		return nil, fmt.Errorf("nonce generation error: %w", err)
 	}
 	cipherText := boxer.Seal(nil, nonce, plainText, nil)
 	return encode.BuildyBytes{0}.AddData(nonce).AddData(cipherText), nil
@@ -143,7 +143,7 @@ func (c *argonPolyCrypter) Encrypt(plainText []byte) ([]byte, error) {
 func (c *argonPolyCrypter) Decrypt(encrypted []byte) ([]byte, error) {
 	ver, pushes, err := encode.DecodeBlob(encrypted)
 	if err != nil {
-		return nil, fmt.Errorf("DecodeBlob: %v", err)
+		return nil, fmt.Errorf("DecodeBlob: %w", err)
 	}
 	if ver != 0 {
 		return nil, fmt.Errorf("only version 0 encryptions are known. got version %d", ver)
@@ -153,7 +153,7 @@ func (c *argonPolyCrypter) Decrypt(encrypted []byte) ([]byte, error) {
 	}
 	boxer, err := chacha20poly1305.NewX(c.key[:])
 	if err != nil {
-		return nil, fmt.Errorf("aead error: %v", err)
+		return nil, fmt.Errorf("aead error: %w", err)
 	}
 	nonce, cipherText := pushes[0], pushes[1]
 	if len(nonce) != boxer.NonceSize() {
@@ -161,7 +161,7 @@ func (c *argonPolyCrypter) Decrypt(encrypted []byte) ([]byte, error) {
 	}
 	plainText, err := boxer.Open(nil, nonce, cipherText, nil)
 	if err != nil {
-		return nil, fmt.Errorf("aead.Open: %v", err)
+		return nil, fmt.Errorf("aead.Open: %w", err)
 	}
 	return plainText, nil
 }

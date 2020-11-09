@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"time"
 
@@ -55,7 +56,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 			txio.lastLookup = &tipHash
 			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(&txio.tx.hash)
 			if err != nil {
-				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txio.tx.hash, err)
+				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, err)
 			}
 			// More than zero confirmations would indicate that the transaction has
 			// been mined. Collect the block info and update the tx fields.
@@ -79,7 +80,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 		if mainchainBlock != nil && checkApproval {
 			nextBlock, err := txio.dcr.getMainchainDcrBlock(txio.height + 1)
 			if err != nil {
-				return -1, fmt.Errorf("error retrieving approving block tx %s: %v", txio.tx.hash, err)
+				return -1, fmt.Errorf("error retrieving approving block tx %s: %w", txio.tx.hash, err)
 			}
 			if nextBlock != nil && !nextBlock.vote {
 				return -1, fmt.Errorf("transaction %s block %s has been voted as invalid", txio.tx.hash, nextBlock.hash)
@@ -133,7 +134,7 @@ func (input *Input) String() string {
 // transaction.
 func (input *Input) Confirmations() (int64, error) {
 	confs, err := input.confirmations(false)
-	if err == ErrReorgDetected {
+	if errors.Is(err, ErrReorgDetected) {
 		newInput, err := input.dcr.input(&input.tx.hash, input.vin)
 		if err != nil {
 			return -1, fmt.Errorf("input block is not mainchain")
@@ -153,7 +154,7 @@ func (input *Input) ID() []byte {
 func (input *Input) spendsCoin(coinID []byte) (bool, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return false, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	if uint32(len(input.tx.ins)) < input.vin+1 {
 		return false, nil
@@ -208,7 +209,7 @@ var _ asset.Contract = (*Contract)(nil)
 // are other considerations as well.
 func (output *Output) Confirmations() (int64, error) {
 	confs, err := output.confirmations(false)
-	if err == ErrReorgDetected {
+	if errors.Is(err, ErrReorgDetected) {
 		newOut, err := output.dcr.output(&output.tx.hash, output.vout, output.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("output block is not mainchain")
@@ -277,11 +278,11 @@ func (output *Output) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	}
 	matches, err := pkMatches(pubkeys, scriptAddrs.PubKeys, nil)
 	if err != nil {
-		return fmt.Errorf("error during pubkey matching: %v", err)
+		return fmt.Errorf("error during pubkey matching: %w", err)
 	}
 	m, err := pkMatches(pubkeys, scriptAddrs.PkHashes, dcrutil.Hash160)
 	if err != nil {
-		return fmt.Errorf("error during pubkey hash matching: %v", err)
+		return fmt.Errorf("error during pubkey hash matching: %w", err)
 	}
 	matches = append(matches, m...)
 	if len(matches) < output.numSigs {
@@ -312,7 +313,7 @@ type UTXO struct {
 // may error if the output is spent.
 func (utxo *UTXO) Confirmations() (int64, error) {
 	confs, err := utxo.confirmations(!utxo.scriptType.IsStake())
-	if err == ErrReorgDetected {
+	if errors.Is(err, ErrReorgDetected) {
 		// See if we can find the utxo in another block.
 		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
@@ -391,7 +392,7 @@ func (contract *Contract) auditContract() error {
 	}
 	refund, receiver, lockTime, _, err := dexdcr.ExtractSwapDetails(contract.redeemScript, chainParams)
 	if err != nil {
-		return fmt.Errorf("error parsing swap contract for %s:%d: %v", tx.hash, contract.vout, err)
+		return fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
 	}
 	contract.refundAddress = refund.String()
 	contract.swapAddress = receiver.String()

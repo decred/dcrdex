@@ -129,7 +129,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	// dex.Network.
 	net, err := dcr.client.GetCurrentNet()
 	if err != nil {
-		return nil, fmt.Errorf("getcurrentnet failure: %v", err)
+		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
 	}
 	var wantCurrencyNet wire.CurrencyNet
 	switch network {
@@ -147,7 +147,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	// Check the required API versions.
 	versions, err := dcr.client.Version()
 	if err != nil {
-		return nil, fmt.Errorf("DCR node version fetch error: %v", err)
+		return nil, fmt.Errorf("DCR node version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrdjsonrpcapi"]
@@ -166,12 +166,12 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	// Prime the cache with the best block.
 	bestHash, _, err := dcr.client.GetBestBlock()
 	if err != nil {
-		return nil, fmt.Errorf("error getting best block from dcrd: %v", err)
+		return nil, fmt.Errorf("error getting best block from dcrd: %w", err)
 	}
 	if bestHash != nil {
 		_, err := dcr.getDcrBlock(bestHash)
 		if err != nil {
-			return nil, fmt.Errorf("error priming the cache: %v", err)
+			return nil, fmt.Errorf("error priming the cache: %w", err)
 		}
 	}
 	return dcr, nil
@@ -226,7 +226,7 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	output, err := dcr.output(txHash, vout, redeemScript)
 	if err != nil {
@@ -265,7 +265,7 @@ func (dcr *Backend) Synced() (bool, error) {
 func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding redemption coin ID %x: %v", txHash, err)
+		return nil, fmt.Errorf("error decoding redemption coin ID %x: %w", txHash, err)
 	}
 	input, err := dcr.input(txHash, vin)
 	if err != nil {
@@ -285,7 +285,7 @@ func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 func (dcr *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	utxo, err := dcr.utxo(txHash, vout, redeemScript)
 	if err != nil {
@@ -339,11 +339,11 @@ func (dcr *Backend) CheckAddress(addr string) bool {
 func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
+		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
 	}
 	if txOut == nil {
 		return asset.CoinNotFoundError
@@ -358,7 +358,7 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
 	txHash, vout, errCoin := decodeCoinID(coinID)
 	if errCoin != nil {
-		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
+		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
 		return
 	}
 
@@ -434,7 +434,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	// Figure out if it's a stake transaction
 	msgTx, err := msgTxFromHex(verboseTx.Hex)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %v", txHash, err)
+		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %w", txHash, err)
 	}
 	isStake := stake.DetermineTxType(msgTx) != stake.TxTypeRegular
 
@@ -449,7 +449,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	} else {
 		blockHash, err = chainhash.NewHashFromStr(verboseTx.BlockHash)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
+			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %w", verboseTx.BlockHash, txHash, err)
 		}
 		// Make sure the block info is cached.
 		_, err := dcr.getDcrBlock(blockHash)
@@ -468,7 +468,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 		sumIn += value
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %v", input.Txid, txHash, err)
+			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %w", input.Txid, txHash, err)
 		}
 		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout, value: value})
 	}
@@ -477,7 +477,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	for vout, output := range verboseTx.Vout {
 		pkScript, err := hex.DecodeString(output.ScriptPubKey.Hex)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
+			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %w",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
 		sumOut += toAtoms(output.Value)
@@ -688,7 +688,7 @@ func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 		}
 		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
 		if err != nil {
-			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %v", err)
+			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %w", err)
 		}
 		// Check the script hash against the hash of the redeem script.
 		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
@@ -745,7 +745,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	if scriptType.IsP2SH() {
 		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
 		if err != nil {
-			return nil, fmt.Errorf("utxo error: %v", err)
+			return nil, fmt.Errorf("utxo error: %w", err)
 		}
 		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
@@ -770,7 +770,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 
 	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
+		return nil, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
 
 	out := &Output{
@@ -803,11 +803,11 @@ func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
 		if isTxNotFoundErr(err) {
 			return nil, 0, asset.CoinNotFoundError
 		}
-		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %v", err)
+		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
 	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
 	if err != nil {
@@ -861,7 +861,7 @@ func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 	if scriptType.IsP2SH() {
 		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
 		if err != nil {
-			return nil, fmt.Errorf("output error: %v", err)
+			return nil, fmt.Errorf("output error: %w", err)
 		}
 		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for output %s:%d", txHash, vout)
@@ -912,7 +912,7 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err) // TODO: make RPC error type for client message sanitization
+		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err) // TODO: make RPC error type for client message sanitization
 	}
 	if txOut == nil {
 		return nil, nil, asset.CoinNotFoundError
@@ -933,7 +933,7 @@ func (dcr *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjso
 	}
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	return txOut, verboseTx, pkScript, nil
 }
@@ -956,7 +956,7 @@ func (dcr *Backend) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, error) {
 	}
 	blockVerbose, err := dcr.node.GetBlockVerbose(blockHash, false)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving block %s: %v", blockHash, err)
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
 	}
 	return dcr.blockCache.add(blockVerbose)
 }
@@ -981,7 +981,7 @@ func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 
 	dcrdCerts, err := ioutil.ReadFile(cert)
 	if err != nil {
-		return nil, fmt.Errorf("TLS certificate read error: %v", err)
+		return nil, fmt.Errorf("TLS certificate read error: %w", err)
 	}
 
 	config := &rpcclient.ConnConfig{
@@ -994,7 +994,7 @@ func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 
 	dcrdClient, err := rpcclient.New(config, nil)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrd RPC client: %v", err)
+		return nil, fmt.Errorf("Failed to start dcrd RPC client: %w", err)
 	}
 
 	return dcrdClient, nil

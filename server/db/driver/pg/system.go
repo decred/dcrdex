@@ -66,7 +66,7 @@ func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
 	var N int64
 	N, err = res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf(`error in RowsAffected: %v`, err)
+		return 0, fmt.Errorf(`error in RowsAffected: %w`, err)
 	}
 	return N, err
 }
@@ -82,7 +82,7 @@ func sqlExecStmt(stmt *sql.Stmt, args ...interface{}) (int64, error) {
 	var N int64
 	N, err = res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf(`error in RowsAffected: %v`, err)
+		return 0, fmt.Errorf(`error in RowsAffected: %w`, err)
 	}
 	return N, err
 }
@@ -391,7 +391,7 @@ func setSynchronousCommit(db sqlExecutor, syncCommit string) error {
 // checkCurrentTimeZone queries for the currently set postgres time zone.
 func checkCurrentTimeZone(db *sql.DB) (currentTZ string, err error) {
 	if err = db.QueryRow(`SHOW TIME ZONE`).Scan(&currentTZ); err != nil {
-		err = fmt.Errorf("unable to query current time zone: %v", err)
+		err = fmt.Errorf("unable to query current time zone: %w", err)
 	}
 	return
 }
@@ -422,7 +422,7 @@ func (a *Archiver) checkPerfSettings(showPGConfig bool) error {
 			`Changing it to "off".`, syncCommit)
 		// Turn off synchronous_commit.
 		if err = setSynchronousCommit(a.db, "off"); err != nil {
-			return fmt.Errorf("failed to set synchronous_commit: %v", err)
+			return fmt.Errorf("failed to set synchronous_commit: %w", err)
 		}
 		// Verify that the setting was changed.
 		if syncCommit, err = retrieveSysSettingSyncCommit(a.db); err != nil {
