@@ -769,7 +769,7 @@ func newTestRig() *testRig {
 
 	crypter := &tCrypter{}
 
-	return &testRig{
+	rig := &testRig{
 		core: &Core{
 			ctx:      tCtx,
 			cfg:      &Config{},
@@ -798,6 +798,8 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
+	rig.core.refreshUser()
+	return rig
 }
 
 func (rig *testRig) queueConfig() {

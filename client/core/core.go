@@ -2114,7 +2114,9 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 }
 
 // coreOrderFromMetaOrder creates an *Order from a *db.MetaOrder, including
-// loading matches from the database.
+// loading matches from the database. The order is presumed to be inactive, so
+// swap coin confirmations will not be set. For active orders, get the
+// *trackedTrade and use the coreOrder method.
 func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 	corder := coreOrderFromTrade(mOrd.Order, mOrd.MetaData)
 	oid := mOrd.Order.ID()
@@ -2124,7 +2126,7 @@ func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 	}
 	corder.Matches = make([]*Match, 0, len(matches))
 	for _, match := range matches {
-		corder.Matches = append(corder.Matches, matchFromMetaMatch(match))
+		corder.Matches = append(corder.Matches, matchFromMetaMatch(mOrd.Order, match))
 	}
 	return corder, nil
 }
@@ -2136,6 +2138,20 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	}
 	var oid order.OrderID
 	copy(oid[:], oidB)
+	// See if its an active order first.
+	var tracker *trackedTrade
+	c.connMtx.RLock()
+	for _, dc := range c.conns {
+		tracker, _, _ = dc.findOrder(oid)
+		if tracker != nil {
+			break
+		}
+	}
+	c.connMtx.RUnlock()
+	if tracker != nil {
+		return tracker.coreOrder(), nil
+	}
+	// Must not be an active order. Get it from the database.
 	mOrd, err := c.db.Order(oid)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving order %s: %w", oid, err)

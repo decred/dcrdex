@@ -486,6 +486,12 @@ export default class Application {
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
         balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
+        break
+      }
+      case 'match': {
+        const ord = this.order(note.orderID)
+        if (ord) updateMatch(ord, note.match)
+        break
       }
     }
 
@@ -704,4 +710,16 @@ function nowString () {
 function setSeverityClass (el, severity) {
   el.classList.remove('bad', 'warn', 'good')
   el.classList.add(severityClassMap[severity])
+}
+
+/* updateMatch updates the match in or adds the match to the order. */
+function updateMatch (order, match) {
+  for (const i in order.matches) {
+    const m = order.matches[i]
+    if (m.matchID === match.matchID) {
+      order.matches[i] = match
+      return
+    }
+  }
+  order.matches.push(match)
 }
