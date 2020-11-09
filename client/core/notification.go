@@ -146,14 +146,14 @@ type FeePaymentNote struct {
 }
 
 const (
-	FeePaymentInProgressSubject    = "Fee payment in progress"
-	RegUpdateSubject               = "regupdate"
-	FeePaymentErrorSubject         = "Fee payment error"
-	AccountRegisteredSubject       = "Account registered"
-	AccountUnlockErrorSubject      = "Account unlock error"
-	FeeCoinErrorSubject            = "Fee coin error"
-	WalletConnectionWarningSubject = "Wallet connection warning"
-	WalletUnlockErrorSubject       = "Wallet unlock error"
+	SubjectFeePaymentInProgress    = "Fee payment in progress"
+	SubjectRegUpdate               = "regupdate"
+	SubjectFeePaymentError         = "Fee payment error"
+	SubjectAccountRegistered       = "Account registered"
+	SubjectAccountUnlockError      = "Account unlock error"
+	SubjectFeeCoinError            = "Fee coin error"
+	SubjectWalletConnectionWarning = "Wallet connection warning"
+	SubjectWalletUnlockError       = "Wallet unlock error"
 )
 
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
@@ -193,35 +193,35 @@ type OrderNote struct {
 }
 
 const (
-	OrderLoadFailureSubject     = "Order load failure"
-	OrderPlacedSubject          = "Order placed"
-	MissingMatchesSubject       = "Missing matches"
-	WalletMissingSubject        = "Wallet missing"
-	MatchStatusErrorSubject     = "Match status error"
-	MatchRecoveryErrorSubject   = "Match recovery error"
-	NoFundingCoinsSubject       = "No funding coins"
-	OrderCoinErrorSubject       = "Order coin error"
-	PreimageSentSubject         = "preimage sent"
-	CancelPreimageSentSubject   = "cancel preimage sent"
-	MissedCancelSubject         = "Missed cancel"
-	OrderBookedSubject          = "Order booked"
-	NoMatchSubject              = "No match"
-	OrderCanceledSubject        = "Order canceled"
-	CancelSubject               = "cancel"
-	MatchesMadeSubject          = "Matches made"
-	SwapErrorSubject            = "Swap error"
-	SwapsInitiatedSubject       = "Swaps initiated"
-	RedemptionErrorSubject      = "Redemption error"
-	MatchCompleteSubject        = "Match complete"
-	RefundFailureSubject        = "Refund Failure"
-	MatchesRefundedSubject      = "Matches Refunded"
-	MatchRevokedSubject         = "Match revoked"
-	RevokeSubject               = "revoke"
-	MatchRecoveredSubject       = "Match recovered"
-	CancellingOrderSubject      = "Cancelling order"
-	OrderStatusUpdateSubject    = "Order status update"
-	MatchResolutionErrorSubject = "Match resolution error"
-	FailedCancelSubject         = "Failed cancel"
+	SubjectOrderLoadFailure     = "Order load failure"
+	SubjectOrderPlaced          = "Order placed"
+	SubjectMissingMatches       = "Missing matches"
+	SubjectWalletMissing        = "Wallet missing"
+	SubjectMatchStatusError     = "Match status error"
+	SubjectMatchRecoveryError   = "Match recovery error"
+	SubjectNoFundingCoins       = "No funding coins"
+	SubjectOrderCoinError       = "Order coin error"
+	SubjectPreimageSent         = "preimage sent"
+	SubjectCancelPreimageSent   = "cancel preimage sent"
+	SubjectMissedCancel         = "Missed cancel"
+	SubjectOrderBooked          = "Order booked"
+	SubjectNoMatch              = "No match"
+	SubjectOrderCanceled        = "Order canceled"
+	SubjectCancel               = "cancel"
+	SubjectMatchesMade          = "Matches made"
+	SubjectSwapError            = "Swap error"
+	SubjectSwapsInitiated       = "Swaps initiated"
+	SubjectRedemptionError      = "Redemption error"
+	SubjectMatchComplete        = "Match complete"
+	SubjectRefundFailure        = "Refund Failure"
+	SubjectMatchesRefunded      = "Matches Refunded"
+	SubjectMatchRevoked         = "Match revoked"
+	SubjectRevoke               = "revoke"
+	SubjectMatchRecovered       = "Match recovered"
+	SubjectCancellingOrder      = "Cancelling order"
+	SubjectOrderStatusUpdate    = "Order status update"
+	SubjectMatchResolutionError = "Match resolution error"
+	SubjectFailedCancel         = "Failed cancel"
 )
 
 func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
@@ -268,8 +268,8 @@ type MatchNote struct {
 }
 
 const (
-	AuditSubject    = "audit"
-	NewMatchSubject = "new_match"
+	SubjectAudit    = "audit"
+	SubjectNewMatch = "new_match"
 )
 
 func newMatchNote(subject, details string, severity db.Severity, corder *Order, matchID order.MatchID) *MatchNote {
@@ -347,9 +347,9 @@ type DEXAuthNote struct {
 }
 
 const (
-	DexAuthErrorSubject     = "DEX auth error"
-	UnknownOrdersSubject    = "DEX reported unknown orders"
-	OrdersReconciledSubject = "Orders reconciled with DEX"
+	SubjectDexAuthError     = "DEX auth error"
+	SubjectUnknownOrders    = "DEX reported unknown orders"
+	SubjectOrdersReconciled = "Orders reconciled with DEX"
 )
 
 func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
@@ -368,8 +368,8 @@ type WalletConfigNote struct {
 }
 
 const (
-	WalletConfigurationUpdatedSubject = "Wallet Configuration Updated"
-	WalletPasswordUpdatedSubject      = "Wallet Password Updated"
+	SubjectWalletConfigurationUpdated = "Wallet Configuration Updated"
+	SubjectWalletPasswordUpdated      = "Wallet Password Updated"
 )
 
 func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
@@ -397,10 +397,10 @@ type ServerNotifyNote struct {
 }
 
 const (
-	MarketSuspendScheduledSubject = "market suspend scheduled"
-	MarketSuspendedSubject        = "market suspended"
-	MarketResumeScheduledSubject  = "market resume scheduled"
-	MarketResumedSubject          = "market resumed"
+	SubjectMarketSuspendScheduled = "market suspend scheduled"
+	SubjectMarketSuspended        = "market suspended"
+	SubjectMarketResumeScheduled  = "market resume scheduled"
+	SubjectMarketResumed          = "market resumed"
 )
 
 func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
