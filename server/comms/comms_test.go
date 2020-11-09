@@ -35,8 +35,9 @@ var (
 
 func newServer() *Server {
 	return &Server{
-		clients:    make(map[uint64]*wsLink),
-		quarantine: make(map[string]time.Time),
+		clients:     make(map[uint64]*wsLink),
+		quarantine:  make(map[string]time.Time),
+		dataEnabled: 1,
 	}
 }
 
@@ -57,6 +58,7 @@ func giveItASecond(f func() bool) bool {
 }
 
 func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
+	t.Helper()
 	select {
 	case i := <-c:
 		return i
@@ -64,6 +66,19 @@ func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
 		t.Fatalf("%s: didn't read channel", tag)
 	}
 	return nil
+}
+
+func decodeResponse(t *testing.T, b []byte) *msgjson.ResponsePayload {
+	t.Helper()
+	msg, err := msgjson.DecodeMessage(b)
+	if err != nil {
+		t.Fatalf("error decoding last message (%s): %v", string(b), err)
+	}
+	resp, err := msg.Response()
+	if err != nil {
+		t.Fatalf("error decoding response payload: %v", err)
+	}
+	return resp
 }
 
 type wsConnStub struct {
@@ -80,6 +95,7 @@ func (conn *wsConnStub) addChan() {
 }
 
 func (conn *wsConnStub) wait(t *testing.T, tag string) {
+	t.Helper()
 	select {
 	case <-conn.recv:
 	case <-time.NewTimer(time.Second).C:
@@ -334,6 +350,12 @@ func TestClientRequests(t *testing.T) {
 		c.Banish()
 		return nil
 	})
+	var httpSeen uint32
+	RegisterHTTP("httproute", func(thing interface{}) (interface{}, error) {
+		atomic.StoreUint32(&httpSeen, 1)
+		srvChan <- nil
+		return struct{}{}, nil
+	})
 
 	// A helper function to reconnect to the server (new comm) and grab the
 	// server's link (new client).
@@ -436,16 +458,38 @@ func TestClientRequests(t *testing.T) {
 		t.Fatalf("incorrect error for disconnected client")
 	}
 
+	// Test that an http request passes.
+	reconnect()
+	conn.addChan()
+	sendToServer("httproute", "{}")
+	readChannel(t, "httproute", srvChan)
+	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("HTTP route not hit")
+	}
+	conn.wait(t, "http route success")
+
+	// Disable HTTP non-critical HTTP routes and try again.
+	server.EnableDataAPI(false)
+	sendToServer("httproute", "{}")
+	resp := decodeResponse(t, <-conn.recv)
+	if resp.Error == nil || resp.Error.Code != msgjson.RouteUnavailableError {
+		t.Fatalf("no error for disabled HTTP route")
+	}
+	if atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("disabled HTTP route hit")
+	}
+
+	// Make the route a critical route
+	criticalRoutes["httproute"] = true
+	sendToServer("httproute", "{}")
+	readChannel(t, "httproute", srvChan)
+	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("critical HTTP route not hit")
+	}
+	conn.wait(t, "critical http route success")
+
 	checkParseError := func() {
-		b := <-conn.recv
-		msg, err := msgjson.DecodeMessage(b)
-		if err != nil {
-			t.Fatalf("error decoding last message (%s): %v", string(b), err)
-		}
-		resp, err := msg.Response()
-		if err != nil {
-			t.Fatalf("error decoding response payload: %v", err)
-		}
+		resp := decodeResponse(t, <-conn.recv)
 		if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
 			t.Fatalf("no error after invalid id")
 		}
@@ -841,7 +885,9 @@ func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
 
 func TestRateLimiter(t *testing.T) {
 	tHandler := &tHTTPHandler{}
-	f := limitRate(tHandler)
+	s := Server{dataEnabled: 1}
+
+	f := s.limitRate(tHandler)
 	ip := "ip"
 	req := &http.Request{RemoteAddr: ip}
 	recorder := httptest.NewRecorder()

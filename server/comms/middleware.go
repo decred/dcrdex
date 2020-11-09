@@ -5,8 +5,10 @@ package comms
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -21,21 +23,33 @@ const (
 	ctxThing contextKey = iota
 )
 
-// limitRate is rate-limiting middleware that checks both the global rate
-// limiter and the more restrictive ip-based rate limiter.
-func limitRate(next http.Handler) http.Handler {
+// limitRate is rate-limiting middleware that checks whether a request can be
+// fulfilled.
+func (s *Server) limitRate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !globalHTTPRateLimiter.Allow() {
-			http.Error(w, "too many global requests", http.StatusTooManyRequests)
-			return
-		}
-		ipLimiter := getIPLimiter(r.RemoteAddr)
-		if !ipLimiter.Allow() {
-			http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+		code, err := s.meterIP(r.RemoteAddr)
+		if err != nil {
+			http.Error(w, err.Error(), code)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// meterIP checks the dataEnabled flag, the global rate limiter, and the
+// more restrictive ip-based rate limiter.
+func (s *Server) meterIP(ip string) (int, error) {
+	if atomic.LoadUint32(&s.dataEnabled) != 1 {
+		return http.StatusServiceUnavailable, fmt.Errorf("data API is disabled")
+	}
+	if !globalHTTPRateLimiter.Allow() {
+		return http.StatusTooManyRequests, fmt.Errorf("too many global requests")
+	}
+	ipLimiter := getIPLimiter(ip)
+	if !ipLimiter.Allow() {
+		return http.StatusTooManyRequests, fmt.Errorf(http.StatusText(http.StatusTooManyRequests))
+	}
+	return 0, nil
 }
 
 // candlesParamsParser is middleware for the /candles routes. Parses the

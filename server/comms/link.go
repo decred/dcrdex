@@ -13,6 +13,11 @@ import (
 
 const readLimitAuthorized = 65536
 
+// criticalRoutes are not subject to the rate limiter on websocket connections.
+var criticalRoutes = map[string]bool{
+	msgjson.ConfigRoute: true,
+}
+
 // Link is an interface for a communication channel with an API client. The
 // reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
@@ -60,16 +65,20 @@ type wsLink struct {
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
 	ban bool
+	// meterIP is a function that will be checked to see if certain data API
+	// requests should be denied due to rate limits or if the API disabled.
+	meterIP func(string) (int, error)
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection) *wsLink {
+func newWSLink(addr string, conn ws.Connection, limitRate func(string) (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
+		meterIP:      limitRate,
 	}
 	return c
 }
@@ -119,13 +128,13 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
 
-		// Check HTTP rate limiters.
-		if !globalHTTPRateLimiter.Allow() {
-			return msgjson.NewError(msgjson.RPCParseError, "too many global requests")
-		}
-		ipLimiter := getIPLimiter(c.IP())
-		if !ipLimiter.Allow() {
-			return msgjson.NewError(msgjson.RPCParseError, "too many requests")
+		// If it's not a critical route, check the rate limiters.
+		if !criticalRoutes[msg.Route] {
+			if _, err := c.meterIP(c.IP()); err != nil {
+				// These errors are actually formatted nicely for sending, since
+				// they are used directly in HTTP errors as well.
+				return msgjson.NewError(msgjson.RouteUnavailableError, err.Error())
+			}
 		}
 
 		// Prepare the thing and unmarshal.

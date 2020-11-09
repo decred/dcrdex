@@ -71,6 +71,7 @@ const (
 	InvalidRequestError               // 52
 	OrderQuantityTooHigh              // 53
 	HTTPRouteError                    // 54
+	RouteUnavailableError             // 55
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

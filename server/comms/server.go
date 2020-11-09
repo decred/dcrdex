@@ -155,6 +155,8 @@ type RPCConfig struct {
 	// TLS keypair. Changing AltDNSNames does not force the keypair to be
 	// regenerated. To regenerate, delete or move the old files.
 	AltDNSNames []string
+	// DisableDataAPI will disable all traffic to the HTTP data API routes.
+	DisableDataAPI bool
 }
 
 // Server is a low-level communications hub. It supports websocket clients
@@ -170,8 +172,9 @@ type Server struct {
 	counter uint64
 	// The quarantine map maps IP addresses to a time in which the quarantine will
 	// be lifted.
-	banMtx     sync.RWMutex
-	quarantine map[string]time.Time
+	banMtx      sync.RWMutex
+	quarantine  map[string]time.Time
+	dataEnabled uint32
 }
 
 // A constructor for an Server. The Server handles a map of clients, each
@@ -226,11 +229,16 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	if len(listeners) == 0 {
 		return nil, fmt.Errorf("RPCS: No valid listen address")
 	}
+	var dataEnabled uint32 = 1
+	if cfg.DisableDataAPI {
+		dataEnabled = 0
+	}
 
 	return &Server{
-		listeners:  listeners,
-		clients:    make(map[uint64]*wsLink),
-		quarantine: make(map[string]time.Time),
+		listeners:   listeners,
+		clients:     make(map[uint64]*wsLink),
+		quarantine:  make(map[string]time.Time),
+		dataEnabled: dataEnabled,
 	}, nil
 }
 
@@ -289,7 +297,7 @@ func (s *Server) Run(ctx context.Context) {
 
 	// Data API endpoints.
 	mux.Route("/api", func(rr chi.Router) {
-		rr.Use(limitRate)
+		rr.Use(s.limitRate)
 		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
 		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
 		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", routeHandler(msgjson.CandlesRoute))
@@ -383,7 +391,7 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip st
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newWSLink(ip, conn)
+	client := newWSLink(ip, conn, s.meterIP)
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", ip)
@@ -418,6 +426,15 @@ func (s *Server) Broadcast(msg *msgjson.Message) {
 			log.Debugf("Send to client %d at %s failed: %v", id, cl.IP(), err)
 			cl.Disconnect() // triggers return of websocketHandler, and removeClient
 		}
+	}
+}
+
+// EnableDataAPI enables or disables the HTTP data API endpoints.
+func (s *Server) EnableDataAPI(yes bool) {
+	if yes {
+		atomic.StoreUint32(&s.dataEnabled, 1)
+	} else {
+		atomic.StoreUint32(&s.dataEnabled, 0)
 	}
 }
 
@@ -554,7 +571,7 @@ func handleHTTP(w http.ResponseWriter, r *http.Request, route string, thing inte
 	writeJSONWithStatus(w, resp, http.StatusOK)
 }
 
-// routeHandler creeates a HandlerFunc for a route. Middleware should have
+// routeHandler creates a HandlerFunc for a route. Middleware should have
 // already processed the request and added the request struct to the Context.
 func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -568,7 +585,6 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	encoder := json.NewEncoder(w)
-	// encoder.SetIndent("", indent)
 	if err := encoder.Encode(thing); err != nil {
 		log.Infof("JSON encode error: %v", err)
 	}

@@ -784,3 +784,9 @@ func (dm *DEX) EpochOrders(base, quote uint32) ([]order.Order, error) {
 func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
 	return dm.storage.MarketMatches(base, quote, includeInactive)
 }
+
+// EnableDataAPI can be called via admin API to enable or disable the HTTP data
+// API endpoints.
+func (dm *DEX) EnableDataAPI(yes bool) {
+	dm.server.EnableDataAPI(yes)
+}

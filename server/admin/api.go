@@ -323,6 +323,22 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, accts)
 }
 
+// apiEnableDataAPI is the handler for the `/enabledataapi/{yes}` API request,
+// used to enable or disable the HTTP data API.
+func (s *Server) apiEnableDataAPI(w http.ResponseWriter, r *http.Request) {
+	yes, err := strconv.ParseBool(chi.URLParam(r, yesKey))
+	if err != nil {
+		http.Error(w, "unable to parse selection: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.core.EnableDataAPI(yes)
+	msg := "Data API disabled"
+	if yes {
+		msg = "Data API enabled"
+	}
+	writeJSON(w, msg)
+}
+
 // apiAccountInfo is the handler for the '/account/{account id}' API request.
 func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)

@@ -58,7 +58,7 @@ type BookSource interface {
 	Book(mktName string) (*msgjson.OrderBook, error)
 }
 
-// DataAPI implement a data API backend. API data is
+// DataAPI is a data API backend.
 type DataAPI struct {
 	db             DBSource
 	epochDurations map[string]uint64
