@@ -193,7 +193,8 @@ export default class WalletsPage extends BasePage {
       }
       if (count === 0) continue
       const header = page.dexTitle.cloneNode(true)
-      header.textContent = host
+      header.querySelector('#host').textContent = host
+      header.querySelector('#acctID').textContent = xc.acctID
       card.appendChild(header)
       const marketsBox = page.markets.cloneNode(true)
       card.appendChild(marketsBox)

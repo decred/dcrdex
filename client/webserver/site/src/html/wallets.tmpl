@@ -92,7 +92,10 @@
     <div id="marketsBox" class="d-hide">
       <div class="fs22 text-center py-1"><span id="marketsFor"></span> Markets</div>
       <div id="marketsCard" class="card">
-        <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
+        <div class="bg2 px-2 py-1 text-center" id="dexTitle">
+            <span class="fs18" id="host"></span><br>
+            <span class="fs12" id="acctID"></span>
+        </div>
         <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
           <div class="asset-market p-1" id="oneMarket">
             <img src="{{logoPath "dcr"}}" class="mini-icon"><br>
