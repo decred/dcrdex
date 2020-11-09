@@ -62,7 +62,7 @@ func (cache *blockCache) add(block *btcjson.GetBlockVerboseResult) (*cachedBlock
 	defer cache.mtx.Unlock()
 	hash, err := chainhash.NewHashFromStr(block.Hash)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding block hash %s: %v", block.Hash, err)
+		return nil, fmt.Errorf("error decoding block hash %s: %w", block.Hash, err)
 	}
 	blk := &cachedBlock{
 		hash:     *hash,

@@ -180,7 +180,7 @@ ordersLoop:
 					"Revoking the order.", coin, lo)
 			} else {
 				// other failure (coinID decode, RPC, etc.)
-				return nil, fmt.Errorf("unexpected error checking coinID %v for order %v: %v",
+				return nil, fmt.Errorf("unexpected error checking coinID %v for order %v: %w",
 					lo.Coins[i], lo, err)
 				// NOTE: This does not revoke orders from storage since this is
 				// likely to be a configuration or node issue.
@@ -1298,7 +1298,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// initiating the swap, and notifying book subscribers.
 	if err := m.storage.NewEpochOrder(ord, epoch.Epoch, epoch.Duration); err != nil {
 		errChan <- ErrInternalServer
-		return fmt.Errorf("processOrder: Failed to store new epoch order %v: %v",
+		return fmt.Errorf("processOrder: Failed to store new epoch order %v: %w",
 			ord, err)
 	}
 

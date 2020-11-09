@@ -138,7 +138,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	if initTZ != "UTC" {
 		log.Infof("Switching PostgreSQL time zone to UTC for this session.")
 		if _, err = db.Exec(`SET TIME ZONE UTC`); err != nil {
-			return nil, fmt.Errorf("Failed to set time zone to UTC: %v", err)
+			return nil, fmt.Errorf("Failed to set time zone to UTC: %w", err)
 		}
 	}
 
@@ -197,13 +197,13 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	// Get the master extended public key.
 	masterKey, err := hdkeychain.NewKeyFromString(cfg.FeeKey, archiver.keyParams)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing master pubkey: %v", err)
+		return nil, fmt.Errorf("error parsing master pubkey: %w", err)
 	}
 
 	// Get the external branch (= child 0) of the extended pubkey.
 	archiver.feeKeyBranch, err = masterKey.Child(0)
 	if err != nil {
-		return nil, fmt.Errorf("error creating external branch: %v", err)
+		return nil, fmt.Errorf("error creating external branch: %w", err)
 	}
 
 	// Get a unique ID to serve as an ID for this key in the child counter table.

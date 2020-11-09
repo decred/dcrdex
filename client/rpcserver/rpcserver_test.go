@@ -128,7 +128,7 @@ func newTServerWErr(t *testing.T, start bool, user, pass string) (*RPCServer, fu
 	tempDir, err := ioutil.TempDir("", "rpcservertest")
 	if err != nil {
 		killCtx()
-		return nil, nil, fmt.Errorf("error creating temporary directory: %v", err)
+		return nil, nil, fmt.Errorf("error creating temporary directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -144,14 +144,14 @@ func newTServerWErr(t *testing.T, start bool, user, pass string) (*RPCServer, fu
 	s, err := New(cfg)
 	if err != nil {
 		killCtx()
-		return nil, nil, fmt.Errorf("error creating server: %v", err)
+		return nil, nil, fmt.Errorf("error creating server: %w", err)
 	}
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
 			killCtx()
-			return nil, nil, fmt.Errorf("error starting RPCServer: %v", err)
+			return nil, nil, fmt.Errorf("error starting RPCServer: %w", err)
 		}
 		shutdown = func() {
 			killCtx()

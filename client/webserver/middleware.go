@@ -6,6 +6,7 @@ package webserver
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -51,11 +52,11 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 // and interprets the value as true only if it's equal to the string "1".
 func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
 	cookie, err := r.Cookie(k)
-	switch err {
+	switch {
 	// Dark mode is the default
-	case nil:
+	case err == nil:
 		return cookie.Value == "1"
-	case http.ErrNoCookie:
+	case errors.Is(err, http.ErrNoCookie):
 	default:
 		log.Errorf("Cookie %q retrieval error: %v", k, err)
 	}

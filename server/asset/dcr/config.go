@@ -76,7 +76,7 @@ func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 		// The config file exists, so attempt to parse it.
 		err = flags.NewIniParser(parser).ParseFile(configPath)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing %q ini file: %v", assetName, err)
+			return nil, fmt.Errorf("error parsing %q ini file: %w", assetName, err)
 		}
 	}
 

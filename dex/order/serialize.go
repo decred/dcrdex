@@ -118,7 +118,7 @@ func decodeTrade_v0(pushes [][]byte) (mrkt *Trade, err error) {
 	coinsB, sellB, qtyB, addrB, filledB := pushes[0], pushes[1], pushes[2], pushes[3], pushes[4]
 	rawCoins, err := encode.ExtractPushes(coinsB)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting coins: %v", err)
+		return nil, fmt.Errorf("error extracting coins: %w", err)
 	}
 	coins := make([]CoinID, 0, len(rawCoins))
 	for _, coin := range rawCoins {
@@ -287,7 +287,7 @@ func decodeOrder_v0(pushes [][]byte) (Order, error) {
 		}
 		flags, err := encode.ExtractPushes(limitFlagsB)
 		if err != nil {
-			return nil, fmt.Errorf("decodeOrder_v0: error extracting limit flags: %d", err)
+			return nil, fmt.Errorf("decodeOrder_v0: error extracting limit flags: %w", err)
 		}
 		if len(flags) != 2 {
 			return nil, fmt.Errorf("decodeOrder_v0: expected 2 error flags, got %d", len(flags))

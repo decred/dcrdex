@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -176,7 +177,7 @@ func (s *Server) Run(ctx context.Context) {
 		}
 	}()
 	log.Infof("admin server listening on %s", s.addr)
-	if err := s.srv.Serve(listener); err != http.ErrServerClosed {
+	if err := s.srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 

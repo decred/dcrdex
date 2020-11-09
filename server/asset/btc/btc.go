@@ -152,7 +152,7 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 		Pass:         cfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating %q RPC client: %v", name, err)
+		return nil, fmt.Errorf("error creating %q RPC client: %w", name, err)
 	}
 
 	btc := newBTC(name, segwit, params, logger, client)
@@ -162,12 +162,12 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 	// Prime the cache
 	bestHash, err := btc.client.GetBestBlockHash()
 	if err != nil {
-		return nil, fmt.Errorf("error getting best block from rpc: %v", err)
+		return nil, fmt.Errorf("error getting best block from rpc: %w", err)
 	}
 	if bestHash != nil {
 		_, err := btc.getBtcBlock(bestHash)
 		if err != nil {
-			return nil, fmt.Errorf("error priming the cache: %v", err)
+			return nil, fmt.Errorf("error priming the cache: %w", err)
 		}
 	}
 
@@ -183,7 +183,7 @@ func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger,
 func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	output, err := btc.output(txHash, vout, redeemScript)
 	if err != nil {
@@ -222,7 +222,7 @@ func (btc *Backend) Synced() (bool, error) {
 func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding redemption coin ID %x: %v", txHash, err)
+		return nil, fmt.Errorf("error decoding redemption coin ID %x: %w", txHash, err)
 	}
 	input, err := btc.input(txHash, vin)
 	if err != nil {
@@ -242,7 +242,7 @@ func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	utxo, err := btc.utxo(txHash, vout, redeemScript)
 	if err != nil {
@@ -276,11 +276,11 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
+		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
 	}
 	if txOut == nil {
 		return asset.CoinNotFoundError
@@ -467,7 +467,7 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 
 	tx, err := btc.transaction(txHash, verboseTx)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
+		return nil, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
 
 	out := &Output{
@@ -498,11 +498,11 @@ func (btc *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
 		if isTxNotFoundErr(err) {
 			return nil, 0, asset.CoinNotFoundError
 		}
-		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	tx, err := btc.transaction(txHash, verboseTx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %v", err)
+		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
 	blockHeight, blockHash, lastLookup, err := btc.blockInfo(verboseTx)
 	if err != nil {
@@ -601,7 +601,7 @@ func (btc *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 func (btc *Backend) prevOutputValue(txid string, vout int) (uint64, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
-		return 0, fmt.Errorf("error decoding tx hash %s: %v", txid, err)
+		return 0, fmt.Errorf("error decoding tx hash %s: %w", txid, err)
 	}
 	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
@@ -630,7 +630,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 		var err error
 		blockHash, err = chainhash.NewHashFromStr(verboseTx.BlockHash)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
+			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %w", verboseTx.BlockHash, txHash, err)
 		}
 		// Make sure the block info is cached.
 		blk, err := btc.getBtcBlock(blockHash)
@@ -652,7 +652,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 			var err error
 			valIn, err = btc.prevOutputValue(input.Txid, int(input.Vout))
 			if err != nil {
-				return nil, fmt.Errorf("error fetching previous output value for %s:%d: %v", txHash, vin, err)
+				return nil, fmt.Errorf("error fetching previous output value for %s:%d: %w", txHash, vin, err)
 			}
 		}
 		sumIn += valIn
@@ -665,7 +665,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 		}
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %v", input.Txid, txHash, err)
+			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %w", input.Txid, txHash, err)
 		}
 		inputs = append(inputs, txIn{
 			prevTx: *hash,
@@ -678,7 +678,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 	for vout, output := range verboseTx.Vout {
 		pkScript, err := hex.DecodeString(output.ScriptPubKey.Hex)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
+			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %w",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
 		vOut := toSat(output.Value)
@@ -705,7 +705,7 @@ func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.
 				return nil, nil, nil, asset.CoinNotFoundError
 			}
 		}
-		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
+		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err)
 	}
 	if txOut == nil {
 		return nil, nil, nil, asset.CoinNotFoundError
@@ -716,7 +716,7 @@ func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.
 	}
 	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	return txOut, verboseTx, pkScript, nil
 }
@@ -739,7 +739,7 @@ func (btc *Backend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error)
 	}
 	blockVerbose, err := btc.node.GetBlockVerbose(blockHash)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving block %s: %v", blockHash, err)
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
 	}
 	return btc.blockCache.add(blockVerbose)
 }
@@ -783,7 +783,7 @@ func (btc *Backend) auditContract(contract *Contract) error {
 	}
 	refund, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
 	if err != nil {
-		return fmt.Errorf("error parsing swap contract for %s:%d: %v", tx.hash, contract.vout, err)
+		return fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
 	}
 	contract.refundAddress = refund.String()
 	contract.swapAddress = receiver.String()

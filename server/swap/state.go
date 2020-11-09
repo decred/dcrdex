@@ -52,14 +52,14 @@ type BackupFile struct {
 func LatestStateFile(dir string) (*BackupFile, error) {
 	cwd, err := os.Open(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to Open %q: %v", dir, err)
+		return nil, fmt.Errorf("failed to Open %q: %w", dir, err)
 	}
 	defer cwd.Close()
 
 	//files, err := ioutil.ReadDir(".")
 	fileNames, err := cwd.Readdirnames(0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to Readdirnames: %v", err)
+		return nil, fmt.Errorf("failed to Readdirnames: %w", err)
 	}
 
 	var backupFiles []BackupFile

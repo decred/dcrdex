@@ -62,7 +62,7 @@ func (t *templates) addTemplate(name string, preloads ...string) *templates {
 	files = append(files, t.filepath(name))
 	temp, err := template.New(name).Funcs(templateFuncs).ParseFiles(files...)
 	if err != nil {
-		t.addErr = fmt.Errorf("error adding template %s: %v", name, err)
+		t.addErr = fmt.Errorf("error adding template %s: %w", name, err)
 		return t
 	}
 	t.templates[name] = pageTemplate{

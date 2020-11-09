@@ -341,7 +341,7 @@ func ExtractStakeScriptHash(script []byte, stakeOpcode byte) []byte {
 func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
 	rAddr, err := dcrutil.DecodeAddress(recipient, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding recipient address %s: %v", recipient, err)
+		return nil, fmt.Errorf("error decoding recipient address %s: %w", recipient, err)
 	}
 	a, ok := rAddr.(*dcrutil.AddressPubKeyHash)
 	if !ok {
@@ -352,7 +352,7 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 	}
 	sAddr, err := dcrutil.DecodeAddress(sender, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding sender address %s: %v", sender, err)
+		return nil, fmt.Errorf("error decoding sender address %s: %w", sender, err)
 	}
 	a, ok = sAddr.(*dcrutil.AddressPubKeyHash)
 	if !ok {
@@ -614,7 +614,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScript
 	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams, false)
 	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
-		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %v", err)
+		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
 	}
 	if nonStandard {
 		return &DCRScriptAddrs{}, nonStandard, nil
@@ -728,7 +728,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 func ExtractContractHash(scriptHex string) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
+		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %w",
 			scriptHex, err)
 	}
 	scriptHash := ExtractScriptHash(pkScript)
@@ -766,7 +766,7 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 			if bytes.Equal(h, contractHash) {
 				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 				if err != nil {
-					return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
+					return nil, fmt.Errorf("error extracting atomic swap details: %w", err)
 				}
 			}
 			continue

@@ -153,7 +153,7 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 		var err error
 		payload, err = msg.Response()
 		if err != nil {
-			return fmt.Errorf("Failed to unmarshal message ResponsePayload: %v", err)
+			return fmt.Errorf("Failed to unmarshal message ResponsePayload: %w", err)
 		}
 		msgErr = payload.Error
 	}
@@ -169,7 +169,7 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 		ordRes := new(msgjson.OrderResult)
 		err := json.Unmarshal(payload.Result, ordRes)
 		if err != nil {
-			return fmt.Errorf("Failed to unmarshal message Payload into OrderResult: %v", err)
+			return fmt.Errorf("Failed to unmarshal message Payload into OrderResult: %w", err)
 		}
 		log.Debugf("setting preimage for order %v", ordRes.OrderID)
 		a.preimagesByOrdID[ordRes.OrderID.String()] = preimage

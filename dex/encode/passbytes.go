@@ -43,7 +43,7 @@ func (pb *PassBytes) UnmarshalJSON(rawBytes []byte) error {
 	utf8EncodedBytes, err := parseJSONEncodedDataAsUTF8Bytes(rawBytes)
 	ClearBytes(rawBytes)
 	if err != nil {
-		return fmt.Errorf("cannot unmarshal password: %v", err)
+		return fmt.Errorf("cannot unmarshal password: %w", err)
 	}
 	*pb = utf8EncodedBytes
 	return nil

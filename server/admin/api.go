@@ -255,7 +255,7 @@ func decodeAcctID(acctIDStr string) (account.AccountID, error) {
 		return acctID, errors.New("account id has incorrect length")
 	}
 	if _, err := hex.Decode(acctID[:], []byte(acctIDStr)); err != nil {
-		return acctID, fmt.Errorf("could not decode accout id: %v", err)
+		return acctID, fmt.Errorf("could not decode accout id: %w", err)
 	}
 	return acctID, nil
 }
@@ -347,7 +347,7 @@ func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	body, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("unable to read request body: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("unable to read request body: %w", err)
 	}
 	if len(body) == 0 {
 		return nil, http.StatusBadRequest, errors.New("no message to broadcast")
@@ -362,7 +362,7 @@ func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	}
 	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, string(body))
 	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("unable to create notification: %v", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("unable to create notification: %w", err)
 	}
 	return msg, 0, nil
 }

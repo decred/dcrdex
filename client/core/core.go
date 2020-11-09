@@ -292,7 +292,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 	}
 	err = validateOrderResponse(dc, result, co, msgOrder)
 	if err != nil {
-		err = fmt.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
+		err = fmt.Errorf("Abandoning order. preimage: %x, server time: %d: %w",
 			preImg[:], result.ServerTime, err)
 		return
 	}
@@ -321,7 +321,7 @@ func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err 
 		Order: co,
 	})
 	if err != nil {
-		err = fmt.Errorf("failed to store order in database: %v", err)
+		err = fmt.Errorf("failed to store order in database: %w", err)
 		return
 	}
 
@@ -359,7 +359,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	}
 	err := sign(dc.acct.privKey, signable)
 	if err != nil {
-		return fmt.Errorf("error signing %s message: %v", route, err)
+		return fmt.Errorf("error signing %s message: %w", route, err)
 	}
 	return sendRequest(dc.WsConn, route, signable, result, timeout)
 }
@@ -372,15 +372,15 @@ func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjs
 	sigMsg := signable.Serialize()
 	ack.Sig, err = dc.acct.sign(sigMsg)
 	if err != nil {
-		return fmt.Errorf("sign error - %v", err)
+		return fmt.Errorf("sign error - %w", err)
 	}
 	msg, err := msgjson.NewResponse(msgID, ack, nil)
 	if err != nil {
-		return fmt.Errorf("NewResponse error - %v", err)
+		return fmt.Errorf("NewResponse error - %w", err)
 	}
 	err = dc.Send(msg)
 	if err != nil {
-		return fmt.Errorf("Send error - %v", err)
+		return fmt.Errorf("Send error - %w", err)
 	}
 	return nil
 }
@@ -859,7 +859,7 @@ func New(cfg *Config) (*Core, error) {
 	}
 	db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
 	if err != nil {
-		return nil, fmt.Errorf("database initialization error: %v", err)
+		return nil, fmt.Errorf("database initialization error: %w", err)
 	}
 	if cfg.TorProxy != "" {
 		if _, _, err = net.SplitHostPort(cfg.TorProxy); err != nil {
@@ -1000,11 +1000,11 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
 	keyParams, err := c.db.Get(keyParamsKey)
 	if err != nil {
-		return nil, fmt.Errorf("key retrieval error: %v", err)
+		return nil, fmt.Errorf("key retrieval error: %w", err)
 	}
 	crypter, err := c.reCrypter(pw, keyParams)
 	if err != nil {
-		return nil, fmt.Errorf("encryption key deserialization error: %v", err)
+		return nil, fmt.Errorf("encryption key deserialization error: %w", err)
 	}
 	return crypter, nil
 }
@@ -1020,7 +1020,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		c.log.Infof("connecting wallet for %s", unbip(assetID))
 		err := wallet.Connect(c.ctx)
 		if err != nil {
-			return nil, fmt.Errorf("Connect error: %v", err)
+			return nil, fmt.Errorf("Connect error: %w", err)
 		}
 		// If first connecting the wallet, try to get the balance. Ignore errors
 		// here with the assumption that some wallets may not reveal balance
@@ -1116,7 +1116,7 @@ func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	wallet.setBalance(walletBal)
 	err = c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
 	if err != nil {
-		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
+		return nil, fmt.Errorf("error updating %s balance in database: %w", unbip(wallet.AssetID), err)
 	}
 	c.notify(newBalanceNote(wallet.AssetID, walletBal))
 	return walletBal, nil
@@ -1283,12 +1283,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, symbol, err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
 	}
 
 	err = wallet.Connect(c.ctx)
 	if err != nil {
-		return fmt.Errorf("error connecting wallet: %v", err)
+		return fmt.Errorf("error connecting wallet: %w", err)
 	}
 
 	initErr := func(s string, a ...interface{}) error {
@@ -1364,7 +1364,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	logger := c.log.SubLogger(unbip(dbWallet.AssetID))
 	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
 	if err != nil {
-		return nil, fmt.Errorf("error creating wallet: %v", err)
+		return nil, fmt.Errorf("error creating wallet: %w", err)
 	}
 	wallet.Wallet = w
 	wallet.connector = dex.NewConnectionMaster(w)
@@ -1391,7 +1391,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
 	err = unlockWallet(wallet, crypter)
 	if err != nil {
@@ -1422,7 +1422,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
 	err := wallet.Unlock(crypter)
 	if err != nil {
-		return fmt.Errorf("unlockWallet unlock error: %v", err)
+		return fmt.Errorf("unlockWallet unlock error: %w", err)
 	}
 	return nil
 }
@@ -1439,7 +1439,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
 	err = wallet.Lock()
 	if err != nil {
@@ -1747,7 +1747,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
 	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %v", err)
+		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
 	} else if !initialized {
 		return nil, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
@@ -1907,7 +1907,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		wallet, _ := c.wallet(assetID)
 		confs, err := wallet.Confirmations(coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
+			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDString(wallet.AssetID, coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, reqConfs)
 
@@ -1960,7 +1960,7 @@ func (c *Core) IsInitialized() (bool, error) {
 // InitializeClient sets the initial app-wide password for the client.
 func (c *Core) InitializeClient(pw []byte) error {
 	if initialized, err := c.IsInitialized(); err != nil {
-		return fmt.Errorf("error checking if app is already initialized: %v", err)
+		return fmt.Errorf("error checking if app is already initialized: %w", err)
 	} else if initialized {
 		return fmt.Errorf("already initialized, login instead")
 	}
@@ -1972,7 +1972,7 @@ func (c *Core) InitializeClient(pw []byte) error {
 	crypter := c.newCrypter(pw)
 	err := c.db.Store(keyParamsKey, crypter.Serialize())
 	if err != nil {
-		return fmt.Errorf("error storing key parameters: %v", err)
+		return fmt.Errorf("error storing key parameters: %w", err)
 	}
 	c.refreshUser()
 	return nil
@@ -1984,7 +1984,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
 	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %v", err)
+		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
 	} else if !initialized {
 		return nil, fmt.Errorf("cannot log in because app has not been initialized")
 	}
@@ -2098,7 +2098,7 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		Statuses: filter.Statuses,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("UserOrders error: %v", err)
+		return nil, fmt.Errorf("UserOrders error: %w", err)
 	}
 
 	cords := make([]*Order, 0, len(ords))
@@ -2122,7 +2122,7 @@ func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 	oid := mOrd.Order.ID()
 	matches, err := c.db.MatchesForOrder(oid)
 	if err != nil {
-		return nil, fmt.Errorf("MatchesForOrder error loading matches for %s: %v", oid, err)
+		return nil, fmt.Errorf("MatchesForOrder error loading matches for %s: %w", oid, err)
 	}
 	corder.Matches = make([]*Match, 0, len(matches))
 	for _, match := range matches {
@@ -2351,7 +2351,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	}
 	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.NotifyFeeRoute, req)
 	if err != nil {
-		return fmt.Errorf("failed to create notifyfee request: %v", err)
+		return fmt.Errorf("failed to create notifyfee request: %w", err)
 	}
 
 	// Make the 'notifyfee' request and wait for the response. The server waits
@@ -2365,7 +2365,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		ack := new(msgjson.Acknowledgement)
 		// Do NOT capture err in this closure.
 		if err := resp.UnmarshalResult(ack); err != nil {
-			errChan <- fmt.Errorf("notify fee result error: %v", err)
+			errChan <- fmt.Errorf("notify fee result error: %w", err)
 			return
 		}
 		err := dc.acct.checkSig(req.Serialize(), ack.Sig)
@@ -2381,7 +2381,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		errChan <- fmt.Errorf("timed out waiting for '%s' response", msgjson.NotifyFeeRoute)
 	})
 	if err != nil {
-		return fmt.Errorf("Sending the 'notifyfee' request failed: %v", err)
+		return fmt.Errorf("Sending the 'notifyfee' request failed: %w", err)
 	}
 
 	// The request was sent. Wait for a response or timeout.
@@ -2393,7 +2393,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("Withdraw password error: %v", err)
+		return nil, fmt.Errorf("Withdraw password error: %w", err)
 	}
 	if value == 0 {
 		return nil, fmt.Errorf("%s zero withdraw", unbip(assetID))
@@ -2425,7 +2425,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	// Check the user password.
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("Trade password error: %v", err)
+		return nil, fmt.Errorf("Trade password error: %w", err)
 	}
 	host, err := addrHost(form.Host)
 	if err != nil {
@@ -2765,7 +2765,7 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
-		return fmt.Errorf("Cancel password error: %v", err)
+		return fmt.Errorf("Cancel password error: %w", err)
 	}
 
 	if len(oidB) != order.OrderIDSize {
@@ -2801,14 +2801,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	sigMsg := payload.Serialize()
 	sig, err := dc.acct.sign(sigMsg)
 	if err != nil {
-		return fmt.Errorf("signing error: %v", err)
+		return fmt.Errorf("signing error: %w", err)
 	}
 	payload.SetSig(sig)
 
 	// Send the 'connect' request.
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.ConnectRoute, payload)
 	if err != nil {
-		return fmt.Errorf("error encoding 'connect' request: %v", err)
+		return fmt.Errorf("error encoding 'connect' request: %w", err)
 	}
 	errChan := make(chan error, 1)
 	result := new(msgjson.ConnectResult)
@@ -2957,7 +2957,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
+		return nil, fmt.Errorf("%d -> %s wallet error: %w", assetID, unbip(assetID), err)
 	}
 	return c.walletBalances(wallet)
 }
@@ -3123,7 +3123,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 	// Prepare active orders, according to the DB.
 	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.host)
 	if err != nil {
-		return nil, fmt.Errorf("database error when fetching orders for %s: %v", dc.acct.host, err)
+		return nil, fmt.Errorf("database error when fetching orders for %s: %w", dc.acct.host, err)
 	}
 	c.log.Infof("Loaded %d active orders.", len(dbOrders))
 
@@ -3140,7 +3140,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 
 	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(dc.acct.host)
 	if err != nil {
-		return nil, fmt.Errorf("database error fetching active match orders for %s: %v", dc.acct.host, err)
+		return nil, fmt.Errorf("database error fetching active match orders for %s: %w", dc.acct.host, err)
 	}
 	c.log.Infof("Loaded %d active match orders", len(activeMatchOrders))
 	for _, oid := range activeMatchOrders {
@@ -3149,7 +3149,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 		}
 		dbOrder, err := c.db.Order(oid)
 		if err != nil {
-			return nil, fmt.Errorf("database error fetching order %s for %s: %v", oid, dc.acct.host, err)
+			return nil, fmt.Errorf("database error fetching order %s for %s: %w", oid, dc.acct.host, err)
 		}
 		dbOrders = append(dbOrders, dbOrder)
 	}
@@ -3203,7 +3203,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		// Get matches.
 		dbMatches, err := c.db.MatchesForOrder(oid)
 		if err != nil {
-			return nil, fmt.Errorf("error loading matches for order %s: %v", oid, err)
+			return nil, fmt.Errorf("error loading matches for order %s: %w", oid, err)
 		}
 		for _, dbMatch := range dbMatches {
 			tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
@@ -3271,7 +3271,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	// Parse the active trades and see if any wallets need unlocking.
 	trades, err := c.dbTrackers(dc)
 	if err != nil {
-		return nil, fmt.Errorf("error retreiving active matches: %v", err)
+		return nil, fmt.Errorf("error retreiving active matches: %w", err)
 	}
 
 	errs := newErrorSet(dc.acct.host + ": ")
@@ -3391,7 +3391,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if err != nil {
 					c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 						match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked(), err)
-					match.swapErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
+					match.swapErr = fmt.Errorf("audit error, order %s, match %s: %w", tracker.ID(), match.id, err)
 					match.MetaData.Proof.SelfRevoked = true
 					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v",
 						tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
@@ -3498,7 +3498,7 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 		if sm.cancel != nil {
 			err := tracker.processCancelMatch(sm.cancel)
 			if err != nil {
-				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
+				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %w",
 					sm.cancel.OrderID, oid, err)
 			}
 		}
@@ -3509,7 +3509,7 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 			err := tracker.negotiate(sm.msgMatches)
 			tracker.mtx.Unlock()
 			if err != nil {
-				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %w", oid, err)
 			}
 
 			// Coins may be returned for canceled orders.
@@ -3524,7 +3524,7 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 			tickUpdatedAssets, err := c.tick(tracker)
 			updatedAssets.merge(tickUpdatedAssets)
 			if err != nil {
-				return updatedAssets, fmt.Errorf("tick of order %v failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("tick of order %v failed: %w", oid, err)
 			}
 		}
 
@@ -3572,7 +3572,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	wsAddr := "wss://" + host + "/ws"
 	wsURL, err := url.Parse(wsAddr)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing ws address %s: %v", wsAddr, err)
+		return nil, fmt.Errorf("error parsing ws address %s: %w", wsAddr, err)
 	}
 
 	wsCfg := comms.WsCfg{
@@ -3616,7 +3616,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg, DefaultResponseTimeout)
 	if err != nil {
 		connMaster.Disconnect()
-		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
+		return nil, fmt.Errorf("Error fetching DEX server config: %w", err)
 	}
 
 	assets, marketMap, epochMap, err := generateDEXMaps(host, dexCfg)
@@ -3749,7 +3749,7 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	var note msgjson.MatchProofNote
 	err := msg.Unmarshal(&note)
 	if err != nil {
-		return fmt.Errorf("match proof note unmarshal error: %v", err)
+		return fmt.Errorf("match proof note unmarshal error: %w", err)
 	}
 
 	// Expire the epoch
@@ -3777,7 +3777,7 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var revocation msgjson.RevokeOrder
 	err := msg.Unmarshal(&revocation)
 	if err != nil {
-		return fmt.Errorf("revoke order unmarshal error: %v", err)
+		return fmt.Errorf("revoke order unmarshal error: %w", err)
 	}
 
 	var oid order.OrderID
@@ -3801,7 +3801,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var revocation msgjson.RevokeMatch
 	err := msg.Unmarshal(&revocation)
 	if err != nil {
-		return fmt.Errorf("revoke match unmarshal error: %v", err)
+		return fmt.Errorf("revoke match unmarshal error: %w", err)
 	}
 
 	var oid order.OrderID
@@ -3823,7 +3823,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	err = tracker.revokeMatch(matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
-		return fmt.Errorf("unable to revoke match %s for order %s: %v", matchID, tracker.ID(), err)
+		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
 	}
 
 	// Update market orders, and the balance to account for unlocked coins.
@@ -3837,7 +3837,7 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var txt string
 	err := msg.Unmarshal(&txt)
 	if err != nil {
-		return fmt.Errorf("notify unmarshal error: %v", err)
+		return fmt.Errorf("notify unmarshal error: %w", err)
 	}
 	txt = fmt.Sprintf("Message from DEX at %s:\n\n\"%s\"\n", dc.acct.host, txt)
 	c.notify(newServerNotifyNote(dc.acct.host, txt, db.WarningLevel))
@@ -3851,7 +3851,7 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.PenaltyNote
 	err := msg.Unmarshal(&note)
 	if err != nil {
-		return fmt.Errorf("penalty note unmarshal error: %v", err)
+		return fmt.Errorf("penalty note unmarshal error: %w", err)
 	}
 	// Check the signature.
 	err = dc.acct.checkSig(note.Serialize(), note.Sig)
@@ -4037,7 +4037,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	req := new(msgjson.PreimageRequest)
 	err := msg.Unmarshal(req)
 	if err != nil {
-		return fmt.Errorf("preimage request parsing error: %v", err)
+		return fmt.Errorf("preimage request parsing error: %w", err)
 	}
 
 	var oid order.OrderID
@@ -4093,11 +4093,11 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		Preimage: preImg[:],
 	}, nil)
 	if err != nil {
-		return fmt.Errorf("preimage response encoding error: %v", err)
+		return fmt.Errorf("preimage response encoding error: %w", err)
 	}
 	err = dc.Send(resp)
 	if err != nil {
-		return fmt.Errorf("preimage send error: %v", err)
+		return fmt.Errorf("preimage send error: %w", err)
 	}
 	subject := "preimage sent"
 	if isCancel {
@@ -4113,7 +4113,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	msgMatches := make([]*msgjson.Match, 0)
 	err := msg.Unmarshal(&msgMatches)
 	if err != nil {
-		return fmt.Errorf("match request parsing error: %v", err)
+		return fmt.Errorf("match request parsing error: %w", err)
 	}
 
 	// TODO: If the dexConnection.acct is locked, prompt the user to login.
@@ -4158,7 +4158,7 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	nomatchMsg := new(msgjson.NoMatch)
 	err := msg.Unmarshal(nomatchMsg)
 	if err != nil {
-		return fmt.Errorf("nomatch request parsing error: %v", err)
+		return fmt.Errorf("nomatch request parsing error: %w", err)
 	}
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
@@ -4220,7 +4220,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	audit := new(msgjson.Audit)
 	err := msg.Unmarshal(audit)
 	if err != nil {
-		return fmt.Errorf("audit request parsing error: %v", err)
+		return fmt.Errorf("audit request parsing error: %w", err)
 	}
 	var oid order.OrderID
 	copy(oid[:], audit.OrderID)
@@ -4244,7 +4244,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	redemption := new(msgjson.Redemption)
 	err := msg.Unmarshal(redemption)
 	if err != nil {
-		return fmt.Errorf("redemption request parsing error: %v", err)
+		return fmt.Errorf("redemption request parsing error: %w", err)
 	}
 	var oid order.OrderID
 	copy(oid[:], redemption.OrderID)
@@ -4391,11 +4391,11 @@ func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 	pubKey, err := secp256k1.ParsePubKey(pkBytes)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
+		return nil, fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %w", err)
 	}
 	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+		return nil, fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return nil, fmt.Errorf("secp256k1 signature verification failed")
@@ -4423,7 +4423,7 @@ func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) erro
 func sendRequest(conn comms.WsConn, route string, request, response interface{}, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
-		return fmt.Errorf("error encoding %q request: %v", route, err)
+		return fmt.Errorf("error encoding %q request: %w", route, err)
 	}
 
 	errChan := make(chan error, 1)

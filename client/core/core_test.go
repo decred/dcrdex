@@ -4890,7 +4890,7 @@ func TestPreimageSync(t *testing.T) {
 		msgOrder := new(msgjson.LimitOrder)
 		err := msg.Unmarshal(msgOrder)
 		if err != nil {
-			return fmt.Errorf("unmarshal error: %v", err)
+			return fmt.Errorf("unmarshal error: %w", err)
 		}
 		lo := convertMsgLimitOrder(msgOrder)
 		resp := orderResponse(msg.ID, msgOrder, lo, false, false, false)

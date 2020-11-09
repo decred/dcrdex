@@ -262,13 +262,13 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
 		assetDCR.LotSize, epochDurationMSec, mbBuffer)
 	if err != nil {
-		return nil, nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %v", err)
+		return nil, nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %w", err)
 	}
 
 	mkt, err := NewMarket(mktInfo, storage, swapper, authMgr,
 		bookLockerBase, bookLockerQuote)
 	if err != nil {
-		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %v", err)
+		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
 	}
 	mktUnbook = mkt.Unbook
 

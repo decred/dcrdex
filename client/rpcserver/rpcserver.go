@@ -237,7 +237,7 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Create listener.
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
+		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %w", s.addr, err)
 	}
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
@@ -262,7 +262,7 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.srv.Serve(listener); err != http.ErrServerClosed {
+		if err := s.srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
 		// Disconnect the websocket clients since http.(*Server).Shutdown does

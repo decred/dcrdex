@@ -509,7 +509,7 @@ func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
 
 	seed, csum, err := ob.epochQueue.GenerateMatchProof(note.Epoch, pimgs, misses)
 	if err != nil {
-		return fmt.Errorf("unable to generate match proof for epoch %d: %v",
+		return fmt.Errorf("unable to generate match proof for epoch %d: %w",
 			note.Epoch, err)
 	}
 

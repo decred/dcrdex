@@ -415,7 +415,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		log.Infof("searching for swap state files in %q", cfg.DataDir)
 		stateFile, err := LatestStateFile(cfg.DataDir)
 		if err != nil {
-			return nil, fmt.Errorf("unable to read datadir: %v", err)
+			return nil, fmt.Errorf("unable to read datadir: %w", err)
 		}
 		if stateFile != nil {
 			// Get the last stored state file hash, and check it against the
@@ -439,7 +439,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 				state, err = LoadStateFile(stateFile.Name)
 				if err != nil {
-					return nil, fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
+					return nil, fmt.Errorf("failed to load swap state file %v: %w", stateFile.Name, err)
 				}
 				log.Infof("loaded the most recent swap state file from %q", stateFile.Name)
 			}
@@ -578,7 +578,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 			assetID := ssd.SwapAsset
 			swap, err := s.coins[assetID].Backend.Contract(swapCoin, ssd.ContractScript)
 			if err != nil {
-				return fmt.Errorf("unable to find swap out coin %x for asset %d: %v", swapCoin, assetID, err)
+				return fmt.Errorf("unable to find swap out coin %x for asset %d: %w", swapCoin, assetID, err)
 			}
 			ss.swap = swap
 			ss.swapTime = encode.UnixTimeMilli(ssd.SwapTime)
@@ -592,7 +592,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 			assetID := ssd.RedeemAsset
 			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, cpSwapCoin)
 			if err != nil {
-				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %v", redeemCoin, assetID, err)
+				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %w", redeemCoin, assetID, err)
 			}
 			ss.redemption = redeem
 			ss.redeemTime = encode.UnixTimeMilli(ssd.RedeemTime)
@@ -1490,7 +1490,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
-		if err == asset.CoinNotFoundError {
+		if errors.Is(err, asset.CoinNotFoundError) {
 			return wait.TryAgain
 		}
 		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %x and contract %x: %v",
@@ -1669,7 +1669,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
-		if err == asset.CoinNotFoundError {
+		if errors.Is(err, asset.CoinNotFoundError) {
 			return wait.TryAgain
 		}
 		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",

@@ -223,7 +223,7 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 	var dbTx *sql.Tx
 	dbTx, err = a.db.Begin()
 	if err != nil {
-		err = fmt.Errorf("failed to begin database transaction: %v", err)
+		err = fmt.Errorf("failed to begin database transaction: %w", err)
 		return
 	}
 
@@ -278,14 +278,14 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 			co.ServerTime, nil, co.TargetOrderID, orderStatusRevoked, exemptEpochIdx, dummyEpochDur)
 		if err != nil {
 			fail()
-			err = fmt.Errorf("failed to store pseudo-cancel order: %v", err)
+			err = fmt.Errorf("failed to store pseudo-cancel order: %w", err)
 			return
 		}
 	}
 
 	if err = dbTx.Commit(); err != nil {
 		fail()
-		err = fmt.Errorf("failed to commit transaction: %v", err)
+		err = fmt.Errorf("failed to commit transaction: %w", err)
 		return
 	}
 
@@ -338,11 +338,11 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 
 	var rows *sql.Rows
 	rows, err = a.db.Query(stmt)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		err = nil
 		fallthrough
-	case nil:
+	case err == nil:
 		baseCoins = make(map[order.OrderID][]order.CoinID)
 		quoteCoins = make(map[order.OrderID][]order.CoinID)
 	default:
@@ -523,21 +523,21 @@ func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, status 
 		N, err = storeCancelOrder(a.db, tableName, ot, status, epochIdx, epochDur)
 		if err != nil {
 			a.fatalBackendErr(err)
-			return fmt.Errorf("storeCancelOrder failed: %v", err)
+			return fmt.Errorf("storeCancelOrder failed: %w", err)
 		}
 	case *order.MarketOrder:
 		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeMarketOrder(a.db, tableName, ot, status, epochIdx, epochDur)
 		if err != nil {
 			a.fatalBackendErr(err)
-			return fmt.Errorf("storeMarketOrder failed: %v", err)
+			return fmt.Errorf("storeMarketOrder failed: %w", err)
 		}
 	case *order.LimitOrder:
 		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeLimitOrder(a.db, tableName, ot, status, epochIdx, epochDur)
 		if err != nil {
 			a.fatalBackendErr(err)
-			return fmt.Errorf("storeLimitOrder failed: %v", err)
+			return fmt.Errorf("storeLimitOrder failed: %w", err)
 		}
 	default:
 		panic("ValidateOrder should have caught this")
@@ -1289,10 +1289,10 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	var filled int64
 	var orderType order.OrderType
 	err := dbe.QueryRow(stmt, oid).Scan(&orderType, &status, &filled)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		return false, orderStatusUnknown, order.UnknownOrderType, -1, nil
-	case nil:
+	case err == nil:
 		return true, status, orderType, filled, nil
 	default:
 		return false, orderStatusUnknown, order.UnknownOrderType, -1, err
@@ -1304,10 +1304,10 @@ func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (ord
 	// Search active orders first.
 	fullTable := fullOrderTableName(dbName, marketSchema, true)
 	ord, status, err := loadTradeFromTable(dbe, fullTable, oid)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		// try archived orders next
-	case nil:
+	case err == nil:
 		// found
 		return ord, status, nil
 	default:
@@ -1318,10 +1318,10 @@ func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (ord
 	// Search archived orders.
 	fullTable = fullOrderTableName(dbName, marketSchema, false)
 	ord, status, err = loadTradeFromTable(dbe, fullTable, oid)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		return nil, orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
-	case nil:
+	case err == nil:
 		// found
 		return ord, status, nil
 	default:
@@ -1629,10 +1629,10 @@ func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID
 	// Search active orders first.
 	fullTable := fullCancelOrderTableName(dbName, marketSchema, true)
 	co, status, err := loadCancelOrderFromTable(dbe, fullTable, oid)
-	switch err {
-	case sql.ErrNoRows:
-		// try archived orders next
-	case nil:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	// try archived orders next
+	case err == nil:
 		// found
 		return co, status, nil
 	default:
@@ -1643,10 +1643,10 @@ func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID
 	// Search archived orders.
 	fullTable = fullCancelOrderTableName(dbName, marketSchema, false)
 	co, status, err = loadCancelOrderFromTable(dbe, fullTable, oid)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		return nil, orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
-	case nil:
+	case err == nil:
 		// found
 		return co, status, nil
 	default:
@@ -1683,10 +1683,10 @@ func findCancelOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string
 	stmt := fmt.Sprintf(internal.CancelOrderStatus, fullTable)
 	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&status)
-	switch err {
-	case sql.ErrNoRows:
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		return false, orderStatusUnknown, nil
-	case nil:
+	case err == nil:
 		return true, status, nil
 	default:
 		return false, orderStatusUnknown, err

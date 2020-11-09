@@ -304,11 +304,11 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
 	rAddr, err := btcutil.DecodeAddress(recipient, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding recipient address %s: %v", recipient, err)
+		return nil, fmt.Errorf("error decoding recipient address %s: %w", recipient, err)
 	}
 	sAddr, err := btcutil.DecodeAddress(sender, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding sender address %s: %v", sender, err)
+		return nil, fmt.Errorf("error decoding sender address %s: %w", sender, err)
 	}
 	if segwit {
 		_, ok := rAddr.(*btcutil.AddressWitnessPubKeyHash)
@@ -402,7 +402,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
 	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
-		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %v", err)
+		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
 	}
 	if nonStandard {
 		return &BtcScriptAddrs{}, nonStandard, nil
@@ -618,7 +618,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	}
 	scriptAddrs, nonStandard, err := ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing script addresses: %v", err)
+		return nil, fmt.Errorf("error parsing script addresses: %w", err)
 	}
 	if nonStandard {
 		return &SpendInfo{
@@ -709,7 +709,7 @@ func findKeyPush(redeemScript, secret, contractHash []byte, chainParams *chaincf
 	// compatible with both address types.
 	_, _, _, keyHash, err := ExtractSwapDetails(redeemScript, true, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
+		return nil, fmt.Errorf("error extracting atomic swap details: %w", err)
 	}
 	if !bytes.Equal(hasher(redeemScript), contractHash) {
 		return nil, fmt.Errorf("redeemScript is not correct for provided contract hash")
@@ -745,7 +745,7 @@ func ExtractPubKeyHash(script []byte) []byte {
 func ExtractContractHash(scriptHex string) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
+		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %w",
 			scriptHex, err)
 	}
 	scriptHash := ExtractScriptHash(pkScript)

@@ -39,7 +39,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	}
 	pwB, err := crypter.Decrypt(w.encPW)
 	if err != nil {
-		return fmt.Errorf("unlockWallet decryption error: %v", err)
+		return fmt.Errorf("unlockWallet decryption error: %w", err)
 	}
 	pw := string(pwB)
 	err = w.Wallet.Unlock(pw)

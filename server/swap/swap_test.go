@@ -701,7 +701,7 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.Order
 			break
 		}
 		if err = checkSigS256(n, rig.auth.privkey.PubKey()); err != nil {
-			return fmt.Errorf("incorrect server signature: %v", err)
+			return fmt.Errorf("incorrect server signature: %w", err)
 		}
 	}
 	if notification == nil {
@@ -739,7 +739,7 @@ func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
 	matchInfo := rig.matchInfo
 	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
 	if err != nil {
-		return fmt.Errorf("error sending maker swap transaction: %v", err)
+		return fmt.Errorf("error sending maker swap transaction: %w", err)
 	}
 	matchInfo.db.makerSwap = swap
 	tracker := rig.getTracker()
@@ -762,7 +762,7 @@ func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
 	taker := matchInfo.taker
 	swap, err := rig.sendSwap(taker, matchInfo.takerOID, matchInfo.maker.addr)
 	if err != nil {
-		return fmt.Errorf("error sending taker swap transaction: %v", err)
+		return fmt.Errorf("error sending taker swap transaction: %w", err)
 	}
 	matchInfo.db.takerSwap = swap
 	if err != nil {
@@ -842,7 +842,7 @@ func (rig *testRig) auditSwap_maker() error {
 func checkSigS256(msg msgjson.Signable, pubKey *secp256k1.PublicKey) error {
 	signature, err := ecdsa.ParseDERSignature(msg.SigBytes())
 	if err != nil {
-		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg.Serialize(), pubKey) {
 		return fmt.Errorf("secp256k1 signature verification failed")
@@ -861,10 +861,10 @@ func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, contract,
 	var params *msgjson.Audit
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
-		return fmt.Errorf("error unmarshaling audit params: %v", err)
+		return fmt.Errorf("error unmarshaling audit params: %w", err)
 	}
 	if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
-		return fmt.Errorf("incorrect server signature: %v", err)
+		return fmt.Errorf("incorrect server signature: %w", err)
 	}
 	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", tag, oid, params.OrderID)
@@ -1015,10 +1015,10 @@ func (rig *testRig) checkRedeem(msg *msgjson.Message, oid order.OrderID, coinID 
 	var params *msgjson.Redemption
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
-		return fmt.Errorf("error unmarshaling redeem params: %v", err)
+		return fmt.Errorf("error unmarshaling redeem params: %w", err)
 	}
 	if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
-		return fmt.Errorf("incorrect server signature: %v", err)
+		return fmt.Errorf("incorrect server signature: %w", err)
 	}
 	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", tag, oid, params.OrderID)
@@ -1953,14 +1953,14 @@ func TestState(t *testing.T) {
 	loadLatestState := func() (*State, error) {
 		stateFile, err := LatestStateFile(rig.swapDataDir)
 		if err != nil {
-			return nil, fmt.Errorf("error finding swap state files: %v", err)
+			return nil, fmt.Errorf("error finding swap state files: %w", err)
 		}
 		if stateFile == nil {
 			return nil, fmt.Errorf("no swap state file found")
 		}
 		state, err := LoadStateFile(stateFile.Name)
 		if err != nil {
-			return nil, fmt.Errorf("error loading swap state file %q: %v", stateFile.Name, err)
+			return nil, fmt.Errorf("error loading swap state file %q: %w", stateFile.Name, err)
 		}
 		return state, nil
 	}

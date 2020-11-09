@@ -31,11 +31,11 @@ func checkSig(msg, pkBytes, sigBytes []byte, sigType dcrec.SignatureType) error 
 func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	pubKey, err := secp256k1.ParsePubKey(pkBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
+		return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %w", err)
 	}
 	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return fmt.Errorf("secp256k1 signature verification failed")
@@ -48,11 +48,11 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 func checkSigEdwards(msg, pkBytes, sigBytes []byte) error {
 	pubKey, err := edwards.ParsePubKey(pkBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding edwards PublicKey from bytes: %v", err)
+		return fmt.Errorf("error decoding edwards PublicKey from bytes: %w", err)
 	}
 	signature, err := edwards.ParseSignature(sigBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding edwards Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding edwards Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return fmt.Errorf("edwards signature verification failed")
@@ -65,11 +65,11 @@ func checkSigEdwards(msg, pkBytes, sigBytes []byte) error {
 func checkSigSchnorr(msg, pkBytes, sigBytes []byte) error {
 	pubKey, err := schnorr.ParsePubKey(pkBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding schnorr PublicKey from bytes: %v", err)
+		return fmt.Errorf("error decoding schnorr PublicKey from bytes: %w", err)
 	}
 	signature, err := schnorr.ParseSignature(sigBytes)
 	if err != nil {
-		return fmt.Errorf("error decoding schnorr Signature from bytes: %v", err)
+		return fmt.Errorf("error decoding schnorr Signature from bytes: %w", err)
 	}
 	if !signature.Verify(msg, pubKey) {
 		return fmt.Errorf("schnorr signature verification failed")

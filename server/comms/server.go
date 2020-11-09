@@ -157,14 +157,14 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	for _, addr := range ipv4ListenAddrs {
 		listener, err := tls.Listen("tcp4", addr, &tlsConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Can't listen on %s: %v", addr, err)
+			return nil, fmt.Errorf("Can't listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
 	for _, addr := range ipv6ListenAddrs {
 		listener, err := tls.Listen("tcp6", addr, &tlsConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Can't listen on %s: %v", addr, err)
+			return nil, fmt.Errorf("Can't listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
