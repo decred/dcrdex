@@ -548,7 +548,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		abort()
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
-	startSubSys("Comms Server", server)
 
 	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
 	if err != nil {
@@ -571,6 +570,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+
+	startSubSys("Comms Server", server)
 
 	return dexMgr, nil
 }

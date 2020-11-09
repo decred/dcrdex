@@ -129,7 +129,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	mktCaches := s.marketCaches[mktName]
 	if mktCaches == nil {
 		s.cacheMtx.Unlock()
-		return fmt.Errorf("unkown market %q", mktName)
+		return fmt.Errorf("unknown market %q", mktName)
 	}
 	epochDur := s.epochDurations[mktName]
 	startStamp := epochIdx * epochDur

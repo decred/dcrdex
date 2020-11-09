@@ -316,6 +316,7 @@ func (s *Server) Run(ctx context.Context) {
 	// Run a periodic routine to keep the ipHTTPRateLimiter map clean.
 	go func() {
 		ticker := time.NewTicker(time.Minute * 5)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -548,28 +549,20 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 	return ipv4ListenAddrs, ipv6ListenAddrs, haveWildcard, nil
 }
 
-// handleHTTP handles an HTTP request by finding and calling the appropriate
-// handler. The caller of handleHTTP should have already parsed and request
-// data into the right type for the handler.
-func handleHTTP(w http.ResponseWriter, r *http.Request, route string, thing interface{}) {
-	handler := httpRoutes[route]
-	if handler == nil {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-		return
-	}
-	resp, err := handler(thing)
-	if err != nil {
-		writeJSONWithStatus(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
-		return
-	}
-	writeJSONWithStatus(w, resp, http.StatusOK)
-}
-
 // routeHandler creates a HandlerFunc for a route. Middleware should have
 // already processed the request and added the request struct to the Context.
 func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
+	handler := httpRoutes[route]
+	if handler == nil {
+		panic("no known handler")
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		handleHTTP(w, r, route, r.Context().Value(ctxThing))
+		resp, err := handler(r.Context().Value(ctxThing))
+		if err != nil {
+			writeJSONWithStatus(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+			return
+		}
+		writeJSONWithStatus(w, resp, http.StatusOK)
 	}
 }
 
