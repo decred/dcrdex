@@ -469,7 +469,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 
 		// Match notifications.
 		for _, match := range newTrackers {
-			t.notify(newMatchNote(SubjectNewMatch, "", db.Data, t.coreOrderInternal(), match.id))
+			t.notify(newMatchNote(SubjectNewMatch, "", db.Data, t, match))
 		}
 
 		// A single order notification.
@@ -586,7 +586,7 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 		changed = true
 	}
 
-	t.notify(newMatchNote("counterconfirms", "", db.Data, t, match))
+	t.notify(newMatchNote(SubjectCounterConfirms, "", db.Data, t, match))
 
 	return
 }
@@ -801,7 +801,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote("confirms", "", db.Data, t, match))
+		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
@@ -848,7 +848,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote("confirms", "", db.Data, t, match))
+		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
@@ -1833,7 +1833,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	auth.AuditStamp = audit.Time
 	auth.AuditSig = audit.Sig
 
-	t.notify(newMatchNote(SubjectAudit, "", db.Data, t.coreOrderInternal(), mid))
+	t.notify(newMatchNote(SubjectAudit, "", db.Data, t, match))
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {

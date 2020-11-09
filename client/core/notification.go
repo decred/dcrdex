@@ -9,7 +9,6 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/order"
 )
 
 // Notifications should use the following note type strings.
@@ -240,6 +239,13 @@ type MatchNote struct {
 	MarketID string    `json:"marketID"`
 }
 
+const (
+	SubjectAudit           = "audit"
+	SubjectNewMatch        = "new_match"
+	SubjectCounterConfirms = "counterconfirms"
+	SubjectConfirms        = "confirms"
+)
+
 func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
 	return &MatchNote{
 		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
@@ -259,32 +265,6 @@ func (on *OrderNote) String() string {
 		return base
 	}
 	return fmt.Sprintf("%s - Order: %s", base, on.Order.ID)
-}
-
-type MatchNote struct {
-	db.Notification
-	Order *Order `json:"order"`
-	Match *Match `json:"match"`
-}
-
-const (
-	SubjectAudit    = "audit"
-	SubjectNewMatch = "new_match"
-)
-
-func newMatchNote(subject, details string, severity db.Severity, corder *Order, matchID order.MatchID) *MatchNote {
-	midStr := matchID.String()
-	var coreMatch *Match
-	for _, match := range corder.Matches {
-		if match.MatchID.String() == midStr {
-			coreMatch = match
-		}
-	}
-	return &MatchNote{
-		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
-		Order:        corder,
-		Match:        coreMatch,
-	}
 }
 
 // EpochNotification is a data notification that a new epoch has begun.
