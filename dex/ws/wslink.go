@@ -27,20 +27,16 @@ const (
 	outBufferSize    = 128
 	defaultReadLimit = 4096
 	writeWait        = 5 * time.Second
-)
-
-// websocket.Upgrader is the preferred method of upgrading a request to a
-// websocket connection.
-var upgrader = websocket.Upgrader{}
-
-// Using errors.New prevents defining these as consts.
-const (
 	// ErrPeerDisconnected will be returned if Send or Request is called on a
 	// disconnected link.
 	ErrPeerDisconnected = dex.ErrorKind("peer disconnected")
 
 	ErrHandshake = dex.ErrorKind("handshake error")
 )
+
+// websocket.Upgrader is the preferred method of upgrading a request to a
+// websocket connection.
+var upgrader = websocket.Upgrader{}
 
 // Connection represents a websocket connection to a remote peer. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
@@ -62,7 +58,7 @@ type WSLink struct {
 	// log is the WSLink's logger
 	log dex.Logger
 	// ip is the peer's IP address.
-	ip string
+	ip dex.IPKey
 	// conn is the gorilla websocket.Conn, or a stub for testing.
 	conn Connection
 	// on is used internally to prevent multiple Close calls on the underlying
@@ -90,9 +86,9 @@ type sendData struct {
 }
 
 // NewWSLink is a constructor for a new WSLink.
-func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
+func NewWSLink(ip dex.IPKey, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
 	return &WSLink{
-		ip:         addr,
+		ip:         ip,
 		log:        logger,
 		conn:       conn,
 		outChan:    make(chan *sendData, outBufferSize),
@@ -459,7 +455,7 @@ func (c *WSLink) Off() bool {
 }
 
 // IP is the peer address passed to the constructor.
-func (c *WSLink) IP() string {
+func (c *WSLink) IP() dex.IPKey {
 	return c.ip
 }
 

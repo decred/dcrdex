@@ -131,7 +131,7 @@ type tReq struct {
 // tRPCClient satisfies the comms.Link interface.
 type TRPCClient struct {
 	id         uint64
-	ip         string
+	ip         dex.IPKey
 	sendErr    error
 	requestErr error
 	banished   bool
@@ -141,9 +141,9 @@ type TRPCClient struct {
 	closed     chan struct{}
 }
 
-func (c *TRPCClient) ID() uint64  { return c.id }
-func (c *TRPCClient) IP() string  { return c.ip }
-func (c *TRPCClient) Authorized() {}
+func (c *TRPCClient) ID() uint64    { return c.id }
+func (c *TRPCClient) IP() dex.IPKey { return c.ip }
+func (c *TRPCClient) Authorized()   {}
 func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
@@ -189,7 +189,7 @@ func tNewRPCClient() *TRPCClient {
 	tClientID++
 	return &TRPCClient{
 		id:     tClientID,
-		ip:     "123.123.123.123",
+		ip:     dex.NewIPKey("123.123.123.123"),
 		closed: make(chan struct{}),
 	}
 }

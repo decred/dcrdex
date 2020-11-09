@@ -36,7 +36,7 @@ var (
 func newServer() *Server {
 	return &Server{
 		clients:     make(map[uint64]*wsLink),
-		quarantine:  make(map[string]time.Time),
+		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: 1,
 	}
 }
@@ -287,7 +287,8 @@ func TestClientRequests(t *testing.T) {
 	}()
 	var client *wsLink
 	var conn *wsConnStub
-	stubAddr := "testaddr"
+	stubAddr := dex.IPKey{}
+	copy(stubAddr[:], []byte("testaddr"))
 	sendToServer := func(method, msg string) { sendToConn(t, conn, method, msg) }
 
 	waitForShutdown := func(tag string, f func()) {
@@ -513,7 +514,8 @@ func TestClientResponses(t *testing.T) {
 	server := newServer()
 	var client *wsLink
 	var conn *wsConnStub
-	stubAddr := "testaddr"
+	stubAddr := dex.IPKey{}
+	copy(stubAddr[:], []byte("testaddr"))
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.

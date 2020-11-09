@@ -27,7 +27,7 @@ const (
 // fulfilled.
 func (s *Server) limitRate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		code, err := s.meterIP(r.RemoteAddr)
+		code, err := s.meterIP(dex.NewIPKey(r.RemoteAddr))
 		if err != nil {
 			http.Error(w, err.Error(), code)
 			return
@@ -38,7 +38,7 @@ func (s *Server) limitRate(next http.Handler) http.Handler {
 
 // meterIP checks the dataEnabled flag, the global rate limiter, and the
 // more restrictive ip-based rate limiter.
-func (s *Server) meterIP(ip string) (int, error) {
+func (s *Server) meterIP(ip dex.IPKey) (int, error) {
 	if atomic.LoadUint32(&s.dataEnabled) != 1 {
 		return http.StatusServiceUnavailable, fmt.Errorf("data API is disabled")
 	}

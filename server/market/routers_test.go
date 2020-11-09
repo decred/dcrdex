@@ -1208,7 +1208,7 @@ func (s *TBookSource) OrderFeed() <-chan *updateSignal {
 type TLink struct {
 	mtx         sync.Mutex
 	id          uint64
-	ip          string
+	ip          dex.IPKey
 	sends       []*msgjson.Message
 	sendErr     error
 	sendTrigger chan struct{}
@@ -1223,15 +1223,15 @@ func tNewLink() *TLink {
 	linkCounter++
 	return &TLink{
 		id:          linkCounter,
-		ip:          "[1:800:dex:rules::]",
+		ip:          dex.NewIPKey("[1:800:dead:cafe::]"),
 		sends:       make([]*msgjson.Message, 0),
 		sendTrigger: make(chan struct{}, 1),
 	}
 }
 
-func (conn *TLink) Authorized() {}
-func (conn *TLink) ID() uint64  { return conn.id }
-func (conn *TLink) IP() string  { return conn.ip }
+func (conn *TLink) Authorized()   {}
+func (conn *TLink) ID() uint64    { return conn.id }
+func (conn *TLink) IP() dex.IPKey { return conn.ip }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()

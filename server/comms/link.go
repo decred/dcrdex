@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 )
@@ -27,7 +28,7 @@ type Link interface {
 	// ID returns a unique ID by which this connection can be identified.
 	ID() uint64
 	// IP returns the IP address of the peer.
-	IP() string
+	IP() dex.IPKey
 	// Send sends the msgjson.Message to the peer.
 	Send(msg *msgjson.Message) error
 	// SendError sends the msgjson.Error to the peer, with reference to a
@@ -67,14 +68,14 @@ type wsLink struct {
 	ban bool
 	// meterIP is a function that will be checked to see if certain data API
 	// requests should be denied due to rate limits or if the API disabled.
-	meterIP func(string) (int, error)
+	meterIP func(dex.IPKey) (int, error)
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection, limitRate func(string) (int, error)) *wsLink {
+func newWSLink(ip dex.IPKey, conn ws.Connection, limitRate func(dex.IPKey) (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
-		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
+		WSLink: ws.NewWSLink(ip, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
@@ -95,7 +96,7 @@ func (c *wsLink) ID() uint64 {
 }
 
 // IP returns the IP address of the peer.
-func (c *wsLink) IP() string {
+func (c *wsLink) IP() dex.IPKey {
 	return c.WSLink.IP()
 }
 

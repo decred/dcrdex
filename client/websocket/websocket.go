@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -41,7 +40,7 @@ type wsClient struct {
 	feedLoop    *dex.StartStopWaiter
 }
 
-func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
+func newWSClient(ip dex.IPKey, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
 	return &wsClient{
 		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr, logger),
 		cid:    atomic.AddInt32(&cidCounter, 1),
@@ -96,13 +95,7 @@ func (s *Server) Shutdown() {
 // able to cancel the hijacked connection handler at a later time since this
 // function is not blocking.
 func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	// If the IP address includes a port, remove it.
-	ip := r.RemoteAddr
-	// If a host:port can be parsed, the IP is only the host portion.
-	host, _, err := net.SplitHostPort(ip)
-	if err == nil && host != "" {
-		ip = host
-	}
+	ip := dex.NewIPKey(r.RemoteAddr)
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
 		s.log.Errorf("ws connection error: %v", err)
@@ -116,7 +109,7 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.connect(ctx, wsConn, ip)
+		s.connect(ctx, wsConn, r.RemoteAddr, ip)
 	}()
 
 	s.log.Trace("HandleConnect done.")
@@ -125,7 +118,7 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 // connect handles a new websocket client by creating a new wsClient, starting
 // it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) connect(ctx context.Context, conn ws.Connection, ip string) {
+func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string, ip dex.IPKey) {
 	s.log.Debugf("New websocket client %s", ip)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
@@ -133,7 +126,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, ip string) {
 	var cl *wsClient
 	cl = newWSClient(ip, conn, func(msg *msgjson.Message) *msgjson.Error {
 		return s.handleMessage(cl, msg)
-	}, s.log.SubLogger(ip))
+	}, s.log.SubLogger(addr))
 
 	// Lock the clients map before starting the connection listening so that
 	// synchronized map accesses are guaranteed to reflect this connection.

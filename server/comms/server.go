@@ -64,7 +64,7 @@ var (
 	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
 
 	// ipRateLimiter is a per-client rate limiter.
-	ipHTTPRateLimiter = make(map[string]*ipRateLimiter)
+	ipHTTPRateLimiter = make(map[dex.IPKey]*ipRateLimiter)
 	rateLimiterMtx    sync.RWMutex
 )
 
@@ -77,7 +77,7 @@ type ipRateLimiter struct {
 }
 
 // Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist.
-func getIPLimiter(ip string) *ipRateLimiter {
+func getIPLimiter(ip dex.IPKey) *ipRateLimiter {
 	rateLimiterMtx.Lock()
 	defer rateLimiterMtx.Unlock()
 	limiter := ipHTTPRateLimiter[ip]
@@ -173,7 +173,7 @@ type Server struct {
 	// The quarantine map maps IP addresses to a time in which the quarantine will
 	// be lifted.
 	banMtx      sync.RWMutex
-	quarantine  map[string]time.Time
+	quarantine  map[dex.IPKey]time.Time
 	dataEnabled uint32
 }
 
@@ -237,7 +237,7 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	return &Server{
 		listeners:   listeners,
 		clients:     make(map[uint64]*wsLink),
-		quarantine:  make(map[string]time.Time),
+		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: dataEnabled,
 	}, nil
 }
@@ -262,13 +262,7 @@ func (s *Server) Run(ctx context.Context) {
 
 	// Websocket endpoint.
 	mux.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		// If the IP address includes a port, remove it.
-		ip := r.RemoteAddr
-		// If a host:port can be parsed, the IP is only the host portion.
-		host, _, err := net.SplitHostPort(ip)
-		if err == nil && host != "" {
-			ip = host
-		}
+		ip := dex.NewIPKey(r.RemoteAddr)
 
 		if s.isQuarantined(ip) {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -359,7 +353,7 @@ func (s *Server) Run(ctx context.Context) {
 }
 
 // Check if the IP address is quarantined.
-func (s *Server) isQuarantined(ip string) bool {
+func (s *Server) isQuarantined(ip dex.IPKey) bool {
 	s.banMtx.RLock()
 	banTime, banned := s.quarantine[ip]
 	s.banMtx.RUnlock()
@@ -376,7 +370,7 @@ func (s *Server) isQuarantined(ip string) bool {
 }
 
 // Quarantine the specified IP address.
-func (s *Server) banish(ip string) {
+func (s *Server) banish(ip dex.IPKey) {
 	s.banMtx.Lock()
 	defer s.banMtx.Unlock()
 	s.quarantine[ip] = time.Now().Add(banishTime)
@@ -385,7 +379,7 @@ func (s *Server) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip string) {
+func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey) {
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
