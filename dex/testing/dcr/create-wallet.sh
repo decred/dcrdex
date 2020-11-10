@@ -70,7 +70,7 @@ ${SEED}
 EOF
 
 # create and unlock the wallet
-tmux new-window -t $TMUX_WIN_ID -n "${NAME}"
+tmux new-window -t $TMUX_WIN_ID -n w-"${NAME}"
 tmux send-keys -t $TMUX_WIN_ID "set +o history" C-m
 tmux send-keys -t $TMUX_WIN_ID "cd ${WALLET_DIR}" C-m
 
