@@ -5,11 +5,12 @@ package main
 
 import (
 	"bytes"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 func Test_createAndStoreKey(t *testing.T) {
