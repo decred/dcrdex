@@ -4,7 +4,7 @@ set -ex
 
 dir=$(pwd)
 # list of all modules to test
-modules=". server/cmd/dcrdex client/cmd/dexc client/cmd/dexcctl"
+modules="."
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules
