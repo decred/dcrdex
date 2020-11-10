@@ -4,8 +4,6 @@
 package dex
 
 import (
-	"encoding/hex"
-	"fmt"
 	"net"
 )
 
@@ -20,8 +18,6 @@ func NewIPKey(addr string) IPKey {
 		addr = host
 	}
 	netIP := net.ParseIP(addr)
-	fmt.Println("--", addr, ",", host, ",", hex.EncodeToString(netIP[:]))
-
 	ip := netIP.To4()
 	if ip == nil {
 		ip = netIP.To16()

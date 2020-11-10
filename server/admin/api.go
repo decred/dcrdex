@@ -38,11 +38,16 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(code)
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "    ")
-	if err := encoder.Encode(thing); err != nil {
+	b, err := json.MarshalIndent(thing, "", "    ")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		log.Errorf("JSON encode error: %v", err)
+		return
+	}
+	w.WriteHeader(code)
+	_, err = w.Write(append(b, byte('\n')))
+	if err != nil {
+		log.Errorf("Write error: %v", err)
 	}
 }
 

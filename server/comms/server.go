@@ -570,9 +570,15 @@ func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
 // code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	b, err := json.Marshal(thing)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Errorf("JSON encode error: %v", err)
+		return
+	}
 	w.WriteHeader(code)
-	encoder := json.NewEncoder(w)
-	if err := encoder.Encode(thing); err != nil {
-		log.Infof("JSON encode error: %v", err)
+	_, err = w.Write(append(b, byte('\n')))
+	if err != nil {
+		log.Errorf("Write error: %v", err)
 	}
 }
