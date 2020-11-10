@@ -175,8 +175,8 @@ type WithdrawNote struct {
 }
 
 const (
-	WithdrawErrorSubject = "Withdraw error"
-	WithdrawSendSubject  = "Withdraw sent"
+	SubjectWithdrawError = "Withdraw error"
+	SubjectWithdrawSend  = "Withdraw sent"
 )
 
 func newWithdrawNote(subject, details string, severity db.Severity) *WithdrawNote {

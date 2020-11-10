@@ -721,5 +721,6 @@ function updateMatch (order, match) {
       return
     }
   }
+  order.matches = order.matches || []
   order.matches.push(match)
 }

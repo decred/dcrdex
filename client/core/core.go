@@ -2408,12 +2408,12 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	coin, err := wallet.Withdraw(address, value)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
-		c.notify(newWithdrawNote(WithdrawErrorSubject, details, db.ErrorLevel))
+		c.notify(newWithdrawNote(SubjectWithdrawError, details, db.ErrorLevel))
 		return nil, err
 	}
 
 	details := fmt.Sprintf("Withdraw of %s has completed successfully. Coin ID = %s", unbip(assetID), coin)
-	c.notify(newWithdrawNote(WithdrawSendSubject, details, db.Success))
+	c.notify(newWithdrawNote(SubjectWithdrawSend, details, db.Success))
 
 	c.updateAssetBalance(assetID)
 	return coin, nil
