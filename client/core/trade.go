@@ -684,22 +684,25 @@ func (t *trackedTrade) isActive() bool {
 	return false
 }
 
+// MatchIsRevoked checks if the match is revoked, RLocking the trackedTrade.
 func (t *trackedTrade) MatchIsRevoked(match *matchTracker) bool {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	return match.MetaData.Proof.IsRevoked()
 }
 
+// MatchStatus returns the match status, RLocking the trackedTrade.
 func (t *trackedTrade) MatchStatus(match *matchTracker) order.MatchStatus {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	return match.MetaData.Status
 }
 
+// SelfRevokeMatch flags the match as self-revoked, Locking the trackedTrade.
 func (t *trackedTrade) SelfRevokeMatch(match *matchTracker) {
 	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	match.MetaData.Proof.SelfRevoked = true
+	t.mtx.Unlock()
 }
 
 // Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
@@ -1859,7 +1862,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 	// data are updated.
 	go func() {
 		// Search until it's known to be revoked.
-		err := t.auditContract(match, audit.CoinID, audit.Contract, 48*time.Hour)
+		err := t.auditContract(match, audit.CoinID, audit.Contract, 24*time.Hour) // no timeout (after any possible revoke time)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
 			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %v: %v",
