@@ -58,8 +58,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 		go func(trade *trackedTrade, matches []*matchTracker) {
 			defer wg.Done()
 			for _, match := range matches {
-				srvData := resMap[match.id]
-				if srvData != nil {
+				if srvData := resMap[match.id]; srvData != nil {
 					c.resolveConflictWithServerData(dc, trade, match, srvData)
 					continue
 				}
@@ -139,7 +138,9 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 
 	if resolver := conflictResolver(status, srvStatus); resolver != nil {
 		resolver(dc, trade, match, srvData)
-		trade.mtx.RLock() // ok with not not atomic update and store?
+		// NOTE: updated matchTracker fields are briefly out of sync with DB
+		// with the trackedTrade unlocked.
+		trade.mtx.RLock()
 		defer trade.mtx.RUnlock()
 		err := c.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {

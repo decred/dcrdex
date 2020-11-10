@@ -1464,17 +1464,11 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 	// signal to the client to try broadcasting again or check their asset
 	// backend connectivity before hitting the broadcast timeout (and being
 	// penalized).
+	var needsResolution bool
 	timeout := t.broadcastTimeout()
 	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
 		var msgErr *msgjson.Error
-		if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
-			// Try resolving the match status conflict.
-			go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-				t.ID(): {
-					trade:   t,
-					matches: []*matchTracker{match},
-				}})
-		}
+		needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
 		errs.add("error sending 'init' message for match %s: %v", match.id, err)
 	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
 		errs.add("'init' ack signature error for match %s: %v", match.id, err)
@@ -1497,6 +1491,17 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 		errs.add("error storing swap details in database for match %s, coin %s: %v",
 			match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
 	}
+
+	// With updated swap data, attempt match status resolution.
+	if needsResolution {
+		go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+			t.ID(): {
+				trade:   t,
+				matches: []*matchTracker{match},
+			},
+		})
+	}
+
 	return errs.ifAny()
 }
 
@@ -1622,6 +1627,7 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 
 	// Attempt to send `redeem` request and validate server ack.
 	// Not necessary for revoked matches.
+	var needsResolution bool
 	if !proof.IsRevoked() {
 		msgRedeem := &msgjson.Redeem{
 			OrderID: t.ID().Bytes(),
@@ -1635,14 +1641,7 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 		timeout := t.broadcastTimeout()
 		if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
 			var msgErr *msgjson.Error
-			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
-				// Try resolving the match status conflict.
-				go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-					t.ID(): {
-						trade:   t,
-						matches: []*matchTracker{match},
-					}})
-			}
+			needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
 			ack.Sig = nil // in case of partial unmarshal
 			errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
 		} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
@@ -1673,6 +1672,17 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 		errs.add("error storing redeem details in database for match %s, coin %s: %v",
 			match.id, coinIDString(t.wallets.toAsset.ID, coinID), err)
 	}
+
+	// With updated swap data, attempt match status resolution.
+	if needsResolution {
+		go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+			t.ID(): {
+				trade:   t,
+				matches: []*matchTracker{match},
+			},
+		})
+	}
+
 	return errs.ifAny()
 }
 
