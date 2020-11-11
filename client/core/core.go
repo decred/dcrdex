@@ -1708,7 +1708,8 @@ func (c *Core) isRegistered(host string) bool {
 
 // GetFee creates a connection to the specified DEX Server and fetches the
 // registration fee. The connection is closed after the fee is retrieved.
-// Returns an error if user is already registered to the DEX.
+// Returns an error if user is already registered to the DEX. A TLS certificate,
+// certI, can be provided as either a string filename, or []byte file contents.
 func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
