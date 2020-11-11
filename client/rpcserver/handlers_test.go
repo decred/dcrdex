@@ -476,6 +476,7 @@ func TestHandleRegister(t *testing.T) {
 const exchangeIn = `{
   "https://127.0.0.1:7232": {
     "host": "https://127.0.0.1:7232",
+	"acctID": "test",
     "markets": {
       "dcr_btc": {
         "name": "dcr_btc",

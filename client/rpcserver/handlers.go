@@ -715,6 +715,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     obj: The exchanges result.
     {
       "[DEX host]": {
+		"acctID" (string):  The client's account ID associated with this DEX.
         "markets": {
           "[assetID-assetID]": {
             "baseid" (int): The base asset ID
