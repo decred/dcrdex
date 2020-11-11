@@ -1710,9 +1710,19 @@ func TestLogin(t *testing.T) {
 	tCore = rig.core
 	rig.acct.markFeePaid()
 	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
-	_, err = tCore.Login(tPW)
+	// Login>authDEX will do 4 match DB updates for these two matches:
+	// missing -> revoke -> update match
+	// extra -> negotiate -> newTrackers -> update match
+	// matchConflicts (from extras) -> resolveMatchConflicts -> resolveConflictWithServerData
+	// 	-> update match after spawning auditContract
+	// 	-> update match in auditContract (second because of lock) ** the ASYNC one we have to wait for **
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
+	_, err = tCore.Login(tPW) // authDEX -> async contract audit for the extra match
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
+	}
+	for i := 0; i < 4; i++ {
+		<-rig.db.updateMatchChan
 	}
 
 	if !tracker.matches[missingID].MetaData.Proof.SelfRevoked {
@@ -1730,8 +1740,8 @@ func TestLogin(t *testing.T) {
 		t.Errorf("Extra trade not accepted into matches")
 	}
 	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
 	match = tracker.matches[extraID]
-	tracker.mtx.Unlock()
 	if !bytes.Equal(match.MetaData.Proof.CounterScript, missedContract) {
 		t.Errorf("Missed maker contract not retrieved, %s, %s", match.id, hex.EncodeToString(match.MetaData.Proof.CounterScript))
 	}
@@ -2626,7 +2636,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// Check audit errors.
 	tBtcWallet.auditErr = tErr
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for AuditContract error")
 	}
@@ -2634,7 +2644,7 @@ func TestTradeTracking(t *testing.T) {
 	// Check expiration error.
 	match.MetaData.Proof.SelfRevoked = true // keeps trying unless revoked
 	tBtcWallet.auditErr = asset.CoinNotFoundError
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for AuditContract expiration")
 	}
@@ -2646,28 +2656,28 @@ func TestTradeTracking(t *testing.T) {
 	match.MetaData.Proof.SelfRevoked = false
 
 	auditInfo.coin.val = auditQty - 1
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for low value")
 	}
 	auditInfo.coin.val = auditQty
 
 	auditInfo.secretHash = []byte{0x01}
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for wrong secret hash")
 	}
 	auditInfo.secretHash = proof.SecretHash
 
 	auditInfo.recipient = "wrong address"
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for wrong address")
 	}
 	auditInfo.recipient = addr
 
 	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker - time.Hour)
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for early lock time")
 	}
@@ -2693,6 +2703,7 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.TakerSwap, audit.CoinID) {
 		t.Fatalf("taker contract ID not set")
 	}
+	<-rig.db.updateMatchChan // AuditSig is set in a second match data update
 	if !bytes.Equal(auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set")
 	}
@@ -2770,7 +2781,7 @@ func TestTradeTracking(t *testing.T) {
 	tBtcWallet.auditInfo = auditInfo
 	// early lock time
 	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no taker error for early lock time")
 	}
@@ -2793,6 +2804,7 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.MakerSwap, audit.CoinID) {
 		t.Fatalf("maker redeem coin not set")
 	}
+	<-rig.db.updateMatchChan
 	if !bytes.Equal(auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set for taker")
 	}
@@ -3301,7 +3313,7 @@ func TestRefunds(t *testing.T) {
 
 	// Check audit errors.
 	tBtcWallet.auditErr = tErr
-	err = tracker.auditContract(match, audit.CoinID, audit.Contract, time.Second)
+	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for AuditContract error")
 	}
@@ -3351,7 +3363,7 @@ func TestRefunds(t *testing.T) {
 	if status != order.MakerSwapCast {
 		t.Fatalf("wrong match status wanted %v, got %v", order.MakerSwapCast, status)
 	}
-	// note: there's a noop tick scheduled that we don't care to wait for
+	<-rig.db.updateMatchChan // AuditSig set in second update to match data
 	auditInfo.coin.setConfs(tBTC.SwapConf)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
@@ -5120,9 +5132,10 @@ func TestMatchStatusResolution(t *testing.T) {
 	}
 
 	type test struct {
-		ours, servers order.MatchStatus
-		side          order.MatchSide
-		tweaker       func()
+		ours, servers      order.MatchStatus
+		side               order.MatchSide
+		tweaker            func()
+		countStatusUpdates int
 	}
 
 	testName := func(tt *test) string {
@@ -5142,7 +5155,14 @@ func TestMatchStatusResolution(t *testing.T) {
 			f(resp)
 			return nil
 		})
+		if tt.countStatusUpdates > 0 {
+			rig.db.updateMatchChan = make(chan order.MatchStatus, tt.countStatusUpdates)
+		}
 		tCore.authDEX(dc)
+		for i := 0; i < tt.countStatusUpdates; i++ {
+			<-rig.db.updateMatchChan
+		}
+		rig.db.updateMatchChan = nil
 		trade.mtx.Lock()
 		newStatus := match.MetaData.Status
 		trade.mtx.Unlock()
@@ -5153,14 +5173,16 @@ func TestMatchStatusResolution(t *testing.T) {
 	// of us.
 	forwardResolvers := []*test{
 		{
-			ours:    order.NewlyMatched,
-			servers: order.MakerSwapCast,
-			side:    order.Taker,
+			ours:               order.NewlyMatched,
+			servers:            order.MakerSwapCast,
+			side:               order.Taker,
+			countStatusUpdates: 2,
 		},
 		{
-			ours:    order.MakerSwapCast,
-			servers: order.TakerSwapCast,
-			side:    order.Maker,
+			ours:               order.MakerSwapCast,
+			servers:            order.TakerSwapCast,
+			side:               order.Maker,
+			countStatusUpdates: 2,
 		},
 		{
 			ours:    order.TakerSwapCast,
@@ -5258,6 +5280,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			tweaker: func() {
 				auditInfo.expiration = matchTime
 			},
+			countStatusUpdates: 2, // async auditContract -> revoke and db update
 		},
 		{ // Server has our info before us
 			ours:    order.MakerSwapCast,
@@ -5292,6 +5315,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			tweaker: func() {
 				auditInfo.expiration = matchTime
 			},
+			countStatusUpdates: 2, // async auditContract -> revoke and db update
 		},
 		{ // Taker has counter-party info the server doesn't.
 			ours:    order.MakerSwapCast,
@@ -5414,7 +5438,12 @@ func TestMatchStatusResolution(t *testing.T) {
 		f(resp)
 		return nil
 	})
+	// 2 matches resolved via contract audit: 2 synchronous updates, 2 async
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
 	tCore.authDEX(dc)
+	for i := 0; i < 4; i++ {
+		fmt.Println(<-rig.db.updateMatchChan)
+	}
 	trade.mtx.Lock()
 	newStatus1 := match.MetaData.Status
 	newStatus2 := match2.MetaData.Status

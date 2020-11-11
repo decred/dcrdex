@@ -684,25 +684,11 @@ func (t *trackedTrade) isActive() bool {
 	return false
 }
 
-// MatchIsRevoked checks if the match is revoked, RLocking the trackedTrade.
-func (t *trackedTrade) MatchIsRevoked(match *matchTracker) bool {
+// matchIsRevoked checks if the match is revoked, RLocking the trackedTrade.
+func (t *trackedTrade) matchIsRevoked(match *matchTracker) bool {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	return match.MetaData.Proof.IsRevoked()
-}
-
-// MatchStatus returns the match status, RLocking the trackedTrade.
-func (t *trackedTrade) MatchStatus(match *matchTracker) order.MatchStatus {
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
-	return match.MetaData.Status
-}
-
-// SelfRevokeMatch flags the match as self-revoked, Locking the trackedTrade.
-func (t *trackedTrade) SelfRevokeMatch(match *matchTracker) {
-	t.mtx.Lock()
-	match.MetaData.Proof.SelfRevoked = true
-	t.mtx.Unlock()
 }
 
 // Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
@@ -1203,10 +1189,9 @@ func (t *trackedTrade) revoke() {
 	t.maybeReturnCoins()
 }
 
-// revokeMatch sets the status as revoked for the specified match.
+// revokeMatch sets the status as revoked for the specified match. revokeMatch
+// must be called with the mtx write-locked.
 func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	var revokedMatch *matchTracker
 	for _, match := range t.matches {
 		if match.id == matchID {
@@ -1862,11 +1847,13 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 	// data are updated.
 	go func() {
 		// Search until it's known to be revoked.
-		err := t.auditContract(match, audit.CoinID, audit.Contract, 24*time.Hour) // no timeout (after any possible revoke time)
+		err := t.auditContract(match, audit.CoinID, audit.Contract)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
 			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %v: %v",
 				contractID, t.wallets.toAsset.Symbol, match.id, err)
+			// Don't revoke in case server sends a revised audit request before
+			// the match is revoked.
 			return
 		}
 
@@ -1897,8 +1884,8 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 // auditContract audits the contract for the match and relevant MatchProof
 // fields are set. The changes are not saved to the database. This may block for
 // a long period, and should be run in a goroutine. The trackedTrade mtx must
-// NOT be locked.
-func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte, timeout time.Duration) error {
+// NOT be locked. The match is updated in the DB if the audit succeeds.
+func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte) error {
 	// Get the asset.AuditInfo from the ExchangeWallet. Handle network latency.
 	// The coin waiter will run once every recheckInterval until successful or
 	// until the match is revoked. The client is asked by the server to audit a
@@ -1912,7 +1899,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	var tries int
 	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
 	t.latencyQ.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(timeout),
+		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
 			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract)
@@ -1923,15 +1910,16 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 			}
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// Didn't find it that time.
-				if t.MatchIsRevoked(match) {
+				t.dc.log.Tracef("Still searching for counterparty's contract coin %v (%s) for match %v. ", contractID, contractSymb, match.id)
+				if t.matchIsRevoked(match) {
 					errChan <- ExpirationErr(fmt.Sprintf("match revoked while waiting to find counterparty contract coin %v (%s). "+
 						"Check your internet and wallet connections!", contractID, contractSymb))
 					return wait.DontTryAgain
 				}
-				if tries > 2 {
-					t.dc.log.Infof("Still searching for contract coin %v (%s) for match %v. "+
-						"Is your internet and wallet connection good?", contractID, contractSymb, match.id)
-					// t.dc.notify(newOrderNotification) // I'm afraid of breaking consumers now, but we should tell GUI.
+				if tries > 0 && tries%12 == 0 {
+					detail := fmt.Sprintf("Still searching for counterparty's contract coin %v (%s) for match %v. "+
+						"Are your internet and wallet connections good?", contractID, contractSymb, match.id)
+					t.notify(newOrderNote("Audit trouble", detail, db.WarningLevel, t.coreOrder()))
 				}
 				tries++
 				return wait.TryAgain
@@ -1955,7 +1943,6 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	// 1. Recipient Address
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
-	match.counterSwap = auditInfo
 	if auditInfo.Recipient() != t.Trade().Address {
 		return fmt.Errorf("swap recipient %s in contract coin %v (%s) is not the order address %s",
 			auditInfo.Recipient(), contractID, contractSymb, t.Trade().Address)
@@ -1980,31 +1967,38 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	// fee rate no longer matters, or wait for the lock time to expire to refund.
 
 	// Check and store the counterparty contract data.
+	matchTime := match.matchTime()
+	reqLockTime := encode.DropMilliseconds(matchTime.Add(t.lockTimeMaker)) // counterparty == maker
+	if dbMatch.Side == order.Maker {
+		reqLockTime = encode.DropMilliseconds(matchTime.Add(t.lockTimeTaker)) // counterparty == taker
+	}
+	if auditInfo.Expiration().Before(reqLockTime) {
+		return fmt.Errorf("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration())
+	}
+
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	proof := &match.MetaData.Proof
-	proof.CounterScript = contract
-
-	matchTime := match.matchTime()
-	reqLockTime := encode.DropMilliseconds(matchTime.Add(t.lockTimeMaker)) // counterparty == maker
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
 		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
 			return fmt.Errorf("secret hash mismatch for contract coin %v (%s), contract %v. expected %x, got %v",
 				auditInfo.Coin(), t.wallets.toAsset.Symbol, contract, proof.SecretHash, auditInfo.SecretHash())
 		}
+		// Audit successful. Update status and other match data.
 		match.SetStatus(order.TakerSwapCast)
 		proof.TakerSwap = coinID
-		// counterparty == taker
-		reqLockTime = encode.DropMilliseconds(matchTime.Add(t.lockTimeTaker))
 	} else {
 		proof.SecretHash = auditInfo.SecretHash()
 		match.SetStatus(order.MakerSwapCast)
 		proof.MakerSwap = coinID
 	}
+	proof.CounterScript = contract
+	match.counterSwap = auditInfo
 
-	if auditInfo.Expiration().Before(reqLockTime) {
-		return fmt.Errorf("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration())
+	err = t.db.UpdateMatch(&match.MetaMatch)
+	if err != nil {
+		t.dc.log.Errorf("Error updating database for match %v: %v", match.id, err)
 	}
 
 	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s",

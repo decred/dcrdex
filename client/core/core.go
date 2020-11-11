@@ -3819,7 +3819,9 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var matchID order.MatchID
 	copy(matchID[:], revocation.MatchID)
 
+	tracker.mtx.Lock()
 	err = tracker.revokeMatch(matchID, true)
+	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
 	}
