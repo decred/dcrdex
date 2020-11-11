@@ -5442,7 +5442,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
 	tCore.authDEX(dc)
 	for i := 0; i < 4; i++ {
-		fmt.Println(<-rig.db.updateMatchChan)
+		<-rig.db.updateMatchChan
 	}
 	trade.mtx.Lock()
 	newStatus1 := match.MetaData.Status
