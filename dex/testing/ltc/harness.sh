@@ -10,14 +10,14 @@ export ALPHA_RPC_PORT="20566"
 export BETA_RPC_PORT="20567"
 export ALPHA_WALLET_SEED="cMndqchcXSCUQDDZQSKU2cUHbPb5UfFL9afspxsBELeE6qx6ac9n"
 export BETA_WALLET_SEED="cRHosJjgZ2UWsEAeHYYUFa8Z6viHYXm94GguGtpzMo6qwKBC1DSq"
-export ALPHA_MINING_ADDR="2MzNGEV9CBZBptm25CZ4rm2TrKF8gfVU8XA"
-export BETA_MINING_ADDR="2NC2bYfZ9GX3gnDZB8CL7pYLytNKMfVxYDX"
+export ALPHA_MINING_ADDR="QTj2MW1SCfEv2wn7pf6sqiuHTdaWXViqZJ"
+export BETA_MINING_ADDR="QfPMfgRPHd6mvQKDkJN8uEnR2kmBYAUE1x"
 # Gamma is a named wallet in the alpha wallet directory.
 export GAMMA_WALLET_SEED="cR6gasj1RtB9Qv9j2kVej2XzQmXPmZBcn8KzUmxSSCQoz3TqTNMg"
-export GAMMA_ADDRESS="2N9Lwbw6DKoNSyTB9xL4e9LXftuPP7XU214"
+export GAMMA_ADDRESS="QchhiwxTLuRY7dwCaS6fE2y73HqD56MRCR"
 # Delta is a named wallet in the beta wallet directory.
 export DELTA_WALLET_SEED="cNueSN7jzE9DEQsP8SgyonVvMSWyqk2xjTK3RPh2HAdWrR6zb8Y9"
-export DELTA_ADDRESS="2N589dnyfoL92x31TwEh2h1jRQsB9CaQTJQ"
+export DELTA_ADDRESS="QYUukoqupSC86DmWZLj3miArZFcy3eGC4i"
 # Signal that the node needs to restart after encrypting wallet
 export RESTART_AFTER_ENCRYPT="1"
 # Run the harness

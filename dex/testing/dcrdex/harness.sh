@@ -21,6 +21,15 @@ TEST_DB=dcrdex_simnet_test
 sudo -u postgres -H psql -c "DROP DATABASE IF EXISTS ${TEST_DB}" \
 -c "CREATE DATABASE ${TEST_DB} OWNER dcrdex"
 
+EPOCH_DURATION=15000
+if [ "$#" -eq 1 ]; then
+    if [ "$1" -lt 1000 ]; then
+        echo "epoch duration cannot be < 1000 ms"
+        exit 1
+    fi
+    EPOCH_DURATION=$1
+fi
+
 echo "Writing markets.json and dcrdex.conf"
 
 # Write markets.json.
@@ -32,13 +41,13 @@ cat > "./markets.json" <<EOF
         {
             "base": "DCR_simnet",
             "quote": "BTC_simnet",
-            "epochDuration": 15000,
+            "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
         },
         {
             "base": "DCR_simnet",
             "quote": "LTC_simnet",
-            "epochDuration": 15000,
+            "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
         }
     ],
@@ -46,7 +55,7 @@ cat > "./markets.json" <<EOF
         "DCR_simnet": {
             "bip44symbol": "dcr",
             "network": "simnet",
-            "lotSize": 100000000,
+            "lotSize": 1000000000,
             "rateStep": 100000,
             "maxFeeRate": 10,
             "swapConf": 1,
@@ -59,7 +68,7 @@ cat > "./markets.json" <<EOF
             "rateStep": 100,
             "maxFeeRate": 100,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/btc/harness-ctl/alpha.conf"
+            "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf"
         },
         "LTC_simnet": {
             "bip44symbol": "ltc",
@@ -68,7 +77,7 @@ cat > "./markets.json" <<EOF
             "rateStep": 1000000,
             "maxFeeRate": 20,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/ltc/harness-ctl/alpha.conf"
+            "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf"
         }
     }
 }
