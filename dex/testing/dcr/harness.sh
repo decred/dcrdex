@@ -277,6 +277,10 @@ if [ "$MINE" = "1" ]; then
   done
   sleep 0.5
   tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
+
+else
+  tmux send-keys -t $SESSION:0 "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
+
 fi
 
 # Reenable history and attach to the control session.
