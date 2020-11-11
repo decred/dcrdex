@@ -1882,9 +1882,9 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 }
 
 // auditContract audits the contract for the match and relevant MatchProof
-// fields are set. The changes are not saved to the database. This may block for
-// a long period, and should be run in a goroutine. The trackedTrade mtx must
-// NOT be locked. The match is updated in the DB if the audit succeeds.
+// fields are set. This may block for a long period, and should be run in a
+// goroutine. The trackedTrade mtx must NOT be locked. The match is updated in
+// the DB if the audit succeeds.
 func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte) error {
 	// Get the asset.AuditInfo from the ExchangeWallet. Handle network latency.
 	// The coin waiter will run once every recheckInterval until successful or
