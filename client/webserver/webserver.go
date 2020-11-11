@@ -77,7 +77,7 @@ type clientCore interface {
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
-	GetFee(url, cert string) (uint64, error)
+	GetFee(url string, cert interface{}) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)

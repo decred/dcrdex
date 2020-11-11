@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -1260,9 +1261,10 @@ func TestCreateWallet(t *testing.T) {
 func TestGetFee(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
+	cert := []byte{}
 
 	// DEX already registered
-	_, err := tCore.GetFee(tDexHost, "")
+	_, err := tCore.GetFee(tDexHost, cert)
 	if !errorHasCode(err, dupeDEXErr) {
 		t.Fatalf("wrong account exists error: %v", err)
 	}
@@ -1273,7 +1275,7 @@ func TestGetFee(t *testing.T) {
 	tCore.connMtx.Unlock()
 
 	// connectDEX error
-	_, err = tCore.GetFee(tUnparseableHost, "")
+	_, err = tCore.GetFee(tUnparseableHost, cert)
 	if !errorHasCode(err, connectionErr) {
 		t.Fatalf("wrong connectDEX error: %v", err)
 	}
@@ -1282,7 +1284,7 @@ func TestGetFee(t *testing.T) {
 	rig.queueConfig()
 
 	// Success
-	_, err = tCore.GetFee(tDexHost, "")
+	_, err = tCore.GetFee(tDexHost, cert)
 	if err != nil {
 		t.Fatalf("GetFee error: %v", err)
 	}
@@ -1346,7 +1348,7 @@ func TestRegister(t *testing.T) {
 		Addr:    tDexHost,
 		AppPass: tPW,
 		Fee:     tFee,
-		Cert:    "required",
+		Cert:    []byte{},
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: encode.RandomBytes(36)}
@@ -5636,5 +5638,35 @@ out:
 	// avoid github vm false positives.
 	if progressNotes < 5 {
 		t.Fatalf("expected 23 progress notes, got %d", progressNotes)
+	}
+}
+
+func TestParseCert(t *testing.T) {
+	byteCert := []byte{0x0a, 0x0b}
+	cert, err := parseCert("anyhost", []byte{0x0a, 0x0b})
+	if err != nil {
+		t.Fatalf("byte cert error: %v", err)
+	}
+	if !bytes.Equal(cert, byteCert) {
+		t.Fatalf("byte cert note returned unmodified. expected %x, got %x", byteCert, cert)
+	}
+	byteCert = []byte{0x05, 0x06}
+	certFile, _ := ioutil.TempFile("", "dumbcert")
+	defer os.Remove(certFile.Name())
+	certFile.Write(byteCert)
+	certFile.Close()
+	cert, err = parseCert("anyhost", certFile.Name())
+	if err != nil {
+		t.Fatalf("file cert error: %v", err)
+	}
+	if !bytes.Equal(cert, byteCert) {
+		t.Fatalf("byte cert note returned unmodified. expected %x, got %x", byteCert, cert)
+	}
+	cert, err = parseCert("dex-test.ssgen.io:7232", []byte(nil))
+	if err != nil {
+		t.Fatalf("CertStore cert error: %v", err)
+	}
+	if len(cert) == 0 {
+		t.Fatalf("no cert returned from cert store")
 	}
 }

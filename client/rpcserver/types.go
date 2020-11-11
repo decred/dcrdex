@@ -288,9 +288,9 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	cert := ""
+	var cert []byte
 	if len(params.Args) > 2 {
-		cert = params.Args[2]
+		cert = []byte(params.Args[2])
 	}
 	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],

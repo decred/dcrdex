@@ -63,7 +63,7 @@ type clientCore interface {
 	Login(appPass []byte) (*core.LoginResult, error)
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
-	GetFee(addr, cert string) (fee uint64, err error)
+	GetFee(addr string, cert interface{}) (fee uint64, err error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)
