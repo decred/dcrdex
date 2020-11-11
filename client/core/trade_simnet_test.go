@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -91,9 +92,9 @@ func readWalletCfgsAndDexCert() error {
 	fp := filepath.Join
 	for _, client := range clients {
 		dcrw, btcw := client.dcrw(), client.btcw()
-		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.daemon, "w-"+dcrw.daemon+".conf"))
+		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.daemon, dcrw.daemon+".conf"))
 		if err == nil {
-			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.daemon+".conf"))
+			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", btcw.daemon, btcw.daemon+".conf"))
 		}
 		if err != nil {
 			return err
@@ -1076,7 +1077,7 @@ func dcrWallet(daemon string) *tWallet {
 
 func btcWallet(daemon, walletName string) *tWallet {
 	pass := "abc"
-	if walletName == "delta" {
+	if walletName == "delta" || walletName == "gamma" {
 		pass = ""
 	}
 	return &tWallet{
@@ -1116,7 +1117,7 @@ func (client *tClient) init(ctx context.Context) error {
 	client.core, err = New(&Config{
 		DBPath: filepath.Join(tmpDir, fmt.Sprintf("dex_%d.db", cNum)),
 		Net:    dex.Regtest,
-		Logger: dex.StdOutLogger("TCORE", dex.LevelTrace),
+		Logger: dex.StdOutLogger("CORE:"+strconv.Itoa(int(cNum)), dex.LevelTrace),
 	})
 	if err != nil {
 		return err
@@ -1382,6 +1383,9 @@ func (client *tClient) unlockWallets() error {
 		return err
 	}
 	btcw := client.btcw()
+	if btcw.walletName != "alpha" && btcw.walletName != "beta" {
+		return nil
+	}
 	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 600",
 		btcw.daemon, btcw.walletName, string(btcw.pass))
 	return tmuxRun("btc-harness:2", unlockCmd)

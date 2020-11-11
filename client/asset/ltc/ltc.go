@@ -18,7 +18,7 @@ const (
 	BipID = 2
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultFee        = 8
+	defaultFee        = 10
 	minNetworkVersion = 180100
 )
 
