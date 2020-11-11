@@ -1910,7 +1910,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 			}
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// Didn't find it that time.
-				t.dc.log.Tracef("Still searching for counterparty's contract coin %v (%s) for match %v. ", contractID, contractSymb, match.id)
+				t.dc.log.Tracef("Still searching for counterparty's contract coin %v (%s) for match %v.", contractID, contractSymb, match.id)
 				if t.matchIsRevoked(match) {
 					errChan <- ExpirationErr(fmt.Sprintf("match revoked while waiting to find counterparty contract coin %v (%s). "+
 						"Check your internet and wallet connections!", contractID, contractSymb))
@@ -1919,7 +1919,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 				if tries > 0 && tries%12 == 0 {
 					detail := fmt.Sprintf("Still searching for counterparty's contract coin %v (%s) for match %v. "+
 						"Are your internet and wallet connections good?", contractID, contractSymb, match.id)
-					t.notify(newOrderNote("Audit trouble", detail, db.WarningLevel, t.coreOrder()))
+					t.notify(newOrderNote(SubjectAuditTrouble, detail, db.WarningLevel, t.coreOrder()))
 				}
 				tries++
 				return wait.TryAgain

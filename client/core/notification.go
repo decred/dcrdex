@@ -241,6 +241,7 @@ type MatchNote struct {
 
 const (
 	SubjectAudit           = "audit"
+	SubjectAuditTrouble    = "Audit trouble"
 	SubjectNewMatch        = "new_match"
 	SubjectCounterConfirms = "counterconfirms"
 	SubjectConfirms        = "confirms"
