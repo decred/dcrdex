@@ -45,7 +45,9 @@ const (
 	// regConfirmationsPaid is used to indicate completed registration to
 	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
-	tickCheckDivisions          = 3
+	// tickCheckDivisions is how many times to tick trades per broadcast timeout
+	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
+	tickCheckDivisions = 8
 )
 
 var (
@@ -358,10 +360,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	if dc.acct.locked() {
 		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
 	}
-	err := sign(dc.acct.privKey, signable)
-	if err != nil {
-		return fmt.Errorf("error signing %s message: %w", route, err)
-	}
+	sign(dc.acct.privKey, signable)
 	return sendRequest(dc.WsConn, route, signable, result, timeout)
 }
 
@@ -2345,10 +2344,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		CoinID:    coinID,
 	}
 	// Timestamp and sign the request.
-	err := stampAndSign(dc.acct.privKey, req)
-	if err != nil {
-		return err
-	}
+	stampAndSign(dc.acct.privKey, req)
 	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.NotifyFeeRoute, req)
 	if err != nil {
 		return fmt.Errorf("failed to create notifyfee request: %w", err)
@@ -3932,17 +3928,31 @@ func (c *Core) listen(dc *dexConnection) {
 	}()
 
 	checkTrades := func() {
-		var doneTrades, activeTrades []*trackedTrade
-		dc.tradeMtx.Lock()
-		for oid, trade := range dc.trades {
+		var allTrades, doneTrades, activeTrades []*trackedTrade
+		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
+		// since we risk blocking access to the trades map if there is lock
+		// contention for even one trade.
+		dc.tradeMtx.RLock()
+		for _, trade := range dc.trades {
+			allTrades = append(allTrades, trade)
+		}
+		dc.tradeMtx.RUnlock()
+
+		for _, trade := range allTrades {
 			if trade.isActive() {
 				activeTrades = append(activeTrades, trade)
 				continue
 			}
 			doneTrades = append(doneTrades, trade)
-			delete(dc.trades, oid)
 		}
-		dc.tradeMtx.Unlock()
+
+		if len(doneTrades) > 0 {
+			dc.tradeMtx.Lock()
+			for _, trade := range doneTrades {
+				delete(dc.trades, trade.ID())
+			}
+			dc.tradeMtx.Unlock()
+		}
 
 		// Unlock funding coins for retired orders for good measure, in case
 		// there were not unlocked at an earlier time.
@@ -4236,13 +4246,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
-	err = tracker.processAudit(msg.ID, audit)
-	if err != nil {
-		return err
-	}
-	// Are we ticking this trade after an audit in case it's mined already?
-	c.schedTradeTick(tracker)
-	return nil
+	return tracker.processAuditMsg(msg.ID, audit)
 }
 
 // handleRedemptionRoute handles the DEX-originating redemption request, which
@@ -4411,18 +4415,17 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 }
 
 // sign signs the msgjson.Signable with the provided private key.
-func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
+func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) {
 	sigMsg := payload.Serialize()
 	sig := ecdsa.Sign(privKey, sigMsg) // should we be signing the *hash* of the payload?
 	payload.SetSig(sig.Serialize())
-	return nil
 }
 
 // stampAndSign time stamps the msgjson.Stampable, and signs it with the given
 // private key.
-func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
+func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
 	payload.Stamp(encode.UnixMilliU(time.Now()))
-	return sign(privKey, payload)
+	sign(privKey, payload)
 }
 
 // sendRequest sends a request via the specified ws connection and unmarshals
