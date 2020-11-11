@@ -45,7 +45,9 @@ const (
 	// regConfirmationsPaid is used to indicate completed registration to
 	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
-	tickCheckDivisions          = 3
+	// tickCheckDivisions is how many times to tick trades per broadcast timeout
+	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
+	tickCheckDivisions = 8
 )
 
 var (
@@ -3926,17 +3928,31 @@ func (c *Core) listen(dc *dexConnection) {
 	}()
 
 	checkTrades := func() {
-		var doneTrades, activeTrades []*trackedTrade
-		dc.tradeMtx.Lock()
-		for oid, trade := range dc.trades {
+		var allTrades, doneTrades, activeTrades []*trackedTrade
+		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
+		// since we risk blocking access to the trades map if there is lock
+		// contention for even one trade.
+		dc.tradeMtx.RLock()
+		for _, trade := range dc.trades {
+			allTrades = append(allTrades, trade)
+		}
+		dc.tradeMtx.RUnlock()
+
+		for _, trade := range allTrades {
 			if trade.isActive() {
 				activeTrades = append(activeTrades, trade)
 				continue
 			}
 			doneTrades = append(doneTrades, trade)
-			delete(dc.trades, oid)
 		}
-		dc.tradeMtx.Unlock()
+
+		if len(doneTrades) > 0 {
+			dc.tradeMtx.Lock()
+			for _, trade := range doneTrades {
+				delete(dc.trades, trade.ID())
+			}
+			dc.tradeMtx.Unlock()
+		}
 
 		// Unlock funding coins for retired orders for good measure, in case
 		// there were not unlocked at an earlier time.
