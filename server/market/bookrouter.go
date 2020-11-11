@@ -390,8 +390,6 @@ out:
 						EndStamp:    uint64(endStamp),
 						MatchVolume: stats.MatchVolume,
 						QuoteVolume: stats.QuoteVolume,
-						BookVolume:  stats.BookVolume,
-						OrderVolume: stats.OrderVolume,
 						HighRate:    stats.HighRate,
 						LowRate:     stats.LowRate,
 						StartRate:   stats.StartRate,

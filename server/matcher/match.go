@@ -232,7 +232,6 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			// limit-limit order matching
 			var makers []*order.LimitOrder
 			matchSet := matchLimitOrder(book, o)
-			stats.OrderVolume += o.Quantity
 
 			if matchSet != nil {
 				appendTradeSet(matchSet)
@@ -281,18 +280,11 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			var matchSet *order.MatchSet
 
 			if o.Sell {
-				stats.OrderVolume += o.Quantity
 				matchSet = matchMarketSellOrder(book, o)
 			} else {
 				// Market buy order Quantity is denominated in the quote asset,
 				// and lot size multiples are not applicable.
 				matchSet = matchMarketBuyOrder(book, o)
-				// For market buy orders, we can only capture matched quantity.
-				// i.e. if the book side is empty, we can't convert to a base
-				// quantity.
-				if matchSet != nil {
-					stats.OrderVolume += matchSet.Total
-				}
 			}
 			if matchSet != nil {
 				// Only count market order volume that matches.
@@ -323,8 +315,9 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 		nomatched = append(nomatched, q)
 	}
 
-	stats.EndRate = midGap(book)
-	stats.BookVolume = bookVolume(book)
+	midGap := midGap(book)
+	stats.EndRate = midGap
+	bookVolumes(book, midGap, stats)
 
 	return
 }
@@ -665,7 +658,29 @@ func sideVolume(ords []*order.LimitOrder) (q uint64) {
 	return
 }
 
-func bookVolume(book Booker) uint64 {
-	bids, asks := book.BuyOrders(), book.SellOrders()
-	return sideVolume(bids) + sideVolume(asks)
+func bookVolumes(book Booker, midGap uint64, stats *MatchCycleStats) {
+	cutoff5 := midGap - midGap/20 // 5%
+	cutoff25 := midGap - midGap/4 // 25%
+	for _, ord := range book.BuyOrders() {
+		remaining := ord.Remaining()
+		stats.BookBuys += remaining
+		if ord.Rate > cutoff25 {
+			stats.BookBuys25 += remaining
+			if ord.Rate > cutoff5 {
+				stats.BookBuys5 += remaining
+			}
+		}
+	}
+	cutoff5 = midGap + midGap/20
+	cutoff25 = midGap + midGap/4
+	for _, ord := range book.SellOrders() {
+		remaining := ord.Remaining()
+		stats.BookSells += remaining
+		if ord.Rate < cutoff25 {
+			stats.BookSells25 += remaining
+			if ord.Rate < cutoff5 {
+				stats.BookSells5 += remaining
+			}
+		}
+	}
 }

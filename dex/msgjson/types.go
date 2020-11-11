@@ -1043,8 +1043,6 @@ type Candle struct {
 	EndStamp    uint64 `json:"endStamp"`
 	MatchVolume uint64 `json:"matchVolume"`
 	QuoteVolume uint64 `json:"quoteVolume"`
-	BookVolume  uint64 `json:"bookVolume"`
-	OrderVolume uint64 `json:"orderVolume"`
 	HighRate    uint64 `json:"highRate"`
 	LowRate     uint64 `json:"lowRate"`
 	StartRate   uint64 `json:"startRate"`
@@ -1059,8 +1057,6 @@ type WireCandles struct {
 	EndStamps    []uint64 `json:"endStamps"`
 	MatchVolumes []uint64 `json:"matchVolumes"`
 	QuoteVolumes []uint64 `json:"quoteVolumes"`
-	BookVolumes  []uint64 `json:"bookVolumes"`
-	OrderVolumes []uint64 `json:"orderVolumes"`
 	HighRates    []uint64 `json:"highRates"`
 	LowRates     []uint64 `json:"lowRates"`
 	StartRates   []uint64 `json:"startRates"`
@@ -1074,8 +1070,6 @@ func NewWireCandles(n int) *WireCandles {
 		EndStamps:    make([]uint64, 0, n),
 		MatchVolumes: make([]uint64, 0, n),
 		QuoteVolumes: make([]uint64, 0, n),
-		BookVolumes:  make([]uint64, 0, n),
-		OrderVolumes: make([]uint64, 0, n),
 		HighRates:    make([]uint64, 0, n),
 		LowRates:     make([]uint64, 0, n),
 		StartRates:   make([]uint64, 0, n),
@@ -1092,8 +1086,6 @@ func (wc *WireCandles) Candles() []*Candle {
 			EndStamp:    wc.EndStamps[i],
 			MatchVolume: wc.MatchVolumes[i],
 			QuoteVolume: wc.QuoteVolumes[i],
-			BookVolume:  wc.BookVolumes[i],
-			OrderVolume: wc.OrderVolumes[i],
 			HighRate:    wc.HighRates[i],
 			LowRate:     wc.LowRates[i],
 			StartRate:   wc.StartRates[i],

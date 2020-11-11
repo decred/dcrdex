@@ -25,8 +25,12 @@ const (
 		epoch_dur INT4,             -- epoch duration in milliseconds
 		match_volume INT8,          -- total matched during epoch's match cycle
 		quote_volume INT8,          -- total matched volume in terms of quote asset
-		book_volume INT8,           -- book volume after matching
-		order_volume INT8,          -- epoch order volume
+		book_buys INT8,             -- booked buy volume
+		book_buys_5 INT8,           -- booked buy volume within 5 pct of market
+		book_buys_25 INT8,          -- booked buy volume within 25 pct of market
+		book_sells INT8,            -- booked sell volume
+		book_sells_5 INT8,          -- booked sell volume within 5 pct of market
+		book_sells_25 INT8,         -- booked sell volume within 25 pct of market
 		high_rate INT8,             -- the highest rate matched
 		low_rate INT8,              -- the lowest rate matched
 		start_rate INT8,            -- the mid-gap rate at the beginning of the match cycle
@@ -35,13 +39,14 @@ const (
 
 	// InsertEpochReport inserts a row into the epoch_reports table.
 	InsertEpochReport = `INSERT INTO %s (epoch_end, epoch_dur, match_volume, quote_volume,
-			book_volume, order_volume, high_rate, low_rate, start_rate, end_rate)
-			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`
+			book_buys, book_buys_5, book_buys_25, book_sells, book_sells_5, book_sells_25,
+			high_rate, low_rate, start_rate, end_rate)
+			VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`
 
-	// SelectAllEpochReports selects all rows from the epoch_reports table sorted
+	// SelectEpochCandles selects all rows from the epoch_reports table sorted
 	// by ascending time.
-	SelectAllEpochReports = `SELECT epoch_end, epoch_dur, match_volume, quote_volume,
-		book_volume, order_volume, high_rate, low_rate, start_rate, end_rate
+	SelectEpochCandles = `SELECT epoch_end, epoch_dur, match_volume, quote_volume,
+			high_rate, low_rate, start_rate, end_rate
 		FROM %s
 		WHERE epoch_end >= $1
 		ORDER BY epoch_end;`

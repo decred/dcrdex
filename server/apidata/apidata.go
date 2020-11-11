@@ -140,8 +140,6 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			EndStamp:    endStamp,
 			MatchVolume: stats.MatchVolume,
 			QuoteVolume: stats.QuoteVolume,
-			BookVolume:  stats.BookVolume,
-			OrderVolume: stats.OrderVolume,
 			HighRate:    stats.HighRate,
 			LowRate:     stats.LowRate,
 			StartRate:   stats.StartRate,
@@ -153,11 +151,10 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	// Encode the spot price.
 	s.spotsMtx.Lock()
 	s.spots[mktName], err = json.Marshal(msgjson.Spot{
-		Stamp:      encode.UnixMilliU(time.Now()),
-		BaseID:     base,
-		QuoteID:    quote,
-		Rate:       stats.EndRate,
-		BookVolume: stats.BookVolume,
+		Stamp:   encode.UnixMilliU(time.Now()),
+		BaseID:  base,
+		QuoteID: quote,
+		Rate:    stats.EndRate,
 	})
 	s.spotsMtx.Unlock()
 	return err

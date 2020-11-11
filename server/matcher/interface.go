@@ -22,8 +22,12 @@ type Booker interface {
 type MatchCycleStats struct {
 	MatchVolume uint64
 	QuoteVolume uint64
-	BookVolume  uint64
-	OrderVolume uint64
+	BookSells   uint64
+	BookBuys    uint64
+	BookSells5  uint64
+	BookBuys5   uint64
+	BookSells25 uint64
+	BookBuys25  uint64
 	HighRate    uint64
 	LowRate     uint64
 	StartRate   uint64

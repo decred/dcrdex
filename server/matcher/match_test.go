@@ -365,8 +365,9 @@ var (
 )
 
 const (
-	fullBookLots  = 64
-	initialMidGap = (4550000 + 4500000) / 2
+	bookBuyLots   = 32
+	bookSellLots  = 32
+	initialMidGap = (4550000 + 4500000) / 2 // 4525000
 )
 
 func newBooker() Booker {
@@ -771,8 +772,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumTradesCompleted: 2,
 			wantNumNomatched:       0,
 			matchStats: &MatchCycleStats{
-				BookVolume:  (fullBookLots - 1) * LotSize,
-				OrderVolume: LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				BookSells:   (bookSellLots - 1) * LotSize,
+				MatchVolume: LotSize,
 				HighRate:    4550000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -805,8 +807,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumTradesCompleted: 1,
 			wantNumNomatched:       0,
 			matchStats: &MatchCycleStats{
-				BookVolume:  fullBookLots * LotSize,
-				OrderVolume: 2 * LotSize,
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    (bookBuyLots + 1) * LotSize,
+				MatchVolume: LotSize,
 				HighRate:    4550000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -838,8 +841,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumTradesCompleted: 2, // not in partial since they are done
 			wantNumNomatched:       0,
 			matchStats: &MatchCycleStats{
-				BookVolume:  (fullBookLots - 1) * LotSize,
-				OrderVolume: 2 * LotSize,
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: LotSize,
 				HighRate:    4550000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -868,12 +872,12 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumTradesFailed: 1,
 			wantNumNomatched:    1,
 			matchStats: &MatchCycleStats{
-				BookVolume:  fullBookLots * LotSize,
-				OrderVolume: LotSize,
-				HighRate:    initialMidGap,
-				LowRate:     initialMidGap,
-				StartRate:   initialMidGap,
-				EndRate:     initialMidGap,
+				BookSells: bookSellLots * LotSize,
+				BookBuys:  bookBuyLots * LotSize,
+				HighRate:  initialMidGap,
+				LowRate:   initialMidGap,
+				StartRate: initialMidGap,
+				EndRate:   initialMidGap,
 			},
 		},
 		{
@@ -1386,8 +1390,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumUnbooked:        1,
 			wantNumTradesCompleted: 2, // the taker and the maker are completed
 			matchStats: &MatchCycleStats{
-				BookVolume:  (fullBookLots - 1) * LotSize,
-				OrderVolume: LotSize,
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: LotSize,
 				HighRate:    4550000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -1420,8 +1425,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumTradesCompleted: 2, // taker, and one maker
 			wantNumTradesPartial:   1, // the second maker
 			matchStats: &MatchCycleStats{
-				BookVolume:  (fullBookLots - 2) * LotSize,
-				OrderVolume: 2 * LotSize,
+				BookSells:   (bookSellLots - 2) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: 2 * LotSize,
 				HighRate:    4600000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -1453,8 +1459,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumUnbooked:        2,
 			wantNumTradesCompleted: 3, // taker, 2 makers
 			matchStats: &MatchCycleStats{
-				BookVolume:  (fullBookLots - 3) * LotSize,
-				OrderVolume: 3 * LotSize,
+				BookSells:   (bookSellLots - 3) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: 3 * LotSize,
 				HighRate:    4600000,
 				LowRate:     initialMidGap,
 				StartRate:   initialMidGap,
@@ -2169,11 +2176,26 @@ func TestBaseToQuoteToBase(t *testing.T) {
 
 func compareMatchStats(t *testing.T, sWant, sHave *MatchCycleStats) {
 	t.Helper()
-	if sWant.BookVolume != sHave.BookVolume {
-		t.Errorf("wrong BookVolume. wanted %d, got %d", sWant.BookVolume, sHave.BookVolume)
+	if sWant.BookBuys != sHave.BookBuys {
+		t.Errorf("wrong BookBuys. wanted %d, got %d", sWant.BookBuys, sHave.BookBuys)
 	}
-	if sWant.OrderVolume != sHave.OrderVolume {
-		t.Errorf("wrong OrderVolume. wanted %d, got %d", sWant.OrderVolume, sHave.OrderVolume)
+	// if sWant.BookBuys5 != sHave.BookBuys5 {
+	// 	t.Errorf("wrong BookBuys5. wanted %d, got %d", sWant.BookBuys5, sHave.BookBuys5)
+	// }
+	// if sWant.BookBuys25 != sHave.BookBuys25 {
+	// 	t.Errorf("wrong BookBuys25. wanted %d, got %d", sWant.BookBuys25, sHave.BookBuys25)
+	// }
+	if sWant.BookSells != sHave.BookSells {
+		t.Errorf("wrong BookSells. wanted %d, got %d", sWant.BookSells, sHave.BookSells)
+	}
+	// if sWant.BookSells5 != sHave.BookSells5 {
+	// 	t.Errorf("wrong BookSells5. wanted %d, got %d", sWant.BookSells5, sHave.BookSells5)
+	// }
+	// if sWant.BookSells25 != sHave.BookSells25 {
+	// 	t.Errorf("wrong BookSells25. wanted %d, got %d", sWant.BookSells25, sHave.BookSells25)
+	// }
+	if sWant.MatchVolume != sHave.MatchVolume {
+		t.Errorf("wrong MatchVolume. wanted %d, got %d", sWant.MatchVolume, sHave.MatchVolume)
 	}
 	if sWant.HighRate != sHave.HighRate {
 		t.Errorf("wrong HighRate. wanted %d, got %d", sWant.HighRate, sHave.HighRate)

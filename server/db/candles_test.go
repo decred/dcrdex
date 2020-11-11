@@ -21,8 +21,6 @@ func TestCandleCache(t *testing.T) {
 	makeCandle := func(startStamp, endStamp, matchVol, orderVol, bookVol, startRate, endRate, lowRate, highRate uint64) *Candle {
 		return &Candle{
 			MatchVolume: matchVol,
-			OrderVolume: orderVol,
-			BookVolume:  bookVol,
 			StartStamp:  startStamp,
 			EndStamp:    endStamp,
 			StartRate:   startRate,
@@ -46,12 +44,6 @@ func TestCandleCache(t *testing.T) {
 		t.Helper()
 		if candle.MatchVolume != matchVol {
 			t.Fatalf("wrong MatchVolume. wanted %d, got %d", matchVol, candle.MatchVolume)
-		}
-		if candle.OrderVolume != orderVol {
-			t.Fatalf("wrong OrderVolume. wanted %d, got %d", orderVol, candle.OrderVolume)
-		}
-		if candle.BookVolume != bookVol {
-			t.Fatalf("wrong BookVolume. wanted %d, got %d", bookVol, candle.BookVolume)
 		}
 	}
 

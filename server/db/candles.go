@@ -15,8 +15,6 @@ type Candle struct {
 	EndStamp    uint64
 	MatchVolume uint64
 	QuoteVolume uint64
-	BookVolume  uint64
-	OrderVolume uint64
 	HighRate    uint64
 	LowRate     uint64
 	StartRate   uint64
@@ -82,8 +80,6 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 		wc.EndStamps = append(wc.EndStamps, candle.EndStamp)
 		wc.MatchVolumes = append(wc.MatchVolumes, candle.MatchVolume)
 		wc.QuoteVolumes = append(wc.QuoteVolumes, candle.QuoteVolume)
-		wc.BookVolumes = append(wc.BookVolumes, candle.BookVolume)
-		wc.OrderVolumes = append(wc.OrderVolumes, candle.OrderVolume)
 		wc.HighRates = append(wc.HighRates, candle.HighRate)
 		wc.LowRates = append(wc.LowRates, candle.LowRate)
 		wc.StartRates = append(wc.StartRates, candle.StartRate)
@@ -113,9 +109,7 @@ func (c *CandleCache) combineCandles(target, candidate *Candle) bool {
 	if candidate.LowRate < target.LowRate || target.LowRate == 0 {
 		target.LowRate = candidate.LowRate
 	}
-	target.BookVolume = candidate.BookVolume
 	target.MatchVolume += candidate.MatchVolume
 	target.QuoteVolume += candidate.QuoteVolume
-	target.OrderVolume += candidate.OrderVolume
 	return true
 }

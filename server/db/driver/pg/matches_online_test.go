@@ -1042,12 +1042,11 @@ func TestEpochReport(t *testing.T) {
 		Idx:         epochIdx,
 		Dur:         epochDur,
 		MatchVolume: 1,
-		BookVolume:  2,
-		OrderVolume: 3,
-		HighRate:    4,
-		LowRate:     5,
-		StartRate:   6,
-		EndRate:     7,
+		HighRate:    2,
+		LowRate:     3,
+		StartRate:   4,
+		EndRate:     5,
+		QuoteVolume: 6,
 	})
 
 	if err != nil {
@@ -1071,12 +1070,11 @@ func TestEpochReport(t *testing.T) {
 		Idx:         epochIdx + 1,
 		Dur:         epochDur,
 		MatchVolume: 11,
-		BookVolume:  12,
-		OrderVolume: 13,
-		HighRate:    14,
-		LowRate:     15,
-		StartRate:   16,
-		EndRate:     17,
+		HighRate:    12,
+		LowRate:     13,
+		StartRate:   14,
+		EndRate:     15,
+		QuoteVolume: 16,
 	})
 	if err != nil {
 		t.Fatalf("error inserting second epoch: %v", err)
@@ -1088,12 +1086,11 @@ func TestEpochReport(t *testing.T) {
 		Idx:         epochIdx + 2,
 		Dur:         epochDur,
 		MatchVolume: 100,
-		BookVolume:  100,
-		OrderVolume: 100,
 		HighRate:    100,
 		LowRate:     100,
 		StartRate:   100,
 		EndRate:     100,
+		QuoteVolume: 100,
 	})
 
 	epochCache := db.NewCandleCache(3, uint64(epochDur))
@@ -1119,6 +1116,22 @@ func TestEpochReport(t *testing.T) {
 	}
 	lastCandle = dayCandles[len(dayCandles)-1]
 	if lastCandle.MatchVolume != 112 { // 1 + 11
-		t.Fatalf("wrong last day candle match volume. expected 112, got %d", lastCandle.MatchVolume)
+		t.Fatalf("wrong last day candle MatchVolume. expected 112, got %d", lastCandle.MatchVolume)
 	}
+	if lastCandle.QuoteVolume != 122 { // 6 + 16
+		t.Fatalf("wrong last day candle QuoteVolume. expected 122, got %d", lastCandle.MatchVolume)
+	}
+	if lastCandle.HighRate != 100 {
+		t.Fatalf("wrong last day candle HighRate. expected 100, got %d", lastCandle.HighRate)
+	}
+	if lastCandle.LowRate != 3 {
+		t.Fatalf("wrong last day candle LowRate. expected 3, got %d", lastCandle.LowRate)
+	}
+	if lastCandle.StartRate != 4 {
+		t.Fatalf("wrong last day candle StartRate. expected 4, got %d", lastCandle.StartRate)
+	}
+	if lastCandle.EndRate != 100 {
+		t.Fatalf("wrong last day candle EndRate. expected 100, got %d", lastCandle.EndRate)
+	}
+
 }
