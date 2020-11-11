@@ -144,6 +144,17 @@ type FeePaymentNote struct {
 	Dex           string  `json:"dex,omitempty"`
 }
 
+const (
+	SubjectFeePaymentInProgress    = "Fee payment in progress"
+	SubjectRegUpdate               = "regupdate"
+	SubjectFeePaymentError         = "Fee payment error"
+	SubjectAccountRegistered       = "Account registered"
+	SubjectAccountUnlockError      = "Account unlock error"
+	SubjectFeeCoinError            = "Fee coin error"
+	SubjectWalletConnectionWarning = "Wallet connection warning"
+	SubjectWalletUnlockError       = "Wallet unlock error"
+)
+
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	host, _ := addrHost(dexAddr)
 	return &FeePaymentNote{
@@ -163,6 +174,11 @@ type WithdrawNote struct {
 	db.Notification
 }
 
+const (
+	SubjectWithdrawError = "Withdraw error"
+	SubjectWithdrawSend  = "Withdraw sent"
+)
+
 func newWithdrawNote(subject, details string, severity db.Severity) *WithdrawNote {
 	return &WithdrawNote{
 		Notification: db.NewNotification(NoteTypeWithdraw, subject, details, severity),
@@ -174,6 +190,38 @@ type OrderNote struct {
 	db.Notification
 	Order *Order `json:"order"`
 }
+
+const (
+	SubjectOrderLoadFailure     = "Order load failure"
+	SubjectOrderPlaced          = "Order placed"
+	SubjectMissingMatches       = "Missing matches"
+	SubjectWalletMissing        = "Wallet missing"
+	SubjectMatchStatusError     = "Match status error"
+	SubjectMatchRecoveryError   = "Match recovery error"
+	SubjectNoFundingCoins       = "No funding coins"
+	SubjectOrderCoinError       = "Order coin error"
+	SubjectPreimageSent         = "preimage sent"
+	SubjectCancelPreimageSent   = "cancel preimage sent"
+	SubjectMissedCancel         = "Missed cancel"
+	SubjectOrderBooked          = "Order booked"
+	SubjectNoMatch              = "No match"
+	SubjectOrderCanceled        = "Order canceled"
+	SubjectCancel               = "cancel"
+	SubjectMatchesMade          = "Matches made"
+	SubjectSwapError            = "Swap error"
+	SubjectSwapsInitiated       = "Swaps initiated"
+	SubjectRedemptionError      = "Redemption error"
+	SubjectMatchComplete        = "Match complete"
+	SubjectRefundFailure        = "Refund Failure"
+	SubjectMatchesRefunded      = "Matches Refunded"
+	SubjectMatchRevoked         = "Match revoked"
+	SubjectRevoke               = "revoke"
+	SubjectMatchRecovered       = "Match recovered"
+	SubjectCancellingOrder      = "Cancelling order"
+	SubjectOrderStatusUpdate    = "Order status update"
+	SubjectMatchResolutionError = "Match resolution error"
+	SubjectFailedCancel         = "Failed cancel"
+)
 
 func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
 	return &OrderNote{
@@ -190,6 +238,13 @@ type MatchNote struct {
 	Host     string    `json:"host"`
 	MarketID string    `json:"marketID"`
 }
+
+const (
+	SubjectAudit           = "audit"
+	SubjectNewMatch        = "new_match"
+	SubjectCounterConfirms = "counterconfirms"
+	SubjectConfirms        = "confirms"
+)
 
 func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
 	return &MatchNote{
@@ -271,6 +326,12 @@ type DEXAuthNote struct {
 	Authenticated bool   `json:"authenticated"`
 }
 
+const (
+	SubjectDexAuthError     = "DEX auth error"
+	SubjectUnknownOrders    = "DEX reported unknown orders"
+	SubjectOrdersReconciled = "Orders reconciled with DEX"
+)
+
 func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
 	return &DEXAuthNote{
 		Notification:  db.NewNotification("dex_auth", subject, details, severity),
@@ -285,6 +346,11 @@ type WalletConfigNote struct {
 	db.Notification
 	Wallet *WalletState `json:"wallet"`
 }
+
+const (
+	SubjectWalletConfigurationUpdated = "Wallet Configuration Updated"
+	SubjectWalletPasswordUpdated      = "Wallet Password Updated"
+)
 
 func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
 	return &WalletConfigNote{
@@ -309,6 +375,13 @@ func newWalletStateNote(walletState *WalletState) *WalletStateNote {
 type ServerNotifyNote struct {
 	db.Notification
 }
+
+const (
+	SubjectMarketSuspendScheduled = "market suspend scheduled"
+	SubjectMarketSuspended        = "market suspended"
+	SubjectMarketResumeScheduled  = "market resume scheduled"
+	SubjectMarketResumed          = "market resumed"
+)
 
 func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
 	return &ServerNotifyNote{

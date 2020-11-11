@@ -284,7 +284,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		t.metaData.LinkedOrder = order.OrderID{}
 
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
-		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, t.coreOrderInternal()))
+		t.notify(newOrderNote(SubjectMissedCancel, details, db.WarningLevel, t.coreOrderInternal()))
 		return assets, t.db.UpdateOrderStatus(oid, order.OrderStatusExecuted)
 	}
 
@@ -296,13 +296,13 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 		t.dc.log.Infof("Standing order %s did not match and is now booked.", t.token())
 		t.metaData.Status = order.OrderStatusBooked
-		t.notify(newOrderNote("Order booked", "", db.Data, t.coreOrderInternal()))
+		t.notify(newOrderNote(SubjectOrderBooked, "", db.Data, t.coreOrderInternal()))
 	} else {
 		t.returnCoins()
 		assets.count(t.wallets.fromAsset.ID)
 		t.dc.log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
-		t.notify(newOrderNote("No match", "", db.Data, t.coreOrderInternal()))
+		t.notify(newOrderNote(SubjectNoMatch, "", db.Data, t.coreOrderInternal()))
 	}
 	return assets, t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
@@ -458,17 +458,24 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	if cancelMatch != nil {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
-		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
+		t.notify(newOrderNote(SubjectOrderCanceled, details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
-		t.notify(newOrderNote("cancel", "", db.Data, corder))
+		t.notify(newOrderNote(SubjectCancel, "", db.Data, corder))
 	}
 	if len(newTrackers) > 0 {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
-		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
-			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
 		t.dc.log.Debugf("Trade order %v matched with %d orders: +%d filled, total fill %d / %d (%.1f%%)",
 			t.ID(), len(newTrackers), newFill, filled, trade.Quantity, fillPct)
-		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
+
+		// Match notifications.
+		for _, match := range newTrackers {
+			t.notify(newMatchNote(SubjectNewMatch, "", db.Data, t, match))
+		}
+
+		// A single order notification.
+		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
+			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
+		t.notify(newOrderNote(SubjectMatchesMade, details, db.Poke, corder))
 	}
 
 	err := t.db.UpdateOrder(t.metaOrder())
@@ -579,7 +586,7 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 		changed = true
 	}
 
-	t.notify(newMatchNote("counterconfirms", "", db.Data, t, match))
+	t.notify(newMatchNote(SubjectCounterConfirms, "", db.Data, t, match))
 
 	return
 }
@@ -648,7 +655,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	}
 
 	details := fmt.Sprintf("Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.", t.token())
-	t.notify(newOrderNote("Failed cancel", details, db.WarningLevel, t.coreOrderInternal()))
+	t.notify(newOrderNote(SubjectFailedCancel, details, db.WarningLevel, t.coreOrderInternal()))
 }
 
 // isActive will be true if the trade is booked or epoch, or if any of the
@@ -794,7 +801,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote("confirms", "", db.Data, t, match))
+		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
@@ -841,7 +848,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote("confirms", "", db.Data, t, match))
+		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
 		return false
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
@@ -1040,11 +1047,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote("Swap error", details, db.ErrorLevel, corder))
+			t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
 		} else {
 			details := fmt.Sprintf("Sent swaps worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote("Swaps initiated", details, db.Poke, corder))
+			t.notify(newOrderNote(SubjectSwapsInitiated, details, db.Poke, corder))
 		}
 	}
 
@@ -1070,11 +1077,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			t.notify(newOrderNote("Redemption error", details, db.ErrorLevel, corder))
+			t.notify(newOrderNote(SubjectRedemptionError, details, db.ErrorLevel, corder))
+			c.log.Errorf("redemption error details: %v", details, err)
 		} else {
 			details := fmt.Sprintf("Redeemed %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
+			t.notify(newOrderNote(SubjectMatchComplete, details, db.Poke, corder))
 		}
 	}
 
@@ -1093,9 +1101,9 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			float64(refunded)/conversionFactor, unbip(fromID), t.token())
 		if err != nil {
 			errs.addErr(err)
-			t.notify(newOrderNote("Refund Failure", details+", with some errors", db.ErrorLevel, corder))
+			t.notify(newOrderNote(SubjectRefundFailure, details+", with some errors", db.ErrorLevel, corder))
 		} else {
-			t.notify(newOrderNote("Matches Refunded", details, db.WarningLevel, corder))
+			t.notify(newOrderNote(SubjectMatchesRefunded, details, db.WarningLevel, corder))
 		}
 	}
 
@@ -1168,7 +1176,7 @@ func (t *trackedTrade) revoke() {
 		t.dc.log.Errorf("unable to update order: %v", err)
 	}
 
-	t.notify(newOrderNote("revoke", "", db.Data, t.coreOrderInternal()))
+	t.notify(newOrderNote(SubjectRevoke, "", db.Data, t.coreOrderInternal()))
 
 	// Return coins if there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
@@ -1201,7 +1209,7 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 
 	// Notify the user of the failed match.
 	corder := t.coreOrderInternal() // no cancel order
-	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
+	t.notify(newOrderNote(SubjectMatchRevoked, fmt.Sprintf("Match %s has been revoked",
 		token(matchID[:])), db.WarningLevel, corder))
 
 	// Unlock coins if we're not expecting future matches for this
@@ -1714,7 +1722,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 
 		details := fmt.Sprintf("Found maker's redemption (%s: %v) and validated secret for match %s",
 			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match.id)
-		t.notify(newOrderNote("Match recovered", details, db.Poke, t.coreOrderInternal()))
+		t.notify(newOrderNote(SubjectMatchRecovered, details, db.Poke, t.coreOrderInternal()))
 	}()
 }
 
@@ -1824,6 +1832,8 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	auth := &match.MetaMatch.MetaData.Proof.Auth
 	auth.AuditStamp = audit.Time
 	auth.AuditSig = audit.Sig
+
+	t.notify(newMatchNote(SubjectAudit, "", db.Data, t, match))
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
