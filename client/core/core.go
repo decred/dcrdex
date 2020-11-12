@@ -817,6 +817,7 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
+	ready         chan struct{}
 	cfg           *Config
 	log           dex.Logger
 	db            db.DB
@@ -868,6 +869,7 @@ func New(cfg *Config) (*Core, error) {
 
 	core := &Core{
 		cfg:           cfg,
+		ready:         make(chan struct{}),
 		log:           cfg.Logger,
 		db:            db,
 		conns:         make(map[string]*dexConnection),
@@ -899,6 +901,7 @@ func (c *Core) Run(ctx context.Context) {
 	// when new accounts are registered.
 	c.ctx = ctx
 	c.initialize()
+	close(c.ready)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -911,6 +914,12 @@ func (c *Core) Run(ctx context.Context) {
 	}()
 	c.wg.Wait()
 	c.log.Infof("DEX client core off")
+}
+
+// Ready returns a channel that is closed when Run completes its initialization
+// tasks and Core becomes ready for use.
+func (c *Core) Ready() <-chan struct{} {
+	return c.ready
 }
 
 const defaultDEXPort = "7232"
