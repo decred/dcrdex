@@ -86,6 +86,8 @@ func main() {
 		wg.Done()
 	}()
 
+	<-clientCore.Ready()
+
 	if cfg.RPCOn {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
 		rpcCfg := &rpcserver.Config{
