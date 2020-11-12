@@ -63,7 +63,7 @@ type Swapper interface {
 }
 
 type DataCollector interface {
-	ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) error
+	ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -1968,7 +1968,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	}
 
 	// Update the API data collector.
-	err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
+	_, err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
 	if err != nil {
 		log.Errorf("Error updating API data collector: %v", err)
 	}

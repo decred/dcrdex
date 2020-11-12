@@ -4,6 +4,9 @@
 package db
 
 import (
+	"time"
+
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -45,7 +48,6 @@ func NewCandleCache(cap int, binSize uint64) *CandleCache {
 // responsible to ensure that candles added with Add are always newer than
 // the last candle added.
 func (c *CandleCache) Add(candle *Candle) {
-
 	sz := len(c.candles)
 	if sz == 0 {
 		c.candles = append(c.candles, *candle)
@@ -72,7 +74,6 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 	if sz < n {
 		n = sz
 	}
-
 	wc := msgjson.NewWireCandles(n)
 	for i := sz - n; i < sz; i++ {
 		candle := &c.candles[(c.cursor+1+i)%sz]
@@ -87,6 +88,44 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 	}
 
 	return wc
+}
+
+// Delta calculates the the change in rate, as a percentage, and total volume
+// over the specified period going backwards from now. Because the first candle
+// does not necessarily align with the cutoff, the rate and volume contribution
+// from that candle is linearly interpreted between the endpoints. The caller is
+// responsible for making sure that dur >> binSize, otherwise the results will
+// be of little value.
+func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
+	cutoff := encode.UnixMilliU(since)
+	sz := len(c.candles)
+	if sz == 0 {
+		return 0, 0
+	}
+	endRate := c.last().EndRate
+	var startRate uint64
+	for i := 0; i < sz; i++ {
+		candle := &c.candles[(c.cursor+sz-i)%sz]
+		if candle.EndStamp <= cutoff {
+			break
+		} else if candle.StartStamp <= cutoff {
+			// Interpret the point linearly between the start and end stamps
+			cut := float64(cutoff-candle.StartStamp) / float64(candle.EndStamp-candle.StartStamp)
+			rateDelta := candle.EndRate - candle.StartRate
+			startRate = candle.StartRate + uint64(cut*float64(rateDelta))
+			vol += uint64((1 - cut) * float64(candle.MatchVolume))
+
+			break
+		}
+		startRate = candle.StartRate
+		vol += candle.MatchVolume
+
+	}
+	if startRate == 0 {
+		return 0, vol
+	}
+	return (float64(endRate) - float64(startRate)) / float64(startRate), vol
+
 }
 
 // last gets the most recent candle in the cache.

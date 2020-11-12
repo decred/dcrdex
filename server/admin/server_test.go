@@ -66,7 +66,7 @@ type TCore struct {
 	epochOrdersErr   error
 	marketMatches    []*db.MatchData
 	marketMatchesErr error
-	dataEnabled uint32
+	dataEnabled      uint32
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }

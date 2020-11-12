@@ -5,6 +5,9 @@ package db
 
 import (
 	"testing"
+	"time"
+
+	"decred.org/dcrdex/dex/encode"
 )
 
 func TestCandleCache(t *testing.T) {
@@ -18,9 +21,10 @@ func TestCandleCache(t *testing.T) {
 		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.binSize)
 	}
 
-	makeCandle := func(startStamp, endStamp, matchVol, orderVol, bookVol, startRate, endRate, lowRate, highRate uint64) *Candle {
+	makeCandle := func(startStamp, endStamp, matchVol, quoteVol, bookVol, startRate, endRate, lowRate, highRate uint64) *Candle {
 		return &Candle{
 			MatchVolume: matchVol,
+			QuoteVolume: quoteVol,
 			StartStamp:  startStamp,
 			EndStamp:    endStamp,
 			StartRate:   startRate,
@@ -40,10 +44,13 @@ func TestCandleCache(t *testing.T) {
 		}
 	}
 
-	checkCandleVolumes := func(candle *Candle, matchVol, orderVol, bookVol uint64) {
+	checkCandleVolumes := func(candle *Candle, matchVol, quoteVol, bookVol uint64) {
 		t.Helper()
 		if candle.MatchVolume != matchVol {
 			t.Fatalf("wrong MatchVolume. wanted %d, got %d", matchVol, candle.MatchVolume)
+		}
+		if candle.QuoteVolume != quoteVol {
+			t.Fatalf("wrong QuoteVolume. wanted %d, got %d", quoteVol, candle.QuoteVolume)
 		}
 	}
 
@@ -64,7 +71,7 @@ func TestCandleCache(t *testing.T) {
 	}
 
 	// Check basic functionality.
-	cache.Add(makeCandle(11, 12, 100, 100, 100, 100, 100, 50, 150)) // start rate 100
+	cache.Add(makeCandle(11, 12, 100, 101, 100, 100, 100, 50, 150)) // start rate 100
 	if len(cache.candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
@@ -73,18 +80,18 @@ func TestCandleCache(t *testing.T) {
 		t.Fatalf("failed to retreive last candle")
 	}
 	checkCandleStamps(lastCandle, 11, 12)
-	checkCandleVolumes(lastCandle, 100, 100, 100)
+	checkCandleVolumes(lastCandle, 100, 101, 100)
 	checkCandleRates(lastCandle, 100, 100, 50, 150)
 
 	// A bunch of stamps from the same bin should not add any candles.
-	cache.Add(makeCandle(12, 13, 100, 100, 100, 100, 100, 25, 100)) // low rate 25
-	cache.Add(makeCandle(13, 14, 100, 100, 100, 100, 100, 50, 200)) // high rate 200
-	cache.Add(makeCandle(14, 15, 100, 100, 150, 100, 125, 50, 100)) // end book volume 150, end rate 125
+	cache.Add(makeCandle(12, 13, 100, 101, 100, 100, 100, 25, 100)) // low rate 25
+	cache.Add(makeCandle(13, 14, 100, 101, 100, 100, 100, 50, 200)) // high rate 200
+	cache.Add(makeCandle(14, 15, 100, 101, 150, 100, 125, 50, 100)) // end book volume 150, end rate 125
 	if len(cache.candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
 	checkCandleStamps(cache.last(), 11, 15)
-	checkCandleVolumes(cache.last(), 400, 400, 150)
+	checkCandleVolumes(cache.last(), 400, 404, 150)
 	checkCandleRates(cache.last(), 100, 125, 25, 200)
 
 	// Two candles each in a new bin.
@@ -129,5 +136,63 @@ func TestCandleCache(t *testing.T) {
 	if wc.MatchVolumes[0] != 54321 {
 		t.Fatalf("single candle wasn't the last")
 	}
+}
 
+func TestDelta(t *testing.T) {
+	tNow := time.Now()
+	now := encode.UnixMilliU(tNow)
+	aDayAgo := now - 86400*1000
+	var fiveMins uint64 = 5 * 60 * 1000
+
+	c := NewCandleCache(5, fiveMins)
+	// This one shouldn't be included.
+	c.Add(&Candle{
+		MatchVolume: 100,
+		StartStamp:  aDayAgo - fiveMins,
+		EndStamp:    aDayAgo,
+		StartRate:   100,
+		EndRate:     100,
+	})
+	c.Add(&Candle{
+		MatchVolume: 150,
+		StartStamp:  now - 2*fiveMins,
+		EndStamp:    now - fiveMins,
+		StartRate:   100,
+		EndRate:     125,
+	})
+	c.Add(&Candle{
+		MatchVolume: 50,
+		StartStamp:  now - fiveMins,
+		EndStamp:    now,
+		StartRate:   125,
+		EndRate:     175,
+	})
+	delta24, vol24 := c.Delta(tNow.Add(-time.Hour * 24))
+	if delta24 < 0.74 || delta24 > 0.76 {
+		t.Fatalf("wrong delta24. expected 0.75, got, %.3f", delta24)
+	}
+	if vol24 != 200 {
+		t.Fatalf("wrong 24-hour volume. wanted 200, got %d", vol24)
+	}
+
+	// Get a delta that uses a partial stick.
+	c = NewCandleCache(5, fiveMins)
+	c.Add(&Candle{
+		MatchVolume: 444,
+		StartStamp:  aDayAgo,
+		EndStamp:    now,
+		StartRate:   50,
+		EndRate:     150,
+	})
+	delta6, vol6 := c.Delta(tNow.Add(-time.Hour * 6))
+	// In the last 6 hours, the rate would be interpreted as going from 125 to
+	// 150, change = 25/125 = 0.20
+	// Note that the cache would never be used with duration < binSize this way
+	// in practice.
+	if delta6 < 0.19 || delta6 > 0.21 {
+		t.Fatalf("wrong delta6. expected 0.25, got, %.3f", delta6)
+	}
+	if vol6 < 110 || vol6 > 111 {
+		t.Fatalf("wrong 12-hour volume. wanted 110, got %d", vol6)
+	}
 }

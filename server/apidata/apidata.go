@@ -32,9 +32,10 @@ var (
 	// BinSizes is the default bin sizes for candlestick data sets. Exported for
 	// use in the 'config' response. Internally, we will parse these to uint64
 	// milliseconds.
-	BinSizes = []string{"24h", "1h", "15m"}
+	BinSizes = []string{"24h", "1h", "5m"}
 	// Our internal millisecond representation of the bin sizes.
 	binSizes []uint64
+	bin5min  uint64 = 60 * 5 * 1000
 	started  uint32
 )
 
@@ -69,6 +70,7 @@ type DataAPI struct {
 
 	cacheMtx     sync.RWMutex
 	marketCaches map[string]map[uint64]*db.CandleCache
+	cache5min    *db.CandleCache
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
@@ -103,6 +105,12 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 		cache := db.NewCandleCache(CacheSize, binSize)
 		cacheList = append(cacheList, cache)
 		binCaches[binSize] = cache
+		if binSize == bin5min {
+			s.cache5min = cache
+		}
+	}
+	if s.cache5min == nil {
+		panic("no 5-minute cache")
 	}
 	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
 	if err != nil {
@@ -118,10 +126,10 @@ func (s *DataAPI) SetBookSource(bs BookSource) {
 
 // ReportEpoch should be called by every Market after every match cycle to
 // report their epoch stats.
-func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) error {
+func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error) {
 	mktName, err := dex.MarketName(base, quote)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Add the candlestick.
@@ -129,7 +137,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	mktCaches := s.marketCaches[mktName]
 	if mktCaches == nil {
 		s.cacheMtx.Unlock()
-		return fmt.Errorf("unknown market %q", mktName)
+		return nil, fmt.Errorf("unknown market %q", mktName)
 	}
 	epochDur := s.epochDurations[mktName]
 	startStamp := epochIdx * epochDur
@@ -146,18 +154,22 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			EndRate:     stats.EndRate,
 		})
 	}
+	change24, vol24 := s.cache5min.Delta(time.Now().Add(-time.Hour * 24))
 	s.cacheMtx.Unlock()
 
 	// Encode the spot price.
+	spot := &msgjson.Spot{
+		Stamp:    encode.UnixMilliU(time.Now()),
+		BaseID:   base,
+		QuoteID:  quote,
+		Rate:     stats.EndRate,
+		Change24: change24,
+		Vol24:    vol24,
+	}
 	s.spotsMtx.Lock()
-	s.spots[mktName], err = json.Marshal(msgjson.Spot{
-		Stamp:   encode.UnixMilliU(time.Now()),
-		BaseID:  base,
-		QuoteID: quote,
-		Rate:    stats.EndRate,
-	})
+	s.spots[mktName], err = json.Marshal(spot)
 	s.spotsMtx.Unlock()
-	return err
+	return spot, err
 }
 
 // handleSpots implements comms.HTTPHandler for the /spots endpoint.

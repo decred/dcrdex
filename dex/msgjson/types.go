@@ -1022,11 +1022,13 @@ type ConfigResult struct {
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot
 // are sent as the response to the SpotsRoute request.
 type Spot struct {
-	Stamp      uint64 `json:"stamp"`
-	BaseID     uint32 `json:"baseID"`
-	QuoteID    uint32 `json:"quoteID"`
-	Rate       uint64 `json:"rate"`
-	BookVolume uint64 `json:"bookVolume"`
+	Stamp      uint64  `json:"stamp"`
+	BaseID     uint32  `json:"baseID"`
+	QuoteID    uint32  `json:"quoteID"`
+	Rate       uint64  `json:"rate"`
+	BookVolume uint64  `json:"bookVolume"`
+	Change24   float64 `json:"change24"`
+	Vol24      uint64  `json:"vol24"`
 }
 
 // CandlesRequest is a data API request for market history.

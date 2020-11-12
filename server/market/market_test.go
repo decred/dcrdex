@@ -214,8 +214,8 @@ func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*db.CandleCache) error { 
 
 type TCollector struct{}
 
-func (tc *TCollector) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) error {
-	return nil
+func (tc *TCollector) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error) {
+	return nil, nil
 }
 
 func randomOrderID() order.OrderID {
