@@ -3792,6 +3792,9 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	tracker.revoke()
 
+	details := fmt.Sprintf("Order %s on market %s at %s has been revoked by the server", tracker.token(), tracker.mktID, dc.acct.host)
+	c.notify(newOrderNote(SubjectOrderRevoked, details, db.ErrorLevel, tracker.coreOrder()))
+
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
 	c.updateAssetBalance(tracker.fromAssetID)
