@@ -512,7 +512,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 			// Locally revoke the purged book order.
 			tracker.revoke()
 			details := fmt.Sprintf("Order %s on market %s at %s revoked due to market suspension", tracker.token(), sp.MarketID, dc.acct.host)
-			c.notify(newOrderNote("Order Auto-revoked", details, db.WarningLevel, tracker.coreOrderInternal()))
+			c.notify(newOrderNote(SubjectOrderAutoRevoked, details, db.WarningLevel, tracker.coreOrderInternal()))
 			updatedAssets.count(tracker.fromAssetID)
 		}
 	}

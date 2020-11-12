@@ -2433,7 +2433,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 		t.Fatalf("handleRevokeOrderMsg error: %v", err)
 	}
 
-	verifyRevokeNotification(orderNotes, "Order Revoked", t)
+	verifyRevokeNotification(orderNotes, SubjectOrderRevoked, t)
 
 	if tracker.metaData.Status != order.OrderStatusRevoked {
 		t.Errorf("expected order status %v, got %v", order.OrderStatusRevoked, tracker.metaData.Status)
@@ -4342,7 +4342,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
-	verifyRevokeNotification(orderNotes, "Order Auto-revoked", t)
+	verifyRevokeNotification(orderNotes, SubjectOrderAutoRevoked, t)
 
 	// Check that the funding coin was returned. Use the tradeMtx for
 	// synchronization.
