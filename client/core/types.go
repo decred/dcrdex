@@ -389,6 +389,7 @@ func (m *Market) marketName() string {
 type Exchange struct {
 	Host          string                `json:"host"`
 	AcctID        string                `json:"acctID"`
+	IsAuthed      bool                  `json:"isAuthed"`
 	Markets       map[string]*Market    `json:"markets"`
 	Assets        map[uint32]*dex.Asset `json:"assets"`
 	FeePending    bool                  `json:"feePending"`

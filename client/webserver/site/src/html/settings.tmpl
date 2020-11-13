@@ -17,6 +17,14 @@
         Show pop-up notifications
       </label>
     </div>
+
+    <div id="dexBox">
+        <div class="bg2 px-2 py-1" id="dexInfo">
+            Dex Address: <span class="dexInfoHost"></span><br>
+            <div class="dexInfoAcct">Account ID: <span class="dexInfoAcctID fs12"></span></div>
+        </div>
+    </div>
+
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
       <p>
         The Decred DEX Client supports simultaneous use of any number of DEX
