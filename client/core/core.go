@@ -985,7 +985,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 		infos[host] = &Exchange{
 			Host:          host,
 			AcctID:        dc.acct.ID().String(),
-			IsAuthed:      dc.acct.isAuthed,
+			IsAuthed:      dc.acct.authed(),
 			Markets:       dc.markets(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
