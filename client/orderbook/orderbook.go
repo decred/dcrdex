@@ -13,12 +13,6 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
-var (
-	// defaultQueueCapacity represents the default capacity of
-	// the order note queue.
-	defaultQueueCapacity = 10
-)
-
 // Order represents an ask or bid.
 type Order struct {
 	OrderID  order.OrderID
@@ -60,20 +54,24 @@ type OrderBook struct {
 	ordersMtx    sync.Mutex
 	buys         *bookSide
 	sells        *bookSide
-	synced       bool
 	syncedMtx    sync.Mutex
-	epochQueue   *EpochQueue
+	synced       bool
+
+	epochMtx     sync.Mutex
+	currentEpoch uint64
+	proofedEpoch uint64
+	epochQueues  map[uint64]*EpochQueue
 }
 
 // NewOrderBook creates a new order book.
 func NewOrderBook(logger dex.Logger) *OrderBook {
 	ob := &OrderBook{
-		log:        logger,
-		noteQueue:  make([]*cachedOrderNote, 0, defaultQueueCapacity),
-		orders:     make(map[order.OrderID]*Order),
-		buys:       NewBookSide(descending),
-		sells:      NewBookSide(ascending),
-		epochQueue: NewEpochQueue(logger),
+		log:         logger,
+		noteQueue:   make([]*cachedOrderNote, 0, 16),
+		orders:      make(map[order.OrderID]*Order),
+		buys:        newBookSide(descending),
+		sells:       newBookSide(ascending),
+		epochQueues: make(map[uint64]*EpochQueue),
 	}
 	return ob
 }
@@ -131,9 +129,10 @@ func (ob *OrderBook) processCachedNotes() error {
 	ob.noteQueueMtx.Lock()
 	defer ob.noteQueueMtx.Unlock()
 
+	ob.log.Debugf("Processing %d cached order notes", len(ob.noteQueue))
 	for len(ob.noteQueue) > 0 {
 		var entry *cachedOrderNote
-		entry, ob.noteQueue = ob.noteQueue[0], ob.noteQueue[1:]
+		entry, ob.noteQueue = ob.noteQueue[0], ob.noteQueue[1:] // so much for preallocating
 
 		switch entry.Route {
 		case msgjson.BookOrderRoute:
@@ -189,6 +188,7 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 
 // Reset forcibly updates a client tracked order book with an order book
 // snapshot. This resets the sequence.
+// TODO: eliminate this and half of the mutexes!
 func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 	// Don't use setSeq here, since this message is the seed and is not expected
 	// to be 1 more than the current seq value.
@@ -200,8 +200,8 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 
 	// Clear all orders, if any.
 	ob.orders = make(map[order.OrderID]*Order)
-	ob.buys = NewBookSide(descending)
-	ob.sells = NewBookSide(ascending)
+	ob.buys = newBookSide(descending)
+	ob.sells = newBookSide(ascending)
 
 	for _, o := range snapshot.Orders {
 		if len(o.OrderID) != order.OrderIDSize {
@@ -426,101 +426,110 @@ func (ob *OrderBook) BestNOrders(n int, side uint8) ([]*Order, bool, error) {
 }
 
 // Orders is the full order book, as slices of sorted buys and sells, and
-// unsorted epoch orders.
+// unsorted epoch orders in the current epoch.
 func (ob *OrderBook) Orders() ([]*Order, []*Order, []*Order) {
-	return ob.buys.orders(), ob.sells.orders(), ob.epochQueue.Orders()
-}
-
-// bestFill returns the best fill for a quantity from the provided side.
-func (ob *OrderBook) bestFill(qty uint64, side uint8) ([]*fill, error) {
-	if !ob.isSynced() {
-		return nil, fmt.Errorf("order book is unsynced")
+	ob.epochMtx.Lock()
+	eq := ob.epochQueues[ob.currentEpoch]
+	ob.epochMtx.Unlock()
+	var epochOrders []*Order
+	if eq != nil {
+		// NOTE: This epoch is either (1) open or (2) closed but awaiting a
+		// match_proof and with no orders for a subsequent epoch yet.
+		epochOrders = eq.Orders()
 	}
-
-	switch side {
-	case msgjson.BuyOrderNum:
-		return ob.buys.BestFill(qty)
-
-	case msgjson.SellOrderNum:
-		return ob.sells.BestFill(qty)
-
-	default:
-		return nil, fmt.Errorf("unknown side provided: %d", side)
-	}
+	return ob.buys.orders(), ob.sells.orders(), epochOrders
 }
 
-// ResetEpoch clears the orderbook's epoch queue. This should be called when
-// a new epoch begins.
-func (ob *OrderBook) ResetEpoch() {
-	ob.epochQueue.Reset()
-}
-
-// Enqueue appends the provided order note to the orderbook's epoch queue.
+// Enqueue appends the provided order note to the corresponding epoch's queue.
 func (ob *OrderBook) Enqueue(note *msgjson.EpochOrderNote) error {
 	ob.setSeq(note.Seq)
-	return ob.epochQueue.Enqueue(note)
-}
+	idx := note.Epoch
+	ob.epochMtx.Lock()
+	defer ob.epochMtx.Unlock()
+	eq, have := ob.epochQueues[idx]
+	if !have {
+		eq = NewEpochQueue()
+		ob.epochQueues[idx] = eq // NOTE: trusting server here a bit not to flood us with fake epochs
+		if idx > ob.currentEpoch {
+			ob.currentEpoch = idx
+		} else {
+			ob.log.Errorf("epoch order note received for epoch %d but current epoch is %d", idx, ob.currentEpoch)
+		}
+	}
 
-// EpochSize returns the number of entries in the orderbook's epoch queue.
-func (ob *OrderBook) EpochSize() int {
-	return ob.epochQueue.Size()
-}
-
-// IsEpochEntry checks if the provided order id is in the orderbook's epoch queue.
-func (ob *OrderBook) IsEpochEntry(oid order.OrderID) bool {
-	return ob.epochQueue.Exists(oid)
+	return eq.Enqueue(note)
 }
 
 // ValidateMatchProof ensures the match proof data provided is correct by
 // comparing it to a locally generated proof from the same epoch queue.
 func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
-	localSize := ob.epochQueue.Size()
+	idx := note.Epoch
 	noteSize := len(note.Preimages) + len(note.Misses)
-	if noteSize > 0 {
-		ob.log.Debugf("Validating match proof note with %d preimages and %d misses.",
-			len(note.Preimages), len(note.Misses))
+
+	// Extract the EpochQueue in a closure for clean epochMtx handling.
+	var firstProof bool
+	extractEpochQueue := func() (*EpochQueue, error) {
+		ob.epochMtx.Lock()
+		defer ob.epochMtx.Unlock()
+		firstProof = ob.proofedEpoch == 0
+		ob.proofedEpoch = idx
+		if eq := ob.epochQueues[idx]; eq != nil {
+			delete(ob.epochQueues, idx) // there will be no more additions to this epoch
+			return eq, nil
+		}
+		// This is expected for an empty match proof or if we started mid-epoch.
+		if noteSize == 0 || firstProof {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("epoch %d match proof note references %d orders, but local epoch queue is empty",
+			idx, noteSize)
 	}
-	if noteSize != localSize {
-		return fmt.Errorf("match proof note references %d orders, but local epoch queue has %d",
-			noteSize, localSize)
+	eq, err := extractEpochQueue()
+	if eq == nil /* includes err != nil */ {
+		return err
 	}
 
-	if len(note.Preimages) == 0 {
-		if noteSize > 0 {
-			ob.log.Debugf("Match proof note contains only misses (%d) for %v epoch %v",
-				noteSize, note.MarketID, note.Epoch)
+	if noteSize > 0 {
+		ob.log.Tracef("Validating match proof note for epoch %d (%s) with %d preimages and %d misses.",
+			idx, note.MarketID, len(note.Preimages), len(note.Misses))
+	}
+	if localSize := eq.Size(); noteSize != localSize {
+		if firstProof && localSize < noteSize {
+			return nil // we only saw part of the epoch
 		}
+		// Since match_proof lags epoch close by up to preimage request timeout,
+		// this can still happen for multiple proofs after (re)connect.
+		return fmt.Errorf("epoch %d match proof note references %d orders, but local epoch queue has %d",
+			idx, noteSize, localSize)
+	}
+	if len(note.Preimages) == 0 {
 		return nil
 	}
 
-	pimgs := make([]order.Preimage, 0, len(note.Preimages))
-	for _, entry := range note.Preimages {
-		var pimg order.Preimage
-		copy(pimg[:], entry[:order.PreimageSize])
-		pimgs = append(pimgs, pimg)
+	pimgs := make([]order.Preimage, len(note.Preimages))
+	for i, entry := range note.Preimages {
+		copy(pimgs[i][:], entry)
 	}
 
-	misses := make([]order.OrderID, 0, len(note.Misses))
-	for _, entry := range note.Misses {
-		var miss order.OrderID
-		copy(miss[:], entry[:order.OrderIDSize])
-		misses = append(misses, miss)
+	misses := make([]order.OrderID, len(note.Misses))
+	for i, entry := range note.Misses {
+		copy(misses[i][:], entry)
 	}
 
-	seed, csum, err := ob.epochQueue.GenerateMatchProof(note.Epoch, pimgs, misses)
+	seed, csum, err := eq.GenerateMatchProof(pimgs, misses)
 	if err != nil {
 		return fmt.Errorf("unable to generate match proof for epoch %d: %w",
-			note.Epoch, err)
+			idx, err)
 	}
 
 	if !bytes.Equal(seed, note.Seed) {
 		return fmt.Errorf("match proof seed mismatch for epoch %d: "+
-			"expected %s, got %s", note.Epoch, note.Seed, seed)
+			"expected %s, got %s", idx, note.Seed, seed)
 	}
 
 	if !bytes.Equal(csum, note.CSum) {
 		return fmt.Errorf("match proof csum mismatch for epoch %d: "+
-			"expected %s, got %s", note.Epoch, note.CSum, csum)
+			"expected %s, got %s", idx, note.CSum, csum)
 	}
 
 	return nil

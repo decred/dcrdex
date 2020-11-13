@@ -10,7 +10,7 @@ import (
 
 // makeBookSideDepth creates a new book side depth from the provided
 // group and sort order.
-func makeBookSide(groups map[uint64][]*Order, rateIndex *rateIndex, orderPref OrderPreference) *bookSide {
+func makeBookSide(groups map[uint64][]*Order, rateIndex *rateIndex, orderPref orderPreference) *bookSide {
 	return &bookSide{
 		bins:      groups,
 		rateIndex: rateIndex,
@@ -604,7 +604,7 @@ func TestBookSideBestFill(t *testing.T) {
 		label     string
 		side      *bookSide
 		quantity  uint64
-		orderPref OrderPreference
+		orderPref orderPreference
 		expected  []*fill
 		wantErr   bool
 	}{
