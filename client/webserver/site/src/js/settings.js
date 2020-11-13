@@ -24,9 +24,7 @@ export default class SettingsPage extends BasePage {
       'showPokes', 'dexBox', 'dexInfo'
     ])
 
-    const dexBox = page.dexBox
-    const dexInfo = page.dexInfo.cloneNode(true)
-    const dexInfoAcct = page.dexInfo.querySelector('.dexInfoAcct').cloneNode(true)
+    this.showDexInfo(page)
 
     Doc.bind(page.darkMode, 'click', () => {
       State.dark(page.darkMode.checked)
@@ -42,19 +40,6 @@ export default class SettingsPage extends BasePage {
       State.setCookie('popups', show ? '1' : '0')
       app.showPopups = show
     })
-
-    page.dexInfo.remove()
-    dexInfo.removeAttribute('id')
-    dexInfo.querySelector('.dexInfoAcct').remove()
-
-    for (const [host, xc] of Object.entries(app.user.exchanges)) {
-      dexInfo.querySelector('.dexInfoHost').textContent = host
-      if (xc.isAuthed) {
-        dexInfoAcct.querySelector('.dexInfoAcctID').textContent = xc.acctID
-        dexInfo.appendChild(dexInfoAcct)
-      }
-      dexBox.appendChild(dexInfo)
-    }
 
     page.commitHash.textContent = app.commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
@@ -76,6 +61,27 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
+  }
+
+  async showDexInfo (page) {
+    const dexBox = page.dexBox
+    const dexInfo = page.dexInfo.cloneNode(true)
+    const dexInfoAcct = page.dexInfo.querySelector('.dexInfoAcct').cloneNode(true)
+
+    Doc.hide(dexBox)
+    page.dexInfo.remove()
+    dexInfo.removeAttribute('id')
+    dexInfo.querySelector('.dexInfoAcct').remove()
+
+    for (const [host, xc] of Object.entries(app.user.exchanges)) {
+      dexInfo.querySelector('.dexInfoHost').textContent = host
+      if (xc.isAuthed) {
+        dexInfoAcct.querySelector('.dexInfoAcctID').textContent = xc.acctID
+        dexInfo.appendChild(dexInfoAcct)
+      }
+      dexBox.appendChild(dexInfo)
+    }
+    Doc.show(dexBox)
   }
 
   /* showForm shows a modal form with a little animation. */
