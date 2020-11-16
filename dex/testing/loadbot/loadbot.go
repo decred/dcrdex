@@ -47,9 +47,9 @@ const (
 )
 
 var (
-	dcrID, _    = dex.BipSymbolID("dcr")
-	btcID, _    = dex.BipSymbolID("btc")
-	ltcID, _    = dex.BipSymbolID("ltc")
+	dcrID, _ = dex.BipSymbolID("dcr")
+	btcID, _ = dex.BipSymbolID("btc")
+	// ltcID, _    = dex.BipSymbolID("ltc") // TODO
 	loggerMaker *dex.LoggerMaker
 	hostAddr    = "127.0.0.1:17273"
 	pass        = []byte("abc")
@@ -126,13 +126,13 @@ func returnAddress(symbol, node string) string {
 // mineAlpha will mine a single block on the alpha node of the asset indicated
 // by symbol.
 func mineAlpha(symbol string) <-chan *harnessResult {
-	return harnessCtl(symbol, "./mine-alpha 1")
+	return harnessCtl(symbol, "./mine-alpha", "1")
 }
 
 // mineBeta will mine a single block on the beta node of the asset indicated
 // by symbol.
 func mineBeta(symbol string) <-chan *harnessResult {
-	return harnessCtl(symbol, "./mine-beta 1")
+	return harnessCtl(symbol, "./mine-beta", "1")
 }
 
 // harnessResult is the result of a harnessCtl command.
@@ -145,20 +145,21 @@ type harnessResult struct {
 // String returns a result string for the harnessResult.
 func (res *harnessResult) String() string {
 	if res.err != nil {
-		return fmt.Sprintf("error running harnes command %q: %v", res.cmd, res.err)
+		return fmt.Sprintf("error running harness command %q: %v", res.cmd, res.err)
 	}
 	return fmt.Sprintf("response from harness command %q: %s", res.cmd, res.output)
 }
 
 // harnessCtl will run the command from the harness-ctl directory for the
 // specified symbol.
-func harnessCtl(symbol, cmd string, args ...interface{}) <-chan *harnessResult {
-	cmd = fmt.Sprintf(cmd, args...)
-	harnessCtl := filepath.Join(dextestDir, symbol, "harness-ctl")
-	compoundCmd := fmt.Sprintf("cd %s; %s", harnessCtl, cmd)
+func harnessCtl(symbol, cmd string, args ...string) <-chan *harnessResult {
+	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
 	c := make(chan *harnessResult)
 	go func() {
-		output, err := exec.CommandContext(ctx, "/bin/sh", "-c", compoundCmd).Output()
+		fullCmd := strings.Join(append([]string{cmd}, args...), " ")
+		command := exec.CommandContext(ctx, cmd, args...)
+		command.Dir = dir
+		output, err := command.Output()
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
@@ -170,7 +171,7 @@ func harnessCtl(symbol, cmd string, args ...interface{}) <-chan *harnessResult {
 		c <- &harnessResult{
 			err:    err,
 			output: strings.TrimSpace(string(output)),
-			cmd:    cmd,
+			cmd:    fullCmd,
 		}
 	}()
 	return c
@@ -257,24 +258,24 @@ func main() {
 
 	log.Infof("Running program %s", programName)
 
-	getAddress := func(symbol, cmd string) string {
-		res := <-harnessCtl(symbol, cmd)
+	getAddress := func(symbol, cmd string, args ...string) string {
+		res := <-harnessCtl(symbol, cmd, args...)
 		if res.err != nil {
-			log.Errorf("error getting address:", symbol, res.err)
+			log.Errorf("error getting %s address: %v", symbol, res.err)
 		}
 		return res.output
 	}
 
-	alphaAddrDCR = getAddress(dcr, "./alpha getnewaddress")
-	betaAddrDCR = getAddress(dcr, "./beta getnewaddress")
-	alphaAddrBTC = getAddress(btc, "./alpha getnewaddress '' bech32")
-	betaAddrBTC = getAddress(btc, "./beta getnewaddress '' bech32")
+	alphaAddrDCR = getAddress(dcr, "./alpha", "getnewaddress", "default", "ignore")
+	betaAddrDCR = getAddress(dcr, "./beta", "getnewaddress", "default", "ignore")
+	alphaAddrBTC = getAddress(btc, "./alpha", "getnewaddress", "''", "bech32")
+	betaAddrBTC = getAddress(btc, "./beta", "getnewaddress", "''", "bech32")
 
 	// Unlock wallets, since they may have been locked on a previous shutdown.
-	<-harnessCtl(dcr, "./alpha walletpassphrase abc %d", 0xffffffff)
-	<-harnessCtl(dcr, "./beta walletpassphrase abc %d", 0xffffffff)
-	<-harnessCtl(btc, "./alpha walletpassphrase abc %d", 0xffffffff)
-	<-harnessCtl(btc, "./beta walletpassphrase abc %d", 0xffffffff)
+	<-harnessCtl(dcr, "./alpha", "walletpassphrase", "abc", "4294967295")
+	<-harnessCtl(dcr, "./beta", "walletpassphrase", "abc", "4294967295")
+	<-harnessCtl(btc, "./alpha", "walletpassphrase", "abc", "4294967295")
+	<-harnessCtl(btc, "./beta", "walletpassphrase", "abc", "4294967295")
 
 	// Clean up the directory.
 	os.RemoveAll(botDir)

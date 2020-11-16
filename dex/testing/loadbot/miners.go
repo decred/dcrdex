@@ -9,7 +9,7 @@ import (
 )
 
 // blockEvery2 will randomize  the delay, but aim for 1 block of each asset
-// withing a 2 epoch window.
+// within a 2 epoch window.
 func blockEvery2() {
 	i := 0
 	for {

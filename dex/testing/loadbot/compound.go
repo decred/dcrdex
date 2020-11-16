@@ -43,8 +43,8 @@ func runHeavy() {
 	log.Infof("loading the beta node wallets")
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 5; j++ {
-			<-harnessCtl(btc, "./alpha sendtoaddress %s %s", betaAddrBTC, valString(btcPer))
-			<-harnessCtl(dcr, "./alpha sendtoaddress %s %s", betaAddrDCR, valString(dcrPer))
+			<-harnessCtl(btc, "./alpha", "sendtoaddress", betaAddrBTC, valString(btcPer))
+			<-harnessCtl(dcr, "./alpha", "sendtoaddress", betaAddrDCR, valString(dcrPer))
 		}
 		<-mineAlpha(btc)
 		<-mineAlpha(dcr)

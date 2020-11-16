@@ -26,7 +26,7 @@ func runPingPong(n int) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			runTrader(&pingPonger{}, "PINGPONG:"+strconv.Itoa(int(n)))
+			runTrader(&pingPonger{}, "PINGPONG:"+strconv.Itoa(i))
 		}(i)
 	}
 	wg.Wait()

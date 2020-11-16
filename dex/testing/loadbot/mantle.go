@@ -263,10 +263,10 @@ func (m *Mantle) truncatedMidGap() uint64 {
 
 // createWallet creates a new wallet/account for the asset and node. If an error
 // is encountered, LoadBot will be killed.
-func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, numCoins int) (w *botWallet) {
+func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, numCoins int) {
 	// Generate a name for this wallet.
 	name := randomToken()
-	cmdOut := <-harnessCtl(symbol, "./new-wallet "+node+" "+name)
+	cmdOut := <-harnessCtl(symbol, "./new-wallet", node, name)
 	if cmdOut.err != nil {
 		m.fatalError("%s new-wallet error: %v", symbol, cmdOut.err)
 		return
@@ -280,7 +280,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	if symbol == dcr {
 		walletPass = pass
 	}
-	w = newBotWallet(symbol, node, name, walletPass, minFunds, maxFunds, numCoins)
+	w := newBotWallet(symbol, node, name, walletPass, minFunds, maxFunds, numCoins)
 	m.wallets[w.assetID] = w
 	err := m.CreateWallet(pass, walletPass, w.form)
 	if err != nil {
@@ -299,9 +299,9 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 
 	chunk := maxFunds/uint64(numCoins) + 1
 	for i := 0; i < numCoins; i++ {
-		<-harnessCtl(symbol, fmt.Sprintf("./%s sendtoaddress %s %s", node, coreWallet.Address, valString(chunk)))
+		<-harnessCtl(symbol, fmt.Sprintf("./%s", node), "sendtoaddress", coreWallet.Address, valString(chunk))
 	}
-	<-harnessCtl(symbol, fmt.Sprintf("./mine-%s 1", node))
+	<-harnessCtl(symbol, fmt.Sprintf("./mine-%s", node), "1")
 	<-time.After(time.Second)
 	return
 }
@@ -333,7 +333,7 @@ func (m *Mantle) replenishBalance(w *botWallet) {
 		chunk := (w.maxFunds - bal.Available) / uint64(w.numCoins)
 		for i := 0; i < w.numCoins; i++ {
 			m.log.Debugf("Requesting %s from %s alpha node", valString(chunk), w.symbol)
-			cmdOut := <-harnessCtl(w.symbol, "./alpha sendtoaddress %s %s", w.address, valString(chunk))
+			cmdOut := <-harnessCtl(w.symbol, "./alpha", "sendtoaddress", w.address, valString(chunk))
 			if cmdOut.err != nil {
 				m.fatalError("error refreshing balance for %s: %v", w.symbol, cmdOut.err)
 			}
@@ -390,9 +390,8 @@ func midGap(book *core.OrderBook, rateStep uint64) uint64 {
 	if len(book.Sells) > 0 {
 		if len(book.Buys) > 0 {
 			return toAtoms((book.Buys[0].Rate + book.Sells[0].Rate) / 2)
-		} else {
-			return toAtoms(book.Sells[0].Rate)
 		}
+		return toAtoms(book.Sells[0].Rate)
 	} else {
 		if len(book.Buys) > 0 {
 			return toAtoms(book.Buys[0].Rate)
