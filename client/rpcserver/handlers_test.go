@@ -4,6 +4,7 @@
 package rpcserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -726,7 +727,7 @@ func (tCoin) String() string {
 func (tCoin) Value() uint64 {
 	return 0
 }
-func (tCoin) Confirmations() (uint32, error) {
+func (tCoin) Confirmations(context.Context) (uint32, error) {
 	return 0, nil
 }
 

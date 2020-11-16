@@ -88,8 +88,20 @@ func (s signer) Sign(hash []byte) *ecdsa.Signature {
 }
 
 type subsystem struct {
-	*dex.StartStopWaiter
 	name string
+	// either a ssw or cm
+	ssw *dex.StartStopWaiter
+	cm  *dex.ConnectionMaster
+}
+
+func (ss *subsystem) stop() {
+	if ss.ssw != nil {
+		ss.ssw.Stop()
+		ss.ssw.WaitForShutdown()
+	} else {
+		ss.cm.Disconnect()
+		ss.cm.Wait()
+	}
 }
 
 // DEX is the DEX manager, which creates and controls the lifetime of all
@@ -103,7 +115,7 @@ type DEX struct {
 	swapper     *swap.Swapper
 	orderRouter *market.OrderRouter
 	bookRouter  *market.BookRouter
-	stopWaiters []subsystem
+	subsystems  []subsystem
 	server      *comms.Server
 
 	configRespMtx sync.RWMutex
@@ -198,11 +210,10 @@ func (cr *configResponse) remarshal() {
 // completed their shutdown.
 func (dm *DEX) Stop() {
 	log.Infof("Stopping all DEX subsystems.")
-	for _, ssw := range dm.stopWaiters {
-		log.Infof("Stopping %s...", ssw.name)
-		ssw.Stop()
-		ssw.WaitForShutdown()
-		log.Infof("%s is now shut down.", ssw.name)
+	for _, ss := range dm.subsystems {
+		log.Infof("Stopping %s...", ss.name)
+		ss.stop()
+		log.Infof("%s is now shut down.", ss.name)
 	}
 	if err := dm.storage.Close(); err != nil {
 		log.Errorf("DEXArchivist.Close: %v", err)
@@ -213,7 +224,7 @@ func marketSubSysName(name string) string {
 	return fmt.Sprintf("Market[%s]", name)
 }
 
-func (dm *DEX) handleDEXConfig(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 
@@ -247,19 +258,32 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
 	}
 
-	var stopWaiters []subsystem
 	ctx, cancel := context.WithCancel(context.Background())
 
-	startSubSys := func(name string, r dex.Runner) {
-		ssw := dex.NewStartStopWaiter(r)
-		ssw.Start(ctx)
-		stopWaiters = append([]subsystem{{ssw, name}}, stopWaiters...) // top of stack
+	var subsystems []subsystem
+	startSubSys := func(name string, rc interface{}) (err error) {
+		subsys := subsystem{name: name}
+		switch st := rc.(type) {
+		case dex.Runner:
+			subsys.ssw = dex.NewStartStopWaiter(st)
+			subsys.ssw.Start(ctx)
+		case dex.Connector:
+			subsys.cm = dex.NewConnectionMaster(st)
+			err = subsys.cm.Connect(ctx)
+			if err != nil {
+				return
+			}
+		default:
+			panic(fmt.Sprintf("Invalid subsystem type %T", rc))
+		}
+
+		subsystems = append([]subsystem{subsys}, subsystems...) // top of stack
+		return
 	}
 
 	abort := func() {
-		for _, ssw := range stopWaiters {
-			ssw.Stop()
-			ssw.WaitForShutdown()
+		for _, ss := range subsystems {
+			ss.stop()
 		}
 		// If the DB is running, kill it too.
 		cancel()
@@ -326,7 +350,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			}
 		}
 
-		startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
+		err = startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
+		if err != nil {
+			abort()
+			return nil, fmt.Errorf("failed to start asset %q: %w", symbol, err)
+		}
 
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
@@ -551,7 +579,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		storage:     storage,
 		orderRouter: orderRouter,
 		bookRouter:  bookRouter,
-		stopWaiters: stopWaiters,
+		subsystems:  subsystems,
 		server:      server,
 		configResp:  cfgResp,
 	}
@@ -612,7 +640,7 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (s
 		err = fmt.Errorf("market subsystem %s not found", name)
 		return
 	}
-	if !dm.stopWaiters[i].On() {
+	if !dm.subsystems[i].ssw.On() {
 		err = fmt.Errorf("market subsystem %s is not running", name)
 		return
 	}
@@ -647,8 +675,8 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (s
 }
 
 func (dm *DEX) findSubsys(name string) int {
-	for i := range dm.stopWaiters {
-		if dm.stopWaiters[i].name == name {
+	for i := range dm.subsystems {
+		if dm.subsystems[i].name == name {
 			return i
 		}
 	}
@@ -680,7 +708,7 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 		err = fmt.Errorf("market subsystem %s not found", name)
 		return
 	}
-	if dm.stopWaiters[i].On() {
+	if dm.subsystems[i].ssw.On() {
 		err = fmt.Errorf("market subsystem %s not stopped", name)
 		return
 	}
@@ -700,7 +728,7 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 
 	// Relaunch the market.
 	ssw := dex.NewStartStopWaiter(mkt)
-	dm.stopWaiters[i].StartStopWaiter = ssw
+	dm.subsystems[i].ssw = ssw
 	ssw.Start(context.Background())
 
 	// Broadcast a TradeResumption notification to all connected clients.

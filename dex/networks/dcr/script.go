@@ -11,13 +11,12 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrwallet/wallet/txsizes"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3" // for txscript/v3
+	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrwallet/wallet/v3/txsizes"
 )
 
 const (
@@ -421,7 +420,7 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
 // contract. If the provided script is not a swap contract, an error will be
-// returned. The returned addresses are dcrutil/v2 types.
+// returned.
 func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 	sender, receiver dcrutil.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
@@ -620,11 +619,11 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScript
 		return &DCRScriptAddrs{}, nonStandard, nil
 	}
 	for _, addr := range addrs {
-		// If the address is an unhashed public key, is won't need a pubkey as part
-		// of its sigScript, so count them separately.
-		_, isPubkey := addr.(*dcrutilv3.AddressSecpPubKey)
+		// If the address is an unhashed public key, is won't need a pubkey as
+		// part of its sigScript, so count them separately.
+		_, isPubkey := addr.(*dcrutil.AddressSecpPubKey)
 		if isPubkey {
-			pubkeys = append(pubkeys, addr) // dcrutil/v2.Address(dcrutil/v3.Address)
+			pubkeys = append(pubkeys, addr)
 		} else {
 			pkHashes = append(pkHashes, addr)
 		}

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"math/rand"
 	"os"
 	"sync"
@@ -20,18 +19,17 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrwallet/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
-	walletjson "github.com/decred/dcrwallet/rpc/jsonrpc/types"
 )
 
 var (
@@ -88,7 +86,7 @@ func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) *chai
 	return tx
 }
 
-func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) (string, error) {
+func makeTxHex(pkScripts []dex.Bytes, inputs []chainjson.Vin) (string, error) {
 	msgTx := wire.NewMsgTx()
 	for _, input := range inputs {
 		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
@@ -154,10 +152,11 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet := unconnectedWallet(walletCfg, &Config{}, tLogger)
 	wallet.node = client
+	wallet.ctx = walletCtx
 
 	// Initialize the best block.
 	wallet.tipMtx.Lock()
-	wallet.currentTip, _ = wallet.getBestBlock()
+	wallet.currentTip, _ = wallet.getBestBlock(walletCtx)
 	wallet.tipMtx.Unlock()
 
 	go wallet.monitorBlocks(walletCtx)
@@ -167,7 +166,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 
 func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
 	for i := range msgTx.TxIn {
-		msgTx.TxIn[i].SignatureScript = randBytes(dexdcr.P2PKHSigScriptSize)
+		msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
 	}
 	return msgTx, true, nil
 }
@@ -232,17 +231,17 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
-func (c *tRPCClient) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
+func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
 	optimalRate := float64(optimalFeeRate) * 1e-5
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 }
 
-func (c *tRPCClient) GetBlockChainInfo() (*chainjson.GetBlockChainInfoResult, error) {
+func (c *tRPCClient) GetBlockChainInfo(_ context.Context) (*chainjson.GetBlockChainInfoResult, error) {
 	return c.blockchainInfo, c.blockchainInfoErr
 }
 
-func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+func (c *tRPCClient) SendRawTransaction(_ context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
 	c.sentRawTx = tx
 	if c.sendRawErr == nil && c.sendRawHash == nil {
 		h := tx.TxHash()
@@ -251,11 +250,11 @@ func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*ch
 	return c.sendRawHash, c.sendRawErr
 }
 
-func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, vout uint32, mempool bool) (*chainjson.GetTxOutResult, error) {
+func (c *tRPCClient) GetTxOut(_ context.Context, txHash *chainhash.Hash, vout uint32, mempool bool) (*chainjson.GetTxOutResult, error) {
 	return c.txOutRes[newOutPoint(txHash, vout)], c.txOutErr
 }
 
-func (c *tRPCClient) GetBestBlock() (*chainhash.Hash, int64, error) {
+func (c *tRPCClient) GetBestBlock(_ context.Context) (*chainhash.Hash, int64, error) {
 	if c.bestBlockErr != nil {
 		return nil, -1, c.bestBlockErr
 	}
@@ -272,7 +271,7 @@ func (c *tRPCClient) GetBestBlock() (*chainhash.Hash, int64, error) {
 	return bestHash, bestBlkHeight, nil
 }
 
-func (c *tRPCClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (c *tRPCClient) GetBlockHash(_ context.Context, blockHeight int64) (*chainhash.Hash, error) {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	h, found := c.mainchain[blockHeight]
@@ -282,7 +281,7 @@ func (c *tRPCClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return h, nil
 }
 
-func (c *tRPCClient) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+func (c *tRPCClient) GetBlockVerbose(_ context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	blk, found := c.verboseBlocks[blockHash.String()]
@@ -292,11 +291,11 @@ func (c *tRPCClient) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) 
 	return blk, nil
 }
 
-func (c *tRPCClient) GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
+func (c *tRPCClient) GetRawMempool(_ context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
 	return c.mempool, c.mempoolErr
 }
 
-func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
+func (c *tRPCClient) GetRawTransactionVerbose(_ context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	return c.rawTx, c.rawTxErr
 }
 
@@ -326,42 +325,42 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *chainjson.TxRawResult) (*ch
 	return blkHash, block
 }
 
-func (c *tRPCClient) GetBalanceMinConf(account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
+func (c *tRPCClient) GetBalanceMinConf(_ context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
 	return c.balanceResult, c.balanceErr
 }
 
-func (c *tRPCClient) LockUnspent(unlock bool, ops []*wire.OutPoint) error {
+func (c *tRPCClient) LockUnspent(_ context.Context, unlock bool, ops []*wire.OutPoint) error {
 	if unlock == false {
 		c.lockedCoins = ops
 	}
 	return c.lockUnspentErr
 }
 
-func (c *tRPCClient) GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error) {
+func (c *tRPCClient) GetRawChangeAddress(_ context.Context, account string, net dcrutil.AddressParams) (dcrutil.Address, error) {
 	return c.changeAddr, c.changeAddrErr
 }
 
-func (c *tRPCClient) GetNewAddressGapPolicy(account string, gapPolicy rpcclient.GapPolicy, net dcrutil.AddressParams) (dcrutil.Address, error) {
+func (c *tRPCClient) GetNewAddressGapPolicy(_ context.Context, account string, gapPolicy dcrwallet.GapPolicy) (dcrutil.Address, error) {
 	return c.newAddr, c.newAddrErr
 }
 
-func (c *tRPCClient) DumpPrivKey(address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error) {
+func (c *tRPCClient) DumpPrivKey(_ context.Context, address dcrutil.Address) (*dcrutil.WIF, error) {
 	return c.privWIF, c.privWIFErr
 }
 
-func (c *tRPCClient) GetTransaction(txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
+func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
 	return c.walletTx, c.walletTxErr
 }
 
-func (c *tRPCClient) WalletLock() error {
+func (c *tRPCClient) WalletLock(_ context.Context) error {
 	return c.lockErr
 }
 
-func (c *tRPCClient) WalletPassphrase(passphrase string, timeoutSecs int64) error {
+func (c *tRPCClient) WalletPassphrase(_ context.Context, passphrase string, timeoutSecs int64) error {
 	return c.passErr
 }
 
-func (c *tRPCClient) WalletInfo() (*walletjson.WalletInfoResult, error) {
+func (c *tRPCClient) WalletInfo(_ context.Context) (*walletjson.WalletInfoResult, error) {
 	return &walletjson.WalletInfoResult{
 		Unlocked: true,
 	}, nil
@@ -371,7 +370,7 @@ func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
 }
 
-func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	case methodListUnspent:
 		if c.unspentErr != nil {
@@ -800,9 +799,9 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
-func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
-func (c *tCoin) Value() uint64                  { return 100 }
-func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
+func (c *tCoin) String() string                                    { return hex.EncodeToString(c.id) }
+func (c *tCoin) Value() uint64                                     { return 100 }
+func (c *tCoin) Confirmations(ctx context.Context) (uint32, error) { return 2, nil }
 
 func TestReturnCoins(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
@@ -1159,27 +1158,6 @@ func (ai *TAuditInfo) Coin() asset.Coin      { return &tCoin{} }
 func (ai *TAuditInfo) Contract() dex.Bytes   { return nil }
 func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
-// secp256k1/v3.PrivateKey no longer implements chainec.PrivateKey
-type privKeyAdaptor struct {
-	*secp256k1.PrivateKey
-}
-
-func (pka privKeyAdaptor) GetD() *big.Int {
-	return pka.ToECDSA().D
-}
-
-func (pka privKeyAdaptor) GetType() int {
-	return 0
-}
-
-func (pka privKeyAdaptor) Public() (*big.Int, *big.Int) {
-	return pka.PubKey().X(), pka.PubKey().Y()
-}
-
-func (pka privKeyAdaptor) SerializeSecret() []byte {
-	return pka.Serialize()
-}
-
 func TestRedeem(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
@@ -1207,10 +1185,12 @@ func TestRedeem(t *testing.T) {
 	}
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey := secp256k1.PrivKeyFromBytes(privBytes)
 
 	node.changeAddr = tPKHAddr
-	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
 
 	_, _, feesPaid, err := wallet.Redeem([]*asset.Redemption{redemption})
 	if err != nil {
@@ -1320,7 +1300,11 @@ func TestSignMessage(t *testing.T) {
 		},
 	}
 
-	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	var err error
+	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
 
 	op := newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular)
 
@@ -1356,7 +1340,7 @@ func TestSignMessage(t *testing.T) {
 
 	// gettransaction error
 	node.txOutErr = tErr
-	_, _, err := wallet.SignMessage(op, msg)
+	_, _, err = wallet.SignMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for gettxout rpc error")
 	}
@@ -1389,7 +1373,7 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	addr, _ := dcrutilv3.NewAddressScriptHash(contract, chainParams)
+	addr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
 	pkScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", addr, addr)
@@ -1427,7 +1411,7 @@ func TestAuditContract(t *testing.T) {
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
-	wrongAddr, _ := dcrutilv3.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
+	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
 	badContract, err := txscript.PayToAddrScript(wrongAddr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
@@ -1452,7 +1436,7 @@ func TestFindRedemption(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
 
-	_, bestBlockHeight, err := node.GetBestBlock()
+	_, bestBlockHeight, err := node.GetBestBlock(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected GetBestBlock error: %v", err)
 	}
@@ -1471,13 +1455,13 @@ func TestFindRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	contractAddr, _ := dcrutilv3.NewAddressScriptHash(contract, chainParams)
+	contractAddr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
 	pkScript, err := txscript.PayToAddrScript(contractAddr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
 	}
 
-	tPKHAddrV3, _ := dcrutilv3.DecodeAddress(tPKHAddr.String(), chainParams)
+	tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), chainParams)
 	otherScript, err := txscript.PayToAddrScript(tPKHAddrV3)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", tPKHAddrV3, tPKHAddrV3)
@@ -1493,7 +1477,7 @@ func TestFindRedemption(t *testing.T) {
 	inputs := []chainjson.Vin{makeRPCVin(otherTxid, 0, otherSpendScript)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
-	txHex, err := makeTxHex(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs)
+	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
 	}
@@ -1563,7 +1547,7 @@ func TestFindRedemption(t *testing.T) {
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 
 	// Wrong script type for output
-	node.walletTx.Hex, _ = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	node.walletTx.Hex, _ = makeTxHex([]dex.Bytes{otherScript, otherScript}, inputs)
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong script type")
@@ -1597,8 +1581,10 @@ func TestRefund(t *testing.T) {
 	node.newAddr = tPKHAddr
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey := secp256k1.PrivKeyFromBytes(privBytes)
-	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
 
 	contractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular)
 	_, err = wallet.Refund(contractOutput.ID(), contract)
@@ -1747,21 +1733,21 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, err := wallet.Confirmations(randBytes(35))
+	_, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// listunspent error
 	node.walletTxErr = tErr
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for listunspent error")
 	}
 	node.walletTxErr = nil
 
 	node.walletTx = &walletjson.GetTransactionResult{}
-	_, err = wallet.Confirmations(coinID)
+	_, err = wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}
@@ -1775,7 +1761,7 @@ func TestSendEdges(t *testing.T) {
 
 	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
 
-	contractAddr, _ := dcrutilv3.NewAddressScriptHash(randBytes(20), chainParams)
+	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), chainParams)
 	// See dexdcr.IsDust for the source of this dustCoverage voodoo.
 	dustCoverage := (dexdcr.P2PKHOutputSize + 165) * feeRate * 3
 	dexReqFees := dexdcr.InitTxSize * feeRate
@@ -1825,7 +1811,7 @@ func TestSendEdges(t *testing.T) {
 		},
 	}
 
-	tPKHAddrV3, _ := dcrutilv3.DecodeAddress(tPKHAddr.String(), chainParams)
+	tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), chainParams)
 
 	for _, tt := range tests {
 		tx, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), tPKHAddrV3, tt.funding, swapVal, feeRate, nil)

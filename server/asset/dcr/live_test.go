@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		var wg sync.WaitGroup
+		wg := new(sync.WaitGroup)
 		defer func() {
 			logger.Infof("Shutting down...")
 			cancel()
@@ -66,11 +66,11 @@ func TestMain(m *testing.M) {
 			return 1
 		}
 
-		wg.Add(1)
-		go func() {
-			dcr.Run(ctx)
-			wg.Done()
-		}()
+		wg, err = dcr.Connect(ctx)
+		if err != nil {
+			fmt.Printf("Connect failed: %v", err)
+			return 1
+		}
 
 		return m.Run()
 	}
@@ -102,9 +102,12 @@ func TestLiveUTXO(t *testing.T) {
 	maturity := uint32(chainParams.CoinbaseMaturity)
 	numBlocks := 512
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Check if the best hash is still bestHash.
 	blockChanged := func() bool {
-		h, _, _ := dcr.client.GetBestBlock()
+		h, _, _ := dcr.client.GetBestBlock(ctx)
 		return *bestHash != *h
 	}
 
@@ -112,7 +115,7 @@ func TestLiveUTXO(t *testing.T) {
 	getMsgTxs := func(hashes []*chainhash.Hash) []*wire.MsgTx {
 		outTxs := make([]*wire.MsgTx, 0)
 		for _, h := range hashes {
-			newTx, err := dcr.client.GetRawTransaction(h)
+			newTx, err := dcr.client.GetRawTransaction(ctx, h)
 			if err != nil {
 				t.Fatalf("error retrieving MsgTx: %v", err)
 				outTxs = append(outTxs, newTx.MsgTx())
@@ -140,7 +143,7 @@ func TestLiveUTXO(t *testing.T) {
 	}
 
 	refreshMempool := func() {
-		mpHashes, err := dcr.client.GetRawMempool("all")
+		mpHashes, err := dcr.client.GetRawMempool(ctx, "all")
 		if err != nil {
 			t.Fatalf("getrawmempool error: %v", err)
 		}
@@ -186,7 +189,7 @@ func TestLiveUTXO(t *testing.T) {
 				// Check if its an acceptable script type.
 				scriptTypeOK := scriptType != dexdcr.ScriptUnsupported
 				// Now try to get the UTXO with the Backend
-				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
+				utxo, err := dcr.utxo(ctx, txHash, uint32(vout), nil)
 				// Can't do stakebase or coinbase.
 				// ToDo: Use a custom error and check it.
 				if err == immatureTransactionError {
@@ -214,7 +217,7 @@ func TestLiveUTXO(t *testing.T) {
 						stats.feeRates = append(stats.feeRates, utxo.FeeRate())
 					}
 					// Just check for no error on Confirmations.
-					confs, err := utxo.Confirmations()
+					confs, err := utxo.Confirmations(ctx)
 					if err != nil {
 						return fmt.Errorf("error getting confirmations for mempool tx output: %v", err)
 					}
@@ -261,7 +264,7 @@ func TestLiveUTXO(t *testing.T) {
 	// Check the next (actually the previous) block. The returned bool indicates
 	// that a block change was detected so the test should be run again.
 	checkNextBlock := func() bool {
-		block, err := dcr.client.GetBlock(prevHash)
+		block, err := dcr.client.GetBlock(ctx, prevHash)
 		currentHeight = int64(block.Header.Height)
 		if err != nil {
 			t.Fatalf("error retrieving previous block (%s): %v", prevHash, err)
@@ -278,7 +281,7 @@ func TestLiveUTXO(t *testing.T) {
 	for {
 		// The loop can continue until a test completes without any block changes.
 		var err error
-		bestHash, currentHeight, err = dcr.client.GetBestBlock()
+		bestHash, currentHeight, err = dcr.client.GetBestBlock(ctx)
 		prevHash = bestHash
 		tipHeight = currentHeight
 		if err != nil {
@@ -325,7 +328,7 @@ func TestLiveUTXO(t *testing.T) {
 //  using the cache to provide justification the added complexity.
 func TestCacheAdvantage(t *testing.T) {
 	client := dcr.client
-	nextHash, _, err := client.GetBestBlock()
+	nextHash, _, err := client.GetBestBlock(ctx)
 	if err != nil {
 		t.Fatalf("error retrieving best block info")
 	}
@@ -334,7 +337,7 @@ func TestCacheAdvantage(t *testing.T) {
 	start := time.Now()
 	// Download the blocks over RPC, recording the duration.
 	for i := 0; i < numBlocks; i++ {
-		block, err := client.GetBlockVerbose(nextHash, false)
+		block, err := client.GetBlockVerbose(ctx, nextHash, false)
 		if err != nil {
 			t.Fatalf("error retreving %d-th block from the tip: %v", i, err)
 		}
@@ -398,7 +401,7 @@ out:
 				fmt.Printf("block received for height %d\n", tipHeight)
 			}
 			lastHeight = tipHeight
-			_, err := dcr.getMainchainDcrBlock(tipHeight)
+			_, err := dcr.getMainchainDcrBlock(ctx, tipHeight)
 			if err != nil {
 				t.Fatalf("error getting newly connected block at height %d", tipHeight)
 			}

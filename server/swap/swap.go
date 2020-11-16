@@ -51,7 +51,7 @@ func makerTaker(isMaker bool) string {
 // AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
-	Route(string, func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error)
+	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message) error
@@ -450,10 +450,9 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	}
 
 	if state != nil {
-		ctx := context.Background()
 		log.Infof("loaded swap state contains %d live matches and %d live coin waiters",
 			len(state.MatchTrackers), len(state.LiveWaiters))
-		err = swapper.restoreState(ctx, state, cfg.AllowPartialRestore)
+		err = swapper.restoreState(state, cfg.AllowPartialRestore)
 		if err != nil {
 			return nil, err
 		}
@@ -532,12 +531,12 @@ func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (a
 }
 
 // ChainsSynced will return true if both specified asset's backends are synced.
-func (s *Swapper) ChainsSynced(ctx context.Context, base, quote uint32) (bool, error) {
+func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
 	b, found := s.coins[base]
 	if !found {
 		return false, fmt.Errorf("No backend found for %d", base)
 	}
-	baseSynced, err := b.Backend.Synced(ctx)
+	baseSynced, err := b.Backend.Synced()
 	if err != nil {
 		return false, fmt.Errorf("Error checking sync status for %d", base)
 	}
@@ -548,14 +547,14 @@ func (s *Swapper) ChainsSynced(ctx context.Context, base, quote uint32) (bool, e
 	if !found {
 		return false, fmt.Errorf("No backend found for %d", base)
 	}
-	quoteSynced, err := q.Backend.Synced(ctx)
+	quoteSynced, err := q.Backend.Synced()
 	if err != nil {
 		return false, fmt.Errorf("Error checking sync status for %d", base)
 	}
 	return quoteSynced, nil
 }
 
-func (s *Swapper) restoreState(ctx context.Context, state *State, allowPartial bool) error {
+func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// State binary version check should be done when State is loaded.
 
 	// Check that the assets required by State are included
@@ -577,7 +576,7 @@ func (s *Swapper) restoreState(ctx context.Context, state *State, allowPartial b
 		swapCoin := ssd.ContractCoinOut
 		if len(swapCoin) > 0 {
 			assetID := ssd.SwapAsset
-			swap, err := s.coins[assetID].Backend.Contract(ctx, swapCoin, ssd.ContractScript)
+			swap, err := s.coins[assetID].Backend.Contract(swapCoin, ssd.ContractScript)
 			if err != nil {
 				return fmt.Errorf("unable to find swap out coin %x for asset %d: %w", swapCoin, assetID, err)
 			}
@@ -591,7 +590,7 @@ func (s *Swapper) restoreState(ctx context.Context, state *State, allowPartial b
 
 		if redeemCoin := ssd.RedeemCoinIn; len(redeemCoin) > 0 {
 			assetID := ssd.RedeemAsset
-			redeem, err := s.coins[assetID].Backend.Redemption(ctx, redeemCoin, cpSwapCoin)
+			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, cpSwapCoin)
 			if err != nil {
 				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %w", redeemCoin, assetID, err)
 			}
@@ -661,9 +660,9 @@ func (s *Swapper) restoreState(ctx context.Context, state *State, allowPartial b
 		rt := waitDat.Msg.Route
 		switch rt {
 		case msgjson.InitRoute:
-			msgErr = s.handleInit(ctx, waitDat.User, waitDat.Msg)
+			msgErr = s.handleInit(waitDat.User, waitDat.Msg)
 		case msgjson.RedeemRoute:
-			msgErr = s.handleRedeem(ctx, waitDat.User, waitDat.Msg)
+			msgErr = s.handleRedeem(waitDat.User, waitDat.Msg)
 		default:
 			log.Errorf("%s is not a route that starts coinwaiters!", rt)
 			continue
@@ -872,6 +871,12 @@ func (s *Swapper) Run(ctx context.Context) {
 	// allows batching the match checks.
 	bcastEventTrigger := bufferedTicker(ctxMaster, s.bTimeout/4)
 
+	processBlockWithTimeout := func(block *blockNotification) {
+		ctxTime, cancelTimeCtx := context.WithTimeout(ctxMaster, 5*time.Second)
+		defer cancelTimeCtx()
+		s.processBlock(ctxTime, block)
+	}
+
 	// Main loop can stop on internal error via cancel(), or when the caller
 	// cancels the parent context triggering graceful shutdown.
 	wgMain.Add(1)
@@ -896,21 +901,7 @@ func (s *Swapper) Run(ctx context.Context) {
 
 				// processBlock will update confirmation times in the swapStatus
 				// structs.
-				//
-				// WARNING! Confirmation checks in processBlock must be quick
-				// because either of the blockNotification or asset.BlockUpdate
-				// channels could fill up and we will miss blocks! The asset
-				// backends should allow a blocking channel, just retrying on
-				// the next block, but that is not a solution.
-				//
-				// TODO: Consider a timeout for the entire processBlock call:
-				//
-				//   ctxTime := context.WithTimeout(ctx, 2*time.Second)
-				//   s.processBlock(ctxTime, block)
-				//
-				// Presently, one stuck backend that hangs on Confirmations
-				// halts the whole DEX! So timeouts on Confirmations too.
-				s.processBlock(ctx, block)
+				processBlockWithTimeout(block)
 
 				// Schedule an inaction check for matches that involve this
 				// asset, as they could be expecting user action within bTimeout
@@ -1485,11 +1476,11 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 // audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
-func (s *Swapper) processInit(ctx context.Context, msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
+func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
-	contract, err := chain.Contract(ctx, params.CoinID, params.Contract)
+	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) {
 			return wait.TryAgain
@@ -1639,7 +1630,7 @@ func (s *Swapper) processInit(ctx context.Context, msg *msgjson.Message, params 
 // processRedeem processes a 'redeem' request from a client. processRedeem does
 // not perform user authentication, which is handled in handleRedeem before
 // processRedeem is invoked. This method is run as a coin waiter.
-func (s *Swapper) processRedeem(ctx context.Context, msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
+func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
 	// TODO(consider): Extract secret from initiator's (maker's) redemption
 	// transaction. The Backend would need a method identify the component of
 	// the redemption transaction that contains the secret and extract it. In a
@@ -1666,7 +1657,7 @@ func (s *Swapper) processRedeem(ctx context.Context, msg *msgjson.Message, param
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
 		return wait.DontTryAgain
 	}
-	redemption, err := chain.Redemption(ctx, params.CoinID, cpSwapCoin)
+	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
@@ -1825,7 +1816,7 @@ func (s *Swapper) processRedeem(ctx context.Context, msg *msgjson.Message, param
 // swap contract script and the CoinID of contract. Most of the work is
 // performed by processInit, but the request is parsed and user is authenticated
 // first.
-func (s *Swapper) handleInit(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	s.handlerMtx.RLock()
 	defer s.handlerMtx.RUnlock() // block shutdown until registered with latencyQ
 	if s.stop {
@@ -1928,7 +1919,7 @@ func (s *Swapper) handleInit(ctx context.Context, user account.AccountID, msg *m
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() bool {
-			done := s.processInit(ctx, msg, params, stepInfo)
+			done := s.processInit(msg, params, stepInfo)
 			if done == wait.DontTryAgain {
 				// It is now either a live acker, or terminally failed.
 				s.rmLiveWaiter(user, msg.ID)
@@ -1950,7 +1941,7 @@ func (s *Swapper) handleInit(ctx context.Context, user account.AccountID, msg *m
 // handleRedeem handles the 'redeem' request from a user. Most of the work is
 // performed by processRedeem, but the request is parsed and user is
 // authenticated first.
-func (s *Swapper) handleRedeem(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	s.handlerMtx.RLock()
 	defer s.handlerMtx.RUnlock() // block shutdown until registered with latencyQ
 	if s.stop {
@@ -2027,7 +2018,7 @@ func (s *Swapper) handleRedeem(ctx context.Context, user account.AccountID, msg 
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() bool {
-			done := s.processRedeem(ctx, msg, params, stepInfo)
+			done := s.processRedeem(msg, params, stepInfo)
 			if done == wait.DontTryAgain {
 				// It is now either a live acker, or terminally failed.
 				s.rmLiveWaiter(user, msg.ID)
@@ -2334,7 +2325,7 @@ func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*mat
 // this is not done, it is possible that an order may be flagged as completed if
 // a swap A completes after Matching and creation of swap B but before Negotiate
 // has a chance to record the new swap.
-func (s *Swapper) Negotiate(ctx context.Context, matchSets []*order.MatchSet, finalSwap map[order.OrderID]bool) {
+func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.OrderID]bool) {
 	// If the Swapper is stopping, the Markets should also be stopping, but
 	// block this just in case.
 	s.handlerMtx.RLock()
@@ -2355,7 +2346,7 @@ func (s *Swapper) Negotiate(ctx context.Context, matchSets []*order.MatchSet, fi
 			return true
 		}
 		maxFeeRate := asset.Asset.MaxFeeRate
-		feeRate, err := asset.Backend.FeeRate(ctx)
+		feeRate, err := asset.Backend.FeeRate()
 		if err != nil {
 			feeRate = maxFeeRate
 			log.Warnf("Unable to determining optimal fee rate for %q, using fallback of %d. Err: %v",

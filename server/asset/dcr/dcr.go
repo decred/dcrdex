@@ -20,11 +20,11 @@ import (
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/server/asset"
-	"github.com/decred/dcrd/blockchain/stake/v2"
+	"github.com/decred/dcrd/blockchain/stake/v3"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrd/hdkeychain/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
@@ -74,8 +74,17 @@ type dcrNode interface {
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
-	GetBestBlockHash(context.Context) (*chainhash.Hash, error)
-	GetBlockChainInfo(context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error)
+	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
+}
+
+// The rpcclient package functions will return a rpcclient.ErrRequestCanceled
+// error if the context is canceled. Translate these to asset.ErrRequestTimeout.
+func translateRPCCancelErr(err error) error {
+	if errors.Is(err, rpcclient.ErrRequestCanceled) {
+		err = asset.ErrRequestTimeout
+	}
+	return err
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching output
@@ -83,6 +92,8 @@ type dcrNode interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
+	ctx context.Context
+	cfg *config
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -104,11 +115,21 @@ type Backend struct {
 // Check that Backend satisfies the Backend interface.
 var _ asset.Backend = (*Backend)(nil)
 
+// unconnectedDCR returns a Backend without a node. The node should be set
+// before use.
+func unconnectedDCR(logger dex.Logger, cfg *config) *Backend {
+	return &Backend{
+		cfg:        cfg,
+		blockCache: newBlockCache(logger),
+		log:        logger,
+		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+	}
+}
+
 // NewBackend is the exported constructor by which the DEX will import the
-// Backend. The provided context.Context should be canceled when the DEX
-// application exits. If configPath is an empty string, the backend will
-// attempt to read the settings directly from the dcrd config file in its
-// default system location.
+// Backend. If configPath is an empty string, the backend will attempt to read
+// the settings directly from the dcrd config file in its default system
+// location.
 func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
@@ -116,24 +137,33 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(logger)
-	// When the exported constructor is used, the node will be an
-	// rpcclient.Client.
-	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
-		cfg.RPCCert)
+	return unconnectedDCR(logger, cfg), nil
+}
+
+func (dcr *Backend) shutdown() {
+	if dcr.client != nil {
+		dcr.client.Shutdown()
+		dcr.client.WaitForShutdown()
+	}
+}
+
+// Connect connects to the node RPC server. A dex.Connector.
+func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	client, err := connectNodeRPC(dcr.cfg.RPCListen, dcr.cfg.RPCUser, dcr.cfg.RPCPass, dcr.cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
+	dcr.client = client
 
 	// Ensure the network of the connected node is correct for the expected
 	// dex.Network.
-	ctx := context.TODO()
 	net, err := dcr.client.GetCurrentNet(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
 	}
 	var wantCurrencyNet wire.CurrencyNet
-	switch network {
+	switch dcr.cfg.Network {
 	case dex.Testnet:
 		wantCurrencyNet = wire.TestNet3
 	case dex.Mainnet:
@@ -142,21 +172,25 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		wantCurrencyNet = wire.SimNet
 	}
 	if net != wantCurrencyNet {
+		dcr.shutdown()
 		return nil, fmt.Errorf("wrong net %v", net.String())
 	}
 
 	// Check the required API versions.
 	versions, err := dcr.client.Version(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("DCR node version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrdjsonrpcapi"]
 	if !exists {
+		dcr.shutdown()
 		return nil, fmt.Errorf("dcrd.Version response missing 'dcrdjsonrpcapi'")
 	}
 	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+		dcr.shutdown()
 		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
 			nodeSemver, requiredNodeVersion)
 	}
@@ -164,18 +198,33 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	dcr.log.Infof("Connected to dcrd (JSON-RPC API v%s) on %v", nodeSemver, net)
 
 	dcr.node = dcr.client
+	dcr.ctx = ctx
+
 	// Prime the cache with the best block.
 	bestHash, _, err := dcr.client.GetBestBlock(ctx)
 	if err != nil {
+		dcr.shutdown()
 		return nil, fmt.Errorf("error getting best block from dcrd: %w", err)
 	}
 	if bestHash != nil {
 		_, err := dcr.getDcrBlock(ctx, bestHash)
 		if err != nil {
+			dcr.shutdown()
 			return nil, fmt.Errorf("error priming the cache: %w", err)
 		}
 	}
-	return dcr, nil
+
+	if _, err = dcr.FeeRate(); err != nil {
+		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.run(ctx)
+	}()
+	return &wg, nil
 }
 
 // InitTxSize is an asset.Backend method that must produce the max size of a
@@ -190,11 +239,11 @@ func (dcr *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
-func (dcr *Backend) FeeRate(ctx context.Context) (uint64, error) {
+func (dcr *Backend) FeeRate() (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
-	dcrPerKB, err := dcr.node.EstimateSmartFee(ctx, 2, chainjson.EstimateSmartFeeConservative)
+	dcrPerKB, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
 	if err != nil {
-		return 0, err
+		return 0, translateRPCCancelErr(err)
 	}
 	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB)
 	if err != nil {
@@ -224,12 +273,12 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 // confirmations. Pubkey scripts can be P2PKH or P2SH in either regular- or
 // stake-tree flavor. P2PKH supports two alternative signatures, Schnorr and
 // Edwards. Multi-sig P2SH redeem scripts are supported as well.
-func (dcr *Backend) Contract(ctx context.Context, coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	output, err := dcr.output(ctx, txHash, vout, redeemScript)
+	output, err := dcr.output(txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
@@ -254,21 +303,21 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 }
 
 // Synced is true if the blockchain is ready for action.
-func (dcr *Backend) Synced(ctx context.Context) (bool, error) {
-	chainInfo, err := dcr.node.GetBlockChainInfo(ctx)
+func (dcr *Backend) Synced() (bool, error) {
+	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
 	if err != nil {
-		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
+		return false, fmt.Errorf("GetBlockChainInfo error: %w", translateRPCCancelErr(err))
 	}
 	return !chainInfo.InitialBlockDownload && chainInfo.Headers-chainInfo.Blocks <= 1, nil
 }
 
 // Redemption is an input that redeems a swap contract.
-func (dcr *Backend) Redemption(ctx context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
+func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding redemption coin ID %x: %w", txHash, err)
 	}
-	input, err := dcr.input(ctx, txHash, vin)
+	input, err := dcr.input(txHash, vin)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +393,7 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	}
 	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, err)
+		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, translateRPCCancelErr(err))
 	}
 	if txOut == nil {
 		return asset.CoinNotFoundError
@@ -356,7 +405,7 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 // output encoded by the given coinID. A non-nil error is returned if the
 // output's pubkey script is not a non-stake P2PKH requiring a single
 // ECDSA-secp256k1 signature.
-func (dcr *Backend) FeeCoin(ctx context.Context, coinID []byte) (addr string, val uint64, confs int64, err error) {
+func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
 	txHash, vout, errCoin := decodeCoinID(coinID)
 	if errCoin != nil {
 		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
@@ -364,7 +413,7 @@ func (dcr *Backend) FeeCoin(ctx context.Context, coinID []byte) (addr string, va
 	}
 
 	var txOut *TxOutData
-	txOut, confs, err = dcr.OutputSummary(ctx, txHash, vout)
+	txOut, confs, err = dcr.OutputSummary(txHash, vout)
 	if err != nil {
 		return
 	}
@@ -392,12 +441,14 @@ type TxOutData struct {
 // value, script type, and number of required signatures, plus the current
 // confirmations of a transaction output. If the output does not exist, an error
 // will be returned. Non-standard scripts are not an error.
-func (dcr *Backend) OutputSummary(ctx context.Context, txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
+func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
 	var verboseTx *chainjson.TxRawResult
-	verboseTx, err = dcr.node.GetRawTransactionVerbose(ctx, txHash)
+	verboseTx, err = dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			err = asset.CoinNotFoundError
+		} else {
+			err = translateRPCCancelErr(err)
 		}
 		return
 	}
@@ -431,13 +482,13 @@ func (dcr *Backend) OutputSummary(ctx context.Context, txHash *chainhash.Hash, v
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
-func (dcr *Backend) transaction(ctx context.Context, txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
+func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
 	// Figure out if it's a stake transaction
 	msgTx, err := msgTxFromHex(verboseTx.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %w", txHash, err)
 	}
-	isStake := stake.DetermineTxType(msgTx) != stake.TxTypeRegular
+	isStake := stake.DetermineTxType(msgTx, true) != stake.TxTypeRegular
 
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
@@ -453,7 +504,7 @@ func (dcr *Backend) transaction(ctx context.Context, txHash *chainhash.Hash, ver
 			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %w", verboseTx.BlockHash, txHash, err)
 		}
 		// Make sure the block info is cached.
-		_, err := dcr.getDcrBlock(ctx, blockHash)
+		_, err := dcr.getDcrBlock(dcr.ctx, blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error caching the block data for transaction %s", txHash)
 		}
@@ -494,28 +545,8 @@ func (dcr *Backend) transaction(ctx context.Context, txHash *chainhash.Hash, ver
 	return newTransaction(txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, isCoinbase, inputs, outputs, feeRate), nil
 }
 
-// Shutdown down the rpcclient.Client.
-func (dcr *Backend) shutdown() {
-	if dcr.client != nil {
-		dcr.client.Shutdown()
-		dcr.client.WaitForShutdown()
-	}
-}
-
-// unconnectedDCR returns a Backend without a node. The node should be set
-// before use.
-func unconnectedDCR(logger dex.Logger) *Backend {
-	return &Backend{
-		blockCache: newBlockCache(logger),
-		log:        logger,
-		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
-	}
-}
-
-// Run processes the queue and monitors the application context. The
-// dcrd-registered handlers should perform any necessary type conversion and
-// then deposit the payload into the anyQ channel.
-func (dcr *Backend) Run(ctx context.Context) {
+// run processes the queue and monitors the application context.
+func (dcr *Backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().
@@ -524,11 +555,6 @@ func (dcr *Backend) Run(ctx context.Context) {
 		dcr.shutdown()
 		wg.Done()
 	}()
-
-	_, err := dcr.FeeRate(ctx)
-	if err != nil {
-		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
-	}
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
@@ -583,12 +609,11 @@ func (dcr *Backend) Run(ctx context.Context) {
 out:
 	for {
 		select {
-
 		case <-blockPoll.C:
 			tip := dcr.blockCache.tip()
 			bestHash, err := dcr.node.GetBestBlockHash(ctx)
 			if err != nil {
-				sendErr(asset.NewConnectionError("error retrieving best block: %v", err))
+				sendErr(asset.NewConnectionError("error retrieving best block: %w", translateRPCCancelErr(err)))
 				continue
 			}
 			if *bestHash == tip.hash {
@@ -598,13 +623,13 @@ out:
 			best := bestHash.String()
 			block, err := dcr.node.GetBlockVerbose(ctx, bestHash, false)
 			if err != nil {
-				sendErrFmt("error retrieving block %s: %v", best, err)
+				sendErrFmt("error retrieving block %s: %w", best, translateRPCCancelErr(err))
 				continue
 			}
 			// If this doesn't build on the best known block, look for a reorg.
 			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
 			if err != nil {
-				sendErrFmt("error parsing previous hash %s: %v", block.PreviousHash, err)
+				sendErrFmt("error parsing previous hash %s: %w", block.PreviousHash, err)
 				continue
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
@@ -625,7 +650,7 @@ out:
 				}
 				iBlock, err := dcr.node.GetBlockVerbose(ctx, iHash, false)
 				if err != nil {
-					sendErrFmt("error retrieving block %s: %v", iHash, err)
+					sendErrFmt("error retrieving block %s: %w", iHash, translateRPCCancelErr(err))
 					break
 				}
 				if iBlock.Confirmations > -1 {
@@ -638,8 +663,8 @@ out:
 				reorgHeight = iBlock.Height
 				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 				if err != nil {
-					sendErrFmt("error decoding previous hash %s for block %s: %v",
-						iBlock.PreviousHash, iHash.String(), err)
+					sendErrFmt("error decoding previous hash %s for block %s: %w",
+						iBlock.PreviousHash, iHash.String(), translateRPCCancelErr(err))
 					// Some blocks on the side chain may not be flagged as
 					// orphaned, but still proceed, flagging the ones we have
 					// identified and adding the new best block to the cache and
@@ -665,41 +690,6 @@ out:
 	}
 	// Wait for the RPC client to shut down.
 	wg.Wait()
-}
-
-// validateTxOut validates an outpoint (txHash:out) by retrieving associated
-// output's pkScript, and if the provided redeemScript is not empty, verifying
-// that the pkScript is a P2SH with a script hash to which the redeem script
-// hashes. This also screens out multi-sig scripts.
-func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
-	_, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
-	if err != nil {
-		return err
-	}
-
-	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, redeemScript)
-	if scriptType == dexdcr.ScriptUnsupported {
-		return dex.UnsupportedScriptError
-	}
-
-	switch {
-	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
-		if len(redeemScript) == 0 {
-			return fmt.Errorf("no redeem script provided for P2SH pkScript")
-		}
-		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
-		if err != nil {
-			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %w", err)
-		}
-		// Check the script hash against the hash of the redeem script.
-		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
-			return fmt.Errorf("redeem script does not match script hash from P2SH pkScript")
-		}
-	case len(redeemScript) > 0:
-		return fmt.Errorf("redeem script provided for non P2SH pubkey script")
-	}
-
-	return nil
 }
 
 // blockInfo returns block information for the verbose transaction data. The
@@ -769,7 +759,7 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 		return nil, immatureTransactionError
 	}
 
-	tx, err := dcr.transaction(ctx, txHash, verboseTx)
+	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
@@ -798,19 +788,19 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 
 // newTXIO creates a TXIO for any transaction, spent or unspent. The caller must
 // set the maturity field.
-func (dcr *Backend) newTXIO(ctx context.Context, txHash *chainhash.Hash) (*TXIO, int64, error) {
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
+func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, 0, asset.CoinNotFoundError
 		}
-		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
-	tx, err := dcr.transaction(ctx, txHash, verboseTx)
+	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %w", err)
 	}
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(ctx, verboseTx)
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(dcr.ctx, verboseTx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -825,8 +815,8 @@ func (dcr *Backend) newTXIO(ctx context.Context, txHash *chainhash.Hash) (*TXIO,
 }
 
 // input gets the transaction input.
-func (dcr *Backend) input(ctx context.Context, txHash *chainhash.Hash, vin uint32) (*Input, error) {
-	txio, _, err := dcr.newTXIO(ctx, txHash)
+func (dcr *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
+	txio, _, err := dcr.newTXIO(txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -840,8 +830,8 @@ func (dcr *Backend) input(ctx context.Context, txHash *chainhash.Hash, vin uint3
 }
 
 // output gets the transaction output.
-func (dcr *Backend) output(ctx context.Context, txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*Output, error) {
-	txio, confs, err := dcr.newTXIO(ctx, txHash)
+func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*Output, error) {
+	txio, confs, err := dcr.newTXIO(txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -910,10 +900,11 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
-	txOut, err := dcr.node.GetTxOut(context.TODO(), txHash, vout, true)
+func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err) // TODO: make RPC error type for client message sanitization
+		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w",
+			txHash, vout, translateRPCCancelErr(err))
 	}
 	if txOut == nil {
 		return nil, nil, asset.CoinNotFoundError
@@ -928,13 +919,13 @@ func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chain
 // Get information for an unspent transaction output, plus the verbose
 // transaction.
 func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
 	return txOut, verboseTx, pkScript, nil
 }
@@ -957,7 +948,7 @@ func (dcr *Backend) getDcrBlock(ctx context.Context, blockHash *chainhash.Hash) 
 	}
 	blockVerbose, err := dcr.node.GetBlockVerbose(ctx, blockHash, false)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
 	}
 	return dcr.blockCache.add(blockVerbose)
 }

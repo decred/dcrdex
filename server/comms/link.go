@@ -4,7 +4,6 @@
 package comms
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -65,11 +64,10 @@ type wsLink struct {
 
 // newWSLink is a constructor for a new wsLink.
 func newWSLink(addr string, conn ws.Connection) *wsLink {
-	ctx := context.TODO()
 	var c *wsLink
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
-			return handleMessage(ctx, c, msg)
+			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
 	}
@@ -102,7 +100,7 @@ func (c *wsLink) Authorized() {
 }
 
 // The WSLink.handler for WSLink.inHandler
-func handleMessage(ctx context.Context, c *wsLink, msg *msgjson.Message) *msgjson.Error {
+func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
 		if msg.ID == 0 {
@@ -115,7 +113,7 @@ func handleMessage(ctx context.Context, c *wsLink, msg *msgjson.Message) *msgjso
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
 		// Handle the request.
-		return handler(ctx, c, msg)
+		return handler(c, msg)
 	case msgjson.Response:
 		// NOTE: In the event of an error, we respond to a response, which makes
 		// no sense. A new mechanism is needed with appropriate client handling.
