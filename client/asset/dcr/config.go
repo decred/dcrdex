@@ -11,7 +11,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
 )
 
 const (
@@ -44,9 +44,9 @@ type Config struct {
 	Context context.Context `ini:"-"`
 }
 
-// loadConfig loads the DCRConfig from a settings map. If no values are found
-// for RPCListen or RPCCert in the specified file, default values will be used.
-// If there is no error, the module-level chainParams variable will be set
+// loadConfig loads the Config from a settings map. If no values are found for
+// RPCListen or RPCCert in the specified file, default values will be used. If
+// there is no error, the module-level chainParams variable will be set
 // appropriately for the network.
 func loadConfig(settings map[string]string, network dex.Network) (*Config, error) {
 	cfg := new(Config)

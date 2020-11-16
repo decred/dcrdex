@@ -13,8 +13,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
@@ -79,13 +78,11 @@ func testAddresses() *tAddrs {
 
 func TestParseScriptType(t *testing.T) {
 	addrs := testAddresses()
-	chainParams := chaincfg.MainNetParams()
 
 	var scriptType DCRScriptType
 	parse := func(addr dcrutil.Address, redeem []byte, stakeOpcode byte) ([]byte, DCRScriptType) {
 		t.Helper()
-		addrV3, _ := dcrutilv3.DecodeAddress(addr.String(), chainParams)
-		pkScript, err := txscript.PayToAddrScript(addrV3)
+		pkScript, err := txscript.PayToAddrScript(addr)
 		if err != nil {
 			t.Fatalf("error creating script for address %s: %v", addr, err)
 		}
@@ -314,8 +311,6 @@ func Test_nonstandardScript(t *testing.T) {
 
 func TestExtractScriptAddrs(t *testing.T) {
 	addrs := testAddresses()
-	chainParams := chaincfg.MainNetParams()
-
 	type test struct {
 		addr   dcrutil.Address
 		nonStd bool
@@ -335,8 +330,7 @@ func TestExtractScriptAddrs(t *testing.T) {
 	for _, tt := range tests {
 		s := tt.script
 		if s == nil {
-			addrV3, _ := dcrutilv3.DecodeAddress(tt.addr.String(), chainParams)
-			s, _ = txscript.PayToAddrScript(addrV3)
+			s, _ = txscript.PayToAddrScript(tt.addr)
 		}
 		scriptAddrs, nonStd, err := ExtractScriptAddrs(s, tParams)
 		if err != nil {
@@ -406,7 +400,6 @@ func TestExtractSwapDetails(t *testing.T) {
 
 func TestInputInfo(t *testing.T) {
 	addrs := testAddresses()
-	chainParams := chaincfg.MainNetParams()
 	var spendInfo *SpendInfo
 	var err error
 
@@ -421,8 +414,7 @@ func TestInputInfo(t *testing.T) {
 
 	var script []byte
 	payToAddr := func(addr dcrutil.Address, redeem []byte) {
-		addr3, _ := dcrutilv3.DecodeAddress(addr.String(), chainParams)
-		script, _ = txscript.PayToAddrScript(addr3)
+		script, _ = txscript.PayToAddrScript(addr)
 		spendInfo, err = InputInfo(script, redeem, tParams)
 		if err != nil {
 			t.Fatalf("InputInfo script: %v", err)
@@ -442,8 +434,7 @@ func TestInputInfo(t *testing.T) {
 	}
 
 	// InputInfo P2SH requires a redeem script
-	addr3, _ := dcrutilv3.DecodeAddress(addrs.sh.String(), chainParams)
-	script, _ = txscript.PayToAddrScript(addr3)
+	script, _ = txscript.PayToAddrScript(addrs.sh)
 	_, err = InputInfo(script, nil, tParams)
 	if err == nil {
 		t.Fatalf("no error for missing redeem script")
@@ -499,7 +490,6 @@ func TestFindKeyPush(t *testing.T) {
 
 func TestExtractContractHash(t *testing.T) {
 	addrs := testAddresses()
-	chainParams := chaincfg.MainNetParams()
 	// non-hex
 	_, err := ExtractContractHash("zz")
 	if err == nil {
@@ -516,15 +506,13 @@ func TestExtractContractHash(t *testing.T) {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// wrong script types
-	addrV3, _ := dcrutilv3.DecodeAddress(addrs.pkh.String(), chainParams)
-	p2pkh, _ := txscript.PayToAddrScript(addrV3)
+	p2pkh, _ := txscript.PayToAddrScript(addrs.pkh)
 	_, err = ExtractContractHash(hex.EncodeToString(p2pkh))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// ok
-	addrV3, _ = dcrutilv3.DecodeAddress(addrs.sh.String(), chainParams)
-	p2sh, _ := txscript.PayToAddrScript(addrV3)
+	p2sh, _ := txscript.PayToAddrScript(addrs.sh)
 	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh))
 	if err != nil {
 		t.Fatalf("error extracting contract hash: %v", err)

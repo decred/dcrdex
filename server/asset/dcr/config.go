@@ -4,14 +4,13 @@
 package dcr
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -30,8 +29,8 @@ var (
 	defaultConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
 )
 
-// DCRConfig is passed to the constructor.
-type DCRConfig struct {
+type config struct {
+	Network dex.Network
 	// RPCUser is the RPC username provided to dcrd configuration as the rpcuser
 	// parameter.
 	RPCUser string `long:"rpcuser" description:"Username for RPC connections"`
@@ -45,21 +44,19 @@ type DCRConfig struct {
 	// RPCCert is the filepath to the dcrd TLS certificate. If it is not
 	// provided, the default dcrd location will be assumed.
 	RPCCert string `long:"rpccert" description:"File containing the certificate file"`
-	// Context should be canceled when the program exits. This will cause some
-	// cleanup to be performed during shutdown.
-	Context context.Context
 }
 
-// loadConfig loads the DCRConfig from file. If no values are found for
+// loadConfig loads the config from file. If no values are found for
 // RPCListen or RPCCert in the specified file, default values will be used. If
 // configPath is an empty string, loadConfig will attempt to read settings
 // directly from the default dcrd.conf file path. If there is no error, the
 // module-level chainParams variable will be set appropriately for the network.
-func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
-	// Check for missing credentials. The user and password must be set.
-	cfg := new(DCRConfig)
+func loadConfig(configPath string, network dex.Network) (*config, error) {
+	cfg := &config{
+		Network: network,
+	}
 
-	// Since we are not reading command-line arguments, and the DCRConfig fields
+	// Since we are not reading command-line arguments, and the config fields
 	// share names with the dcrd configuration options, passing just
 	// IgnoreUnknown allows us to have the option to read directly from the
 	// dcrd.conf file.
@@ -72,14 +69,15 @@ func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("no %q config file found at %s", assetName, configPath)
-	} else {
-		// The config file exists, so attempt to parse it.
-		err = flags.NewIniParser(parser).ParseFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing %q ini file: %w", assetName, err)
-		}
 	}
 
+	// The config file exists, so attempt to parse it.
+	err := flags.NewIniParser(parser).ParseFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing %q ini file: %w", assetName, err)
+	}
+
+	// Check for missing credentials. The user and password must be set.
 	missing := ""
 	if cfg.RPCUser == "" {
 		missing += " username"

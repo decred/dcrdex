@@ -27,7 +27,7 @@ import (
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
-	Route(route string, handler func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error)
+	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Suspended(user account.AccountID) (found, suspended bool)
 	Sign(...msgjson.Signable) error
@@ -87,7 +87,7 @@ type MarketTunnel interface {
 	// unbooked (removed from the in-memory book, revoked in the DB, a
 	// cancellation marked against the user, coins unlocked, and orderbook
 	// subscribers notified). See Unbook for details.
-	CheckUnfilled(ctx context.Context, assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
+	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -168,10 +168,16 @@ func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr 
 	}
 }
 
+func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return backend.FundingCoin(ctx, coinID, redeemScript)
+}
+
 // handleLimit is the handler for the 'limit' route. This route accepts a
 // msgjson.Limit payload, validates the information, constructs an
 // order.LimitOrder and submits it to the epoch queue.
-func (r *OrderRouter) handleLimit(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	limit := new(msgjson.LimitOrder)
 	err := json.Unmarshal(msg.Payload, limit)
 	if err != nil {
@@ -212,7 +218,7 @@ func (r *OrderRouter) handleLimit(ctx context.Context, user account.AccountID, m
 			limit.Rate, coins.quote.RateStep)
 	}
 
-	rpcErr = r.checkPrefixTrade(ctx, coins, &limit.Prefix, &limit.Trade, true)
+	rpcErr = r.checkPrefixTrade(coins, &limit.Prefix, &limit.Trade, true)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -300,9 +306,14 @@ func (r *OrderRouter) handleLimit(ctx context.Context, user account.AccountID, m
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
 		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
-			dexCoin, err := fundingAsset.Backend.FundingCoin(ctx, coin.ID, coin.Redeem)
+			dexCoin, err := fundingCoin(fundingAsset.Backend, coin.ID, coin.Redeem)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				if errors.Is(err, asset.ErrRequestTimeout) {
+					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
+						coin.ID, fundingAsset.Symbol)
 					return true, nil
 				}
 				log.Errorf("Error retreiving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
@@ -384,7 +395,7 @@ func (r *OrderRouter) handleLimit(ctx context.Context, user account.AccountID, m
 // handleMarket is the handler for the 'market' route. This route accepts a
 // msgjson.MarketOrder payload, validates the information, constructs an
 // order.MarketOrder and submits it to the epoch queue.
-func (r *OrderRouter) handleMarket(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	market := new(msgjson.MarketOrder)
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
@@ -417,7 +428,7 @@ func (r *OrderRouter) handleMarket(ctx context.Context, user account.AccountID, 
 
 	// Passing sell as the checkLot parameter causes the lot size check to be
 	// ignored for market buy orders.
-	rpcErr = r.checkPrefixTrade(ctx, assets, &market.Prefix, &market.Trade, sell)
+	rpcErr = r.checkPrefixTrade(assets, &market.Prefix, &market.Trade, sell)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -483,9 +494,14 @@ func (r *OrderRouter) handleMarket(ctx context.Context, user account.AccountID, 
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
 		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
-			dexCoin, err := fundingAsset.Backend.FundingCoin(ctx, coin.ID, coin.Redeem)
+			dexCoin, err := fundingCoin(fundingAsset.Backend, coin.ID, coin.Redeem)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				if errors.Is(err, asset.ErrRequestTimeout) {
+					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
+						coin.ID, fundingAsset.Symbol)
 					return true, nil
 				}
 				log.Errorf("Error retreiving market order funding coin ID %s. user = %s: %v", coin.ID, user, err)
@@ -579,7 +595,7 @@ func (r *OrderRouter) handleMarket(ctx context.Context, user account.AccountID, 
 // handleCancel is the handler for the 'cancel' route. This route accepts a
 // msgjson.Cancel payload, validates the information, constructs an
 // order.CancelOrder and submits it to the epoch queue.
-func (r *OrderRouter) handleCancel(_ context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	cancel := new(msgjson.CancelOrder)
 	err := json.Unmarshal(msg.Payload, cancel)
 	if err != nil {
@@ -784,7 +800,7 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 
 // checkPrefixTrade validates the information in the prefix and trade portions
 // of an order.
-func (r *OrderRouter) checkPrefixTrade(ctx context.Context, assets *assetSet, prefix *msgjson.Prefix,
+func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
 	trade *msgjson.Trade, checkLot bool) *msgjson.Error {
 	// Check that the client's timestamp is still valid.
 	rpcErr := checkTimes(prefix)
@@ -826,7 +842,7 @@ func (r *OrderRouter) checkPrefixTrade(ctx context.Context, assets *assetSet, pr
 	var user account.AccountID
 	copy(user[:], prefix.AccountID)
 	for mktName, tunnel := range r.tunnels {
-		unbookedUnfunded := tunnel.CheckUnfilled(ctx, assets.funding.ID, user)
+		unbookedUnfunded := tunnel.CheckUnfilled(assets.funding.ID, user)
 		for _, badLo := range unbookedUnfunded {
 			log.Infof("Unbooked unfunded order %v from market %s for user %v", badLo, mktName, user)
 		}
@@ -844,8 +860,8 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 	return b
 }
 
-// fmtCoinID formats the coin ID by asset. If an error is encounted, the coinID
-// string returned hex-encoded and prepended with "unparsed:".
+// fmtCoinID formats the coin ID by asset. If an error is encountered, the
+// coinID string returned hex-encoded and prepended with "unparsed:".
 func fmtCoinID(symbol string, coinID []byte) string {
 	strID, err := asset.DecodeCoinID(symbol, coinID)
 	if err != nil {

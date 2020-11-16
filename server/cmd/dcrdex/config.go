@@ -26,7 +26,7 @@ import (
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
-	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
 	flags "github.com/jessevdk/go-flags"
 )
 

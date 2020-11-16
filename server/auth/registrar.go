@@ -4,7 +4,6 @@
 package auth
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -25,7 +24,7 @@ var (
 )
 
 // handleRegister handles requests to the 'register' route.
-func (auth *AuthManager) handleRegister(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	register := new(msgjson.Register)
 	err := json.Unmarshal(msg.Payload, &register)
@@ -103,7 +102,7 @@ func (auth *AuthManager) handleRegister(_ context.Context, conn comms.Link, msg 
 }
 
 // handleNotifyFee handles requests to the 'notifyfee' route.
-func (auth *AuthManager) handleNotifyFee(ctx context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	notifyFee := new(msgjson.NotifyFee)
 	err := json.Unmarshal(msg.Payload, &notifyFee)
@@ -187,7 +186,7 @@ func (auth *AuthManager) handleNotifyFee(ctx context.Context, conn comms.Link, m
 	auth.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			res := auth.validateFee(ctx, conn, acctID, notifyFee, msg.ID, notifyFee.CoinID, regAddr)
+			res := auth.validateFee(conn, acctID, notifyFee, msg.ID, notifyFee.CoinID, regAddr)
 			if res == wait.DontTryAgain {
 				removeWaiter()
 			}
@@ -203,8 +202,8 @@ func (auth *AuthManager) handleNotifyFee(ctx context.Context, conn comms.Link, m
 
 // validateFee is a coin waiter that validates a client's notifyFee request and
 // responds with an Acknowledgement.
-func (auth *AuthManager) validateFee(ctx context.Context, conn comms.Link, acctID account.AccountID, notifyFee *msgjson.NotifyFee, msgID uint64, coinID []byte, regAddr string) bool {
-	addr, val, confs, err := auth.checkFee(ctx, coinID)
+func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, notifyFee *msgjson.NotifyFee, msgID uint64, coinID []byte, regAddr string) bool {
+	addr, val, confs, err := auth.checkFee(coinID)
 	if err != nil || confs < auth.feeConfs {
 		return wait.TryAgain
 	}

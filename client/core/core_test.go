@@ -446,7 +446,7 @@ func (c *tCoin) Value() uint64 {
 	return c.val
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 	c.confsMtx.RLock()
 	defer c.confsMtx.RUnlock()
 	return c.confs, c.confsErr
@@ -681,7 +681,7 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
+func (w *TXCWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
 	return 0, nil
 }
 
