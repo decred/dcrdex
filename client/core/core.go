@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -1827,8 +1828,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Prepare and sign the registration payload.
 	// The account ID is generated from the public key.
+	pkBytes := privKey.PubKey().SerializeCompressed()
 	dexReg := &msgjson.Register{
-		PubKey: privKey.PubKey().SerializeCompressed(),
+		PubKey: pkBytes,
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
@@ -1860,8 +1862,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	// Pay the registration fee.
-	c.log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
-		regRes.Fee, regAsset.Symbol)
+	acctID := account.NewID(pkBytes)
+	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
+		"Do NOT manually send funds to this address even if this fails.",
+		regRes.Address, acctID, regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
