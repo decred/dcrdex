@@ -56,33 +56,6 @@ div.popupforms {
   z-index: 100;
 }
 
-#marketChart {
-  position: relative;
-  background-color: white;
-  height: 40%;
-  border-bottom: 1px solid #626262;
-}
-
-#marketLoader {
-  z-index: 50;
-  background-color: rgba(0, 0, 0, 0.5);
-}
-
-#marketLoader > div {
-  width: 40px;
-  height: 40px;
-  font-size: 40px;
-}
-
-#chartResizer {
-  position: absolute;
-  bottom: 0;
-  height: 6px;
-  width: 100%;
-  z-index: 2;
-  cursor: ns-resize;
-}
-
 table.ordertable {
   border-collapse: collapse;
   border: none;
@@ -108,56 +81,13 @@ table.ordertable {
     border-bottom: 1px solid #b3b3b3;
   }
 
-  tbody > tr:hover {
-    background-color: $light_bg_1;
+  tbody > tr:hover,
+  tbody > tr.hover {
+    background-color: white;
   }
 
   .ico-check {
     color: #9b8c09;
-  }
-}
-
-.markettab {
-  background-color: transparent;
-  border-right: 1px solid black;
-  border-radius: 4px 4px 0 0;
-}
-
-.markettab.selected {
-  background-color: #f9f9f9;
-}
-
-.brdrleft {
-  border-left: 1px solid #6a6a6a;
-}
-
-.brdrright {
-  border-right: 1px solid #6a6a6a;
-}
-
-.market-bal {
-  border: 1px solid #6a6a6a;
-  border-radius: 3px;
-}
-
-.market-bal-lbl {
-  display: block;
-  position: absolute;
-  left: 10px;
-  top: -11px;
-  padding: 0 3px;
-  font-size: 16px;
-  font-family: 'demi-sans', sans-serif;
-  background-color: $light_bg_1;
-}
-
-.market-header {
-  height: 30px;
-  background-color: $light_bg_2;
-  color: #222;
-
-  button.selected {
-    color: black;
   }
 }
 
@@ -242,42 +172,13 @@ table.balance-table button:hover {
   border-color: #959595;
 }
 
-#orders {
-  .ico-unlocked {
-    color: #1e7d11;
-  }
-}
+.market-header {
+  height: 30px;
+  background-color: $light_bg_2;
+  color: #222;
 
-#loaderMsg {
-  color: #777;
-}
-
-#registrationStatus {
-  .title {
-    font-weight: bold;
-    margin-bottom: 5px;
-  }
-
-  &.waiting {
-    .title {
-      color: #9b8c09;
-    }
-  }
-
-  &.completed {
-    .title {
-      color: #5cba8b;
-    }
-
-    #regStatusMessage {
-      display: none;
-    }
-  }
-
-  &.error {
-    .title {
-      color: red;
-    }
+  button.selected {
+    color: black;
   }
 }
 
@@ -335,6 +236,151 @@ table.balance-table button:hover {
 
   #orderPreview {
     height: 21px;
+  }
+}
+
+#marketChart {
+  position: relative;
+  background-color: white;
+  height: 40%;
+  border-bottom: 1px solid #626262;
+  padding-top: 20px;
+
+  .chart-legend {
+    display: flex;
+    align-items: center;
+    position: absolute;
+    top: 0;
+    left: 50px;
+    right: 0;
+    height: 30px;
+    font-size: 14px;
+    color: #444;
+
+    .epoch-line {
+      display: inline-block;
+      border-top: 3px dotted #626262;
+      width: 25px;
+      height: 0;
+      margin-right: 5px;
+      position: relative;
+      top: 1px;
+    }
+
+    .category-spacer {
+      display: inline-block;
+      margin: 0 7px;
+      position: relative;
+      bottom: 2px;
+
+      &::after {
+        content: '|';
+      }
+    }
+
+    button {
+      border-left: 1px solid #333;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: transparent;
+      padding: 0 10px;
+      color: #999;
+    }
+  }
+}
+
+#marketLoader {
+  z-index: 50;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+#marketLoader > div {
+  width: 40px;
+  height: 40px;
+  font-size: 40px;
+}
+
+#chartResizer {
+  position: absolute;
+  bottom: 0;
+  height: 6px;
+  width: 100%;
+  z-index: 2;
+  cursor: ns-resize;
+}
+
+.markettab {
+  background-color: transparent;
+  border-right: 1px solid black;
+  border-radius: 4px 4px 0 0;
+}
+
+.markettab.selected {
+  background-color: #f9f9f9;
+}
+
+.brdrleft {
+  border-left: 1px solid #6a6a6a;
+}
+
+.brdrright {
+  border-right: 1px solid #6a6a6a;
+}
+
+.market-bal {
+  border: 1px solid #6a6a6a;
+  border-radius: 3px;
+}
+
+.market-bal-lbl {
+  display: block;
+  position: absolute;
+  left: 10px;
+  top: -11px;
+  padding: 0 3px;
+  font-size: 16px;
+  font-family: 'demi-sans', sans-serif;
+  background-color: $light_bg_1;
+}
+
+#orders {
+  .ico-unlocked {
+    color: #1e7d11;
+  }
+}
+
+#loaderMsg {
+  color: #777;
+}
+
+#registrationStatus {
+  .title {
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+
+  &.waiting {
+    .title {
+      color: #9b8c09;
+    }
+  }
+
+  &.completed {
+    .title {
+      color: #5cba8b;
+    }
+
+    #regStatusMessage {
+      display: none;
+    }
+  }
+
+  &.error {
+    .title {
+      color: red;
+    }
   }
 }
 

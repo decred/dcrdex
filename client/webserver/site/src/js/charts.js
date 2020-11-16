@@ -43,7 +43,7 @@ const lightTheme = {
 
 // DepthChart is a javascript Canvas-based depth chart renderer.
 export class DepthChart {
-  constructor (parent, reporters) {
+  constructor (parent, reporters, zoom) {
     this.theme = State.isDark() ? darkTheme : lightTheme
     this.canvas = document.createElement('canvas')
     this.parent = parent
@@ -53,9 +53,14 @@ export class DepthChart {
     this.ctx.textBaseline = 'middle'
     this.book = null
     this.dataExtents = null
-    this.zoomLevel = null
+    this.zoomLevel = zoom
     this.lotSize = null
     this.rateStep = null
+    this.lines = []
+    this.markers = {
+      buys: [],
+      sells: []
+    }
     parent.appendChild(this.canvas)
     // Mouse handling
     this.mousePos = null
@@ -92,7 +97,7 @@ export class DepthChart {
   // resize_ is a 'resize' event handler.
   resize_ () {
     this.canvas.width = this.parent.clientWidth
-    this.canvas.height = this.parent.clientHeight
+    this.canvas.height = this.parent.clientHeight - 20 // magic number derived from a soup of css values.
     const xLblHeight = 30
     const yGuess = 40 // y label width guess. Will be adjusted when drawn.
     const plotExtents = new Extents(yGuess, this.canvas.width, 10, this.canvas.height - xLblHeight)
@@ -124,6 +129,7 @@ export class DepthChart {
     this.zoomLevel *= bigger ? 2 / 3 : 3 / 2
     this.zoomLevel = clamp(this.zoomLevel, 0.005, 2)
     this.draw()
+    this.reporters.zoom(this.zoomLevel)
   }
 
   // click is the canvas 'click' event handler.
@@ -134,7 +140,7 @@ export class DepthChart {
     if (this.zoomInBttn.contains(x, y)) { this.zoom(true); return }
     if (this.zoomOutBttn.contains(x, y)) { this.zoom(false); return }
     const translator = this.plotRegion.translator(this.dataExtents)
-    this.reporters.price(translator.unx(x))
+    this.reporters.click(translator.unx(x))
   }
 
   // clear the canvas.
@@ -149,11 +155,13 @@ export class DepthChart {
     this.rateStep = rateStep / 1e8
     this.baseTicker = book.baseSymbol.toUpperCase()
     this.quoteTicker = book.quoteSymbol.toUpperCase()
-    const [midGap, gapWidth] = this.gap()
-    // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing
-    // the hard cap of 200%.
-    const minZoom = Math.max(gapWidth / midGap * 5, 0.05)
-    this.zoomLevel = Math.min(minZoom, 2)
+    if (!this.zoomLevel) {
+      const [midGap, gapWidth] = this.gap()
+      // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing
+      // the hard cap of 200%.
+      const minZoom = Math.max(gapWidth / midGap * 5, 0.05)
+      this.zoomLevel = Math.min(minZoom, 2)
+    }
     this.draw()
   }
 
@@ -181,40 +189,71 @@ export class DepthChart {
     const high = midGap + halfWindow
     const low = midGap - halfWindow
 
+    // Get a sorted copy of the markers list.
+    const buyMarkers = [...this.markers.buys]
+    const sellMarkers = [...this.markers.sells]
+    buyMarkers.sort((a, b) => b.rate - a.rate)
+    sellMarkers.sort((a, b) => a.rate - b.rate)
+    const markers = []
+
     const buyDepth = []
     const buyEpoch = []
     const sellDepth = []
     const sellEpoch = []
+    const volumeReport = {
+      buyBase: 0,
+      buyQuote: 0,
+      sellBase: 0,
+      sellQuote: 0
+    }
     var sum = 0
     // The epoch line is above the non-epoch region, so the epochSum y value
     // must account for non-epoch orders too.
     var epochSum = 0
+
     for (let i = 0; i < buys.length; i++) {
-      const pt = buys[i]
-      epochSum += pt.qty
-      buyEpoch.push([pt.rate, epochSum])
-      if (!pt.epoch) {
-        sum += pt.qty
-        buyDepth.push([pt.rate, sum])
+      const ord = buys[i]
+      epochSum += ord.qty
+      if (ord.rate >= low) buyEpoch.push([ord.rate, epochSum])
+      if (ord.epoch) continue
+      sum += ord.qty
+      buyDepth.push([ord.rate, sum])
+      volumeReport.buyBase += ord.qty
+      volumeReport.buyQuote += ord.qty * ord.rate
+      while (buyMarkers.length && floatCompare(buyMarkers[0].rate, ord.rate)) {
+        const mark = buyMarkers.shift()
+        markers.push({
+          rate: mark.rate,
+          qty: ord.epoch ? epochSum : sum,
+          sell: ord.sell,
+          active: mark.active
+        })
       }
-      if (pt.rate < low) break
     }
     const buySum = buyDepth.length ? last(buyDepth)[1] : 0
     buyDepth.push([low, buySum])
     const epochBuySum = buyEpoch.length ? last(buyEpoch)[1] : 0
     buyEpoch.push([low, epochBuySum])
 
-    sum = 0
-    epochSum = 0
+    epochSum = sum = 0
     for (let i = 0; i < sells.length; i++) {
-      const pt = sells[i]
-      epochSum += pt.qty
-      sellEpoch.push([pt.rate, epochSum])
-      if (!pt.epoch) {
-        sum += pt.qty
-        sellDepth.push([pt.rate, sum])
+      const ord = sells[i]
+      epochSum += ord.qty
+      if (ord.rate <= high) sellEpoch.push([ord.rate, epochSum])
+      if (ord.epoch) continue
+      sum += ord.qty
+      sellDepth.push([ord.rate, sum])
+      volumeReport.sellBase += ord.qty
+      volumeReport.sellQuote += ord.qty * ord.rate
+      while (sellMarkers.length && floatCompare(sellMarkers[0].rate, ord.rate)) {
+        const mark = sellMarkers.shift()
+        markers.push({
+          rate: mark.rate,
+          qty: ord.epoch ? epochSum : sum,
+          sell: ord.sell,
+          active: mark.active
+        })
       }
-      if (pt.rate > high) break
     }
     // Add a data point going to the left so that the data doesn't end with a
     // vertical line.
@@ -223,8 +262,10 @@ export class DepthChart {
     const epochSellSum = sellEpoch.length ? last(sellEpoch)[1] : 0
     sellEpoch.push([high, epochSellSum])
 
-    // Add 5% padding to the top of the chart.
-    const maxY = epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) * 1.05 : epochSellSum || epochBuySum || 1
+    // Add ~30px padding to the top of the chart.
+    const h = this.xRegion.extents.y.min
+    const growthFactor = (h + 30) / h
+    const maxY = (epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) : epochSellSum || epochBuySum || 1) * growthFactor
 
     const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
@@ -237,15 +278,15 @@ export class DepthChart {
     const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min,
       dataExtents.y.max, 50, this.lotSize, this.book.baseSymbol)
     // Reassign the width of the y-label column to accommodate the widest text.
-    const newWidth = yLabels.widest * 1.5
-    this.yRegion.extents.x.max = newWidth
-    this.plotRegion.extents.x.min = newWidth
-    this.xRegion.extents.x.min = newWidth
+    const yAxisWidth = yLabels.widest * 1.5
+    this.yRegion.extents.x.max = yAxisWidth
+    this.plotRegion.extents.x.min = yAxisWidth
+    this.xRegion.extents.x.min = yAxisWidth
     const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
       dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
 
     // A function to be run at the end if there is legend data to display.
-    var legendData
+    var mouseData
 
     // Draw the grid.
     ctx.lineWidth = 1
@@ -333,12 +374,52 @@ export class DepthChart {
         ctx.fillText(plusChar, this.zoomInBttn.extents.midX, this.zoomInBttn.extents.midY)
       })
 
+      // Draw a dotted vertical line where the mouse is, and a dot at the level
+      // of the depth line.
+      const drawLine = (x, color) => {
+        if (x > high || x < low) return
+        ctx.save()
+        ctx.setLineDash([3, 5])
+        ctx.lineWidth = 1.5
+        ctx.strokeStyle = color
+        line(ctx, tools.x(x), tools.y(0), tools.x(x), tools.y(maxY))
+        ctx.restore()
+      }
+
+      for (const line of this.lines || []) {
+        drawLine(line.rate, line.color)
+      }
+
+      const tolerance = (high - low) * 0.005
+      const hoverMarkers = []
+      for (const marker of markers || []) {
+        const hovered = (mousePos && withinTolerance(marker.rate, tools.unx(mousePos.x), tolerance))
+        if (hovered) hoverMarkers.push(marker.rate)
+        ctx.save()
+        ctx.lineWidth = (hovered || marker.active) ? 5 : 3
+        ctx.strokeStyle = marker.sell ? this.theme.sellLine : this.theme.buyLine
+        ctx.fillStyle = marker.sell ? this.theme.sellFill : this.theme.buyFill
+        const size = (hovered || marker.active) ? 10 : 8
+        ctx.beginPath()
+        const tip = {
+          x: tools.x(marker.rate),
+          y: tools.y(marker.qty) - 8
+        }
+        const top = tip.y - (Math.sqrt(3) * size / 2) // cos(30)
+        ctx.moveTo(tip.x, tip.y)
+        ctx.lineTo(tip.x - size / 2, top)
+        ctx.lineTo(tip.x + size / 2, top)
+        ctx.closePath()
+        ctx.stroke()
+        ctx.fill()
+        ctx.restore()
+      }
+
       // If the mouse is in the chart area, draw the crosshairs.
       if (!mousePos) return
       if (!this.plotRegion.contains(mousePos.x, mousePos.y)) return
       // The mouse is in the plot region. Get the data coordinates and find the
       // side and depth for the x value.
-
       const dataX = tools.unx(mousePos.x)
       let evalSide = sellDepth
       let trigger = (ptX) => ptX >= dataX
@@ -354,16 +435,13 @@ export class DepthChart {
         if (trigger(pt[0])) break
         bestDepth = pt
       }
-      // Draw a dotted vertical line where the mouse is, and a dot at the level
-      // of the depth line.
-      ctx.setLineDash([3, 5])
-      ctx.lineWidth = 1
-      ctx.strokeStyle = this.theme.crosshairs
-      line(ctx, tools.x(dataX), tools.y(0), tools.x(dataX), tools.y(maxY))
-      legendData = {
-        dataX: dataX,
+      drawLine(dataX, this.theme.crosshairs, true)
+      mouseData = {
+        rate: dataX,
         depth: bestDepth[1],
-        dotColor: dotColor
+        dotColor: dotColor,
+        yAxisWidth: yAxisWidth,
+        hoverMarkers: hoverMarkers
       }
     })
 
@@ -423,76 +501,17 @@ export class DepthChart {
     ctx.strokeStyle = this.theme.buyLine
     this.drawDepth(buyDepth)
 
-    // Draw the epoch line legend
-    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
-      const fontSize = 14
-      ctx.font = `${fontSize}px 'sans', sans-serif`
-      // Top-left corner is at (5, 5) from top left of plot region.
-      const topLeft = {
-        x: tools.x(0) + 5,
-        y: tools.y(1) + 5
-      }
-
-      // Get the label metrics to plan the box.
-      const lbl = 'epoch'
-      const textMetrics = ctx.measureText(lbl)
-      const padding = 10
-      const halfWidth = textMetrics.width + padding
-      const topCenter = {
-        x: topLeft.x + halfWidth,
-        y: topLeft.y
-      }
-
-      // Draw the legend background.
-      ctx.fillStyle = this.theme.legendFill
-      ctx.globalAlpha = 0.9
-      ctx.fillRect(topLeft.x, topCenter.y, halfWidth * 2, fontSize * 2)
-
-      // Draw the dashed line.
-      const lineY = topCenter.y + fontSize
-      this.ctx.lineWidth = 1.5
-      ctx.setLineDash([3, 3])
-      ctx.strokeStyle = this.theme.legendText
-      line(ctx, topLeft.x + padding, lineY, topCenter.x - padding, lineY)
-
-      // Write the text.
-      ctx.fillStyle = this.theme.legendText
-      ctx.fillText(lbl, topCenter.x + (textMetrics.width / 2), topCenter.y + fontSize + 1)
-    })
-
-    // If there is legend data to display, run that now.
-    // dot(ctx, tools.x(dataX), tools.y(bestDepth[1]), dotColor, 5)
-    if (legendData) {
-      const dataX = legendData.dataX
+    // Display the dot at the intersection of the mouse hover line and the depth
+    // line. This should be drawn after the depths.
+    if (mouseData) {
       this.plotRegion.plot(dataExtents, (ctx, tools) => {
-        const screenX = tools.x(dataX)
-        dot(ctx, screenX, tools.y(legendData.depth), legendData.dotColor, 5)
-        // Create the strings and measure them to check how wide our legend needs
-        // to be.
-        const price = `price: ${formatLabelValue(dataX)} ${this.quoteTicker}`
-        const volume = `depth: ${formatLabelValue(legendData.depth)} ${this.baseTicker}`
-        ctx.font = '14px \'sans\', sans-serif'
-        const boxWidth = widest(ctx, price, volume) * 1.3
-
-        // Draw the little black semi-transparent background.
-        const rectH = 60
-        let rectTop = tools.y(legendData.depth) - rectH / 2
-        const extY = this.plotRegion.extents.y
-        rectTop = rectTop <= extY.min + 5 ? extY.min + 5 : rectTop
-        rectTop = rectTop > extY.max - rectH - 5 ? extY.max - rectH - 5 : rectTop
-        const left = dataX < midGap ? screenX + 10 : screenX - 10 - boxWidth
-        ctx.fillStyle = this.theme.legendFill
-        ctx.globalAlpha = 0.85
-        ctx.fillRect(left, rectTop, boxWidth, rectH)
-        ctx.globalAlpha = 1
-
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'top'
-        ctx.fillStyle = this.theme.legendText
-        ctx.fillText(price, left + boxWidth * 0.12, rectTop + 12)
-        ctx.fillText(volume, left + boxWidth * 0.12, rectTop + 37)
+        dot(ctx, tools.x(mouseData.rate), tools.y(mouseData.depth), mouseData.dotColor, 5)
       })
     }
+
+    // Report the book volumes.
+    this.reporters.volume(volumeReport)
+    this.reporters.mouse(mouseData)
   }
 
   // Draw a single side's depth chart data.
@@ -531,6 +550,14 @@ export class DepthChart {
       return [s.rate, 0]
     } else if (!s) return [b.rate, 0]
     return [(s.rate + b.rate) / 2, s.rate - b.rate]
+  }
+
+  setLines (lines) {
+    this.lines = lines
+  }
+
+  setMarkers (markers) {
+    this.markers = markers
   }
 }
 
@@ -734,16 +761,6 @@ function dot (ctx, x, y, color, radius) {
   ctx.fill()
 }
 
-// widest uses the measureText method of the provided context sequentially on
-// the provided strings to calculate the widest rendering.
-function widest (ctx, ...texts) {
-  var wide = 0
-  texts.forEach(txt => {
-    wide = Math.max(wide, ctx.measureText(txt).width)
-  })
-  return wide
-}
-
 function clamp (v, min, max) {
   if (v < min) return min
   if (v > max) return max
@@ -759,4 +776,12 @@ const labelSpecs = {
 // formatLabelValue formats the provided value using the labelSpecs format.
 function formatLabelValue (x) {
   return x.toLocaleString('en-us', labelSpecs)
+}
+
+function floatCompare (a, b) {
+  return withinTolerance(a, b, 1e-8)
+}
+
+function withinTolerance (a, b, tolerance) {
+  return Math.abs(a - b) < Math.abs(tolerance)
 }
