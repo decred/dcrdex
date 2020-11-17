@@ -753,7 +753,8 @@ func (dc *dexConnection) market(mktID string) *Market {
 }
 
 // setEpoch sets the epoch. If the passed epoch is greater than the highest
-// previously passed epoch, send an epoch notification to all subscribers.
+// previously passed epoch, an epoch notification is sent to all subscribers and
+// true is returned.
 func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 	dc.epochMtx.Lock()
 	defer dc.epochMtx.Unlock()
@@ -3743,7 +3744,7 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 
 	// Expire the epoch
 	if dc.setEpoch(note.MarketID, note.Epoch+1) {
-		c.refreshUser()
+		c.refreshUser() // maybe remove if this was pre-nomatch
 	}
 
 	dc.booksMtx.RLock()
@@ -3754,9 +3755,6 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}
-
-	// Reset the epoch queue after processing the match proof message.
-	defer book.ResetEpoch()
 
 	return book.ValidateMatchProof(note)
 }
