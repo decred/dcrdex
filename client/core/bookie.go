@@ -698,7 +698,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	}
 
 	if dc.setEpoch(note.MarketID, note.Epoch) {
-		c.refreshUser()
+		c.refreshUser() // maybe remove if this was pre-nomatch
 	}
 
 	dc.booksMtx.RLock()
@@ -715,7 +715,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("failed to Enqueue epoch order: %w", err)
 	}
 
-	// Send a mini-order for book updates.
+	// Send a MiniOrder for book updates.
 	book.send(&BookUpdate{
 		Action:   msg.Route,
 		Host:     dc.acct.host,

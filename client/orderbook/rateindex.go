@@ -18,8 +18,8 @@ type rateIndex struct {
 	Rates []uint64
 }
 
-// NewRateIndex creates a new rate index.
-func NewRateIndex() *rateIndex {
+// newRateIndex creates a new rate index.
+func newRateIndex() *rateIndex {
 	return &rateIndex{
 		Rates: make([]uint64, 0, defaultCapacity),
 	}

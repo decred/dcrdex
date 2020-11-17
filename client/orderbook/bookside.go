@@ -12,13 +12,11 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
-// OrderPreference reprsents ordering preference for a sort.
-type OrderPreference int
+// orderPreference represents ordering preference for a sort.
+type orderPreference int
 
 const (
-	// Ascending denotes ascending order.
-	ascending OrderPreference = iota
-	// Descending denotes descending order.
+	ascending orderPreference = iota
 	descending
 )
 
@@ -32,15 +30,15 @@ type fill struct {
 type bookSide struct {
 	bins      map[uint64][]*Order
 	rateIndex *rateIndex
-	orderPref OrderPreference
+	orderPref orderPreference
 	mtx       sync.RWMutex
 }
 
-// NewBookSide creates a new book side depth.
-func NewBookSide(pref OrderPreference) *bookSide {
+// newBookSide creates a new book side depth.
+func newBookSide(pref orderPreference) *bookSide {
 	return &bookSide{
 		bins:      make(map[uint64][]*Order),
-		rateIndex: NewRateIndex(),
+		rateIndex: newRateIndex(),
 		orderPref: pref,
 	}
 }
