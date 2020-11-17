@@ -21,3 +21,4 @@ node_modules/
 client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
 wiki
+dex/testing/loadbot/loadbot

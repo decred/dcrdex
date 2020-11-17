@@ -4394,6 +4394,20 @@ func (c *Core) PromptShutdown() bool {
 	return ok
 }
 
+// ForceShutdown shuts down the client, ignoring any active trades.
+func (c *Core) ForceShutdown() {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	for _, wallet := range c.wallets {
+		wallet.Lock()
+	}
+	for _, dc := range c.conns {
+		dc.acct.lock()
+	}
+}
+
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
 // *dex.Asset.
 func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {

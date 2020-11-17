@@ -4,6 +4,7 @@
 package dex
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -56,4 +57,9 @@ func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
 		*b = dst
 	}
 	return err
+}
+
+// Equal is true if otherB has identical []byte contents to the Bytes.
+func (b Bytes) Equal(otherB []byte) bool {
+	return bytes.Equal(b, otherB)
 }

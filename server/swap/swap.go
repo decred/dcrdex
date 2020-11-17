@@ -1913,7 +1913,8 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
 	if lastEvent.IsZero() {
-		log.Warnf("Prematurely received 'init' from %v at step %v", makerTaker(stepInfo.actor.isMaker), stepInfo.step)
+		log.Warnf("Prematurely received 'init' from %v at step %v. acct = %s, match = %s",
+			makerTaker(stepInfo.actor.isMaker), stepInfo.step, stepInfo.actor.user, stepInfo.match.ID())
 	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
 		expireTime = deadline
 	}

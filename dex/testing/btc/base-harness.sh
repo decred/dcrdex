@@ -187,6 +187,7 @@ if [ "$CHAIN_LOADED" ] ; then
   tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
   # Get the median block time up to date.
   tmux send-keys -t $SESSION:2 "./mine-alpha 12${DONE}" C-m\; ${WAIT}
+  tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 
 else
   tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
