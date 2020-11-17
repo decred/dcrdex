@@ -12,7 +12,7 @@ func makeRateIndex(index []uint64) *rateIndex {
 		}
 	}
 
-	return NewRateIndex()
+	return newRateIndex()
 }
 
 func TestRateIndexAdd(t *testing.T) {

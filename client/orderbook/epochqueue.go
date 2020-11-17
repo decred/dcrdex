@@ -9,7 +9,6 @@ import (
 	"sort"
 	"sync"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/crypto/blake256"
@@ -26,24 +25,15 @@ type epochOrder struct {
 
 // EpochQueue represents a client epoch queue.
 type EpochQueue struct {
-	orders map[order.OrderID]*epochOrder
 	mtx    sync.RWMutex
-	log    dex.Logger
+	orders map[order.OrderID]*epochOrder
 }
 
 // NewEpochQueue creates a client epoch queue.
-func NewEpochQueue(logger dex.Logger) *EpochQueue {
+func NewEpochQueue() *EpochQueue {
 	return &EpochQueue{
 		orders: make(map[order.OrderID]*epochOrder),
-		log:    logger,
 	}
-}
-
-// Reset clears the epoch queue. This should be called when a new epoch begins.
-func (eq *EpochQueue) Reset() {
-	eq.mtx.Lock()
-	eq.orders = make(map[order.OrderID]*epochOrder)
-	eq.mtx.Unlock()
 }
 
 // Enqueue appends the provided order note to the epoch queue.
@@ -111,7 +101,7 @@ type pimgMatch struct {
 //
 // The epoch queue needs to be reset if there are preimage mismatches or
 // non-existent orders for preimage errors.
-func (eq *EpochQueue) GenerateMatchProof(epoch uint64, preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
+func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
 	eq.mtx.Lock()
 	defer eq.mtx.Unlock()
 
@@ -168,18 +158,10 @@ outer:
 	}
 	csum := blake256.Sum256(cbuff)
 
-	// Check for old orders and log any found.
-	for oid, ord := range eq.orders {
-		if ord.epoch <= epoch {
-			eq.log.Errorf("removing stale order from epoch queue %s", oid)
-			delete(eq.orders, oid)
-		}
-	}
-
 	return seed[:], msgjson.Bytes(csum[:]), nil
 }
 
-// Orders returns the eqoch queue as a []*Order.
+// Orders returns the epoch queue as a []*Order.
 func (eq *EpochQueue) Orders() (orders []*Order) {
 	eq.mtx.Lock()
 	defer eq.mtx.Unlock()

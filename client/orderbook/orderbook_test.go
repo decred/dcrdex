@@ -3,6 +3,7 @@ package orderbook
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -58,16 +59,10 @@ func makeCachedUnbookOrderNote(orderNote *msgjson.UnbookOrderNote) *cachedOrderN
 }
 
 func makeOrderBook(seq uint64, marketID string, orders []*Order, cachedOrders []*cachedOrderNote, synced bool) *OrderBook {
-	ob := &OrderBook{
-		log:        tLogger,
-		seq:        seq,
-		marketID:   marketID,
-		noteQueue:  cachedOrders,
-		orders:     make(map[order.OrderID]*Order),
-		buys:       NewBookSide(descending),
-		sells:      NewBookSide(ascending),
-		epochQueue: NewEpochQueue(tLogger),
-	}
+	ob := NewOrderBook(tLogger)
+	ob.noteQueue = cachedOrders
+	ob.marketID = marketID
+	ob.seq = seq
 
 	for _, order := range orders {
 		ob.orders[order.OrderID] = order
@@ -463,7 +458,7 @@ func TestOrderBookUpdateRemaining(t *testing.T) {
 		t.Fatalf("failed to update remaining,. Wanted %d, got %d", remaining, sells[0].Quantity)
 	}
 
-	// Unkown order
+	// Unknown order
 	wrongID := order.OrderID{0x02}
 	urNote.OrderID = wrongID[:]
 	err = book.UpdateRemaining(urNote)
@@ -909,8 +904,24 @@ func TestOrderBookBestFill(t *testing.T) {
 		},
 	}
 
+	// bestFill returns the best fill for a quantity from the provided side.
+	bestFill := func(ob *OrderBook, qty uint64, side uint8) ([]*fill, error) {
+		if !ob.isSynced() {
+			return nil, fmt.Errorf("order book is not synced")
+		}
+
+		switch side {
+		case msgjson.BuyOrderNum:
+			return ob.buys.BestFill(qty)
+		case msgjson.SellOrderNum:
+			return ob.sells.BestFill(qty)
+		default:
+			return nil, fmt.Errorf("unknown side: %d", side)
+		}
+	}
+
 	for idx, tc := range tests {
-		best, err := tc.orderBook.bestFill(tc.qty, tc.side)
+		best, err := bestFill(tc.orderBook, tc.qty, tc.side)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[OrderBook.BestFill] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)
@@ -998,7 +1009,7 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[ValidateMatchProof]: unexpected error: %v", err)
 	}
 
-	ob.ResetEpoch()
+	ob = NewOrderBook(tLogger)
 
 	err = ob.Enqueue(n1)
 	if err != nil {
@@ -1034,8 +1045,19 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[ValidateMatchProof (with misses)]: unexpected error: %v", err)
 	}
 
-	ob.ResetEpoch()
+	ob = NewOrderBook(tLogger)
 
+	// firstProof for idx-1, length mismatch ignored
+	emptyProofNote := msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch - 1,                  // previous
+		Preimages: []msgjson.Bytes{n1Pimg[:]}, // ob will be missing this, but it's the firstProof, so no error
+	}
+	if err := ob.ValidateMatchProof(emptyProofNote); err != nil {
+		t.Fatalf("[ValidateMatchProof (empty)]: unexpected error: %v", err)
+	}
+
+	// next proof will not permit length mismatches
 	err = ob.Enqueue(n1)
 	if err != nil {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
@@ -1068,11 +1090,10 @@ func TestValidateMatchProof(t *testing.T) {
 	// Ensure a invalid match proof message (missing a preimage) gets
 	// detected as expected.
 	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
-		t.Fatalf("[ValidateMatchProof (missing a preimage)]: "+
-			"unexpected error: %v", err)
+		t.Fatalf("[ValidateMatchProof (missing a preimage)]: unexpected an error")
 	}
 
-	ob.ResetEpoch()
+	ob = NewOrderBook(tLogger)
 
 	err = ob.Enqueue(n1)
 	if err != nil {
@@ -1109,7 +1130,7 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[ValidateMatchProof (inavlid seed)]: unexpected error: %v", err)
 	}
 
-	ob.ResetEpoch()
+	ob = NewOrderBook(tLogger)
 
 	err = ob.Enqueue(n1)
 	if err != nil {
