@@ -49,6 +49,9 @@ const (
 	ctxKeyUserInfo = contextKey("userinfo")
 	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
+	// The basis for content-security-policy. connect-src must be the final
+	// directive so that it can be reliably suppelemented on startup.
+	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'"
 )
 
 var (
@@ -97,6 +100,7 @@ type WebServer struct {
 	mux            *chi.Mux
 	core           clientCore
 	addr           string
+	csp            string
 	srv            *http.Server
 	html           *templates
 	indent         bool
@@ -185,7 +189,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	if log.Level() == dex.LevelTrace {
 		mux.Use(middleware.Logger)
 	}
-	mux.Use(securityMiddleware)
+	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)
 
@@ -281,6 +285,10 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
+	// Work around a webkit (safari) bug with the handling of the connect-src
+	// directive of content security policy. See:
+	// https://bugs.webkit.org/show_bug.cgi?id=201591
+	s.csp = fmt.Sprintf("%s ws://%s", baseCSP, s.addr)
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
