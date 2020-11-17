@@ -113,12 +113,12 @@ export default class SettingsPage extends BasePage {
       cert = await page.certFile.files[0].text()
     }
 
-    app.loading(page.dexAddrForm)
+    const loaded = app.loading(page.dexAddrForm)
     const res = await postJSON('/api/getfee', {
       addr: addr,
       cert: cert
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       page.dexAddrErr.textContent = res.msg
       Doc.show(page.dexAddrErr)
@@ -145,18 +145,18 @@ export default class SettingsPage extends BasePage {
       cert: cert
     }
     page.appPass.value = ''
-    app.loading(page.confirmRegForm)
+    const loaded = app.loading(page.confirmRegForm)
     const res = await postJSON('/api/register', registration)
     if (!app.checkResponse(res)) {
       page.regErr.textContent = res.msg
       Doc.show(page.regErr)
-      app.loaded()
+      loaded()
       return
     }
     page.dexAddr.value = ''
     this.clearCertFile()
     Doc.hide(page.forms)
     await app.fetchUser()
-    app.loaded()
+    loaded()
   }
 }

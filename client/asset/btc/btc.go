@@ -629,7 +629,7 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeEconomical)
+	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -660,6 +660,79 @@ func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
 	return feeRate
 }
 
+// MaxOrder generates information about the maximum order size and associated
+// fees that the wallet can support for the given DEX configuration. The fees are an
+// estimate based on current network conditions, and will be <= the fees
+// associated with nfo.MaxFeeRate. For quote assets, the caller will have to
+// calculate lotSize based on a rate conversion from the base asset's lot size.
+func (btc *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+	networkFeeRate, err := btc.feeRate(1)
+	if err != nil {
+		return nil, fmt.Errorf("error getting network fee estimate: %w", err)
+	}
+	btc.fundingMtx.RLock()
+	utxos, _, avail, err := btc.spendableUTXOs(0)
+	btc.fundingMtx.RUnlock()
+	if err != nil {
+		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+	}
+	// Start by attempting max lots with no fees.
+	lots := avail / lotSize
+	for lots > 0 {
+		val := lots * lotSize
+		sum, size, _, _, _, _, err := btc.fund(val, lots, utxos, nfo)
+		// The only failure mode of btc.fund is when there is not enough funds,
+		// so if an error is encountered, count down the lots and repeat until
+		// we have enough.
+		if err != nil {
+			lots--
+			continue
+		}
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size), lots, nfo)
+		maxFees := reqFunds - val
+		estFunds := calc.RequiredOrderFundsAlt(val, uint64(size), lots, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+		estFees := estFunds - val
+		// Math for split transactions is a little different.
+		if btc.useSplitTx {
+			_, extraFees := btc.splitBaggageFees(nfo.MaxFeeRate)
+			_, extraEstFees := btc.splitBaggageFees(networkFeeRate)
+			if avail >= reqFunds+extraFees {
+				return &asset.OrderEstimate{
+					Lots:          lots,
+					Value:         val,
+					MaxFees:       maxFees + extraFees,
+					EstimatedFees: estFees + extraEstFees,
+					Locked:        val + maxFees + extraFees,
+				}, nil
+			}
+		}
+
+		// No split transaction.
+		return &asset.OrderEstimate{
+			Lots:          lots,
+			Value:         val,
+			MaxFees:       maxFees,
+			EstimatedFees: estFees,
+			Locked:        sum,
+		}, nil
+	}
+	return &asset.OrderEstimate{}, nil
+}
+
+// RedemptionFees is an estimate of the redemption fees for a 1-swap redemption.
+func (btc *ExchangeWallet) RedemptionFees() (uint64, error) {
+	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget)
+	var size uint64 = dexbtc.MinimumTxOverhead + dexbtc.TxInOverhead + dexbtc.TxOutOverhead
+	if btc.segwit {
+		// Add the marker and flag weight here.
+		var witnessVBytes uint64 = (dexbtc.RedeemSwapSigScriptSize + 2 + 3) / 4
+		size += witnessVBytes + dexbtc.P2WPKHOutputSize
+	} else {
+		size += dexbtc.RedeemSwapSigScriptSize + dexbtc.P2PKHOutputSize
+	}
+	return size * feeRate, nil
+}
+
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
@@ -681,7 +754,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
 	defer btc.fundingMtx.Unlock() // after we update the map and lock in the wallet
 	// Now that we allow funding with 0 conf UTXOs, some more logic could be
-	// used out of caution, including preference for >0 confs.
+	// used out of caution, including preference for > 0 confs.
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
@@ -690,54 +763,10 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return nil, nil, fmt.Errorf("insufficient funds. %.8f requested, %.8f available",
 			btcutil.Amount(ord.Value).ToBTC(), btcutil.Amount(avail).ToBTC())
 	}
-	var sum uint64
-	var size uint32
-	var coins asset.Coins
-	var redeemScripts []dex.Bytes
-	var spents []*output
-	fundingCoins := make(map[outPoint]*utxo)
 
-	// TODO: For the chained swaps, make sure that contract outputs are P2WSH,
-	// and that change outputs that fund further swaps are P2WPKH.
-
-	isEnoughWith := func(unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(ord.Value, uint64(size+unspent.input.VBytes()), ord.MaxSwapCount, ord.DEXConfig)
-		return sum+unspent.amount >= reqFunds
-	}
-
-	addUTXO := func(unspent *compositeUTXO) {
-		v := unspent.amount
-		op := newOutput(btc.node, unspent.txHash, unspent.vout, v)
-		coins = append(coins, op)
-		redeemScripts = append(redeemScripts, unspent.redeemScript)
-		spents = append(spents, op)
-		size += unspent.input.VBytes()
-		fundingCoins[op.pt] = unspent.utxo
-		sum += v
-	}
-
-out:
-	for {
-		// If there are none left, we don't have enough.
-		reqFunds := calc.RequiredOrderFunds(ord.Value, uint64(size), ord.MaxSwapCount, ord.DEXConfig)
-		fees := reqFunds - ord.Value
-		if len(utxos) == 0 {
-			return nil, nil, fmt.Errorf("not enough to cover requested funds (%d) + fees (%d) = %d",
-				ord.Value, fees, reqFunds)
-		}
-		// On each loop, find the smallest UTXO that is enough for the value. If
-		// no UTXO is large enough, add the largest and continue.
-		var txout *compositeUTXO
-		for _, txout = range utxos {
-			if isEnoughWith(txout) {
-				addUTXO(txout)
-				break out
-			}
-		}
-		// Append the last output, which is the largest.
-		addUTXO(txout)
-		// Pop the utxo from the unspents
-		utxos = utxos[:len(utxos)-1]
+	sum, size, coins, fundingCoins, redeemScripts, spents, err := btc.fund(ord.Value, ord.MaxSwapCount, utxos, ord.DEXConfig)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if btc.useSplitTx && !ord.Immediate {
@@ -764,6 +793,56 @@ out:
 	}
 
 	return coins, redeemScripts, nil
+}
+
+func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *dex.Asset) (
+	sum uint64, size uint32, coins asset.Coins, fundingCoins map[outPoint]*utxo, redeemScripts []dex.Bytes, spents []*output, err error) {
+
+	fundingCoins = make(map[outPoint]*utxo)
+
+	// TODO: For the chained swaps, make sure that contract outputs are P2WSH,
+	// and that change outputs that fund further swaps are P2WPKH.
+
+	isEnoughWith := func(unspent *compositeUTXO) bool {
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
+		return sum+unspent.amount >= reqFunds
+	}
+
+	addUTXO := func(unspent *compositeUTXO) {
+		v := unspent.amount
+		op := newOutput(btc.node, unspent.txHash, unspent.vout, v)
+		coins = append(coins, op)
+		redeemScripts = append(redeemScripts, unspent.redeemScript)
+		spents = append(spents, op)
+		size += unspent.input.VBytes()
+		fundingCoins[op.pt] = unspent.utxo
+		sum += v
+	}
+
+out:
+	for {
+		// If there are none left, we don't have enough.
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size), lots, nfo)
+		fees := reqFunds - val
+		if len(utxos) == 0 {
+			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds (%d) + fees (%d) = %d",
+				val, fees, reqFunds)
+		}
+		// On each loop, find the smallest UTXO that is enough for the value. If
+		// no UTXO is large enough, add the largest and continue.
+		var txout *compositeUTXO
+		for _, txout = range utxos {
+			if isEnoughWith(txout) {
+				addUTXO(txout)
+				break out
+			}
+		}
+		// Append the last output, which is the largest.
+		addUTXO(txout)
+		// Pop the utxo from the unspents
+		utxos = utxos[:len(utxos)-1]
+	}
+	return
 }
 
 // split will send a split transaction and return the sized output. If the
@@ -802,12 +881,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
-	var swapInputSize uint64 = dexbtc.RedeemP2PKHInputSize
-	baggage := nfo.MaxFeeRate * splitTxBaggage
-	if btc.segwit {
-		baggage = nfo.MaxFeeRate * splitTxBaggageSegwit
-		swapInputSize = dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
-	}
+	swapInputSize, baggage := btc.splitBaggageFees(nfo.MaxFeeRate)
 
 	var coinSum uint64
 	coins := make(asset.Coins, 0, len(outputs))
@@ -876,6 +950,18 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	// Assign to coins so the deferred function will lock the output.
 	outputs = []*output{op}
 	return asset.Coins{op}, true, nil
+}
+
+// splitBaggageFees is the fees associated with adding a split transaction.
+func (btc *ExchangeWallet) splitBaggageFees(maxFeeRate uint64) (swapInputSize, baggage uint64) {
+	if btc.segwit {
+		baggage = maxFeeRate * splitTxBaggageSegwit
+		swapInputSize = dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
+		return
+	}
+	baggage = maxFeeRate * splitTxBaggage
+	swapInputSize = dexbtc.RedeemP2PKHInputSize
+	return
 }
 
 // ReturnCoins unlocks coins. This would be used in the case of a canceled or

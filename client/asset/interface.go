@@ -80,6 +80,15 @@ type Wallet interface {
 	// empty dex.Bytes should be appended to the redeem scripts collection for
 	// coins with no redeem script.
 	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, err error)
+	// MaxOrder generates information about the maximum order size and
+	// associated fees that the wallet can support for the specified DEX. The
+	// fees are an estimate based on current network conditions, and will be <=
+	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
+	// will be an estimate based on current market conditions.
+	MaxOrder(lotSize uint64, nfo *dex.Asset) (*OrderEstimate, error)
+	// RedemptionFees is an estimate of the redemption fees for a 1-swap
+	// redemption.
+	RedemptionFees() (uint64, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -275,4 +284,22 @@ type Order struct {
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
 	Immediate bool
+}
+
+// OrderEstimate is an estimate of the fees and locked amounts associated with
+// an order.
+type OrderEstimate struct {
+	// Lots is the number of lots in the order.
+	Lots uint64
+	// Value is the total value of the order.
+	Value uint64
+	// MaxFees is the maximum possible fees that can be assessed for the order's
+	// swaps.
+	MaxFees uint64
+	// EstimatedFees is an estimation of the fees that might be assessed for the
+	// order's swaps.
+	EstimatedFees uint64
+	// Locked is the amount that will be locked if this order is
+	// subsequently placed.
+	Locked uint64
 }

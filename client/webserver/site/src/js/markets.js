@@ -62,17 +62,22 @@ export default class MarketsPage extends BasePage {
       // Chart and legend
       'marketChart', 'chartResizer', 'sellBookedBase', 'sellBookedQuote',
       'buyBookedBase', 'buyBookedQuote', 'hoverData', 'hoverPrice',
-      'hoverVolume', 'chartLegend'
+      'hoverVolume', 'chartLegend',
+      // Max order section
+      'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
+      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
+      'maxBox'
     ])
     this.main = main
-    app.loading(this.main.parentElement)
-    this.loaded = false
+    this.loaded = app.loading(this.main.parentElement)
+    this.maxLoaded = null
     this.market = null
     this.registrationStatus = {}
     this.currentForm = null
     this.openAsset = null
     this.openFunc = null
     this.currentCreate = null
+    this.preorderTimer = null
     this.book = null
     this.cancelData = null
     this.metaOrders = {}
@@ -131,6 +136,7 @@ export default class MarketsPage extends BasePage {
       swapBttns(page.sellBttn, page.buyBttn)
       page.submitBttn.classList.remove('sellred')
       page.submitBttn.classList.add('buygreen')
+      page.maxLbl.textContent = 'Buy'
       this.setOrderBttnText()
       this.setOrderVisibility()
       this.drawChartLines()
@@ -139,6 +145,7 @@ export default class MarketsPage extends BasePage {
       swapBttns(page.buyBttn, page.sellBttn)
       page.submitBttn.classList.add('sellred')
       page.submitBttn.classList.remove('buygreen')
+      page.maxLbl.textContent = 'Sell'
       this.setOrderBttnText()
       this.setOrderVisibility()
       this.drawChartLines()
@@ -160,6 +167,11 @@ export default class MarketsPage extends BasePage {
       this.setMarketBuyOrderEstimate()
       this.depthLines.input = []
       this.drawChartLines()
+    })
+    bind(page.maxOrd, 'click', () => {
+      if (this.isSell()) page.lotField.value = this.market.maxSell.lots
+      else page.lotField.value = this.market.maxBuys[this.adjustedRate()].lots
+      this.lotChanged()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -322,12 +334,11 @@ export default class MarketsPage extends BasePage {
   setOrderVisibility () {
     const page = this.page
     if (this.isLimit()) {
-      Doc.show(page.priceBox, page.tifBox, page.qtyBox)
+      Doc.show(page.priceBox, page.tifBox, page.qtyBox, page.maxBox)
       Doc.hide(page.mktBuyBox)
       this.previewQuoteAmt(true)
     } else {
-      Doc.hide(page.tifBox)
-      Doc.hide(page.priceBox)
+      Doc.hide(page.tifBox, page.maxBox, page.priceBox)
       if (this.isSell()) {
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
@@ -447,6 +458,11 @@ export default class MarketsPage extends BasePage {
     const dex = app.user.exchanges[host]
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
+    Doc.hide(this.page.maxOrd)
+    if (this.preorderTimer) {
+      window.clearTimeout(this.preorderTimer)
+      this.preorderTimer = null
+    }
     this.market = {
       dex: dex,
       sid: marketID(baseCfg.symbol, quoteCfg.symbol), // A string market identifier used by the DEX.
@@ -457,7 +473,9 @@ export default class MarketsPage extends BasePage {
       // dex.assets is a map of dex.Asset type, which is defined at
       // dex/asset.go.
       baseCfg: dex.assets[base],
-      quoteCfg: dex.assets[quote]
+      quoteCfg: dex.assets[quote],
+      maxSell: null,
+      maxBuys: {}
     }
     this.page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
@@ -560,6 +578,10 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const order = this.parseOrder()
     page.orderErr.textContent = ''
+    if (order.rate) {
+      if (order.sell) this.preSell()
+      else this.preBuy()
+    }
     this.depthLines.input = []
     if (order.rate && this.isLimit()) {
       this.depthLines.input = [{
@@ -576,6 +598,100 @@ export default class MarketsPage extends BasePage {
     const quoteAsset = app.assets[order.quote]
     const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
     page.orderPreview.textContent = `Total: ${total} ${quoteAsset.symbol.toUpperCase()}`
+  }
+
+  /**
+   * preSell populates the max order message for the largest available sell.
+   */
+  preSell () {
+    const mkt = this.market
+    const baseWallet = app.assets[mkt.base.id].wallet
+    if (baseWallet.available < mkt.baseCfg.lotSize) mkt.maxSell = { lots: 0, value: 0 }
+    if (mkt.maxSell) {
+      this.setMaxOrder(mkt.maxSell, this.adjustedRate() / 1e8)
+      return
+    }
+    // We only fetch pre-sell once per balance update, so don't delay.
+    this.schedulePreOrder('/api/maxsell', {}, 0, res => {
+      mkt.maxSell = res.maxSell
+      mkt.sellBalance = baseWallet.balance.available
+      this.setMaxOrder(res.maxSell, this.adjustedRate() / 1e8)
+    })
+  }
+
+  /**
+   * preBuy populates the max order message for the largest available buy.
+   */
+  preBuy () {
+    const mkt = this.market
+    const rate = this.adjustedRate()
+    const quoteWallet = app.assets[mkt.quote.id].wallet
+    const aLot = mkt.baseCfg.lotSize * (rate / 1e8)
+    if (quoteWallet.balance.available < aLot) mkt.maxBuys[rate] = { lots: 0, value: 0 }
+    if (mkt.maxBuys[rate]) {
+      this.setMaxOrder(mkt.maxBuys[rate], 1e8 / rate)
+      return
+    }
+    // 0 delay for first fetch after balance update or market change, otherwise
+    // meter these at 1 / sec.
+    const delay = mkt.maxBuys ? 1000 : 0
+    this.schedulePreOrder('/api/maxbuy', { rate: rate }, delay, res => {
+      mkt.maxBuys[rate] = res.maxBuy
+      mkt.buyBalance = app.assets[mkt.quote.id].wallet.balance.available
+      this.setMaxOrder(res.maxBuy, 1e8 / rate)
+    })
+  }
+
+  /**
+   * schedulePreorder shows the loading icon and schedules a call to an order
+   * estimate api endpoint. If another call to schedulePreorder is made before
+   * this one is fired (after delay), this call will be canceled.
+   */
+  schedulePreOrder (path, args, delay, success) {
+    const page = this.page
+    if (!this.maxLoaded) this.maxLoaded = app.loading(page.maxOrd)
+    const [bid, qid] = [this.market.base.id, this.market.quote.id]
+    const [bWallet, qWallet] = [app.assets[bid].wallet, app.assets[qid].wallet]
+    if (!bWallet || !bWallet.running || !qWallet || !qWallet.running) return
+    if (this.preorderTimer) window.clearTimeout(this.preorderTimer)
+    Doc.show(page.maxOrd)
+    this.preorderTimer = window.setTimeout(async () => {
+      this.preorderTimer = null
+      const res = await postJSON(path, {
+        host: this.market.dex.host,
+        base: bid,
+        quote: qid,
+        ...args
+      })
+      this.maxLoaded()
+      this.maxLoaded = null
+
+      if (!app.checkResponse(res, true)) {
+        console.error(`${path} error: `, res)
+        return
+      }
+      success(res)
+    }, delay)
+  }
+
+  /* setMaxOrder sets the max order text. */
+  setMaxOrder (maxOrder, rate) {
+    const page = this.page
+    Doc.show(page.maxOrd, page.maxLotBox, page.maxAboveZero)
+    const sell = this.isSell()
+    page.maxFromLots.textContent = maxOrder.lots.toString()
+    page.maxFromLotsLbl.textContent = maxOrder.lots === 1 ? 'lot' : 'lots'
+    if (maxOrder.lots === 0) {
+      Doc.hide(page.maxAboveZero)
+      return
+    }
+    // Could add the maxOrder.estimatedFees here, but that might also be
+    // confusing.
+    page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value / 1e8)
+    page.maxFromTicker.textContent = sell ? this.market.base.symbol : this.market.quote.symbol.toUpperCase()
+    // Could subtract the maxOrder.redemptionFees here.
+    page.maxToAmt.textContent = Doc.formatCoinValue(maxOrder.value / 1e8 * rate)
+    page.maxToTicker.textContent = sell ? this.market.quote.symbol : this.market.base.symbol.toUpperCase()
   }
 
   /*
@@ -743,9 +859,10 @@ export default class MarketsPage extends BasePage {
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
-    if (!this.loaded) {
-      this.loaded = true
-      app.loaded()
+    this.refreshActiveOrders()
+    if (this.loaded) {
+      this.loaded()
+      this.loaded = null
       Doc.animate(250, progress => {
         this.main.style.opacity = progress
       })
@@ -871,7 +988,6 @@ export default class MarketsPage extends BasePage {
     }
     page.cancelPass.value = ''
     var res = await postJSON('/api/cancel', req)
-    app.loaded()
     if (!app.checkResponse(res)) return
     Doc.hide(cancelData.bttn, page.forms)
     order.cancelling = true
@@ -993,9 +1109,24 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  // handleBalanceNote handles notifications updating a wallet's balance.
+  /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     this.balanceWgt.updateAsset(note.assetID)
+    // If there's a balance update, refresh the max order section.
+    const mkt = this.market
+    const avail = note.balance.available
+    switch (note.assetID) {
+      case mkt.base.id:
+        // If we're not showing the max order panel yet, don't do anything.
+        if (!mkt.maxSell) break
+        if (typeof mkt.sellBalance === 'number' && mkt.sellBalance !== avail) mkt.maxSell = null
+        if (this.isSell()) this.preSell()
+        break
+      case mkt.quote.id:
+        if (!Object.keys(mkt.maxBuys).length) break
+        if (typeof mkt.buyBalance === 'number' && mkt.buyBalance !== avail) mkt.maxBuys = {}
+        if (!this.isSell()) this.preBuy()
+    }
   }
 
   /*
@@ -1015,7 +1146,6 @@ export default class MarketsPage extends BasePage {
     }
     if (!this.validateOrder(order)) return
     var res = await postJSON('/api/trade', req)
-    app.loaded()
     if (!app.checkResponse(res)) return
     // If the wallets are not open locally, they must have been opened during
     // ordering. Grab updated info.
@@ -1122,8 +1252,7 @@ export default class MarketsPage extends BasePage {
       return
     }
     // Truncate to rate step. If it is a market buy order, do not adjust.
-    const rateStep = this.market.quoteCfg.rateStep
-    const adjusted = order.rate - (order.rate % rateStep)
+    const adjusted = this.adjustedRate()
     const v = (adjusted / 1e8)
     this.page.rateField.value = v
     this.depthLines.input = [{
@@ -1132,6 +1261,18 @@ export default class MarketsPage extends BasePage {
     }]
     this.drawChartLines()
     this.previewQuoteAmt(true)
+  }
+
+  /*
+   * adjustedRate is the current rate field rate, rounded down to a
+   * multiple of rateStep.
+   */
+  adjustedRate () {
+    const v = this.page.rateField.value
+    if (!v) return null
+    const rate = asAtoms(v)
+    const rateStep = this.market.quoteCfg.rateStep
+    return rate - (rate % rateStep)
   }
 
   /* loadTable reloads the table from the current order book information. */

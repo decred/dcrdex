@@ -627,6 +627,85 @@ func (dcr *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
 	return feeRate
 }
 
+// MaxOrder generates information about the maximum order size and associated
+// fees that the wallet can support for the given DEX configuration. The fees are an
+// estimate based on current network conditions, and will be <= the fees
+// associated with nfo.MaxFeeRate. For quote assets, the caller will have to
+// calculate lotSize based on a rate conversion from the base asset's lot size.
+func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+	networkFeeRate, err := dcr.feeRate(1)
+	if err != nil {
+		return nil, fmt.Errorf("error getting network fee estimate: %w", err)
+	}
+	utxos, err := dcr.spendableUTXOs()
+	if err != nil {
+		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+	}
+	var avail uint64
+	for _, utxo := range utxos {
+		avail += toAtoms(utxo.rpc.Amount)
+	}
+
+	// Start by attempting max lots with no fees.
+	lots := avail / lotSize
+	for lots > 0 {
+		val := lots * lotSize
+		sum, size, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo))
+		// The only failure mode of btc.fund is when there is not enough funds,
+		// so if an error is encountered, count down the lots and repeat until
+		// we have enough.
+		if err != nil {
+			lots--
+			continue
+		}
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size), lots, nfo)
+		maxFees := reqFunds - val
+		estFunds := calc.RequiredOrderFundsAlt(val, uint64(size), lots, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+		estFees := estFunds - val
+		// Math for split transactions is a little different.
+		if dcr.useSplitTx {
+			extraFees := splitTxBaggage * nfo.MaxFeeRate
+			if avail >= reqFunds+extraFees {
+				return &asset.OrderEstimate{
+					Lots:          lots,
+					Value:         val,
+					MaxFees:       maxFees + extraFees,
+					EstimatedFees: estFees + (splitTxBaggage * networkFeeRate),
+					Locked:        val + maxFees + extraFees,
+				}, nil
+			}
+		}
+
+		// No split transaction.
+		return &asset.OrderEstimate{
+			Lots:          lots,
+			Value:         val,
+			MaxFees:       maxFees,
+			EstimatedFees: estFees,
+			Locked:        sum,
+		}, nil
+	}
+	return &asset.OrderEstimate{}, nil
+}
+
+// RedemptionFees is an estimate of the redemption fees for a 1-swap redemption.
+func (dcr *ExchangeWallet) RedemptionFees() (uint64, error) {
+	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget)
+	var size uint64 = dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + dexdcr.TxOutOverhead +
+		dexdcr.RedeemSwapSigScriptSize + dexdcr.P2PKHOutputSize
+	return size * feeRate, nil
+}
+
+// orderEnough generates a function that can be used as the enough argument to
+// the fund method.
+func orderEnough(val, lots uint64, nfo *dex.Asset) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
+	return func(sum uint64, size uint32, unspent *compositeUTXO) bool {
+		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.Size()), lots, nfo)
+		// needed fees are reqFunds - value
+		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
+	}
+}
+
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
@@ -642,14 +721,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
 
-	//oneInputSize := dexdcr.P2PKHInputSize
-	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(ord.Value, uint64(size+unspent.input.Size()), ord.MaxSwapCount, ord.DEXConfig)
-		// needed fees are reqFunds - value
-		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
-	}
-
-	coins, redeemScripts, sum, inputsSize, fundingCoins, err := dcr.fund(enough)
+	coins, redeemScripts, sum, inputsSize, fundingCoins, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error funding order value of %d DCR: %w",
 			ord.Value, err)
@@ -687,36 +759,59 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
 // falling back to 0-conf coins where there are not enough 1+ confs coins.
-func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, []dex.Bytes, uint64, uint64, []*fundingCoin, error) {
+func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
+	coins asset.Coins, redeemScripts []dex.Bytes, sum, size uint64, spents []*fundingCoin, err error) {
 
 	// Keep a consistent view of spendable and locked coins in the wallet and
 	// the fundingCoins map to make this safe for concurrent use.
 	dcr.fundingMtx.Lock()         // before listing unspents in wallet
 	defer dcr.fundingMtx.Unlock() // hold until lockFundingCoins (wallet and map)
 
-	unspents, err := dcr.unspents()
+	utxos, err := dcr.spendableUTXOs()
 	if err != nil {
 		return nil, nil, 0, 0, nil, err
 	}
+
+	sum, sz, coins, spents, redeemScripts, err := dcr.tryFund(utxos, enough)
+	if err != nil {
+		return nil, nil, 0, 0, nil, err
+	}
+
+	err = dcr.lockFundingCoins(spents)
+	if err != nil {
+		return nil, nil, 0, 0, nil, err
+	}
+	return coins, redeemScripts, sum, uint64(sz), spents, nil
+}
+
+// spendableUTXOs generates a slice of spendable *compositeUTXO.
+func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
+	unspents, err := dcr.unspents()
+	if err != nil {
+		return nil, err
+	}
 	if len(unspents) == 0 {
-		return nil, nil, 0, 0, nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
+		return nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
 	}
 
 	// Parse utxos to include script size for spending input.
 	// Returned utxos will be sorted in ascending order by amount (smallest first).
 	utxos, err := dcr.parseUTXOs(unspents)
 	if err != nil {
-		return nil, nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	if len(utxos) == 0 {
-		return nil, nil, 0, 0, nil, fmt.Errorf("no funds available")
+		return nil, fmt.Errorf("no funds available")
 	}
+	return utxos, nil
+}
 
-	var sum uint64
-	var size uint32
-	var coins asset.Coins
-	var spents []*fundingCoin
-	var redeemScripts []dex.Bytes
+// tryFund attempts to use the provided []*compositeUTXO to satisfy the enough
+// function with the fewest number of inputs. The selected utxos are not locked.
+// If the requirement can be satisfied without 0-conf utxos, that set will be
+// selected regardless of whether the 0-conf inclusive case would be cheaper.
+func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
+	sum uint64, size uint32, coins asset.Coins, spents []*fundingCoin, redeemScripts []dex.Bytes, err error) {
 
 	addUTXO := func(unspent *compositeUTXO) error {
 		txHash, err := chainhash.NewHashFromStr(unspent.rpc.TxID)
@@ -779,24 +874,20 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 	// First try with confs>0.
 	ok, err := tryUTXOs(1)
 	if err != nil {
-		return nil, nil, 0, 0, nil, err
+		return 0, 0, nil, nil, nil, err
 	}
 	// Fallback to allowing 0-conf outputs.
 	if !ok {
 		ok, err = tryUTXOs(0)
 		if err != nil {
-			return nil, nil, 0, 0, nil, err
+			return 0, 0, nil, nil, nil, err
 		}
 		if !ok {
-			return nil, nil, 0, 0, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
+			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
 		}
 	}
 
-	err = dcr.lockFundingCoins(spents)
-	if err != nil {
-		return nil, nil, 0, 0, nil, err
-	}
-	return coins, redeemScripts, sum, uint64(size), spents, nil
+	return
 }
 
 // split will send a split transaction and return the sized output. If the
