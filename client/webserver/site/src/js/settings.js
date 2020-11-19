@@ -21,7 +21,7 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Others
-      'showPokes', 'dexBox', 'dexInfo'
+      'showPokes', 'dexBox'
     ])
 
     this.showDexInfo(page)
@@ -65,22 +65,13 @@ export default class SettingsPage extends BasePage {
 
   async showDexInfo (page) {
     const dexBox = page.dexBox
-    const dexInfo = page.dexInfo.cloneNode(true)
-    const dexInfoAcct = page.dexInfo.querySelector('.dexInfoAcct').cloneNode(true)
-
-    Doc.hide(dexBox)
-    page.dexInfo.remove()
-    dexInfo.removeAttribute('id')
-    dexInfo.querySelector('.dexInfoAcct').remove()
-
+    const dexInfoRows = Doc.tmplElement(dexBox, 'dexInfoRows')
+    const dexInfoRow = Doc.tmplElement(dexInfoRows, 'dexInfoRow')
+    dexInfoRows.removeChild(dexInfoRow)
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
-      dexInfo.querySelector('.dexInfoHost').textContent = host
-      if (xc.isAuthed) {
-        dexInfoAcct.querySelector('.dexInfoAcctID').textContent = xc.acctID
-        dexInfo.appendChild(dexInfoAcct)
-      }
-      dexBox.appendChild(dexInfo)
+      dexInfoRows.appendChild(new DexInfoRow(dexInfoRow, host, xc).row)
     }
+    dexBox.appendChild(dexInfoRows)
     Doc.show(dexBox)
   }
 
@@ -181,5 +172,19 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
     await app.fetchUser()
     app.loaded()
+  }
+}
+
+class DexInfoRow {
+  constructor (dexInfoRow, host, xc) {
+    const row = dexInfoRow.cloneNode(true)
+    this.row = row
+    Doc.tmplElement(row, 'dexInfoHost').textContent = host
+    const dexInfoAcct = Doc.tmplElement(row, 'dexInfoAcct')
+    if (xc.isAuthed) {
+      Doc.tmplElement(dexInfoAcct, 'dexInfoAcctID').textContent = xc.acctID
+    } else {
+      Doc.tmplElement(row, 'dexInfoAcct').remove()
+    }
   }
 }
