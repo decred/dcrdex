@@ -21,10 +21,8 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Others
-      'showPokes', 'dexBox'
+      'showPokes'
     ])
-
-    this.showDexInfo(page)
 
     Doc.bind(page.darkMode, 'click', () => {
       State.dark(page.darkMode.checked)
@@ -61,18 +59,6 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
-  }
-
-  async showDexInfo (page) {
-    const dexBox = page.dexBox
-    const dexInfoRows = Doc.tmplElement(dexBox, 'dexInfoRows')
-    const dexInfoRow = Doc.tmplElement(dexInfoRows, 'dexInfoRow')
-    dexInfoRows.removeChild(dexInfoRow)
-    for (const [host, xc] of Object.entries(app.user.exchanges)) {
-      dexInfoRows.appendChild(new DexInfoRow(dexInfoRow, host, xc).row)
-    }
-    dexBox.appendChild(dexInfoRows)
-    Doc.show(dexBox)
   }
 
   /* showForm shows a modal form with a little animation. */
@@ -172,19 +158,5 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
     await app.fetchUser()
     app.loaded()
-  }
-}
-
-class DexInfoRow {
-  constructor (dexInfoRow, host, xc) {
-    const row = dexInfoRow.cloneNode(true)
-    this.row = row
-    Doc.tmplElement(row, 'dexInfoHost').textContent = host
-    const dexInfoAcct = Doc.tmplElement(row, 'dexInfoAcct')
-    if (xc.isAuthed) {
-      Doc.tmplElement(dexInfoAcct, 'dexInfoAcctID').textContent = xc.acctID
-    } else {
-      Doc.tmplElement(row, 'dexInfoAcct').remove()
-    }
   }
 }
