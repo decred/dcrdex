@@ -24,10 +24,6 @@ import (
 )
 
 const (
-	cancelThreshWindow = 100 // spec
-	scoringMatchLimit  = 60  // last N matches (success or at-fault fail) to be considered in swap inaction scoring
-	scoringOrderLimit  = 40  // last N orders to be considered in preimage miss scoring
-
 	maxIDsPerOrderStatusRequest = 10_000
 )
 
@@ -208,101 +204,10 @@ type AuthManager struct {
 	conns     map[uint64]*clientInfo
 	unbookers map[account.AccountID]*time.Timer
 
-	violationMtx   sync.Mutex
-	matchOutcomes  map[account.AccountID]*latestMatchOutcomes
-	preimgOutcomes map[account.AccountID]*latestPreimageOutcomes
-}
-
-// violation badness
-const (
-	// preimage miss
-	preimageMissScore = 2 // book spoof, no match, no stuck funds
-
-	// failure to act violations
-	noSwapAsMakerScore   = 4  // book spoof, match with taker order affected, no stuck funds
-	noSwapAsTakerScore   = 11 // maker has contract stuck for 20 hrs
-	noRedeemAsMakerScore = 7  // taker has contract stuck for 8 hrs
-	noRedeemAsTakerScore = 1  // just dumb, counterparty not inconvenienced
-
-	successScore = -1 // offsets the violations
-
-	defaultBanScore = 20
-)
-
-// Violation represents a specific infraction. For example, not broadcasting a
-// swap contract transaction by the deadline as the maker.
-type Violation int32
-
-const (
-	ViolationInvalid Violation = iota - 2
-	ViolationForgiven
-	ViolationSwapSuccess
-	ViolationPreimageMiss
-	ViolationNoSwapAsMaker
-	ViolationNoSwapAsTaker
-	ViolationNoRedeemAsMaker
-	ViolationNoRedeemAsTaker
-)
-
-var violations = map[Violation]struct {
-	score int32
-	desc  string
-}{
-	ViolationSwapSuccess:     {successScore, "swap success"},
-	ViolationForgiven:        {-1, "forgiveness"},
-	ViolationPreimageMiss:    {preimageMissScore, "preimage miss"},
-	ViolationNoSwapAsMaker:   {noSwapAsMakerScore, "no swap as maker"},
-	ViolationNoSwapAsTaker:   {noSwapAsTakerScore, "no swap as taker"},
-	ViolationNoRedeemAsMaker: {noRedeemAsMakerScore, "no redeem as maker"},
-	ViolationNoRedeemAsTaker: {noRedeemAsTakerScore, "no redeem as taker"},
-	ViolationInvalid:         {0, "invalid violation"},
-}
-
-// Score returns the Violation's score, which is a representation of the
-// relative severity of the infraction.
-func (v Violation) Score() int32 {
-	return violations[v].score
-}
-
-// String returns a description of the Violation.
-func (v Violation) String() string {
-	return violations[v].desc
-}
-
-// NoActionStep is the action that the user failed to take. This is used to
-// define valid inputs to the Inaction method.
-type NoActionStep uint8
-
-const (
-	SwapSuccess NoActionStep = iota // success included for accounting purposes
-	NoSwapAsMaker
-	NoSwapAsTaker
-	NoRedeemAsMaker
-	NoRedeemAsTaker
-)
-
-// Violation returns the corresponding Violation for the misstep represented by
-// the NoActionStep.
-func (step NoActionStep) Violation() Violation {
-	switch step {
-	case SwapSuccess:
-		return ViolationSwapSuccess
-	case NoSwapAsMaker:
-		return ViolationNoSwapAsMaker
-	case NoSwapAsTaker:
-		return ViolationNoSwapAsTaker
-	case NoRedeemAsMaker:
-		return ViolationNoRedeemAsMaker
-	case NoRedeemAsTaker:
-		return ViolationNoRedeemAsTaker
-	default:
-		return ViolationInvalid
-	}
-}
-
-// String returns the description of the NoActionStep's corresponding Violation.
-func (step NoActionStep) String() string {
-	return step.Violation().String()
+	repMtx      sync.Mutex
+	reputations map[account.AccountID]*Reputation
+	// matchOutcomes  map[account.AccountID]*latestMatchOutcomes
+	// preimgOutcomes map[account.AccountID]*latestPreimageOutcomes
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -379,8 +284,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		conns:             make(map[uint64]*clientInfo),
 		unbookers:         make(map[account.AccountID]*time.Timer),
 		feeWaiterIdx:      make(map[account.AccountID]struct{}),
-		matchOutcomes:     make(map[account.AccountID]*latestMatchOutcomes),
-		preimgOutcomes:    make(map[account.AccountID]*latestPreimageOutcomes),
+		reputations:       make(map[account.AccountID]*Reputation),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -614,75 +518,31 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	return auth.request(user, msg, f, expireTimeout, expire)
 }
 
-// userSwapAmountHistory retrieves the summary of recent swap amounts for the
-// given user and market. The user should be connected.
-func (auth *AuthManager) userSwapAmountHistory(user account.AccountID, base, quote uint32) *SwapAmounts {
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
-	if outcomes, found := auth.matchOutcomes[user]; found {
-		return outcomes.mktSwapAmounts(base, quote)
-	}
-	return new(SwapAmounts)
-}
-
-const (
-	// These coefficients are used to compute a user's swap limit adjustment via
-	// UserOrderLimitAdjustment based on the cumulative amounts in the different
-	// match outcomes.
-	successWeight    int64 = 3
-	stuckLongWeight  int64 = -5
-	stuckShortWeight int64 = -3
-	spoofedWeight    int64 = -1
-)
-
 // UserSettlingLimit returns a user's settling amount limit for the given market
 // in units of the base asset. The limit may be negative for accounts with poor
 // swap history.
 func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
-	currentLotSize := int64(mkt.LotSize)
-	base := currentLotSize * auth.initTakerLotLimit
-	sa := auth.userSwapAmountHistory(user, mkt.Base, mkt.Quote)
-	limit := base + sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
-	if limit/currentLotSize >= auth.absTakerLotLimit {
-		limit = auth.absTakerLotLimit * currentLotSize
-	}
-	return limit
+	auth.repMtx.Lock()
+	defer auth.repMtx.Unlock()
+	return auth.userReputation(user).userSettlingLimit(mkt.Base, mkt.Quote, mkt.LotSize)
 }
 
-// userScore computes the user score from the user's recent match outcomes and
-// preimage history. This must be called with the violationMtx locked.
-func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
-	if outcomes, found := auth.matchOutcomes[user]; found {
-		for v, count := range outcomes.binViolations() {
-			score += v.Score() * int32(count)
-		}
+func (auth *AuthManager) userReputation(user account.AccountID) *Reputation {
+	rep, found := auth.reputations[user]
+	if !found {
+		rep = NewReputation(auth.initTakerLotLimit, auth.absTakerLotLimit)
+		auth.reputations[user] = rep
 	}
-	if outcomes, found := auth.preimgOutcomes[user]; found {
-		score += ViolationPreimageMiss.Score() * outcomes.misses()
-	}
-	return
+	return rep
 }
 
 func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) int32 {
 	violation := misstep.Violation()
-
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
-	outcomes, found := auth.matchOutcomes[user]
-	if !found {
-		outcomes = newLatestMatchOutcomes(scoringMatchLimit)
-		auth.matchOutcomes[user] = outcomes
-	}
-	outcomes.add(&matchOutcome{
-		time:    encode.UnixMilli(refTime),
-		mid:     mmid.MatchID,
-		outcome: violation,
-		value:   value,
-		base:    mmid.Base,
-		quote:   mmid.Quote,
-	})
-
-	score := auth.userScore(user)
+	auth.repMtx.Lock()
+	defer auth.repMtx.Unlock()
+	rep := auth.userReputation(user)
+	rep.registerMatchOutcome(violation, mmid.Base, mmid.Quote, mmid.MatchID, value, refTime)
+	score := rep.userScore()
 	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
 		violation.String(), violation.Score(), user, score)
 
@@ -693,7 +553,7 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
 func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
-	auth.registerMatchOutcome(user, SwapSuccess, mmid, value, redeemTime)
+	auth.userReputation(user).registerMatchOutcome(SwapSuccess.Violation(), mmid.Base, mmid.Quote, mmid.MatchID, value, redeemTime)
 }
 
 // Inaction registers an inaction violation by the user at the given step. The
@@ -721,20 +581,11 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 }
 
 func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) int32 {
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
-	outcomes, found := auth.preimgOutcomes[user]
-	if !found {
-		outcomes = newLatestPreimageOutcomes(scoringOrderLimit)
-		auth.preimgOutcomes[user] = outcomes
-	}
-	outcomes.add(&preimageOutcome{
-		time: encode.UnixMilli(refTime),
-		oid:  oid,
-		miss: miss,
-	})
-
-	score := auth.userScore(user)
+	auth.repMtx.Lock()
+	defer auth.repMtx.Unlock()
+	rep := auth.userReputation(user)
+	rep.registerPreimageOutcome(miss, oid, refTime)
+	score := rep.userScore()
 	if miss {
 		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
 			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, score)
@@ -935,10 +786,9 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	client.conn.Disconnect() // in case not triggered by disconnect
 	auth.unbookers[user] = time.AfterFunc(auth.miaUserTimeout, func() { auth.unbookUserOrders(user) })
 
-	auth.violationMtx.Lock()
-	delete(auth.matchOutcomes, user)
-	delete(auth.preimgOutcomes, user)
-	auth.violationMtx.Unlock()
+	auth.repMtx.Lock()
+	delete(auth.reputations, user)
+	auth.repMtx.Unlock()
 }
 
 // loadUserScore computes the user's current score from order and swap data
@@ -975,11 +825,11 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 		return 0, fmt.Errorf("PreimageStats: %w", err)
 	}
 
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
+	auth.repMtx.Lock()
+	defer auth.repMtx.Unlock()
+	rep := NewReputation(auth.initTakerLotLimit, auth.absTakerLotLimit)
+	auth.reputations[user] = rep
 
-	latestMatches := newLatestMatchOutcomes(scoringMatchLimit)
-	auth.matchOutcomes[user] = latestMatches
 	for _, mo := range matchOutcomes {
 		// The Fail flag qualifies MakerRedeemed, which is always success for
 		// maker, but fail for taker if revoked.
@@ -989,31 +839,18 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 		} else {
 			successCount++
 		}
-		latestMatches.add(&matchOutcome{
-			time:    mo.Time,
-			mid:     mo.ID,
-			outcome: v,
-			value:   mo.Value, // Note: DB knows value, not number of lots!
-			base:    mo.Base,
-			quote:   mo.Quote,
-		})
+		rep.registerMatchOutcome(v, mo.Base, mo.Quote, mo.ID, mo.Value, encode.UnixTimeMilli(mo.Time))
 	}
 
-	latestPreimageResults := newLatestPreimageOutcomes(scoringOrderLimit)
-	auth.preimgOutcomes[user] = latestPreimageResults
 	for _, po := range piOutcomes {
 		if po.Miss {
 			piMissCount++
 		}
-		latestPreimageResults.add(&preimageOutcome{
-			time: po.Time,
-			oid:  po.ID,
-			miss: po.Miss,
-		})
+		rep.registerPreimageOutcome(po.Miss, po.ID, encode.UnixTimeMilli(po.Time))
 	}
 
 	// Integrate the match and preimage outcomes.
-	score := auth.userScore(user)
+	score := rep.userScore()
 
 	successScore := successCount * successScore // negative
 	piMissScore := piMissCount * preimageMissScore
