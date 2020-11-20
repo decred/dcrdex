@@ -18,11 +18,13 @@ import (
 
 type marketConfig struct {
 	Markets []*struct {
-		Base           string  `json:"base"`
-		Quote          string  `json:"quote"`
-		Duration       uint64  `json:"epochDuration"`
-		MBBuffer       float64 `json:"marketBuyBuffer"`
-		BookedLotLimit uint32  `json:"userBookedLotLimit"`
+		Base                 string  `json:"base"`
+		Quote                string  `json:"quote"`
+		Duration             uint64  `json:"epochDuration"`
+		MBBuffer             float64 `json:"marketBuyBuffer"`
+		BookedLotLimit       uint32  `json:"userBookedLotLimit"`
+		ProbationaryLotLimit uint32  `json:"probationaryLotLimit"`
+		PrivilegedLotLimit   uint32  `json:"privilegedLotLimit"`
 	} `json:"markets"`
 	Assets map[string]*dexsrv.AssetConf `json:"assets"`
 }
@@ -50,9 +52,10 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 
 	log.Debug("-------------------- BEGIN parsed markets.json --------------------")
 	log.Debug("MARKETS")
-	log.Debug("                  Base         Quote   EpochDur")
+	log.Debug("                  Base         Quote   EpochDur      Unpriv     Priv")
 	for i, mktConf := range conf.Markets {
-		log.Debugf("Market %d: % 12s  % 12s  % 8d ms", i, mktConf.Base, mktConf.Quote, mktConf.Duration)
+		log.Debugf("Market %d: % 12s  % 12s  % 8d ms %d %d", i, mktConf.Base, mktConf.Quote,
+			mktConf.Duration, mktConf.ProbationaryLotLimit, mktConf.PrivilegedLotLimit)
 	}
 	log.Debug("")
 
@@ -129,6 +132,12 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 		}
 		if mktConf.BookedLotLimit != 0 {
 			mkt.BookedLotLimit = mktConf.BookedLotLimit
+		}
+		if mktConf.ProbationaryLotLimit != 0 {
+			mkt.ProbationaryLots = mktConf.ProbationaryLotLimit
+		}
+		if mktConf.PrivilegedLotLimit != 0 {
+			mkt.PrivilegedLots = mktConf.PrivilegedLotLimit
 		}
 		markets = append(markets, mkt)
 	}

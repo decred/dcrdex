@@ -186,12 +186,10 @@ type AuthManager struct {
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
 
-	anarchy           bool
-	freeCancels       bool
-	banScore          uint32
-	cancelThresh      float64
-	initTakerLotLimit int64
-	absTakerLotLimit  int64
+	anarchy       bool
+	freeCancels   bool
+	baselineScore int32
+	cancelThresh  float64
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
@@ -234,57 +232,37 @@ type Config struct {
 	CancelThreshold float64
 	Anarchy         bool
 	FreeCancels     bool
-	// BanScore defines the penalty score when an account gets closed.
-	BanScore uint32
-
-	// InitTakerLotLimit is the number of lots per-market a new user is
-	// permitted to have in active orders and swaps.
-	InitTakerLotLimit uint32
-	// AbsTakerLotLimit is a cap on the per-market taker lot limit regardless of
-	// how good the user's swap history is.
-	AbsTakerLotLimit uint32
+	// BaselineScore is the initial score (and penalty buffer) for a new user,
+	// and the threshold between probationary and privileged trading limits.
+	BaselineScore uint32
 }
-
-const (
-	defaultInitTakerLotLimit = 6
-	defaultAbsTakerLotLimit  = 375
-)
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
-	// A ban score of 0 is not sensible, so have a default.
-	banScore := cfg.BanScore
-	if banScore == 0 {
-		banScore = defaultBanScore
+	// A baseline score must be > 0.
+	baselineScore := cfg.BaselineScore
+	if baselineScore <= 0 {
+		baselineScore = defaultBaselineScore
 	}
-	initTakerLotLimit := int64(cfg.InitTakerLotLimit)
-	if initTakerLotLimit == 0 {
-		initTakerLotLimit = defaultInitTakerLotLimit
-	}
-	absTakerLotLimit := int64(cfg.AbsTakerLotLimit)
-	if absTakerLotLimit == 0 {
-		absTakerLotLimit = defaultAbsTakerLotLimit
-	}
+
 	auth := &AuthManager{
-		storage:           cfg.Storage,
-		signer:            cfg.Signer,
-		regFee:            cfg.RegistrationFee,
-		checkFee:          cfg.FeeChecker,
-		feeConfs:          cfg.FeeConfs,
-		miaUserTimeout:    cfg.MiaUserTimeout,
-		unbookFun:         cfg.UserUnbooker,
-		anarchy:           cfg.Anarchy,
-		freeCancels:       cfg.FreeCancels || cfg.Anarchy,
-		banScore:          banScore,
-		cancelThresh:      cfg.CancelThreshold,
-		initTakerLotLimit: initTakerLotLimit,
-		absTakerLotLimit:  absTakerLotLimit,
-		latencyQ:          wait.NewTickerQueue(recheckInterval),
-		users:             make(map[account.AccountID]*clientInfo),
-		conns:             make(map[uint64]*clientInfo),
-		unbookers:         make(map[account.AccountID]*time.Timer),
-		feeWaiterIdx:      make(map[account.AccountID]struct{}),
-		reputations:       make(map[account.AccountID]*Reputation),
+		storage:        cfg.Storage,
+		signer:         cfg.Signer,
+		regFee:         cfg.RegistrationFee,
+		checkFee:       cfg.FeeChecker,
+		feeConfs:       cfg.FeeConfs,
+		miaUserTimeout: cfg.MiaUserTimeout,
+		unbookFun:      cfg.UserUnbooker,
+		anarchy:        cfg.Anarchy,
+		freeCancels:    cfg.FreeCancels || cfg.Anarchy,
+		baselineScore:  int32(defaultBaselineScore),
+		cancelThresh:   cfg.CancelThreshold,
+		latencyQ:       wait.NewTickerQueue(recheckInterval),
+		users:          make(map[account.AccountID]*clientInfo),
+		conns:          make(map[uint64]*clientInfo),
+		unbookers:      make(map[account.AccountID]*time.Timer),
+		feeWaiterIdx:   make(map[account.AccountID]struct{}),
+		reputations:    make(map[account.AccountID]*Reputation),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -373,8 +351,8 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 // Run runs the AuthManager until the context is canceled. Satisfies the
 // dex.Runner interface.
 func (auth *AuthManager) Run(ctx context.Context) {
-	log.Infof("Allowing %d settling + taker order lots per market for new users.", auth.initTakerLotLimit)
-	log.Infof("Allowing up to %d settling + taker order lots per market for established users.", auth.absTakerLotLimit)
+	// log.Infof("Allowing %d settling + taker order lots per market for new users.", auth.initTakerLotLimit)
+	// log.Infof("Allowing up to %d settling + taker order lots per market for established users.", auth.absTakerLotLimit)
 
 	go auth.latencyQ.Run(ctx)
 	<-ctx.Done()
@@ -524,13 +502,13 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
-	return auth.userReputation(user).userSettlingLimit(mkt.Base, mkt.Quote, mkt.LotSize)
+	return auth.userReputation(user).userSettlingLimit(mkt.Base, mkt.Quote, mkt.ProbationaryLots, mkt.PrivilegedLots, mkt.LotSize)
 }
 
 func (auth *AuthManager) userReputation(user account.AccountID) *Reputation {
 	rep, found := auth.reputations[user]
 	if !found {
-		rep = NewReputation(auth.initTakerLotLimit, auth.absTakerLotLimit)
+		rep = NewReputation(auth.baselineScore)
 		auth.reputations[user] = rep
 	}
 	return rep
@@ -542,11 +520,11 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
 	rep.registerMatchOutcome(violation, mmid.Base, mmid.Quote, mmid.MatchID, value, refTime)
-	score := rep.userScore()
+	rawScore := rep.rawScore()
 	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
-		violation.String(), violation.Score(), user, score)
+		violation.String(), violation.Score(), user, rawScore)
 
-	return score
+	return rawScore
 }
 
 // SwapSuccess registers the successful completion of a swap by the given user.
@@ -570,10 +548,10 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 		return
 	}
 	score := auth.registerMatchOutcome(user, misstep, mmid, matchValue, refTime)
-	if score < int32(auth.banScore) {
+	if score > 0 {
 		return
 	}
-	log.Debugf("User %v ban score %d is at or above %d. Penalizing.", user, score, auth.banScore)
+	log.Debugf("User %v raw score %d is at or below 0 (baseline = %d). Penalizing.", user, score, auth.baselineScore)
 	details := fmt.Sprintf("swap %v failure (%v) for order %v", mmid.MatchID, misstep, oid)
 	if err := auth.Penalize(user, account.FailureToAct, details); err != nil {
 		log.Errorf("Failed to penalize user %v: %v", user, err)
@@ -585,12 +563,12 @@ func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bo
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
 	rep.registerPreimageOutcome(miss, oid, refTime)
-	score := rep.userScore()
+	rawScore := rep.rawScore()
 	if miss {
 		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
-			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, score)
+			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, rawScore)
 	}
-	return score
+	return rawScore
 }
 
 // PreimageSuccess registers an accepted preimage for the user.
@@ -601,10 +579,10 @@ func (auth *AuthManager) PreimageSuccess(user account.AccountID, epochEnd time.T
 // MissedPreimage registers a missed preimage violation by the user.
 func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
 	score := auth.registerPreimageOutcome(user, true, oid, epochEnd)
-	if score < int32(auth.banScore) {
+	if score > 0 {
 		return
 	}
-	log.Debugf("User %v ban score %d is at or above %d. Penalizing.", user, score, auth.banScore)
+	log.Debugf("User %v raw score %d is at or below 0 (baseline = %d). Penalizing.", user, score, auth.baselineScore)
 	details := fmt.Sprintf("preimage for order %v not provided upon request", oid)
 	if err := auth.Penalize(user, account.PreimageReveal, details); err != nil {
 		log.Errorf("Failed to penalize user %v: %v", user, err)
@@ -700,7 +678,7 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	}
 
 	// Restore the account if score is sub-threshold.
-	if score < int32(auth.banScore) {
+	if score > 0 {
 		if err = auth.Unban(user); err == nil {
 			unbanned = true
 		}
@@ -827,7 +805,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
-	rep := NewReputation(auth.initTakerLotLimit, auth.absTakerLotLimit)
+	rep := NewReputation(auth.baselineScore)
 	auth.reputations[user] = rep
 
 	for _, mo := range matchOutcomes {
@@ -850,16 +828,16 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	}
 
 	// Integrate the match and preimage outcomes.
-	score := rep.userScore()
+	rawScore := rep.rawScore()
 
 	successScore := successCount * successScore // negative
 	piMissScore := piMissCount * preimageMissScore
 	// score = violationScore + piMissScore + successScore
-	violationScore := score - piMissScore - successScore
-	log.Debugf("User %v score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
-		user, score, violationScore, piMissScore, piMissCount, -successScore, successCount)
+	violationScore := rawScore - piMissScore - successScore
+	log.Debugf("User %v raw score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
+		user, rawScore, violationScore, piMissScore, piMissCount, -successScore, successCount)
 
-	return score, nil
+	return rawScore, nil
 }
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
@@ -950,7 +928,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			acctInfo.ID, 100*rate, cancels, completions)
 	}
 
-	// Compute the user's ban score.
+	// Compute the user's raw score.
 	score, err := auth.loadUserScore(user)
 	if err != nil {
 		log.Errorf("Failed to compute user %v score: %v", user, err)
@@ -959,8 +937,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "DB error",
 		}
 	}
-	if score >= int32(auth.banScore) && open && !auth.anarchy {
-		// Would already be penalized unless server changed the banScore or
+	if score <= 0 && open && !auth.anarchy {
+		// Would already be penalized unless server changed the baselineScore or
 		// was previously running in anarchy mode.
 		client.suspended = true
 		auth.storage.CloseAccount(user, account.FailureToAct)

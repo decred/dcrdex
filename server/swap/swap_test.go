@@ -194,7 +194,6 @@ func (m *TAuthManager) Route(string,
 func (m *TAuthManager) SwapSuccess(id account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
 }
 func (m *TAuthManager) Inaction(id account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-	// banscore of zero => immediate penalize
 	m.penalize(id, account.FailureToAct)
 }
 func (m *TAuthManager) penalize(id account.AccountID, rule account.Rule) {

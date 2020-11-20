@@ -49,7 +49,7 @@ const (
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
 	defaultMaxUserCancels      = 2
-	defaultBanScore            = 20
+	defaultBaselineScore       = 20
 
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
@@ -84,7 +84,7 @@ type dexConf struct {
 	Anarchy           bool
 	FreeCancels       bool
 	MaxUserCancels    uint32
-	BanScore          uint32
+	BaselineScore     uint32
 	InitTakerLotLimit uint32
 	AbsTakerLotLimit  uint32
 	DEXPrivKeyPath    string
@@ -132,7 +132,7 @@ type flagsData struct {
 	CancelThreshold   float64 `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
 	FreeCancels       bool    `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders). Implied by --anarchy."`
 	MaxUserCancels    uint32  `long:"maxepochcancels" description:"The maximum number of cancel orders allowed for a user in a given epoch."`
-	BanScore          uint32  `long:"banscore" description:"The accumulated penalty score at which when an account gets closed."`
+	BaselineScore     uint32  `long:"baselinescore" description:"The user's initial score. Acts as a penalty buffer for new users and the threshold between probationary and privileged trading status."`
 	InitTakerLotLimit uint32  `long:"inittakerlotlimit" description:"The starting limit on the number of settling lots per-market for new users. Used to limit size of likely-taker orders."`
 	AbsTakerLotLimit  uint32  `long:"abstakerlotlimit" description:"The upper limit on the number of settling lots per-market for a user regardless of their swap history. Used to limit size of likely-taker orders."`
 
@@ -316,7 +316,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
-		BanScore:         defaultBanScore,
+		BaselineScore:    defaultBaselineScore,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
@@ -591,7 +591,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		MaxUserCancels:    cfg.MaxUserCancels,
 		Anarchy:           cfg.Anarchy,
 		FreeCancels:       cfg.FreeCancels || cfg.Anarchy,
-		BanScore:          cfg.BanScore,
+		BaselineScore:     cfg.BaselineScore,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,
 		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
 		DEXPrivKeyPath:    cfg.DEXPrivKeyPath,

@@ -58,22 +58,23 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
-	DataDir           string
-	LogBackend        *dex.LoggerMaker
-	Markets           []*dex.MarketInfo
-	Assets            []*AssetConf
-	Network           dex.Network
-	DBConf            *DBConf
-	RegFeeXPub        string
-	RegFeeConfirms    int64
-	RegFeeAmount      uint64
-	BroadcastTimeout  time.Duration
-	CancelThreshold   float64
-	Anarchy           bool
-	FreeCancels       bool
-	BanScore          uint32
+	DataDir          string
+	LogBackend       *dex.LoggerMaker
+	Markets          []*dex.MarketInfo
+	Assets           []*AssetConf
+	Network          dex.Network
+	DBConf           *DBConf
+	RegFeeXPub       string
+	RegFeeConfirms   int64
+	RegFeeAmount     uint64
+	BroadcastTimeout time.Duration
+	CancelThreshold  float64
+	Anarchy          bool
+	FreeCancels      bool
+	// BanScore          uint32
 	InitTakerLotLimit uint32
 	AbsTakerLotLimit  uint32
+	BaselineScore     uint32
 	DEXPrivKey        *secp256k1.PrivateKey
 	CommsCfg          *RPCConfig
 	NoResumeSwaps     bool
@@ -411,19 +412,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	authCfg := auth.Config{
-		Storage:           storage,
-		Signer:            signer{cfg.DEXPrivKey},
-		RegistrationFee:   cfg.RegFeeAmount,
-		FeeConfs:          cfg.RegFeeConfirms,
-		FeeChecker:        dcrBackend.FeeCoin,
-		UserUnbooker:      userUnbookFun,
-		MiaUserTimeout:    cfg.BroadcastTimeout,
-		CancelThreshold:   cfg.CancelThreshold,
-		Anarchy:           cfg.Anarchy,
-		FreeCancels:       cfg.FreeCancels,
-		BanScore:          cfg.BanScore,
-		InitTakerLotLimit: cfg.InitTakerLotLimit,
-		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
+		Storage:         storage,
+		Signer:          signer{cfg.DEXPrivKey},
+		RegistrationFee: cfg.RegFeeAmount,
+		FeeConfs:        cfg.RegFeeConfirms,
+		FeeChecker:      dcrBackend.FeeCoin,
+		UserUnbooker:    userUnbookFun,
+		MiaUserTimeout:  cfg.BroadcastTimeout,
+		CancelThreshold: cfg.CancelThreshold,
+		Anarchy:         cfg.Anarchy,
+		FreeCancels:     cfg.FreeCancels,
+		BaselineScore:   cfg.BaselineScore,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
@@ -433,7 +432,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	if authCfg.FreeCancels {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
-	log.Infof("Ban score threshold is %v", cfg.BanScore)
+	log.Infof("Baseline score is %v", cfg.BaselineScore)
 
 	// Create a swapDone dispatcher for the Swapper.
 	swapDone := func(ord order.Order, match *order.Match, fail bool) {

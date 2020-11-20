@@ -27,17 +27,17 @@ const (
 // violation badness
 const (
 	// preimage miss
-	preimageMissScore = 2 // book spoof, no match, no stuck funds
+	preimageMissScore = -2 // book spoof, no match, no stuck funds
 
 	// failure to act violations
-	noSwapAsMakerScore   = 4  // book spoof, match with taker order affected, no stuck funds
-	noSwapAsTakerScore   = 11 // maker has contract stuck for 20 hrs
-	noRedeemAsMakerScore = 7  // taker has contract stuck for 8 hrs
-	noRedeemAsTakerScore = 1  // just dumb, counterparty not inconvenienced
+	noSwapAsMakerScore   = -4  // book spoof, match with taker order affected, no stuck funds
+	noSwapAsTakerScore   = -11 // maker has contract stuck for 20 hrs
+	noRedeemAsMakerScore = -7  // taker has contract stuck for 8 hrs
+	noRedeemAsTakerScore = -1  // just dumb, counterparty not inconvenienced
 
-	successScore = -1 // offsets the violations
+	successScore = 1 // offsets the violations
 
-	defaultBanScore = 20
+	defaultBaselineScore = 20
 )
 
 // Violation represents a specific infraction. For example, not broadcasting a
@@ -119,19 +119,17 @@ func (step NoActionStep) String() string {
 // Reputation is the user's reputation, which takes into account recent orders
 // and matches.
 type Reputation struct {
-	initTakerLotLimit int64
-	absTakerLotLimit  int64
-	matches           *latestMatchOutcomes
-	ords              *latestPreimageOutcomes
+	baseline int32
+	matches  *latestMatchOutcomes
+	ords     *latestPreimageOutcomes
 }
 
 // NewReputation is the constructor for a *Reputation.
-func NewReputation(initTakerLotLimit, absTakerLotLimit int64) *Reputation {
+func NewReputation(baseline int32) *Reputation {
 	return &Reputation{
-		initTakerLotLimit: initTakerLotLimit,
-		absTakerLotLimit:  absTakerLotLimit,
-		matches:           newLatestMatchOutcomes(scoringMatchLimit),
-		ords:              newLatestPreimageOutcomes(scoringOrderLimit),
+		baseline: baseline,
+		matches:  newLatestMatchOutcomes(scoringMatchLimit),
+		ords:     newLatestPreimageOutcomes(scoringOrderLimit),
 	}
 }
 
@@ -139,9 +137,10 @@ func (r *Reputation) mktSwapAmounts(base, quote uint32) *SwapAmounts {
 	return r.matches.mktSwapAmounts(base, quote)
 }
 
-// userScore computes the user score from the user's recent match outcomes and
+// rawScore computes the user score from the user's recent match outcomes and
 // preimage history. This must be called with the violationMtx locked.
-func (r *Reputation) userScore() (score int32) {
+func (r *Reputation) rawScore() (score int32) {
+	score = r.baseline
 	for v, count := range r.matches.binViolations() {
 		score += v.Score() * int32(count)
 	}
@@ -173,15 +172,15 @@ func (r *Reputation) registerPreimageOutcome(miss bool, oid order.OrderID, refTi
 // userSettlingLimit returns a user's settling amount limit for the given market
 // in units of the base asset. The limit may be negative for accounts with poor
 // swap history.
-func (r *Reputation) userSettlingLimit(base, quote uint32, lotSize uint64) int64 {
+func (r *Reputation) userSettlingLimit(base, quote, probationary, privileged uint32, lotSize uint64) int64 {
 	currentLotSize := int64(lotSize)
-	start := currentLotSize * r.initTakerLotLimit
+	start := currentLotSize * int64(probationary)
 
 	sa := r.mktSwapAmounts(base, quote)
 
 	limit := start + sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
-	if limit/currentLotSize >= r.absTakerLotLimit {
-		limit = r.absTakerLotLimit * currentLotSize
+	if limit/currentLotSize >= int64(privileged) {
+		limit = int64(privileged) * currentLotSize
 	}
 	return limit
 }

@@ -510,7 +510,7 @@ func setViolations() (wantScore int32) {
 	for range rig.storage.userMatchOutcomes {
 		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
 	}
-	return 4*successScore + 1*preimageMissScore +
+	return defaultBaselineScore + 4*successScore + 1*preimageMissScore +
 		2*noSwapAsMakerScore + noSwapAsTakerScore + noRedeemAsMakerScore + 1*noRedeemAsTakerScore
 }
 
@@ -544,6 +544,8 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 		t.Errorf("wrong score. got %d, want %d", score, wantScore)
 	}
 
+	bs := rig.mgr.baselineScore
+
 	tests := []struct {
 		name           string
 		user           account.AccountID
@@ -560,13 +562,13 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
-			wantScore: -4,
+			wantScore: bs + 4,
 		},
 		{
 			name:          "nuthin",
 			user:          user.acctID,
 			matchOutcomes: []*db.MatchOutcome{},
-			wantScore:     0,
+			wantScore:     bs,
 		},
 		{
 			name: "balance",
@@ -581,7 +583,7 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(true, nextTime()),
 			},
-			wantScore: 0,
+			wantScore: bs,
 		},
 		{
 			name: "tipping red",
@@ -601,7 +603,7 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(false, nextTime()),
 			},
-			wantScore: 2*noSwapAsMakerScore + 1*noSwapAsTakerScore + 0*noRedeemAsMakerScore +
+			wantScore: bs + 2*noSwapAsMakerScore + 1*noSwapAsTakerScore + 0*noRedeemAsMakerScore +
 				1*noRedeemAsTakerScore + 1*preimageMissScore + 5*successScore,
 		},
 	}
@@ -706,12 +708,12 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
 	}
 
-	// Connect with a violation score above ban score.
+	// Connect with a raw score <= 0.
 	wantScore := setViolations()
 	defer clearViolations()
 
-	if wantScore < int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not at least the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	if wantScore > 0 {
+		t.Fatalf("test score of %v is not at least less than zero (baseline = %d), revise the test", wantScore, rig.mgr.baselineScore)
 	}
 
 	// Test loadUserScore while here.
@@ -734,8 +736,8 @@ func TestConnect(t *testing.T) {
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
 	wantScore -= noSwapAsTakerScore
-	if wantScore >= int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not less than the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	if wantScore <= 0 {
+		t.Fatalf("test score of %v is > 0, revise the test", wantScore)
 	}
 	score, err = rig.mgr.loadUserScore(user.acctID)
 	if err != nil {
