@@ -335,7 +335,7 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 	m.epochMtx.Lock()
 	defer m.epochMtx.Unlock()
 
-	dur := int64(m.EpochDuration())
+	dur := int64(m.Info().EpochDuration)
 
 	epochEnd := func(idx int64) time.Time {
 		start := encode.UnixTimeMilli(idx * dur)
@@ -385,7 +385,7 @@ func (m *Market) ResumeEpoch(asSoonAs time.Time) (startEpochIdx int64) {
 		return
 	}
 
-	dur := int64(m.EpochDuration())
+	dur := int64(m.Info().EpochDuration)
 
 	now := encode.UnixMilli(time.Now())
 	nextEpochIdx := 1 + now/dur
@@ -469,24 +469,9 @@ func (m *Market) Running() bool {
 	}
 }
 
-// EpochDuration returns the Market's epoch duration in milliseconds.
-func (m *Market) EpochDuration() uint64 {
-	return m.marketInfo.EpochDuration
-}
-
-// MarketBuyBuffer returns the Market's market-buy buffer.
-func (m *Market) MarketBuyBuffer() float64 {
-	return m.marketInfo.MarketBuyBuffer
-}
-
-// Base is the base asset ID.
-func (m *Market) Base() uint32 {
-	return m.marketInfo.Base
-}
-
-// Quote is the quote asset ID.
-func (m *Market) Quote() uint32 {
-	return m.marketInfo.Quote
+// Info returns the Market's MarketInfo.
+func (m *Market) Info() *dex.MarketInfo {
+	return m.marketInfo
 }
 
 // OrderFeed provides a new order book update channel. Channels provided before
@@ -995,7 +980,7 @@ func (m *Market) Run(ctx context.Context) {
 	if nextEpochIdx == 0 {
 		log.Warnf("Run: startEpochIdx not set. Starting at the next epoch.")
 		now := encode.UnixMilli(time.Now())
-		nextEpochIdx = 1 + now/int64(m.EpochDuration())
+		nextEpochIdx = 1 + now/int64(m.Info().EpochDuration)
 		m.startEpochIdx = nextEpochIdx
 	}
 	m.epochMtx.Unlock()
@@ -1967,7 +1952,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			matchProof: &order.MatchProof{
 				Epoch: order.EpochID{
 					Idx: uint64(epoch.Epoch),
-					Dur: m.EpochDuration(),
+					Dur: m.Info().EpochDuration,
 				},
 				Preimages: preimages,
 				Misses:    misses,

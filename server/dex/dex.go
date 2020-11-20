@@ -506,19 +506,22 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
 	cfgMarkets := make([]*msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
-		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
+		mktInfo := mkt.Info()
+		startEpochIdx := 1 + now/int64(mktInfo.EpochDuration)
 		mkt.SetStartEpochIdx(startEpochIdx)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
-			Base:            mkt.Base(),
-			Quote:           mkt.Quote(),
-			EpochLen:        mkt.EpochDuration(),
-			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+			Base:            mktInfo.Base,
+			Quote:           mktInfo.Quote,
+			EpochLen:        mktInfo.EpochDuration,
+			MarketBuyBuffer: mktInfo.MarketBuyBuffer,
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},
+			ProbationaryLots: mktInfo.ProbationaryLots,
+			PrivilegedLots:   mktInfo.PrivilegedLots,
 		})
 	}
 

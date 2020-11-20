@@ -3065,7 +3065,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	// Set the account as authenticated.
 	c.log.Debugf("Authenticated connection to %s, %d active orders, %d active matches, score %d",
-		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score)
+		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Reputation.Score)
 	dc.acct.auth()
 
 	// Associate the matches with known trades.
@@ -4089,6 +4089,11 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return nil
 }
 
+func handleReputationUpdate(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	c.log.Tracef("Received reputation update from %s: %s", dc.acct.host, string(msg.Payload))
+	return nil
+}
+
 // handleNotifyMsg is called when a notify notification is received.
 func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var txt string
@@ -4135,19 +4140,20 @@ var reqHandlers = map[string]routeHandler{
 }
 
 var noteHandlers = map[string]routeHandler{
-	msgjson.MatchProofRoute:      handleMatchProofMsg,
-	msgjson.BookOrderRoute:       handleBookOrderMsg,
-	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
-	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
-	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
-	msgjson.EpochReportRoute:     handleEpochReportMsg,
-	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
-	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
-	msgjson.NotifyRoute:          handleNotifyMsg,
-	msgjson.PenaltyRoute:         handlePenaltyMsg,
-	msgjson.NoMatchRoute:         handleNoMatchRoute,
-	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
-	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
+	msgjson.MatchProofRoute:       handleMatchProofMsg,
+	msgjson.BookOrderRoute:        handleBookOrderMsg,
+	msgjson.EpochOrderRoute:       handleEpochOrderMsg,
+	msgjson.UnbookOrderRoute:      handleUnbookOrderMsg,
+	msgjson.UpdateRemainingRoute:  handleUpdateRemainingMsg,
+	msgjson.EpochReportRoute:      handleEpochReportMsg,
+	msgjson.SuspensionRoute:       handleTradeSuspensionMsg,
+	msgjson.ResumptionRoute:       handleTradeResumptionMsg,
+	msgjson.NotifyRoute:           handleNotifyMsg,
+	msgjson.PenaltyRoute:          handlePenaltyMsg,
+	msgjson.NoMatchRoute:          handleNoMatchRoute,
+	msgjson.RevokeOrderRoute:      handleRevokeOrderMsg,
+	msgjson.RevokeMatchRoute:      handleRevokeMatchMsg,
+	msgjson.ReputationUpdateRoute: handleReputationUpdate,
 }
 
 // listen monitors the DEX websocket connection for server requests and

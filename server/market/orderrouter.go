@@ -54,9 +54,8 @@ type MarketTunnel interface {
 	// MidGap returns the mid-gap market rate, which is ths rate halfway between
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
-	// MarketBuyBuffer is a coefficient that when multiplied by the market's lot
-	// size specifies the minimum required amount for a market buy order.
-	MarketBuyBuffer() float64
+	// Info is the markets *dex.MarketInfo.
+	Info() *dex.MarketInfo
 	// CoinLocked should return true if the CoinID is currently a funding Coin
 	// for an active DEX order. This is required for Coin validation to prevent
 	// a user from submitting multiple orders spending the same Coin. This
@@ -539,7 +538,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			if midGap == 0 {
 				midGap = assets.quote.RateStep
 			}
-			buyBuffer := tunnel.MarketBuyBuffer()
+			buyBuffer := tunnel.Info().MarketBuyBuffer
 			lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
 			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
 			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)

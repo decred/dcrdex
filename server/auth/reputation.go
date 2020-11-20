@@ -125,27 +125,32 @@ func NewReputation(baseline int32) *Reputation {
 	}
 }
 
-func (r *Reputation) Privilege() float64 {
-	rawScore := r.rawScore()
-	if rawScore < r.baseline {
-		return 0
-	}
-	return float64(rawScore-r.baseline) / float64(MaxScore-r.baseline)
-}
-
-func (r *Reputation) Score() int {
-	return int(math.Round(float64(r.rawScore()) / MaxScore * 100))
-}
-
-// rawScore computes the user score from the user's recent match outcomes and
-// preimage history. This must be called with the violationMtx locked.
-func (r *Reputation) rawScore() (score int32) {
+// RawScore is the score in the internal scoring system. RawScore will be on the
+// range [0, MaxScore]. The RawScore is computed from the user's recent match
+// outcomes and preimage history.
+func (r *Reputation) RawScore() (score int32) {
 	score = r.baseline
 	for v, count := range r.matches.binViolations() {
 		score += v.Score() * int32(count)
 	}
 	score += ViolationPreimageMiss.Score() * r.ords.misses()
 	return
+}
+
+// Score is the normalized user score, and will range from < 0 (for penalized
+// users) to max 100.
+func (r *Reputation) Score() int {
+	return int(math.Round(float64(r.RawScore()) / MaxScore * 100))
+}
+
+// Privilege is the amount of privilege the user has, and is computed as
+// (rawScore - baseline) / (maxScore - baseline), with a minimum value of zero.
+func (r *Reputation) Privilege() float64 {
+	rawScore := r.RawScore()
+	if rawScore < r.baseline {
+		return 0
+	}
+	return float64(rawScore-r.baseline) / float64(MaxScore-r.baseline)
 }
 
 // registerMatchOutcome registers the outcome from a match.

@@ -291,8 +291,10 @@ func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
 	return m.locked
 }
 
-func (m *TMarketTunnel) MarketBuyBuffer() float64 {
-	return m.mbBuffer
+func (m *TMarketTunnel) Info() *dex.MarketInfo {
+	return &dex.MarketInfo{
+		MarketBuyBuffer: m.mbBuffer,
+	}
 }
 
 func (m *TMarketTunnel) pop() *orderRecord {

@@ -518,17 +518,18 @@ func clearViolations() {
 	rig.storage.userMatchOutcomes = []*db.MatchOutcome{}
 }
 
-func TestAuthManager_loadUserScore(t *testing.T) {
+func TestAuthManager_loadUserReputation(t *testing.T) {
 	// Spot test with all violations set
 	wantScore := setViolations()
 	defer clearViolations()
 	user := tNewUser(t)
-	score, err := rig.mgr.loadUserScore(user.acctID)
+	rep, err := rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore := rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
@@ -536,12 +537,13 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()))
 	wantScore += noSwapAsTakerScore
 
-	score, err = rig.mgr.loadUserScore(user.acctID)
+	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore = rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	bs := rig.mgr.baselineScore
@@ -611,12 +613,13 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rig.storage.userMatchOutcomes = tt.matchOutcomes
 			rig.storage.userPreimageResults = tt.preimageMisses
-			score, err := rig.mgr.loadUserScore(tt.user)
+			rep, err := rig.mgr.loadUserReputation(tt.user)
 			if err != nil {
 				t.Fatalf("got err: %v", err)
 			}
-			if score != tt.wantScore {
-				t.Errorf("incorrect user score. got %d, want %d", score, tt.wantScore)
+			rawScore := rep.RawScore()
+			if rawScore != tt.wantScore {
+				t.Errorf("incorrect user score. got %d, want %d", rawScore, tt.wantScore)
 			}
 		})
 	}
@@ -717,13 +720,13 @@ func TestConnect(t *testing.T) {
 	}
 
 	// Test loadUserScore while here.
-	score, err := rig.mgr.loadUserScore(user.acctID)
+	rep, err := rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore := rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// No error, but Penalize account that was not previously closed.
@@ -739,12 +742,13 @@ func TestConnect(t *testing.T) {
 	if wantScore <= 0 {
 		t.Fatalf("test score of %v is > 0, revise the test", wantScore)
 	}
-	score, err = rig.mgr.loadUserScore(user.acctID)
+	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore = rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// Connect the user.

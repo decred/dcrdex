@@ -182,6 +182,9 @@ const (
 	// CandlesRoute is the HTTP request to get the set of candlesticks
 	// representing market activity history.
 	CandlesRoute = "candles"
+	// ReputationUpdateRoute is the DEX-originating notification-type message
+	// informing the client of an update to the account's reputation.
+	ReputationUpdateRoute = "reputation_update"
 )
 
 type Bytes = dex.Bytes
@@ -868,7 +871,13 @@ type ConnectResult struct {
 	Sig                 Bytes          `json:"sig"`
 	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
 	ActiveMatches       []*Match       `json:"activematches"`
-	Score               int32          `json:"score"`
+	Reputation          Reputation     `json:"reputation"`
+}
+
+type Reputation struct {
+	Score     int     `json:"score"`
+	RawScore  int32   `json:"rawScore"`
+	Privilege float64 `json:"privilege"`
 }
 
 // PenaltyNote is the payload of a Penalty notification.
@@ -977,12 +986,14 @@ type MarketStatus struct {
 // ConfigResult. The market's status (running, start epoch, and any planned
 // final epoch before suspend) are also provided.
 type Market struct {
-	Name            string  `json:"name"`
-	Base            uint32  `json:"base"`
-	Quote           uint32  `json:"quote"`
-	EpochLen        uint64  `json:"epochlen"`
-	MarketBuyBuffer float64 `json:"buybuffer"`
-	MarketStatus    `json:"status"`
+	Name             string  `json:"name"`
+	Base             uint32  `json:"base"`
+	Quote            uint32  `json:"quote"`
+	EpochLen         uint64  `json:"epochlen"`
+	MarketBuyBuffer  float64 `json:"buybuffer"`
+	ProbationaryLots uint32  `json:"probationaryLots"`
+	PrivilegedLots   uint32  `json:"privilegedLots"`
+	MarketStatus     `json:"status"`
 }
 
 // Running indicates if the market should be running given the known StartEpoch,

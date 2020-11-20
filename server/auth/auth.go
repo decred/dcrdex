@@ -522,10 +522,11 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
 	rep.registerMatchOutcome(violation, mmid.Base, mmid.Quote, mmid.MatchID, value, refTime)
-	rawScore := rep.rawScore()
+	rawScore := rep.RawScore()
 	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
 		violation.String(), violation.Score(), user, rawScore)
 
+	auth.sendReputationUpdate(user, rep)
 	return rawScore
 }
 
@@ -560,16 +561,33 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 	}
 }
 
+// sendReputationUpdate sends the reputation to the user as a reputation_update
+// notification.
+func (auth *AuthManager) sendReputationUpdate(user account.AccountID, rep *Reputation) {
+	note, err := msgjson.NewNotification(msgjson.ReputationUpdateRoute, &msgjson.Reputation{
+		Score:     rep.Score(),
+		RawScore:  rep.RawScore(),
+		Privilege: rep.Privilege(),
+	})
+	if err == nil {
+		auth.Notify(user, note)
+	} else {
+		log.Errorf("error creating reputation_update notification: %w", err)
+	}
+}
+
 func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) int32 {
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
 	rep.registerPreimageOutcome(miss, oid, refTime)
-	rawScore := rep.rawScore()
+	rawScore := rep.RawScore()
 	if miss {
 		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
 			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, rawScore)
 	}
+
+	auth.sendReputationUpdate(user, rep)
 	return rawScore
 }
 
@@ -673,14 +691,13 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	}
 
 	// Recompute the user's score.
-	var score int32
-	score, err = auth.loadUserScore(user)
+	rep, err := auth.loadUserReputation(user)
 	if err != nil {
 		return
 	}
 
 	// Restore the account if score is sub-threshold.
-	if score > 0 {
+	if rep.RawScore() > 0 {
 		if err = auth.Unban(user); err == nil {
 			unbanned = true
 		}
@@ -771,15 +788,15 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.repMtx.Unlock()
 }
 
-// loadUserScore computes the user's current score from order and swap data
-// retrieved from the DB.
-func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
+// loadUserReputation computes the user's current reputation from order and swap
+// data retrieved from the DB.
+func (auth *AuthManager) loadUserReputation(user account.AccountID) (*Reputation, error) {
 	var successCount, piMissCount int32
 	// Load the N most recent matches resulting in success or an at-fault match
 	// revocation for the user.
 	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, scoringMatchLimit)
 	if err != nil {
-		return 0, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
+		return nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
 	}
 
 	matchStatusToViol := func(status order.MatchStatus) Violation {
@@ -802,7 +819,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	// Load the count of preimage misses in the N most recently placed orders.
 	piOutcomes, err := auth.storage.PreimageStats(user, scoringOrderLimit)
 	if err != nil {
-		return 0, fmt.Errorf("PreimageStats: %w", err)
+		return nil, fmt.Errorf("PreimageStats: %w", err)
 	}
 
 	auth.repMtx.Lock()
@@ -830,7 +847,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	}
 
 	// Integrate the match and preimage outcomes.
-	rawScore := rep.rawScore()
+	rawScore := rep.RawScore()
 
 	successScore := successCount * successScore // negative
 	piMissScore := piMissCount * preimageMissScore
@@ -839,7 +856,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	log.Debugf("User %v raw score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
 		user, rawScore, violationScore, piMissScore, piMissCount, -successScore, successCount)
 
-	return rawScore, nil
+	return rep, nil
 }
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
@@ -931,7 +948,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Compute the user's raw score.
-	score, err := auth.loadUserScore(user)
+	rep, err := auth.loadUserReputation(user)
 	if err != nil {
 		log.Errorf("Failed to compute user %v score: %v", user, err)
 		return &msgjson.Error{
@@ -939,12 +956,13 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "DB error",
 		}
 	}
-	if score <= 0 && open && !auth.anarchy {
+	rawScore := rep.RawScore()
+	if rawScore <= 0 && open && !auth.anarchy {
 		// Would already be penalized unless server changed the baselineScore or
 		// was previously running in anarchy mode.
 		client.suspended = true
 		auth.storage.CloseAccount(user, account.FailureToAct)
-		log.Debugf("Suspended account %v (score = %d) connected.", acctInfo.ID, score)
+		log.Debugf("Suspended account %v (raw score = %d) connected.", acctInfo.ID, rawScore)
 	}
 
 	// Get the list of active orders for this user.
@@ -1027,7 +1045,11 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		Sig:                 sig.Serialize(),
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
-		Score:               score,
+		Reputation: msgjson.Reputation{
+			Score:     rep.Score(),
+			RawScore:  rawScore,
+			Privilege: rep.Privilege(),
+		},
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
