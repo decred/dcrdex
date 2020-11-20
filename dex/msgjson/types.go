@@ -874,6 +874,7 @@ type ConnectResult struct {
 	Reputation          Reputation     `json:"reputation"`
 }
 
+// Reputation is the user's reputation breakdown.
 type Reputation struct {
 	Score     int     `json:"score"`
 	RawScore  int32   `json:"rawScore"`

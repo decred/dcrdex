@@ -1337,9 +1337,10 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		// Get the settling amount limit in units of the base asset from the
 		// AuthManager, which tracks the user's swap outcome amount history.
-		userLimit := m.auth.UserSettlingLimit(user, m.marketInfo) // hard to make this lots across all markets, partly because db stores base value
+		userLotLimit := m.auth.UserSettlingLimit(user, m.marketInfo) // hard to make this lots across all markets, partly because db stores base value
 		// Subtract the user's total active amount from their limit.
-		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
+		userQtyLimit := userLotLimit * int64(m.marketInfo.LotSize)
+		orderQtyAllowed := userQtyLimit - int64(amtInSwaps+userTakerEpochQty)
 
 		qty := baseQty(ord)
 		symb := dex.BipIDSymbol(m.marketInfo.Base)
@@ -1350,8 +1351,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		if int64(qty) > orderQtyAllowed {
 			log.Infof("Rejecting user %v likely-taker order %v: qty %d > %d allowed "+
-				"(already have %d swapping and %d epoch takers with %d limit)",
-				user, oid, qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty, userLimit)
+				"(already have %d swapping and %d epoch takers with %d lot limit = %d)",
+				user, oid, qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty, userLotLimit, userQtyLimit)
 			errChan <- dex.NewError(ErrQuantityTooHigh,
 				fmt.Sprintf("Order quantity %d too large. Current likely-taker order limit: %d "+
 					"(you have %d settling already and %d in epoch taker orders)",

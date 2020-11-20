@@ -203,7 +203,7 @@ type AuthManager struct {
 	unbookers map[account.AccountID]*time.Timer
 
 	repMtx      sync.Mutex
-	reputations map[account.AccountID]*Reputation
+	reputations map[account.AccountID]*dex.Reputation
 	// matchOutcomes  map[account.AccountID]*latestMatchOutcomes
 	// preimgOutcomes map[account.AccountID]*latestPreimageOutcomes
 }
@@ -242,7 +242,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	// A baseline score must be > 0.
 	baselineScore := cfg.BaselineScore
 	if baselineScore <= 0 {
-		baselineScore = DefaultBaselineScore
+		baselineScore = dex.DefaultBaselineScore
 	}
 
 	auth := &AuthManager{
@@ -255,14 +255,14 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		unbookFun:      cfg.UserUnbooker,
 		anarchy:        cfg.Anarchy,
 		freeCancels:    cfg.FreeCancels || cfg.Anarchy,
-		baselineScore:  int32(DefaultBaselineScore),
+		baselineScore:  int32(dex.DefaultBaselineScore),
 		cancelThresh:   cfg.CancelThreshold,
 		latencyQ:       wait.NewTickerQueue(recheckInterval),
 		users:          make(map[account.AccountID]*clientInfo),
 		conns:          make(map[uint64]*clientInfo),
 		unbookers:      make(map[account.AccountID]*time.Timer),
 		feeWaiterIdx:   make(map[account.AccountID]struct{}),
-		reputations:    make(map[account.AccountID]*Reputation),
+		reputations:    make(map[account.AccountID]*dex.Reputation),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -507,21 +507,21 @@ func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.Mark
 	return int64(mkt.ProbationaryLots) + int64(math.Round(privBonus*rep.Privilege()))
 }
 
-func (auth *AuthManager) userReputation(user account.AccountID) *Reputation {
+func (auth *AuthManager) userReputation(user account.AccountID) *dex.Reputation {
 	rep, found := auth.reputations[user]
 	if !found {
-		rep = NewReputation(auth.baselineScore)
+		rep = dex.NewReputation(auth.baselineScore)
 		auth.reputations[user] = rep
 	}
 	return rep
 }
 
-func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) int32 {
+func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep dex.NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) int32 {
 	violation := misstep.Violation()
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
-	rep.registerMatchOutcome(violation, mmid.Base, mmid.Quote, mmid.MatchID, value, refTime)
+	rep.RegisterMatchOutcome(violation, mmid.Base, mmid.Quote, mmid.MatchID, value, refTime)
 	rawScore := rep.RawScore()
 	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
 		violation.String(), violation.Score(), user, rawScore)
@@ -534,7 +534,7 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
 func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
-	auth.userReputation(user).registerMatchOutcome(SwapSuccess.Violation(), mmid.Base, mmid.Quote, mmid.MatchID, value, redeemTime)
+	auth.registerMatchOutcome(user, dex.SwapSuccess, mmid, value, redeemTime)
 }
 
 // Inaction registers an inaction violation by the user at the given step. The
@@ -545,8 +545,8 @@ func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatch
 // the actor was first able to take the missed action.
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
-func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-	if misstep.Violation() == ViolationInvalid {
+func (auth *AuthManager) Inaction(user account.AccountID, misstep dex.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+	if misstep.Violation() == dex.ViolationInvalid {
 		log.Errorf("Invalid inaction step %d", misstep)
 		return
 	}
@@ -563,7 +563,7 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 
 // sendReputationUpdate sends the reputation to the user as a reputation_update
 // notification.
-func (auth *AuthManager) sendReputationUpdate(user account.AccountID, rep *Reputation) {
+func (auth *AuthManager) sendReputationUpdate(user account.AccountID, rep *dex.Reputation) {
 	note, err := msgjson.NewNotification(msgjson.ReputationUpdateRoute, &msgjson.Reputation{
 		Score:     rep.Score(),
 		RawScore:  rep.RawScore(),
@@ -580,11 +580,11 @@ func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bo
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
 	rep := auth.userReputation(user)
-	rep.registerPreimageOutcome(miss, oid, refTime)
+	rep.RegisterPreimageOutcome(miss, oid, refTime)
 	rawScore := rep.RawScore()
 	if miss {
 		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
-			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, rawScore)
+			dex.ViolationPreimageMiss.String(), dex.ViolationPreimageMiss.Score(), user, rawScore)
 	}
 
 	auth.sendReputationUpdate(user, rep)
@@ -790,67 +790,50 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 
 // loadUserReputation computes the user's current reputation from order and swap
 // data retrieved from the DB.
-func (auth *AuthManager) loadUserReputation(user account.AccountID) (*Reputation, error) {
+func (auth *AuthManager) loadUserReputation(user account.AccountID) (*dex.Reputation, error) {
 	var successCount, piMissCount int32
 	// Load the N most recent matches resulting in success or an at-fault match
 	// revocation for the user.
-	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, scoringMatchLimit)
+	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, dex.ScoringMatchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
 	}
 
-	matchStatusToViol := func(status order.MatchStatus) Violation {
-		switch status {
-		case order.NewlyMatched:
-			return ViolationNoSwapAsMaker
-		case order.MakerSwapCast:
-			return ViolationNoSwapAsTaker
-		case order.TakerSwapCast:
-			return ViolationNoRedeemAsMaker
-		case order.MakerRedeemed:
-			return ViolationNoRedeemAsTaker
-		case order.MatchComplete:
-			return ViolationSwapSuccess // should be caught by Fail==false
-		default:
-			return ViolationInvalid
-		}
-	}
-
 	// Load the count of preimage misses in the N most recently placed orders.
-	piOutcomes, err := auth.storage.PreimageStats(user, scoringOrderLimit)
+	piOutcomes, err := auth.storage.PreimageStats(user, dex.ScoringOrderLimit)
 	if err != nil {
 		return nil, fmt.Errorf("PreimageStats: %w", err)
 	}
 
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
-	rep := NewReputation(auth.baselineScore)
+	rep := dex.NewReputation(auth.baselineScore)
 	auth.reputations[user] = rep
 
 	for _, mo := range matchOutcomes {
 		// The Fail flag qualifies MakerRedeemed, which is always success for
 		// maker, but fail for taker if revoked.
-		v := ViolationSwapSuccess
+		v := dex.ViolationSwapSuccess
 		if mo.Fail {
-			v = matchStatusToViol(mo.Status)
+			v = dex.ViolationFromMatchStatus(mo.Status)
 		} else {
 			successCount++
 		}
-		rep.registerMatchOutcome(v, mo.Base, mo.Quote, mo.ID, mo.Value, encode.UnixTimeMilli(mo.Time))
+		rep.RegisterMatchOutcome(v, mo.Base, mo.Quote, mo.ID, mo.Value, encode.UnixTimeMilli(mo.Time))
 	}
 
 	for _, po := range piOutcomes {
 		if po.Miss {
 			piMissCount++
 		}
-		rep.registerPreimageOutcome(po.Miss, po.ID, encode.UnixTimeMilli(po.Time))
+		rep.RegisterPreimageOutcome(po.Miss, po.ID, encode.UnixTimeMilli(po.Time))
 	}
 
 	// Integrate the match and preimage outcomes.
 	rawScore := rep.RawScore()
 
-	successScore := successCount * successScore // negative
-	piMissScore := piMissCount * preimageMissScore
+	successScore := successCount * dex.SuccessScore // negative
+	piMissScore := piMissCount * dex.PreimageMissScore
 	// score = violationScore + piMissScore + successScore
 	violationScore := rawScore - piMissScore - successScore
 	log.Debugf("User %v raw score = %d: %d (violations) + %d (%d preimage misses) - %d (%d successes)",
@@ -918,7 +901,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Retrieve the user's N latest finished (completed or canceled orders)
 	// and store them in a latestOrders.
-	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
+	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, dex.CancelThreshWindow)
 	if err != nil {
 		log.Errorf("Unable to retrieve user's executed cancels and completed orders: %v", err)
 		return &msgjson.Error{
@@ -1084,7 +1067,7 @@ func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) 
 	}
 
 	// Create the sorted list with capacity.
-	latestFinished := newLatestOrders(cancelThreshWindow)
+	latestFinished := newLatestOrders(dex.CancelThreshWindow)
 	// Insert the completed orders.
 	for i := range oids {
 		latestFinished.add(&oidStamped{

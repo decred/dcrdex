@@ -20,7 +20,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -57,7 +56,7 @@ type AuthManager interface {
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
 	SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time)
-	Inaction(user account.AccountID, misstep auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
+	Inaction(user account.AccountID, misstep dex.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -814,24 +813,24 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 
 func (s *Swapper) failMatch(match *matchTracker) {
 	// From the match status, determine maker/taker fault and the corresponding
-	// auth.NoActionStep.
+	// dex.NoActionStep.
 	var makerFault bool
-	var misstep auth.NoActionStep
+	var misstep dex.NoActionStep
 	var refTime time.Time // a reference time found in the DB for reproducibly sorting outcomes
 	switch match.Status {
 	case order.NewlyMatched:
-		misstep = auth.NoSwapAsMaker
+		misstep = dex.NoSwapAsMaker
 		refTime = match.Epoch.End()
 		makerFault = true
 	case order.MakerSwapCast:
-		misstep = auth.NoSwapAsTaker
+		misstep = dex.NoSwapAsTaker
 		refTime = match.makerStatus.swapTime // swapConfirmed time is not in the DB
 	case order.TakerSwapCast:
-		misstep = auth.NoRedeemAsMaker
+		misstep = dex.NoRedeemAsMaker
 		refTime = match.takerStatus.swapTime // swapConfirmed time is not in the DB
 		makerFault = true
 	case order.MakerRedeemed:
-		misstep = auth.NoRedeemAsTaker
+		misstep = dex.NoRedeemAsTaker
 		refTime = match.makerStatus.redeemTime
 	default:
 		log.Errorf("Invalid failMatch status %v for match %v", match.Status, match.ID())

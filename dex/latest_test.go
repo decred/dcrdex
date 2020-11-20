@@ -1,4 +1,4 @@
-package auth
+package dex
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
+	ordertest "decred.org/dcrdex/dex/order/test"
 )
 
 func Test_latestMatchOutcomes(t *testing.T) {
@@ -47,7 +48,7 @@ func Test_latestMatchOutcomes(t *testing.T) {
 
 	// Add 3 orders with the same time, different order IDs.
 	nextTime := 1 + wantStampedTimes[len(wantStampedTimes)-1] // new
-	mids := []order.MatchID{randomMatchID(), randomMatchID(), randomMatchID()}
+	mids := []order.MatchID{ordertest.RandomMatchID(), ordertest.RandomMatchID(), ordertest.RandomMatchID()}
 	for i := range mids {
 		ordList.add(&matchOutcome{
 			time: nextTime,
@@ -110,7 +111,7 @@ func Test_latestPreimageOutcomes(t *testing.T) {
 
 	// Add 3 orders with the same time, different order IDs.
 	nextTime := 1 + wantStampedTimes[len(wantStampedTimes)-1] // new
-	oids := []order.OrderID{randomOrderID(), randomOrderID(), randomOrderID()}
+	oids := []order.OrderID{ordertest.RandomOrderID(), ordertest.RandomOrderID(), ordertest.RandomOrderID()}
 	for i := range oids {
 		ordList.add(&preimageOutcome{
 			time: nextTime,

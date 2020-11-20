@@ -315,7 +315,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
-		BaselineScore:    auth.DefaultBaselineScore,
+		BaselineScore:    dex.DefaultBaselineScore,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file

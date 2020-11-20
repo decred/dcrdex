@@ -52,9 +52,9 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 
 	log.Debug("-------------------- BEGIN parsed markets.json --------------------")
 	log.Debug("MARKETS")
-	log.Debug("                  Base         Quote   EpochDur      Unpriv     Priv")
+	log.Debug("                  Base         Quote   EpochDur   ProbLimit PrivLimit")
 	for i, mktConf := range conf.Markets {
-		log.Debugf("Market %d: % 12s  % 12s  % 8d ms %d %d", i, mktConf.Base, mktConf.Quote,
+		log.Debugf("Market %d: % 12s  % 12s  % 8d ms  % 8d % 8d", i, mktConf.Base, mktConf.Quote,
 			mktConf.Duration, mktConf.ProbationaryLotLimit, mktConf.PrivilegedLotLimit)
 	}
 	log.Debug("")

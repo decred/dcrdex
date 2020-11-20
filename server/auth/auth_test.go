@@ -498,20 +498,22 @@ func setViolations() (wantScore int32) {
 		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
 		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
-		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()), // noSwapAsTaker at index 3
-		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoSwapAsTaker at index 3
+		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoRedeemAsMaker
 		newMatchOutcome(order.MakerRedeemed, randomMatchID(), false, 7, nextTime()), // success (for maker)
 		newMatchOutcome(order.MakerRedeemed, randomMatchID(), true, 7, nextTime()),
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
+		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoRedeemAsMaker
 	}
 	t0 -= 4000
 	rig.storage.userPreimageResults = []*db.PreimageResult{newPreimageResult(true, nextTime())}
 	for range rig.storage.userMatchOutcomes {
 		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
 	}
-	return DefaultBaselineScore + 4*successScore + 1*preimageMissScore +
-		2*noSwapAsMakerScore + noSwapAsTakerScore + noRedeemAsMakerScore + 1*noRedeemAsTakerScore
+
+	return dex.DefaultBaselineScore + (4+10)*dex.SuccessScore + 1*dex.PreimageMissScore +
+		2*dex.NoSwapAsMakerScore + dex.NoSwapAsTakerScore + 2*dex.NoRedeemAsMakerScore + 1*dex.NoRedeemAsTakerScore
 }
 
 func clearViolations() {
@@ -527,15 +529,16 @@ func TestAuthManager_loadUserReputation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	rawScore := rep.RawScore()
 	if rawScore != wantScore {
-		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
+		t.Fatalf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes,
 		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()))
-	wantScore += noSwapAsTakerScore
+	wantScore += dex.NoSwapAsTakerScore
 
 	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
@@ -605,8 +608,8 @@ func TestAuthManager_loadUserReputation(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(false, nextTime()),
 			},
-			wantScore: bs + 2*noSwapAsMakerScore + 1*noSwapAsTakerScore + 0*noRedeemAsMakerScore +
-				1*noRedeemAsTakerScore + 1*preimageMissScore + 5*successScore,
+			wantScore: bs + 2*dex.NoSwapAsMakerScore + 1*dex.NoSwapAsTakerScore + 0*dex.NoRedeemAsMakerScore +
+				1*dex.NoRedeemAsTakerScore + 1*dex.PreimageMissScore + (5+1)*dex.SuccessScore,
 		},
 	}
 	for _, tt := range tests {
@@ -738,7 +741,7 @@ func TestConnect(t *testing.T) {
 
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
-	wantScore -= noSwapAsTakerScore
+	wantScore -= dex.NoSwapAsTakerScore
 	if wantScore <= 0 {
 		t.Fatalf("test score of %v is > 0, revise the test", wantScore)
 	}

@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -193,7 +192,7 @@ func (m *TAuthManager) Route(string,
 
 func (m *TAuthManager) SwapSuccess(id account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
 }
-func (m *TAuthManager) Inaction(id account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+func (m *TAuthManager) Inaction(id account.AccountID, step dex.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 	m.penalize(id, account.FailureToAct)
 }
 func (m *TAuthManager) penalize(id account.AccountID, rule account.Rule) {
