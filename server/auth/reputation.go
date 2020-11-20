@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"math"
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
@@ -15,17 +16,6 @@ const (
 	scoringMatchLimit  = 60  // last N matches (success or at-fault fail) to be considered in swap inaction scoring
 	scoringOrderLimit  = 40  // last N orders to be considered in preimage miss scoring
 
-	// These coefficients are used to compute a user's swap limit adjustment via
-	// UserOrderLimitAdjustment based on the cumulative amounts in the different
-	// match outcomes.
-	successWeight    int64 = 3
-	stuckLongWeight  int64 = -5
-	stuckShortWeight int64 = -3
-	spoofedWeight    int64 = -1
-)
-
-// violation badness
-const (
 	// preimage miss
 	preimageMissScore = -2 // book spoof, no match, no stuck funds
 
@@ -37,7 +27,9 @@ const (
 
 	successScore = 1 // offsets the violations
 
-	defaultBaselineScore = 20
+	DefaultBaselineScore = 20
+
+	MaxScore = DefaultBaselineScore + scoringMatchLimit + scoringOrderLimit
 )
 
 // Violation represents a specific infraction. For example, not broadcasting a
@@ -133,8 +125,16 @@ func NewReputation(baseline int32) *Reputation {
 	}
 }
 
-func (r *Reputation) mktSwapAmounts(base, quote uint32) *SwapAmounts {
-	return r.matches.mktSwapAmounts(base, quote)
+func (r *Reputation) Privilege() float64 {
+	rawScore := r.rawScore()
+	if rawScore < r.baseline {
+		return 0
+	}
+	return float64(rawScore-r.baseline) / float64(MaxScore-r.baseline)
+}
+
+func (r *Reputation) Score() int {
+	return int(math.Round(float64(r.rawScore()) / MaxScore * 100))
 }
 
 // rawScore computes the user score from the user's recent match outcomes and
@@ -167,20 +167,4 @@ func (r *Reputation) registerPreimageOutcome(miss bool, oid order.OrderID, refTi
 		oid:  oid,
 		miss: miss,
 	})
-}
-
-// userSettlingLimit returns a user's settling amount limit for the given market
-// in units of the base asset. The limit may be negative for accounts with poor
-// swap history.
-func (r *Reputation) userSettlingLimit(base, quote, probationary, privileged uint32, lotSize uint64) int64 {
-	currentLotSize := int64(lotSize)
-	start := currentLotSize * int64(probationary)
-
-	sa := r.mktSwapAmounts(base, quote)
-
-	limit := start + sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
-	if limit/currentLotSize >= int64(privileged) {
-		limit = int64(privileged) * currentLotSize
-	}
-	return limit
 }

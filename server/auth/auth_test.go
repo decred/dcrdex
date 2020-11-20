@@ -510,7 +510,7 @@ func setViolations() (wantScore int32) {
 	for range rig.storage.userMatchOutcomes {
 		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
 	}
-	return defaultBaselineScore + 4*successScore + 1*preimageMissScore +
+	return DefaultBaselineScore + 4*successScore + 1*preimageMissScore +
 		2*noSwapAsMakerScore + noSwapAsTakerScore + noRedeemAsMakerScore + 1*noRedeemAsTakerScore
 }
 

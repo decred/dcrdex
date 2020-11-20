@@ -242,7 +242,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	// A baseline score must be > 0.
 	baselineScore := cfg.BaselineScore
 	if baselineScore <= 0 {
-		baselineScore = defaultBaselineScore
+		baselineScore = DefaultBaselineScore
 	}
 
 	auth := &AuthManager{
@@ -255,7 +255,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		unbookFun:      cfg.UserUnbooker,
 		anarchy:        cfg.Anarchy,
 		freeCancels:    cfg.FreeCancels || cfg.Anarchy,
-		baselineScore:  int32(defaultBaselineScore),
+		baselineScore:  int32(DefaultBaselineScore),
 		cancelThresh:   cfg.CancelThreshold,
 		latencyQ:       wait.NewTickerQueue(recheckInterval),
 		users:          make(map[account.AccountID]*clientInfo),
@@ -502,7 +502,9 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
 	auth.repMtx.Lock()
 	defer auth.repMtx.Unlock()
-	return auth.userReputation(user).userSettlingLimit(mkt.Base, mkt.Quote, mkt.ProbationaryLots, mkt.PrivilegedLots, mkt.LotSize)
+	rep := auth.userReputation(user)
+	privBonus := float64(mkt.PrivilegedLots - mkt.ProbationaryLots)
+	return int64(mkt.ProbationaryLots) + int64(math.Round(privBonus*rep.Privilege()))
 }
 
 func (auth *AuthManager) userReputation(user account.AccountID) *Reputation {

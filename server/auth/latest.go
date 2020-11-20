@@ -75,49 +75,6 @@ func (la *latestMatchOutcomes) binViolations() map[Violation]int64 {
 	return bins
 }
 
-// SwapAmounts breaks down the quantities of completed swaps in four rough
-// categories: successfully swapped (Swapped), failed with counterparty funds
-// locked for the long/maker lock time (StuckLong), failed with counterparty
-// funds locked for the short/taker lock time (StuckShort), and failed to
-// initiate swap following match with no funds locked in contracts (Spoofed).
-type SwapAmounts struct {
-	Swapped    int64
-	StuckLong  int64
-	StuckShort int64
-	Spoofed    int64
-}
-
-func (sa *SwapAmounts) addAmt(v Violation, value int64) {
-	switch v {
-	case ViolationSwapSuccess:
-		sa.Swapped += value
-	case ViolationNoSwapAsTaker:
-		sa.StuckLong += value
-	case ViolationNoRedeemAsMaker:
-		sa.StuckShort += value
-	case ViolationNoSwapAsMaker, ViolationPreimageMiss: // ! preimage misses are presently in preimageOutcome
-		sa.Spoofed += value
-	}
-}
-
-// func (la *latestMatchOutcomes) swapAmounts() *SwapAmounts {
-// 	sa := new(SwapAmounts)
-// 	for _, mo := range la.outcomes {
-// 		sa.addAmt(mo.outcome, int64(mo.value)) // must be same units (e.g. lots)!
-// 	}
-// 	return sa
-// }
-
-func (la *latestMatchOutcomes) mktSwapAmounts(base, quote uint32) *SwapAmounts {
-	sa := new(SwapAmounts)
-	for _, mo := range la.outcomes {
-		if mo.base == base && mo.quote == quote {
-			sa.addAmt(mo.outcome, int64(mo.value))
-		}
-	}
-	return sa
-}
-
 type preimageOutcome struct {
 	time int64
 	oid  order.OrderID

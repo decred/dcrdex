@@ -49,7 +49,6 @@ const (
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
 	defaultMaxUserCancels      = 2
-	defaultBaselineScore       = 20
 
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
@@ -316,7 +315,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
-		BaselineScore:    defaultBaselineScore,
+		BaselineScore:    auth.DefaultBaselineScore,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
