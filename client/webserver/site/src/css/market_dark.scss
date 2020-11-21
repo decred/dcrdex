@@ -10,7 +10,8 @@ body.dark {
       border-bottom: 1px solid #222;
     }
 
-    tbody > tr:hover {
+    tbody > tr:hover,
+    tbody > tr.hover {
       background-color: #1d2936;
     }
   }
@@ -76,6 +77,10 @@ body.dark {
   #marketChart {
     background-color: #131313;
     border-bottom-color: black;
+
+    .chart-legend {
+      color: #999;
+    }
   }
 
   #orderForm {

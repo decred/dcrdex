@@ -46,6 +46,22 @@
         <div class="ico-spinner spinner"></div>
 
       </div>
+      <div class="chart-legend" id="chartLegend">
+        <div class="epoch-line"></div> epoch
+        <div class="flex-grow-1">
+          <div id="hoverData" class="d-flex align-items-center d-hide">
+            <span class="category-spacer text-center text-nowrap"></span>
+            <span>
+              <span class="ico-target fs11"></span>
+              price: <span id="hoverPrice"></span>,
+              volume: <span id="hoverVolume"></span>
+            </span>
+          </div>
+        </div>
+        <span>sells: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
+        <span class="category-spacer"></span>
+        <span class="mr-2">buys: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+      </div>
       <div id="chartResizer"></div>
     </div>
 

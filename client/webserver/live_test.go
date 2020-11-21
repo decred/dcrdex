@@ -49,6 +49,7 @@ var (
 	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
 	randomPokes           = false
 	randomNotes           = false
+	numUserOrders         = 10
 )
 
 func dummySettings() map[string]string {
@@ -77,10 +78,13 @@ func randomMagnitude(low, high int) float64 {
 	return mantissa * math.Pow10(exponent)
 }
 
-func userOrders() (ords []*core.Order) {
-	orderCount := rand.Intn(50)
+func userOrders(mktID string) (ords []*core.Order) {
+	orderCount := rand.Intn(numUserOrders)
 	for i := 0; i < orderCount; i++ {
-		qty := uint64(randomMagnitude(7, 11))
+		midGap, maxQty := getMarketStats(mktID)
+		sell := rand.Intn(2) > 0
+		ord := randomOrder(sell, maxQty, midGap, gapWidthFactor*midGap, false)
+		qty := uint64(ord.Qty * 1e8)
 		filled := uint64(rand.Float64() * float64(qty))
 		orderType := order.OrderType(rand.Intn(2) + 1)
 		status := order.OrderStatusEpoch
@@ -95,7 +99,9 @@ func userOrders() (ords []*core.Order) {
 			}
 		}
 		var tif order.TimeInForce
+		var rate uint64
 		if isLimit {
+			rate = uint64(ord.Rate * 1e8)
 			if rand.Float32() < 0.25 {
 				tif = order.ImmediateTiF
 			} else {
@@ -108,9 +114,9 @@ func userOrders() (ords []*core.Order) {
 			Stamp:  encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*600_000),
 			Status: status,
 			Epoch:  epoch,
-			Rate:   uint64(randomMagnitude(4, 12)),
+			Rate:   rate,
 			Qty:    qty,
-			Sell:   rand.Intn(2) > 0,
+			Sell:   sell,
 			Filled: filled,
 			Matches: []*core.Match{
 				{
@@ -124,17 +130,34 @@ func userOrders() (ords []*core.Order) {
 	return
 }
 
+var marketStats = make(map[string][2]float64)
+
+func getMarketStats(mktID string) (midGap, maxQty float64) {
+	stats := marketStats[mktID]
+	return stats[0], stats[1]
+}
+
 func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
+	mktID := base + "_" + quote
+	if _, exists := marketStats[mktID]; !exists {
+		baseAsset := dexAssets[baseID]
+		quoteAsset := dexAssets[quoteID]
+		midGap := float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
+		maxQty := float64(baseAsset.LotSize) / 1e8 * float64(rand.Intn(1e3))
+		marketStats[mktID] = [2]float64{midGap, maxQty}
+	}
+
 	return &core.Market{
-		Name:            fmt.Sprintf("%s-%s", base, quote),
+		Name:            fmt.Sprintf("%s_%s", base, quote),
 		BaseID:          baseID,
 		BaseSymbol:      base,
 		QuoteID:         quoteID,
 		QuoteSymbol:     quote,
 		MarketBuyBuffer: rand.Float64() + 1,
 		EpochLen:        uint64(epochDuration.Milliseconds()),
+		Orders:          userOrders(mktID),
 	}
 }
 
@@ -215,18 +238,34 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 	}
 }
 
+func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
+	var epoch uint64 = 555
+	if ord.Status > order.OrderStatusEpoch {
+		epoch = 0
+	}
+	return &core.MiniOrder{
+		Qty:   float64(ord.Qty) / 1e8,
+		Rate:  float64(ord.Rate) / 1e8,
+		Sell:  ord.Sell,
+		Token: ord.ID[:4].String(),
+		Epoch: epoch,
+	}
+}
+
+var dexAssets = map[uint32]*dex.Asset{
+	0:   mkDexAsset("btc"),
+	2:   mkDexAsset("ltc"),
+	42:  mkDexAsset("dcr"),
+	22:  mkDexAsset("mona"),
+	28:  mkDexAsset("vtc"),
+	141: mkDexAsset("kmd"),
+	3:   mkDexAsset("doge"),
+}
+
 var tExchanges = map[string]*core.Exchange{
 	firstDEX: {
-		Host: "somedex.com",
-		Assets: map[uint32]*dex.Asset{
-			0:   mkDexAsset("btc"),
-			2:   mkDexAsset("ltc"),
-			42:  mkDexAsset("dcr"),
-			22:  mkDexAsset("mona"),
-			28:  mkDexAsset("vtc"),
-			141: mkDexAsset("kmd"),
-			3:   mkDexAsset("doge"),
-		},
+		Host:   "somedex.com",
+		Assets: dexAssets,
 		Markets: map[string]*core.Market{
 			mkid(42, 0): mkMrkt("dcr", "btc"),
 			mkid(42, 2): mkMrkt("dcr", "ltc"),
@@ -235,16 +274,8 @@ var tExchanges = map[string]*core.Exchange{
 		Connected: true,
 	},
 	secondDEX: {
-		Host: "thisdexwithalongname.com",
-		Assets: map[uint32]*dex.Asset{
-			0:   mkDexAsset("btc"),
-			2:   mkDexAsset("ltc"),
-			42:  mkDexAsset("dcr"),
-			22:  mkDexAsset("mona"),
-			28:  mkDexAsset("vtc"),
-			141: mkDexAsset("kmd"),
-			3:   mkDexAsset("doge"),
-		},
+		Host:   "thisdexwithalongname.com",
+		Assets: dexAssets,
 		Markets: map[string]*core.Market{
 			mkid(42, 28):  mkMrkt("dcr", "vtc"),
 			mkid(0, 2):    mkMrkt("btc", "ltc"),
@@ -292,8 +323,6 @@ type TCore struct {
 	marketID    string
 	base        uint32
 	quote       uint32
-	midGap      float64
-	maxQty      float64
 	feed        *core.BookFeed
 	killFeed    context.CancelFunc
 	buys        map[string]*core.MiniOrder
@@ -521,10 +550,6 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 }
 
 func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, error) {
-	quoteAsset := tExchanges[dexAddr].Assets[quote]
-	baseAsset := tExchanges[dexAddr].Assets[base]
-	c.midGap = float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
-	c.maxQty = float64(baseAsset.LotSize) / 1e8 * float64(rand.Intn(1e3))
 	mktID, _ := dex.MarketName(base, quote)
 	c.mtx.Lock()
 	c.dexAddr = dexAddr
@@ -532,6 +557,16 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 	c.base = base
 	c.quote = quote
 	c.mtx.Unlock()
+
+	usrOrds := tExchanges[dexAddr].Markets[mktID].Orders
+	isUserOrder := func(tkn string) bool {
+		for _, ord := range usrOrds {
+			if tkn == ord.ID[:4].String() {
+				return true
+			}
+		}
+		return false
+	}
 
 	if c.feed != nil {
 		c.killFeed()
@@ -552,7 +587,8 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 				case r < 0.80:
 					// Book order
 					sell := rand.Float32() < 0.5
-					ord := randomOrder(sell, c.maxQty, c.midGap, gapWidthFactor*c.midGap, true)
+					midGap, maxQty := getMarketStats(mktID)
+					ord := randomOrder(sell, maxQty, midGap, gapWidthFactor*midGap, true)
 					c.orderMtx.Lock()
 					side := c.buys
 					if sell {
@@ -584,6 +620,11 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 						c.orderMtx.Unlock()
 						continue
 					}
+					if isUserOrder(tkn) {
+						// Our own order. Don't remove.
+						c.orderMtx.Unlock()
+						continue
+					}
 					delete(side, tkn)
 					c.orderMtx.Unlock()
 
@@ -607,7 +648,7 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 		Payload: &core.MarketOrderBook{
 			Base:  base,
 			Quote: quote,
-			Book:  c.book(),
+			Book:  c.book(dexAddr, mktID),
 		},
 	}
 
@@ -623,23 +664,38 @@ func nextToken() string {
 }
 
 // Book randomizes an order book.
-func (c *TCore) book() *core.OrderBook {
-	midGap := c.midGap
-	maxQty := c.maxQty
+func (c *TCore) book(dexAddr, mktID string) *core.OrderBook {
+	midGap, maxQty := getMarketStats(mktID)
 	// Set the market width to about 5% of midGap.
 	var buys, sells []*core.MiniOrder
 	c.orderMtx.Lock()
 	c.buys = make(map[string]*core.MiniOrder, numBuys)
 	c.sells = make(map[string]*core.MiniOrder, numSells)
 	c.epochOrders = nil
+
+	mkt := tExchanges[dexAddr].Markets[mktID]
+	for _, ord := range mkt.Orders {
+		if ord.Status != order.OrderStatusBooked {
+			continue
+		}
+		ord := miniOrderFromCoreOrder(ord)
+		if ord.Sell {
+			sells = append(sells, ord)
+			c.sells[ord.Token] = ord
+		} else {
+			buys = append(buys, ord)
+			c.buys[ord.Token] = ord
+		}
+	}
+
 	for i := 0; i < numSells; i++ {
-		ord := randomOrder(true, maxQty, midGap, gapWidthFactor*c.midGap, false)
+		ord := randomOrder(true, maxQty, midGap, gapWidthFactor*midGap, false)
 		sells = append(sells, ord)
 		c.sells[ord.Token] = ord
 	}
 	for i := 0; i < numBuys; i++ {
 		// For buys the rate must be smaller than midGap.
-		ord := randomOrder(false, maxQty, midGap, gapWidthFactor*c.midGap, false)
+		ord := randomOrder(false, maxQty, midGap, gapWidthFactor*midGap, false)
 		buys = append(buys, ord)
 		c.buys[ord.Token] = ord
 	}
@@ -832,11 +888,6 @@ func (c *TCore) User() *core.User {
 	if c.reg != nil {
 		exchanges = tExchanges
 	}
-	for _, xc := range tExchanges {
-		for _, mkt := range xc.Markets {
-			mkt.Orders = userOrders()
-		}
-	}
 	user := &core.User{
 		Exchanges:   exchanges,
 		Initialized: c.inited,
@@ -1019,21 +1070,24 @@ func TestServer(t *testing.T) {
 	asset.Register(141, &TDriver{}) // kmd
 	asset.Register(3, &TDriver{})   // doge
 
-	numBuys = 50
-	numSells = 50
-	feedPeriod = 500 * time.Millisecond
-	initialize := false
-	register := false
+	numBuys = 10
+	numSells = 10
+	feedPeriod = 5000 * time.Millisecond
+	initialize := true
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true
 	randomNotes = true
+	numUserOrders = 40
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCore := newTCore()
+
+	rand.Seed(time.Now().UnixNano())
 
 	if initialize {
 		tCore.InitializeClient([]byte(""))

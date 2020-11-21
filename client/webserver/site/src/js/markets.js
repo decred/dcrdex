@@ -21,6 +21,7 @@ const unmarketRoute = 'unmarket'
 
 const lastMarketKey = 'selectedMarket'
 const chartRatioKey = 'chartRatio'
+const depthZoomKey = 'depthZoom'
 
 const animationLength = 500
 
@@ -35,8 +36,8 @@ export default class MarketsPage extends BasePage {
     app = application
     const page = this.page = Doc.parsePage(main, [
       // Templates, loaders, chart div...
-      'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
-      'sellRows', 'marketSearch', 'chartResizer', 'rightSide',
+      'marketLoader', 'marketList', 'rowTemplate', 'buyRows', 'sellRows',
+      'marketSearch', 'rightSide',
       // Registration status
       'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
       'regStatusDex', 'confReq',
@@ -57,7 +58,11 @@ export default class MarketsPage extends BasePage {
       // Active orders
       'liveTemplate', 'liveList',
       // Cancel order form
-      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
+      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
+      // Chart and legend
+      'marketChart', 'chartResizer', 'sellBookedBase', 'sellBookedQuote',
+      'buyBookedBase', 'buyBookedQuote', 'hoverData', 'hoverPrice',
+      'hoverVolume', 'chartLegend'
     ])
     this.main = main
     app.loading(this.main.parentElement)
@@ -71,10 +76,20 @@ export default class MarketsPage extends BasePage {
     this.book = null
     this.cancelData = null
     this.metaOrders = {}
-    const reporters = {
-      price: p => { this.reportPrice(p) }
+    this.depthLines = {
+      hover: [],
+      input: []
     }
-    this.chart = new DepthChart(page.marketChart, reporters)
+    this.activeMarkerRate = null
+    this.hovers = []
+
+    const reporters = {
+      click: p => { this.reportClick(p) },
+      volume: d => { this.reportVolume(d) },
+      mouse: d => { this.reportMousePosition(d) },
+      zoom: z => { this.reportZoom(z) }
+    }
+    this.chart = new DepthChart(page.marketChart, reporters, State.fetch(depthZoomKey))
 
     // Set up the BalanceWidget.
     {
@@ -118,6 +133,7 @@ export default class MarketsPage extends BasePage {
       page.submitBttn.classList.add('buygreen')
       this.setOrderBttnText()
       this.setOrderVisibility()
+      this.drawChartLines()
     })
     bind(page.sellBttn, 'click', () => {
       swapBttns(page.buyBttn, page.sellBttn)
@@ -125,16 +141,25 @@ export default class MarketsPage extends BasePage {
       page.submitBttn.classList.remove('buygreen')
       this.setOrderBttnText()
       this.setOrderVisibility()
+      this.drawChartLines()
     })
     // const tifCheck = tifDiv.querySelector('input[type=checkbox]')
     bind(page.limitBttn, 'click', () => {
       swapBttns(page.marketBttn, page.limitBttn)
       this.setOrderVisibility()
+      if (!page.rateField.value) return
+      this.depthLines.input = [{
+        rate: page.rateField.value,
+        color: this.isSell() ? this.chart.theme.sellLine : this.chart.theme.buyLine
+      }]
+      this.drawChartLines()
     })
     bind(page.marketBttn, 'click', () => {
       swapBttns(page.limitBttn, page.marketBttn)
       this.setOrderVisibility()
       this.setMarketBuyOrderEstimate()
+      this.depthLines.input = []
+      this.drawChartLines()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -185,11 +210,22 @@ export default class MarketsPage extends BasePage {
     bind(page.mktBuyField, 'change', () => { this.marketBuyChanged() })
     bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
-    bind(page.rateField, 'keyup', () => { this.previewOrder(true) })
+    bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
 
     // Market search input bindings.
     bind(page.marketSearch, 'change', () => { this.filterMarkets() })
     bind(page.marketSearch, 'keyup', () => { this.filterMarkets() })
+
+    const clearChartLines = () => {
+      this.depthLines.hover = []
+      this.drawChartLines()
+    }
+    bind(page.buyRows, 'mouseleave', clearChartLines)
+    bind(page.sellRows, 'mouseleave', clearChartLines)
+    bind(page.liveList, 'mouseleave', () => {
+      this.activeMarkerRate = null
+      this.setMarkers()
+    })
 
     // Load the user's layout preferences.
     const setChartRatio = r => {
@@ -288,18 +324,18 @@ export default class MarketsPage extends BasePage {
     if (this.isLimit()) {
       Doc.show(page.priceBox, page.tifBox, page.qtyBox)
       Doc.hide(page.mktBuyBox)
-      this.previewOrder(true)
+      this.previewQuoteAmt(true)
     } else {
       Doc.hide(page.tifBox)
       Doc.hide(page.priceBox)
       if (this.isSell()) {
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
-        this.previewOrder(true)
+        this.previewQuoteAmt(true)
       } else {
         Doc.show(page.mktBuyBox)
         Doc.hide(page.qtyBox)
-        this.previewOrder(false)
+        this.previewQuoteAmt(false)
       }
     }
   }
@@ -432,12 +468,64 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportPrice is a callback used by the DepthChart when the user clicks
+   * reportClick is a callback used by the DepthChart when the user clicks
    * on the chart area. The rate field is set to the x-value of the click.
    */
-  reportPrice (p) {
+  reportClick (p) {
     this.page.rateField.value = p.toFixed(8)
     this.rateFieldChanged()
+  }
+
+  /*
+   * reportVolume accepts a volume report from the DepthChart and sets the
+   * values in the chart legend.
+   */
+  reportVolume (d) {
+    const page = this.page
+    page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase)
+    page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote)
+    page.buyBookedBase.textContent = Doc.formatCoinValue(d.buyBase)
+    page.buyBookedQuote.textContent = Doc.formatCoinValue(d.buyQuote)
+  }
+
+  /*
+   * reportMousePosition accepts informations about the mouse position on the
+   * chart area.
+   */
+  reportMousePosition (d) {
+    while (this.hovers.length) this.hovers.shift().classList.remove('hover')
+    const page = this.page
+    if (!d) {
+      Doc.hide(page.hoverData)
+      return
+    }
+
+    // If the user is hovered to within a small percent (based on chart width)
+    // of a user order, highlight that order's row.
+    const markers = d.hoverMarkers.map(v => Math.round(v * 1e8))
+    for (const metaOrd of Object.values(this.metaOrders)) {
+      const [row, ord] = [metaOrd.row, metaOrd.order]
+      if (ord.status !== Order.StatusBooked) continue
+      if (markers.indexOf(ord.rate) > -1) {
+        row.classList.add('hover')
+        this.hovers.push(row)
+      }
+    }
+
+    page.hoverPrice.textContent = Doc.formatCoinValue(d.rate)
+    page.hoverVolume.textContent = Doc.formatCoinValue(d.depth)
+    page.hoverVolume.style.color = d.dotColor
+    page.chartLegend.style.left = `${d.yAxisWidth}px`
+    Doc.show(page.hoverData)
+  }
+
+  /*
+   * reportZoom accepts informations about the current depth chart zoom level.
+   * This information is saved to disk so that the zoom level can be maintained
+   * across reloads.
+   */
+  reportZoom (zoom) {
+    State.store(depthZoomKey, zoom)
   }
 
   /*
@@ -466,14 +554,23 @@ export default class MarketsPage extends BasePage {
   }
 
   /**
-   * previewOrder shows quote amount when rate or quantity input are changed
+   * previewQuoteAmt shows quote amount when rate or quantity input are changed
    */
-  previewOrder (show) {
+  previewQuoteAmt (show) {
     const page = this.page
     const order = this.parseOrder()
     page.orderErr.textContent = ''
+    this.depthLines.input = []
+    if (order.rate && this.isLimit()) {
+      this.depthLines.input = [{
+        rate: order.rate / 1e8,
+        color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+      }]
+    }
+    this.drawChartLines()
     if (!show || !order.rate || !order.qty) {
       page.orderPreview.textContent = ''
+      this.drawChartLines()
       return
     }
     const quoteAsset = app.assets[order.quote]
@@ -569,16 +666,18 @@ export default class MarketsPage extends BasePage {
         row: row,
         order: ord
       }
+      Doc.bind(row, 'mouseenter', e => {
+        this.activeMarkerRate = ord.rate
+        this.setMarkers()
+      })
       updateUserOrderRow(row, ord)
-      if (ord.type === Order.Limit) {
-        if (ord.tif === Order.StandingTiF && ord.status < Order.StatusExecuted) {
-          const icon = Doc.tmplElement(row, 'cancelBttn')
-          Doc.show(icon)
-          bind(icon, 'click', e => {
-            e.stopPropagation()
-            this.showCancel(row, ord.id)
-          })
-        }
+      if (ord.type === Order.Limit && (ord.tif === Order.StandingTiF && ord.status < Order.StatusExecuted)) {
+        const icon = Doc.tmplElement(row, 'cancelBttn')
+        Doc.show(icon)
+        bind(icon, 'click', e => {
+          e.stopPropagation()
+          this.showCancel(row, ord.id)
+        })
       }
       const link = Doc.tmplElement(row, 'link')
       link.href = `order/${ord.id}`
@@ -586,6 +685,33 @@ export default class MarketsPage extends BasePage {
       page.liveList.appendChild(row)
       app.bindTooltips(row)
     }
+    this.setMarkers()
+  }
+
+  /* setMarkers sets the depth chart markers for booked orders. */
+  setMarkers () {
+    const markers = {
+      buys: [],
+      sells: []
+    }
+    for (const mo of Object.values(this.metaOrders)) {
+      const ord = mo.order
+      if (ord.rate && ord.status === Order.StatusBooked) {
+        if (ord.sell) {
+          markers.sells.push({
+            rate: ord.rate / 1e8,
+            active: ord.rate === this.activeMarkerRate
+          })
+        } else {
+          markers.buys.push({
+            rate: ord.rate / 1e8,
+            active: ord.rate === this.activeMarkerRate
+          })
+        }
+      }
+    }
+    this.chart.setMarkers(markers)
+    if (this.book) this.chart.draw()
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent
@@ -600,6 +726,7 @@ export default class MarketsPage extends BasePage {
     const host = market.dex.host
     const [b, q] = [market.baseCfg, market.quoteCfg]
     if (mktBook.base !== b.id || mktBook.quote !== q.id) return
+    this.refreshActiveOrders()
     this.handleBook(mktBook)
     page.marketLoader.classList.add('d-none')
     this.marketList.select(host, b.id, q.id)
@@ -616,7 +743,6 @@ export default class MarketsPage extends BasePage {
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
-    this.refreshActiveOrders()
     if (!this.loaded) {
       this.loaded = true
       app.loaded()
@@ -822,6 +948,7 @@ export default class MarketsPage extends BasePage {
     const order = note.order
     const metaOrder = this.metaOrders[order.id]
     if (!metaOrder) return
+    const oldStatus = metaOrder.status
     metaOrder.order = order
     const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
     if (note.subject === 'Missed cancel') {
@@ -832,6 +959,9 @@ export default class MarketsPage extends BasePage {
       Doc.hide(bttn)
     }
     updateUserOrderRow(metaOrder.row, order)
+    // Only reset markers if there is a change, since the chart is redrawn.
+    if ((oldStatus === Order.StatusEpoch && order.status === Order.StatusBooked) ||
+      (oldStatus === Order.StatusBooked && order.status > Order.StatusBooked)) this.setMarkers()
   }
 
   /*
@@ -897,6 +1027,7 @@ export default class MarketsPage extends BasePage {
       this.balanceWgt.updateAsset(market.quote.id)
     }
     this.refreshActiveOrders()
+    this.chart.draw()
   }
 
   /*
@@ -935,7 +1066,7 @@ export default class MarketsPage extends BasePage {
     const lotSize = this.market.baseCfg.lotSize
     page.lotField.value = lots
     page.qtyField.value = (lots * lotSize / 1e8)
-    this.previewOrder(true)
+    this.previewQuoteAmt(true)
   }
 
   /*
@@ -956,7 +1087,7 @@ export default class MarketsPage extends BasePage {
     page.lotField.value = lots
     if (!order.isLimit && !order.sell) return
     if (finalize) page.qtyField.value = (adjusted / 1e8)
-    this.previewOrder(true)
+    this.previewQuoteAmt(true)
   }
 
   /*
@@ -985,14 +1116,22 @@ export default class MarketsPage extends BasePage {
   rateFieldChanged () {
     const order = this.parseOrder()
     if (order.rate <= 0) {
+      this.depthLines.input = []
+      this.drawChartLines()
       this.page.rateField.value = 0
       return
     }
     // Truncate to rate step. If it is a market buy order, do not adjust.
     const rateStep = this.market.quoteCfg.rateStep
     const adjusted = order.rate - (order.rate % rateStep)
-    this.page.rateField.value = (adjusted / 1e8)
-    this.previewOrder(true)
+    const v = (adjusted / 1e8)
+    this.page.rateField.value = v
+    this.depthLines.input = [{
+      rate: v,
+      color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+    }]
+    this.drawChartLines()
+    this.previewQuoteAmt(true)
   }
 
   /* loadTable reloads the table from the current order book information. */
@@ -1093,7 +1232,7 @@ export default class MarketsPage extends BasePage {
     tr.order = order
     const rate = order.rate
     bind(tr, 'click', () => {
-      this.reportPrice(rate)
+      this.reportClick(rate)
     })
     var qtyTD
     tr.querySelectorAll('td').forEach(td => {
@@ -1108,6 +1247,15 @@ export default class MarketsPage extends BasePage {
           } else {
             td.innerText = order.rate.toFixed(8)
             td.classList.add(cssClass)
+            // Draw a line on the chart on hover.
+            Doc.bind(tr, 'mouseenter', e => {
+              const chart = this.chart
+              this.depthLines.hover = [{
+                rate: order.rate,
+                color: order.sell ? chart.theme.sellLine : chart.theme.buyLine
+              }]
+              this.drawChartLines()
+            })
           }
           break
         case 'epoch':
@@ -1130,6 +1278,12 @@ export default class MarketsPage extends BasePage {
     const filterTxt = this.page.marketSearch.value
     const filter = filterTxt ? mkt => mkt.name.includes(filterTxt) : () => true
     this.marketList.setFilter(filter)
+  }
+
+  /* drawChartLines draws the hover and input lines on the chart. */
+  drawChartLines () {
+    this.chart.setLines([...this.depthLines.hover, ...this.depthLines.input])
+    this.chart.draw()
   }
 
   /*
