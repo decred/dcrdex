@@ -115,6 +115,9 @@ func configure() (*config, []string, bool, error) {
 		if !fileExists(cfg.RPCCert) { // Then in ~/.dexc
 			cfg.RPCCert = cleanAndExpandPath(filepath.Join(dexcAppDir, defaultRPCCertFile))
 		}
+	} else {
+		// Handle environment variable and tilde expansion in the given path.
+		cfg.RPCCert = cleanAndExpandPath(cfg.RPCCert)
 	}
 
 	if cfg.RPCAddr == "" {
