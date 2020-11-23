@@ -19,14 +19,14 @@ import (
 )
 
 const (
-	defaultRPCAddr            = "localhost:5757"
-	defaultConfigFilename     = "dexcctl.conf"
-	defaultRPCCertFile        = "rpc.cert"
-	defaultDexcConfigFilename = "dexc.conf"
+	defaultRPCAddr        = "localhost:5757"
+	defaultConfigFilename = "dexcctl.conf"
+	defaultRPCCertFile    = "rpc.cert"
 )
 
 var (
-	appDir            = dcrutil.AppDataDir("dexc", false)
+	appDir            = dcrutil.AppDataDir("dexcctl", false)
+	dexcAppDir        = dcrutil.AppDataDir("dexc", false)
 	defaultConfigPath = filepath.Join(appDir, defaultConfigFilename)
 )
 
@@ -110,15 +110,16 @@ func configure() (*config, []string, bool, error) {
 	}
 
 	if cfg.RPCCert == "" {
-		cfg.RPCCert = filepath.Join(appDir, defaultRPCCertFile)
+		// Check in ~/.dexcctl first.
+		cfg.RPCCert = cleanAndExpandPath(filepath.Join(appDir, defaultRPCCertFile))
+		if !fileExists(cfg.RPCCert) { // Then in ~/.dexc
+			cfg.RPCCert = cleanAndExpandPath(filepath.Join(dexcAppDir, defaultRPCCertFile))
+		}
 	}
 
 	if cfg.RPCAddr == "" {
 		cfg.RPCAddr = defaultRPCAddr
 	}
-
-	// Handle environment variable expansion in the RPC certificate path.
-	cfg.RPCCert = cleanAndExpandPath(cfg.RPCCert)
 
 	return cfg, remainingArgs, false, nil
 }
