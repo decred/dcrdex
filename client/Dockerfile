@@ -22,11 +22,14 @@ FROM golang:1.15 AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
 WORKDIR /root/dex/client/cmd/dexc/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
+WORKDIR /root/dex/client/cmd/dexcctl/
+RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
-FROM alpine
+FROM alpine:3.10.1
 WORKDIR /root
 COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
+COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
 COPY --from=gobuilder /root/dex/client/webserver/site ./site
 EXPOSE 5758
 CMD [ "./dexc", "--webaddr=0.0.0.0:5758" ]
