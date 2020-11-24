@@ -50,7 +50,7 @@ const (
 	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
 	// The basis for content-security-policy. connect-src must be the final
-	// directive so that it can be reliably suppelemented on startup.
+	// directive so that it can be reliably supplemented on startup.
 	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'"
 )
 
