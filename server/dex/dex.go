@@ -76,7 +76,7 @@ type DexConf struct {
 	AbsTakerLotLimit  uint32
 	DEXPrivKey        *secp256k1.PrivateKey
 	CommsCfg          *RPCConfig
-	IgnoreState       bool
+	NoResumeSwaps     bool
 	StatePath         string
 }
 
@@ -436,29 +436,26 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 	log.Infof("Ban score threshold is %v", cfg.BanScore)
 
-	// Create an unbook dispatcher for the Swapper.
-	marketUnbookHook := func(lo *order.LimitOrder) bool {
-		name, err := dex.MarketName(lo.BaseAsset, lo.QuoteAsset)
+	// Create a swapDone dispatcher for the Swapper.
+	swapDone := func(ord order.Order, match *order.Match, fail bool) {
+		name, err := dex.MarketName(ord.Base(), ord.Quote())
 		if err != nil {
-			log.Errorf("unbook hook: %v", err)
-			return false
+			log.Errorf("bad market for order %v: %v", ord.ID(), err)
+			return
 		}
-
-		return markets[name].Unbook(lo)
+		markets[name].SwapDone(ord, match, fail)
 	}
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{
-		DataDir:          cfg.DataDir,
 		Assets:           lockableAssets,
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
-		UnbookHook:       marketUnbookHook,
-		IgnoreState:      cfg.IgnoreState,
-		StatePath:        cfg.StatePath,
+		SwapDone:         swapDone,
+		NoResume:         cfg.NoResumeSwaps,
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)

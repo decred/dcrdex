@@ -34,7 +34,6 @@ func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
 		stmt := fmt.Sprintf(internal.ForgiveMatchFail, fullMatchesTableName(a.dbName, m))
 		N, err := sqlExec(a.db, stmt, mid)
 		if err != nil { // not just no rows updated
-			a.fatalBackendErr(err)
 			return false, err
 		}
 		if N == 1 {
@@ -43,6 +42,93 @@ func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
 		// N==0 could also mean it was not eligible to forgive, but just keep going
 	}
 	return false, nil
+}
+
+// ActiveSwaps loads the full details for all active swaps across all markets.
+func (a *Archiver) ActiveSwaps() ([]*db.SwapDataFull, error) {
+	var sd []*db.SwapDataFull
+
+	for m, mkt := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, m)
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		matches, swapData, err := activeSwaps(ctx, a.db, matchesTableName)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+
+		for i := range matches {
+			sd = append(sd, &db.SwapDataFull{
+				Base:      mkt.Base,
+				Quote:     mkt.Quote,
+				MatchData: matches[i],
+				SwapData:  swapData[i],
+			})
+		}
+	}
+
+	return sd, nil
+}
+
+func activeSwaps(ctx context.Context, dbe *sql.DB, tableName string) (matches []*db.MatchData, swapData []*db.SwapData, err error) {
+	stmt := fmt.Sprintf(internal.RetrieveActiveMarketMatchesExtended, tableName)
+	rows, err := dbe.QueryContext(ctx, stmt)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m db.MatchData
+		var sd db.SwapData
+
+		var status uint8
+		var baseRate, quoteRate sql.NullInt64
+		var takerSell sql.NullBool
+		var takerAddr, makerAddr sql.NullString
+		var contractATime, contractBTime, redeemATime, redeemBTime sql.NullInt64
+
+		err = rows.Scan(&m.ID, &takerSell,
+			&m.Taker, &m.TakerAcct, &takerAddr,
+			&m.Maker, &m.MakerAcct, &makerAddr,
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+			&baseRate, &quoteRate, &status,
+			&sd.SigMatchAckMaker, &sd.SigMatchAckTaker,
+			&sd.ContractACoinID, &sd.ContractA, &contractATime,
+			&sd.ContractAAckSig,
+			&sd.ContractBCoinID, &sd.ContractB, &contractBTime,
+			&sd.ContractBAckSig,
+			&sd.RedeemACoinID, &sd.RedeemASecret, &redeemATime,
+			&sd.RedeemAAckSig,
+			&sd.RedeemBCoinID, &redeemBTime)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// All are active.
+		m.Active = true
+
+		m.Status = order.MatchStatus(status)
+		m.TakerSell = takerSell.Bool
+		m.TakerAddr = takerAddr.String
+		m.MakerAddr = makerAddr.String
+		m.BaseRate = uint64(baseRate.Int64)
+		m.QuoteRate = uint64(quoteRate.Int64)
+
+		sd.ContractATime = contractATime.Int64
+		sd.ContractBTime = contractBTime.Int64
+		sd.RedeemATime = redeemATime.Int64
+		sd.RedeemBTime = redeemBTime.Int64
+
+		matches = append(matches, &m)
+		swapData = append(swapData, &sd)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return
 }
 
 // CompletedAndAtFaultMatchStats retrieves the outcomes of matches that were (1)
@@ -56,8 +142,8 @@ func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN in
 	for m, mkt := range a.markets {
 		matchesTableName := fullMatchesTableName(a.dbName, m)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-		defer cancel()
 		matchOutcomes, err := completedAndAtFaultMatches(ctx, a.db, matchesTableName, aid, lastN, mkt.Base, mkt.Quote)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
@@ -550,8 +636,7 @@ func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp in
 }
 
 // SetMatchInactive flags the match as done/inactive. This is not necessary if
-// both SaveRedeemAckSigA and SaveRedeemAckSigB are run for the match since they
-// will also flags the match as done when both signatures are stored.
+// SaveRedeemAckSigB is run for the match since it will flag the match as done.
 func (a *Archiver) SetMatchInactive(mid db.MarketMatchID) error {
 	return a.updateMatchStmt(mid, internal.SetSwapDone, mid.MatchID)
 }

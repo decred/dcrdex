@@ -143,8 +143,7 @@ func mainCore(ctx context.Context) error {
 			AltDNSNames:    cfg.AltDNSNames,
 			DisableDataAPI: cfg.DisableDataAPI,
 		},
-		IgnoreState: cfg.IgnoreState,
-		StatePath:   cfg.StatePath,
+		NoResumeSwaps: cfg.NoResumeSwaps,
 	}
 	dexMan, err := dexsrv.NewDEX(dexConf)
 	if err != nil {

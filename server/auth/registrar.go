@@ -74,15 +74,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		Fee:          auth.regFee,
 		Time:         encode.UnixMilliU((unixMsNow())),
 	}
-
-	err = auth.Sign(regRes)
-	if err != nil {
-		log.Errorf("error serializing register result: %v, data = %#v", err, regRes)
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal error",
-		}
-	}
+	auth.Sign(regRes)
 
 	resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
 	if err != nil {
@@ -250,14 +242,7 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 	log.Infof("New user registered: acct %v, paid %d to %v", acctID, val, addr)
 
 	// Create, sign, and send the the response.
-	err = auth.Sign(notifyFee)
-	if err != nil {
-		msgErr = &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal signature error",
-		}
-		return wait.DontTryAgain
-	}
+	auth.Sign(notifyFee)
 	notifyRes := new(msgjson.NotifyFeeResult)
 	notifyRes.SetSig(notifyFee.SigBytes())
 	resp, err := msgjson.NewResponse(msgID, notifyRes, nil)

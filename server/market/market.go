@@ -56,7 +56,7 @@ const (
 
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
-	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
+	Negotiate(matchSets []*order.MatchSet)
 	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 	ChainsSynced(base, quote uint32) (bool, error)
@@ -102,6 +102,7 @@ type Market struct {
 	bookMtx      sync.Mutex // guards book and bookEpochIdx
 	book         *book.Book
 	bookEpochIdx int64 // next epoch from the point of view of the book
+	settling     map[order.OrderID]uint64
 
 	epochMtx         sync.RWMutex
 	startEpochIdx    int64
@@ -119,15 +120,25 @@ type Market struct {
 	coinLockerQuote coinlock.CoinLocker
 
 	// Persistent data storage
-	storage db.DEXArchivist
+	storage Storage
 
 	// Data API
 	dataCollector DataCollector
 }
 
+// Storage is the DB interface required by Market.
+type Storage interface {
+	db.OrderArchiver
+	LastErr() error
+	Fatal() <-chan struct{}
+	Close() error
+	InsertEpoch(ed *db.EpochResults) error
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error)
+}
+
 // NewMarket creates a new Market for the provided base and quote assets, with
 // an epoch cycling at given duration in milliseconds.
-func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper, authMgr AuthManager,
+func NewMarket(mktInfo *dex.MarketInfo, storage Storage, swapper Swapper, authMgr AuthManager,
 	coinLockerBase, coinLockerQuote coinlock.CoinLocker, dataCollector DataCollector) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
 	if err := storage.LastErr(); err != nil {
@@ -270,10 +281,29 @@ ordersLoop:
 		}
 	}
 
+	// Populate the order settling amount map from the active matches in DB.
+	activeMatches, err := storage.MarketMatches(base, quote, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load active matches for market %v: %w", mktInfo.Name, err)
+	}
+	settling := make(map[order.OrderID]uint64)
+	for _, match := range activeMatches {
+		settling[match.Taker] += match.Quantity
+		settling[match.Maker] += match.Quantity
+		// Note: we actually don't want to bother with matches for orders that
+		// were canceled or had at-fault match failures, since including them
+		// give that user another shot to get a successfully "completed" order
+		// if they complete these remaining matches, but it's OK. We'd have to
+		// query these order statuses, and look for at-fault match failures
+		// involving them, so just give the user the benefit of the doubt.
+	}
+	log.Infof("Track for %d orders with %d active matches.", len(settling), len(activeMatches))
+
 	return &Market{
 		running:          make(chan struct{}), // closed on market start
 		marketInfo:       mktInfo,
 		book:             Book,
+		settling:         settling,
 		matcher:          matcher.New(),
 		persistBook:      true,
 		epochCommitments: make(map[order.Commitment]order.OrderID),
@@ -683,6 +713,78 @@ orders:
 		}
 	}
 	return
+}
+
+// SwapDone registers a match for a given order as being finished. Whether the
+// match was a successful or failed swap is indicated by fail. This is used to
+// (1) register completed orders for cancellation rate purposes, and (2) to
+// unbook at-fault limit orders.
+//
+// Implementation note: Orders that have failed a swap or were canceled (see
+// processReadyEpoch) are removed from the settling map regardless of any amount
+// still setting for such orders.
+func (m *Market) SwapDone(ord order.Order, match *order.Match, fail bool) {
+	oid := ord.ID()
+	m.bookMtx.Lock()
+	defer m.bookMtx.Unlock()
+	settling, found := m.settling[oid]
+	if !found {
+		// Order was canceled or already had failed swap, and was removed from
+		// the map. No more settling amount tracking needed.
+		return
+	}
+	if settling < match.Quantity {
+		log.Errorf("Finished swap %v (qty %d) for order %v larger than current settling (%d) amount.",
+			match.ID(), match.Quantity, oid, settling)
+		settling = 0
+	} else {
+		settling -= match.Quantity
+	}
+
+	// Limit orders may need to be unbooked, or considered for further matches.
+	lo, limit := ord.(*order.LimitOrder)
+
+	// For a failed swap, remove the map entry, and unbook/revoke the order.
+	if fail {
+		delete(m.settling, oid)
+		if limit {
+			// Try to unbook and revoke failed limit orders.
+			_, removed := m.book.Remove(oid)
+			// Lazy update DB and coin locker, and notify clients.
+			go func() {
+				m.unlockOrderCoins(lo)
+				if removed {
+					// Update the order status in DB, and notify orderbook subscribers.
+					m.unbookedOrder(lo)
+				}
+			}()
+		}
+		return
+	}
+
+	// Continue tracking if more matches can be made or there are swaps
+	// settling. If it is a limit order, we know it is not canceled yet because
+	// it is still in the settling map.
+	matchable := limit && lo.Force == order.StandingTiF && lo.Remaining() > 0
+	if matchable || settling > 0 {
+		m.settling[oid] = settling
+		return
+	}
+
+	// The order can no longer be matched and nothing is settling.
+	delete(m.settling, oid)
+
+	// Register the order as successfully completed in the auth manager.
+	compTime := time.Now().UTC()
+	m.auth.RecordCompletedOrder(ord.User(), oid, compTime)
+	// Record the successful completion time.
+	if err := m.storage.SetOrderCompleteTime(ord, encode.UnixMilli(compTime)); err != nil {
+		if db.IsErrGeneralFailure(err) {
+			log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord, err)
+			return
+		}
+		log.Errorf("SetOrderCompleteTime for %v: %v", ord, err)
+	}
 }
 
 // CheckUnfilled checks unfilled book orders belonging to a user and funded by
@@ -1713,7 +1815,28 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
 	seed, matches, _, failed, doneOK, partial, booked, nomatched, unbooked, updates, stats := m.matcher.Match(m.book, ordersRevealed)
 	m.bookEpochIdx = epoch.Epoch + 1
+	var canceled []order.OrderID
+	for _, ms := range matches {
+		// Set the epoch ID.
+		ms.Epoch.Idx = uint64(epoch.Epoch)
+		ms.Epoch.Dur = uint64(epoch.Duration)
+
+		// Update order settling amounts.
+		for _, match := range ms.Matches() {
+			if co, ok := match.Taker.(*order.CancelOrder); ok {
+				m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, matchTime)
+				canceled = append(canceled, co.TargetOrderID)
+				continue
+			}
+			m.settling[match.Taker.ID()] += match.Quantity
+			m.settling[match.Maker.ID()] += match.Quantity
+		}
+	}
+	for _, oid := range canceled {
+		delete(m.settling, oid) // may still be settling, but we don't care anymore
+	}
 	m.bookMtx.Unlock()
+
 	if len(ordersRevealed) > 0 {
 		log.Infof("Matching complete for market %v epoch %d:"+
 			" %d matches (%d partial fills), %d completed OK (not booked),"+
@@ -1819,38 +1942,6 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	for _, co := range updates.CancelsExecuted {
 		if err = m.storage.ExecuteOrder(co); err != nil {
 			return
-		}
-	}
-
-	// The Swapper needs to know which orders it is processing are off the book
-	// so that they may be marked as complete when/if all swaps complete.
-	offBookOrders := make(map[order.OrderID]bool)
-	offBook := func(ord order.Order) bool {
-		lo, limit := ord.(*order.LimitOrder)
-		// Non-limit orders are not on the book (!limit).
-		// Immediate force limits are not on the book.
-		// Standing limits with no remaining are not on the book.
-		return !limit || lo.Force == order.ImmediateTiF || lo.Remaining() == 0
-		// Don't forget to check canceled orders too.
-	}
-
-	// Set the EpochID for each MatchSet, and record executed cancels.
-	for _, match := range matches {
-		offBookOrders[match.Taker.ID()] = offBook(match.Taker)
-		for _, lo := range match.Makers {
-			offBookOrders[lo.ID()] = offBook(lo)
-		}
-
-		// Set the epoch ID.
-		match.Epoch.Idx = uint64(epoch.Epoch)
-		match.Epoch.Dur = uint64(epoch.Duration)
-
-		// Record the cancel in the auth manager.
-		if co, ok := match.Taker.(*order.CancelOrder); ok {
-			m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, matchTime) // cancel execution time, not order's server time
-			// The order could be involved in trade match from up the epoch, but
-			// it is now off the book regardless of order type and status.
-			offBookOrders[co.TargetOrderID] = true
 		}
 	}
 
@@ -1964,7 +2055,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		m.swapper.Negotiate(matches, offBookOrders)
+		m.swapper.Negotiate(matches)
 	}
 
 	// Update the API data collector.
@@ -1998,10 +2089,7 @@ func (m *Market) orderResponse(oRecord *orderRecord) (*msgjson.Message, error) {
 	oRecord.req.Stamp(stamp)
 
 	// Sign the serialized order request.
-	err := m.auth.Sign(oRecord.req)
-	if err != nil {
-		return nil, err
-	}
+	m.auth.Sign(oRecord.req)
 
 	// Prepare the OrderResult, including the server signature and time stamp.
 	oid := oRecord.order.ID()

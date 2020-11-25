@@ -24,7 +24,7 @@ func TestInsertMatch(t *testing.T) {
 	limitBuyStanding := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
 	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
 
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	// Taker is selling.
 	matchA := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 
@@ -137,7 +137,7 @@ func TestSetSwapData(t *testing.T) {
 	limitBuyStanding := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
 	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
 
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	matchA := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	matchID := matchA.ID()
 
@@ -395,7 +395,7 @@ func TestMatchByID(t *testing.T) {
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
 	// Store it.
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	err := archie.InsertMatch(match)
 	if err != nil {
@@ -453,7 +453,7 @@ func TestUserMatches(t *testing.T) {
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
 	// Store it.
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	err := archie.InsertMatch(match)
 	if err != nil {
@@ -511,7 +511,7 @@ func TestMarketMatches(t *testing.T) {
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
 	// Store it.
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	err := archie.InsertMatch(match)
 	if err != nil {
@@ -572,17 +572,30 @@ type matchPair struct {
 }
 
 func generateMatch(t *testing.T, matchStatus order.MatchStatus, active bool, makerBuyer, takerSeller account.AccountID, epochIdx ...uint64) *matchPair {
+	t.Helper()
 	loBuy := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
 	loBuy.P.AccountID = makerBuyer
 	loSell := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
 	loSell.P.AccountID = takerSeller
+
 	epIdx := uint64(132412341)
 	if len(epochIdx) > 0 {
 		epIdx = epochIdx[0]
 	}
-	match := newMatch(loBuy, loSell, loSell.Quantity, order.EpochID{epIdx, 10})
+	epochID := order.EpochID{epIdx, 1000}
+
+	err := archie.StoreOrder(loBuy, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
+	if err != nil {
+		t.Fatalf("failed to store order: %v", err)
+	}
+	err = archie.StoreOrder(loSell, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
+	if err != nil {
+		t.Fatalf("failed to store order: %v", err)
+	}
+
+	match := newMatch(loBuy, loSell, loSell.Quantity, epochID)
 	match.Status = matchStatus
-	err := archie.InsertMatch(match)
+	err = archie.InsertMatch(match)
 	if err != nil {
 		t.Fatalf("InsertMatch() failed: %v", err)
 	}
@@ -664,7 +677,7 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 	limitSell.BaseAsset, limitSell.QuoteAsset = AssetBTC, AssetLTC
 	taker2 := randomAccountID()
 	limitSell.AccountID = taker2
-	matchLTC := newMatch(limitBuy, limitSell, limitSell.Quantity, order.EpochID{nextIdx(), 10})
+	matchLTC := newMatch(limitBuy, limitSell, limitSell.Quantity, order.EpochID{nextIdx(), 1000})
 	matchLTC.Status = order.MatchComplete
 	err := archie.InsertMatch(matchLTC)
 	if err != nil {
@@ -788,7 +801,7 @@ func TestAllActiveUserMatches(t *testing.T) {
 	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
 
 	// Make it complete and store it.
-	epochID := order.EpochID{132412341, 10}
+	epochID := order.EpochID{132412341, 1000}
 	// maker buy (quote swap asset), taker sell (base swap asset)
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	match.Status = order.TakerSwapCast // failed here
@@ -808,7 +821,7 @@ func TestAllActiveUserMatches(t *testing.T) {
 	limitSellImmediate2.AccountID = limitSellImmediate.AccountID
 
 	// Store it.
-	epochID2 := order.EpochID{132412342, 10}
+	epochID2 := order.EpochID{132412342, 1000}
 	// maker buy (quote swap asset), taker sell (base swap asset)
 	match2 := newMatch(limitBuyStanding2, limitSellImmediate2, limitSellImmediate2.Quantity, epochID2)
 	err = archie.InsertMatch(match2)
@@ -827,7 +840,7 @@ func TestAllActiveUserMatches(t *testing.T) {
 	limitSellImmediate3.AccountID = limitSellImmediate.AccountID
 
 	// Store it.
-	epochID3 := order.EpochID{132412342, 10}
+	epochID3 := order.EpochID{132412342, 1000}
 	match3 := newMatch(limitBuyStanding3, limitSellImmediate3, limitSellImmediate3.Quantity, epochID3)
 	err = archie.InsertMatch(match3)
 	if err != nil {
@@ -910,6 +923,93 @@ func TestAllActiveUserMatches(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestActiveSwaps(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	swapsDetails, err := archie.ActiveSwaps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(swapsDetails) > 0 {
+		t.Fatalf("got details for %d swaps, expected 0", len(swapsDetails))
+	}
+
+	user1 := randomAccountID()
+	user2 := randomAccountID()
+	match := generateMatch(t, order.MakerRedeemed, true, user1, user2)
+
+	swapsDetails, err = archie.ActiveSwaps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(swapsDetails) != 1 {
+		t.Fatalf("got details for %d swaps, expected 1", len(swapsDetails))
+	}
+	swapDetails := swapsDetails[0]
+
+	taker, _, err := archie.Order(swapDetails.MatchData.Taker, swapDetails.Base, swapDetails.Quote)
+	if err != nil {
+		t.Fatalf("Failed to load taker order: %v", err)
+	}
+	if taker.ID() != swapDetails.MatchData.Taker {
+		t.Fatalf("Failed to load order %v, computed ID %v instead", swapDetails.MatchData.Taker, taker.ID())
+	}
+	if match.match.Taker.ID() != swapDetails.MatchData.Taker {
+		t.Fatalf("Failed to load order %v, computed ID %v instead", swapDetails.MatchData.Taker, taker.ID())
+	}
+
+	maker, _, err := archie.Order(swapDetails.MatchData.Maker, swapDetails.Base, swapDetails.Quote)
+	if err != nil {
+		t.Fatalf("Failed to load maker order: %v", err)
+	}
+	if maker.ID() != swapDetails.MatchData.Maker {
+		t.Fatalf("Failed to load order %v, computed ID %v instead", swapDetails.MatchData.Maker, maker.ID())
+	}
+	if match.match.Maker.ID() != swapDetails.MatchData.Maker {
+		t.Fatalf("Failed to load order %v, computed ID %v instead", swapDetails.MatchData.Maker, maker.ID())
+	}
+
+	if match.match.Rate != swapDetails.Rate {
+		t.Fatalf("wrong rate loaded, got %d want %d", swapDetails.Rate, match.match.Rate)
+	}
+	if match.match.Quantity != swapDetails.Quantity {
+		t.Fatalf("wrong quantity loaded, got %d want %d", swapDetails.Quantity, match.match.Quantity)
+	}
+	makerLO, ok := maker.(*order.LimitOrder)
+	if !ok {
+		t.Fatalf("Maker order was not a limit order: %T", maker)
+	}
+
+	matchBack := &order.Match{
+		Taker:        taker,
+		Maker:        makerLO,
+		Quantity:     swapDetails.Quantity,
+		Rate:         swapDetails.Rate,
+		FeeRateBase:  swapDetails.BaseRate,
+		FeeRateQuote: swapDetails.QuoteRate,
+		Epoch:        swapDetails.Epoch,
+		Status:       swapDetails.Status,
+		Sigs: order.Signatures{ // not really needed
+			MakerMatch:  swapDetails.SwapData.SigMatchAckMaker,
+			TakerMatch:  swapDetails.SwapData.SigMatchAckTaker,
+			MakerAudit:  swapDetails.SwapData.ContractAAckSig,
+			TakerAudit:  swapDetails.SwapData.ContractBAckSig,
+			TakerRedeem: swapDetails.SwapData.RedeemAAckSig,
+		},
+	}
+
+	wantMid := match.match.ID()
+	if wantMid != swapDetails.MatchData.ID {
+		t.Fatalf("incorrect match ID %v, expected %v", swapDetails.MatchData.ID, wantMid)
+	}
+	// recompute the match ID from the loaded orders (their computed IDs), match rate, qty, etc.
+	if wantMid != matchBack.ID() {
+		t.Fatalf("Failed to reconstruct Match %v, computed ID %v instead", matchBack.ID(), wantMid)
 	}
 }
 

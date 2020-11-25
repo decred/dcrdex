@@ -30,13 +30,14 @@ type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Suspended(user account.AccountID) (found, suspended bool)
-	Sign(...msgjson.Signable) error
+	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message) error
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID)
 	MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
+	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 	UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64
 }
 

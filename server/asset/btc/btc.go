@@ -337,6 +337,52 @@ func (btc *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	return c
 }
 
+// CoinConfTime returns the time when a coin (i.e. transaction) reached a
+// certain number of confirmations. The zero Time is returned if it has not been
+// mined or does not yet have confs confirmations.
+func (btc *Backend) CoinConfTime(coinID []byte, confs int64) (time.Time, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
+	}
+	grtv, err := btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getrawtransactionverbose %x: %w", coinID, err)
+	}
+
+	if grtv.BlockHash == "" {
+		return time.Time{}, nil // unconfirmed
+	}
+	if grtv.Confirmations < uint64(confs) {
+		return time.Time{}, nil // not at confs
+	}
+
+	// bitcoin's getrawtransaction result does not include block height.
+	blockHash, err := chainhash.NewHashFromStr(grtv.BlockHash)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid block hash from getrawtransaction: %w", err)
+	}
+	gbv, err := btc.node.GetBlockVerbose(blockHash)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	blockHeight := gbv.Height
+	blockHash, err = btc.node.GetBlockHash(blockHeight + confs - 1)
+	if err != nil {
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCOutOfRange {
+			return time.Time{}, nil // not that many confs yet
+		}
+		return time.Time{}, fmt.Errorf("getblockhash failed: %w", err)
+	}
+	gbv, err = btc.node.GetBlockVerbose(blockHash)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getblock failed: %w", err)
+	}
+	return time.Unix(gbv.Time, 0).UTC(), nil
+}
+
 // InitTxSize is an asset.Backend method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (btc *Backend) InitTxSize() uint32 {
@@ -420,7 +466,7 @@ func (btc *Backend) call(method string, args anylist, thing interface{}) error {
 	}
 	b, err := btc.node.RawRequest(method, params)
 	if err != nil {
-		return fmt.Errorf("rawrequest error: %v", err)
+		return fmt.Errorf("rawrequest error: %w", err)
 	}
 	if thing != nil {
 		return json.Unmarshal(b, thing)

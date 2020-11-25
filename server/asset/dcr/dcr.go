@@ -227,6 +227,42 @@ func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
+// CoinConfTime returns the time when a coin (i.e. transaction) reached a
+// certain number of confirmations. The zero Time is returned if it has not been
+// mined or does not yet have confs confirmations.
+func (dcr *Backend) CoinConfTime(coinID []byte, confs int64) (time.Time, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
+	}
+	grtv, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getrawtransactionverbose %x: %w", coinID, err)
+	}
+
+	blockHeight := grtv.BlockHeight
+	if blockHeight == 0 {
+		return time.Time{}, nil // unconfirmed
+	}
+	if grtv.Confirmations < confs {
+		return time.Time{}, nil // not at confs
+	}
+
+	blockHash, err := dcr.node.GetBlockHash(dcr.ctx, blockHeight+confs-1)
+	if err != nil {
+		var rpcErr *dcrjson.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCOutOfRange {
+			return time.Time{}, nil // not that many confs yet
+		}
+		return time.Time{}, fmt.Errorf("getblockhash failed: %w", err)
+	}
+	gbv, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, false)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getblock failed: %w", err)
+	}
+	return time.Unix(gbv.Time, 0).UTC(), nil
+}
+
 // InitTxSize is an asset.Backend method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (dcr *Backend) InitTxSize() uint32 {

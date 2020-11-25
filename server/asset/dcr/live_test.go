@@ -78,6 +78,39 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+func TestCoinConfTime(t *testing.T) {
+	// a txn in testnet3 block 559407
+	hash, _ := chainhash.NewHashFromStr("f46d601c7b4b5fcc73c05b821e940652035765f10f078b9ef6297b8b421e85a4")
+	coin := toCoinID(hash, 0)
+	confTime, err := dcr.CoinConfTime(coin, 1)
+	if err != nil {
+		t.Error(err)
+	}
+	wantTime := int64(1605737010)
+	if confTime.Unix() != wantTime {
+		t.Errorf("Wrong time. got %d, wanted %d", confTime.Unix(), wantTime)
+	}
+
+	confTime, err = dcr.CoinConfTime(coin, 1<<22)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !confTime.IsZero() {
+		t.Errorf("expected a zero Time for a txn without that many confs, got %v", confTime)
+	}
+
+	// unknown txn
+	hash, _ = chainhash.NewHashFromStr("ffff601c7b4b5fcc73c05b821e940652035765f10f078b9ef6297b8b421e85a4")
+	coin = toCoinID(hash, 0)
+	confTime, err = dcr.CoinConfTime(coin, 1)
+	if err == nil {
+		t.Error("shouldn't have found that")
+	}
+	if !confTime.IsZero() {
+		t.Errorf("expected a zero Time for an unknown txn, got %v", confTime)
+	}
+}
+
 // TestLiveUTXO will iterate the blockchain backwards, starting with mempool,
 // checking that UTXOs are behaving as expected along the way. Stats will be
 // collected on the types of scripts found.
@@ -219,7 +252,7 @@ func TestLiveUTXO(t *testing.T) {
 					// Just check for no error on Confirmations.
 					confs, err := utxo.Confirmations(ctx)
 					if err != nil {
-						return fmt.Errorf("error getting confirmations for mempool tx output: %v", err)
+						return fmt.Errorf("error getting confirmations for mempool tx output: %w", err)
 					}
 					if confs != int64(expectedConfs) {
 						return fmt.Errorf("expected %d confirmations, found %d for %s:%d", expectedConfs, confs, txHash, vout)
@@ -231,7 +264,7 @@ func TestLiveUTXO(t *testing.T) {
 					// Since we are iterating backwards starting with mempool, we would
 					// already know the spending transaction and have it stored.
 					if !txOutIsSpent(*txHash, uint32(vout)) {
-						return fmt.Errorf("unexpected UTXO error: %v", err)
+						return fmt.Errorf("unexpected UTXO error: %w", err)
 					}
 					break
 				case !scriptTypeOK && err == nil:

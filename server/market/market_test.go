@@ -42,6 +42,7 @@ type TArchivist struct {
 	revoked              order.Order
 }
 
+func (ta *TArchivist) Close() error           { return nil }
 func (ta *TArchivist) LastErr() error         { return nil }
 func (ta *TArchivist) Fatal() <-chan struct{} { return nil }
 func (ta *TArchivist) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
@@ -147,7 +148,10 @@ func (ta *TArchivist) SetOrderCompleteTime(ord order.Order, compTime int64) erro
 func (ta *TArchivist) FailCancelOrder(*order.CancelOrder) error                   { return nil }
 func (ta *TArchivist) UpdateOrderFilled(*order.LimitOrder) error                  { return nil }
 func (ta *TArchivist) UpdateOrderStatus(order.Order, order.OrderStatus) error     { return nil }
-func (ta *TArchivist) InsertMatch(match *order.Match) error                       { return nil }
+
+// SwapArchiver for Swapper
+func (ta *TArchivist) ActiveSwaps() ([]*db.SwapDataFull, error) { return nil, nil }
+func (ta *TArchivist) InsertMatch(match *order.Match) error     { return nil }
 func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchData, error) {
 	return nil, nil
 }
@@ -193,23 +197,7 @@ func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error 
 func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return nil
-}
-func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error        { return nil }
-func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) error { return nil }
-func (ta *TArchivist) RestoreAccount(account.AccountID) error             { return nil }
-func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
-	return nil, false, false
-}
-func (ta *TArchivist) CreateAccount(*account.Account) (string, error)         { return "", nil }
-func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)       { return "", nil }
-func (ta *TArchivist) PayAccount(account.AccountID, []byte) error             { return nil }
-func (ta *TArchivist) Accounts() ([]*db.Account, error)                       { return nil, nil }
-func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error)     { return nil, nil }
-func (ta *TArchivist) Close() error                                           { return nil }
-func (ta *TArchivist) GetStateHash() ([]byte, error)                          { return nil, nil }
-func (ta *TArchivist) SetStateHash([]byte) error                              { return nil }
+func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error            { return nil }
 func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*db.CandleCache) error { return nil }
 
 type TCollector struct{}
@@ -250,9 +238,8 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	if err != nil {
 		panic(err.Error())
 	}
-	var mktUnbook func(lo *order.LimitOrder) bool
+	var swapDone func(ord order.Order, match *order.Match, fail bool)
 	swapperCfg := &swap.Config{
-		DataDir: swapDataDir,
 		Assets: map[uint32]*swap.LockableAsset{
 			assetDCR.ID: {BackedAsset: assetDCR, CoinLocker: swapLockerBase},
 			assetBTC.ID: {BackedAsset: assetBTC, CoinLocker: swapLockerQuote},
@@ -262,8 +249,8 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		BroadcastTimeout: 10 * time.Second,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
-		UnbookHook: func(lo *order.LimitOrder) bool {
-			return mktUnbook(lo)
+		SwapDone: func(ord order.Order, match *order.Match, fail bool) {
+			swapDone(ord, match, fail)
 		},
 	}
 	swapper, err := swap.NewSwapper(swapperCfg)
@@ -283,7 +270,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
 	}
-	mktUnbook = mkt.Unbook
+	swapDone = mkt.SwapDone
 
 	ssw := dex.NewStartStopWaiter(swapper)
 	ssw.Start(testCtx)

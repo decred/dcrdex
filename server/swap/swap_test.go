@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
@@ -173,12 +172,11 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 	}
 	return nil
 }
-func (m *TAuthManager) Sign(signables ...msgjson.Signable) error {
+func (m *TAuthManager) Sign(signables ...msgjson.Signable) {
 	for _, signable := range signables {
 		sig := ecdsa.Sign(m.privkey, signable.Serialize())
 		signable.SetSig(sig.Serialize())
 	}
-	return nil
 }
 func (m *TAuthManager) Suspended(user account.AccountID) (found, suspended bool) {
 	var rule account.Rule
@@ -276,10 +274,9 @@ func (m *TAuthManager) getResp(id account.AccountID) (msg *msgjson.Message, resp
 }
 
 type TStorage struct {
-	fatalMtx  sync.RWMutex
-	fatal     chan struct{}
-	fatalErr  error
-	stateHash []byte
+	fatalMtx sync.RWMutex
+	fatal    chan struct{}
+	fatalErr error
 }
 
 func (ts *TStorage) LastErr() error {
@@ -304,12 +301,12 @@ func (ts *TStorage) fatalBackendErr(err error) {
 	ts.fatalMtx.Unlock()
 }
 
-func (ts *TStorage) InsertMatch(match *order.Match) error { return nil }
-func (ts *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
-func (ts *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error) {
-	return
+func (ts *TStorage) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
+	return nil, order.OrderStatusUnknown, nil // not loading swaps
 }
-func (ts *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
+func (ts *TStorage) CancelOrder(*order.LimitOrder) error      { return nil }
+func (ts *TStorage) ActiveSwaps() ([]*db.SwapDataFull, error) { return nil, nil }
+func (ts *TStorage) InsertMatch(match *order.Match) error     { return nil }
 func (ts *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
@@ -336,19 +333,7 @@ func (ts *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 func (ts *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ts *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return nil
-}
 func (ts *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
-
-func (ts *TStorage) GetStateHash() ([]byte, error) {
-	return ts.stateHash, nil
-}
-
-func (ts *TStorage) SetStateHash(h []byte) error {
-	ts.stateHash = h
-	return nil
-}
 
 type redeemKey struct {
 	redemptionCoin       string
@@ -378,6 +363,9 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
+func (a *TAsset) CoinConfTime(coinID []byte, confs int64) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
@@ -533,37 +521,26 @@ type testRig struct {
 	storage       *TStorage
 	matches       *tMatchSet
 	matchInfo     *tMatch
-	swapDataDir   string
-	statePath     string
-	ignoreState   bool
+	noResume      bool
 }
 
 func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 	var abcBackend, xyzBackend *TAsset
 	storage := &TStorage{}
 	authMgr := newTAuthManager()
-	var swapDataDir, statePath string
-	var ignoreState bool
+	var noResume bool
 	manualMode := len(seed) > 0
 	if manualMode && seed[0] != nil {
 		seedRig := seed[0]
 		abcBackend, xyzBackend = seedRig.abcNode, seedRig.xyzNode
 		storage = seedRig.storage
-		// state := conf[0].state
-		swapDataDir = seedRig.swapDataDir
-		statePath = seedRig.statePath
-		ignoreState = seedRig.ignoreState
+		noResume = seedRig.noResume
 		authMgr.newReq = seedRig.auth.newReq
 		authMgr.newNtfn = seedRig.auth.newNtfn
 		authMgr.newSuspend = seedRig.auth.newSuspend
 	} else {
 		abcBackend = newTAsset("abc")
 		xyzBackend = newTAsset("xyz")
-		var err error
-		swapDataDir, err = ioutil.TempDir("", "swapstates")
-		if err != nil {
-			panic(err.Error())
-		}
 	}
 
 	abcAsset := TNewAsset(abcBackend)
@@ -573,7 +550,6 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 	xyzCoinLocker := coinlock.NewAssetCoinLocker()
 
 	swapper, err := NewSwapper(&Config{
-		DataDir: swapDataDir,
 		Assets: map[uint32]*LockableAsset{
 			ABCID: {abcAsset, abcCoinLocker},
 			XYZID: {xyzAsset, xyzCoinLocker},
@@ -583,9 +559,7 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		BroadcastTimeout: txWaitExpiration * 5,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
-		UnbookHook:       func(*order.LimitOrder) bool { return true },
-		IgnoreState:      ignoreState,
-		StatePath:        statePath,
+		SwapDone:         func(ord order.Order, match *order.Match, fail bool) {},
 	})
 	if err != nil {
 		panic(err.Error())
@@ -596,14 +570,6 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 	cleanup := func() {
 		ssw.Stop()
 		ssw.WaitForShutdown()
-		// If state was passed, even if nil, do not clean up the swapDataDir.
-		// Leave it to the test that used the state arg to do
-		// os.RemoveAll(rig.swapDataDir) after cleanup().
-		if !manualMode {
-			os.RemoveAll(swapDataDir)
-		} else {
-			time.Sleep(10 * time.Millisecond) // to avoid swap state files with the same ms stamp
-		}
 	}
 
 	return &testRig{
@@ -616,9 +582,7 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		swapperWaiter: ssw,
 		storage:       storage,
 		matchInfo:     matchInfo,
-		swapDataDir:   swapDataDir,
-		statePath:     statePath,
-		ignoreState:   ignoreState,
+		noResume:      noResume,
 	}, cleanup
 }
 
@@ -1439,23 +1403,23 @@ func TestSwaps(t *testing.T) {
 		}
 		t.Run("perfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 			testSwap(t, rig)
 		})
 		t.Run("perfect limit-market match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitMarket(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-market match"+sellStr, func(t *testing.T) {
 			// only requirement is that maker val > taker val.
 			rig.matches = tMarketPair(uint64(10e8), uint64(2e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tLimitPair(uint64(10e8), uint64(2e8), uint64(2e8), uint64(5e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 			testSwap(t, rig)
 		})
 		for _, isMarket := range []bool{true, false} {
@@ -1468,7 +1432,7 @@ func TestSwaps(t *testing.T) {
 				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
 				// one taker, 3 makers => 4 'match' requests
 				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
-				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
+				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 				testSwap(t, rig)
 			})
 		}
@@ -1490,7 +1454,7 @@ func TestTxWaiters(t *testing.T) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 
 	// Get the MatchNotifications that the swapper sent to the clients and check
 	// the match notification length, content, IDs, etc.
@@ -1697,7 +1661,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true) // same orders, different users
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
-		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 		// Step through the negotiation process. No errors should be generated.
 		// TODO: timeout each match ack, not block based inaction.
 
@@ -1772,7 +1736,7 @@ func TestSigErrors(t *testing.T) {
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
 
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil) // pushes a new req to m.reqs
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}) // pushes a new req to m.reqs
 	ensureNilErr := makeEnsureNilErr(t)
 
 	// ensureSigErr makes sure that the specified user has a signature error
@@ -1827,7 +1791,7 @@ func TestMalformedSwap(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
@@ -1857,7 +1821,7 @@ func TestBadParams(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	swapper := rig.swapper
 	match := rig.getTracker()
 	user := matchInfo.maker
@@ -1898,7 +1862,7 @@ func TestCancel(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	// There should be no matchTracker
 	if rig.getTracker() != nil {
 		t.Fatalf("found matchTracker for a cancellation")
@@ -1934,27 +1898,14 @@ func TestCancel(t *testing.T) {
 	}
 }
 
-func TestState(t *testing.T) {
+/*
+func TestSwapper_resume(t *testing.T) {
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
 	var rig *testRig
 	var stop func()
-	loadLatestState := func() (*State, error) {
-		stateFile, err := LatestStateFile(rig.swapDataDir)
-		if err != nil {
-			return nil, fmt.Errorf("error finding swap state files: %w", err)
-		}
-		if stateFile == nil {
-			return nil, fmt.Errorf("no swap state file found")
-		}
-		state, err := LoadStateFile(stateFile.Name)
-		if err != nil {
-			return nil, fmt.Errorf("error loading swap state file %q: %w", stateFile.Name, err)
-		}
-		return state, nil
-	}
 
 	// Wait for a request up to timeout.
 	reqWait := func(timeout time.Duration) {
@@ -1971,10 +1922,12 @@ func TestState(t *testing.T) {
 	makerSell := true // maker: swap = ABC, redeem = XYZ / taker: swap = XYZ, redeem = ABC
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
 	matchInfo := set.matchInfos[0]
-	rig, stop = tNewTestRig(matchInfo, nil)
-	defer os.RemoveAll(rig.swapDataDir)
 
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+	// store match and orders for TStorage.Order and TStorage.ActiveSwaps to resume
+
+	rig, stop = tNewTestRig(matchInfo, nil)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 
 	abc, xyz := rig.abcNode, rig.xyzNode
 
@@ -1982,56 +1935,23 @@ func TestState(t *testing.T) {
 
 	stop()
 
-	// Swap state is now written into a file in rig.swapDataDir.
-	state, err := loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
 	if len(rig.swapper.matches) != 1 {
 		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
 	}
 
-	// Loading with ignoreState = true should result in no matches being loaded.
-	// Set a different swapDataDir so the temporary rig doesn't dump it's empty
-	// state file on stop().
-	ogSwapDir := rig.swapDataDir
-	ogHash := rig.storage.stateHash
-	otherDir, err := ioutil.TempDir("", "otherstate")
-	if err != nil {
-		panic(err.Error())
-	}
-	rig.swapDataDir = otherDir
-	rig.ignoreState = true
+	// Loading with noResume = true should result in no matches being loaded.
+	rig.noResume = true
 	rig, stop = tNewTestRig(matchInfo, rig)
-	rig.ignoreState = false
-	defer os.RemoveAll(otherDir)
-	defer stop()
+	rig.noResume = false
 
 	if len(rig.swapper.matches) != 0 {
-		t.Errorf("expected 0 tracked matches for ignoreState = true, got %d", len(rig.swapper.matches))
+		t.Errorf("expected 0 tracked matches for noResume = true, got %d", len(rig.swapper.matches))
 	}
 	stop()
-
-	// Loading the file from a different location should work as well.
-	stateFile, err := LatestStateFile(ogSwapDir)
-	if err != nil {
-		t.Errorf("unable to read datadir: %v", err)
-	}
-	rig.statePath = stateFile.Name
-	rig, stop = tNewTestRig(matchInfo, rig)
-	rig.statePath = ""
-	defer stop()
-	if len(rig.swapper.matches) != 1 {
-		t.Errorf("expected 1 tracked match for custom state file, got %d", len(rig.swapper.matches))
-	}
-	stop()
-	rig.swapDataDir = ogSwapDir
-	rig.storage.stateHash = ogHash
 
 	// Now load the state in the default way.
 	rig.auth.newReq = make(chan struct{}, 2) // 2 'match' request sent on start
 	rig, stop = tNewTestRig(matchInfo, rig)
-	defer os.RemoveAll(rig.swapDataDir)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -2044,12 +1964,6 @@ func TestState(t *testing.T) {
 	}
 
 	// No match acks expected after a restart.
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
@@ -2070,19 +1984,9 @@ func TestState(t *testing.T) {
 	// yet since that is triggered after accounting for latency, calling
 	// processInit>processAck.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
+	stop()
 
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 1 {
-		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
-	}
-
-	// Restarting the swapper should call handleInit again with the same args to
-	// recreate the same coinwaiter.
+	// clients will have to init request again.
 	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
@@ -2094,6 +1998,11 @@ func TestState(t *testing.T) {
 	tracker = rig.getTracker()
 	if tracker.Status != order.NewlyMatched {
 		t.Fatalf("match not marked as NewlyMatched: %v", tracker.Status)
+	}
+
+	rpcErr = rig.swapper.handleInit(maker.acct, makerSwap.req)
+	if rpcErr != nil {
+		t.Fatalf("handleInit failed: %v", rpcErr)
 	}
 
 	// "broadcast" the contract and signal a new block.
@@ -2113,24 +2022,10 @@ func TestState(t *testing.T) {
 	// requests are no longer persisted. Missing acks no longer halt progression
 	// of match negotiation.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
+	stop()
 
 	if tracker.Status != order.MakerSwapCast {
 		t.Fatalf("match not marked as MakerSwapCast: %v", tracker.Status)
-	}
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 0 {
-		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
-	}
-
-	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MakerSwapCast {
-		t.Fatalf("state's match tracker in status %v, expected %v",
-			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MakerSwapCast)
 	}
 
 	rig, stop = tNewTestRig(matchInfo, rig)
@@ -2161,16 +2056,7 @@ func TestState(t *testing.T) {
 	// yet since that is triggered after accounting for latency, calling
 	// processInit>processAck.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 1 {
-		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
-	}
+	stop()
 
 	// Restarting the swapper should call handleInit again with the same args to
 	// recreate the same coinwaiter.
@@ -2181,6 +2067,11 @@ func TestState(t *testing.T) {
 	tracker = rig.getTracker()
 	if tracker.Status != order.MakerSwapCast {
 		t.Fatalf("match not marked as MakerSwapCast: %v", tracker.Status)
+	}
+
+	rpcErr = rig.swapper.handleInit(taker.acct, takerSwap.req)
+	if rpcErr != nil {
+		t.Fatalf("handleInit failed: %v", rpcErr)
 	}
 
 	// "broadcast" the contract and signal a new block.
@@ -2200,24 +2091,10 @@ func TestState(t *testing.T) {
 	// requests are no longer persisted. Missing acks no longer halt progression
 	// of match negotiation.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
+	stop()
 
 	if tracker.Status != order.TakerSwapCast {
 		t.Fatalf("match not marked as TakerSwapCast: %v", tracker.Status)
-	}
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 0 {
-		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
-	}
-
-	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.TakerSwapCast {
-		t.Fatalf("state's match tracker in status %v, expected %v",
-			state.MatchTrackers[matchInfo.matchID].Match.Status, order.TakerSwapCast)
 	}
 
 	rig, stop = tNewTestRig(matchInfo, rig)
@@ -2241,16 +2118,7 @@ func TestState(t *testing.T) {
 	// request yet since that is triggered after accounting for latency, calling
 	// processRedeem>processAck.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 1 {
-		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
-	}
+	stop()
 
 	// Restarting the swapper should call handleRedeem again with the same args
 	// to recreate the same coinwaiter.
@@ -2268,6 +2136,11 @@ func TestState(t *testing.T) {
 		t.Fatalf("match not marked as TakerSwapCast: %v", tracker.Status)
 	}
 
+	rpcErr = rig.swapper.handleRedeem(maker.acct, makerRedeem.req)
+	if rpcErr != nil {
+		t.Fatalf("handleRedeem failed: %v", rpcErr)
+	}
+
 	// "broadcast" the redeem and signal a new block.
 	xyz.setRedemption(makerRedeem.coin, makerRedeem.cpSwapCoin, true)
 	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
@@ -2280,24 +2153,10 @@ func TestState(t *testing.T) {
 	// The match status should now be MakerRedeemed, and there should be one ack
 	// (taker redemption ack request).
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
+	stop()
 
 	if tracker.Status != order.MakerRedeemed {
 		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
-	}
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 0 {
-		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
-	}
-
-	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MakerRedeemed {
-		t.Fatalf("state's match tracker in status %v, expected %v",
-			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MakerRedeemed)
 	}
 
 	rig, stop = tNewTestRig(matchInfo, rig)
@@ -2324,16 +2183,7 @@ func TestState(t *testing.T) {
 	// request yet since that is triggered after accounting for latency, calling
 	// processRedeem>processAck.
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 1 {
-		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
-	}
+	stop()
 
 	// Restarting the swapper should call handleRedeem again with the same args to
 	// recreate the same coinwaiter.
@@ -2349,6 +2199,11 @@ func TestState(t *testing.T) {
 		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
 	}
 
+	rpcErr = rig.swapper.handleRedeem(taker.acct, takerRedeem.req)
+	if rpcErr != nil {
+		t.Fatalf("handleRedeem failed: %v", rpcErr)
+	}
+
 	// "broadcast" the redeem and signal a new block.
 	abc.setRedemption(takerRedeem.coin, takerRedeem.cpSwapCoin, true)
 	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
@@ -2361,7 +2216,7 @@ func TestState(t *testing.T) {
 	// The match status should now be MatchComplete, and there should be one ack
 	// (maker redemption ack request).
 
-	stop() // Swap state is now written into a file in rig.swapDataDir.
+	stop()
 
 	if tracker.Status != order.MatchComplete {
 		t.Fatalf("match not marked as MatchComplete: %v", tracker.Status)
@@ -2369,20 +2224,6 @@ func TestState(t *testing.T) {
 	tracker = rig.getTracker()
 	if tracker != nil {
 		t.Fatalf("match not deleted")
-	}
-
-	state, err = loadLatestState()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(state.LiveWaiters) != 0 {
-		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
-	}
-
-	if state.MatchTrackers[matchInfo.matchID] != nil {
-		t.Fatalf("state's match tracker in status %v, expected it to be deleted",
-			state.MatchTrackers[matchInfo.matchID].Match.Status)
 	}
 
 	rig, stop = tNewTestRig(matchInfo, rig)
@@ -2397,3 +2238,4 @@ func TestState(t *testing.T) {
 		t.Fatalf("expected matchTracker to be removed")
 	}
 }
+*/

@@ -119,21 +119,24 @@ func CreateTable(db *sql.DB, schema, tableName string) (bool, error) {
 // PrepareTables ensures that all tables required by the DEX market config,
 // mktConfig, are ready.
 func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
-	// Create the meta table in the public schema.
-	created, err := CreateTable(db, publicSchema, metaTableName)
-	if err != nil {
-		return fmt.Errorf("failed to create meta table: %w", err)
-	}
-	if created {
-		log.Trace("Creating new meta table.")
-		_, err := db.Exec(internal.CreateMetaRow)
-		if err != nil {
-			return fmt.Errorf("failed to create row for meta table")
-		}
-	}
+	// Create the meta table in the public schema. (TODO with version).
+	// created, err := CreateTable(db, publicSchema, metaTableName)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to create meta table: %w", err)
+	// }
+	// if created {
+	// 	log.Trace("Creating new meta table.")
+	// 	_, err := db.Exec(internal.CreateMetaRow)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to create row for meta table")
+	// 	}
+	// }
+
+	// TODO: do something about the existing meta table (add version row if not
+	// exist and delete the swap state hash column).
 
 	// Create the markets table in the public schema.
-	created, err = CreateTable(db, publicSchema, marketsTableName)
+	created, err := CreateTable(db, publicSchema, marketsTableName)
 	if err != nil {
 		return fmt.Errorf("failed to create markets table: %w", err)
 	}

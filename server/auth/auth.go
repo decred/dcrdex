@@ -524,13 +524,12 @@ func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended boo
 }
 
 // Sign signs the msgjson.Signables with the DEX private key.
-func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
+func (auth *AuthManager) Sign(signables ...msgjson.Signable) {
 	for _, signable := range signables {
 		sigMsg := signable.Serialize()
 		sig := auth.signer.Sign(sigMsg)
 		signable.SetSig(sig.Serialize())
 	}
-	return nil
 }
 
 // Response and notification (non-request) messages

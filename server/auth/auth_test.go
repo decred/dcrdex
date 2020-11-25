@@ -995,20 +995,14 @@ func TestSign(t *testing.T) {
 	sig1Bytes := sig1.Serialize()
 	rig.signer.sig = sig1
 	s := &tSignable{b: randBytes(25)}
-	err := rig.mgr.Sign(s)
-	if err != nil {
-		t.Fatalf("unexpected error for valid signable: %v", err)
-	}
+	rig.mgr.Sign(s)
 	if !bytes.Equal(sig1Bytes, s.SigBytes()) {
 		t.Fatalf("incorrect signature. expected %x, got %x", sig1.Serialize(), s.SigBytes())
 	}
 
 	// Try two at a time
 	s2 := &tSignable{b: randBytes(25)}
-	err = rig.mgr.Sign(s, s2)
-	if err != nil {
-		t.Fatalf("error for multiple signables: %v", err)
-	}
+	rig.mgr.Sign(s, s2)
 }
 
 func TestSend(t *testing.T) {
