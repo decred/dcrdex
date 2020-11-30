@@ -63,6 +63,8 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 |-
 | /account/{accountID}/notify?timeout=TIMEOUT || POST || send a notification containing text in the request body to account. If not currently connected, the notification will be sent upon reconnect unless timeout duration has passed. default timeout is 72 hours. timeout should be of the form #h#m#s (i.e. "2h" or "5h30m"). Header Content-Type must be set to "text/plain"
 |-
+| /account/{accountID}/forgive_match/{matchID} || GET || forgive an account for a specific match failure
+|-
 | /markets  || GET || display status information for all markets
 |-
 | /market/{marketID} || GET || display status information for a specific market
@@ -73,7 +75,9 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 |-
 | /market/{marketID}/matches?includeinactive=BOOL || GET || display active matches for a specific market. If includeinactive, completed matches are also returned
 |-
-| /market/{marketID}/suspend?t=EPOCH-MS&persist=BOOL || GET || schedule a market suspension at the end of the current epoch
+| /market/{marketID}/suspend?t=EPOCH-MS&persist=BOOL || GET || schedule a market suspension at the end of the current epoch or the first epoch after t has elapsed. If persist, booked orders are saved and reinstated upon resumption. Default is true
+|-
+| /market/{marketID}/resume?t=EPOCH-MS || GET || schedule a market resumption at the end of the current epoch or the first epoch after t has elapsed
 |-
 | /notifyall || POST || send a notification containing text in the request body to all connected clients. Header Content-Type must be set to "text/plain"
 |}
