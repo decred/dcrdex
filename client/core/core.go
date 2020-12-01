@@ -839,7 +839,7 @@ type Core struct {
 	wallets   map[uint32]*xcWallet
 
 	waiterMtx    sync.Mutex
-	blockWaiters map[uint32]*blockWaiter
+	blockWaiters map[string]*blockWaiter
 
 	tickSchedMtx sync.Mutex
 	tickSched    map[order.OrderID]*time.Timer
@@ -879,7 +879,7 @@ func New(cfg *Config) (*Core, error) {
 		net:           cfg.Net,
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
-		blockWaiters:  make(map[uint32]*blockWaiter),
+		blockWaiters:  make(map[string]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
@@ -1929,7 +1929,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		return confs >= reqConfs, nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
+	c.wait(coinID, assetID, trigger, func(err error) {
 		wallet, _ := c.wallet(assetID)
 		c.log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
@@ -2332,12 +2332,10 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 	return loaded
 }
 
-var waiterID uint64
-
-func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
+func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	c.blockWaiters[assetID] = &blockWaiter{
+	c.blockWaiters[coinIDString(assetID, coinID)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
 		action:  action,
@@ -4283,7 +4281,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 }
 
 // removeWaiter removes a blockWaiter from the map.
-func (c *Core) removeWaiter(id uint32) {
+func (c *Core) removeWaiter(id string) {
 	c.waiterMtx.Lock()
 	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
@@ -4303,7 +4301,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		if waiter.assetID != assetID {
 			continue
 		}
-		go func(id uint32, waiter *blockWaiter) {
+		go func(id string, waiter *blockWaiter) {
 			ok, err := waiter.trigger()
 			if err != nil {
 				waiter.action(err)
