@@ -839,7 +839,7 @@ type Core struct {
 	wallets   map[uint32]*xcWallet
 
 	waiterMtx    sync.Mutex
-	blockWaiters map[uint64]*blockWaiter
+	blockWaiters map[uint32]*blockWaiter
 
 	tickSchedMtx sync.Mutex
 	tickSched    map[order.OrderID]*time.Timer
@@ -879,7 +879,7 @@ func New(cfg *Config) (*Core, error) {
 		net:           cfg.Net,
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
-		blockWaiters:  make(map[uint64]*blockWaiter),
+		blockWaiters:  make(map[uint32]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
@@ -2337,7 +2337,7 @@ var waiterID uint64
 func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
+	c.blockWaiters[assetID] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
 		action:  action,
@@ -4283,7 +4283,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 }
 
 // removeWaiter removes a blockWaiter from the map.
-func (c *Core) removeWaiter(id uint64) {
+func (c *Core) removeWaiter(id uint32) {
 	c.waiterMtx.Lock()
 	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
@@ -4303,7 +4303,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		if waiter.assetID != assetID {
 			continue
 		}
-		go func(id uint64, waiter *blockWaiter) {
+		go func(id uint32, waiter *blockWaiter) {
 			ok, err := waiter.trigger()
 			if err != nil {
 				waiter.action(err)
