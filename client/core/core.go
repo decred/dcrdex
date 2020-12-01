@@ -3082,6 +3082,13 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 // called if the client was shutdown after a fee was paid, but before it had the
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
 func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
+
+	// Return if the coin is already in blockWaiters.
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	if _, ok := c.blockWaiters[coinIDString(regFeeAssetID, dc.acct.feeCoin)]; ok {
+		return
+	}
+
 	// Get the database account info.
 	acctInfo, err := c.db.Account(dc.acct.host)
 	if err != nil {
