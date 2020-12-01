@@ -29,6 +29,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/dcrd/certgen"
@@ -121,6 +122,9 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 		PersistBook:   mkt.persist,
 	}
 }
+
+func (c *TCore) Asset(id uint32) (*asset.BackedAsset, error)         { return nil, fmt.Errorf("not tested") }
+func (c *TCore) SetFeeRateScale(assetID uint32, scale float64) error { return nil }
 
 func (c *TCore) BookOrders(_, _ uint32) ([]*order.LimitOrder, error) {
 	return c.book, c.bookErr

@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/slog"
@@ -38,8 +39,8 @@ const (
 	accountIDKey         = "account"
 	yesKey               = "yes"
 	matchIDKey           = "match"
+	assetSymKey          = "asset"
 	ruleToken            = "rule"
-	timeoutToken         = "timeout"
 	includeInactiveToken = "includeinactive"
 )
 
@@ -54,6 +55,8 @@ type SvrCore interface {
 	Notify(acctID account.AccountID, msg *msgjson.Message)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
+	Asset(id uint32) (*asset.BackedAsset, error)
+	SetFeeRateScale(assetID uint32, scale float64) error
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
@@ -149,6 +152,10 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/unban", s.apiUnban)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
+		})
+		r.Route("/asset/{"+assetSymKey+"}", func(rm chi.Router) {
+			rm.Get("/", s.apiAsset)
+			rm.Post("/", s.apiAssetPOST)
 		})
 		r.Post("/notifyall", s.apiNotifyAll)
 		r.Get("/markets", s.apiMarkets)

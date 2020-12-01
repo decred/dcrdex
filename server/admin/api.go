@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -23,9 +24,8 @@ import (
 )
 
 const (
-	pongStr        = "pong"
-	maxUInt16      = int(^uint16(0))
-	defaultTimeout = time.Hour * 72
+	pongStr   = "pong"
+	maxUInt16 = int(^uint16(0))
 )
 
 // writeJSON marshals the provided interface and writes the bytes to the
@@ -52,13 +52,93 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 }
 
 // apiPing is the handler for the '/ping' API request.
-func (_ *Server) apiPing(w http.ResponseWriter, _ *http.Request) {
+func (*Server) apiPing(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, pongStr)
 }
 
 // apiConfig is the handler for the '/config' API request.
 func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.core.ConfigMsg())
+}
+
+func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetID, found := dex.BipSymbolID(assetSymbol)
+	if !found {
+		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
+		return
+	}
+	asset, err := s.core.Asset(assetID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
+		return
+	}
+
+	var errs []string
+	dexAsset := asset.Asset
+	backend := asset.Backend
+	currentFeeRate, err := backend.FeeRate()
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
+	}
+
+	synced, err := backend.Synced()
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("unable to get sync status: %v", err))
+	}
+
+	res := &AssetInfo{
+		Asset:          dexAsset,
+		CurrentFeeRate: currentFeeRate,
+		Synced:         synced,
+		Errors:         errs,
+	}
+	writeJSON(w, res)
+}
+
+func (s *Server) apiAssetPOST(w http.ResponseWriter, r *http.Request) {
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetID, found := dex.BipSymbolID(assetSymbol)
+	if !found {
+		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
+		return
+	}
+	asset, err := s.core.Asset(assetID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
+		return
+	}
+
+	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unable to read request body: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(body) == 0 {
+		http.Error(w, "no POST data provided", http.StatusBadRequest)
+		return
+	}
+
+	var data AssetPost
+	if err = json.Unmarshal(body, &data); err != nil {
+		http.Error(w, fmt.Sprintf("invalid POST data: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var settingsFound bool
+
+	if data.FeeRateScale != nil {
+		settingsFound = true
+		log.Infof("Setting %s (%d) fee rate scale factor to %f", strings.ToUpper(assetSymbol), assetID, *data.FeeRateScale)
+		asset.Backend.SetFeeRateScale(*data.FeeRateScale)
+	}
+
+	if settingsFound {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Error(w, "no settings applied", http.StatusBadRequest)
 }
 
 func (s *Server) apiMarkets(w http.ResponseWriter, r *http.Request) {
@@ -486,8 +566,7 @@ func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	return msg, 0, nil
 }
 
-// apiNotify is the handler for the '/account/{accountID}/notify?timeout=TIMEOUT'
-// API request.
+// apiNotify is the handler for the '/account/{accountID}/notify' API request.
 func (s *Server) apiNotify(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
 	acctID, err := decodeAcctID(acctIDStr)

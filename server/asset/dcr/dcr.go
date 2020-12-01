@@ -15,6 +15,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -110,6 +111,9 @@ type Backend struct {
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
 	log dex.Logger
+	// feeRateScale should contain a float64 scale applied to the fee rate from
+	// estimatesmartfee. When unset, 1.0 is used.
+	feeRateScale atomic.Value
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -238,7 +242,8 @@ func (dcr *Backend) InitTxSizeBase() uint32 {
 	return dexdcr.InitTxSizeBase
 }
 
-// FeeRate returns the current optimal fee rate in atoms / byte.
+// FeeRate returns the current optimal fee rate in atoms / byte. Use
+// SetFeeRateScale to modulate the fee rate this function returns.
 func (dcr *Backend) FeeRate() (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
 	dcrPerKB, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
@@ -249,9 +254,25 @@ func (dcr *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Add 1 extra atom/byte, which is both extra conservative and prevents a
-	// zero value if the atoms/KB is less than 1000.
-	return 1 + uint64(atomsPerKB)/1000, nil
+	scale, ok := dcr.feeRateScale.Load().(float64)
+	if !ok {
+		scale = 1.0
+	}
+	atomsPerB := uint64(math.Round(scale * float64(atomsPerKB) / 1000))
+	if atomsPerB == 0 {
+		atomsPerB = 1
+	}
+	return atomsPerB, nil
+}
+
+// SetFeeRateScale specifies a scale factor by which the optimal fee rate
+// returned by FeeRate will be scaled. Values < 0 are rejected.
+func (dcr *Backend) SetFeeRateScale(scale float64) {
+	if scale < 0 {
+		dcr.log.Errorf("Negative fee rate scale factor is not acceptable.")
+		return
+	}
+	dcr.feeRateScale.Store(scale)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

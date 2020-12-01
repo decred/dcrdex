@@ -5,7 +5,22 @@ package admin
 
 import (
 	"time"
+
+	"decred.org/dcrdex/dex"
 )
+
+// AssetPost is the expected structure of the asset POST data.
+type AssetPost struct {
+	FeeRateScale *float64 `json:"feeRateScale,omitempty"`
+}
+
+// AssetInfo is the result of the asset GET.
+type AssetInfo struct {
+	dex.Asset
+	CurrentFeeRate uint64   `json:"currentFeeRate,omitempty"`
+	Synced         bool     `json:"synced"`
+	Errors         []string `json:"errors,omitempty"`
+}
 
 // MarketStatus summarizes the operational status of a market.
 type MarketStatus struct {

@@ -576,6 +576,27 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	return dexMgr, nil
 }
 
+// Asset retrieves an asset backend by its ID.
+func (dm *DEX) Asset(id uint32) (*asset.BackedAsset, error) {
+	asset, found := dm.assets[id]
+	if !found {
+		return nil, fmt.Errorf("no backend for asset %d", id)
+	}
+	return asset.BackedAsset, nil
+}
+
+// SetFeeRateScale specifies a scale factor that the specified asset backend
+// should use to scale the optimal fee rates. That is, values above 1 increase
+// the fee rate, while values below 1 decrease it.
+func (dm *DEX) SetFeeRateScale(assetID uint32, scale float64) error {
+	asset, found := dm.assets[assetID]
+	if !found {
+		return fmt.Errorf("no backend for asset %d", assetID)
+	}
+	asset.Backend.SetFeeRateScale(scale)
+	return nil
+}
+
 // Config returns the current dex configuration.
 func (dm *DEX) ConfigMsg() json.RawMessage {
 	dm.configRespMtx.RLock()
