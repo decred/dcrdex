@@ -983,9 +983,15 @@ func (c *Core) Exchanges() map[string]*Exchange {
 		dc.cfgMtx.RLock()
 		dc.assetsMtx.RLock()
 		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
+		// Set AcctID to empty string if not initialized.
+		acctID := dc.acct.ID().String()
+		var emptyAcctID account.AccountID
+		if dc.acct.ID() == emptyAcctID {
+			acctID = ""
+		}
 		infos[host] = &Exchange{
 			Host:          host,
-			AcctID:        dc.acct.ID().String(),
+			AcctID:        acctID,
 			Markets:       dc.markets(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
