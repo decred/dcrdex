@@ -23,17 +23,13 @@
           {{range $host, $xc := .UserInfo.Exchanges}}
             <div>
               Dex Address: {{$host}}
-              {{if $xc.IsAuthed}}
-                <br>
-                Account ID: <span class="fs12">{{$xc.AcctID}}</span>
-              {{end}}
+              <br>
+              Account ID: <span class="fs12">{{$xc.AcctID}}</span>
             </div>
           {{end}}
         </div>
       </div>
-      {{if and (gt (len .UserInfo.Exchanges) 0) .UserInfo.Authed}}
-        <br>
-      {{end}}
+      <br>
       <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         <p>
         The Decred DEX Client supports simultaneous use of any number of DEX

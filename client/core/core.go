@@ -985,7 +985,6 @@ func (c *Core) Exchanges() map[string]*Exchange {
 		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
 		infos[host] = &Exchange{
 			Host:          host,
-			IsAuthed:      dc.acct.authed(),
 			AcctID:        dc.acct.ID().String(),
 			Markets:       dc.markets(),
 			Assets:        dc.assets,

@@ -715,7 +715,6 @@ Registration is complete after the fee transaction has been confirmed.`,
     obj: The exchanges result.
     {
       "[DEX host]": {
-        "isAuthed" (bool):  The client's DEX authentication status.,
         "acctID" (string):  The client's account ID associated with this DEX.,
         "markets": {
           "[assetID-assetID]": {
