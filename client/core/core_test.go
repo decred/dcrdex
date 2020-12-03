@@ -784,7 +784,7 @@ func newTestRig() *testRig {
 			lockTimeTaker: dex.LockTimeTaker(dex.Testnet),
 			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
 			wallets:       make(map[uint32]*xcWallet),
-			blockWaiters:  make(map[uint64]*blockWaiter),
+			blockWaiters:  make(map[string]*blockWaiter),
 			piSyncers:     make(map[order.OrderID]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {

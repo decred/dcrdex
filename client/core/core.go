@@ -837,8 +837,8 @@ type Core struct {
 	walletMtx sync.RWMutex
 	wallets   map[uint32]*xcWallet
 
-	waiterMtx    sync.Mutex
-	blockWaiters map[uint64]*blockWaiter
+	waiterMtx    sync.RWMutex
+	blockWaiters map[string]*blockWaiter
 
 	tickSchedMtx sync.Mutex
 	tickSched    map[order.OrderID]*time.Timer
@@ -878,7 +878,7 @@ func New(cfg *Config) (*Core, error) {
 		net:           cfg.Net,
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
-		blockWaiters:  make(map[uint64]*blockWaiter),
+		blockWaiters:  make(map[string]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
@@ -1929,7 +1929,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		return confs >= reqConfs, nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
+	c.wait(coinID, assetID, trigger, func(err error) {
 		wallet, _ := c.wallet(assetID)
 		c.log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
@@ -2316,12 +2316,10 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 	return loaded
 }
 
-var waiterID uint64
-
-func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
+func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
+	c.blockWaiters[coinIDString(assetID, coinID)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
 		action:  action,
@@ -3062,6 +3060,13 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 // called if the client was shutdown after a fee was paid, but before it had the
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
 func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
+
+	// Return if the coin is already in blockWaiters.
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	if c.existsWaiter(coinIDString(regFeeAssetID, dc.acct.feeCoin)) {
+		return
+	}
+
 	// Get the database account info.
 	acctInfo, err := c.db.Account(dc.acct.host)
 	if err != nil {
@@ -4256,8 +4261,16 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	return nil
 }
 
+// existsWaiter returns true if the waiter already exists in the map.
+func (c *Core) existsWaiter(id string) bool {
+	c.waiterMtx.RLock()
+	_, exists := c.blockWaiters[id]
+	c.waiterMtx.RUnlock()
+	return exists
+}
+
 // removeWaiter removes a blockWaiter from the map.
-func (c *Core) removeWaiter(id uint64) {
+func (c *Core) removeWaiter(id string) {
 	c.waiterMtx.Lock()
 	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
@@ -4277,7 +4290,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		if waiter.assetID != assetID {
 			continue
 		}
-		go func(id uint64, waiter *blockWaiter) {
+		go func(id string, waiter *blockWaiter) {
 			ok, err := waiter.trigger()
 			if err != nil {
 				waiter.action(err)
