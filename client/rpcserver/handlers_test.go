@@ -476,6 +476,7 @@ func TestHandleRegister(t *testing.T) {
 const exchangeIn = `{
   "https://127.0.0.1:7232": {
     "host": "https://127.0.0.1:7232",
+    "acctID": "edc7620e02",
     "markets": {
       "dcr_btc": {
         "name": "dcr_btc",
@@ -542,6 +543,7 @@ const exchangeIn = `{
 
 const exchangeOut = `{
   "https://127.0.0.1:7232": {
+    "acctID": "edc7620e02",
     "markets": {
       "dcr_btc": {
         "baseid": 42,
