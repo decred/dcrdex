@@ -800,6 +800,8 @@ export default class MarketsPage extends BasePage {
           this.showCancel(row, ord.id)
         })
       }
+      const side = Doc.tmplElement(row, 'side')
+      side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       const link = Doc.tmplElement(row, 'link')
       link.href = `order/${ord.id}`
       app.bindInternalNavigation(row)
