@@ -107,6 +107,13 @@ export default class WalletsPage extends BasePage {
       })
     })
 
+    this.keyup = e => {
+      if (e.key === 'Escape') {
+        this.showMarkets(this.lastFormAsset)
+      }
+    }
+    bind(document, 'keyup', this.keyup)
+
     // Bind buttons
     for (const [k, asset] of Object.entries(rowInfos)) {
       const assetID = parseInt(k) // keys are string asset ID.
@@ -464,6 +471,14 @@ export default class WalletsPage extends BasePage {
    */
   handleWalletStateNote (note) {
     this.rowInfos[note.wallet.assetID].stateIcons.readWallet(note.wallet)
+  }
+
+  /*
+   * unload is called by the Application when the user navigates away from
+   * the /wallets page.
+   */
+  unload () {
+    Doc.unbind(document, 'keyup', this.keyup)
   }
 }
 
