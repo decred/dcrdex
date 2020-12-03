@@ -56,6 +56,13 @@ export default class SettingsPage extends BasePage {
       if (!Doc.mouseInElement(e, this.currentForm)) { closePopups() }
     })
 
+    this.keyup = e => {
+      if (e.key === 'Escape') {
+        closePopups()
+      }
+    }
+    Doc.bind(document, 'keyup', this.keyup)
+
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
@@ -158,5 +165,13 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
     await app.fetchUser()
     loaded()
+  }
+
+  /*
+   * unload is called by the Application when the user navigates away from
+   * the /settings page.
+   */
+  unload () {
+    Doc.unbind(document, 'keyup', this.keyup)
   }
 }

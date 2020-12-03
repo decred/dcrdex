@@ -210,6 +210,13 @@ export default class MarketsPage extends BasePage {
       }
     })
 
+    this.keyup = e => {
+      if (e.key === 'Escape') {
+        closePopups()
+      }
+    }
+    bind(document, 'keyup', this.keyup)
+
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
@@ -1465,6 +1472,7 @@ export default class MarketsPage extends BasePage {
     ws.deregisterRoute(bookOrderRoute)
     ws.deregisterRoute(unbookOrderRoute)
     this.chart.unattach()
+    Doc.unbind(document, 'keyup', this.keyup)
     clearInterval(this.secondTicker)
   }
 }
