@@ -838,7 +838,7 @@ type Core struct {
 	walletMtx sync.RWMutex
 	wallets   map[uint32]*xcWallet
 
-	waiterMtx    sync.Mutex
+	waiterMtx    sync.RWMutex
 	blockWaiters map[string]*blockWaiter
 
 	tickSchedMtx sync.Mutex
@@ -3085,7 +3085,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 
 	// Return if the coin is already in blockWaiters.
 	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-	if _, ok := c.blockWaiters[coinIDString(regFeeAssetID, dc.acct.feeCoin)]; ok {
+	if c.existsWaiter(coinIDString(regFeeAssetID, dc.acct.feeCoin)) {
 		return
 	}
 
@@ -4285,6 +4285,14 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 	c.schedTradeTick(tracker)
 	return nil
+}
+
+// existsWaiter returns true if the waiter already exists in the map.
+func (c *Core) existsWaiter(id string) bool {
+	c.waiterMtx.RLock()
+	_, exists := c.blockWaiters[id]
+	c.waiterMtx.RUnlock()
+	return exists
 }
 
 // removeWaiter removes a blockWaiter from the map.
