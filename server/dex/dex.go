@@ -332,14 +332,18 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("failed to start asset %q: %w", symbol, err)
 		}
 
+		initTxSize := uint64(be.InitTxSize())
+		initTxSizeBase := uint64(be.InitTxSizeBase())
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
-				ID:         ID,
-				Symbol:     symbol,
-				LotSize:    assetConf.LotSize,
-				RateStep:   assetConf.RateStep,
-				MaxFeeRate: assetConf.MaxFeeRate,
-				SwapConf:   assetConf.SwapConf,
+				ID:           ID,
+				Symbol:       symbol,
+				LotSize:      assetConf.LotSize,
+				RateStep:     assetConf.RateStep,
+				MaxFeeRate:   assetConf.MaxFeeRate,
+				SwapSize:     initTxSize,
+				SwapSizeBase: initTxSizeBase,
+				SwapConf:     assetConf.SwapConf,
 			},
 			Backend: be,
 		}
@@ -350,14 +354,15 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			CoinLocker:  dexCoinLocker.AssetLocker(ID).Swap(),
 		}
 
+		// Prepare assets portion of config response.
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
 			Symbol:       assetConf.Symbol,
 			ID:           ID,
 			LotSize:      assetConf.LotSize,
 			RateStep:     assetConf.RateStep,
 			MaxFeeRate:   assetConf.MaxFeeRate,
-			SwapSize:     uint64(be.InitTxSize()),
-			SwapSizeBase: uint64(be.InitTxSizeBase()),
+			SwapSize:     initTxSize,
+			SwapSizeBase: initTxSizeBase,
 			SwapConf:     uint16(assetConf.SwapConf),
 		})
 	}
