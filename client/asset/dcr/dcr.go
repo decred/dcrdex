@@ -1767,24 +1767,28 @@ func (dcr *ExchangeWallet) Locked() bool {
 	return !walletInfo.Unlocked
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registration fee, and the fee rate is taken from the DEX configuration.
-func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
+// SendToAddress sends the an amount to an address. This should be used to pay a
+// DEX registration fee. Transaction fees are in addition to the registration
+// fee, and the fee rate is taken from the DEX configuration.
+func (dcr *ExchangeWallet) SendToAddress(address string, val uint64) (asset.Coin, error) {
 	addr, err := dcrutil.DecodeAddress(address, chainParams)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: Evaluate SendToAddress and how it deals with the change output
+	// NOTE: Can't set fees in one shot with the sendtoaddress RPC, so we do it
+	// the with our own coin selection and tx authoring. However, settxfee could
+	// be used in conjunction with it. TODO: Evaluate
+	// rpcclient.(*Client).SendToAddress and how it deals with the change output
 	// address index to see if it can be used here instead.
-	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(1))
+	msgTx, sent, err := dcr.sendToAddress(addr, val, dcr.feeRateWithFallback(1))
 	if err != nil {
 		return nil, err
 	}
-	if sent != regFee {
+	if sent != val {
 		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
-			"expected %d, but %d was reported", msgTx.CachedTxHash(), regFee, sent)
+			"expected %d, but %d was reported", msgTx.CachedTxHash(), val, sent)
 	}
-	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
+	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, val, wire.TxTreeRegular), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
@@ -1988,10 +1992,9 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	return dcr.sendCoins(addr, coins, val, feeRate, true)
 }
 
-// sendRegFee sends the registration fee to the address. Transaction fees will
-// be in addition to the registration fee and the output will be the zeroth
-// output.
-func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate uint64) (*wire.MsgTx, uint64, error) {
+// sendToAddress sends an amount an address. Transaction fees will be in
+// addition to the registration fee and the output will be the zeroth output.
+func (dcr *ExchangeWallet) sendToAddress(addr dcrutil.Address, regFee, netFeeRate uint64) (*wire.MsgTx, uint64, error) {
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		txFee := uint64(size+unspent.input.Size()) * netFeeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= regFee+txFee
@@ -1999,7 +2002,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate u
 	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
 		regFeeDCR := dcrutil.Amount(regFee).ToCoin()
-		return nil, 0, fmt.Errorf("unable to pay registration fee of %f DCR to address %s with fee rate of %d atoms/byte: %w",
+		return nil, 0, fmt.Errorf("unable to send %f DCR to address %s with fee rate of %d atoms/byte: %w",
 			regFeeDCR, addr, netFeeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)

@@ -1683,7 +1683,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	var sendVal uint64 = 1e8
 	var unspentVal uint64 = 100e8
 	sender := func(addr string, val uint64) (asset.Coin, error) {
-		return wallet.PayFee(addr, val)
+		return wallet.SendToAddress(addr, val)
 	}
 	if senderType == tWithdrawSender {
 		// For withdraw, test with unspent total = withdraw value

@@ -372,8 +372,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		t.Fatalf("refund error: %v", err)
 	}
 
-	// Test PayFee
-	coin, err := rig.gamma().PayFee(address, 1e8)
+	// Test SendToAddress
+	coin, err := rig.gamma().SendToAddress(address, 1e8)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}

@@ -1871,7 +1871,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, acctID, regRes.Fee, regAsset.Symbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
+	coin, err := wallet.SendToAddress(regRes.Address, regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -2403,9 +2403,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	return <-errChan
 }
 
-// Withdraw initiates a withdraw from an exchange wallet. The client password
-// must be provided as an additional verification.
-func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+func (c *Core) sendToAddress(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Withdraw password error: %w", err)
@@ -2421,7 +2419,12 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	coin, err := wallet.Withdraw(address, value)
+
+	sendFun := wallet.SendToAddress
+	if subtract {
+		sendFun = wallet.Withdraw
+	}
+	coin, err := sendFun(address, value)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote(SubjectWithdrawError, details, db.ErrorLevel))
@@ -2433,6 +2436,19 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 
 	c.updateAssetBalance(assetID)
 	return coin, nil
+}
+
+// SendToAddress sends the an amount to an address. Unlike Withdraw, transaction
+// fees are in addition to the registration fee, and the fee rate is taken from
+// the DEX configuration.
+func (c *Core) SendToAddress(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+	return c.sendToAddress(pw, assetID, value, address, false)
+}
+
+// Withdraw initiates a withdraw from an exchange wallet. The client password
+// must be provided as an additional verification.
+func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+	return c.sendToAddress(pw, assetID, value, address, true)
 }
 
 // Trade is used to place a market or limit order.

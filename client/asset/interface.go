@@ -140,16 +140,18 @@ type Wallet interface {
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
-	// PayFee sends the dex registration fee. Transaction fees are in addition to
-	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, feeAmt uint64) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
 	Confirmations(id dex.Bytes) (uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
-	// the value.
+	// the value. Use SendToAddress to send the specified value to an address.
 	Withdraw(address string, value uint64) (Coin, error)
+	// SendToAddress sends the an amount to an address. This should be used to
+	// pay a DEX registration fee. Unlike Withdraw, transaction fees are in
+	// addition to the registration fee, and the fee rate is taken from the DEX
+	// configuration.
+	SendToAddress(address string, feeAmt uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.

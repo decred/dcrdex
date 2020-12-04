@@ -1890,7 +1890,7 @@ const (
 func testSender(t *testing.T, senderType tSenderType) {
 	wallet, node, shutdown := tNewWallet(true)
 	sender := func(addr string, val uint64) (asset.Coin, error) {
-		return wallet.PayFee(addr, val)
+		return wallet.SendToAddress(addr, val)
 	}
 	if senderType == tWithdrawSender {
 		sender = func(addr string, val uint64) (asset.Coin, error) {

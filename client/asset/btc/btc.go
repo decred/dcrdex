@@ -1808,12 +1808,13 @@ func (btc *ExchangeWallet) Address() (string, error) {
 	return addr.String(), nil
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registration fee, and the fee rate is taken from the DEX configuration.
-func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1), false)
+// SendToAddress sends the an amount to an address. This should be used to pay a
+// DEX registration fee. Transaction fees are in addition to the registration
+// fee, and the fee rate is taken from the DEX configuration.
+func (btc *ExchangeWallet) SendToAddress(address string, value uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(1), false)
 	if err != nil {
-		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
+		btc.log.Errorf("SendToAddress error address = '%s', fee = %d: %v", address, value, err)
 		return nil, err
 	}
 	return newOutput(btc.node, txHash, vout, sent), nil
