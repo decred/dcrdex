@@ -89,6 +89,8 @@ type DataCollector interface {
 type Market struct {
 	marketInfo *dex.MarketInfo
 
+	tasks sync.WaitGroup // for lazy asynchronous tasks e.g. revoke ntfns
+
 	// Communications.
 	orderRouter chan *orderUpdateSignal // incoming orders, via SubmitOrderAsync
 
@@ -750,14 +752,11 @@ func (m *Market) SwapDone(ord order.Order, match *order.Match, fail bool) {
 		if limit {
 			// Try to unbook and revoke failed limit orders.
 			_, removed := m.book.Remove(oid)
-			// Lazy update DB and coin locker, and notify clients.
-			go func() {
-				m.unlockOrderCoins(lo)
-				if removed {
-					// Update the order status in DB, and notify orderbook subscribers.
-					m.unbookedOrder(lo)
-				}
-			}()
+			m.unlockOrderCoins(lo)
+			if removed {
+				// Lazily update DB and auth, and notify orderbook subscribers.
+				m.lazy(func() { m.unbookedOrder(lo) })
+			}
 		}
 		return
 	}
@@ -860,6 +859,14 @@ func (m *Market) PurgeBook() {
 	}
 }
 
+func (m *Market) lazy(do func()) {
+	m.tasks.Add(1)
+	go func() {
+		defer m.tasks.Done()
+		do()
+	}()
+}
+
 // Run is the main order processing loop, which takes new orders, notifies book
 // subscribers, and cycles the epochs. The caller should cancel the provided
 // Context to stop the market. The outgoing order feed channels persist after
@@ -947,6 +954,8 @@ func (m *Market) Run(ctx context.Context) {
 		// Stop and wait for the order feed goroutine.
 		close(notifyChan)
 		wgFeeds.Wait()
+
+		m.tasks.Wait()
 
 		log.Infof("Market %q stopped.", m.marketInfo.Name)
 	}()
@@ -1432,10 +1441,12 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
-	if err := m.auth.Send(user, respMsg); err != nil {
-		log.Infof("Failed to send signed new order response to user %v, order %v: %v",
-			user, oid, err)
-	}
+	m.lazy(func() {
+		if err := m.auth.Send(user, respMsg); err != nil {
+			log.Infof("Failed to send signed new order response to user %v, order %v: %v",
+				user, oid, err)
+		}
+	})
 
 	// Send epoch update to epoch queue subscribers.
 	notifyChan <- &updateSignal{
