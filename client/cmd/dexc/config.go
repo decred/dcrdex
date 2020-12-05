@@ -19,10 +19,13 @@ import (
 
 const (
 	maxLogRolls        = 16
-	defaultRPCAddr     = "localhost:5757"
 	defaultRPCCertFile = "rpc.cert"
 	defaultRPCKeyFile  = "rpc.key"
-	defaultWebAddr     = "localhost:5758"
+	defaultMainnetHost = "127.0.0.1"
+	defaultTestnetHost = "127.0.0.2"
+	defaultSimnetHost  = "127.0.0.3"
+	defaultRPCPort     = "5757"
+	defaultWebPort     = "5758"
 	configFilename     = "dexc.conf"
 	defaultLogLevel    = "debug"
 )
@@ -82,8 +85,6 @@ var defaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	Config:     defaultConfigPath,
 	DebugLevel: defaultLogLevel,
-	RPCAddr:    defaultRPCAddr,
-	WebAddr:    defaultWebAddr,
 }
 
 // configure processes the application configuration.
@@ -154,12 +155,18 @@ func configure() (*Config, error) {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
 		defaultDBPath = setNet(preCfg.AppData, "testnet")
+		cfg.RPCAddr = defaultTestnetHost + ":" + defaultRPCPort
+		cfg.WebAddr = defaultTestnetHost + ":" + defaultWebPort
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
 		defaultDBPath = setNet(preCfg.AppData, "simnet")
+		cfg.RPCAddr = defaultSimnetHost + ":" + defaultRPCPort
+		cfg.WebAddr = defaultSimnetHost + ":" + defaultWebPort
 	default:
 		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet(preCfg.AppData, "mainnet")
+		cfg.RPCAddr = defaultMainnetHost + ":" + defaultRPCPort
+		cfg.WebAddr = defaultMainnetHost + ":" + defaultWebPort
 	}
 
 	if cfg.RPCCert == "" {
