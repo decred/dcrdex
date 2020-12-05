@@ -472,7 +472,7 @@ func (m *matchReader) OrderPortion() string {
 // TimeString is a formatted string of the match's timestamp.
 func (m *matchReader) TimeString() string {
 	t := encode.UnixTimeMilli(int64(m.Stamp)).Local()
-	return t.Format("Jan 2 2008, 15:04:05 MST")
+	return t.Format("Jan 2 2006, 15:04:05 MST")
 }
 
 func decodeCoinID(assetID uint32, coinID []byte) string {
