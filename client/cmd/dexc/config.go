@@ -173,7 +173,7 @@ func configure() (*Config, error) {
 	}
 
 	// Calc RPC & Web addresses, if any of the hosts isn't available fallback
-	// to network specific host
+	// to default network specific host
 	RPCHost := defaultHostByNetwork(cfg.RPCHost, cfg.Testnet, cfg.Simnet)
 	WebHost := defaultHostByNetwork(cfg.WebHost, cfg.Testnet, cfg.Simnet)
 	var (
