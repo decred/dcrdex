@@ -871,7 +871,7 @@ func TestFundEdges(t *testing.T) {
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
-	var estFeeRate uint64 = optimalFeeRate + 1 // +1 added in feeRate
+	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
 
 	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
 		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)
@@ -1083,7 +1083,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
-	var estFeeRate uint64 = optimalFeeRate + 1 // +1 added in feeRateWithFallback
+	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRateWithFallback
 
 	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
 		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)

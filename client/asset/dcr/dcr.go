@@ -651,7 +651,7 @@ func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.Orde
 	for lots > 0 {
 		val := lots * lotSize
 		sum, size, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo))
-		// The only failure mode of btc.fund is when there is not enough funds,
+		// The only failure mode of dcr.tryFund is when there is not enough funds,
 		// so if an error is encountered, count down the lots and repeat until
 		// we have enough.
 		if err != nil {
@@ -723,8 +723,8 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 
 	coins, redeemScripts, sum, inputsSize, fundingCoins, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))
 	if err != nil {
-		return nil, nil, fmt.Errorf("error funding order value of %d DCR: %w",
-			ord.Value, err)
+		return nil, nil, fmt.Errorf("error funding order value of %.8f DCR: %w",
+			toDCR(ord.Value), err)
 	}
 
 	// Send a split, if preferred.
@@ -740,7 +740,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 	}
 
-	dcr.log.Infof("Funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
+	dcr.log.Infof("Funding %.8f DCR order with coins %v worth %.8f", toDCR(ord.Value), coins, toDCR(sum))
 
 	return coins, redeemScripts, nil
 }
@@ -791,7 +791,7 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 		return nil, err
 	}
 	if len(unspents) == 0 {
-		return nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
+		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in %q account", dcr.acct)
 	}
 
 	// Parse utxos to include script size for spending input.
@@ -883,7 +883,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			return 0, 0, nil, nil, nil, err
 		}
 		if !ok {
-			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
+			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %.8f available", toDCR(sum))
 		}
 	}
 
@@ -922,8 +922,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
-		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %d > %d.", baggageFees, excess)
-		dcr.log.Infof("Funding %d atom order with coins %v worth %d", value, coins, coinSum)
+		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %.8f > %.8f.", toDCR(baggageFees), toDCR(excess))
+		dcr.log.Infof("Funding %.8f DCR order with coins %v worth %.8f", toDCR(value), coins, toDCR(coinSum))
 		return coins, false, nil
 	}
 
@@ -948,7 +948,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	if net != reqFunds {
-		dcr.log.Errorf("split - total sent %d does not match expected %d", net, reqFunds)
+		dcr.log.Errorf("split - total sent %.8f does not match expected %.8f", toDCR(net), toDCR(reqFunds))
 	}
 
 	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular)
@@ -968,8 +968,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("error returning coins spent in split transaction %v", coins)
 	}
 
-	dcr.log.Infof("Funding %d atom order with split output coin %v from original coins %v", value, op, coins)
-	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
+	dcr.log.Infof("Funding %.8f DCR order with split output coin %v from original coins %v", toDCR(value), op, coins)
+	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %.8f + fees = %.8f", op.txHash(), toDCR(value), toDCR(reqFunds))
 
 	return asset.Coins{op}, true, nil
 }
@@ -1888,7 +1888,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 	}
 	if sent != regFee {
 		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
-			"expected %d, but %d was reported", msgTx.CachedTxHash(), regFee, sent)
+			"expected %.8f, but %.8f was reported", msgTx.CachedTxHash(), toDCR(regFee), toDCR(sent))
 	}
 	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
@@ -2087,9 +2087,8 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	}
 	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		valDCR := dcrutil.Amount(val).ToCoin()
-		return nil, 0, fmt.Errorf("unable to send %f DCR to address %s with feeRate %d atoms/byte: %w",
-			valDCR, addr, feeRate, err)
+		return nil, 0, fmt.Errorf("unable to send %.8f DCR to address %s with feeRate %d atoms/byte: %w",
+			toDCR(val), addr, feeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, val, feeRate, true)
 }
@@ -2104,9 +2103,8 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate u
 	}
 	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		regFeeDCR := dcrutil.Amount(regFee).ToCoin()
-		return nil, 0, fmt.Errorf("unable to pay registration fee of %f DCR to address %s with fee rate of %d atoms/byte: %w",
-			regFeeDCR, addr, netFeeRate, err)
+		return nil, 0, fmt.Errorf("unable to pay registration fee of %.8f DCR to address %s with fee rate of %d atoms/byte: %w",
+			toDCR(regFee), addr, netFeeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)
 }
@@ -2235,8 +2233,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	}
 
 	if minFee > reservoir {
-		return nil, nil, 0, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
-			minFee, reservoir)
+		return nil, nil, 0, fmt.Errorf("not enough funds to cover minimum fee rate. %.8f < %.8f",
+			toDCR(minFee), toDCR(reservoir))
 	}
 
 	// If the change is not dust, recompute the signed txn size and iterate on
@@ -2269,8 +2267,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 			if reqFee > reservoir {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
-					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
+				dcr.log.Errorf("reached the impossible place. in = %.8f, out = %.8f, reqFee = %.8f, lastFee = %.8f, raw tx = %x",
+					toDCR(totalIn), toDCR(totalOut), toDCR(reqFee), toDCR(lastFee), dcr.wireBytes(msgTx))
 				return nil, nil, 0, fmt.Errorf("change error")
 			}
 
@@ -2294,8 +2292,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
-					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
+				dcr.log.Errorf("reached the impossible place. in = %.8f, out = %.8f, reqFee = %.8f, lastFee = %.8f, raw tx = %x",
+					toDCR(totalIn), toDCR(totalOut), toDCR(reqFee), toDCR(lastFee), dcr.wireBytes(msgTx))
 				return nil, nil, 0, fmt.Errorf("dust error")
 			}
 			continue
@@ -2305,7 +2303,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// Double check the resulting txns fee and fee rate.
 	checkFee, checkRate := fees(msgTx)
 	if checkFee != lastFee {
-		return nil, nil, 0, fmt.Errorf("fee mismatch! %d != %d, raw tx: %x", checkFee, lastFee, dcr.wireBytes(msgTx))
+		return nil, nil, 0, fmt.Errorf("fee mismatch! %.8f != %.8f, raw tx: %x", toDCR(checkFee), toDCR(lastFee), dcr.wireBytes(msgTx))
 	}
 	// Ensure the effective fee rate is at least the required fee rate.
 	if checkRate < feeRate {
@@ -2571,4 +2569,10 @@ func fees(tx *wire.MsgTx) (uint64, uint64) {
 func isTxNotFoundErr(err error) bool {
 	var rpcErr *dcrjson.RPCError
 	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
+}
+
+// toSats returns a float representation in conventional units for the given
+// atoms.
+func toDCR(v uint64) float64 {
+	return dcrutil.Amount(v).ToCoin()
 }

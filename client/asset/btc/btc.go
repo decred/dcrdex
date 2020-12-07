@@ -741,8 +741,8 @@ func (btc *ExchangeWallet) RedemptionFees() (uint64, error) {
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
 func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-	btc.log.Debugf("Attempting to fund order for %d %s, maxFeeRate = %d, max swaps = %d",
-		ord.Value, btc.walletInfo.Units, ord.DEXConfig.MaxFeeRate, ord.MaxSwapCount)
+	btc.log.Debugf("Attempting to fund order for %.8f %s, maxFeeRate = %d, max swaps = %d",
+		toBTC(ord.Value), btc.walletInfo.Units, ord.DEXConfig.MaxFeeRate, ord.MaxSwapCount)
 
 	if ord.Value == 0 {
 		return nil, nil, fmt.Errorf("cannot fund value = 0")
@@ -761,7 +761,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 	if avail < ord.Value {
 		return nil, nil, fmt.Errorf("insufficient funds. %.8f requested, %.8f available",
-			btcutil.Amount(ord.Value).ToBTC(), btcutil.Amount(avail).ToBTC())
+			toBTC(ord.Value), toBTC(avail))
 	}
 
 	sum, size, coins, fundingCoins, redeemScripts, spents, err := btc.fund(ord.Value, ord.MaxSwapCount, utxos, ord.DEXConfig)
@@ -780,8 +780,8 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 	}
 
-	btc.log.Infof("Funding %d %s order with coins %v worth %d",
-		ord.Value, btc.walletInfo.Units, coins, sum)
+	btc.log.Infof("Funding %.8f %s order with coins %v worth %.8f",
+		toBTC(ord.Value), btc.walletInfo.Units, coins, toBTC(sum))
 
 	err = btc.wallet.LockUnspent(false, spents)
 	if err != nil {
@@ -825,8 +825,8 @@ out:
 		reqFunds := calc.RequiredOrderFunds(val, uint64(size), lots, nfo)
 		fees := reqFunds - val
 		if len(utxos) == 0 {
-			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds (%d) + fees (%d) = %d",
-				val, fees, reqFunds)
+			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds (%.8f) + fees (%.8f) = %.8f",
+				toBTC(val), toBTC(fees), toBTC(reqFunds))
 		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
@@ -893,9 +893,9 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggage > excess {
 		btc.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
-			"%d > %d", baggage, excess)
-		btc.log.Infof("Funding %d %s order with coins %v worth %d",
-			value, btc.walletInfo.Units, coins, coinSum)
+			"%.8f > %.8f", toBTC(baggage), toBTC(excess))
+		btc.log.Infof("Funding %.8f %s order with coins %v worth %.8f",
+			toBTC(value), btc.walletInfo.Units, coins, toBTC(coinSum))
 		return coins, false, nil
 	}
 
@@ -942,10 +942,10 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 		amount:  reqFunds,
 	}}
 
-	btc.log.Infof("Funding %d %s order with split output coin %v from original coins %v",
-		value, btc.walletInfo.Units, op, coins)
-	btc.log.Infof("Sent split transaction %s to accommodate swap of size %d + fees = %d",
-		op.txHash(), value, reqFunds)
+	btc.log.Infof("Funding %.8f %s order with split output coin %v from original coins %v",
+		toBTC(value), btc.walletInfo.Units, op, coins)
+	btc.log.Infof("Sent split transaction %s to accommodate swap of size %.8f + fees = %.8f",
+		op.txHash(), toBTC(value), toBTC(reqFunds))
 
 	// Assign to coins so the deferred function will lock the output.
 	outputs = []*output{op}
@@ -1899,7 +1899,7 @@ func (btc *ExchangeWallet) Address() (string, error) {
 func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1), false)
 	if err != nil {
-		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
+		btc.log.Errorf("PayFee error address = '%s', fee = %.8f: %v", address, toBTC(regFee), err)
 		return nil, err
 	}
 	return newOutput(btc.node, txHash, vout, sent), nil
@@ -1910,7 +1910,7 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2), true)
 	if err != nil {
-		btc.log.Errorf("Withdraw error address = '%s', fee = %d: %v", address, value, err)
+		btc.log.Errorf("Withdraw error address = '%s', fee = %.8f: %v", address, toBTC(value), err)
 		return nil, err
 	}
 	return newOutput(btc.node, txHash, vout, sent), nil
@@ -2110,8 +2110,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	minFee := feeRate * vSize
 	remaining := totalIn - totalOut
 	if minFee > remaining {
-		return makeErr("not enough funds to cover minimum fee rate. %d < %d, raw tx: %x",
-			totalIn, minFee+totalOut, btc.wireBytes(baseTx))
+		return makeErr("not enough funds to cover minimum fee rate. %.8f < %.8f, raw tx: %x",
+			toBTC(totalIn), toBTC(minFee+totalOut), btc.wireBytes(baseTx))
 	}
 
 	// Create a change output.
@@ -2155,8 +2155,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x, vSize = %d, feeRate = %d",
-					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx), vSize, feeRate)
+				btc.log.Errorf("reached the impossible place. in = %.8f, out = %.8f, reqFee = %.8f, lastFee = %.8f, raw tx = %x, vSize = %d, feeRate = %d",
+					toBTC(totalIn), toBTC(totalOut), toBTC(reqFee), toBTC(fee), btc.wireBytes(msgTx), vSize, feeRate)
 				return makeErr("change error")
 			}
 			if fee == reqFee || (fee > reqFee && tried[reqFee]) {
@@ -2174,8 +2174,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
-					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx))
+				btc.log.Errorf("reached the impossible place. in = %.8f, out = %.8f, reqFee = %.8f, lastFee = %.8f, raw tx = %x",
+					toBTC(totalIn), toBTC(totalOut), toBTC(reqFee), toBTC(fee), btc.wireBytes(msgTx))
 				return makeErr("dust error")
 			}
 			continue
@@ -2465,4 +2465,9 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 func isTxNotFoundErr(err error) bool {
 	var rpcErr *btcjson.RPCError
 	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
+}
+
+// toBTC returns a float representation in conventional units for the sats.
+func toBTC(v uint64) float64 {
+	return btcutil.Amount(v).ToBTC()
 }
