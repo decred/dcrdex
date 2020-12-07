@@ -126,7 +126,7 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 		return
 	}
 	w.WriteHeader(code)
-	_, err = w.Write(append(b, byte('\n')))
+	_, err = w.Write(b)
 	if err != nil {
 		log.Errorf("Write error: %v", err)
 	}
