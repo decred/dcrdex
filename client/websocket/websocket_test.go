@@ -117,7 +117,7 @@ func newLink() *tLink {
 		respReady: make(chan []byte, 1),
 		close:     make(chan struct{}, 1),
 	}
-	cl := newWSClient(dex.IPKey{}, conn, func(*msgjson.Message) *msgjson.Error { return nil }, dex.StdOutLogger("ws_TEST", dex.LevelTrace))
+	cl := newWSClient(dex.IPKey{}, "addr", conn, func(*msgjson.Message) *msgjson.Error { return nil }, dex.StdOutLogger("ws_TEST", dex.LevelTrace))
 	return &tLink{
 		cl:   cl,
 		conn: conn,

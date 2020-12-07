@@ -902,7 +902,7 @@ func (auth *AuthManager) addClient(client *clientInfo) {
 			return // reused conn, just update maps
 		}
 		log.Warnf("User %v reauthorized from %v (id %d) with an existing connection from %v (id %d). Disconnecting the old one.",
-			user, client.conn.IP(), connID, oldClient.conn.IP(), oldConnID)
+			user, client.conn.Addr(), connID, oldClient.conn.Addr(), oldConnID)
 		// When replacing with a new conn, manually deregister the old conn so
 		// that when it disconnects it does not remove the new clientInfo.
 		delete(auth.conns, oldConnID)
@@ -912,7 +912,7 @@ func (auth *AuthManager) addClient(client *clientInfo) {
 	// When the conn goes down, automatically unregister the client.
 	go func() {
 		<-client.conn.Done()
-		log.Debugf("Link down: id=%d, ip=%s.", client.conn.ID(), client.conn.IP())
+		log.Debugf("Link down: id=%d, ip=%s.", client.conn.ID(), client.conn.Addr())
 		auth.removeClient(client) // must stop if connID already removed
 	}()
 }

@@ -107,7 +107,7 @@ var rpcRoutes = make(map[string]MsgHandler)
 // HTTPHandler describes a handler for an HTTP route.
 type HTTPHandler func(thing interface{}) (interface{}, error)
 
-// rpcRoutes maps HTTP routes to the handlers.
+// httpRoutes maps HTTP routes to the handlers.
 var httpRoutes = make(map[string]HTTPHandler)
 
 // Route registers a handler for a specified route. The handler map is global
@@ -285,7 +285,7 @@ func (s *Server) Run(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.websocketHandler(ctx, wsConn, ip)
+			s.websocketHandler(ctx, wsConn, ip, r.RemoteAddr)
 		}()
 	})
 
@@ -380,13 +380,13 @@ func (s *Server) banish(ip dex.IPKey) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey) {
+func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey, addr string) {
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newWSLink(ip, conn, s.meterIP)
+	client := newWSLink(ip, addr, conn, s.meterIP)
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", ip)
@@ -418,7 +418,7 @@ func (s *Server) Broadcast(msg *msgjson.Message) {
 
 	for id, cl := range s.clients {
 		if err := cl.Send(msg); err != nil {
-			log.Debugf("Send to client %d at %s failed: %v", id, cl.IP(), err)
+			log.Debugf("Send to client %d at %s failed: %v", id, cl.Addr(), err)
 			cl.Disconnect() // triggers return of websocketHandler, and removeClient
 		}
 	}

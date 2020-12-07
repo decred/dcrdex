@@ -29,6 +29,8 @@ type Link interface {
 	ID() uint64
 	// IP returns the IP address of the peer.
 	IP() dex.IPKey
+	// Addr returns the string-encoded IP address.
+	Addr() string
 	// Send sends the msgjson.Message to the peer.
 	Send(msg *msgjson.Message) error
 	// SendError sends the msgjson.Error to the peer, with reference to a
@@ -72,10 +74,10 @@ type wsLink struct {
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(ip dex.IPKey, conn ws.Connection, limitRate func(dex.IPKey) (int, error)) *wsLink {
+func newWSLink(ip dex.IPKey, addr string, conn ws.Connection, limitRate func(dex.IPKey) (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
-		WSLink: ws.NewWSLink(ip, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
+		WSLink: ws.NewWSLink(ip, addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
@@ -98,6 +100,11 @@ func (c *wsLink) ID() uint64 {
 // IP returns the IP address of the peer.
 func (c *wsLink) IP() dex.IPKey {
 	return c.WSLink.IP()
+}
+
+// Addr returns the string-encoded IP address.
+func (c *wsLink) Addr() string {
+	return c.WSLink.Addr()
 }
 
 // Authorized should be called from a request handler when the connection
@@ -166,7 +173,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 
 		if err != nil {
-			log.Errorf("Error sending response to %s for requested route %q: %v", c.IP(), msg.Route, err)
+			log.Errorf("Error sending response to %s for requested route %q: %v", c.Addr(), msg.Route, err)
 		}
 		return nil
 

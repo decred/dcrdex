@@ -1209,6 +1209,7 @@ type TLink struct {
 	mtx         sync.Mutex
 	id          uint64
 	ip          dex.IPKey
+	addr        string
 	sends       []*msgjson.Message
 	sendErr     error
 	sendTrigger chan struct{}
@@ -1224,6 +1225,7 @@ func tNewLink() *TLink {
 	return &TLink{
 		id:          linkCounter,
 		ip:          dex.NewIPKey("[1:800:dead:cafe::]"),
+		addr:        "testaddr",
 		sends:       make([]*msgjson.Message, 0),
 		sendTrigger: make(chan struct{}, 1),
 	}
@@ -1232,6 +1234,7 @@ func tNewLink() *TLink {
 func (conn *TLink) Authorized()   {}
 func (conn *TLink) ID() uint64    { return conn.id }
 func (conn *TLink) IP() dex.IPKey { return conn.ip }
+func (conn *TLink) Addr() string  { return conn.addr }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()

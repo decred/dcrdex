@@ -40,9 +40,9 @@ type wsClient struct {
 	feedLoop    *dex.StartStopWaiter
 }
 
-func newWSClient(ip dex.IPKey, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
+func newWSClient(ip dex.IPKey, addr string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
 	return &wsClient{
-		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr, logger),
+		WSLink: ws.NewWSLink(ip, addr, conn, pingPeriod, hndlr, logger),
 		cid:    atomic.AddInt32(&cidCounter, 1),
 	}
 }
@@ -119,12 +119,12 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 // it, and blocking until the connection closes. This method should be
 // run as a goroutine.
 func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string, ip dex.IPKey) {
-	s.log.Debugf("New websocket client %s", ip)
+	s.log.Debugf("New websocket client %s", addr)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
 	var cl *wsClient
-	cl = newWSClient(ip, conn, func(msg *msgjson.Message) *msgjson.Error {
+	cl = newWSClient(ip, addr, conn, func(msg *msgjson.Message) *msgjson.Error {
 		return s.handleMessage(cl, msg)
 	}, s.log.SubLogger(addr))
 
@@ -160,7 +160,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string, i
 	}()
 
 	cm.Wait() // also waits for any handleMessage calls in (*WSLink).inHandler
-	s.log.Tracef("Disconnected websocket client %s", ip)
+	s.log.Tracef("Disconnected websocket client %s", addr)
 }
 
 // Notify sends a notification to the websocket client.
@@ -175,7 +175,7 @@ func (s *Server) Notify(route string, payload interface{}) {
 	for _, cl := range s.clients {
 		if err = cl.Send(msg); err != nil {
 			s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
-				msg.Route, cl.cid, cl.IP(), err)
+				msg.Route, cl.cid, cl.Addr(), err)
 		}
 	}
 }

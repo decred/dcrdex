@@ -132,6 +132,7 @@ type tReq struct {
 type TRPCClient struct {
 	id         uint64
 	ip         dex.IPKey
+	addr       string
 	sendErr    error
 	requestErr error
 	banished   bool
@@ -143,6 +144,7 @@ type TRPCClient struct {
 
 func (c *TRPCClient) ID() uint64    { return c.id }
 func (c *TRPCClient) IP() dex.IPKey { return c.ip }
+func (c *TRPCClient) Addr() string  { return c.addr }
 func (c *TRPCClient) Authorized()   {}
 func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
@@ -190,6 +192,7 @@ func tNewRPCClient() *TRPCClient {
 	return &TRPCClient{
 		id:     tClientID,
 		ip:     dex.NewIPKey("123.123.123.123"),
+		addr:   "addr",
 		closed: make(chan struct{}),
 	}
 }

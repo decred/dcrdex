@@ -67,6 +67,12 @@ func TestIPKey(t *testing.T) {
 			addr2:     "[a:b:c:d::]:1234",
 			wantEqual: true,
 		},
+		{
+			name:      "ipv6 mask equal",
+			addr1:     "[a:b:c:d:e:f:a:b]:1234",
+			addr2:     "[a:b:c:d:f:d:c:f]:1234",
+			wantEqual: true,
+		},
 	}
 
 	zeroKey := IPKey{}

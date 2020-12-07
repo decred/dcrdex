@@ -371,7 +371,7 @@ func TestClientRequests(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			server.websocketHandler(testCtx, conn, stubAddr)
+			server.websocketHandler(testCtx, conn, stubAddr, "addr")
 		}()
 
 		if !giveItASecond(func() bool {
@@ -562,7 +562,7 @@ func TestClientResponses(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			server.websocketHandler(testCtx, conn, stubAddr)
+			server.websocketHandler(testCtx, conn, stubAddr, "addr")
 		}()
 		getClient()
 	}

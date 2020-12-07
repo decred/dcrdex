@@ -57,8 +57,10 @@ type Connection interface {
 type WSLink struct {
 	// log is the WSLink's logger
 	log dex.Logger
-	// ip is the peer's IP address.
+	// ip is the peer's IP address key.
 	ip dex.IPKey
+	// addr is a string representation of the peer's IP address
+	addr string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
 	conn Connection
 	// on is used internally to prevent multiple Close calls on the underlying
@@ -86,7 +88,7 @@ type sendData struct {
 }
 
 // NewWSLink is a constructor for a new WSLink.
-func NewWSLink(ip dex.IPKey, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
+func NewWSLink(ip dex.IPKey, addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
 	return &WSLink{
 		ip:         ip,
 		log:        logger,
@@ -457,6 +459,11 @@ func (c *WSLink) Off() bool {
 // IP is the peer address passed to the constructor.
 func (c *WSLink) IP() dex.IPKey {
 	return c.ip
+}
+
+// Addr returns the string-encoded IP address.
+func (c *WSLink) Addr() string {
+	return c.addr
 }
 
 // SetReadLimit should only be called before starting the Connection, or in a
