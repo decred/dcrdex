@@ -654,7 +654,11 @@ export default class MarketsPage extends BasePage {
     const [bWallet, qWallet] = [app.assets[bid].wallet, app.assets[qid].wallet]
     if (!bWallet || !bWallet.running || !qWallet || !qWallet.running) return
     if (this.preorderTimer) window.clearTimeout(this.preorderTimer)
-    Doc.show(page.maxOrd)
+
+    Doc.show(page.maxOrd, page.maxLotBox)
+    Doc.hide(page.maxAboveZero)
+    page.maxFromLots.textContent = 'calculating...'
+    page.maxFromLotsLbl.textContent = ''
     this.preorderTimer = window.setTimeout(async () => {
       this.preorderTimer = null
       const res = await postJSON(path, {
@@ -667,7 +671,8 @@ export default class MarketsPage extends BasePage {
       this.maxLoaded = null
 
       if (!app.checkResponse(res, true)) {
-        console.error(`${path} error: `, res)
+        console.warn('max order estimate not available:', res)
+        page.maxFromLots.textContent = 'estimate unavailable'
         return
       }
       success(res)
