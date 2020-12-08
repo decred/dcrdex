@@ -247,6 +247,9 @@ func (b *BookStub) Remove(orderID order.OrderID) (*order.LimitOrder, bool) {
 	return nil, false
 }
 
+func (b *BookStub) BuyOrders() []*order.LimitOrder  { return b.buyOrders }
+func (b *BookStub) SellOrders() []*order.LimitOrder { return b.sellOrders }
+
 var _ Booker = (*BookStub)(nil)
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
@@ -359,6 +362,12 @@ var (
 		newLimitOrder(true, 4600000, 2, order.StandingTiF, 0),
 		newLimitOrder(true, 4550000, 1, order.StandingTiF, 0),
 	}
+)
+
+const (
+	bookBuyLots   = 32
+	bookSellLots  = 32
+	initialMidGap = (4550000 + 4500000) / 2 // 4525000
 )
 
 func newBooker() Booker {
@@ -623,7 +632,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 
 			numBuys0 := tt.args.book.BuyCount()
 
-			seed, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, updates, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -736,6 +745,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 		wantNumTradesCompleted int
 		wantNumTradesFailed    int
 		wantNumNomatched       int
+		matchStats             *MatchCycleStats
 	}{
 		{
 			name: "limit buy immediate rate match",
@@ -750,6 +760,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 				0xe3, 0xe9, 0x9b, 0x2b, 0x88, 0x35, 0x2c, 0x71,
 				0xed, 0xff, 0x5d, 0xc2, 0x1e, 0x87, 0xcb, 0xf8},
 			wantMatches: []*order.MatchSet{
+				// 1 lot @ 4550000, laves best sell of 4600000
 				newMatchSet(takers[0].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:          1,
@@ -760,6 +771,15 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumUnbooked:        1,
 			wantNumTradesCompleted: 2,
 			wantNumNomatched:       0,
+			matchStats: &MatchCycleStats{
+				BookBuys:    bookBuyLots * LotSize,
+				BookSells:   (bookSellLots - 1) * LotSize,
+				MatchVolume: LotSize,
+				HighRate:    4550000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4500000 + 4600000) / 2,
+			},
 		},
 		{
 			name: "limit buy standing partial taker inserted to book",
@@ -774,6 +794,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 				0x5a, 0x75, 0x05, 0x19, 0x66, 0x6d, 0x53, 0x12,
 				0x7e, 0xc8, 0x9d, 0xe3, 0x87, 0x5d, 0xdc, 0x8a},
 			wantMatches: []*order.MatchSet{
+				// 1 lot @ 4550000. bookvol + 1 - 1 = 0
 				newMatchSet(takers[1].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:          1,
@@ -785,6 +806,15 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumTradesBooked:    1,
 			wantNumTradesCompleted: 1,
 			wantNumNomatched:       0,
+			matchStats: &MatchCycleStats{
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    (bookBuyLots + 1) * LotSize,
+				MatchVolume: LotSize,
+				HighRate:    4550000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4550000 + 4600000) / 2,
+			},
 		},
 		{
 			name: "limit buy immediate partial taker unfilled",
@@ -799,6 +829,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 				0x6e, 0x2d, 0x92, 0xf3, 0xbf, 0xb2, 0x04, 0xfc,
 				0xee, 0x39, 0x13, 0xbb, 0x55, 0xed, 0x98, 0x81},
 			wantMatches: []*order.MatchSet{
+				// 1 lot @ 4550000. bookvol - 1
 				newMatchSet(takers[2].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:          1,
@@ -809,6 +840,15 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumUnbooked:        1,
 			wantNumTradesCompleted: 2, // not in partial since they are done
 			wantNumNomatched:       0,
+			matchStats: &MatchCycleStats{
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: LotSize,
+				HighRate:    4550000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4500000 + 4600000) / 2,
+			},
 		},
 		{
 			name: "limit buy immediate unfilled fail",
@@ -831,6 +871,14 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantNumUnbooked:     0,
 			wantNumTradesFailed: 1,
 			wantNumNomatched:    1,
+			matchStats: &MatchCycleStats{
+				BookSells: bookSellLots * LotSize,
+				BookBuys:  bookBuyLots * LotSize,
+				HighRate:  initialMidGap,
+				LowRate:   initialMidGap,
+				StartRate: initialMidGap,
+				EndRate:   initialMidGap,
+			},
 		},
 		{
 			name: "bad lot size order",
@@ -895,7 +943,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			seed, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, updates, stats := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -941,6 +989,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 			}
 			if len(nomatched) != tt.wantNumNomatched {
 				t.Errorf("number of trades nomatched %d, expected %d", len(nomatched), tt.wantNumNomatched)
+			}
+			if tt.matchStats != nil {
+				compareMatchStats(t, tt.matchStats, stats)
 			}
 		})
 	}
@@ -1176,7 +1227,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 
 			fmt.Printf("%v\n", takers)
 
-			seed, matches, passed, failed, doneOK, partial, booked, _, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, _, unbooked, updates, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1312,6 +1363,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		wantNumTradesCompleted int
 		wantNumTradesPartial   int
 		wantNumTradesFailed    int
+		matchStats             *MatchCycleStats
 	}{
 		{
 			name: "market buy, 1 maker match",
@@ -1326,6 +1378,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				0xfa, 0x6c, 0xf6, 0x86, 0x70, 0x97, 0xc7, 0x74,
 				0x0b, 0xfb, 0x29, 0x19, 0xbf, 0x86, 0x6a, 0xc8},
 			wantMatches: []*order.MatchSet{
+				// 1 lot @ 4550000, leaving best sell as 4600000
 				newMatchSet(takers[0].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			remaining:              []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
@@ -1336,6 +1389,15 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumInserted:        0,
 			wantNumUnbooked:        1,
 			wantNumTradesCompleted: 2, // the taker and the maker are completed
+			matchStats: &MatchCycleStats{
+				BookSells:   (bookSellLots - 1) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: LotSize,
+				HighRate:    4550000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4500000 + 4600000) / 2,
+			},
 		},
 		{
 			name: "market buy, 2 maker match",
@@ -1350,6 +1412,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				0xe3, 0xe9, 0x9b, 0x2b, 0x88, 0x35, 0x2c, 0x71,
 				0xed, 0xff, 0x5d, 0xc2, 0x1e, 0x87, 0xcb, 0xf8},
 			wantMatches: []*order.MatchSet{
+				// 1 lot @ 4550000, 1 @ 4600000
 				newMatchSet(takers[1].Order, []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}, 1*LotSize),
 			},
 			remaining:              []uint64{0},
@@ -1361,6 +1424,15 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumUnbooked:        1,
 			wantNumTradesCompleted: 2, // taker, and one maker
 			wantNumTradesPartial:   1, // the second maker
+			matchStats: &MatchCycleStats{
+				BookSells:   (bookSellLots - 2) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: 2 * LotSize,
+				HighRate:    4600000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4500000 + 4600000) / 2,
+			},
 		},
 		{
 			name: "market buy, 3 maker match",
@@ -1375,6 +1447,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				0x5a, 0x75, 0x05, 0x19, 0x66, 0x6d, 0x53, 0x12,
 				0x7e, 0xc8, 0x9d, 0xe3, 0x87, 0x5d, 0xdc, 0x8a},
 			wantMatches: []*order.MatchSet{
+				// 1 @ 4550000, 2 @ 4600000, leaves best sell of 4700000 behind/
 				newMatchSet(takers[2].Order, []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}),
 			},
 			remaining:              []uint64{0},
@@ -1385,6 +1458,15 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantNumInserted:        0,
 			wantNumUnbooked:        2,
 			wantNumTradesCompleted: 3, // taker, 2 makers
+			matchStats: &MatchCycleStats{
+				BookSells:   (bookSellLots - 3) * LotSize,
+				BookBuys:    bookBuyLots * LotSize,
+				MatchVolume: 3 * LotSize,
+				HighRate:    4600000,
+				LowRate:     initialMidGap,
+				StartRate:   initialMidGap,
+				EndRate:     (4500000 + 4700000) / 2,
+			},
 		},
 		{
 			name: "market buy, 99 maker match",
@@ -1417,7 +1499,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			seed, matches, passed, failed, doneOK, partial, booked, _, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, _, unbooked, updates, stats := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1425,6 +1507,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			if len(matches) != len(tt.wantMatches) {
 				t.Errorf("number of matches %d, expected %d", len(matches), len(tt.wantMatches))
 			}
+
 			for i := range matches {
 				if !reflect.DeepEqual(matches[i], tt.wantMatches[i]) {
 					t.Errorf("matches[%d] = %v, want %v", i, matches[i], tt.wantMatches[i])
@@ -1464,6 +1547,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			}
 			if len(updates.TradesFailed) != tt.wantNumTradesFailed {
 				t.Errorf("number of trades failed %d, expected %d", len(updates.TradesFailed), tt.wantNumTradesFailed)
+			}
+			if tt.matchStats != nil {
+				compareMatchStats(t, tt.matchStats, stats)
 			}
 		})
 	}
@@ -2085,5 +2171,42 @@ func TestBaseToQuoteToBase(t *testing.T) {
 			// t.Logf("expected quote = %d, final quote = %d, float quote = %f",
 			// 	tt.args.base, gotBase, baseFlt)
 		})
+	}
+}
+
+func compareMatchStats(t *testing.T, sWant, sHave *MatchCycleStats) {
+	t.Helper()
+	if sWant.BookBuys != sHave.BookBuys {
+		t.Errorf("wrong BookBuys. wanted %d, got %d", sWant.BookBuys, sHave.BookBuys)
+	}
+	// if sWant.BookBuys5 != sHave.BookBuys5 {
+	// 	t.Errorf("wrong BookBuys5. wanted %d, got %d", sWant.BookBuys5, sHave.BookBuys5)
+	// }
+	// if sWant.BookBuys25 != sHave.BookBuys25 {
+	// 	t.Errorf("wrong BookBuys25. wanted %d, got %d", sWant.BookBuys25, sHave.BookBuys25)
+	// }
+	if sWant.BookSells != sHave.BookSells {
+		t.Errorf("wrong BookSells. wanted %d, got %d", sWant.BookSells, sHave.BookSells)
+	}
+	// if sWant.BookSells5 != sHave.BookSells5 {
+	// 	t.Errorf("wrong BookSells5. wanted %d, got %d", sWant.BookSells5, sHave.BookSells5)
+	// }
+	// if sWant.BookSells25 != sHave.BookSells25 {
+	// 	t.Errorf("wrong BookSells25. wanted %d, got %d", sWant.BookSells25, sHave.BookSells25)
+	// }
+	if sWant.MatchVolume != sHave.MatchVolume {
+		t.Errorf("wrong MatchVolume. wanted %d, got %d", sWant.MatchVolume, sHave.MatchVolume)
+	}
+	if sWant.HighRate != sHave.HighRate {
+		t.Errorf("wrong HighRate. wanted %d, got %d", sWant.HighRate, sHave.HighRate)
+	}
+	if sWant.LowRate != sHave.LowRate {
+		t.Errorf("wrong LowRate. wanted %d, got %d", sWant.LowRate, sHave.LowRate)
+	}
+	if sWant.StartRate != sHave.StartRate {
+		t.Errorf("wrong StartRate. wanted %d, got %d", sWant.StartRate, sHave.StartRate)
+	}
+	if sWant.EndRate != sHave.EndRate {
+		t.Errorf("wrong EndRate. wanted %d, got %d", sWant.EndRate, sHave.EndRate)
 	}
 }

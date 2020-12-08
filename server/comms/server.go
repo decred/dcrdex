@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/elliptic"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -38,6 +40,10 @@ const (
 
 	// banishTime is the default duration of a client quarantine.
 	banishTime = time.Hour
+
+	// Per-ip rate limits for HTTP routes.
+	ipMaxRatePerSec = 1
+	ipMaxBurstSize  = 5
 )
 
 var (
@@ -51,9 +57,41 @@ var (
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
 	pingPeriod = (pongWait * 9) / 10 // i.e. 18 sec
+
+	// globalHTTPRateLimiter is a limit on the global HTTP request limit. The
+	// global rate limiter is like a rudimentary auto-spam filter for
+	// non-critical routes, including all routes registered as HTTP routes.
+	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
+
+	// ipRateLimiter is a per-client rate limiter.
+	ipHTTPRateLimiter = make(map[dex.IPKey]*ipRateLimiter)
+	rateLimiterMtx    sync.RWMutex
 )
 
 var idCounter uint64
+
+// ipRateLimiter is used to track an IPs HTTP request rate.
+type ipRateLimiter struct {
+	*rate.Limiter
+	lastHit time.Time
+}
+
+// Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist.
+func getIPLimiter(ip dex.IPKey) *ipRateLimiter {
+	rateLimiterMtx.Lock()
+	defer rateLimiterMtx.Unlock()
+	limiter := ipHTTPRateLimiter[ip]
+	if limiter != nil {
+		limiter.lastHit = time.Now()
+		return limiter
+	}
+	limiter = &ipRateLimiter{
+		Limiter: rate.NewLimiter(ipMaxRatePerSec, ipMaxBurstSize),
+		lastHit: time.Now(),
+	}
+	ipHTTPRateLimiter[ip] = limiter
+	return limiter
+}
 
 // NextID returns a unique ID to identify a request-type message.
 func NextID() uint64 {
@@ -65,6 +103,12 @@ type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]MsgHandler)
+
+// HTTPHandler describes a handler for an HTTP route.
+type HTTPHandler func(thing interface{}) (interface{}, error)
+
+// httpRoutes maps HTTP routes to the handlers.
+var httpRoutes = make(map[string]HTTPHandler)
 
 // Route registers a handler for a specified route. The handler map is global
 // and has no mutex protection. All calls to Route should be done before the
@@ -86,6 +130,17 @@ func RouteHandler(route string) MsgHandler {
 	return rpcRoutes[route]
 }
 
+func RegisterHTTP(route string, handler HTTPHandler) {
+	if route == "" {
+		panic("RegisterHTTP: route is empty string")
+	}
+	_, alreadyHave := httpRoutes[route]
+	if alreadyHave {
+		panic(fmt.Sprintf("RegisterHTTP: double registration: %s", route))
+	}
+	httpRoutes[route] = handler
+}
+
 // The RPCConfig is the server configuration settings and the only argument
 // to the server's constructor.
 type RPCConfig struct {
@@ -100,6 +155,8 @@ type RPCConfig struct {
 	// TLS keypair. Changing AltDNSNames does not force the keypair to be
 	// regenerated. To regenerate, delete or move the old files.
 	AltDNSNames []string
+	// DisableDataAPI will disable all traffic to the HTTP data API routes.
+	DisableDataAPI bool
 }
 
 // Server is a low-level communications hub. It supports websocket clients
@@ -115,8 +172,9 @@ type Server struct {
 	counter uint64
 	// The quarantine map maps IP addresses to a time in which the quarantine will
 	// be lifted.
-	banMtx     sync.RWMutex
-	quarantine map[string]time.Time
+	banMtx      sync.RWMutex
+	quarantine  map[dex.IPKey]time.Time
+	dataEnabled uint32
 }
 
 // A constructor for an Server. The Server handles a map of clients, each
@@ -171,11 +229,16 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	if len(listeners) == 0 {
 		return nil, fmt.Errorf("RPCS: No valid listen address")
 	}
+	var dataEnabled uint32 = 1
+	if cfg.DisableDataAPI {
+		dataEnabled = 0
+	}
 
 	return &Server{
-		listeners:  listeners,
-		clients:    make(map[uint64]*wsLink),
-		quarantine: make(map[string]time.Time),
+		listeners:   listeners,
+		clients:     make(map[uint64]*wsLink),
+		quarantine:  make(map[dex.IPKey]time.Time),
+		dataEnabled: dataEnabled,
 	}, nil
 }
 
@@ -199,13 +262,7 @@ func (s *Server) Run(ctx context.Context) {
 
 	// Websocket endpoint.
 	mux.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		// If the IP address includes a port, remove it.
-		ip := r.RemoteAddr
-		// If a host:port can be parsed, the IP is only the host portion.
-		host, _, err := net.SplitHostPort(ip)
-		if err == nil && host != "" {
-			ip = host
-		}
+		ip := dex.NewIPKey(r.RemoteAddr)
 
 		if s.isQuarantined(ip) {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -228,8 +285,18 @@ func (s *Server) Run(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.websocketHandler(ctx, wsConn, ip)
+			s.websocketHandler(ctx, wsConn, ip, r.RemoteAddr)
 		}()
+	})
+
+	// Data API endpoints.
+	mux.Route("/api", func(rr chi.Router) {
+		rr.Use(s.limitRate)
+		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
+		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", routeHandler(msgjson.CandlesRoute))
+		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", routeHandler(msgjson.CandlesRoute))
+		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", routeHandler(msgjson.OrderBookRoute))
 	})
 
 	// Start serving.
@@ -245,6 +312,26 @@ func (s *Server) Run(ctx context.Context) {
 			wg.Done()
 		}(listener)
 	}
+
+	// Run a periodic routine to keep the ipHTTPRateLimiter map clean.
+	go func() {
+		ticker := time.NewTicker(time.Minute * 5)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rateLimiterMtx.Lock()
+				for ip, limiter := range ipHTTPRateLimiter {
+					if time.Since(limiter.lastHit) > time.Minute {
+						delete(ipHTTPRateLimiter, ip)
+					}
+				}
+				rateLimiterMtx.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	<-ctx.Done()
 
@@ -267,7 +354,7 @@ func (s *Server) Run(ctx context.Context) {
 }
 
 // Check if the IP address is quarantined.
-func (s *Server) isQuarantined(ip string) bool {
+func (s *Server) isQuarantined(ip dex.IPKey) bool {
 	s.banMtx.RLock()
 	banTime, banned := s.quarantine[ip]
 	s.banMtx.RUnlock()
@@ -284,7 +371,7 @@ func (s *Server) isQuarantined(ip string) bool {
 }
 
 // Quarantine the specified IP address.
-func (s *Server) banish(ip string) {
+func (s *Server) banish(ip dex.IPKey) {
 	s.banMtx.Lock()
 	defer s.banMtx.Unlock()
 	s.quarantine[ip] = time.Now().Add(banishTime)
@@ -293,13 +380,13 @@ func (s *Server) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip string) {
+func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey, addr string) {
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newWSLink(ip, conn)
+	client := newWSLink(ip, addr, conn, s.meterIP)
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", ip)
@@ -331,9 +418,18 @@ func (s *Server) Broadcast(msg *msgjson.Message) {
 
 	for id, cl := range s.clients {
 		if err := cl.Send(msg); err != nil {
-			log.Debugf("Send to client %d at %s failed: %v", id, cl.IP(), err)
+			log.Debugf("Send to client %d at %s failed: %v", id, cl.Addr(), err)
 			cl.Disconnect() // triggers return of websocketHandler, and removeClient
 		}
+	}
+}
+
+// EnableDataAPI enables or disables the HTTP data API endpoints.
+func (s *Server) EnableDataAPI(yes bool) {
+	if yes {
+		atomic.StoreUint32(&s.dataEnabled, 1)
+	} else {
+		atomic.StoreUint32(&s.dataEnabled, 0)
 	}
 }
 
@@ -451,4 +547,38 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 		}
 	}
 	return ipv4ListenAddrs, ipv6ListenAddrs, haveWildcard, nil
+}
+
+// routeHandler creates a HandlerFunc for a route. Middleware should have
+// already processed the request and added the request struct to the Context.
+func routeHandler(route string) func(w http.ResponseWriter, r *http.Request) {
+	handler := httpRoutes[route]
+	if handler == nil {
+		panic("no known handler")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := handler(r.Context().Value(ctxThing))
+		if err != nil {
+			writeJSONWithStatus(w, map[string]string{"error": err.Error()}, http.StatusBadRequest)
+			return
+		}
+		writeJSONWithStatus(w, resp, http.StatusOK)
+	}
+}
+
+// writeJSONWithStatus writes the JSON response with the specified HTTP response
+// code.
+func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	b, err := json.Marshal(thing)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Errorf("JSON encode error: %v", err)
+		return
+	}
+	w.WriteHeader(code)
+	_, err = w.Write(append(b, byte('\n')))
+	if err != nil {
+		log.Errorf("Write error: %v", err)
+	}
 }

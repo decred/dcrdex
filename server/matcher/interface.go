@@ -14,4 +14,22 @@ type Booker interface {
 	BestBuy() *order.LimitOrder
 	Insert(*order.LimitOrder) bool
 	Remove(order.OrderID) (*order.LimitOrder, bool)
+	BuyOrders() []*order.LimitOrder
+	SellOrders() []*order.LimitOrder
+}
+
+// MatchCycleStats is data about the results of a match cycle.
+type MatchCycleStats struct {
+	MatchVolume uint64
+	QuoteVolume uint64
+	BookSells   uint64
+	BookBuys    uint64
+	BookSells5  uint64
+	BookBuys5   uint64
+	BookSells25 uint64
+	BookBuys25  uint64
+	HighRate    uint64
+	LowRate     uint64
+	StartRate   uint64
+	EndRate     uint64
 }

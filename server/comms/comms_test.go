@@ -11,11 +11,13 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,8 +35,9 @@ var (
 
 func newServer() *Server {
 	return &Server{
-		clients:    make(map[uint64]*wsLink),
-		quarantine: make(map[string]time.Time),
+		clients:     make(map[uint64]*wsLink),
+		quarantine:  make(map[dex.IPKey]time.Time),
+		dataEnabled: 1,
 	}
 }
 
@@ -55,6 +58,7 @@ func giveItASecond(f func() bool) bool {
 }
 
 func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
+	t.Helper()
 	select {
 	case i := <-c:
 		return i
@@ -62,6 +66,19 @@ func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
 		t.Fatalf("%s: didn't read channel", tag)
 	}
 	return nil
+}
+
+func decodeResponse(t *testing.T, b []byte) *msgjson.ResponsePayload {
+	t.Helper()
+	msg, err := msgjson.DecodeMessage(b)
+	if err != nil {
+		t.Fatalf("error decoding last message (%s): %v", string(b), err)
+	}
+	resp, err := msg.Response()
+	if err != nil {
+		t.Fatalf("error decoding response payload: %v", err)
+	}
+	return resp
 }
 
 type wsConnStub struct {
@@ -78,6 +95,7 @@ func (conn *wsConnStub) addChan() {
 }
 
 func (conn *wsConnStub) wait(t *testing.T, tag string) {
+	t.Helper()
 	select {
 	case <-conn.recv:
 	case <-time.NewTimer(time.Second).C:
@@ -234,6 +252,10 @@ func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
+	// Register dummy handlers for the HTTP routes.
+	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
+		RegisterHTTP(route, func(interface{}) (interface{}, error) { return nil, nil })
+	}
 	UseLogger(tLogger)
 	os.Exit(m.Run())
 }
@@ -269,7 +291,8 @@ func TestClientRequests(t *testing.T) {
 	}()
 	var client *wsLink
 	var conn *wsConnStub
-	stubAddr := "testaddr"
+	stubAddr := dex.IPKey{}
+	copy(stubAddr[:], []byte("testaddr"))
 	sendToServer := func(method, msg string) { sendToConn(t, conn, method, msg) }
 
 	waitForShutdown := func(tag string, f func()) {
@@ -332,6 +355,12 @@ func TestClientRequests(t *testing.T) {
 		c.Banish()
 		return nil
 	})
+	var httpSeen uint32
+	RegisterHTTP("httproute", func(thing interface{}) (interface{}, error) {
+		atomic.StoreUint32(&httpSeen, 1)
+		srvChan <- nil
+		return struct{}{}, nil
+	})
 
 	// A helper function to reconnect to the server (new comm) and grab the
 	// server's link (new client).
@@ -342,7 +371,7 @@ func TestClientRequests(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			server.websocketHandler(testCtx, conn, stubAddr)
+			server.websocketHandler(testCtx, conn, stubAddr, "addr")
 		}()
 
 		if !giveItASecond(func() bool {
@@ -434,16 +463,38 @@ func TestClientRequests(t *testing.T) {
 		t.Fatalf("incorrect error for disconnected client")
 	}
 
+	// Test that an http request passes.
+	reconnect()
+	conn.addChan()
+	sendToServer("httproute", "{}")
+	readChannel(t, "httproute", srvChan)
+	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("HTTP route not hit")
+	}
+	conn.wait(t, "http route success")
+
+	// Disable HTTP non-critical HTTP routes and try again.
+	server.EnableDataAPI(false)
+	sendToServer("httproute", "{}")
+	resp := decodeResponse(t, <-conn.recv)
+	if resp.Error == nil || resp.Error.Code != msgjson.RouteUnavailableError {
+		t.Fatalf("no error for disabled HTTP route")
+	}
+	if atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("disabled HTTP route hit")
+	}
+
+	// Make the route a critical route
+	criticalRoutes["httproute"] = true
+	sendToServer("httproute", "{}")
+	readChannel(t, "httproute", srvChan)
+	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+		t.Fatalf("critical HTTP route not hit")
+	}
+	conn.wait(t, "critical http route success")
+
 	checkParseError := func() {
-		b := <-conn.recv
-		msg, err := msgjson.DecodeMessage(b)
-		if err != nil {
-			t.Fatalf("error decoding last message (%s): %v", string(b), err)
-		}
-		resp, err := msg.Response()
-		if err != nil {
-			t.Fatalf("error decoding response payload: %v", err)
-		}
+		resp := decodeResponse(t, <-conn.recv)
 		if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
 			t.Fatalf("no error after invalid id")
 		}
@@ -467,7 +518,8 @@ func TestClientResponses(t *testing.T) {
 	server := newServer()
 	var client *wsLink
 	var conn *wsConnStub
-	stubAddr := "testaddr"
+	stubAddr := dex.IPKey{}
+	copy(stubAddr[:], []byte("testaddr"))
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
@@ -510,7 +562,7 @@ func TestClientResponses(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			server.websocketHandler(testCtx, conn, stubAddr)
+			server.websocketHandler(testCtx, conn, stubAddr, "addr")
 		}()
 		getClient()
 	}
@@ -827,4 +879,36 @@ func TestParseListeners(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error with invalid address")
 	}
+}
+
+type tHTTPHandler struct {
+	count uint32
+}
+
+func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
+	atomic.AddUint32(&h.count, 1)
+}
+
+func TestRateLimiter(t *testing.T) {
+	tHandler := &tHTTPHandler{}
+	s := Server{dataEnabled: 1}
+
+	f := s.limitRate(tHandler)
+	ip := "ip"
+	req := &http.Request{RemoteAddr: ip}
+	recorder := httptest.NewRecorder()
+	for i := 0; i < ipMaxBurstSize; i++ {
+		f.ServeHTTP(recorder, req)
+	}
+	time.Sleep(100 * time.Millisecond)
+	f.ServeHTTP(recorder, req)
+	successes := atomic.LoadUint32(&tHandler.count)
+	if successes != ipMaxBurstSize {
+		t.Fatalf("expected %d requests. got %d", ipMaxBurstSize, successes)
+	}
+	statusCode := recorder.Result().StatusCode
+	if statusCode != http.StatusTooManyRequests {
+		t.Fatalf("wrong status code. wanted %d, got %d", http.StatusTooManyRequests, statusCode)
+	}
+
 }

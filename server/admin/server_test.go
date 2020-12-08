@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,7 @@ type TCore struct {
 	epochOrdersErr   error
 	marketMatches    []*db.MatchData
 	marketMatchesErr error
+	dataEnabled      uint32
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -157,6 +159,14 @@ func (c *TCore) MarketRunning(mktName string) (found, running bool) {
 		return
 	}
 	return true, mkt.running
+}
+
+func (c *TCore) EnableDataAPI(yes bool) {
+	var v uint32
+	if yes {
+		v = 1
+	}
+	atomic.StoreUint32(&c.dataEnabled, v)
 }
 
 type tResponseWriter struct {
@@ -1518,4 +1528,55 @@ func TestNotifyAll(t *testing.T) {
 			t.Fatalf("%q: apiNotifyAll returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
 	}
+}
+
+func TestEnableDataAPI(t *testing.T) {
+	core := new(TCore)
+	srv := &Server{
+		core: core,
+	}
+	mux := chi.NewRouter()
+	mux.Route("/enabledataapi/{yes}", func(rm chi.Router) {
+		rm.Post("/", srv.apiEnableDataAPI)
+	})
+
+	tests := []struct {
+		name, yes   string
+		wantCode    int
+		wantEnabled uint32
+	}{{
+		name:        "ok 1",
+		yes:         "1",
+		wantCode:    http.StatusOK,
+		wantEnabled: 1,
+	}, {
+		name:        "ok true",
+		yes:         "true",
+		wantCode:    http.StatusOK,
+		wantEnabled: 1,
+	}, {
+		name:        "message too long",
+		yes:         "mabye",
+		wantCode:    http.StatusBadRequest,
+		wantEnabled: 0,
+	}}
+	for _, test := range tests {
+		w := httptest.NewRecorder()
+		br := bytes.NewReader([]byte{})
+		r, _ := http.NewRequest("POST", "https://localhost/enabledataapi/"+test.yes, br)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiEnableDataAPI returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+
+		if test.wantEnabled != atomic.LoadUint32(&core.dataEnabled) {
+			t.Fatalf("%q: apiEnableDataAPI expected dataEnabled = %d, got %d", test.name, test.wantEnabled, atomic.LoadUint32(&core.dataEnabled))
+		}
+
+		atomic.StoreUint32(&core.dataEnabled, 0)
+	}
+
 }

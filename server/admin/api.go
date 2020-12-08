@@ -38,11 +38,16 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(code)
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "    ")
-	if err := encoder.Encode(thing); err != nil {
+	b, err := json.MarshalIndent(thing, "", "    ")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		log.Errorf("JSON encode error: %v", err)
+		return
+	}
+	w.WriteHeader(code)
+	_, err = w.Write(append(b, byte('\n')))
+	if err != nil {
+		log.Errorf("Write error: %v", err)
 	}
 }
 
@@ -321,6 +326,22 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, accts)
+}
+
+// apiEnableDataAPI is the handler for the `/enabledataapi/{yes}` API request,
+// used to enable or disable the HTTP data API.
+func (s *Server) apiEnableDataAPI(w http.ResponseWriter, r *http.Request) {
+	yes, err := strconv.ParseBool(chi.URLParam(r, yesKey))
+	if err != nil {
+		http.Error(w, "unable to parse selection: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.core.EnableDataAPI(yes)
+	msg := "Data API disabled"
+	if yes {
+		msg = "Data API enabled"
+	}
+	writeJSON(w, msg)
 }
 
 // apiAccountInfo is the handler for the '/account/{account id}' API request.

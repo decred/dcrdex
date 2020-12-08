@@ -302,6 +302,7 @@ func TestAPIRegister(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
+		t.Helper()
 		ensureResponse(t, s.apiRegister, want, reader, writer, body)
 	}
 

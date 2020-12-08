@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -1025,6 +1026,112 @@ func TestMatchStatuses(t *testing.T) {
 			}
 			t.Fatalf("%s: expected match at index %d not found in results", tt.name, expIdx)
 		}
+	}
+
+}
+
+func TestEpochReport(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	var epochIdx, epochDur int64 = 13245678, 6000
+	err := archie.InsertEpoch(&db.EpochResults{
+		MktBase:     42,
+		MktQuote:    0,
+		Idx:         epochIdx,
+		Dur:         epochDur,
+		MatchVolume: 1,
+		HighRate:    2,
+		LowRate:     3,
+		StartRate:   4,
+		EndRate:     5,
+		QuoteVolume: 6,
+	})
+
+	if err != nil {
+		t.Fatalf("error inserting first epoch: %v", err)
+	}
+
+	// Trying for the same epoch should violate a primary key constraint.
+	err = archie.InsertEpoch(&db.EpochResults{
+		MktBase:  42,
+		MktQuote: 0,
+		Idx:      epochIdx,
+		Dur:      epochDur,
+	})
+	if err == nil {
+		t.Fatalf("no error for duplicate epoch")
+	}
+
+	err = archie.InsertEpoch(&db.EpochResults{
+		MktBase:     42,
+		MktQuote:    0,
+		Idx:         epochIdx + 1,
+		Dur:         epochDur,
+		MatchVolume: 11,
+		HighRate:    12,
+		LowRate:     13,
+		StartRate:   14,
+		EndRate:     15,
+		QuoteVolume: 16,
+	})
+	if err != nil {
+		t.Fatalf("error inserting second epoch: %v", err)
+	}
+
+	archie.InsertEpoch(&db.EpochResults{
+		MktBase:     42,
+		MktQuote:    0,
+		Idx:         epochIdx + 2,
+		Dur:         epochDur,
+		MatchVolume: 100,
+		HighRate:    100,
+		LowRate:     100,
+		StartRate:   100,
+		EndRate:     100,
+		QuoteVolume: 100,
+	})
+
+	epochCache := db.NewCandleCache(3, uint64(epochDur))
+	dayCache := db.NewCandleCache(2, uint64(time.Hour*24/time.Millisecond))
+
+	err = archie.LoadEpochStats(42, 0, []*db.CandleCache{epochCache, dayCache})
+	if err != nil {
+		t.Fatalf("error loading epoch stats: %v", err)
+	}
+
+	epochCandles := epochCache.WireCandles(3).Candles()
+	if len(epochCandles) != 3 {
+		t.Fatalf("epoch cache has wrong number of entries. expected 3, got %d", len(epochCandles))
+	}
+	lastCandle := epochCandles[len(epochCandles)-1]
+	if lastCandle.MatchVolume != 100 {
+		t.Fatalf("wrong last epoch candle match volume. expected 100, got %d", lastCandle.MatchVolume)
+	}
+
+	dayCandles := dayCache.WireCandles(2).Candles()
+	if len(dayCandles) != 1 {
+		t.Fatalf("day cache has wrong number of entries. expected 1, got %d", len(dayCandles))
+	}
+	lastCandle = dayCandles[len(dayCandles)-1]
+	if lastCandle.MatchVolume != 112 { // 1 + 11
+		t.Fatalf("wrong last day candle MatchVolume. expected 112, got %d", lastCandle.MatchVolume)
+	}
+	if lastCandle.QuoteVolume != 122 { // 6 + 16
+		t.Fatalf("wrong last day candle QuoteVolume. expected 122, got %d", lastCandle.MatchVolume)
+	}
+	if lastCandle.HighRate != 100 {
+		t.Fatalf("wrong last day candle HighRate. expected 100, got %d", lastCandle.HighRate)
+	}
+	if lastCandle.LowRate != 3 {
+		t.Fatalf("wrong last day candle LowRate. expected 3, got %d", lastCandle.LowRate)
+	}
+	if lastCandle.StartRate != 4 {
+		t.Fatalf("wrong last day candle StartRate. expected 4, got %d", lastCandle.StartRate)
+	}
+	if lastCandle.EndRate != 100 {
+		t.Fatalf("wrong last day candle EndRate. expected 100, got %d", lastCandle.EndRate)
 	}
 
 }

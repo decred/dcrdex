@@ -62,6 +62,10 @@ type Swapper interface {
 	ChainsSynced(base, quote uint32) (bool, error)
 }
 
+type DataCollector interface {
+	ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error)
+}
+
 // Market is the market manager. It should not be overly involved with details
 // of accounts and authentication. Via the account package it should request
 // account status with new orders, verification of order signatures. The Market
@@ -116,12 +120,15 @@ type Market struct {
 
 	// Persistent data storage
 	storage db.DEXArchivist
+
+	// Data API
+	dataCollector DataCollector
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with
 // an epoch cycling at given duration in milliseconds.
 func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper, authMgr AuthManager,
-	coinLockerBase, coinLockerQuote coinlock.CoinLocker) (*Market, error) {
+	coinLockerBase, coinLockerQuote coinlock.CoinLocker, dataCollector DataCollector) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
 	if err := storage.LastErr(); err != nil {
 		return nil, err
@@ -276,6 +283,7 @@ ordersLoop:
 		storage:          storage,
 		coinLockerBase:   coinLockerBase,
 		coinLockerQuote:  coinLockerQuote,
+		dataCollector:    dataCollector,
 	}, nil
 }
 
@@ -1703,7 +1711,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	// Perform order matching using the preimages to shuffle the queue.
 	m.bookMtx.Lock()        // allow a coherent view of book orders with (*Market).Book
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
-	seed, matches, _, failed, doneOK, partial, booked, nomatched, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
+	seed, matches, _, failed, doneOK, partial, booked, nomatched, unbooked, updates, stats := m.matcher.Match(m.book, ordersRevealed)
 	m.bookEpochIdx = epoch.Epoch + 1
 	m.bookMtx.Unlock()
 	if len(ordersRevealed) > 0 {
@@ -1737,6 +1745,18 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		Seed:           seed,
 		OrdersRevealed: oidsRevealed,
 		OrdersMissed:   oidsMissed,
+		MatchVolume:    stats.MatchVolume,
+		QuoteVolume:    stats.QuoteVolume,
+		BookBuys:       stats.BookBuys,
+		BookBuys5:      stats.BookBuys5,
+		BookBuys25:     stats.BookBuys25,
+		BookSells:      stats.BookSells,
+		BookSells5:     stats.BookSells5,
+		BookSells25:    stats.BookSells25,
+		HighRate:       stats.HighRate,
+		LowRate:        stats.LowRate,
+		StartRate:      stats.StartRate,
+		EndRate:        stats.EndRate,
 	})
 	if err != nil {
 		// fatal backend error, do not begin new swaps.
@@ -1930,11 +1950,27 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		}
 	}
 
+	// Send "epoch_report" notifications.
+	notifyChan <- &updateSignal{
+		action: epochReportAction,
+		data: sigDataEpochReport{
+			epochIdx: epoch.Epoch,
+			epochDur: epoch.Duration,
+			stats:    stats,
+		},
+	}
+
 	// Initiate the swaps.
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
 		m.swapper.Negotiate(matches, offBookOrders)
+	}
+
+	// Update the API data collector.
+	_, err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
+	if err != nil {
+		log.Errorf("Error updating API data collector: %v", err)
 	}
 }
 

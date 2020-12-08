@@ -99,6 +99,7 @@ type dexConf struct {
 	AdminSrvPW        []byte
 	IgnoreState       bool
 	StatePath         string
+	DisableDataAPI    bool
 }
 
 type flagsData struct {
@@ -150,6 +151,8 @@ type flagsData struct {
 
 	IgnorePrevState bool   `long:"ignoreprevstate" description:"Do not attempt to load the stored swap state."`
 	PrevStatePath   string `long:"prevstatepath" description:"Load the swap state from provided file path. --prevstatepath supercedes --ignoreprevstate"`
+
+	DisableDataAPI bool `long:"nodata" description:"Disable the HTTP data API."`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -601,6 +604,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AdminSrvPW:        []byte(cfg.AdminSrvPassword),
 		IgnoreState:       cfg.IgnorePrevState,
 		StatePath:         cfg.PrevStatePath,
+		DisableDataAPI:    cfg.DisableDataAPI,
 	}
 
 	opts := &procOpts{
