@@ -509,8 +509,12 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	if txscript.IsUnspendable(txOut.Value, txOut.PkScript) {
 		return true
 	}
-	totalSize := txOut.SerializeSize() + 165
-	return txOut.Value/(3*int64(totalSize)) < int64(minRelayTxFee)
+	return IsDustVal(uint64(txOut.SerializeSize()), uint64(txOut.Value), minRelayTxFee)
+}
+
+func IsDustVal(sz, amt, minRelayTxFee uint64) bool {
+	totalSize := sz + 165
+	return amt/(3*totalSize) < minRelayTxFee
 }
 
 // isStandardAltSignatureType returns whether or not the provided opcode
