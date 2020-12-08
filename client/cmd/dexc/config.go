@@ -58,16 +58,16 @@ func setNet(applicationDirectory, net string) string {
 }
 
 // defaultHostByNetwork accepts configured host with configured network
-// flags and returns the network specific default host if the provided host is
+// and returns the network specific default host if the provided host is
 // empty
-func defaultHostByNetwork(host string, testnet, simnet bool) string {
+func defaultHostByNetwork(host string, network dex.Network) string {
 	if host != "" {
 		return host
 	}
-	switch {
-	case testnet:
+	switch network {
+	case dex.Testnet:
 		return defaultTestnetHost
-	case simnet:
+	case dex.Simnet:
 		return defaultSimnetHost
 	default:
 		return defaultMainnetHost
@@ -172,10 +172,23 @@ func configure() (*Config, error) {
 		return nil, fmt.Errorf("simnet and testnet cannot both be specified")
 	}
 
-	// Calc RPC & Web addresses, if any of the hosts isn't available fallback
+	var defaultDBPath string
+	switch {
+	case cfg.Testnet:
+		cfg.Net = dex.Testnet
+		defaultDBPath = setNet(preCfg.AppData, "testnet")
+	case cfg.Simnet:
+		cfg.Net = dex.Simnet
+		defaultDBPath = setNet(preCfg.AppData, "simnet")
+	default:
+		cfg.Net = dex.Mainnet
+		defaultDBPath = setNet(preCfg.AppData, "mainnet")
+	}
+
+	// Set RPC & Web addresses, if no hosts provided fallback
 	// to default network specific host
-	RPCHost := defaultHostByNetwork(cfg.RPCHost, cfg.Testnet, cfg.Simnet)
-	WebHost := defaultHostByNetwork(cfg.WebHost, cfg.Testnet, cfg.Simnet)
+	RPCHost := defaultHostByNetwork(cfg.RPCHost, cfg.Net)
+	WebHost := defaultHostByNetwork(cfg.WebHost, cfg.Net)
 	var (
 		RPCPort string
 		WebPort string
@@ -192,19 +205,6 @@ func configure() (*Config, error) {
 	}
 	cfg.RPCAddr = RPCHost + ":" + RPCPort
 	cfg.WebAddr = WebHost + ":" + WebPort
-
-	var defaultDBPath string
-	switch {
-	case cfg.Testnet:
-		cfg.Net = dex.Testnet
-		defaultDBPath = setNet(preCfg.AppData, "testnet")
-	case cfg.Simnet:
-		cfg.Net = dex.Simnet
-		defaultDBPath = setNet(preCfg.AppData, "simnet")
-	default:
-		cfg.Net = dex.Mainnet
-		defaultDBPath = setNet(preCfg.AppData, "mainnet")
-	}
 
 	if cfg.RPCCert == "" {
 		cfg.RPCCert = filepath.Join(preCfg.AppData, defaultRPCCertFile)
