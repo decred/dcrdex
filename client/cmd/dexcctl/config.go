@@ -19,7 +19,10 @@ import (
 )
 
 const (
-	defaultRPCAddr        = "localhost:5757"
+	defaultRPCPort        = "5757"
+	defaultMainnetHost    = "127.0.0.1"
+	defaultTestnetHost    = "127.0.0.2"
+	defaultSimnetHost     = "127.0.0.3"
 	defaultConfigFilename = "dexcctl.conf"
 	defaultRPCCertFile    = "rpc.cert"
 )
@@ -44,6 +47,8 @@ type config struct {
 	ProxyUser    string   `long:"proxyuser" description:"Username for proxy server"`
 	ProxyPass    string   `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
 	PasswordArgs []string `short:"p" long:"passarg" description:"Password arguments to bypass stdin prompts."`
+	Testnet      bool     `long:"testnet" description:"use testnet"`
+	Simnet       bool     `long:"simnet" description:"use simnet"`
 }
 
 // fileExists reports whether the named file or directory exists.
@@ -120,8 +125,21 @@ func configure() (*config, []string, bool, error) {
 		cfg.RPCCert = cleanAndExpandPath(cfg.RPCCert)
 	}
 
+	if cfg.Simnet && cfg.Testnet {
+		return nil, nil, false, fmt.Errorf("simnet and testnet cannot both be specified")
+	}
+
 	if cfg.RPCAddr == "" {
-		cfg.RPCAddr = defaultRPCAddr
+		var rpcHost string
+		switch {
+		case cfg.Testnet:
+			rpcHost = defaultTestnetHost
+		case cfg.Simnet:
+			rpcHost = defaultSimnetHost
+		default:
+			rpcHost = defaultMainnetHost
+		}
+		cfg.RPCAddr = rpcHost + ":" + defaultRPCPort
 	}
 
 	return cfg, remainingArgs, false, nil
