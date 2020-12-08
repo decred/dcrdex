@@ -3,7 +3,7 @@
 # dcrdex, dexc, and the wallet simnet harnesses should all be running before
 # calling this script.
 
-RPC_PASS="abc"
+RPC_PASS="${1:-abc}"
 
 set -e
 AUTH="./dexcctl -p abc -P ${RPC_PASS}"
