@@ -390,8 +390,8 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 		return fmt.Errorf("missing backend for asset with active swaps")
 	}
 
-	// Load the matchTrackers, calling the Contract, CoinConftime, and
-	// Redemption asset.Backend methods as needed.
+	// Load the matchTrackers, calling the Contract and Redemption asset.Backend
+	// methods as needed.
 
 	type swapStatusData struct {
 		SwapAsset       uint32 // from market schema and takerSell bool
@@ -401,7 +401,8 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 		ContractScript  []byte // {a,b}Contract
 		RedeemTime      int64  // {a,b}RedeemTime
 		RedeemCoinIn    []byte // {a,b}aRedeemCoinID
-		// SwapConfirmTime is not in db, use Backend.CoinConfTime(ContractCoinOut, swapConf)
+		// SwapConfirmTime is not stored in the DB, so use time.Now() if the
+		// contract has reached SwapConf.
 	}
 
 	translateSwapStatus := func(ss *swapStatus, ssd *swapStatusData, cpSwapCoin []byte) error {
@@ -418,9 +419,13 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 			ss.swap = swap
 			ss.swapTime = encode.UnixTimeMilli(ssd.SwapTime)
 
-			ss.swapConfirmed, err = swapAsset.Backend.CoinConfTime(swapCoin, int64(swapAsset.SwapConf))
+			swapConfs, err := swap.Confirmations(context.Background())
 			if err != nil {
 				log.Warnf("No swap confirmed time for %v: %v", swap, err)
+			} else if swapConfs >= int64(swapAsset.SwapConf) {
+				// We don't record the time at which we saw the block that got
+				// the swap to SwapConf, so give the user extra time.
+				ss.swapConfirmed = time.Now().UTC()
 			}
 		}
 

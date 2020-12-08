@@ -22,11 +22,6 @@ const (
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
 	dex.Connector
-	// CoinConfTime returns the time when a coin reached a certain number of
-	// confirmations. The zero Time is returned if it has not been mined or does
-	// not yet have confs confirmations. A non-nil error should be returned if
-	// the coin is not found at all.
-	CoinConfTime(coinID []byte, confs int64) (time.Time, error)
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.

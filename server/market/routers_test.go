@@ -345,9 +345,6 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	}
 	return &tUTXO{val: v, decoded: str}, b.utxoErr
 }
-func (b *TBackend) CoinConfTime(coinID []byte, confs int64) (time.Time, error) {
-	return time.Time{}, nil
-}
 func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	return b.utxo(coinID)
 }
