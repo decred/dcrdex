@@ -585,6 +585,11 @@ func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
+func (w *TXCWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+	return nil, nil
+}
+func (w *TXCWallet) RedemptionFees() (uint64, error) { return 0, nil }
+
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
 	w.returnedCoins = coins
 	coinInSlice := func(coin asset.Coin) bool {

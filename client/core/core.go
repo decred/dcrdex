@@ -2271,6 +2271,93 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	return c.coreOrderFromMetaOrder(mOrd)
 }
 
+// marketWallets gets the 2 *dex.Assets and 2 *xcWallet associated with a
+// market. The wallets will be connected, but not necessarily unlocked.
+func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset, bw, qw *xcWallet, err error) {
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("Unknown host: %s", host)
+	}
+
+	ba, found = dc.assets[base]
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("%s not supported by %s", unbip(base), host)
+	}
+	qa, found = dc.assets[quote]
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("%s not supported by %s", unbip(quote), host)
+	}
+
+	bw, err = c.connectedWallet(base)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%s wallet error: %v", unbip(base), err)
+	}
+	qw, err = c.connectedWallet(quote)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%s wallet error: %v", unbip(quote), err)
+	}
+	return
+}
+
+// MaxBuy is the maximum-sized *OrderEstimate for a buy order on the specified
+// market. An order rate must be provided, since the number of lots available
+// for trading will vary based on the rate for a buy order (unlike a sell
+// order).
+func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*OrderEstimate, error) {
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
+	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, quoteAsset)
+	if err != nil {
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
+	}
+	buyRedemptionPer, err := baseWallet.RedemptionFees()
+	if err != nil {
+		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(base), err)
+	}
+
+	return &OrderEstimate{
+		Lots:           maxBuy.Lots,
+		Value:          maxBuy.Value,
+		MaxFees:        maxBuy.MaxFees,
+		EstimatedFees:  maxBuy.EstimatedFees,
+		Locked:         maxBuy.Locked,
+		RedemptionFees: maxBuy.Lots * buyRedemptionPer,
+	}, nil
+}
+
+// MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
+// market.
+func (c *Core) MaxSell(host string, base, quote uint32) (*OrderEstimate, error) {
+	baseAsset, _, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, baseAsset)
+	if err != nil {
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
+	}
+	sellRedemptionPer, err := quoteWallet.RedemptionFees()
+	if err != nil {
+		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(quote), err)
+	}
+
+	return &OrderEstimate{
+		Lots:           maxSell.Lots,
+		Value:          maxSell.Value,
+		MaxFees:        maxSell.MaxFees,
+		EstimatedFees:  maxSell.EstimatedFees,
+		Locked:         maxSell.Locked,
+		RedemptionFees: maxSell.Lots * sellRedemptionPer,
+	}, nil
+}
+
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.

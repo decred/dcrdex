@@ -128,7 +128,7 @@ func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
 	return &core.Market{
-		Name:            fmt.Sprintf("%s-%s", base, quote),
+		Name:            fmt.Sprintf("%s_%s", base, quote),
 		BaseID:          baseID,
 		BaseSymbol:      base,
 		QuoteID:         quoteID,
@@ -378,6 +378,37 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 		cords = append(cords, cord)
 	}
 	return cords, nil
+}
+
+func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error) {
+	ord := randomOrder(rand.Float32() > 0.5, c.maxQty, c.midGap, gapWidthFactor*c.midGap, false)
+	qty := toAtoms(ord.Qty)
+	quoteQty := calc.BaseToQuote(rate, qty)
+	return &core.OrderEstimate{
+		Lots:           qty / tExchanges[host].Assets[base].LotSize,
+		Value:          quoteQty,
+		MaxFees:        quoteQty / 100,
+		EstimatedFees:  quoteQty / 200,
+		Locked:         quoteQty,
+		RedemptionFees: qty / 300,
+	}, nil
+}
+
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error) {
+	ord := randomOrder(rand.Float32() > 0.5, c.maxQty, c.midGap, gapWidthFactor*c.midGap, false)
+	qty := toAtoms(ord.Qty)
+	return &core.OrderEstimate{
+		Lots:           qty / tExchanges[host].Assets[base].LotSize,
+		Value:          qty,
+		MaxFees:        qty / 100,
+		EstimatedFees:  qty / 200,
+		Locked:         qty,
+		RedemptionFees: 1,
+	}, nil
+}
+
+func toAtoms(v float64) uint64 {
+	return uint64(math.Round(v * 1e8))
 }
 
 func utxoID() []byte {
