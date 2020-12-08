@@ -453,7 +453,10 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 			log.Warnf("Dropping match %v with no backend available for quote asset %d", sd.ID, sd.Quote)
 			continue
 		}
-		// Load the maker's order.LimitOrder and taker's order.Order.
+		// Load the maker's order.LimitOrder and taker's order.Order. WARNING:
+		// This is a different Order instance from whatever Market or other
+		// subsystems might have. As such, the mutable fields or accessors of
+		// mutable data should not be used.
 		taker, _, err := s.storage.Order(sd.MatchData.Taker, sd.Base, sd.Quote)
 		if err != nil {
 			log.Errorf("Failed to load taker order: %v", err)

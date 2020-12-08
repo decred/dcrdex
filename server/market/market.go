@@ -761,11 +761,11 @@ func (m *Market) SwapDone(ord order.Order, match *order.Match, fail bool) {
 		return
 	}
 
-	// Continue tracking if more matches can be made or there are swaps
-	// settling. If it is a limit order, we know it is not canceled yet because
-	// it is still in the settling map.
-	matchable := limit && lo.Force == order.StandingTiF && lo.Remaining() > 0
-	if matchable || settling > 0 {
+	// Continue tracking if there are swaps settling or it is booked (more
+	// matches can be made). We check Book.HaveOrder instead of Remaining since
+	// the provided Order instance may not belong to Market and may thus be out
+	// of sync with respect to filled amount.
+	if settling > 0 || (limit && lo.Force == order.StandingTiF && m.book.HaveOrder(oid)) {
 		m.settling[oid] = settling
 		return
 	}
