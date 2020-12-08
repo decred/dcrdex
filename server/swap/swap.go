@@ -2338,6 +2338,9 @@ func (s *Swapper) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
 	if !found {
 		return feeRate
 	}
+	if feeScale < 1 {
+		log.Warnf("Using fee rate scale of %f < 1.0 for asset %d", feeScale, assetID)
+	}
 	// It started non-zero, so don't allow it to go to zero.
 	return uint64(math.Max(1.0, math.Round(float64(feeRate)*feeScale)))
 }
