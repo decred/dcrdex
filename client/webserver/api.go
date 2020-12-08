@@ -470,6 +470,57 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiMaxBuy handles the 'maxbuy' API request.
+func (s *WebServer) apiMaxBuy(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Host  string `json:"host"`
+		Base  uint32 `json:"base"`
+		Quote uint32 `json:"quote"`
+		Rate  uint64 `json:"rate"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	maxBuy, err := s.core.MaxBuy(form.Host, form.Base, form.Quote, form.Rate)
+	if err != nil {
+		s.writeAPIError(w, "max order estimation error: %v", err)
+		return
+	}
+	resp := struct {
+		OK     bool                `json:"ok"`
+		MaxBuy *core.OrderEstimate `json:"maxBuy"`
+	}{
+		OK:     true,
+		MaxBuy: maxBuy,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiMaxSell handles the 'maxsell' API request.
+func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Host  string `json:"host"`
+		Base  uint32 `json:"base"`
+		Quote uint32 `json:"quote"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	maxSell, err := s.core.MaxSell(form.Host, form.Base, form.Quote)
+	if err != nil {
+		s.writeAPIError(w, "max order estimation error: %v", err)
+		return
+	}
+	resp := struct {
+		OK      bool                `json:"ok"`
+		MaxSell *core.OrderEstimate `json:"maxSell"`
+	}{
+		OK:      true,
+		MaxSell: maxSell,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
 	loginResult, err := s.core.Login(login.Pass)

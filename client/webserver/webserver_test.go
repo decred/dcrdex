@@ -48,7 +48,7 @@ func (c *tCoin) Value() uint64 {
 	return 0
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 	return c.confs, c.confsErr
 }
 
@@ -137,6 +137,12 @@ func (c *TCore) Logout() error { return c.logoutErr }
 
 func (c *TCore) Orders(*core.OrderFilter) ([]*core.Order, error) { return nil, nil }
 func (c *TCore) Order(oid dex.Bytes) (*core.Order, error)        { return nil, nil }
+func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error) {
+	return nil, nil
+}
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error) {
+	return nil, nil
+}
 
 type TWriter struct {
 	b []byte
@@ -296,6 +302,7 @@ func TestAPIRegister(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
+		t.Helper()
 		ensureResponse(t, s.apiRegister, want, reader, writer, body)
 	}
 

@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		var wg sync.WaitGroup
+		wg := new(sync.WaitGroup)
 		defer func() {
 			cancel()
 			wg.Wait()
@@ -76,11 +76,11 @@ func TestMain(m *testing.M) {
 			return 1
 		}
 
-		wg.Add(1)
-		go func() {
-			dexAsset.Run(ctx)
-			wg.Done()
-		}()
+		wg, err = dexAsset.Connect(ctx)
+		if err != nil {
+			fmt.Printf("Connect failed: %v", err)
+			return 1
+		}
 
 		return m.Run()
 	}

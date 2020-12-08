@@ -143,11 +143,33 @@ func (ou *OrdersUpdated) String() string {
 // limit orders that only matched as makers to down-queue takers.
 //
 // TODO: Eliminate order slice return args in favor of just the *OrdersUpdated.
-func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked, nomatched []*OrderRevealed, unbooked []*order.LimitOrder, updates *OrdersUpdated) {
+func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet,
+	passed, failed, doneOK, partial, booked, nomatched []*OrderRevealed,
+	unbooked []*order.LimitOrder, updates *OrdersUpdated, stats *MatchCycleStats) {
+
 	// Apply the deterministic pseudorandom shuffling.
 	seed = shuffleQueue(queue)
 
 	updates = new(OrdersUpdated)
+	stats = new(MatchCycleStats)
+	startRate := midGap(book)
+	stats.StartRate = startRate
+	stats.LowRate = startRate
+	stats.HighRate = startRate
+
+	appendTradeSet := func(matchSet *order.MatchSet) {
+		matches = append(matches, matchSet)
+
+		stats.MatchVolume += matchSet.Total
+		high, low := matchSet.HighLowRates()
+		if high > stats.HighRate {
+			stats.HighRate = high
+		}
+		if low < stats.LowRate || stats.LowRate == 0 {
+			stats.LowRate = low
+		}
+		stats.QuoteVolume += matchSet.QuoteVolume()
+	}
 
 	// Store partially filled limit orders in a map to avoid duplicate
 	// entries.
@@ -212,7 +234,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			matchSet := matchLimitOrder(book, o)
 
 			if matchSet != nil {
-				matches = append(matches, matchSet)
+				appendTradeSet(matchSet)
 				makers = matchSet.Makers
 			} else {
 				if o.Force == order.ImmediateTiF {
@@ -256,6 +278,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 		case *order.MarketOrder:
 			// market-limit order matching
 			var matchSet *order.MatchSet
+
 			if o.Sell {
 				matchSet = matchMarketSellOrder(book, o)
 			} else {
@@ -264,7 +287,8 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				matchSet = matchMarketBuyOrder(book, o)
 			}
 			if matchSet != nil {
-				matches = append(matches, matchSet)
+				// Only count market order volume that matches.
+				appendTradeSet(matchSet)
 				passed = append(passed, q)
 				doneOK = append(doneOK, q)
 				updates.TradesCompleted = append(updates.TradesCompleted, o)
@@ -290,6 +314,10 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 	for _, q := range nomatchStanding {
 		nomatched = append(nomatched, q)
 	}
+
+	midGap := midGap(book)
+	stats.EndRate = midGap
+	bookVolumes(book, midGap, stats)
 
 	return
 }
@@ -608,4 +636,51 @@ func shuffleQueue(queue []*OrderRevealed) (seed []byte) {
 	}
 
 	return
+}
+
+func midGap(book Booker) uint64 {
+	b, s := book.BestBuy(), book.BestSell()
+	if b == nil {
+		if s == nil {
+			return 0
+		}
+		return s.Rate
+	} else if s == nil {
+		return b.Rate
+	}
+	return (b.Rate + s.Rate) / 2
+}
+
+func sideVolume(ords []*order.LimitOrder) (q uint64) {
+	for _, ord := range ords {
+		q += ord.Remaining()
+	}
+	return
+}
+
+func bookVolumes(book Booker, midGap uint64, stats *MatchCycleStats) {
+	cutoff5 := midGap - midGap/20 // 5%
+	cutoff25 := midGap - midGap/4 // 25%
+	for _, ord := range book.BuyOrders() {
+		remaining := ord.Remaining()
+		stats.BookBuys += remaining
+		if ord.Rate > cutoff25 {
+			stats.BookBuys25 += remaining
+			if ord.Rate > cutoff5 {
+				stats.BookBuys5 += remaining
+			}
+		}
+	}
+	cutoff5 = midGap + midGap/20
+	cutoff25 = midGap + midGap/4
+	for _, ord := range book.SellOrders() {
+		remaining := ord.Remaining()
+		stats.BookSells += remaining
+		if ord.Rate < cutoff25 {
+			stats.BookSells25 += remaining
+			if ord.Rate < cutoff5 {
+				stats.BookSells5 += remaining
+			}
+		}
+	}
 }

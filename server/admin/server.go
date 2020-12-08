@@ -36,6 +36,7 @@ const (
 
 	marketNameKey        = "market"
 	accountIDKey         = "account"
+	yesKey               = "yes"
 	matchIDKey           = "match"
 	ruleToken            = "rule"
 	timeoutToken         = "timeout"
@@ -64,6 +65,7 @@ type SvrCore interface {
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
 	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error)
+	EnableDataAPI(yes bool)
 }
 
 // Server is a multi-client https server.
@@ -140,6 +142,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
+		r.Get("/enabledataapi/{yes}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/ban", s.apiBan)

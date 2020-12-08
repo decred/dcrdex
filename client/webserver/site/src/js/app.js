@@ -615,12 +615,9 @@ export default class Application {
    * element until Application.loaded is called.
    */
   loading (el) {
-    el.appendChild(this.page.loader)
-  }
-
-  /* loaded hides the loading element as shown with Application.loading. */
-  loaded () {
-    this.page.loader.remove()
+    const loader = this.page.loader.cloneNode(true)
+    el.appendChild(loader)
+    return () => { loader.remove() }
   }
 
   /* orders retrieves a list of orders for the specified dex and market. */

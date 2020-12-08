@@ -28,6 +28,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
 )
 
@@ -201,14 +202,21 @@ func (ta *TArchivist) RestoreAccount(account.AccountID) error             { retu
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }
-func (ta *TArchivist) CreateAccount(*account.Account) (string, error)     { return "", nil }
-func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)   { return "", nil }
-func (ta *TArchivist) PayAccount(account.AccountID, []byte) error         { return nil }
-func (ta *TArchivist) Accounts() ([]*db.Account, error)                   { return nil, nil }
-func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error) { return nil, nil }
-func (ta *TArchivist) Close() error                                       { return nil }
-func (ta *TArchivist) GetStateHash() ([]byte, error)                      { return nil, nil }
-func (ta *TArchivist) SetStateHash([]byte) error                          { return nil }
+func (ta *TArchivist) CreateAccount(*account.Account) (string, error)         { return "", nil }
+func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)       { return "", nil }
+func (ta *TArchivist) PayAccount(account.AccountID, []byte) error             { return nil }
+func (ta *TArchivist) Accounts() ([]*db.Account, error)                       { return nil, nil }
+func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error)     { return nil, nil }
+func (ta *TArchivist) Close() error                                           { return nil }
+func (ta *TArchivist) GetStateHash() ([]byte, error)                          { return nil, nil }
+func (ta *TArchivist) SetStateHash([]byte) error                              { return nil }
+func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*db.CandleCache) error { return nil }
+
+type TCollector struct{}
+
+func (tc *TCollector) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error) {
+	return nil, nil
+}
 
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
@@ -271,7 +279,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	}
 
 	mkt, err := NewMarket(mktInfo, storage, swapper, authMgr,
-		bookLockerBase, bookLockerQuote)
+		bookLockerBase, bookLockerQuote, new(TCollector))
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
 	}
@@ -1268,17 +1276,24 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 				{bookAction, sigDataBookedOrder{lo, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestBuy, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestSell, epochIdx}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
 			},
 		},
 		{
-			"ok no matches, on book updates",
+			"ok no matches or book updates",
 			eq2,
-			[]*updateSignal{{matchProofAction, sigDataMatchProof{mp2}}},
+			[]*updateSignal{
+				{matchProofAction, sigDataMatchProof{mp2}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+			},
 		},
 		{
 			"ok empty queue",
 			NewEpoch(epochIdx, epochDur),
-			[]*updateSignal{{matchProofAction, sigDataMatchProof{mp0}}},
+			[]*updateSignal{
+				{matchProofAction, sigDataMatchProof{mp0}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -1367,6 +1382,17 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 					if wantIdx != sigData.idx {
 						t.Errorf("new epoch signal #%d (action %v) has epoch index %d, expected %d",
 							i, s.action, sigData.idx, wantIdx)
+					}
+
+				case sigDataEpochReport:
+					expSig := exp.data.(sigDataEpochReport)
+					if expSig.epochIdx != sigData.epochIdx {
+						t.Errorf("epoch report signal #%d (action %v) has epoch index %d, expected %d",
+							i, s.action, sigData.epochIdx, expSig.epochIdx)
+					}
+					if expSig.epochDur != sigData.epochDur {
+						t.Errorf("epoch report signal #%d (action %v) has epoch duration %d, expected %d",
+							i, s.action, sigData.epochDur, expSig.epochDur)
 					}
 				}
 

@@ -34,6 +34,7 @@ func (cm *contextManager) On() bool {
 // goroutines via the Run method.
 type Runner interface {
 	Run(ctx context.Context)
+	// Ready() <-chan struct{}
 }
 
 // StartStopWaiter wraps a Runner, providing the non-blocking Start and Stop
@@ -62,6 +63,7 @@ func (ssw *StartStopWaiter) Start(ctx context.Context) {
 		ssw.cancel() // in case it stopped on its own
 		ssw.wg.Done()
 	}()
+	// TODO: do <-ssw.runner.Ready()
 }
 
 // WaitForShutdown blocks until the Runner has returned in response to Stop.

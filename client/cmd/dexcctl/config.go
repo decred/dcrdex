@@ -15,7 +15,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 
 	"decred.org/dcrdex/client/rpcserver"
-	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
 )
 
 const (

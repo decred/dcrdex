@@ -304,49 +304,49 @@ func (ts *TStorage) fatalBackendErr(err error) {
 	ts.fatalMtx.Unlock()
 }
 
-func (s *TStorage) InsertMatch(match *order.Match) error { return nil }
-func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
-func (s *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error) {
+func (ts *TStorage) InsertMatch(match *order.Match) error { return nil }
+func (ts *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
+func (ts *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error) {
 	return
 }
-func (s *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
-func (s *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
+func (ts *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
+func (ts *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
-func (s *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (s *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ts *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ts *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
 
 // Contract data.
-func (s *TStorage) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+func (ts *TStorage) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
-func (s *TStorage) SaveContractB(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+func (ts *TStorage) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ts *TStorage) SaveContractB(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ts *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
 
 // Redeem data.
-func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID, secret []byte, timestamp int64) error {
+func (ts *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID, secret []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
+func (ts *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+func (ts *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
+func (ts *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
 	return nil
 }
-func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
+func (ts *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
 
-func (s *TStorage) GetStateHash() ([]byte, error) {
-	return s.stateHash, nil
+func (ts *TStorage) GetStateHash() ([]byte, error) {
+	return ts.stateHash, nil
 }
 
-func (s *TStorage) SetStateHash(h []byte) error {
-	s.stateHash = h
+func (ts *TStorage) SetStateHash(h []byte) error {
+	ts.stateHash = h
 	return nil
 }
 
@@ -378,7 +378,7 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
-func (a *TAsset) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.funds, a.fundsErr
@@ -413,15 +413,15 @@ func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }
-func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate { return a.bChan }
-func (a *TAsset) InitTxSize() uint32                              { return 100 }
-func (a *TAsset) InitTxSizeBase() uint32                          { return 66 }
-func (a *TAsset) FeeRate() (uint64, error)                        { return 10, nil }
-func (a *TAsset) CheckAddress(string) bool                        { return true }
-func (a *TAsset) Run(context.Context)                             {}
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
-func (a *TAsset) VerifyUnspentCoin(coinID []byte) error           { return nil }
-func (a *TAsset) Synced() (bool, error)                           { return true, nil }
+func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate          { return a.bChan }
+func (a *TAsset) InitTxSize() uint32                                       { return 100 }
+func (a *TAsset) InitTxSizeBase() uint32                                   { return 66 }
+func (a *TAsset) FeeRate() (uint64, error)                                 { return 10, nil }
+func (a *TAsset) CheckAddress(string) bool                                 { return true }
+func (a *TAsset) Connect(context.Context) (*sync.WaitGroup, error)         { return nil, nil }
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool              { return true }
+func (a *TAsset) VerifyUnspentCoin(_ context.Context, coinID []byte) error { return nil }
+func (a *TAsset) Synced() (bool, error)                                    { return true, nil }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()
@@ -462,7 +462,7 @@ type TCoin struct {
 	lockTime  time.Time
 }
 
-func (coin *TCoin) Confirmations() (int64, error) {
+func (coin *TCoin) Confirmations(context.Context) (int64, error) {
 	coin.mtx.RLock()
 	defer coin.mtx.RUnlock()
 	return coin.confs, coin.confsErr
@@ -1336,15 +1336,6 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 		t.Helper()
 		if err != nil {
 			t.Fatalf(err.Error())
-		}
-	}
-}
-
-func makeMustBeError(t *testing.T) func(error, string) {
-	return func(err error, tag string) {
-		t.Helper()
-		if err == nil {
-			t.Fatalf("no error for %s", tag)
 		}
 	}
 }

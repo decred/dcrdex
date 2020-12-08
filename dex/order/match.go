@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"github.com/decred/dcrd/crypto/blake256"
 )
@@ -240,6 +241,27 @@ func (set *MatchSet) Matches() []*Match {
 		matches = append(matches, match)
 	}
 	return matches
+}
+
+// HighLowRates gets the highest and lowest rate from all matches.
+func (set *MatchSet) HighLowRates() (high uint64, low uint64) {
+	for _, rate := range set.Rates {
+		if rate > high {
+			high = rate
+		}
+		if rate < low || low == 0 {
+			low = rate
+		}
+	}
+	return
+}
+
+// QuoteVolume is the matched quantity in terms of the quote asset.
+func (set *MatchSet) QuoteVolume() (v uint64) {
+	for i := range set.Rates {
+		v += calc.BaseToQuote(set.Rates[i], set.Amounts[i])
+	}
+	return
 }
 
 func appendUint64Bytes(b []byte, i uint64) []byte {

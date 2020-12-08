@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -838,8 +839,8 @@ type Core struct {
 	walletMtx sync.RWMutex
 	wallets   map[uint32]*xcWallet
 
-	waiterMtx    sync.Mutex
-	blockWaiters map[uint64]*blockWaiter
+	waiterMtx    sync.RWMutex
+	blockWaiters map[string]*blockWaiter
 
 	tickSchedMtx sync.Mutex
 	tickSched    map[order.OrderID]*time.Timer
@@ -879,7 +880,7 @@ func New(cfg *Config) (*Core, error) {
 		net:           cfg.Net,
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
-		blockWaiters:  make(map[uint64]*blockWaiter),
+		blockWaiters:  make(map[string]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
@@ -982,8 +983,15 @@ func (c *Core) Exchanges() map[string]*Exchange {
 		dc.cfgMtx.RLock()
 		dc.assetsMtx.RLock()
 		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
+		// Set AcctID to empty string if not initialized.
+		acctID := dc.acct.ID().String()
+		var emptyAcctID account.AccountID
+		if dc.acct.ID() == emptyAcctID {
+			acctID = ""
+		}
 		infos[host] = &Exchange{
 			Host:          host,
+			AcctID:        acctID,
 			Markets:       dc.markets(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
@@ -1825,8 +1833,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Prepare and sign the registration payload.
 	// The account ID is generated from the public key.
+	pkBytes := privKey.PubKey().SerializeCompressed()
 	dexReg := &msgjson.Register{
-		PubKey: privKey.PubKey().SerializeCompressed(),
+		PubKey: pkBytes,
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
@@ -1858,8 +1867,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	// Pay the registration fee.
-	c.log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
-		regRes.Fee, regAsset.Symbol)
+	acctID := account.NewID(pkBytes)
+	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
+		"Do NOT manually send funds to this address even if this fails.",
+		regRes.Address, acctID, regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
@@ -1914,7 +1925,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
 		wallet, _ := c.wallet(assetID)
-		confs, err := wallet.Confirmations(coinID)
+		confs, err := wallet.Confirmations(c.ctx, coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDString(wallet.AssetID, coinID), err)
 		}
@@ -1929,7 +1940,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		return confs >= reqConfs, nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
+	c.wait(coinID, assetID, trigger, func(err error) {
 		wallet, _ := c.wallet(assetID)
 		c.log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
@@ -2168,6 +2179,93 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	return c.coreOrderFromMetaOrder(mOrd)
 }
 
+// marketWallets gets the 2 *dex.Assets and 2 *xcWallet associated with a
+// market. The wallets will be connected, but not necessarily unlocked.
+func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset, bw, qw *xcWallet, err error) {
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("Unknown host: %s", host)
+	}
+
+	ba, found = dc.assets[base]
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("%s not supported by %s", unbip(base), host)
+	}
+	qa, found = dc.assets[quote]
+	if !found {
+		return nil, nil, nil, nil, fmt.Errorf("%s not supported by %s", unbip(quote), host)
+	}
+
+	bw, err = c.connectedWallet(base)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%s wallet error: %v", unbip(base), err)
+	}
+	qw, err = c.connectedWallet(quote)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%s wallet error: %v", unbip(quote), err)
+	}
+	return
+}
+
+// MaxBuy is the maximum-sized *OrderEstimate for a buy order on the specified
+// market. An order rate must be provided, since the number of lots available
+// for trading will vary based on the rate for a buy order (unlike a sell
+// order).
+func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*OrderEstimate, error) {
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
+	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, quoteAsset)
+	if err != nil {
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
+	}
+	buyRedemptionPer, err := baseWallet.RedemptionFees()
+	if err != nil {
+		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(base), err)
+	}
+
+	return &OrderEstimate{
+		Lots:           maxBuy.Lots,
+		Value:          maxBuy.Value,
+		MaxFees:        maxBuy.MaxFees,
+		EstimatedFees:  maxBuy.EstimatedFees,
+		Locked:         maxBuy.Locked,
+		RedemptionFees: maxBuy.Lots * buyRedemptionPer,
+	}, nil
+}
+
+// MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
+// market.
+func (c *Core) MaxSell(host string, base, quote uint32) (*OrderEstimate, error) {
+	baseAsset, _, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, baseAsset)
+	if err != nil {
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
+	}
+	sellRedemptionPer, err := quoteWallet.RedemptionFees()
+	if err != nil {
+		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(quote), err)
+	}
+
+	return &OrderEstimate{
+		Lots:           maxSell.Lots,
+		Value:          maxSell.Value,
+		MaxFees:        maxSell.MaxFees,
+		EstimatedFees:  maxSell.EstimatedFees,
+		Locked:         maxSell.Locked,
+		RedemptionFees: maxSell.Lots * sellRedemptionPer,
+	}, nil
+}
+
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
@@ -2332,12 +2430,10 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 	return loaded
 }
 
-var waiterID uint64
-
-func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
+func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
+	c.blockWaiters[coinIDString(assetID, coinID)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
 		action:  action,
@@ -3084,6 +3180,13 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 // called if the client was shutdown after a fee was paid, but before it had the
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
 func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
+
+	// Return if the coin is already in blockWaiters.
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	if c.existsWaiter(coinIDString(regFeeAssetID, dc.acct.feeCoin)) {
+		return
+	}
+
 	// Get the database account info.
 	acctInfo, err := c.db.Account(dc.acct.host)
 	if err != nil {
@@ -3100,7 +3203,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// Get the coin for the fee.
-	confs, err := dcrWallet.Confirmations(acctInfo.FeeCoin)
+	confs, err := dcrWallet.Confirmations(c.ctx, acctInfo.FeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
@@ -3895,6 +3998,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
+	msgjson.EpochReportRoute:     handleEpochReportMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,
@@ -4282,8 +4386,16 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	return nil
 }
 
+// existsWaiter returns true if the waiter already exists in the map.
+func (c *Core) existsWaiter(id string) bool {
+	c.waiterMtx.RLock()
+	_, exists := c.blockWaiters[id]
+	c.waiterMtx.RUnlock()
+	return exists
+}
+
 // removeWaiter removes a blockWaiter from the map.
-func (c *Core) removeWaiter(id uint64) {
+func (c *Core) removeWaiter(id string) {
 	c.waiterMtx.Lock()
 	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
@@ -4303,7 +4415,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		if waiter.assetID != assetID {
 			continue
 		}
-		go func(id uint64, waiter *blockWaiter) {
+		go func(id string, waiter *blockWaiter) {
 			ok, err := waiter.trigger()
 			if err != nil {
 				waiter.action(err)

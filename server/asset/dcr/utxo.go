@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -14,8 +15,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrutil/v2"
-	dcrutilv3 "github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 )
 
 const ErrReorgDetected = dex.ErrorKind("reorg detected")
@@ -47,21 +47,21 @@ type TXIO struct {
 // confirmations. A transaction in the current best block should have one
 // confirmation. The value -1 will be returned with any error. This function is
 // NOT thread-safe.
-func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
+func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64, error) {
 	tipHash := txio.dcr.blockCache.tipHash()
 	// If the tx was in a mempool transaction, check if it has been confirmed.
 	if txio.height == 0 {
 		// If the tip hasn't changed, don't do anything here.
 		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
 			txio.lastLookup = &tipHash
-			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(&txio.tx.hash)
+			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(ctx, &txio.tx.hash)
 			if err != nil {
-				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, err)
+				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, translateRPCCancelErr(err))
 			}
 			// More than zero confirmations would indicate that the transaction has
 			// been mined. Collect the block info and update the tx fields.
 			if verboseTx.Confirmations > 0 {
-				blk, err := txio.dcr.getBlockInfo(verboseTx.BlockHash)
+				blk, err := txio.dcr.getBlockInfo(ctx, verboseTx.BlockHash)
 				if err != nil {
 					return -1, err
 				}
@@ -78,7 +78,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 			return -1, ErrReorgDetected
 		}
 		if mainchainBlock != nil && checkApproval {
-			nextBlock, err := txio.dcr.getMainchainDcrBlock(txio.height + 1)
+			nextBlock, err := txio.dcr.getMainchainDcrBlock(ctx, txio.height+1)
 			if err != nil {
 				return -1, fmt.Errorf("error retrieving approving block tx %s: %w", txio.tx.hash, err)
 			}
@@ -132,15 +132,15 @@ func (input *Input) String() string {
 
 // Confirmations returns the number of confirmations on this input's
 // transaction.
-func (input *Input) Confirmations() (int64, error) {
-	confs, err := input.confirmations(false)
+func (input *Input) Confirmations(ctx context.Context) (int64, error) {
+	confs, err := input.confirmations(ctx, false)
 	if errors.Is(err, ErrReorgDetected) {
 		newInput, err := input.dcr.input(&input.tx.hash, input.vin)
 		if err != nil {
 			return -1, fmt.Errorf("input block is not mainchain")
 		}
 		*input = *newInput
-		return input.Confirmations()
+		return input.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -207,15 +207,18 @@ var _ asset.Contract = (*Contract)(nil)
 // with the validity of regular tree transactions that is voted on by
 // stakeholders. While stakeholder approval is a part of output validity, there
 // are other considerations as well.
-func (output *Output) Confirmations() (int64, error) {
-	confs, err := output.confirmations(false)
+func (output *Output) Confirmations(ctx context.Context) (int64, error) {
+	confs, err := output.confirmations(ctx, false)
 	if errors.Is(err, ErrReorgDetected) {
 		newOut, err := output.dcr.output(&output.tx.hash, output.vout, output.redeemScript)
 		if err != nil {
-			return -1, fmt.Errorf("output block is not mainchain")
+			if !errors.Is(err, asset.ErrRequestTimeout) {
+				err = fmt.Errorf("output block is not mainchain")
+			}
+			return -1, err
 		}
 		*output = *newOut
-		return output.Confirmations()
+		return output.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -311,16 +314,16 @@ type UTXO struct {
 // transaction. See also (*Output).Confirmations. This function differs from the
 // Output method in that it is necessary to relocate the utxo after a reorg, it
 // may error if the output is spent.
-func (utxo *UTXO) Confirmations() (int64, error) {
-	confs, err := utxo.confirmations(!utxo.scriptType.IsStake())
+func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
+	confs, err := utxo.confirmations(ctx, !utxo.scriptType.IsStake())
 	if errors.Is(err, ErrReorgDetected) {
 		// See if we can find the utxo in another block.
-		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
+		newUtxo, err := utxo.dcr.utxo(ctx, &utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
 		*utxo = *newUtxo
-		return utxo.Confirmations()
+		return utxo.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -351,13 +354,13 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 				}
 				var sigType dcrec.SignatureType
 				switch a := addr.(type) {
-				case *dcrutilv3.AddressPubKeyHash:
+				case *dcrutil.AddressPubKeyHash:
 					sigType = a.DSA()
-				case *dcrutilv3.AddressSecpPubKey:
+				case *dcrutil.AddressSecpPubKey:
 					sigType = dcrec.STEcdsaSecp256k1
-				case *dcrutilv3.AddressEdwardsPubKey:
+				case *dcrutil.AddressEdwardsPubKey:
 					sigType = dcrec.STEd25519
-				case *dcrutilv3.AddressSecSchnorrPubKey:
+				case *dcrutil.AddressSecSchnorrPubKey:
 					sigType = dcrec.STSchnorrSecp256k1
 				default:
 					return nil, fmt.Errorf("unsupported signature type")

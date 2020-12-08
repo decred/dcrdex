@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/matcher"
 )
 
 // A updateAction classifies updates into how they affect the book or epoch
@@ -39,6 +40,14 @@ const (
 	// newEpochAction is an internal signal to the routers main loop that
 	// indicates when a new epoch has opened.
 	newEpochAction
+	// epochReportAction is sent when all bookAction, unbookAction, and
+	// updateRemainingAction signals are sent for a completed epoch.
+	// This signal performs a couple of important roles. First, it informs the
+	// client that the book updates are done, and the book will be static until
+	// the end of the epoch. Second, it sends the candlestick data, so a
+	// subscriber can maintain a up-to-date CandleCache without repeatedly
+	// querying the HTTP API for the data.
+	epochReportAction
 	// matchProofAction means the matching has been performed and will result in
 	// a msgjson.MatchProofNote being sent to subscribers.
 	matchProofAction
@@ -94,6 +103,12 @@ type sigDataBookedOrder sigDataOrder
 type sigDataUnbookedOrder sigDataOrder
 type sigDataEpochOrder sigDataOrder
 type sigDataUpdateRemaining sigDataOrder
+
+type sigDataEpochReport struct {
+	epochIdx int64
+	epochDur int64
+	stats    *matcher.MatchCycleStats
+}
 
 type sigDataNewEpoch struct {
 	idx int64
@@ -360,6 +375,28 @@ out:
 				n.Seq = subs.nextSeq()
 				note = n
 
+			case sigDataEpochReport:
+				route = msgjson.EpochReportRoute
+				startStamp := sigData.epochIdx * sigData.epochDur
+				endStamp := startStamp + sigData.epochDur
+				stats := sigData.stats
+
+				note = &msgjson.EpochReportNote{
+					Seq:      subs.nextSeq(),
+					MarketID: book.name,
+					Epoch:    uint64(sigData.epochIdx),
+					Candle: msgjson.Candle{
+						StartStamp:  uint64(startStamp),
+						EndStamp:    uint64(endStamp),
+						MatchVolume: stats.MatchVolume,
+						QuoteVolume: stats.QuoteVolume,
+						HighRate:    stats.HighRate,
+						LowRate:     stats.LowRate,
+						StartRate:   stats.StartRate,
+						EndRate:     stats.EndRate,
+					},
+				}
+
 			case sigDataEpochOrder:
 				route = msgjson.EpochOrderRoute
 				epochNote := new(msgjson.EpochOrderNote)
@@ -446,27 +483,27 @@ out:
 	}
 }
 
+// Book creates a copy of the book as a *msgjson.OrderBook.
+func (r *BookRouter) Book(mktName string) (*msgjson.OrderBook, error) {
+	book := r.books[mktName]
+	if book == nil {
+		return nil, fmt.Errorf("market %s unknown", mktName)
+	}
+	msgOB := r.msgOrderBook(book)
+	if msgOB == nil {
+		return nil, fmt.Errorf("market %s not ruhning", mktName)
+	}
+	return msgOB, nil
+}
+
 // sendBook encodes and sends the the entire order book to the specified client.
 func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
-	book.mtx.RLock() // book.orders and book.running
-	if !book.running {
-		book.mtx.RUnlock()
+	msgOB := r.msgOrderBook(book)
+	if msgOB == nil {
 		conn.SendError(msgID, msgjson.NewError(msgjson.MarketNotRunningError, "market not running"))
 		return
 	}
-	msgBook := make([]*msgjson.BookOrderNote, 0, len(book.orders))
-	for _, o := range book.orders {
-		msgBook = append(msgBook, o)
-	}
-	epochIdx := book.epochIdx // instead of book.epoch() while already locked
-	book.mtx.RUnlock()
-
-	msg, err := msgjson.NewResponse(msgID, &msgjson.OrderBook{
-		Seq:      book.subs.lastSeq(),
-		MarketID: book.name,
-		Epoch:    uint64(epochIdx),
-		Orders:   msgBook,
-	}, nil)
+	msg, err := msgjson.NewResponse(msgID, msgOB, nil)
 	if err != nil {
 		log.Errorf("error encoding 'orderbook' response: %v", err)
 		return
@@ -475,6 +512,27 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 	err = conn.Send(msg) // consider a synchronous send here
 	if err != nil {
 		log.Debugf("error sending 'orderbook' response: %v", err)
+	}
+}
+
+func (r *BookRouter) msgOrderBook(book *msgBook) *msgjson.OrderBook {
+	book.mtx.RLock() // book.orders and book.running
+	if !book.running {
+		book.mtx.RUnlock()
+		return nil
+	}
+	ords := make([]*msgjson.BookOrderNote, 0, len(book.orders))
+	for _, o := range book.orders {
+		ords = append(ords, o)
+	}
+	epochIdx := book.epochIdx // instead of book.epoch() while already locked
+	book.mtx.RUnlock()
+
+	return &msgjson.OrderBook{
+		Seq:      book.subs.lastSeq(),
+		MarketID: book.name,
+		Epoch:    uint64(epochIdx),
+		Orders:   ords,
 	}
 }
 

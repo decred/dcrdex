@@ -168,6 +168,12 @@ func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr 
 	}
 }
 
+func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return backend.FundingCoin(ctx, coinID, redeemScript)
+}
+
 // handleLimit is the handler for the 'limit' route. This route accepts a
 // msgjson.Limit payload, validates the information, constructs an
 // order.LimitOrder and submits it to the epoch queue.
@@ -300,9 +306,14 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
 		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
-			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
+			dexCoin, err := fundingCoin(fundingAsset.Backend, coin.ID, coin.Redeem)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				if errors.Is(err, asset.ErrRequestTimeout) {
+					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
+						coin.ID, fundingAsset.Symbol)
 					return true, nil
 				}
 				log.Errorf("Error retreiving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
@@ -483,9 +494,14 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	checkCoins := func() (tryAgain bool, msgErr *msgjson.Error) {
 		for key, coin := range neededCoins {
 			// Get the coin from the backend and validate it.
-			dexCoin, err := fundingAsset.Backend.FundingCoin(coin.ID, coin.Redeem)
+			dexCoin, err := fundingCoin(fundingAsset.Backend, coin.ID, coin.Redeem)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
+					return true, nil
+				}
+				if errors.Is(err, asset.ErrRequestTimeout) {
+					log.Errorf("Deadline exceeded attempting to verify funding coin %v (%s). Will try again.",
+						coin.ID, fundingAsset.Symbol)
 					return true, nil
 				}
 				log.Errorf("Error retreiving market order funding coin ID %s. user = %s: %v", coin.ID, user, err)
@@ -844,8 +860,8 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 	return b
 }
 
-// fmtCoinID formats the coin ID by asset. If an error is encounted, the coinID
-// string returned hex-encoded and prepended with "unparsed:".
+// fmtCoinID formats the coin ID by asset. If an error is encountered, the
+// coinID string returned hex-encoded and prepended with "unparsed:".
 func fmtCoinID(symbol string, coinID []byte) string {
 	strID, err := asset.DecodeCoinID(symbol, coinID)
 	if err != nil {

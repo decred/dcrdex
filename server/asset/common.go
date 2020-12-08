@@ -4,6 +4,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,11 +14,14 @@ import (
 // CoinNotFoundError is to be returned from Contract, Redemption, and
 // FundingCoin when the specified transaction cannot be found. Used by the
 // server to handle network latency.
-const CoinNotFoundError = dex.ErrorKind("coin not found")
+const (
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	ErrRequestTimeout = dex.ErrorKind("request timeout")
+)
 
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
-	dex.Runner
+	dex.Connector
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
@@ -30,7 +34,7 @@ type Backend interface {
 	// FundingCoin returns the unspent coin at the specified location. Coins
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
-	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
+	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -52,7 +56,7 @@ type Backend interface {
 	// and retrieving the corresponding Coin. If the coin is not found or no
 	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
 	// for more UTXO data.
-	VerifyUnspentCoin(coinID []byte) error
+	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
 	FeeRate() (uint64, error)
 	// Synced should return true when the blockchain is synced and ready for
@@ -69,11 +73,7 @@ type Coin interface {
 	// ready to spend. An unmined transaction should have zero confirmations. A
 	// transaction in the current best block should have one confirmation. A
 	// negative number can be returned if error is not nil.
-	//
-	// TODO: This really must get a timeout, and a short one, as the Swapper
-	// will block at inconvenient times. The timeout can be at the RPC client
-	// level or a wrapper around the underlying RPC calls
-	Confirmations() (int64, error)
+	Confirmations(context.Context) (int64, error)
 	// ID is the coin ID.
 	ID() []byte
 	// TxID is a transaction identifier for the coin.

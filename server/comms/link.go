@@ -7,11 +7,17 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 )
 
 const readLimitAuthorized = 65536
+
+// criticalRoutes are not subject to the rate limiter on websocket connections.
+var criticalRoutes = map[string]bool{
+	msgjson.ConfigRoute: true,
+}
 
 // Link is an interface for a communication channel with an API client. The
 // reference implementation of a Link-satisfying type is the wsLink, which
@@ -22,7 +28,9 @@ type Link interface {
 	// ID returns a unique ID by which this connection can be identified.
 	ID() uint64
 	// IP returns the IP address of the peer.
-	IP() string
+	IP() dex.IPKey
+	// Addr returns the string-encoded IP address.
+	Addr() string
 	// Send sends the msgjson.Message to the peer.
 	Send(msg *msgjson.Message) error
 	// SendError sends the msgjson.Error to the peer, with reference to a
@@ -60,16 +68,20 @@ type wsLink struct {
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
 	ban bool
+	// meterIP is a function that will be checked to see if certain data API
+	// requests should be denied due to rate limits or if the API disabled.
+	meterIP func(dex.IPKey) (int, error)
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection) *wsLink {
+func newWSLink(ip dex.IPKey, addr string, conn ws.Connection, limitRate func(dex.IPKey) (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
-		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
+		WSLink: ws.NewWSLink(ip, addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
+		meterIP:      limitRate,
 	}
 	return c
 }
@@ -86,8 +98,13 @@ func (c *wsLink) ID() uint64 {
 }
 
 // IP returns the IP address of the peer.
-func (c *wsLink) IP() string {
+func (c *wsLink) IP() dex.IPKey {
 	return c.WSLink.IP()
+}
+
+// Addr returns the string-encoded IP address.
+func (c *wsLink) Addr() string {
+	return c.WSLink.Addr()
 }
 
 // Authorized should be called from a request handler when the connection
@@ -106,14 +123,60 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
 		}
-		// Look for a registered handler. Failure to find a handler results in an
-		// error response but not a disconnect.
+		// Look for a registered route handler.
 		handler := RouteHandler(msg.Route)
-		if handler == nil {
+		if handler != nil {
+			// Handle the request.
+			return handler(c, msg)
+		}
+
+		// Look for an HTTP handler.
+		httpHandler := httpRoutes[msg.Route]
+		if httpHandler == nil {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
 		}
-		// Handle the request.
-		return handler(c, msg)
+
+		// If it's not a critical route, check the rate limiters.
+		if !criticalRoutes[msg.Route] {
+			if _, err := c.meterIP(c.IP()); err != nil {
+				// These errors are actually formatted nicely for sending, since
+				// they are used directly in HTTP errors as well.
+				return msgjson.NewError(msgjson.RouteUnavailableError, err.Error())
+			}
+		}
+
+		// Prepare the thing and unmarshal.
+		var thing interface{}
+		switch msg.Route {
+		case msgjson.CandlesRoute:
+			thing = new(msgjson.CandlesRequest)
+		case msgjson.OrderBookRoute:
+			thing = new(msgjson.OrderBookSubscription)
+		}
+		if thing != nil {
+			err := msg.Unmarshal(thing)
+			if err != nil {
+				return msgjson.NewError(msgjson.RPCParseError, "json parse error")
+			}
+		}
+
+		// Process request.
+		resp, err := httpHandler(thing)
+		if err != nil {
+			return msgjson.NewError(msgjson.HTTPRouteError, err.Error())
+		}
+
+		// Respond.
+		msg, err := msgjson.NewResponse(msg.ID, resp, nil)
+		if err == nil {
+			err = c.Send(msg)
+		}
+
+		if err != nil {
+			log.Errorf("Error sending response to %s for requested route %q: %v", c.Addr(), msg.Route, err)
+		}
+		return nil
+
 	case msgjson.Response:
 		// NOTE: In the event of an error, we respond to a response, which makes
 		// no sense. A new mechanism is needed with appropriate client handling.

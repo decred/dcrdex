@@ -34,9 +34,9 @@ export class NewWalletForm {
         appPass: fields.nwAppPass.value
       }
       fields.nwAppPass.value = ''
-      app.loading(form)
+      const loaded = app.loading(form)
       var res = await postJSON('/api/newwallet', createForm)
-      app.loaded()
+      loaded()
       if (!app.checkResponse(res)) {
         this.setError(res.msg)
         return
@@ -69,9 +69,9 @@ export class NewWalletForm {
    * the subform if settings are found.
    */
   async loadDefaults () {
-    app.loading(this.form)
+    const loaded = app.loading(this.form)
     var res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       this.setError(res.msg)
       return
@@ -133,13 +133,13 @@ export class WalletConfigForm {
    */
   async fileInputChanged () {
     if (!this.fileInput.value) return
-    app.loading(this.form)
+    const loaded = app.loading(this.form)
     const config = await this.fileInput.files[0].text()
     if (!config) return
     const res = await postJSON('/api/parseconfig', {
       configtext: config
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       this.errMsg.textContent = res.msg
       Doc.show(this.errMsg)
@@ -301,9 +301,9 @@ export function bindOpenWallet (app, form, success) {
       pass: fields.uwAppPass.value
     }
     fields.uwAppPass.value = ''
-    app.loading(form)
+    const loaded = app.loading(form)
     var res = await postJSON('/api/openwallet', open)
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       fields.unlockErr.textContent = res.msg
       Doc.show(fields.unlockErr)

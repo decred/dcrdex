@@ -348,7 +348,7 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	return b.utxo(coinID)
 }
-func (b *TBackend) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (b *TBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	return b.utxo(coinID)
 }
 func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
@@ -361,7 +361,7 @@ func (b *TBackend) CheckAddress(string) bool                        { return b.a
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
-func (b *TBackend) Run(context.Context) {}
+func (b *TBackend) Connect(context.Context) (*sync.WaitGroup, error) { return nil, nil }
 func (b *TBackend) ValidateCoinID(coinID []byte) (string, error) {
 	return "", nil
 }
@@ -370,7 +370,7 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 }
 
 func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
-func (b *TBackend) VerifyUnspentCoin(coinID []byte) error {
+func (b *TBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 	_, err := b.utxo(coinID)
 	return err
 }
@@ -394,7 +394,7 @@ var utxoAuthErr error
 var utxoConfsErr error
 var utxoConfs int64 = 2
 
-func (u *tUTXO) Confirmations() (int64, error) { return utxoConfs, utxoConfsErr }
+func (u *tUTXO) Confirmations(context.Context) (int64, error) { return utxoConfs, utxoConfsErr }
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
@@ -1208,7 +1208,8 @@ func (s *TBookSource) OrderFeed() <-chan *updateSignal {
 type TLink struct {
 	mtx         sync.Mutex
 	id          uint64
-	ip          string
+	ip          dex.IPKey
+	addr        string
 	sends       []*msgjson.Message
 	sendErr     error
 	sendTrigger chan struct{}
@@ -1223,15 +1224,17 @@ func tNewLink() *TLink {
 	linkCounter++
 	return &TLink{
 		id:          linkCounter,
-		ip:          "[1:800:dex:rules::]",
+		ip:          dex.NewIPKey("[1:800:dead:cafe::]"),
+		addr:        "testaddr",
 		sends:       make([]*msgjson.Message, 0),
 		sendTrigger: make(chan struct{}, 1),
 	}
 }
 
-func (conn *TLink) Authorized() {}
-func (conn *TLink) ID() uint64  { return conn.id }
-func (conn *TLink) IP() string  { return conn.ip }
+func (conn *TLink) Authorized()   {}
+func (conn *TLink) ID() uint64    { return conn.id }
+func (conn *TLink) IP() dex.IPKey { return conn.ip }
+func (conn *TLink) Addr() string  { return conn.addr }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()

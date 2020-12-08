@@ -24,6 +24,7 @@ const (
 	ordersActiveTableName    = "orders_active"
 	cancelsArchivedTableName = "cancels_archived"
 	cancelsActiveTableName   = "cancels_active"
+	epochReportsTableName    = "epoch_reports"
 )
 
 type tableStmt struct {
@@ -48,6 +49,7 @@ var createMarketTableStatements = []tableStmt{
 	{cancelsActiveTableName, internal.CreateCancelOrdersTable},
 	{matchesTableName, internal.CreateMatchesTable}, // just one matches table per market for now
 	{epochsTableName, internal.CreateEpochsTable},
+	{epochReportsTableName, internal.CreateEpochReportTable},
 }
 
 var tableMap = func() map[string]string {
@@ -93,6 +95,10 @@ func fullMatchesTableName(dbName, marketSchema string) string {
 
 func fullEpochsTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + "." + epochsTableName
+}
+
+func fullEpochReportsTableName(dbName, marketSchema string) string {
+	return dbName + "." + marketSchema + "." + epochReportsTableName
 }
 
 // CreateTable creates one of the known tables by name. The table will be

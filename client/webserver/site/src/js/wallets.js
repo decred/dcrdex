@@ -246,11 +246,11 @@ export default class WalletsPage extends BasePage {
     this.reconfigAsset = this.lastFormAsset = assetID
     await this.hideBox()
     this.animation = this.showBox(page.walletReconfig)
-    app.loading(page.walletReconfig)
+    const loaded = app.loading(page.walletReconfig)
     var res = await postJSON('/api/walletsettings', {
       assetID: assetID
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       page.reconfigErr.textContent = res.msg
       Doc.show(page.reconfigErr)
@@ -282,7 +282,7 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.repwErr)
       return
     }
-    app.loading(page.walletRepw)
+    const loaded = app.loading(page.walletRepw)
     var res = await postJSON('/api/setwalletpass', {
       assetID: this.reconfigAsset,
       newPW: page.repwNewPw.value,
@@ -290,7 +290,7 @@ export default class WalletsPage extends BasePage {
     })
     page.repwNewPw.value = ''
     page.repwAppPw.value = ''
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       page.repwErr.textContent = res.msg
       Doc.show(page.repwErr)
@@ -322,11 +322,11 @@ export default class WalletsPage extends BasePage {
   async newDepositAddress () {
     const page = this.page
     Doc.hide(page.depositErr)
-    app.loading(page.deposit)
+    const loaded = app.loading(page.deposit)
     const res = await postJSON('/api/depositaddress', {
       assetID: this.depositAsset
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       page.depositErr.textContent = res.msg
       Doc.show(page.depositErr)
@@ -358,11 +358,11 @@ export default class WalletsPage extends BasePage {
 
   /* doConnect connects to a wallet via the connectwallet API route. */
   async doConnect (assetID) {
-    app.loading(this.body)
+    const loaded = app.loading(this.body)
     var res = await postJSON('/api/connectwallet', {
       assetID: assetID
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) return
     const rowInfo = this.rowInfos[assetID]
     Doc.hide(rowInfo.actions.connect)
@@ -404,9 +404,9 @@ export default class WalletsPage extends BasePage {
       value: parseInt(Math.round(page.withdrawAmt.value * 1e8)),
       pw: page.withdrawPW.value
     }
-    app.loading(page.withdrawForm)
+    const loaded = app.loading(page.withdrawForm)
     var res = await postJSON('/api/withdraw', open)
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       page.withdrawErr.textContent = res.msg
       Doc.show(page.withdrawErr)
@@ -424,14 +424,14 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    app.loading(page.walletReconfig)
+    const loaded = app.loading(page.walletReconfig)
     var res = await postJSON('/api/reconfigurewallet', {
       assetID: this.reconfigAsset,
       config: this.walletReconfig.map(),
       pw: page.reconfigPW.value
     })
     page.reconfigPW.value = ''
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       page.reconfigErr.textContent = res.msg
       Doc.show(page.reconfigErr)
@@ -443,9 +443,9 @@ export default class WalletsPage extends BasePage {
   /* lock instructs the API to lock the wallet. */
   async lock (assetID, asset) {
     const page = this.page
-    app.loading(page.walletForm)
+    const loaded = app.loading(page.walletForm)
     var res = await postJSON('/api/closewallet', { assetID: assetID })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) return
     const a = asset.actions
     Doc.hide(a.withdraw, a.lock, a.deposit)

@@ -14,7 +14,10 @@ import (
 // has been spent or it never existed. This error may be returned from
 // AuditContract, Refund or Redeem as those methods expect the provided coin to
 // exist and be unspent.
-const CoinNotFoundError = dex.ErrorKind("coin not found")
+const (
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	ErrRequestTimeout = dex.ErrorKind("request timeout")
+)
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
@@ -77,6 +80,15 @@ type Wallet interface {
 	// empty dex.Bytes should be appended to the redeem scripts collection for
 	// coins with no redeem script.
 	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, err error)
+	// MaxOrder generates information about the maximum order size and
+	// associated fees that the wallet can support for the specified DEX. The
+	// fees are an estimate based on current network conditions, and will be <=
+	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
+	// will be an estimate based on current market conditions.
+	MaxOrder(lotSize uint64, nfo *dex.Asset) (*OrderEstimate, error)
+	// RedemptionFees is an estimate of the redemption fees for a 1-swap
+	// redemption.
+	RedemptionFees() (uint64, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -146,7 +158,7 @@ type Wallet interface {
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
-	Confirmations(id dex.Bytes) (uint32, error)
+	Confirmations(ctx context.Context, id dex.Bytes) (uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value uint64) (Coin, error)
@@ -179,7 +191,7 @@ type Coin interface {
 	Value() uint64
 	// Confirmations is the number of confirmations on this Coin's block. If the
 	// coin becomes spent, Confirmations should return an error.
-	Confirmations() (uint32, error)
+	Confirmations(ctx context.Context) (uint32, error)
 }
 
 // Coins a collection of coins as returned by Fund.
@@ -272,4 +284,22 @@ type Order struct {
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
 	Immediate bool
+}
+
+// OrderEstimate is an estimate of the fees and locked amounts associated with
+// an order.
+type OrderEstimate struct {
+	// Lots is the number of lots in the order.
+	Lots uint64
+	// Value is the total value of the order.
+	Value uint64
+	// MaxFees is the maximum possible fees that can be assessed for the order's
+	// swaps.
+	MaxFees uint64
+	// EstimatedFees is an estimation of the fees that might be assessed for the
+	// order's swaps.
+	EstimatedFees uint64
+	// Locked is the amount that will be locked if this order is
+	// subsequently placed.
+	Locked uint64
 }

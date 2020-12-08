@@ -104,3 +104,21 @@ func TestMatchID(t *testing.T) {
 		t.Fatalf("wrong taker ID. expected %s, got %s", marketID, match.Taker.ID())
 	}
 }
+
+func TestMatchSet(t *testing.T) {
+	matchSet := &MatchSet{
+		Rates:   []uint64{1e8, 2e8},
+		Amounts: []uint64{5, 10},
+	}
+	h, l := matchSet.HighLowRates()
+	if h != 2e8 {
+		t.Fatalf("wrong high rate. wanted 2e8, got %d", h)
+	}
+	if l != 1e8 {
+		t.Fatalf("wrong low rate. wanted 1e8, got %d", l)
+	}
+	qv := matchSet.QuoteVolume()
+	if qv != 25 {
+		t.Fatalf("wrong quote volume. wanted 25, got %d", qv)
+	}
+}

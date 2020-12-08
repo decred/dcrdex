@@ -270,7 +270,7 @@ func runTest(t *testing.T, splitTx bool) {
 	confCoin := receipts[0].Coin()
 	checkConfs := func(n uint32) {
 		t.Helper()
-		confs, err := rig.beta().Confirmations(confCoin.ID())
+		confs, err := rig.beta().Confirmations(tCtx, confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
@@ -303,7 +303,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, err := swapOutput.Confirmations()
+		confs, err := swapOutput.Confirmations(context.TODO())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -358,7 +358,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapReceipt.Coin().Confirmations()
+	_, err = swapReceipt.Coin().Confirmations(context.TODO())
 	if err == nil {
 		t.Fatalf("no error getting confirmations for redeemed swap. has swap output been spent?")
 	}

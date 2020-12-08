@@ -688,6 +688,26 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
+// handleEpochReportMsg is called when an epoch_report notification is
+// received.
+func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+	note := new(msgjson.EpochReportNote)
+	err := msg.Unmarshal(note)
+	if err != nil {
+		return fmt.Errorf("epoch report note unmarshal error: %w", err)
+	}
+	book, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'",
+			note.MarketID)
+	}
+	err = book.LogEpochReport(note)
+	if err != nil {
+		return fmt.Errorf("error logging epoch report: %w", err)
+	}
+	return nil
+}
+
 // handleEpochOrderMsg is called when an epoch_order notification is
 // received.
 func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {

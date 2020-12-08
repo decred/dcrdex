@@ -446,7 +446,7 @@ func (c *tCoin) Value() uint64 {
 	return c.val
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 	c.confsMtx.RLock()
 	defer c.confsMtx.RUnlock()
 	return c.confs, c.confsErr
@@ -588,6 +588,11 @@ func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
+func (w *TXCWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+	return nil, nil
+}
+func (w *TXCWallet) RedemptionFees() (uint64, error) { return 0, nil }
+
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
 	w.returnedCoins = coins
 	coinInSlice := func(coin asset.Coin) bool {
@@ -681,7 +686,7 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
+func (w *TXCWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
 	return 0, nil
 }
 
@@ -785,7 +790,7 @@ func newTestRig() *testRig {
 			lockTimeTaker: dex.LockTimeTaker(dex.Testnet),
 			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
 			wallets:       make(map[uint32]*xcWallet),
-			blockWaiters:  make(map[uint64]*blockWaiter),
+			blockWaiters:  make(map[string]*blockWaiter),
 			piSyncers:     make(map[order.OrderID]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {

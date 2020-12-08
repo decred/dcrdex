@@ -24,6 +24,18 @@ type EpochResults struct {
 	Seed              []byte
 	OrdersRevealed    []order.OrderID
 	OrdersMissed      []order.OrderID
+	MatchVolume       uint64
+	QuoteVolume       uint64
+	BookBuys          uint64
+	BookBuys5         uint64
+	BookBuys25        uint64
+	BookSells         uint64
+	BookSells5        uint64
+	BookSells25       uint64
+	HighRate          uint64
+	LowRate           uint64
+	StartRate         uint64
+	EndRate           uint64
 }
 
 // OrderStatus is the current status of an order.
@@ -63,6 +75,8 @@ type DEXArchivist interface {
 
 	// SetStateHash stores the swap state file hash.
 	SetStateHash([]byte) error
+
+	LoadEpochStats(uint32, uint32, []*CandleCache) error
 
 	OrderArchiver
 	AccountArchiver

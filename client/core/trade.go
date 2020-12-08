@@ -24,6 +24,8 @@ import (
 	"decred.org/dcrdex/dex/wait"
 )
 
+const confCheckTimeout = 2 * time.Second
+
 // ExpirationErr indicates that the wait.TickerQueue has expired a waiter, e.g.
 // a reported coin was not found before the set expiration time.
 type ExpirationErr string
@@ -38,7 +40,7 @@ type matchTracker struct {
 	// swapErr is an error set when we have given up hope on broadcasting a swap
 	// tx for a match. This can happen if 1) the swap has been attempted
 	// (repeatedly), but could not be successfully broadcast before the
-	// broadcast timeout, or 2) a match data was found to be in a non-sensical
+	// broadcast timeout, or 2) a match data was found to be in a nonsensical
 	// state during startup.
 	swapErr error
 	// tickGovernor can be set non-nil to prevent swaps or redeems from
@@ -572,7 +574,9 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 	// Check the confirmations on the counter-party's swap.
 	coin := match.counterSwap.Coin()
 	var err error
-	have, err = coin.Confirmations()
+	ctx, cancel := context.WithTimeout(context.Background(), confCheckTimeout)
+	defer cancel()
+	have, err = coin.Confirmations(ctx)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v",
 			coin, t.wallets.toAsset.Symbol, match.id, t.UID())
@@ -766,6 +770,12 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 	return
 }
 
+func confirmations(wallet *xcWallet, coinID []byte) (uint32, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), confCheckTimeout)
+	defer cancel()
+	return wallet.Confirmations(ctx, coinID)
+}
+
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
 //
@@ -801,9 +811,8 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 			}
 			return ready
 		}
-		// If we're the maker, check the confirmations anyway so we can
-		// notify.
-		confs, err := wallet.Confirmations([]byte(metaData.Proof.MakerSwap))
+		// If we're the maker, check the confirmations anyway so we can notify.
+		confs, err := confirmations(wallet, metaData.Proof.MakerSwap)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
@@ -850,7 +859,8 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 			}
 			return ready
 		}
-		confs, err := t.wallets.fromWallet.Confirmations([]byte(metaData.Proof.TakerSwap))
+		// If we're the taker, check the confirmations anyway so we can notify.
+		confs, err := confirmations(t.wallets.fromWallet, metaData.Proof.TakerSwap)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
@@ -963,7 +973,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(match *matchTracker) bool {
 		return false
 	}
 
-	confs, err := t.wallets.fromWallet.Confirmations([]byte(swapCoinID))
+	confs, err := confirmations(t.wallets.fromWallet, swapCoinID)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v",
 			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.id, t.UID())

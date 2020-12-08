@@ -871,6 +871,12 @@ func (s *Swapper) Run(ctx context.Context) {
 	// allows batching the match checks.
 	bcastEventTrigger := bufferedTicker(ctxMaster, s.bTimeout/4)
 
+	processBlockWithTimeout := func(block *blockNotification) {
+		ctxTime, cancelTimeCtx := context.WithTimeout(ctxMaster, 5*time.Second)
+		defer cancelTimeCtx()
+		s.processBlock(ctxTime, block)
+	}
+
 	// Main loop can stop on internal error via cancel(), or when the caller
 	// cancels the parent context triggering graceful shutdown.
 	wgMain.Add(1)
@@ -895,21 +901,7 @@ func (s *Swapper) Run(ctx context.Context) {
 
 				// processBlock will update confirmation times in the swapStatus
 				// structs.
-				//
-				// WARNING! Confirmation checks in processBlock must be quick
-				// because either of the blockNotification or asset.BlockUpdate
-				// channels could fill up and we will miss blocks! The asset
-				// backends should allow a blocking channel, just retrying on
-				// the next block, but that is not a solution.
-				//
-				// TODO: Consider a timeout for the entire processBlock call:
-				//
-				//   ctxTime := context.WithTimeout(ctx, 2*time.Second)
-				//   s.processBlock(ctxTime, block)
-				//
-				// Presently, one stuck backend that hangs on Confirmations
-				// halts the whole DEX! So timeouts on Confirmations too.
-				s.processBlock(block)
+				processBlockWithTimeout(block)
 
 				// Schedule an inaction check for matches that involve this
 				// asset, as they could be expecting user action within bTimeout
@@ -954,13 +946,13 @@ func bufferedTicker(ctx context.Context, dur time.Duration) chan struct{} {
 	return buffered
 }
 
-func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) (final bool) {
+func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus, confTime time.Time) (final bool) {
 	status.mtx.Lock()
 	defer status.mtx.Unlock()
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
 		return
 	}
-	confs, err := status.swap.Confirmations()
+	confs, err := status.swap.Confirmations(ctx)
 	if err != nil {
 		// The transaction has become invalid. No reason to do anything.
 		return
@@ -983,7 +975,7 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) (final 
 // broadcast the next transaction in the settlement sequence. The timeout is
 // not evaluated here, but in (Swapper).checkInaction. This method simply sets
 // the appropriate flags in the swapStatus structures.
-func (s *Swapper) processBlock(block *blockNotification) {
+func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 	checkMatch := func(match *matchTracker) {
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID &&
@@ -1003,7 +995,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			}
 			// If the maker has broadcast their transaction, the taker's broadcast
 			// timeout starts once the maker's swap has SwapConf confs.
-			if s.tryConfirmSwap(match.makerStatus, block.time) {
+			if s.tryConfirmSwap(ctx, match.makerStatus, block.time) {
 				s.unlockOrderCoins(match.Maker)
 			}
 		case order.TakerSwapCast:
@@ -1013,7 +1005,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			// If the taker has broadcast their transaction, the maker's broadcast
 			// timeout (for redemption) starts once the maker's swap has SwapConf
 			// confs.
-			if s.tryConfirmSwap(match.takerStatus, block.time) {
+			if s.tryConfirmSwap(ctx, match.takerStatus, block.time) {
 				s.unlockOrderCoins(match.Taker)
 			}
 		}
@@ -2177,13 +2169,13 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 // CheckUnspent attempts to verify a coin ID for a given asset by retrieving the
 // corresponding asset.Coin. If the coin is not found or spent, an
 // asset.CoinNotFoundError is returned.
-func (s *Swapper) CheckUnspent(asset uint32, coinID []byte) error {
+func (s *Swapper) CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error {
 	backend := s.coins[asset]
 	if backend == nil {
 		return fmt.Errorf("unknown asset %d", asset)
 	}
 
-	return backend.Backend.VerifyUnspentCoin(coinID)
+	return backend.Backend.VerifyUnspentCoin(ctx, coinID)
 }
 
 // LockOrdersCoins locks the backing coins for the provided orders.

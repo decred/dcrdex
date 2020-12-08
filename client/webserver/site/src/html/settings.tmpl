@@ -17,12 +17,26 @@
         Show pop-up notifications
       </label>
     </div>
-    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      <p>
+    <div>
+      <div {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
+        <div>
+          {{range $host, $xc := .UserInfo.Exchanges}}
+            <div>
+              DEX Address: {{$host}}
+              <br>
+              Account ID: <span class="fs12">{{if eq (len $xc.AcctID) 0}}&lt;login to show&gt;{{else}}{{$xc.AcctID}}{{end}}</span>
+            </div>
+          {{end}}
+        </div>
+      </div>
+      <br>
+      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+        <p>
         The Decred DEX Client supports simultaneous use of any number of DEX
         servers.
-      </p>
-      <button id="addADex" class="bg2 selected">Add a DEX</button>
+        </p>
+        <button id="addADex" class="bg2 selected">Add a DEX</button>
+      </div>
     </div>
     <div>Build ID: <span id="commitHash" class="mono"></span></div>
   </div>

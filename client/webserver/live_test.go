@@ -303,7 +303,7 @@ func (c *tCoin) Value() uint64 {
 	return 0
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 	return c.confs, c.confsErr
 }
 
@@ -407,6 +407,41 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 		cords = append(cords, cord)
 	}
 	return cords, nil
+}
+
+func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error) {
+	mktID, _ := dex.MarketName(base, quote)
+	midGap, maxQty := getMarketStats(mktID)
+	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
+	qty := toAtoms(ord.Qty)
+	quoteQty := calc.BaseToQuote(rate, qty)
+	return &core.OrderEstimate{
+		Lots:           qty / tExchanges[host].Assets[base].LotSize,
+		Value:          quoteQty,
+		MaxFees:        quoteQty / 100,
+		EstimatedFees:  quoteQty / 200,
+		Locked:         quoteQty,
+		RedemptionFees: qty / 300,
+	}, nil
+}
+
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error) {
+	mktID, _ := dex.MarketName(base, quote)
+	midGap, maxQty := getMarketStats(mktID)
+	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
+	qty := toAtoms(ord.Qty)
+	return &core.OrderEstimate{
+		Lots:           qty / tExchanges[host].Assets[base].LotSize,
+		Value:          qty,
+		MaxFees:        qty / 100,
+		EstimatedFees:  qty / 200,
+		Locked:         qty,
+		RedemptionFees: 1,
+	}, nil
+}
+
+func toAtoms(v float64) uint64 {
+	return uint64(math.Round(v * 1e8))
 }
 
 func coreCoin() *core.Coin {
