@@ -238,7 +238,7 @@ func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, erro
 	err = dc.RequestWithTimeout(req, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(result)
 	}, DefaultResponseTimeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.OrderBookRoute)
+		errChan <- fmt.Errorf("timed out waiting for '%s' response", msgjson.OrderBookRoute)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error subscribing to %s orderbook: %w", mkt, err)
@@ -688,14 +688,15 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
-// handleEpochReportMsg is called when an epoch_report notification is
-// received.
+// handleEpochReportMsg is called when an epoch_report notification is received.
 func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	note := new(msgjson.EpochReportNote)
 	err := msg.Unmarshal(note)
 	if err != nil {
 		return fmt.Errorf("epoch report note unmarshal error: %w", err)
 	}
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
 	book, ok := dc.books[note.MarketID]
 	if !ok {
 		return fmt.Errorf("no order book found with market id '%v'",
