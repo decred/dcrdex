@@ -110,9 +110,9 @@ export default class RegistrationPage extends BasePage {
     app.setNotes([])
     page.appPW.value = ''
     page.appPWAgain.value = ''
-    app.loading(page.appPWForm)
+    const loaded = app.loading(page.appPWForm)
     var res = await postJSON('/api/init', { pass: pw })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       page.appErrMsg.textContent = res.msg
       Doc.show(page.appErrMsg)
@@ -139,12 +139,12 @@ export default class RegistrationPage extends BasePage {
       cert = await page.certFile.files[0].text()
     }
 
-    app.loading(page.dexAddrForm)
+    const loaded = app.loading(page.dexAddrForm)
     var res = await postJSON('/api/getfee', {
       addr: addr,
       cert: cert
     })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res, true)) {
       if (res.msg === 'certificate required') {
         Doc.hide(page.dexShowMore)
@@ -177,9 +177,9 @@ export default class RegistrationPage extends BasePage {
       cert: cert
     }
     page.appPass.value = ''
-    app.loading(page.confirmRegForm)
+    const loaded = app.loading(page.confirmRegForm)
     var res = await postJSON('/api/register', registration)
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       page.regErr.textContent = res.msg
       Doc.show(page.regErr)

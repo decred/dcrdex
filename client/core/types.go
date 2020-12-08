@@ -710,3 +710,17 @@ func (c assetMap) merge(other assetMap) {
 		c[assetID] = struct{}{}
 	}
 }
+
+// OrderEstimate is an estimate of the fees and locked amounts associated with
+// an order. This type differs from asset.OrderEstimate in the addition of the
+// RedemptionFees field, which comes from the other asset's wallet.
+type OrderEstimate struct {
+	Lots          uint64 `json:"lots"`
+	Value         uint64 `json:"value"`
+	MaxFees       uint64 `json:"maxFees"`
+	EstimatedFees uint64 `json:"estimatedFees"`
+	Locked        uint64 `json:"locked"`
+	// RedemptionFees are the fees associated with redeeming the order one
+	// lot at a time, using the wallet's redemption fee rate.
+	RedemptionFees uint64 `json:"redemptionFees"`
+}

@@ -842,12 +842,40 @@ func TestFundingCoins(t *testing.T) {
 	ensureGood()
 }
 
+func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estFees, locked uint64) {
+	t.Helper()
+	maxOrder, err := wallet.MaxOrder(tBTC.LotSize, tBTC)
+	if err != nil {
+		t.Fatalf("MaxOrder error: %v", err)
+	}
+	if maxOrder.Lots != lots {
+		t.Fatalf("MaxOrder has wrong Lots. wanted %d, got %d", lots, maxOrder.Lots)
+	}
+	if maxOrder.Value != swapVal {
+		t.Fatalf("MaxOrder has wrong Value. wanted %d, got %d", swapVal, maxOrder.Value)
+	}
+	if maxOrder.MaxFees != maxFees {
+		t.Fatalf("MaxOrder has wrong MaxFees. wanted %d, got %d", maxFees, maxOrder.MaxFees)
+	}
+	if maxOrder.EstimatedFees != estFees {
+		t.Fatalf("MaxOrder has wrong EstimatedFees. wanted %d, got %d", estFees, maxOrder.EstimatedFees)
+	}
+	if maxOrder.Locked != locked {
+		t.Fatalf("MaxOrder has wrong Locked. wanted %d, got %d", locked, maxOrder.Locked)
+	}
+}
+
 func TestFundEdges(t *testing.T) {
 	wallet, node, shutdown := tNewWallet(false)
 	defer shutdown()
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
+
+	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
+		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)
+	}
 
 	// Base Fees
 	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
@@ -872,7 +900,9 @@ func TestFundEdges(t *testing.T) {
 	// total_bytes  = base_tx_bytes + backing_bytes = 2101 + 149 = 2250
 	// total_fees: base_fees + backing_fees = 71434 + 5066 = 76500 atoms
 	//          OR total_bytes * fee_rate = 2510 * 34 = 76500
-	backingFees := uint64(2250) * tBTC.MaxFeeRate // total_bytes * fee_rate
+	const swapSize = 225
+	const totalBytes = 2250
+	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2pkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       tP2PKHAddr,
@@ -890,6 +920,11 @@ func TestFundEdges(t *testing.T) {
 		MaxSwapCount: lots,
 		DEXConfig:    tBTC,
 	}
+
+	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
+	estFeeReduction := swapSize * estFeeRate
+	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
+
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
@@ -897,6 +932,9 @@ func TestFundEdges(t *testing.T) {
 	// Now add the needed satoshi and try again.
 	p2pkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, swapVal+backingFees)
+
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2pkh utxo: %v", err)
@@ -909,11 +947,12 @@ func TestFundEdges(t *testing.T) {
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
-	backingFees = uint64(2250+splitTxBaggage) * tBTC.MaxFeeRate
+	backingFees = uint64(totalBytes+splitTxBaggage) * tBTC.MaxFeeRate
 	// 1 too few atoms
 	v := swapVal + backingFees - 1
 	p2pkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
 	coins, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when skipping split tx due to baggage: %v", err)
@@ -925,6 +964,9 @@ func TestFundEdges(t *testing.T) {
 	v = swapVal + backingFees
 	p2pkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggage)*estFeeRate, v)
+
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding split tx: %v", err)
@@ -1041,6 +1083,11 @@ func TestFundEdgesSegwit(t *testing.T) {
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRateWithFallback
+
+	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
+		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)
+	}
 
 	// Base Fees
 	// fee_rate: 34 satoshi / vbyte (MaxFeeRate)
@@ -1064,7 +1111,9 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// total_bytes  = base_tx_bytes + backing_bytes = 1461 + 69 = 1530
 	// total_fees: base_fees + backing_fees = 49674 + 2346 = 52020 atoms
 	//          OR total_bytes * fee_rate = 1530 * 34 = 52020
-	backingFees := uint64(1530) * tBTC.MaxFeeRate // total_bytes * fee_rate
+	const swapSize = 153
+	const totalBytes = 1530
+	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2wpkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       tP2WPKHAddr,
@@ -1082,6 +1131,11 @@ func TestFundEdgesSegwit(t *testing.T) {
 		MaxSwapCount: lots,
 		DEXConfig:    tBTC,
 	}
+
+	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
+	estFeeReduction := swapSize * estFeeRate
+	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
+
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
@@ -1089,6 +1143,9 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// Now add the needed satoshi and try again.
 	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, swapVal+backingFees)
+
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
@@ -1101,7 +1158,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
-	backingFees = uint64(1530+splitTxBaggageSegwit) * tBTC.MaxFeeRate
+	backingFees = uint64(totalBytes+splitTxBaggageSegwit) * tBTC.MaxFeeRate
 	v := swapVal + backingFees - 1
 	p2wpkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -1116,6 +1173,9 @@ func TestFundEdgesSegwit(t *testing.T) {
 	v = swapVal + backingFees
 	p2wpkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggageSegwit)*estFeeRate, v)
+
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding split tx: %v", err)

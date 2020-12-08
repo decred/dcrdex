@@ -173,9 +173,9 @@ export default class OrdersPage extends BasePage {
 
   /* fetchOrders fetches orders using the current filter. */
   async fetchOrders () {
-    app.loading(this.main)
+    const loaded = app.loading(this.main)
     const res = await postJSON('/api/orders', this.currentFilter())
-    app.loaded()
+    loaded()
     return res.orders
   }
 

@@ -27,9 +27,9 @@ export default class LoginPage extends BasePage {
       Doc.show(page.errMsg)
       return
     }
-    app.loading(page.loginForm)
+    const loaded = app.loading(page.loginForm)
     var res = await postJSON('/api/login', { pass: pw })
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) {
       page.errMsg.textContent = res.msg
       Doc.show(page.errMsg)

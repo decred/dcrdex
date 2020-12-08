@@ -89,6 +89,8 @@ type clientCore interface {
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)
 	Order(oid dex.Bytes) (*core.Order, error)
+	MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error)
+	MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -264,6 +266,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			apiAuth.Post("/orders", s.apiOrders)
 			apiAuth.Post("/order", s.apiOrder)
 			apiAuth.Post("/withdraw", s.apiWithdraw)
+			apiAuth.Post("/maxbuy", s.apiMaxBuy)
+			apiAuth.Post("/maxsell", s.apiMaxSell)
 		})
 	})
 

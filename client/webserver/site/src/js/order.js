@@ -113,9 +113,9 @@ export default class OrderPage extends BasePage {
       pw: page.cancelPass.value
     }
     page.cancelPass.value = ''
-    app.loading(page.cancelForm)
+    const loaded = app.loading(page.cancelForm)
     var res = await postJSON('/api/cancel', req)
-    app.loaded()
+    loaded()
     if (!app.checkResponse(res)) return
     page.status.textContent = 'cancelling'
     Doc.hide(page.forms)

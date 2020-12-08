@@ -137,6 +137,12 @@ func (c *TCore) Logout() error { return c.logoutErr }
 
 func (c *TCore) Orders(*core.OrderFilter) ([]*core.Order, error) { return nil, nil }
 func (c *TCore) Order(oid dex.Bytes) (*core.Order, error)        { return nil, nil }
+func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error) {
+	return nil, nil
+}
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error) {
+	return nil, nil
+}
 
 type TWriter struct {
 	b []byte
