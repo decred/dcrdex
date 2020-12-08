@@ -922,11 +922,9 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	// from server, and have server check fee rate on unconf funding coins.
 	feeRate, err := btc.feeRate(1)
 	if err != nil {
-		// fallback fee rate is NO good here.
-		// feeRate = nfo.MaxFeeRate // maybe
-		return nil, false, fmt.Errorf("Unable to get optimal fee rate for pre-split transaction: %v", err)
+		// Fallback fee rate is NO GOOD here.
+		return nil, false, fmt.Errorf("unable to get optimal fee rate for pre-split transaction: %w", err)
 	}
-	feeRate += feeRate / 10 // cost of chaining unconf txn, don't gamble.
 	if feeRate > nfo.MaxFeeRate {
 		feeRate = nfo.MaxFeeRate
 	}
