@@ -123,8 +123,9 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 	}
 }
 
-func (c *TCore) Asset(id uint32) (*asset.BackedAsset, error)         { return nil, fmt.Errorf("not tested") }
-func (c *TCore) SetFeeRateScale(assetID uint32, scale float64) error { return nil }
+func (c *TCore) Asset(id uint32) (*asset.BackedAsset, error)     { return nil, fmt.Errorf("not tested") }
+func (c *TCore) SetFeeRateScale(assetID uint32, scale float64)   {}
+func (c *TCore) ScaleFeeRate(assetID uint32, rate uint64) uint64 { return 1 }
 
 func (c *TCore) BookOrders(_, _ uint32) ([]*order.LimitOrder, error) {
 	return c.book, c.bookErr
@@ -277,8 +278,7 @@ func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, func()) {
 
 func TestPing(t *testing.T) {
 	w := httptest.NewRecorder()
-	// apiPing is a Server method, but the receiver and http.Request are unused.
-	(*Server)(nil).apiPing(w, nil)
+	apiPing(w, nil)
 	if w.Code != 200 {
 		t.Fatalf("apiPing returned code %d, expected 200", w.Code)
 	}

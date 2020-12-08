@@ -52,7 +52,7 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 }
 
 // apiPing is the handler for the '/ping' API request.
-func (*Server) apiPing(w http.ResponseWriter, _ *http.Request) {
+func apiPing(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, pongStr)
 }
 
@@ -75,11 +75,13 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var errs []string
-	dexAsset := asset.Asset
 	backend := asset.Backend
+	var scaledFeeRate uint64
 	currentFeeRate, err := backend.FeeRate()
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
+	} else {
+		scaledFeeRate = s.core.ScaleFeeRate(assetID, currentFeeRate)
 	}
 
 	synced, err := backend.Synced()
@@ -88,8 +90,9 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := &AssetInfo{
-		Asset:          dexAsset,
+		Asset:          asset.Asset,
 		CurrentFeeRate: currentFeeRate,
+		ScaledFeeRate:  scaledFeeRate,
 		Synced:         synced,
 		Errors:         errs,
 	}
@@ -103,7 +106,7 @@ func (s *Server) apiAssetPOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
 		return
 	}
-	asset, err := s.core.Asset(assetID)
+	_, err := s.core.Asset(assetID) // asset return may be used if other asset settings are modified
 	if err != nil {
 		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
 		return
@@ -131,7 +134,7 @@ func (s *Server) apiAssetPOST(w http.ResponseWriter, r *http.Request) {
 	if data.FeeRateScale != nil {
 		settingsFound = true
 		log.Infof("Setting %s (%d) fee rate scale factor to %f", strings.ToUpper(assetSymbol), assetID, *data.FeeRateScale)
-		asset.Backend.SetFeeRateScale(*data.FeeRateScale)
+		s.core.SetFeeRateScale(assetID, *data.FeeRateScale)
 	}
 
 	if settingsFound {

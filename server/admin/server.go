@@ -56,7 +56,8 @@ type SvrCore interface {
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	Asset(id uint32) (*asset.BackedAsset, error)
-	SetFeeRateScale(assetID uint32, scale float64) error
+	SetFeeRateScale(assetID uint32, scale float64)
+	ScaleFeeRate(assetID uint32, rate uint64) uint64
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
@@ -142,7 +143,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("text/plain"))
-		r.Get("/ping", s.apiPing)
+		r.Get("/ping", apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
 		r.Get("/enabledataapi/{yes}", s.apiEnableDataAPI)

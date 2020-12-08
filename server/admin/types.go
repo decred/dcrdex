@@ -18,6 +18,7 @@ type AssetPost struct {
 type AssetInfo struct {
 	dex.Asset
 	CurrentFeeRate uint64   `json:"currentFeeRate,omitempty"`
+	ScaledFeeRate  uint64   `json:"scaledFeeRate,omitempty"`
 	Synced         bool     `json:"synced"`
 	Errors         []string `json:"errors,omitempty"`
 }

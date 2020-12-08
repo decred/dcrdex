@@ -417,7 +417,6 @@ func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate          { ret
 func (a *TAsset) InitTxSize() uint32                                       { return 100 }
 func (a *TAsset) InitTxSizeBase() uint32                                   { return 66 }
 func (a *TAsset) FeeRate() (uint64, error)                                 { return 10, nil }
-func (a *TAsset) SetFeeRateScale(scale float64)                            {}
 func (a *TAsset) CheckAddress(string) bool                                 { return true }
 func (a *TAsset) Connect(context.Context) (*sync.WaitGroup, error)         { return nil, nil }
 func (a *TAsset) ValidateSecret(secret, contract []byte) bool              { return true }

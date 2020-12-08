@@ -15,7 +15,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -88,9 +87,6 @@ type Backend struct {
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
 	segwit bool
-	// feeRateScale should contain a float64 scale applied to the fee rate from
-	// estimatesmartfee. When unset, 1.0 is used.
-	feeRateScale atomic.Value
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result the (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -358,8 +354,7 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 	return dexbtc.InitTxSizeBase
 }
 
-// FeeRate returns the current optimal fee rate in sat / byte. Use
-// SetFeeRateScale to modulate the fee rate this function returns.
+// FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *Backend) FeeRate() (uint64, error) {
 	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
 	if err != nil {
@@ -375,25 +370,11 @@ func (btc *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	scale, ok := btc.feeRateScale.Load().(float64)
-	if !ok {
-		scale = 1.0
-	}
-	satPerB := uint64(math.Round(scale * float64(satPerKB) / 1000))
+	satPerB := uint64(math.Round(float64(satPerKB) / 1000))
 	if satPerB == 0 {
 		satPerB = 1
 	}
 	return satPerB, nil
-}
-
-// SetFeeRateScale specifies a scale factor by which the optimal fee rate
-// returned by FeeRate will be scaled. Values < 0 are rejected.
-func (btc *Backend) SetFeeRateScale(scale float64) {
-	if scale < 0 {
-		btc.log.Errorf("Negative fee rate scale factor is not acceptable.")
-		return
-	}
-	btc.feeRateScale.Store(scale)
 }
 
 // CheckAddress checks that the given address is parseable.

@@ -590,16 +590,17 @@ func (dm *DEX) Asset(id uint32) (*asset.BackedAsset, error) {
 	return asset.BackedAsset, nil
 }
 
-// SetFeeRateScale specifies a scale factor that the specified asset backend
-// should use to scale the optimal fee rates. That is, values above 1 increase
-// the fee rate, while values below 1 decrease it.
-func (dm *DEX) SetFeeRateScale(assetID uint32, scale float64) error {
-	asset, found := dm.assets[assetID]
-	if !found {
-		return fmt.Errorf("no backend for asset %d", assetID)
-	}
-	asset.Backend.SetFeeRateScale(scale)
-	return nil
+// SetFeeRateScale specifies a scale factor that the Swapper should use to scale
+// the optimal fee rates for new swaps for for the specified asset. That is,
+// values above 1 increase the fee rate, while values below 1 decrease it.
+func (dm *DEX) SetFeeRateScale(assetID uint32, scale float64) {
+	dm.swapper.SetFeeRateScale(assetID, scale)
+}
+
+// ScaleFeeRate scales the provided fee rate with the given asset's swap fee
+// rate scale factor, which is 1.0 by default.
+func (dm *DEX) ScaleFeeRate(assetID uint32, rate uint64) uint64 {
+	return dm.swapper.ScaleFeeRate(assetID, rate)
 }
 
 // Config returns the current dex configuration.

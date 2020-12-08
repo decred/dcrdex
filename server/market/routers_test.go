@@ -377,7 +377,6 @@ func (b *TBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 func (b *TBackend) FeeRate() (uint64, error) {
 	return 9, nil
 }
-func (b *TBackend) SetFeeRateScale(scale float64) {}
 
 func (b *TBackend) Synced() (bool, error) {
 	if b.syncedErr != nil {

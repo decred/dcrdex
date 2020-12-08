@@ -59,9 +59,6 @@ type Backend interface {
 	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
 	FeeRate() (uint64, error)
-	// SetFeeRateScale specifies a scale factor by which the optimal fee rate
-	// returned by FeeRate will be scaled. Values < 0 are rejected.
-	SetFeeRateScale(scale float64)
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)
