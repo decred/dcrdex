@@ -64,7 +64,6 @@ type WsConn interface {
 // to wait for the response.
 type responseHandler struct {
 	expiration *time.Timer
-	expire     func()
 	f          func(*msgjson.Message)
 }
 
@@ -241,15 +240,6 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	}
 	conn.ws = ws
 	conn.wsMtx.Unlock()
-
-	// Expire existing response handlers.
-	conn.reqMtx.Lock()
-	for id, h := range conn.respHandlers {
-		delete(conn.respHandlers, id)
-		h.expiration.Stop()
-		h.expire()
-	}
-	conn.reqMtx.Unlock()
 
 	conn.setConnected(true)
 	conn.wg.Add(1)
@@ -554,7 +544,6 @@ func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message), expire
 	}
 	conn.respHandlers[id] = &responseHandler{
 		expiration: time.AfterFunc(expireTime, doExpire),
-		expire:     expire,
 		f:          respHandler,
 	}
 }
