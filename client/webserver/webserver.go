@@ -219,6 +219,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 				webAuth.Get(walletsRoute, s.handleWallets)
 				webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
 				webAuth.Get(ordersRoute, s.handleOrders)
+				webAuth.Get(exportOrderRoute, s.handleExportOrders)
 
 				// These handlers require a DEX connection.
 				webAuth.Group(func(webDC chi.Router) {

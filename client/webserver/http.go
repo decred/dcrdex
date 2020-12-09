@@ -4,23 +4,28 @@
 package webserver
 
 import (
+	"encoding/csv"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
 
 const (
-	homeRoute     = "/"
-	registerRoute = "/register"
-	loginRoute    = "/login"
-	marketsRoute  = "/markets"
-	walletsRoute  = "/wallets"
-	settingsRoute = "/settings"
-	ordersRoute   = "/orders"
+	homeRoute        = "/"
+	registerRoute    = "/register"
+	loginRoute       = "/login"
+	marketsRoute     = "/markets"
+	walletsRoute     = "/wallets"
+	settingsRoute    = "/settings"
+	ordersRoute      = "/orders"
+	exportOrderRoute = "/orders/export"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -188,6 +193,93 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 		Hosts:           hosts,
 		Statuses:        allStatuses,
 	})
+}
+
+// handleExportOrders is the handler for the /orders/export page request.
+func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
+	filter := new(core.OrderFilter)
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	filter.Hosts = r.Form["hosts"]
+	assets := r.Form["assets"]
+	filter.Assets = make([]uint32, len(assets))
+	for k, assetStrId := range assets {
+		assetNumId, err := strconv.Atoi(assetStrId)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		filter.Assets[k] = uint32(assetNumId)
+	}
+	statuses := r.Form["statuses"]
+	filter.Statuses = make([]order.OrderStatus, len(statuses))
+	for k, statusStrId := range statuses {
+		statusNumId, err := strconv.Atoi(statusStrId)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		filter.Statuses[k] = order.OrderStatus(statusNumId)
+	}
+
+	ords, err := s.core.Orders(filter)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	csvWriter := csv.NewWriter(w)
+	err = csvWriter.Write([]string{
+		"Trade",
+		"Market",
+		"Type",
+		"Status",
+		"Rate",
+		"Filled (%)",
+		"Settled (%)",
+		"Time",
+	})
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	for _, ord := range ords {
+		ordReader := orderReader{ord}
+
+		rate := float64(ord.Rate) / 1e8
+		tradeStr := fmt.Sprintf("%.8f %s → %.8f %s",
+			ordReader.FromQty(), ordReader.FromSymbol(),
+			ordReader.ToQty(), ordReader.ToSymbol())
+
+		typeStr := ord.Type.String() + " "
+		if ord.Sell {
+			typeStr += "sell"
+		} else {
+			typeStr += "buy"
+		}
+
+		srvTime := encode.UnixTimeMilli(int64(ord.Stamp))
+		err = csvWriter.Write([]string{
+			tradeStr, // Trade
+			fmt.Sprintf("%s-%s @ %s", ord.BaseSymbol, ord.QuoteSymbol, ord.Host), // Market
+			typeStr,                                   // Type
+			ord.Status.String(),                       // Status
+			fmt.Sprintf("%.8f", rate),                 // Rate
+			ordReader.FilledPercent(),                 // Filled
+			ordReader.SettledPercent(),                // Settled
+			srvTime.Format("02/01/2006, 03:04:05 PM"), // Time
+		})
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
+	w.Header().Set("Content-Type", "text/csv")
+	csvWriter.Flush()
 }
 
 type orderTmplData struct {

@@ -97,6 +97,28 @@ func (ord *orderReader) ToSymbol() string {
 	return ord.BaseSymbol
 }
 
+// FromQty is the quantity of the asset which will be sent.
+func (ord *orderReader) FromQty() float64 {
+	if !ord.Sell && ord.Type != order.MarketOrderType {
+		return (float64(ord.Qty) / 1e8) * (float64(ord.Rate) / 1e8)
+	}
+	return float64(ord.Qty) / 1e8
+}
+
+// ToQty is the quantity of the asset which will be received.
+func (ord *orderReader) ToQty() float64 {
+	if ord.Sell {
+		if ord.Type == order.LimitOrderType {
+			return (float64(ord.Qty) / 1e8) * (float64(ord.Rate) / 1e8)
+		}
+	} else {
+		if ord.Type != order.MarketOrderType {
+			return float64(ord.Qty) / 1e8
+		}
+	}
+	return 0
+}
+
 // FromID is the asset ID of the asset which will be sent.
 func (ord *orderReader) FromID() uint32 {
 	if ord.Sell {

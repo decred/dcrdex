@@ -18,7 +18,7 @@ export default class OrdersPage extends BasePage {
     this.loading = false
     const page = this.page = Doc.parsePage(main, [
       'rowTmpl', 'tableBody', 'hostFilter', 'assetFilter', 'statusFilter',
-      'orderLoader', 'ordersTable'
+      'orderLoader', 'ordersTable', 'exportOrders'
     ])
     this.orderTmpl = page.rowTmpl
     this.orderTmpl.remove()
@@ -78,6 +78,10 @@ export default class OrdersPage extends BasePage {
       if (belowBottom < 0) {
         this.nextPage()
       }
+    })
+
+    Doc.bind(page.exportOrders, 'click', () => {
+      this.exportOrders()
     })
 
     this.submitFilter()
@@ -177,6 +181,40 @@ export default class OrdersPage extends BasePage {
     const res = await postJSON('/api/orders', this.currentFilter())
     loaded()
     return res.orders
+  }
+
+  /* exportOrders open a new page to export orders based on the current filter */
+  exportOrders () {
+    const page = this.page
+    this.offset = ''
+    const filterState = this.filterState
+    filterState.hosts = parseSubFilter(page.hostFilter)
+    filterState.assets = parseSubFilter(page.assetFilter)
+    filterState.statuses = parseSubFilter(page.statusFilter)
+
+    const url = new URL(window.location)
+    const search = new URLSearchParams(url.search)
+    search.delete('offset')
+
+    const setQuery = (k) => {
+      const subFilter = filterState[k]
+      search.delete(k)
+      if (subFilter.length !== 0) {
+        if (Array.isArray(subFilter)) {
+          subFilter.forEach(e => {
+            search.append(k, e)
+          })
+        } else {
+          search.set(k, subFilter)
+        }
+      }
+    }
+    setQuery('hosts')
+    setQuery('assets')
+    setQuery('statuses')
+    url.search = search.toString()
+    url.pathname = '/orders/export'
+    window.open(url.toString())
   }
 
   /*
