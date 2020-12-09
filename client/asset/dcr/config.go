@@ -38,6 +38,7 @@ type Config struct {
 	RPCCert          string  `ini:"rpccert"`
 	UseSplitTx       bool    `ini:"txsplit"`
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
+	MaxFeeRate       float64 `ini:"maxfee"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.

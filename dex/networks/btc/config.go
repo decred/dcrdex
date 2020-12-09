@@ -45,6 +45,7 @@ type Config struct {
 
 	UseSplitTx       bool    `ini:"txsplit"`
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
+	MaxFeeRate       float64 `ini:"maxfee"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 }
 

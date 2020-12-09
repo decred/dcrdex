@@ -46,6 +46,8 @@ const (
 
 	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
+	// defaultMaxFee is the default value for maxFee.
+	defaultMaxFee = 100
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -103,6 +105,12 @@ var (
 			DisplayName:  "Fallback fee rate",
 			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:          "maxfee",
+			DisplayName:  "Fee rate limit",
+			Description:  "The fee rate threshold to use for fee payment and withdrawals.  Units: DCR/kB",
+			DefaultValue: defaultMaxFee * 1000 / 1e8,
 		},
 		{
 			Key:          "redeemconftarget",
@@ -353,6 +361,7 @@ type ExchangeWallet struct {
 	acct             string
 	tipChange        func(error)
 	fallbackFeeRate  uint64
+	maxFeeRate       uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
 
@@ -439,6 +448,14 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	}
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
+	// If set in the user config, the max fee rate will be in units of DCR/kB.
+	// Convert to atoms/B.
+	maxFeesPerByte := toAtoms(dcrCfg.MaxFeeRate / 1000)
+	if maxFeesPerByte == 0 {
+		maxFeesPerByte = defaultMaxFee
+	}
+	logger.Tracef("Max fees rate set at %d atoms/byte", maxFeesPerByte)
+
 	redeemConfTarget := dcrCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
 		redeemConfTarget = defaultRedeemConfTarget
@@ -452,6 +469,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
+		maxFeeRate:          maxFeesPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
 	}
@@ -459,8 +477,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
-
+func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
@@ -774,9 +791,7 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
 // falling back to 0-conf coins where there are not enough 1+ confs coins.
-func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
-	coins asset.Coins, redeemScripts []dex.Bytes, sum, size uint64, err error) {
-
+func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, []dex.Bytes, uint64, uint64, []*fundingCoin, error) {
 	// Keep a consistent view of spendable and locked coins in the wallet and
 	// the fundingCoins map to make this safe for concurrent use.
 	dcr.fundingMtx.Lock()         // before listing unspents in wallet
@@ -924,8 +939,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
-func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
-
+func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64, fundingCoins []*fundingCoin, nfo *dex.Asset) (asset.Coins, bool, error) {
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
 	baggageFees := nfo.MaxFeeRate * splitTxBaggage

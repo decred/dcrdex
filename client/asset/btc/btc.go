@@ -47,6 +47,8 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultFee = 100
+	// defaultMaxFee is the default value for maxFee.
+	defaultMaxFee = 600
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -99,8 +101,14 @@ var (
 		{
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
-			Description:  "Bitcoin's 'fallbackfee' rate. Units: BTC/kB",
+			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: BTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:          "maxfee",
+			DisplayName:  "Fee rate limit",
+			Description:  "The fee rate threshold to use for fee payment and withdrawals.  Units: BTC/kB",
+			DefaultValue: defaultMaxFee * 1000 / 1e8,
 		},
 		{
 			Key:          "redeemconftarget",
@@ -152,6 +160,7 @@ type BTCCloneCFG struct {
 	ChainParams        *chaincfg.Params
 	Ports              dexbtc.NetPorts
 	DefaultFallbackFee uint64 // sats/byte
+	DefaultMaxFee      uint64 // sats/byte
 	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
 	// call.
 	LegacyBalance bool
@@ -338,6 +347,7 @@ type ExchangeWallet struct {
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
+	maxFeeRate        uint64
 	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
@@ -403,6 +413,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		ChainParams:        params,
 		Ports:              dexbtc.RPCPorts,
 		DefaultFallbackFee: defaultFee,
+		DefaultMaxFee:      defaultMaxFee,
 		Segwit:             true,
 	}
 
@@ -445,7 +456,16 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 	if fallbackFeesPerByte == 0 {
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
 	}
-	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte", fallbackFeesPerByte, cfg.WalletInfo.Units)
+	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
+		fallbackFeesPerByte, cfg.WalletInfo.Units)
+
+	// If set in the user config, the max fee rate will be in units of DCR/kB.
+	// Convert to sats/B.
+	maxFeesPerByte := toSatoshi(btcCfg.MaxFeeRate / 1000)
+	if maxFeesPerByte == 0 {
+		maxFeesPerByte = cfg.DefaultMaxFee
+	}
+	cfg.Logger.Tracef("Max fees rate set at %d sats/byte", maxFeesPerByte)
 
 	redeemConfTarget := btcCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
@@ -464,6 +484,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
+		maxFeeRate:          maxFeesPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
