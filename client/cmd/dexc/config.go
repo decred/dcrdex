@@ -57,13 +57,9 @@ func setNet(applicationDirectory, net string) string {
 	return filepath.Join(netDirectory, "dexc.db")
 }
 
-// defaultHostByNetwork accepts configured host with configured network
-// and returns the network specific default host if the provided host is
-// empty
-func defaultHostByNetwork(host string, network dex.Network) string {
-	if host != "" {
-		return host
-	}
+// defaultHostByNetwork accepts configured network and returns the network
+// specific default host
+func defaultHostByNetwork(network dex.Network) string {
 	switch network {
 	case dex.Testnet:
 		return defaultTestnetHost
@@ -80,14 +76,12 @@ type Config struct {
 	Config       string `long:"config" description:"Path to an INI configuration file."`
 	DBPath       string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
 	RPCOn        bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCHost      string `long:"rpchost" description:"RPC server host"`
-	RPCPort      string `long:"rpcport" description:"RPC server port"`
+	RPCAddr      string `long:"rpcaddr" description:"RPC server listen address"`
 	RPCUser      string `long:"rpcuser" description:"RPC server user name"`
 	RPCPass      string `long:"rpcpass" description:"RPC server password"`
 	RPCCert      string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
-	WebHost      string `long:"webhost" description:"HTTP server host"`
-	WebPort      string `long:"webport" description:"HTTP server port"`
+	WebAddr      string `long:"webaddr" description:"HTTP server address"`
 	NoWeb        bool   `long:"noweb" description:"disable the web server."`
 	Testnet      bool   `long:"testnet" description:"use testnet"`
 	Simnet       bool   `long:"simnet" description:"use simnet"`
@@ -98,8 +92,6 @@ type Config struct {
 	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
 	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
 	Net          dex.Network
-	RPCAddr      string
-	WebAddr      string
 	CertHosts    []string
 }
 
@@ -187,27 +179,16 @@ func configure() (*Config, error) {
 		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet(preCfg.AppData, "mainnet")
 	}
+	defaultHost := defaultHostByNetwork(cfg.Net)
 
-	// Set RPC & Web addresses, if no hosts provided fallback
-	// to default network specific host
-	RPCHost := defaultHostByNetwork(cfg.RPCHost, cfg.Net)
-	WebHost := defaultHostByNetwork(cfg.WebHost, cfg.Net)
-	var (
-		RPCPort string
-		WebPort string
-	)
-	if cfg.RPCPort != "" {
-		RPCPort = cfg.RPCPort
-	} else {
-		RPCPort = defaultRPCPort
+	// If web & RPC server addresses not set, use network specific
+	// defaults
+	if cfg.WebAddr == "" {
+		cfg.WebAddr = defaultHost + ":" + defaultWebPort
 	}
-	if cfg.WebPort != "" {
-		WebPort = cfg.WebPort
-	} else {
-		WebPort = defaultWebPort
+	if cfg.RPCAddr == "" {
+		cfg.RPCAddr = defaultHost + ":" + defaultRPCPort
 	}
-	cfg.RPCAddr = RPCHost + ":" + RPCPort
-	cfg.WebAddr = WebHost + ":" + WebPort
 
 	if cfg.RPCCert == "" {
 		cfg.RPCCert = filepath.Join(preCfg.AppData, defaultRPCCertFile)
