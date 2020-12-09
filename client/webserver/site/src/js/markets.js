@@ -732,6 +732,7 @@ export default class MarketsPage extends BasePage {
       }
     }
     this.showForm(page.verifyForm)
+    page.vPass.focus()
   }
 
   async submitCancel () {
@@ -760,6 +761,7 @@ export default class MarketsPage extends BasePage {
     const symbol = Order.isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
+    page.cancelPass.focus()
     this.cancelData = {
       bttn: Doc.tmplElement(row, 'cancelBttn'),
       order: order
