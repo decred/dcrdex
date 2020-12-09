@@ -4,15 +4,15 @@
 # calling this script.
 set -e
 echo initializing
-./dexcctl -p abc init
+./dexcctl -p abc --simnet init
 echo configuring Decred wallet
-./dexcctl -p abc -p abc newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
+./dexcctl -p abc -p abc --simnet newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
 echo configuring Bitcoin wallet
-./dexcctl -p abc -p "" newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
+./dexcctl -p abc -p "" --simnet newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
 echo configuring Litecoin wallet
-./dexcctl -p abc -p "" newwallet 2 ~/dextest/ltc/alpha/alpha.conf '{"walletname":"gamma"}'
+./dexcctl -p abc -p "" --simnet newwallet 2 ~/dextest/ltc/alpha/alpha.conf '{"walletname":"gamma"}'
 echo registering with DEX
-./dexcctl -p abc register 127.0.0.1:17273 100000000 ~/dextest/dcrdex/rpc.cert
+./dexcctl -p abc --simnet register 127.0.0.1:17273 100000000 ~/dextest/dcrdex/rpc.cert
 echo mining fee confirmation blocks
 tmux send-keys -t dcr-harness:0 "./mine-alpha 1" C-m
 sleep 2

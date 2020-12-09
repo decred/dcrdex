@@ -100,12 +100,15 @@ type Config struct {
 	Net          dex.Network
 	RPCAddr      string
 	WebAddr      string
+	CertHosts    []string
 }
 
 var defaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	Config:     defaultConfigPath,
 	DebugLevel: defaultLogLevel,
+	CertHosts: []string{defaultTestnetHost, defaultSimnetHost,
+		defaultMainnetHost},
 }
 
 // configure processes the application configuration.
