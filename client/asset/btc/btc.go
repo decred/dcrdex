@@ -106,7 +106,7 @@ var (
 		},
 		{
 			Key:          "feelimit",
-			DisplayName:  "Fee rate limit",
+			DisplayName:  "Highest acceptable fee rate",
 			Description:  "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand. Units: BTC/kB",
 			DefaultValue: defaultFeeLimit * 1000 / 1e8,
 		},
