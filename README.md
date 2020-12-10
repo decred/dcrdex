@@ -58,6 +58,9 @@ For Linux and Mac, the directory is at *~/decred*. For Windows, it's
 directory. Instructions are for Linux. For Windows, you will drop the
 `./` prefix for commands.
 
+**WARNING**: If instead of using **dcrinstall* you decide to build from source and
+you plan to trade on mainnet, use the `release-0.1` branch instead of `master`.
+
 ### Sync Blockchains
 
 Once installed, begin syncing your blockchains. In a new console, run 
