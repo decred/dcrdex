@@ -181,7 +181,7 @@ func configure() (*Config, error) {
 	}
 	defaultHost := defaultHostByNetwork(cfg.Net)
 
-	// If web & RPC server addresses not set, use network specific
+	// If web or RPC server addresses not set, use network specific
 	// defaults
 	if cfg.WebAddr == "" {
 		cfg.WebAddr = defaultHost + ":" + defaultWebPort
