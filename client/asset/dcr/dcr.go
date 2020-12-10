@@ -1874,7 +1874,10 @@ func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	if chainInfo.InitialBlockDownload || toGo > 1 {
 		ogTip := atomic.LoadInt64(&dcr.tipAtConnect)
 		totalToSync := chainInfo.Headers - ogTip
-		progress := 1 - (float32(toGo) / float32(totalToSync))
+		var progress float32 = 1
+		if totalToSync > 0 {
+			progress = 1 - (float32(toGo) / float32(totalToSync))
+		}
 		return false, progress, nil
 	}
 	return true, 1, nil
