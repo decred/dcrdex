@@ -299,7 +299,7 @@ ordersLoop:
 		// query these order statuses, and look for at-fault match failures
 		// involving them, so just give the user the benefit of the doubt.
 	}
-	log.Infof("Track for %d orders with %d active matches.", len(settling), len(activeMatches))
+	log.Infof("Tracking %d orders with %d active matches.", len(settling), len(activeMatches))
 
 	return &Market{
 		running:          make(chan struct{}), // closed on market start
