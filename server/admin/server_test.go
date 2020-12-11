@@ -28,6 +28,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/dcrd/certgen"
@@ -113,6 +114,10 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 		PersistBook:   mkt.persist,
 	}
 }
+
+func (c *TCore) Asset(id uint32) (*asset.BackedAsset, error)     { return nil, fmt.Errorf("not tested") }
+func (c *TCore) SetFeeRateScale(assetID uint32, scale float64)   {}
+func (c *TCore) ScaleFeeRate(assetID uint32, rate uint64) uint64 { return 1 }
 
 func (c *TCore) MarketStatuses() map[string]*market.Status {
 	mktStatuses := make(map[string]*market.Status, len(c.markets))
@@ -245,8 +250,7 @@ func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, func()) {
 
 func TestPing(t *testing.T) {
 	w := httptest.NewRecorder()
-	// apiPing is a Server method, but the receiver and http.Request are unused.
-	(*Server)(nil).apiPing(w, nil)
+	apiPing(w, nil)
 	if w.Code != 200 {
 		t.Fatalf("apiPing returned code %d, expected 200", w.Code)
 	}
@@ -1123,7 +1127,7 @@ func TestBan(t *testing.T) {
 	for _, test := range tests {
 		core.penalizeErr = test.penalizeErr
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/ban?"+ruleToken+"="+test.rule, nil)
+		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/ban?"+ruleKey+"="+test.rule, nil)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)

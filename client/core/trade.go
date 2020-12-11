@@ -492,6 +492,13 @@ func (t *trackedTrade) makeMetaMatch(msgMatch *msgjson.Match) *db.MetaMatch {
 		feeRateSwap = msgMatch.FeeRateBase
 	}
 
+	// Consider: bump fee rate here based on a user setting in dexConnection.
+	// feeRateSwap = feeRateSwap * 11 / 10
+	// maxFeeRate := t.dc.assets[swapAssetID].MaxFeeRate // swapAssetID according to t.Trade().Sell and t.Base()/Quote()
+	// if feeRateSwap > maxFeeRate {
+	// 	feeRateSwap = maxFeeRate
+	// }
+
 	var oid order.OrderID
 	copy(oid[:], msgMatch.OrderID)
 	var mid order.MatchID

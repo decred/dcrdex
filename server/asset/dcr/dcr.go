@@ -199,9 +199,11 @@ func (dcr *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Add 1 extra atom/byte, which is both extra conservative and prevents a
-	// zero value if the atoms/KB is less than 1000.
-	return 1 + uint64(atomsPerKB)/1000, nil
+	atomsPerB := uint64(math.Round(float64(atomsPerKB) / 1000))
+	if atomsPerB == 0 {
+		atomsPerB = 1
+	}
+	return atomsPerB, nil
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
