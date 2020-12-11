@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -23,9 +24,8 @@ import (
 )
 
 const (
-	pongStr        = "pong"
-	maxUInt16      = int(^uint16(0))
-	defaultTimeout = time.Hour * 72
+	pongStr   = "pong"
+	maxUInt16 = int(^uint16(0))
 )
 
 // writeJSON marshals the provided interface and writes the bytes to the
@@ -52,13 +52,78 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 }
 
 // apiPing is the handler for the '/ping' API request.
-func (_ *Server) apiPing(w http.ResponseWriter, _ *http.Request) {
+func apiPing(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, pongStr)
 }
 
 // apiConfig is the handler for the '/config' API request.
 func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.core.ConfigMsg())
+}
+
+func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetID, found := dex.BipSymbolID(assetSymbol)
+	if !found {
+		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
+		return
+	}
+	asset, err := s.core.Asset(assetID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
+		return
+	}
+
+	var errs []string
+	backend := asset.Backend
+	var scaledFeeRate uint64
+	currentFeeRate, err := backend.FeeRate()
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
+	} else {
+		scaledFeeRate = s.core.ScaleFeeRate(assetID, currentFeeRate)
+	}
+
+	synced, err := backend.Synced()
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("unable to get sync status: %v", err))
+	}
+
+	res := &AssetInfo{
+		Asset:          asset.Asset,
+		CurrentFeeRate: currentFeeRate,
+		ScaledFeeRate:  scaledFeeRate,
+		Synced:         synced,
+		Errors:         errs,
+	}
+	writeJSON(w, res)
+}
+
+func (s *Server) apiSetFeeScale(w http.ResponseWriter, r *http.Request) {
+	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
+	assetID, found := dex.BipSymbolID(assetSymbol)
+	if !found {
+		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
+		return
+	}
+
+	feeRateScaleStr := chi.URLParam(r, scaleKey)
+	feeRateScale, err := strconv.ParseFloat(feeRateScaleStr, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid fee rate scale %q", feeRateScaleStr), http.StatusBadRequest)
+		return
+	}
+
+	_, err = s.core.Asset(assetID) // asset return may be used if other asset settings are modified
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
+		return
+	}
+
+	log.Infof("Setting %s (%d) fee rate scale factor to %f", strings.ToUpper(assetSymbol), assetID, feeRateScale)
+	s.core.SetFeeRateScale(assetID, feeRateScale)
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) apiMarkets(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +253,7 @@ func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
 // request.
 func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 	var includeInactive bool
-	if includeInactiveStr := r.URL.Query().Get(includeInactiveToken); includeInactiveStr != "" {
+	if includeInactiveStr := r.URL.Query().Get(includeInactiveKey); includeInactiveStr != "" {
 		var err error
 		includeInactive, err = strconv.ParseBool(includeInactiveStr)
 		if err != nil {
@@ -387,7 +452,7 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	ruleStr := r.URL.Query().Get(ruleToken)
+	ruleStr := r.URL.Query().Get(ruleKey)
 	if ruleStr == "" {
 		http.Error(w, "rule not specified", http.StatusBadRequest)
 		return
@@ -486,8 +551,7 @@ func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	return msg, 0, nil
 }
 
-// apiNotify is the handler for the '/account/{accountID}/notify?timeout=TIMEOUT'
-// API request.
+// apiNotify is the handler for the '/account/{accountID}/notify' API request.
 func (s *Server) apiNotify(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
 	acctID, err := decodeAcctID(acctIDStr)

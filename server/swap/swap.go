@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -289,7 +290,9 @@ type Swapper struct {
 	dataDir string
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins map[uint32]*LockableAsset
+	coins        map[uint32]*LockableAsset
+	feeScalesMtx sync.RWMutex
+	feeScales    map[uint32]float64
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
@@ -384,6 +387,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	swapper := &Swapper{
 		dataDir:       cfg.DataDir,
 		coins:         cfg.Assets,
+		feeScales:     make(map[uint32]float64, len(cfg.Assets)),
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
 		unbookHook:    cfg.UnbookHook,
@@ -2315,6 +2319,32 @@ func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*mat
 	return matches
 }
 
+// SetFeeRateScale sets a swap fee scale factor for the given asset.
+func (s *Swapper) SetFeeRateScale(assetID uint32, scale float64) {
+	s.feeScalesMtx.Lock()
+	s.feeScales[assetID] = scale
+	s.feeScalesMtx.Unlock()
+}
+
+// ScaleFeeRate scales the provided fee rate with the given asset's swap fee
+// rate scale factor, which is 1.0 by default.
+func (s *Swapper) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
+	if feeRate == 0 {
+		return feeRate // no idea if this is sensible for any asset, but ok
+	}
+	s.feeScalesMtx.RLock()
+	feeScale, found := s.feeScales[assetID]
+	s.feeScalesMtx.RUnlock()
+	if !found {
+		return feeRate
+	}
+	if feeScale < 1 {
+		log.Warnf("Using fee rate scale of %f < 1.0 for asset %d", feeScale, assetID)
+	}
+	// It started non-zero, so don't allow it to go to zero.
+	return uint64(math.Max(1.0, math.Round(float64(feeRate)*feeScale)))
+}
+
 // Negotiate takes ownership of the matches and begins swap negotiation. For
 // reliable identification of completed orders when redeem acks are received and
 // processed by processAck, BeginMatchAndNegotiate should be called prior to
@@ -2352,6 +2382,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 			log.Warnf("Unable to determining optimal fee rate for %q, using fallback of %d. Err: %v",
 				asset.Symbol, feeRate, err)
 		} else {
+			feeRate = s.ScaleFeeRate(assetID, feeRate)
 			log.Debugf("Optimal fee rate for %q: %d", asset.Symbol, feeRate)
 			if feeRate > maxFeeRate {
 				log.Warnf("Optimal fee rate %d > max fee rate %d, using max fee rate.",

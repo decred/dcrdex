@@ -370,9 +370,11 @@ func (btc *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Add 1 extra sat/byte, which is both extra conservative and prevents a
-	// zero value if the sat/KB is less than 1000.
-	return 1 + uint64(satPerKB)/1000, nil
+	satPerB := uint64(math.Round(float64(satPerKB) / 1000))
+	if satPerB == 0 {
+		satPerB = 1
+	}
+	return satPerB, nil
 }
 
 // CheckAddress checks that the given address is parseable.
