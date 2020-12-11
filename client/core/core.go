@@ -1449,6 +1449,15 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating wallet: %w", err)
 	}
+	// Parse fee rate limit
+	feeLimit := walletCfg.Settings["feelimit"]
+	if feeLimit != "" {
+		floatLimit, err := strconv.ParseFloat(feeLimit, 32)
+		if err != nil {
+			return nil, err
+		}
+		wallet.feeRateLimit = float32(floatLimit)
+	}
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
@@ -1465,6 +1474,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		address: dbWallet.Address,
 		dbID:    dbWallet.ID(),
 	}, nil
+	wallet.Wallet = w
 }
 
 // WalletState returns the *WalletState for the asset ID.

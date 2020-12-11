@@ -28,6 +28,7 @@ type xcWallet struct {
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
+	feeRateLimit float32
 }
 
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so

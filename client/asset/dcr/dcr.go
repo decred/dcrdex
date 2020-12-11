@@ -47,7 +47,7 @@ const (
 	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
 	// defaultFeeLimit is the default value for feelimit.
-	defaultFeeLimit = 100
+	// defaultFeeLimit = 100
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -107,10 +107,9 @@ var (
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
-			Key:          "feelimit",
-			DisplayName:  "Highest acceptable fee rate",
-			Description:  "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand.  Units: DCR/kB",
-			DefaultValue: defaultFeeLimit * 1000 / 1e8,
+			Key:         "feelimit",
+			DisplayName: "Highest acceptable fee rate",
+			Description: "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand.  Units: DCR/kB",
 		},
 		{
 			Key:          "redeemconftarget",
@@ -361,7 +360,6 @@ type ExchangeWallet struct {
 	acct             string
 	tipChange        func(error)
 	fallbackFeeRate  uint64
-	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
 
@@ -448,14 +446,6 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	}
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
-	// If set in the user config, the max fee rate will be in units of DCR/kB.
-	// Convert to atoms/B.
-	feesLimitPerByte := toAtoms(dcrCfg.FeeRateLimit / 1000)
-	if feesLimitPerByte == 0 {
-		feesLimitPerByte = defaultFeeLimit
-	}
-	logger.Tracef("Fees rate limit set at %d atoms/byte", feesLimitPerByte)
-
 	redeemConfTarget := dcrCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
 		redeemConfTarget = defaultRedeemConfTarget
@@ -469,7 +459,6 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
-		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
 	}
