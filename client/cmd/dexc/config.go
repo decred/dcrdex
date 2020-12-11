@@ -19,10 +19,13 @@ import (
 
 const (
 	maxLogRolls        = 16
-	defaultRPCAddr     = "localhost:5757"
 	defaultRPCCertFile = "rpc.cert"
 	defaultRPCKeyFile  = "rpc.key"
-	defaultWebAddr     = "localhost:5758"
+	defaultMainnetHost = "127.0.0.1"
+	defaultTestnetHost = "127.0.0.2"
+	defaultSimnetHost  = "127.0.0.3"
+	defaultRPCPort     = "5757"
+	defaultWebPort     = "5758"
 	configFilename     = "dexc.conf"
 	defaultLogLevel    = "debug"
 )
@@ -54,6 +57,19 @@ func setNet(applicationDirectory, net string) string {
 	return filepath.Join(netDirectory, "dexc.db")
 }
 
+// defaultHostByNetwork accepts configured network and returns the network
+// specific default host
+func defaultHostByNetwork(network dex.Network) string {
+	switch network {
+	case dex.Testnet:
+		return defaultTestnetHost
+	case dex.Simnet:
+		return defaultSimnetHost
+	default:
+		return defaultMainnetHost
+	}
+}
+
 // Config is the configuration for the DEX client application.
 type Config struct {
 	AppData      string `long:"appdata" description:"Path to application directory."`
@@ -76,14 +92,15 @@ type Config struct {
 	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
 	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
 	Net          dex.Network
+	CertHosts    []string
 }
 
 var defaultConfig = Config{
 	AppData:    defaultApplicationDirectory,
 	Config:     defaultConfigPath,
 	DebugLevel: defaultLogLevel,
-	RPCAddr:    defaultRPCAddr,
-	WebAddr:    defaultWebAddr,
+	CertHosts: []string{defaultTestnetHost, defaultSimnetHost,
+		defaultMainnetHost},
 }
 
 // configure processes the application configuration.
@@ -149,6 +166,7 @@ func configure() (*Config, error) {
 	if cfg.Simnet && cfg.Testnet {
 		return nil, fmt.Errorf("simnet and testnet cannot both be specified")
 	}
+
 	var defaultDBPath string
 	switch {
 	case cfg.Testnet:
@@ -160,6 +178,16 @@ func configure() (*Config, error) {
 	default:
 		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet(preCfg.AppData, "mainnet")
+	}
+	defaultHost := defaultHostByNetwork(cfg.Net)
+
+	// If web or RPC server addresses not set, use network specific
+	// defaults
+	if cfg.WebAddr == "" {
+		cfg.WebAddr = defaultHost + ":" + defaultWebPort
+	}
+	if cfg.RPCAddr == "" {
+		cfg.RPCAddr = defaultHost + ":" + defaultRPCPort
 	}
 
 	if cfg.RPCCert == "" {

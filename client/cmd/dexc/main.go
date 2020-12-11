@@ -91,12 +91,13 @@ func main() {
 	if cfg.RPCOn {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
 		rpcCfg := &rpcserver.Config{
-			Core: clientCore,
-			Addr: cfg.RPCAddr,
-			User: cfg.RPCUser,
-			Pass: cfg.RPCPass,
-			Cert: cfg.RPCCert,
-			Key:  cfg.RPCKey,
+			Core:      clientCore,
+			Addr:      cfg.RPCAddr,
+			User:      cfg.RPCUser,
+			Pass:      cfg.RPCPass,
+			Cert:      cfg.RPCCert,
+			Key:       cfg.RPCKey,
+			CertHosts: cfg.CertHosts,
 		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
