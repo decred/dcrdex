@@ -1460,15 +1460,14 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 		CoinID:   coinID,
 		Contract: contract,
 	}
-	// The DEX may wait up to its configured broadcast timeout to locate the
-	// contract txn, so wait at least that long for a response. Note that the
-	// server presently waits an unspecified amount of time that is shorter than
-	// this, which gives the client an msgjson.TransactionUndiscovered error to
-	// signal to the client to try broadcasting again or check their asset
-	// backend connectivity before hitting the broadcast timeout (and being
-	// penalized).
+	// The DEX may wait up to its configured broadcast timeout, but we will
+	// retry on timeout or other error. Note that the server presently waits an
+	// unspecified amount of time, which gives the client an
+	// msgjson.TransactionUndiscovered error to signal to the client to try
+	// broadcasting again or check their asset backend connectivity before
+	// hitting the broadcast timeout (and being penalized).
 	var needsResolution bool
-	timeout := t.broadcastTimeout()
+	timeout := t.broadcastTimeout() / 4
 	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
 		var msgErr *msgjson.Error
 		needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
@@ -1639,9 +1638,9 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 			Secret:  proof.Secret,
 		}
 		ack := new(msgjson.Acknowledgement)
-		// The DEX may wait up to its configured broadcast timeout, so wait at least
-		// that long for a response.
-		timeout := t.broadcastTimeout()
+		// The DEX may wait up to its configured broadcast timeout, but we will
+		// retry on timeout or other error.
+		timeout := t.broadcastTimeout() / 4
 		if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
 			var msgErr *msgjson.Error
 			needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError

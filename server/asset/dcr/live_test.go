@@ -219,7 +219,7 @@ func TestLiveUTXO(t *testing.T) {
 					// Just check for no error on Confirmations.
 					confs, err := utxo.Confirmations(ctx)
 					if err != nil {
-						return fmt.Errorf("error getting confirmations for mempool tx output: %v", err)
+						return fmt.Errorf("error getting confirmations for mempool tx output: %w", err)
 					}
 					if confs != int64(expectedConfs) {
 						return fmt.Errorf("expected %d confirmations, found %d for %s:%d", expectedConfs, confs, txHash, vout)
@@ -231,7 +231,7 @@ func TestLiveUTXO(t *testing.T) {
 					// Since we are iterating backwards starting with mempool, we would
 					// already know the spending transaction and have it stored.
 					if !txOutIsSpent(*txHash, uint32(vout)) {
-						return fmt.Errorf("unexpected UTXO error: %v", err)
+						return fmt.Errorf("unexpected UTXO error: %w", err)
 					}
 					break
 				case !scriptTypeOK && err == nil:

@@ -6,13 +6,10 @@ package swap
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -54,15 +51,13 @@ func makerTaker(isMaker bool) string {
 type AuthManager interface {
 	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
-	Sign(...msgjson.Signable) error
+	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message) error
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
 	SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time)
 	Inaction(user account.AccountID, misstep auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
-	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
-	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -70,12 +65,9 @@ type Storage interface {
 	db.SwapArchiver
 	LastErr() error
 	Fatal() <-chan struct{}
-	InsertMatch(match *order.Match) error
+	Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error)
 	CancelOrder(*order.LimitOrder) error
-	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
-	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
-	GetStateHash() ([]byte, error)
-	SetStateHash([]byte) error
+	InsertMatch(match *order.Match) error
 }
 
 // swapStatus is information related to the completion or incompletion of each
@@ -115,8 +107,8 @@ func (ss *swapStatus) redeemSeenTime() time.Time {
 type matchTracker struct {
 	mtx sync.RWMutex // Match.Sigs and Match.Status
 	*order.Match
-	time        time.Time
-	matchTime   time.Time
+	time        time.Time // the match request time, not epoch close
+	matchTime   time.Time // epoch close time
 	makerStatus *swapStatus
 	takerStatus *swapStatus
 }
@@ -172,122 +164,10 @@ type LockableAsset struct {
 	coinlock.CoinLocker // should be *coinlock.AssetCoinLocker
 }
 
-type orderSwapStat struct {
-	SwapCount int
-	OffBook   bool
-	HasFailed bool
-}
-
-// orderSwapTracker facilitates cancellation rate computation without complex,
-// costly, and frequent DB queries.
-type orderSwapTracker struct {
-	mtx          sync.Mutex
-	orderMatches map[order.OrderID]*orderSwapStat
-}
-
-func newOrderSwapTracker() *orderSwapTracker {
-	return &orderSwapTracker{
-		orderMatches: make(map[order.OrderID]*orderSwapStat),
-	}
-}
-
-// decrementActiveSwapCount decrements the number of active swaps for an order,
-// returning a boolean indicating if the order is now considered complete, where
-// complete means there are no more active swaps, the order is off-book, and the
-// user is not responsible for any swap failures or premature unbooking of the
-// order. If the number of active swaps is reduced to zero, the order is removed
-// from the tracker, and repeated calls to decrementActiveSwapCount for the
-// order will return true.
-func (s *orderSwapTracker) decrementActiveSwapCount(ord order.Order, failed bool) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	oid := ord.ID()
-	stat := s.orderMatches[oid]
-	if stat == nil {
-		log.Warnf("isOrderComplete: untracked order %v", oid)
-		return true
-	}
-
-	stat.HasFailed = stat.HasFailed || failed
-
-	stat.SwapCount--
-	if stat.SwapCount != 0 {
-		return false
-	}
-
-	// Remove the order's entry only if:
-	// - it has never failed OR
-	// - it is off-book, meaning it will never be seen again
-	if !stat.HasFailed || stat.OffBook {
-		delete(s.orderMatches, oid)
-	}
-
-	return stat.OffBook && !stat.HasFailed
-}
-
-// swapSuccess decrements the active swap counter for an order. The return value
-// indicates if the order is considered successfully complete, which is a status
-// that precludes cancellation of the order, or failure of any swaps involving
-// the order on account of the user's (in)action. The order's failure and
-// off-book flags are unchanged.
-func (s *orderSwapTracker) swapSuccess(ord order.Order) bool {
-	return s.decrementActiveSwapCount(ord, false)
-}
-
-// swapFailure decrements the active swap counter for an order, and flags the
-// order as having failed. The off-book flag is unchanged.
-func (s *orderSwapTracker) swapFailure(ord order.Order) {
-	s.decrementActiveSwapCount(ord, true)
-}
-
-// incActiveSwapCount registers a new swap for the given order, flagging the
-// order according to offBook.
-func (s *orderSwapTracker) incActiveSwapCount(ord order.Order, offBook bool) {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	oid := ord.ID()
-	stat := s.orderMatches[oid]
-	if stat == nil {
-		s.orderMatches[oid] = &orderSwapStat{
-			SwapCount: 1,
-			OffBook:   offBook,
-		}
-		return
-	}
-
-	stat.SwapCount++
-	stat.OffBook = offBook // should never change true to false
-}
-
-// canceled records an order as off-book and failed if it exists in the active
-// order swaps map. No new entry is made because there cannot be future swaps
-// for a canceled order. For this reason, be sure to use incActiveSwapCount
-// before canceled when processing new matches in Negotiate.
-func (s *orderSwapTracker) canceled(ord order.Order) {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	oid := ord.ID()
-	stat := s.orderMatches[oid]
-	if stat == nil {
-		// No active swaps for canceled order, OK.
-		return
-	}
-
-	// Prevent completion of active swaps from counting the order as
-	// successfully completed.
-	stat.OffBook = true
-	stat.HasFailed = true
-}
-
 // Swapper handles order matches by handling authentication and inter-party
 // communications between clients, or 'users'. The Swapper authenticates users
 // (vua AuthManager) and validates transactions as they are reported.
 type Swapper struct {
-	// Where state is dumped on shutdown.
-	dataDir string
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
 	coins        map[uint32]*LockableAsset
@@ -297,17 +177,14 @@ type Swapper struct {
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
 	authMgr AuthManager
-	// unbookHook is a callback the the Swapper's controller (e.g. DEX manager)
-	// for removing an order from the book. This should be called when a swap is
-	// revoked due to failure of the order's owner to complete the necessary
-	// actions.
-	unbookHook func(lo *order.LimitOrder) bool
-	// The matches map and the contained matches are protected by the matchMtx.
+	// swapDone is callback for reporting a swap outcome.
+	swapDone func(oid order.Order, match *order.Match, fail bool)
+
+	// The matches maps and the contained matches are protected by the matchMtx.
 	matchMtx    sync.RWMutex
 	matches     map[order.MatchID]*matchTracker
 	userMatches map[account.AccountID]map[order.MatchID]*matchTracker
-	// orders tracks order status and active swaps.
-	orders *orderSwapTracker
+
 	// The broadcast timeout.
 	bTimeout time.Duration
 	// Expected locktimes for maker and taker swaps.
@@ -324,21 +201,11 @@ type Swapper struct {
 	// stop is used to prevent new handlers from starting coin waiters. It is
 	// set to true during shutdown of Run.
 	stop bool
-
-	// liveWaiters is used to track active coin waiters running in latencyQ.
-	liveWaitersMtx sync.Mutex
-	liveWaiters    map[waiterKey]*handlerArgs
 }
 
 // Config is the swapper configuration settings. A Config instance is the only
 // argument to the Swapper constructor.
 type Config struct {
-	// DataDir is the folder where swap state is stored.
-	DataDir string
-	// AllowPartialRestore indicates if it is acceptable to load only part of
-	// the State if the Swapper's asset configuration lacks assets required to
-	// load all elements of State.
-	AllowPartialRestore bool
 	// Assets is a map to all the asset information, including the asset backends,
 	// used by this Swapper.
 	Assets map[uint32]*LockableAsset
@@ -351,32 +218,21 @@ type Config struct {
 	BroadcastTimeout time.Duration
 	// LockTimeTaker is the locktime Swapper will use for auditing taker swaps.
 	LockTimeTaker time.Duration
-	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
+	// LockTimeMaker is the locktime Swapper will use for auditing maker swaps.
 	LockTimeMaker time.Duration
-	// IgnoreState indicates that the swapper should not load the latest state
-	// from file.
-	IgnoreState bool
-	// StatePath is a path to a swap state file from which the swapper state
-	// will be loaded. If StatePath is not set, and IgnoreState if false, the
-	// most recent stored state file will be loaded. StatePath supercedes
-	// IgnoreState.
-	StatePath string
-	// UnbookHook informs the DEX manager that the specified order should be
-	// removed from the order book.
-	UnbookHook func(lo *order.LimitOrder) bool
+	// NoResume indicates that the swapper should not resume active swaps.
+	NoResume bool
+	// AllowPartialRestore indicates if it is acceptable to load only some of
+	// the active swaps if the Swapper's asset configuration lacks assets
+	// required to load them all.
+	AllowPartialRestore bool
+	// SwapDone registers a match with the DEX manager (or other consumer) for a
+	// given order as being finished.
+	SwapDone func(oid order.Order, match *order.Match, fail bool)
 }
 
 // NewSwapper is a constructor for a Swapper.
 func NewSwapper(cfg *Config) (*Swapper, error) {
-	// Verify the directory where swap state will be saved.
-	inf, err := os.Stat(cfg.DataDir)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("data folder %q does not exist", cfg.DataDir)
-	}
-	if !inf.IsDir() {
-		return nil, fmt.Errorf("path %q is not a directory", cfg.DataDir)
-	}
-
 	for _, asset := range cfg.Assets {
 		if asset.MaxFeeRate == 0 {
 			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", asset.Symbol)
@@ -385,20 +241,17 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		dataDir:       cfg.DataDir,
 		coins:         cfg.Assets,
 		feeScales:     make(map[uint32]float64, len(cfg.Assets)),
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
-		unbookHook:    cfg.UnbookHook,
+		swapDone:      cfg.SwapDone,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
 		userMatches:   make(map[account.AccountID]map[order.MatchID]*matchTracker),
-		orders:        newOrderSwapTracker(),
 		bTimeout:      cfg.BroadcastTimeout,
 		lockTimeTaker: cfg.LockTimeTaker,
 		lockTimeMaker: cfg.LockTimeMaker,
-		liveWaiters:   make(map[waiterKey]*handlerArgs),
 	}
 
 	// Ensure txWaitExpiration is not greater than broadcast timeout setting.
@@ -406,57 +259,8 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		txWaitExpiration = sensible
 	}
 
-	// Load the initial state.
-	var state *State
-	if cfg.StatePath != "" {
-		log.Infof("attempting to load the swap state from user-specified file at %s", cfg.StatePath)
-		state, err = LoadStateFile(cfg.StatePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load specified state file %s", cfg.StatePath)
-		}
-
-	} else if !cfg.IgnoreState {
-		log.Infof("searching for swap state files in %q", cfg.DataDir)
-		stateFile, err := LatestStateFile(cfg.DataDir)
-		if err != nil {
-			return nil, fmt.Errorf("unable to read datadir: %w", err)
-		}
-		if stateFile != nil {
-			// Get the last stored state file hash, and check it against the
-			// most recent state file.
-			stateHash, err := swapper.storage.GetStateHash()
-			if err != nil {
-				return nil, fmt.Errorf("error getting stateHash")
-			}
-
-			// If stateHash is empty, there has never been a state hash stored,
-			// so there is nothing to do.
-			if len(stateHash) > 0 {
-				fileHash, err := encode.FileHash(stateFile.Name)
-				if err != nil {
-					return nil, fmt.Errorf("FileHash error: %w", err)
-				}
-
-				if !bytes.Equal(stateHash, fileHash) {
-					return nil, fmt.Errorf("latest swap %s file failed consistency check", stateFile.Name)
-				}
-
-				state, err = LoadStateFile(stateFile.Name)
-				if err != nil {
-					return nil, fmt.Errorf("failed to load swap state file %v: %w", stateFile.Name, err)
-				}
-				log.Infof("loaded the most recent swap state file from %q", stateFile.Name)
-			}
-
-		} else {
-			log.Info("no swap state files found")
-		}
-	}
-
-	if state != nil {
-		log.Infof("loaded swap state contains %d live matches and %d live coin waiters",
-			len(state.MatchTrackers), len(state.LiveWaiters))
-		err = swapper.restoreState(state, cfg.AllowPartialRestore)
+	if !cfg.NoResume {
+		err := swapper.restoreActiveSwaps(cfg.AllowPartialRestore)
 		if err != nil {
 			return nil, err
 		}
@@ -558,38 +362,71 @@ func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
 	return quoteSynced, nil
 }
 
-func (s *Swapper) restoreState(state *State, allowPartial bool) error {
-	// State binary version check should be done when State is loaded.
+func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
+	// Load active swap data from DB.
+	swapData, err := s.storage.ActiveSwaps()
+	if err != nil {
+		return err
+	}
+	log.Infof("Loaded swap data for %d active swaps.", len(swapData))
+	if len(swapData) == 0 {
+		return nil
+	}
 
-	// Check that the assets required by State are included
+	// Check that the required assets backends are available.
 	missingAssets := make(map[uint32]bool)
-	for _, id := range state.Assets {
-		if s.coins[id] == nil {
-			if !allowPartial {
-				return fmt.Errorf("unable to find backend for asset %d in restore state", id)
-			}
-			log.Warnf("Unable to find backend for asset %d in restore state.", id)
+	checkAsset := func(id uint32) {
+		if s.coins[id] == nil && !missingAssets[id] {
+			log.Warnf("Unable to find backend for asset %d with active swaps.", id)
 			missingAssets[id] = true
 		}
+	}
+	for _, sd := range swapData {
+		checkAsset(sd.Base)
+		checkAsset(sd.Quote)
+	}
+
+	if len(missingAssets) > 0 && !allowPartial {
+		return fmt.Errorf("missing backend for asset with active swaps")
 	}
 
 	// Load the matchTrackers, calling the Contract and Redemption asset.Backend
 	// methods as needed.
 
+	type swapStatusData struct {
+		SwapAsset       uint32 // from market schema and takerSell bool
+		RedeemAsset     uint32
+		SwapTime        int64  // {a,b}ContractTime
+		ContractCoinOut []byte // {a,b}ContractCoinID
+		ContractScript  []byte // {a,b}Contract
+		RedeemTime      int64  // {a,b}RedeemTime
+		RedeemCoinIn    []byte // {a,b}aRedeemCoinID
+		// SwapConfirmTime is not stored in the DB, so use time.Now() if the
+		// contract has reached SwapConf.
+	}
+
 	translateSwapStatus := func(ss *swapStatus, ssd *swapStatusData, cpSwapCoin []byte) error {
+		ss.swapAsset, ss.redeemAsset = ssd.SwapAsset, ssd.RedeemAsset
+
 		swapCoin := ssd.ContractCoinOut
 		if len(swapCoin) > 0 {
 			assetID := ssd.SwapAsset
-			swap, err := s.coins[assetID].Backend.Contract(swapCoin, ssd.ContractScript)
+			swapAsset := s.coins[assetID]
+			swap, err := swapAsset.Backend.Contract(swapCoin, ssd.ContractScript)
 			if err != nil {
 				return fmt.Errorf("unable to find swap out coin %x for asset %d: %w", swapCoin, assetID, err)
 			}
 			ss.swap = swap
 			ss.swapTime = encode.UnixTimeMilli(ssd.SwapTime)
-		}
 
-		if ssd.SwapConfirmTime != 0 {
-			ss.swapConfirmed = encode.UnixTimeMilli(ssd.SwapConfirmTime)
+			swapConfs, err := swap.Confirmations(context.Background())
+			if err != nil {
+				log.Warnf("No swap confirmed time for %v: %v", swap, err)
+			} else if swapConfs >= int64(swapAsset.SwapConf) {
+				// We don't record the time at which we saw the block that got
+				// the swap to SwapConf, so give the user extra time.
+				ss.swapConfirmed = time.Now().UTC()
+			}
 		}
 
 		if redeemCoin := ssd.RedeemCoinIn; len(redeemCoin) > 0 {
@@ -605,172 +442,128 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 		return nil
 	}
 
-	s.matches = make(map[order.MatchID]*matchTracker, len(state.MatchTrackers))
+	s.matches = make(map[order.MatchID]*matchTracker, len(swapData))
 	s.userMatches = make(map[account.AccountID]map[order.MatchID]*matchTracker)
-	for mid, mtd := range state.MatchTrackers {
+	for _, sd := range swapData {
+		if missingAssets[sd.Base] {
+			log.Warnf("Dropping match %v with no backend available for base asset %d", sd.ID, sd.Base)
+			continue
+		}
+		if missingAssets[sd.Quote] {
+			log.Warnf("Dropping match %v with no backend available for quote asset %d", sd.ID, sd.Quote)
+			continue
+		}
+		// Load the maker's order.LimitOrder and taker's order.Order. WARNING:
+		// This is a different Order instance from whatever Market or other
+		// subsystems might have. As such, the mutable fields or accessors of
+		// mutable data should not be used.
+		taker, _, err := s.storage.Order(sd.MatchData.Taker, sd.Base, sd.Quote)
+		if err != nil {
+			log.Errorf("Failed to load taker order: %v", err)
+			continue
+		}
+		if taker.ID() != sd.MatchData.Taker {
+			log.Errorf("Failed to load order %v, computed ID %v instead", sd.MatchData.Taker, taker.ID())
+			continue
+		}
+		maker, _, err := s.storage.Order(sd.MatchData.Maker, sd.Base, sd.Quote)
+		if err != nil {
+			log.Errorf("Failed to load taker order: %v", err)
+			continue
+		}
+		if maker.ID() != sd.MatchData.Maker {
+			log.Errorf("Failed to load order %v, computed ID %v instead", sd.MatchData.Maker, maker.ID())
+			continue
+		}
+		makerLO, ok := maker.(*order.LimitOrder)
+		if !ok {
+			log.Errorf("Maker order was not a limit order: %T", maker)
+			continue
+		}
+
+		match := &order.Match{
+			Taker:        taker,
+			Maker:        makerLO,
+			Quantity:     sd.Quantity,
+			Rate:         sd.Rate,
+			FeeRateBase:  sd.BaseRate,
+			FeeRateQuote: sd.QuoteRate,
+			Epoch:        sd.Epoch,
+			Status:       sd.Status,
+			Sigs: order.Signatures{ // not really needed
+				MakerMatch:  sd.SwapData.SigMatchAckMaker,
+				TakerMatch:  sd.SwapData.SigMatchAckTaker,
+				MakerAudit:  sd.SwapData.ContractAAckSig,
+				TakerAudit:  sd.SwapData.ContractBAckSig,
+				TakerRedeem: sd.SwapData.RedeemAAckSig,
+			},
+		}
+
+		mid := sd.MatchData.ID
+		if mid != match.ID() { // serialization is order IDs, qty, and rate
+			log.Errorf("Failed to load Match %v, computed ID %v instead", mid, match.ID())
+			continue
+		}
+
 		// Check and skip matches for missing assets.
-		makerSwapAsset := mtd.MakerStatus.SwapAsset
-		makerRedeemAsset := mtd.MakerStatus.RedeemAsset
+		makerSwapAsset, makerRedeemAsset := sd.Base, sd.Quote // maker selling -> their swap asset is base
+		if sd.TakerSell {                                     // maker buying -> their swap asset is quote
+			makerSwapAsset, makerRedeemAsset = sd.Quote, sd.Base
+		}
 		if missingAssets[makerSwapAsset] {
-			log.Infof("Skipping match %v with missing asset %d", mid, makerSwapAsset)
+			log.Infof("Skipping match %v with missing asset %d backend", mid, makerSwapAsset)
 			continue
 		}
 		if missingAssets[makerRedeemAsset] {
-			log.Infof("Skipping match %v with missing asset %d", mid, makerRedeemAsset)
+			log.Infof("Skipping match %v with missing asset %d backend", mid, makerRedeemAsset)
 			continue
 		}
 
+		epochCloseTime := match.Epoch.End()
 		mt := &matchTracker{
-			Match:     mtd.Match,
-			time:      encode.UnixTimeMilli(mtd.Time),
-			matchTime: mtd.Match.Epoch.End(),
-			makerStatus: &swapStatus{
-				swapAsset:   makerSwapAsset,
-				redeemAsset: makerRedeemAsset,
-			},
-			takerStatus: &swapStatus{
-				swapAsset:   makerRedeemAsset, // mtd.TakerStatus.SwapAsset
-				redeemAsset: makerSwapAsset,   // mtd.TakerStatus.RedeemAsset
-			},
+			Match:       match,
+			time:        epochCloseTime.Add(time.Minute), // not quite, just be generous
+			matchTime:   epochCloseTime,
+			makerStatus: &swapStatus{}, // populated by translateSwapStatus
+			takerStatus: &swapStatus{},
 		}
 
-		if err := translateSwapStatus(mt.makerStatus, mtd.MakerStatus, mtd.TakerStatus.ContractCoinOut); err != nil {
-			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
+		makerStatus := &swapStatusData{
+			SwapAsset:       makerSwapAsset,
+			RedeemAsset:     makerRedeemAsset,
+			SwapTime:        sd.SwapData.ContractATime,
+			ContractCoinOut: sd.SwapData.ContractACoinID,
+			ContractScript:  sd.SwapData.ContractA,
+			RedeemTime:      sd.SwapData.RedeemATime,
+			RedeemCoinIn:    sd.SwapData.RedeemACoinID,
+		}
+		takerStatus := &swapStatusData{
+			SwapAsset:       makerRedeemAsset,
+			RedeemAsset:     makerSwapAsset,
+			SwapTime:        sd.SwapData.ContractBTime,
+			ContractCoinOut: sd.SwapData.ContractBCoinID,
+			ContractScript:  sd.SwapData.ContractB,
+			RedeemTime:      sd.SwapData.RedeemBTime,
+			RedeemCoinIn:    sd.SwapData.RedeemBCoinID,
+		}
+
+		if err := translateSwapStatus(mt.makerStatus, makerStatus, takerStatus.ContractCoinOut); err != nil {
+			log.Errorf("Loading match %v failed: %v", mid, err)
 			continue
 		}
-		if err := translateSwapStatus(mt.takerStatus, mtd.TakerStatus, mtd.MakerStatus.ContractCoinOut); err != nil {
-			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
+		if err := translateSwapStatus(mt.takerStatus, takerStatus, makerStatus.ContractCoinOut); err != nil {
+			log.Errorf("Loading match %v failed: %v", mid, err)
 			continue
 		}
 
+		log.Infof("Resuming swap %v in status %v", mid, mt.Status)
 		s.addMatch(mt)
 	}
 
-	// Order completion/failure tracking data
-	s.orders.orderMatches = state.OrderMatches
-
-	// Live coin waiters started by the comms handlers for client init and
-	// redeem messages
-	//
-	// Rerun handleInit or handleRedeem to revalidate the contract/redeem and
-	// start the coin waiters that trigger processInit and processRedeem.
-	// Alternatively, we could manually start a waiter. Manually creating a
-	// waiter requires (1) s.step to get stepInfo and (2) msg.Payload unmarshal
-	// into params, a msgjson.Init or msgjson.Redeem. Manually doing this would
-	// skip the msg and contract/redeem validation.
-
-	for _, waitDat := range state.LiveWaiters {
-		var msgErr *msgjson.Error
-		rt := waitDat.Msg.Route
-		switch rt {
-		case msgjson.InitRoute:
-			msgErr = s.handleInit(waitDat.User, waitDat.Msg)
-		case msgjson.RedeemRoute:
-			msgErr = s.handleRedeem(waitDat.User, waitDat.Msg)
-		default:
-			log.Errorf("%s is not a route that starts coinwaiters!", rt)
-			continue
-		}
-
-		if msgErr != nil {
-			log.Errorf("Failed to reprocess %v message: %v", rt, msgErr)
-		}
-	}
+	// Live coin waiters are abandoned on Swapper shutdown. When a client
+	// reconnects or their init request times out, they will resend it.
 
 	return nil
-}
-
-func (s *Swapper) saveState() {
-	// Store state.
-	fName := fmt.Sprintf("swapState-%d.gob", encode.UnixMilli(time.Now()))
-	fPath := filepath.Join(s.dataDir, fName)
-	f, err := os.Create(fPath)
-	if err != nil {
-		log.Errorf("Failed to create swap state file %v: %v", fName, err)
-		return
-	}
-	defer f.Close()
-
-	mtd := make(map[order.MatchID]*matchTrackerData, len(s.matches))
-	neededAssets := make(map[uint32]struct{}, len(s.coins))
-	for matchID, mt := range s.matches {
-		neededAssets[mt.Match.Maker.BaseAsset] = struct{}{}
-		neededAssets[mt.Match.Maker.QuoteAsset] = struct{}{}
-		mtd[matchID] = &matchTrackerData{
-			Match:       mt.Match,
-			Time:        encode.UnixMilli(mt.time),
-			MakerStatus: mt.makerStatus.Data(),
-			TakerStatus: mt.takerStatus.Data(),
-		}
-	}
-	assetIDs := make([]uint32, 0, len(neededAssets))
-	for id := range neededAssets {
-		assetIDs = append(assetIDs, id)
-	}
-
-	st := &State{
-		Version:       stateBinaryVersion,
-		Assets:        assetIDs,
-		MatchTrackers: mtd,
-		OrderMatches:  s.orders.orderMatches,
-		LiveWaiters:   s.liveWaiters,
-	}
-
-	enc := gob.NewEncoder(f)
-	if err = enc.Encode(st); err != nil {
-		log.Errorf("Failed to save swap state to file %v: %v", fName, err)
-		return
-	}
-
-	if err = f.Sync(); err != nil {
-		log.Errorf("Failed to write swap state data to disk: %v", err)
-	} else {
-		log.Infof("Saved swap state to file %q, containing %d live matches with "+
-			"and %d live coin waiters", fName, len(st.MatchTrackers), len(st.LiveWaiters))
-	}
-
-	// Save the filehash of the state file for a consistency check on startup.
-	fileHash, err := encode.FileHash(fPath)
-	if err != nil {
-		log.Errorf("error hashing swap state file: %v", err)
-		return
-	}
-
-	err = s.storage.SetStateHash(fileHash)
-	if err != nil {
-		log.Errorf("error storing swap hash to disk: %v", err)
-	}
-}
-
-// Data input to handleInit and handleRedeem, which both start coin waiters with
-// latencyQ. Store handlerArgs before starting the waiter, and remove them when
-// the waiter completes or expires. On Swapper shutdown, the stored handlerArgs
-// should be saved in the state data after stopping the latencyQ.
-type handlerArgs struct {
-	User account.AccountID
-	Msg  *msgjson.Message // init or redeem inferred from Msg.
-}
-
-// client generated message IDs are not globally unique.
-type waiterKey struct {
-	MsgID uint64
-	User  account.AccountID
-}
-
-func (s *Swapper) setLiveWaiter(user account.AccountID, msg *msgjson.Message) {
-	s.liveWaitersMtx.Lock()
-	key := waiterKey{msg.ID, user}
-	s.liveWaiters[key] = &handlerArgs{
-		User: user,
-		Msg:  msg,
-	}
-	s.liveWaitersMtx.Unlock()
-}
-
-func (s *Swapper) rmLiveWaiter(user account.AccountID, msgID uint64) {
-	s.liveWaitersMtx.Lock()
-	delete(s.liveWaiters, waiterKey{msgID, user})
-	s.liveWaitersMtx.Unlock()
 }
 
 // Run is the main Swapper loop. It's primary purpose is to update transaction
@@ -804,9 +597,6 @@ func (s *Swapper) Run(ctx context.Context) {
 		// Stop the main loop if if there was no internal error.
 		close(mainLoop)
 		wgMain.Wait()
-
-		s.saveState()
-
 	}()
 
 	// Start a listen loop for each asset's block channel. Normal shutdown stops
@@ -1058,37 +848,8 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	// Record the end of this match's processing.
 	s.storage.SetMatchInactive(db.MatchID(match.Match))
 
-	// If the at-fault order is a limit order, signal that if it is
-	// still on the book it should be unbooked, changed to revoked
-	// status, counted against the user's cancellation rate, and a
-	// server-generated cancel order recorded.
-	if lo, isLimit := orderAtFault.(*order.LimitOrder); isLimit {
-		if s.unbookHook(lo) {
-			s.orders.canceled(orderAtFault) // set as off-book and failed
-		}
-	}
-
-	// That's one less active swap for this order, and a failure. If
-	// this order has no other active swaps, it will be removed from the
-	// order swap tracker by decrementActiveSwapCount since it is
-	// off-book and no new swap negotiations can begin for this order.
-	s.orders.swapFailure(orderAtFault)
-
-	// The other order now has one less active swap too.
-	if s.orders.swapSuccess(otherOrder) {
-		// TODO: We should count this as a successful swap, but should
-		// it only be a completed order with the extra stipulation that
-		// it had already completed another swap?
-		compTime := time.Now().UTC()
-		s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), compTime)
-		if err := s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(compTime)); err != nil {
-			if db.IsErrGeneralFailure(err) {
-				log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", otherOrder.UID(), err)
-			} else {
-				log.Warnf("SetOrderCompleteTime for %v: %v", otherOrder.UID(), err)
-			}
-		}
-	}
+	s.swapDone(orderAtFault, match.Match, true) // will also unbook/revoke order if needed
+	s.swapDone(otherOrder, match.Match, false)
 
 	// Register the failure to act violation, adjusting the user's score.
 	s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match), match.Quantity, refTime, orderAtFault.ID())
@@ -1717,8 +1478,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 
 	// Credit the user for completing the swap, adjusting the user's score.
-	if actor.user != counterParty.user || newStatus == order.MatchComplete { // is user is both sides, only credit on MatchComplete (taker done too)
-		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime)
+	if actor.user != counterParty.user || newStatus == order.MatchComplete { // if user is both sides, only credit on MatchComplete (taker done too)
+		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime) // maybe call this in swapDone callback
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
@@ -1752,22 +1513,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if actor.isMaker {
 		ord = match.Maker
 	}
-	// Mark the completed swap for this order.
-	if s.orders.swapSuccess(ord) {
-		// If it was the last for the order, AND no prior swaps for this order
-		// failed with this user at-fault, register the order as successfully
-		// completed in the auth manager.
-		s.authMgr.RecordCompletedOrder(actor.user, ord.ID(), redeemTime)
-		// Record the successful completion time.
-		if err = s.storage.SetOrderCompleteTime(ord, redeemTimeMs); err != nil {
-			if db.IsErrGeneralFailure(err) {
-				log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord, err)
-				s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "internal server error")
-				return wait.DontTryAgain
-			}
-			log.Errorf("SetOrderCompleteTime for %v: %v", ord, err)
-		}
-	}
+
+	s.swapDone(ord, match.Match, false)
 
 	// For taker's redeem, that's the end.
 	if !actor.isMaker {
@@ -1898,8 +1645,6 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// checked in processInit. Note that value cannot be checked as transaction
 	// details, which includes the coin/output value, are not yet retrieved.
 
-	s.setLiveWaiter(user, msg)
-
 	// Do not search for the transaction past the inaction deadline. For maker,
 	// this is bTimeout after match request. For taker, this is bTimeout after
 	// maker's swap reached swapConfs.
@@ -1923,15 +1668,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() bool {
-			done := s.processInit(msg, params, stepInfo)
-			if done == wait.DontTryAgain {
-				// It is now either a live acker, or terminally failed.
-				s.rmLiveWaiter(user, msg.ID)
-			}
-			return done
+			return s.processInit(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
-			s.rmLiveWaiter(user, msg.ID)
 			// NOTE: We may consider a shorter expire time so the client can
 			// receive warning that there may be node or wallet connectivity
 			// trouble while they still have a chance to fix it.
@@ -1999,8 +1738,6 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		}
 	}
 
-	s.setLiveWaiter(user, msg)
-
 	// Do not search for the transaction past the inaction deadline. For maker,
 	// this is bTimeout after taker's swap reached swapConfs. For taker, this is
 	// bTimeout after maker's redeem cast (and redemption request time).
@@ -2022,15 +1759,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() bool {
-			done := s.processRedeem(msg, params, stepInfo)
-			if done == wait.DontTryAgain {
-				// It is now either a live acker, or terminally failed.
-				s.rmLiveWaiter(user, msg.ID)
-			}
-			return done
+			return s.processRedeem(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
-			s.rmLiveWaiter(user, msg.ID)
 			// NOTE: We may consider a shorter expire time so the client can
 			// receive warning that there may be node or wallet connectivity
 			// trouble while they still have a chance to fix it.
@@ -2355,7 +2086,7 @@ func (s *Swapper) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
 // this is not done, it is possible that an order may be flagged as completed if
 // a swap A completes after Matching and creation of swap B but before Negotiate
 // has a chance to record the new swap.
-func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.OrderID]bool) {
+func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	// If the Swapper is stopping, the Markets should also be stopping, but
 	// block this just in case.
 	s.handlerMtx.RLock()
@@ -2461,16 +2192,12 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 	// Setting length to max possible, which is over-allocating by the number of
 	// cancels.
 	toMonitor := make([]*matchTracker, 0, len(matches))
-	var canceled []*order.LimitOrder
 	for _, match := range matches {
 		if match.Taker.Type() == order.CancelOrderType {
-			// The canceled orders must be flagged after new swaps are counted.
-			canceled = append(canceled, match.Maker)
-
 			// If this is a cancellation, there is nothing to track. Just cancel
 			// the target order by removing it from the DB. It is already
 			// removed from book by the Market.
-			err := s.storage.CancelOrder(match.Maker)
+			err := s.storage.CancelOrder(match.Maker) // TODO: do this in Market?
 			if err != nil {
 				log.Errorf("Failed to cancel order %v", match.Maker)
 				// If the DB update failed, the target order status was not
@@ -2481,8 +2208,6 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 			}
 		} else {
 			toMonitor = append(toMonitor, match)
-			s.orders.incActiveSwapCount(match.Maker, finalSwap[match.Maker.ID()])
-			s.orders.incActiveSwapCount(match.Taker, finalSwap[match.Taker.ID()])
 		}
 
 		// Create an acker for maker and taker, sharing the same matchTracker.
@@ -2501,12 +2226,6 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 			isMaker: false,
 			// isAudit: false,
 		})
-	}
-
-	// Flag the canceled orders as failed and off-book if they are involved in
-	// active swaps from this or previous epochs.
-	for _, lo := range canceled {
-		s.orders.canceled(lo)
 	}
 
 	// Add the matches to the matches/userMatches maps.
@@ -2529,7 +2248,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
-			// TODO: prevent user penalty
+			// Should never happen, but the client can still use match_status.
 			continue
 		}
 
@@ -2540,9 +2259,13 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 			u, len(m))
 
 		// Send the request.
-		s.authMgr.Request(u, req, func(_ comms.Link, resp *msgjson.Message) {
+		err = s.authMgr.Request(u, req, func(_ comms.Link, resp *msgjson.Message) {
 			s.processMatchAcks(u, resp, m)
 		})
+		if err != nil {
+			log.Infof("Failed to sent %v request to %v. The match will be returned in the connect response.",
+				req.Route, u)
+		}
 	}
 }
 

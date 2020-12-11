@@ -70,12 +70,7 @@ type DEXArchivist interface {
 	// InsertEpoch stores the results of a newly-processed epoch.
 	InsertEpoch(ed *EpochResults) error
 
-	// GetStateHash retrieves that last stored swap state file hash.
-	GetStateHash() ([]byte, error)
-
-	// SetStateHash stores the swap state file hash.
-	SetStateHash([]byte) error
-
+	// LoadEpochStats reads all market epoch history from the database.
 	LoadEpochStats(uint32, uint32, []*CandleCache) error
 
 	OrderArchiver
@@ -283,6 +278,13 @@ type SwapData struct {
 	RedeemBTime      int64
 }
 
+// SwapDataFull combines a MatchData, SwapData, and the Base/Quote asset IDs.
+type SwapDataFull struct {
+	Base, Quote uint32
+	*MatchData
+	*SwapData
+}
+
 // MarketMatchID designates a MatchID for a certain market by the market's
 // base-quote asset IDs.
 type MarketMatchID struct {
@@ -349,6 +351,9 @@ type MatchArchiver interface {
 // The methods for saving this data are defined below in the order in which the
 // data is expected from the parties.
 type SwapArchiver interface {
+	// ActiveSwaps loads the full details for all active swaps across all markets.
+	ActiveSwaps() ([]*SwapDataFull, error)
+
 	// SwapData retrieves the swap/match status and the current SwapData.
 	SwapData(mid MarketMatchID) (order.MatchStatus, *SwapData, error)
 

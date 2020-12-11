@@ -420,7 +420,7 @@ func (btc *Backend) call(method string, args anylist, thing interface{}) error {
 	}
 	b, err := btc.node.RawRequest(method, params)
 	if err != nil {
-		return fmt.Errorf("rawrequest error: %v", err)
+		return fmt.Errorf("rawrequest error: %w", err)
 	}
 	if thing != nil {
 		return json.Unmarshal(b, thing)

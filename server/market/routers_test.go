@@ -141,7 +141,7 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)
 	return a.authErr
 }
-func (a *TAuth) Sign(...msgjson.Signable) error { return nil }
+func (a *TAuth) Sign(...msgjson.Signable) {}
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 	//log.Infof("Send for user %v. Message: %v", user, msg)
 	a.sendsMtx.Lock()

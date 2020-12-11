@@ -134,6 +134,22 @@ const (
 		AND active
 	ORDER BY epochIdx * epochDur DESC;`
 
+	// RetrieveActiveMarketMatchesExtended combines RetrieveSwapData with
+	// RetrieveActiveMarketMatches.
+	RetrieveActiveMarketMatchesExtended = `SELECT matchid, takerSell,
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
+		sigMatchAckMaker, sigMatchAckTaker,
+		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
+		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
+		aRedeemCoinID, aRedeemSecret, aRedeemTime, bSigAckOfARedeem,
+		bRedeemCoinID, bRedeemTime
+	FROM %s
+	WHERE takerSell IS NOT NULL -- not a cancel order
+		AND active
+	ORDER BY epochIdx * epochDur DESC;`
+
 	// CompletedOrAtFaultMatchesLastN retrieves inactive matches for a user that
 	// are either successfully completed by the user (MatchComplete or
 	// MakerRedeemed with user as maker), or failed because of this user's

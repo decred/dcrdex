@@ -97,8 +97,7 @@ type dexConf struct {
 	AdminSrvOn        bool
 	AdminSrvAddr      string
 	AdminSrvPW        []byte
-	IgnoreState       bool
-	StatePath         string
+	NoResumeSwaps     bool
 	DisableDataAPI    bool
 }
 
@@ -149,8 +148,7 @@ type flagsData struct {
 	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)"`
 	AdminSrvPassword   string `long:"adminsrvpass" description:"Admin server password. INSECURE. Do not set unless absolutely necessary."`
 
-	IgnorePrevState bool   `long:"ignoreprevstate" description:"Do not attempt to load the stored swap state."`
-	PrevStatePath   string `long:"prevstatepath" description:"Load the swap state from provided file path. --prevstatepath supercedes --ignoreprevstate"`
+	NoResumeSwaps bool `long:"noresumeswaps" description:"Do not attempt to resume swaps that are active in the DB."`
 
 	DisableDataAPI bool `long:"nodata" description:"Disable the HTTP data API."`
 }
@@ -602,8 +600,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AdminSrvAddr:      adminSrvAddr,
 		AdminSrvOn:        cfg.AdminSrvOn,
 		AdminSrvPW:        []byte(cfg.AdminSrvPassword),
-		IgnoreState:       cfg.IgnorePrevState,
-		StatePath:         cfg.PrevStatePath,
+		NoResumeSwaps:     cfg.NoResumeSwaps,
 		DisableDataAPI:    cfg.DisableDataAPI,
 	}
 
