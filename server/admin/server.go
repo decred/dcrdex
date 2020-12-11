@@ -35,13 +35,14 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	marketNameKey        = "market"
-	accountIDKey         = "account"
-	yesKey               = "yes"
-	matchIDKey           = "match"
-	assetSymKey          = "asset"
-	ruleToken            = "rule"
-	includeInactiveToken = "includeinactive"
+	marketNameKey      = "market"
+	accountIDKey       = "account"
+	yesKey             = "yes"
+	matchIDKey         = "match"
+	assetSymKey        = "asset"
+	ruleKey            = "rule"
+	scaleKey           = "scale"
+	includeInactiveKey = "includeinactive"
 )
 
 var (
@@ -146,7 +147,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/ping", apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
-		r.Get("/enabledataapi/{yes}", s.apiEnableDataAPI)
+		r.Get("/enabledataapi/{"+yesKey+"}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/ban", s.apiBan)
@@ -156,7 +157,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		})
 		r.Route("/asset/{"+assetSymKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAsset)
-			rm.Post("/", s.apiAssetPOST)
+			rm.Get("/setfeescale/{"+scaleKey+"}", s.apiSetFeeScale)
 		})
 		r.Post("/notifyall", s.apiNotifyAll)
 		r.Get("/markets", s.apiMarkets)

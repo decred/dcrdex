@@ -674,14 +674,14 @@ func TestMarketMatches(t *testing.T) {
 		name:          "ok with token",
 		mkt:           "dcr_btc",
 		running:       true,
-		token:         "?" + includeInactiveToken + "=true",
+		token:         "?" + includeInactiveKey + "=true",
 		marketMatches: []*db.MatchData{},
 		wantCode:      http.StatusOK,
 	}, {
 		name:          "bad token",
 		mkt:           "dcr_btc",
 		running:       true,
-		token:         "?" + includeInactiveToken + "=blue",
+		token:         "?" + includeInactiveKey + "=blue",
 		marketMatches: []*db.MatchData{},
 		wantCode:      http.StatusBadRequest,
 	}, {
@@ -1346,7 +1346,7 @@ func TestBan(t *testing.T) {
 	for _, test := range tests {
 		core.penalizeErr = test.penalizeErr
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/ban?"+ruleToken+"="+test.rule, nil)
+		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/ban?"+ruleKey+"="+test.rule, nil)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)

@@ -99,49 +99,31 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-func (s *Server) apiAssetPOST(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiSetFeeScale(w http.ResponseWriter, r *http.Request) {
 	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
 	assetID, found := dex.BipSymbolID(assetSymbol)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown asset %q", assetSymbol), http.StatusBadRequest)
 		return
 	}
-	_, err := s.core.Asset(assetID) // asset return may be used if other asset settings are modified
+
+	feeRateScaleStr := chi.URLParam(r, scaleKey)
+	feeRateScale, err := strconv.ParseFloat(feeRateScaleStr, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid fee rate scale %q", feeRateScaleStr), http.StatusBadRequest)
+		return
+	}
+
+	_, err = s.core.Asset(assetID) // asset return may be used if other asset settings are modified
 	if err != nil {
 		http.Error(w, fmt.Sprintf("unsupported asset %q / %d", assetSymbol, assetID), http.StatusBadRequest)
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
-	r.Body.Close()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("unable to read request body: %v", err), http.StatusInternalServerError)
-		return
-	}
-	if len(body) == 0 {
-		http.Error(w, "no POST data provided", http.StatusBadRequest)
-		return
-	}
+	log.Infof("Setting %s (%d) fee rate scale factor to %f", strings.ToUpper(assetSymbol), assetID, feeRateScale)
+	s.core.SetFeeRateScale(assetID, feeRateScale)
 
-	var data AssetPost
-	if err = json.Unmarshal(body, &data); err != nil {
-		http.Error(w, fmt.Sprintf("invalid POST data: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	var settingsFound bool
-
-	if data.FeeRateScale != nil {
-		settingsFound = true
-		log.Infof("Setting %s (%d) fee rate scale factor to %f", strings.ToUpper(assetSymbol), assetID, *data.FeeRateScale)
-		s.core.SetFeeRateScale(assetID, *data.FeeRateScale)
-	}
-
-	if settingsFound {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	http.Error(w, "no settings applied", http.StatusBadRequest)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) apiMarkets(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +253,7 @@ func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
 // request.
 func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 	var includeInactive bool
-	if includeInactiveStr := r.URL.Query().Get(includeInactiveToken); includeInactiveStr != "" {
+	if includeInactiveStr := r.URL.Query().Get(includeInactiveKey); includeInactiveStr != "" {
 		var err error
 		includeInactive, err = strconv.ParseBool(includeInactiveStr)
 		if err != nil {
@@ -470,7 +452,7 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	ruleStr := r.URL.Query().Get(ruleToken)
+	ruleStr := r.URL.Query().Get(ruleKey)
 	if ruleStr == "" {
 		http.Error(w, "rule not specified", http.StatusBadRequest)
 		return
