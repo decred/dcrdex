@@ -77,7 +77,6 @@ type DexConf struct {
 	DEXPrivKey        *secp256k1.PrivateKey
 	CommsCfg          *RPCConfig
 	NoResumeSwaps     bool
-	StatePath         string
 }
 
 type signer struct {
