@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import State from './state'
-import { postJSON } from './http'
+import { getJSON, postJSON } from './http'
 import * as forms from './forms'
 
 const animationLength = 300
@@ -21,7 +21,7 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Others
-      'showPokes'
+      'showPokes', 'exportAccountKeys'
     ])
 
     Doc.bind(page.darkMode, 'click', () => {
@@ -46,6 +46,7 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+    Doc.bind(page.exportAccountKeys, 'click', () => this.exportAccountKeys())
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -66,6 +67,17 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
+  }
+
+  async exportAccountKeys () {
+    // const url = new URL(window.location)
+    // url.pathname = '/api/accountKeys'
+    // window.open(url.toString())
+    const loaded = app.loading(this.main)
+    // const res = await postJSON('/api/accountKeys', this.currentFilter())
+    const res = await getJSON('/api/accountKeys')
+    loaded()
+    return res.accountKeys
   }
 
   /* showForm shows a modal form with a little animation. */

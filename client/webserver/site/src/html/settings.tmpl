@@ -21,10 +21,20 @@
       <div {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
         <div>
           {{range $host, $xc := .UserInfo.Exchanges}}
-            <div>
-              DEX Address: {{$host}}
+            <div class="settings-exchange border1">
+              <span>
+                DEX Address: {{$host}}
+              </span>
               <br>
-              Account ID: <span class="fs12">{{if eq (len $xc.AcctID) 0}}&lt;login to show&gt;{{else}}{{$xc.AcctID}}{{end}}</span>
+              Account ID: <span class="fs12">
+                {{if eq (len $xc.AcctID) 0}}
+                  &lt;login to show&gt;
+                {{else}}
+                  {{$xc.AcctID}}
+                  <br>
+                  <button id="exportAccountKeys" class="bg0">Export Keys</button>
+                {{end}}</span>
+              <a href="/api/accountKeys" download="accountKeys.txt">Download Account Keys</a>
             </div>
           {{end}}
         </div>

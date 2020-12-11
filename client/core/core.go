@@ -2679,6 +2679,31 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
+// Trade is used to place a market or limit order.
+func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error) {
+	// Check the user password.
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("AccountKeys password error: %w", err)
+	}
+	_, err = addrHost(host)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	// Get the dexConnection and the dex.Asset for each asset.
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		return nil, fmt.Errorf("unknown DEX %s", host)
+	}
+
+	accountKeysResponse := &AccountKeysResponse{Host: host, PrivKey: dc.acct.privKey.Serialize()}
+
+	return accountKeysResponse, nil
+}
+
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)

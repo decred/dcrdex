@@ -695,6 +695,12 @@ type OrderFilter struct {
 	Statuses []order.OrderStatus `json:"statuses"`
 }
 
+// AccountKeysResponse holds data returned from AccountKeys.
+type AccountKeysResponse struct {
+	Host    string `json:"host"`
+	PrivKey []byte `json:"privKey"`
+}
+
 // assetMap tracks a series of assets and provides methods for registering an
 // asset and merging with another assetMap.
 type assetMap map[uint32]struct{}
