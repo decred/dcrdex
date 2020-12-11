@@ -1450,6 +1450,10 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		return nil, fmt.Errorf("error creating wallet: %w", err)
 	}
 	// Parse fee rate limit
+	// NOTE We parse fee rate limit 'feelimit' settings and store it on xcWallet
+	// unlike other settings which are being configured and set on each asset's
+	// ExchangeWallet instance (see above asset.Setup call) as it required on
+	// order placement time
 	feeLimit := walletCfg.Settings["feelimit"]
 	if feeLimit != "" {
 		floatLimit, err := strconv.ParseFloat(feeLimit, 32)
