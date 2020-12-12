@@ -50,6 +50,7 @@ export default class SettingsPage extends BasePage {
 
     const exchangesDiv = page.exchanges
     var exportAccountKeyButton
+    // eslint-disable-next-line no-unused-vars
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
       exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccountKeys-' + host)
       Doc.bind(exportAccountKeyButton, 'click', () => this.exportAccountKeys(host))
@@ -84,7 +85,7 @@ export default class SettingsPage extends BasePage {
     }
     var res = await postJSON('/api/accountKeys', req)
     const a = document.createElement('a')
-    a.setAttribute('download', 'dcrAccount.json')
+    a.setAttribute('download', 'dcrAccount-' + host + '.json')
     a.setAttribute('href', 'data:application/json,' + JSON.stringify(res, null, 4))
     a.click()
     loaded()
