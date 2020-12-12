@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import State from './state'
-import { getJSON, postJSON } from './http'
+import { postJSON } from './http'
 import * as forms from './forms'
 
 const animationLength = 300
@@ -12,6 +12,7 @@ export default class SettingsPage extends BasePage {
   constructor (application, body) {
     super()
     app = application
+    this.body = body
     const page = this.page = Doc.parsePage(body, [
       'darkMode', 'commitHash',
       'addADex',
@@ -21,7 +22,7 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Others
-      'showPokes', 'exportAccountKeys'
+      'showPokes', 'exchanges'
     ])
 
     Doc.bind(page.darkMode, 'click', () => {
@@ -46,7 +47,13 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
-    Doc.bind(page.exportAccountKeys, 'click', () => this.exportAccountKeys())
+
+    const exchangesDiv = page.exchanges
+    var exportAccountKeyButton
+    for (const [host, xc] of Object.entries(app.user.exchanges)) {
+      exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccountKeys-' + host)
+      Doc.bind(exportAccountKeyButton, 'click', () => this.exportAccountKeys(host))
+    }
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -69,15 +76,18 @@ export default class SettingsPage extends BasePage {
     })
   }
 
-  async exportAccountKeys () {
-    // const url = new URL(window.location)
-    // url.pathname = '/api/accountKeys'
-    // window.open(url.toString())
-    const loaded = app.loading(this.main)
-    // const res = await postJSON('/api/accountKeys', this.currentFilter())
-    const res = await getJSON('/api/accountKeys')
+  // exportAccountKeys exports and downloads the account keys
+  async exportAccountKeys (host) {
+    const loaded = app.loading(this.body)
+    const req = {
+      host: host
+    }
+    var res = await postJSON('/api/accountKeys', req)
+    const a = document.createElement('a')
+    a.setAttribute('download', 'accountKeys1.txt')
+    a.setAttribute('href', 'data:application/json,' + JSON.stringify(res, null, 4))
+    a.click()
     loaded()
-    return res.accountKeys
   }
 
   /* showForm shows a modal form with a little animation. */

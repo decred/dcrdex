@@ -192,19 +192,16 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 // apiAccountKeys is the handler for the '/accountKeys' API request.
 func (s *WebServer) apiAccountKeys(w http.ResponseWriter, r *http.Request) {
 	form := new(accountKeysAuthForm)
-	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
 	r.Close = true
-	accountKeysResponse, err := s.core.AccountKeys(form.Pass, form.Host)
+	accountKeysResponse, err := s.core.AccountKeys(nil, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
 		return
 	}
-
-	w.Header().Set("Content-Disposition", "attachment; filename=accountKeys.json")
-
+	w.Header().Set("Connection", "close")
 	writeJSON(w, accountKeysResponse, s.indent)
 }
 

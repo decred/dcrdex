@@ -263,7 +263,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			apiAuth.Post("/withdraw", s.apiWithdraw)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
-			apiAuth.Get("/accountKeys", s.apiAccountKeys)
+			apiAuth.Post("/accountKeys", s.apiAccountKeys)
 		})
 	})
 
