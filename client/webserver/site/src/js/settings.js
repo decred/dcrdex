@@ -84,7 +84,7 @@ export default class SettingsPage extends BasePage {
     }
     var res = await postJSON('/api/accountKeys', req)
     const a = document.createElement('a')
-    a.setAttribute('download', 'accountKeys1.txt')
+    a.setAttribute('download', 'dcrAccount.json')
     a.setAttribute('href', 'data:application/json,' + JSON.stringify(res, null, 4))
     a.click()
     loaded()
