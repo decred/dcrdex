@@ -187,11 +187,10 @@ type output struct {
 	pt    outPoint
 	tree  int8
 	value uint64
-	node  rpcClient // for calculating confirmations.
 }
 
 // newOutput is the constructor for an output.
-func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64, tree int8) *output {
+func newOutput(txHash *chainhash.Hash, vout uint32, value uint64, tree int8) *output {
 	return &output{
 		pt: outPoint{
 			txHash: *txHash,
@@ -199,28 +198,12 @@ func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64
 		},
 		value: value,
 		tree:  tree,
-		node:  node,
 	}
 }
 
 // Value returns the value of the output. Part of the asset.Coin interface.
 func (op *output) Value() uint64 {
 	return op.value
-}
-
-// Confirmations is the number of confirmations on the output's block.
-// Confirmations always pulls the block information fresh from the blockchain,
-// and will return an error if the output has been spent. Part of the
-// asset.Coin interface.
-func (op *output) Confirmations(ctx context.Context) (uint32, error) {
-	txOut, err := op.node.GetTxOut(ctx, op.txHash(), op.vout(), true)
-	if err != nil {
-		return 0, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
-	}
-	if txOut == nil {
-		return 0, asset.CoinNotFoundError
-	}
-	return uint32(txOut.Confirmations), nil
 }
 
 // ID is the output's coin ID. Part of the asset.Coin interface. For DCR, the
@@ -824,7 +807,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			return fmt.Errorf("error decoding redeem script for %s, script = %s: %w",
 				unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
 		}
-		op := newOutput(dcr.node, txHash, unspent.rpc.Vout, v, unspent.rpc.Tree)
+		op := newOutput(txHash, unspent.rpc.Vout, v, unspent.rpc.Tree)
 		coins = append(coins, op)
 		spents = append(spents, &fundingCoin{
 			op:   op,
@@ -951,7 +934,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("split - total sent %.8f does not match expected %.8f", toDCR(net), toDCR(reqFunds))
 	}
 
-	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular)
+	op := newOutput(msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular)
 
 	// Lock the funding coin.
 	err = dcr.lockFundingCoins([]*fundingCoin{{
@@ -1067,7 +1050,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if len(txOut.ScriptPubKey.Addresses) > 0 {
 			address = txOut.ScriptPubKey.Addresses[0]
 		}
-		coin := newOutput(dcr.node, txHash, output.Vout, toAtoms(output.Amount), output.Tree)
+		coin := newOutput(txHash, output.Vout, toAtoms(output.Amount), output.Tree)
 		coins = append(coins, coin)
 		dcr.fundingCoins[pt] = &fundingCoin{
 			op:   coin,
@@ -1096,7 +1079,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			continue
 		}
 		coinsToLock = append(coinsToLock, wire.NewOutPoint(txHash, txout.Vout, txout.Tree))
-		coin := newOutput(dcr.node, txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree)
+		coin := newOutput(txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree)
 		coins = append(coins, coin)
 		dcr.fundingCoins[pt] = &fundingCoin{
 			op:   coin,
@@ -1205,7 +1188,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		receipts = append(receipts, &swapReceipt{
-			output:     newOutput(dcr.node, &txHash, uint32(i), contract.Value, wire.TxTreeRegular),
+			output:     newOutput(&txHash, uint32(i), contract.Value, wire.TxTreeRegular),
 			contract:   contracts[i],
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
@@ -1301,7 +1284,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
 
-	return coinIDs, newOutput(dcr.node, txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
+	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1405,7 +1388,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 			contractHash, addr.ScriptAddress())
 	}
 	return &auditInfo{
-		output:     newOutput(dcr.node, txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
+		output:     newOutput(txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
 		contract:   contract,
 		secretHash: secretHash,
 		recipient:  receiver,
@@ -1879,7 +1862,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
 			"expected %.8f, but %.8f was reported", msgTx.CachedTxHash(), toDCR(regFee), toDCR(sent))
 	}
-	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
+	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
@@ -1893,7 +1876,7 @@ func (dcr *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, e
 	if err != nil {
 		return nil, err
 	}
-	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular), nil
+	return newOutput(msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -1902,16 +1885,23 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return bytes.Equal(h[:], secretHash)
 }
 
-// Confirmations gets the number of confirmations for the specified coin ID.
-// The coin must be known to the wallet, but need not be unspent.
+// Confirmations gets the number of confirmations for the specified coin ID by
+// first checking for a unspent output, and if not found, searching indexed
+// wallet transactions.
 func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (uint32, error) {
 	// Could check with gettransaction first, figure out the tree, and look for a
 	// redeem script with listscripts, but the listunspent entry has all the
 	// necessary fields already.
-	txHash, _, err := decodeCoinID(id)
+	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, err
 	}
+	// Check for an unspent output.
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+	if err == nil && txOut != nil {
+		return uint32(txOut.Confirmations), nil
+	}
+	// Check wallet transactions.
 	tx, err := dcr.node.GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
@@ -2065,7 +2055,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if dexdcr.IsStakePubkeyHashScript(pkScript) || dexdcr.IsStakeScriptHashScript(pkScript) {
 		tree = wire.TxTreeStake
 	}
-	return newOutput(dcr.node, txHash, vout, coin.Value(), tree), nil
+	return newOutput(txHash, vout, coin.Value(), tree), nil
 }
 
 // sendMinusFees sends the amount to the address. Fees are subtracted from the
@@ -2342,7 +2332,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 	var change *output
 	var changeAddr string
 	if changeAdded {
-		change = newOutput(dcr.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular)
+		change = newOutput(txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular)
 		changeAddr = changeAddress.String()
 	}
 	return msgTx, change, changeAddr, lastFee, nil

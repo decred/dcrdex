@@ -303,7 +303,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, err := swapOutput.Confirmations(context.TODO())
+		confs, err := rig.alpha().Confirmations(context.TODO(), swapOutput.ID())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -355,12 +355,6 @@ func runTest(t *testing.T, splitTx bool) {
 	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
-	}
-
-	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapReceipt.Coin().Confirmations(context.TODO())
-	if err == nil {
-		t.Fatalf("no error getting confirmations for redeemed swap. has swap output been spent?")
 	}
 
 	// Now send another one with lockTime = now and try to refund it.

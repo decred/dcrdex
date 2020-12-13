@@ -583,10 +583,10 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 	var err error
 	ctx, cancel := context.WithTimeout(context.Background(), confCheckTimeout)
 	defer cancel()
-	have, err = coin.Confirmations(ctx)
+	have, err = t.wallets.toWallet.Confirmations(ctx, coin.ID())
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v",
-			coin, t.wallets.toAsset.Symbol, match.id, t.UID())
+		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v: %v",
+			coin, t.wallets.toAsset.Symbol, match.id, t.UID(), err)
 		have = 0 // should already be
 		return
 	}
@@ -982,8 +982,8 @@ func (t *trackedTrade) shouldBeginFindRedemption(match *matchTracker) bool {
 
 	confs, err := confirmations(t.wallets.fromWallet, swapCoinID)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v",
-			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.id, t.UID())
+		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v: %v",
+			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.id, t.UID(), err)
 		return false
 	}
 	return confs >= t.wallets.fromAsset.SwapConf
@@ -1016,7 +1016,6 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if !t.matchIsActive(match) {
 			continue // either refunded or revoked requiring no action on this side of the match
 		}
-
 		switch {
 		case t.isSwappable(match):
 			t.dc.log.Debugf("Swappable match %v for order %v (%v)", match.id, t.ID(), side)

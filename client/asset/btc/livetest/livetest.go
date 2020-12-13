@@ -278,7 +278,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, err := auditCoin.Confirmations(context.TODO())
+		confs, err := rig.alpha().Confirmations(context.TODO(), receipt.Coin().ID())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -327,12 +327,6 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
-	}
-
-	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapReceipt.Coin().Confirmations(context.TODO())
-	if err == nil {
-		t.Fatalf("error getting confirmations. has swap output been spent?")
 	}
 
 	// Now send another one with lockTime = now and try to refund it.
