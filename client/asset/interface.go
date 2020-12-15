@@ -158,7 +158,7 @@ type Wallet interface {
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// If the coin is not unspent, and is not owned by this wallet,
 	// Confirmations may return an error.
-	Confirmations(ctx context.Context, id dex.Bytes) (uint32, error)
+	Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value uint64) (Coin, error)

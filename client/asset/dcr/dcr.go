@@ -1888,28 +1888,28 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // Confirmations gets the number of confirmations for the specified coin ID by
 // first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (uint32, error) {
+func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
 	// Could check with gettransaction first, figure out the tree, and look for a
 	// redeem script with listscripts, but the listunspent entry has all the
 	// necessary fields already.
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	// Check for an unspent output.
 	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err == nil && txOut != nil {
-		return uint32(txOut.Confirmations), nil
+		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
 	tx, err := dcr.node.GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, asset.CoinNotFoundError
+			return 0, true, asset.CoinNotFoundError
 		}
-		return 0, translateRPCCancelErr(err)
+		return 0, true, translateRPCCancelErr(err)
 	}
-	return uint32(tx.Confirmations), nil
+	return uint32(tx.Confirmations), true, nil
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.

@@ -1869,34 +1869,40 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, _, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	op := newOutPoint(tTxHash, 0)
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	confs, err := wallet.Confirmations(context.Background(), coinID)
+	confs, spent, err := wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
 	if confs != 2 {
 		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
 	}
+	if spent {
+		t.Fatalf("expected spent = false for gettxout path, got true")
+	}
 
 	// gettransaction error
 	node.walletTxErr = tErr
 	delete(node.txOutRes, op)
-	_, err = wallet.Confirmations(context.Background(), coinID)
+	_, _, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	node.walletTxErr = nil
 
 	node.walletTx = &walletjson.GetTransactionResult{}
-	_, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("expected spent = true for gettransaction path, got false")
 	}
 }
 

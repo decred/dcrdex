@@ -1931,25 +1931,25 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 // Confirmations gets the number of confirmations for the specified coin ID by
 // first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
+func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	// Check for an unspent output.
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err == nil && txOut != nil {
-		return uint32(txOut.Confirmations), nil
+		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, asset.CoinNotFoundError
+			return 0, true, asset.CoinNotFoundError
 		}
-		return 0, err
+		return 0, true, err
 	}
-	return uint32(tx.Confirmations), nil
+	return uint32(tx.Confirmations), true, nil
 }
 
 // run pings for new blocks and runs the tipChange callback function when the

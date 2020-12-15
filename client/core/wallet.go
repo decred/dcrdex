@@ -164,3 +164,9 @@ func (w *xcWallet) Disconnect() {
 	w.hookedUp = false
 	w.mtx.Unlock()
 }
+
+func (w *xcWallet) Confirmations(ctx context.Context, coinID []byte) (uint32, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
+	defer cancel()
+	return w.Wallet.Confirmations(ctx, coinID)
+}

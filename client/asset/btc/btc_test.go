@@ -2029,7 +2029,7 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, _, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2038,26 +2038,32 @@ func TestConfirmations(t *testing.T) {
 	node.txOutRes = &btcjson.GetTxOutResult{
 		Confirmations: 2,
 	}
-	confs, err := wallet.Confirmations(context.Background(), coinID)
+	confs, spent, err := wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
 	if confs != 2 {
 		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
 	}
+	if spent {
+		t.Fatalf("expected spent = false for gettxout path, got true")
+	}
 
 	// gettransaction error
 	node.txOutRes = nil
-	_, err = wallet.Confirmations(context.Background(), coinID)
+	_, _, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	node.rawErr[methodGetTransaction] = nil
 
 	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
-	_, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.Confirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("expected spent = true for gettransaction path, got false")
 	}
 }
 

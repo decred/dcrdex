@@ -251,18 +251,21 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 
 	confCoin := receipts[0].Coin()
-	checkConfs := func(n uint32) {
+	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, err := rig.gamma().Confirmations(context.Background(), confCoin.ID())
+		confs, spent, err := rig.gamma().Confirmations(context.Background(), confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
 			t.Fatalf("expected %d confs, got %d", n, confs)
 		}
+		if spent != expSpent {
+			t.Fatalf("checkConfs: expected spent = %t, got %t", expSpent, spent)
+		}
 	}
 	// Check that there are 0 confirmations.
-	checkConfs(0)
+	checkConfs(0, false)
 
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
@@ -278,12 +281,15 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, err := rig.alpha().Confirmations(context.TODO(), receipt.Coin().ID())
+		confs, spent, err := rig.alpha().Confirmations(context.TODO(), receipt.Coin().ID())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
 		if confs != 0 {
 			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
+		}
+		if spent {
+			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
 		if ci.Expiration().Equal(lockTime) {
 			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
@@ -323,7 +329,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		t.Fatalf("no block reported")
 	}
 	// Check that there is 1 confirmation on the swap
-	checkConfs(1)
+	checkConfs(1, true)
 	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)

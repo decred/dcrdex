@@ -268,20 +268,24 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	confCoin := receipts[0].Coin()
-	checkConfs := func(n uint32) {
+	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, err := rig.beta().Confirmations(tCtx, confCoin.ID())
+		confs, spent, err := rig.beta().Confirmations(tCtx, confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
 			t.Fatalf("expected %d confs, got %d", n, confs)
 		}
+		// Not using checkConfs until after redemption, so expect spent.
+		if spent != expSpent {
+			t.Fatalf("checkConfs: expected spent = %t, got %t", expSpent, spent)
+		}
 	}
 	// Let alpha get and process that transaction.
 	waitNetwork()
 	// Check that there are 0 confirmations.
-	checkConfs(0)
+	checkConfs(0, false)
 
 	// Unlock the wallet for use.
 	err = rig.alpha().Unlock(walletPassword)
@@ -303,7 +307,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, err := rig.alpha().Confirmations(context.TODO(), swapOutput.ID())
+		confs, spent, err := rig.alpha().Confirmations(context.TODO(), swapOutput.ID())
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -312,6 +316,9 @@ func runTest(t *testing.T, splitTx bool) {
 		}
 		if ci.Expiration().Equal(lockTime) {
 			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
+		}
+		if spent {
+			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
 		return &asset.Redemption{
 			Spends: ci,
@@ -346,7 +353,7 @@ func runTest(t *testing.T, splitTx bool) {
 	mineAlpha()
 	waitNetwork()
 	// Check that the swap has one confirmation.
-	checkConfs(1)
+	checkConfs(1, true)
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}

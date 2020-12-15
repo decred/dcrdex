@@ -705,11 +705,11 @@ func (w *TXCWallet) setConfs(coinID dex.Bytes, confs uint32, err error) {
 	w.confsMtx.Unlock()
 }
 
-func (w *TXCWallet) Confirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
+func (w *TXCWallet) Confirmations(ctx context.Context, coinID dex.Bytes) (uint32, bool, error) {
 	id := coinID.String()
 	w.confsMtx.RLock()
 	defer w.confsMtx.RUnlock()
-	return w.confs[id], w.confsErr[id]
+	return w.confs[id], false, w.confsErr[id]
 }
 
 type tCrypter struct {
