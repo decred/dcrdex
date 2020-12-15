@@ -47,8 +47,6 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultFee = 100
-	// defaultFeeLimit is the default value for feelimit.
-	//defaultFeeLimit = 600
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -107,7 +105,7 @@ var (
 		{
 			Key:         "feelimit",
 			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand. Units: BTC/kB",
+			Description: "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand. Units: sats/kB",
 		},
 		{
 			Key:          "redeemconftarget",

@@ -1456,11 +1456,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	// order placement time
 	feeLimit := walletCfg.Settings["feelimit"]
 	if feeLimit != "" {
-		floatLimit, err := strconv.ParseFloat(feeLimit, 32)
+		floatLimit, err := strconv.ParseUint(feeLimit, 10, 32)
 		if err != nil {
 			return nil, err
 		}
-		wallet.feeRateLimit = float32(floatLimit)
+		wallet.feeRateLimit = uint32(floatLimit)
 	}
 
 	// Construct the unconnected xcWallet.
@@ -2646,6 +2646,27 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
+// validateFeeRateLimit checks if user provided fee rate limit value, if yes
+// it ensures that the server'r MaxFeeRate is smaller than the wallet's
+// configured feeRateLimit.
+func validateFeeRateLimit(w *xcWallet, a dex.Asset) error {
+	// Configured fee rate limit
+	feeRateLimit := w.feeRateLimit
+	// Asset's max fee rate from server
+	maxFeeRate := uint32(a.MaxFeeRate)
+	if feeRateLimit != 0 {
+		if feeRateLimit < maxFeeRate {
+			return newError(orderParamsErr,
+				"%v: server's max fee rate %v higher than configued fee rate limit %v",
+				a.Symbol,
+				maxFeeRate,
+				feeRateLimit)
+		}
+	}
+
+	return nil
+}
+
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
@@ -2674,9 +2695,13 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		wallets.toWallet, wallets.fromAsset, wallets.toAsset
 
 	// Check wallets fee rate limit against server's max fee rate
-	if fromWallet.feeRateLimit < fromAsset.MaxFeeRate ||
-		toWallet.feeRateLimit < toAsset.MaxFeeRate {
-		return nil, 0, newError(orderParamsErr, "server's max fee rate is too high")
+	err = validateFeeRateLimit(fromWallet, *fromAsset)
+	if err != nil {
+		return nil, 0, err
+	}
+	err = validateFeeRateLimit(toWallet, *toAsset)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	prepareWallet := func(w *xcWallet) error {
