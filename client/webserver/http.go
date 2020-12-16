@@ -291,6 +291,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+
 	_, err = w.Write(data)
 	if err != nil {
 		log.Errorf("error writing to client body: %v", err)
