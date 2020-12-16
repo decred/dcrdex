@@ -4,6 +4,7 @@
 package webserver
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -231,9 +232,10 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
-	w.Header().Set("Content-Type", "text/csv")
-	csvWriter := csv.NewWriter(w)
+
+	var buffer bytes.Buffer
+	csvWriter := csv.NewWriter(&buffer)
+
 	err = csvWriter.Write([]string{
 		"Trade",
 		"Market",
@@ -242,6 +244,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		"Rate",
 		"Filled (%)",
 		"Settled (%)",
+		"Quantity",
 		"Time",
 	})
 	if err != nil {
@@ -251,27 +254,20 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	for _, ord := range ords {
 		ordReader := orderReader{ord}
 
-		rate := float64(ord.Rate) / 1e8
-		tradeStr := fmt.Sprintf("%.8f %s → %.8f %s",
-			ordReader.FromQty(), ordReader.FromSymbol(),
-			ordReader.ToQty(), ordReader.ToSymbol())
-
-		typeStr := ord.Type.String() + " "
-		if ord.Sell {
-			typeStr += "sell"
-		} else {
-			typeStr += "buy"
-		}
+		tradeStr := fmt.Sprintf("%s %s → %s %s",
+			ordReader.OfferString(), ordReader.FromSymbol(),
+			ordReader.AskString(), ordReader.ToSymbol())
 
 		srvTime := encode.UnixTimeMilli(int64(ord.Stamp))
 		err = csvWriter.Write([]string{
 			tradeStr, // Trade
 			fmt.Sprintf("%s-%s @ %s", ord.BaseSymbol, ord.QuoteSymbol, ord.Host), // Market
-			typeStr,                                   // Type
-			ord.Status.String(),                       // Status
-			fmt.Sprintf("%.8f", rate),                 // Rate
+			ordReader.TypeString(),                    // Type
+			ordReader.StatusString(),                  // Status
+			ordReader.RateString(),                    // Rate
 			ordReader.FilledPercent(),                 // Filled
 			ordReader.SettledPercent(),                // Settled
+			ordReader.OfferString(),                   // Quantity
 			srvTime.Format("02/01/2006, 03:04:05 PM"), // Time
 		})
 		if err != nil {
@@ -280,6 +276,15 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	csvWriter.Flush()
+	data := buffer.Bytes()
+	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	_, err = w.Write(data)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 }
 
 type orderTmplData struct {
