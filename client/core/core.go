@@ -2699,7 +2699,7 @@ func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error)
 		return nil, fmt.Errorf("unknown DEX %s", host)
 	}
 
-	accountKeysResponse := &AccountKeysResponse{Host: host, PrivKey: dc.acct.privKey.Serialize()}
+	accountKeysResponse := &AccountKeysResponse{Host: host, PrivKey: hex.EncodeToString(dc.acct.privKey.Serialize()), OK: true}
 	return accountKeysResponse, nil
 }
 

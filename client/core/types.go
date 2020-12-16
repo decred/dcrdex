@@ -699,7 +699,7 @@ type OrderFilter struct {
 type AccountKeysResponse struct {
 	OK      bool   `json:"ok"`
 	Host    string `json:"host"`
-	PrivKey []byte `json:"privKey"`
+	PrivKey string `json:"privKey"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an
