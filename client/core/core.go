@@ -49,6 +49,9 @@ const (
 	// tickCheckDivisions is how many times to tick trades per broadcast timeout
 	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
 	tickCheckDivisions = 8
+	// defaultFeeRateLimit is used to as default when no fee rate limit value
+	// specified by user. unit/kB
+	defaultFeeRateLimit = 10000
 )
 
 var (
@@ -1461,6 +1464,9 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			return nil, err
 		}
 		wallet.feeRateLimit = uint32(floatLimit)
+	} else {
+		// If user didn't provide limit use default limit
+		wallet.feeRateLimit = defaultFeeRateLimit
 	}
 
 	// Construct the unconnected xcWallet.
