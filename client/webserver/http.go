@@ -231,6 +231,8 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
+	w.Header().Set("Content-Type", "text/csv")
 	csvWriter := csv.NewWriter(w)
 	err = csvWriter.Write([]string{
 		"Trade",
@@ -277,8 +279,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
-	w.Header().Set("Content-Type", "text/csv")
 	csvWriter.Flush()
 }
 
