@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -2681,7 +2682,11 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 // Trade is used to place a market or limit order.
 func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error) {
-	_, err := addrHost(host)
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("Password error: %w", err)
+	}
+	_, err = addrHost(host)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}

@@ -76,7 +76,8 @@ type withdrawForm struct {
 }
 
 type accountKeysAuthForm struct {
-	Host string `json:"host"`
+	Pass encode.PassBytes `json:"pw"`
+	Host string           `json:"host"`
 }
 
 // orderReader wraps a core.Order and provides methods for info display.

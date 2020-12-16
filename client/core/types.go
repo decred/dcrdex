@@ -697,6 +697,7 @@ type OrderFilter struct {
 
 // AccountKeysResponse holds data returned from AccountKeys.
 type AccountKeysResponse struct {
+	OK      bool   `json:"ok"`
 	Host    string `json:"host"`
 	PrivKey []byte `json:"privKey"`
 }

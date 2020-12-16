@@ -21,8 +21,10 @@ export default class SettingsPage extends BasePage {
       'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      // Export Account
+      'exchanges', 'authorizeExportKeysForm', 'exportKeysAppPass', 'authorizeExportKeysConfirm', 'exportKeysHost', 'exportKeysErr',
       // Others
-      'showPokes', 'exchanges'
+      'showPokes'
     ])
 
     Doc.bind(page.darkMode, 'click', () => {
@@ -47,13 +49,14 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+    forms.bind(page.authorizeExportKeysForm, page.authorizeExportKeysConfirm, () => { this.exportAccountKeys() })
 
     const exchangesDiv = page.exchanges
     var exportAccountKeyButton
     // eslint-disable-next-line no-unused-vars
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
       exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccountKeys-' + host)
-      Doc.bind(exportAccountKeyButton, 'click', () => this.exportAccountKeys(host))
+      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountKeysExport(host, page.authorizeExportKeysForm))
     }
 
     const closePopups = () => {
@@ -77,18 +80,36 @@ export default class SettingsPage extends BasePage {
     })
   }
 
+  async prepareAccountKeysExport (host, authorizeExportKeysForm) {
+    const page = this.page
+    page.exportKeysHost.textContent = host
+    page.exportKeysErr.textContent = ''
+    this.showForm(authorizeExportKeysForm)
+  }
+
   // exportAccountKeys exports and downloads the account keys
-  async exportAccountKeys (host) {
-    const loaded = app.loading(this.body)
+  async exportAccountKeys () {
+    const page = this.page
+    const pw = page.exportKeysAppPass.value
+    const host = page.exportKeysHost.textContent
+    page.exportKeysAppPass.value = ''
     const req = {
+      pw: pw,
       host: host
     }
+    const loaded = app.loading(this.body)
     var res = await postJSON('/api/accountKeys', req)
+    loaded()
+    if (!app.checkResponse(res)) {
+      page.exportKeysErr.textContent = res.msg
+      Doc.show(page.exportKeysErr)
+      return
+    }
     const a = document.createElement('a')
     a.setAttribute('download', 'dcrAccount-' + host + '.json')
     a.setAttribute('href', 'data:application/json,' + JSON.stringify(res, null, 4))
     a.click()
-    loaded()
+    Doc.hide(page.forms)
   }
 
   /* showForm shows a modal form with a little animation. */

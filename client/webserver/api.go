@@ -196,9 +196,9 @@ func (s *WebServer) apiAccountKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	accountKeysResponse, err := s.core.AccountKeys(nil, form.Host)
+	accountKeysResponse, err := s.core.AccountKeys(form.Pass, form.Host)
 	if err != nil {
-		s.writeAPIError(w, "error placing order: %v", err)
+		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
