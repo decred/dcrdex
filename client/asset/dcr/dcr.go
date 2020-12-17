@@ -395,9 +395,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
 	dcr.client, err = newClient(walletCfg.RPCListen, walletCfg.RPCUser,
-		walletCfg.RPCPass, walletCfg.RPCCert)
+		walletCfg.RPCPass, walletCfg.RPCCert, logger)
 	if err != nil {
-		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %v", err)
+		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
 	}
 	// Beyond this point, only node
 	dcr.node = dcr.client
@@ -436,7 +436,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
+func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
 
 	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
@@ -452,9 +452,15 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 		DisableConnectOnNew: true,
 	}
 
-	cl, err := rpcclient.New(config, nil)
+	ntfnHandlers := &rpcclient.NotificationHandlers{
+		// Setup an on-connect handler for logging (re)connects.
+		OnClientConnected: func() {
+			logger.Infof("Connected to Decred wallet at %s", host)
+		},
+	}
+	cl, err := rpcclient.New(config, ntfnHandlers)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %v", err)
+		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
 	}
 
 	return cl, nil
@@ -1724,6 +1730,9 @@ func (dcr *ExchangeWallet) Unlock(pw string) error {
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
+	if dcr.client.Disconnected() {
+		return asset.ErrConnectionDown
+	}
 	return dcr.node.WalletLock()
 }
 

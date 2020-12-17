@@ -14,7 +14,10 @@ import (
 // has been spent or it never existed. This error may be returned from
 // AuditContract, Refund or Redeem as those methods expect the provided coin to
 // exist and be unspent.
-const CoinNotFoundError = dex.ErrorKind("coin not found")
+const (
+	CoinNotFoundError = dex.ErrorKind("coin not found")
+	ErrConnectionDown = dex.ErrorKind("wallet not connected")
+)
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
