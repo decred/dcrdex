@@ -26,7 +26,7 @@ const (
 	orderParamsErr
 	dbErr
 	authErr
-	connectErr
+	connectWalletErr
 	missingWalletErr
 	encryptionErr
 	marketErr

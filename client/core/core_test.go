@@ -1438,7 +1438,7 @@ func TestRegister(t *testing.T) {
 	// wallet not found
 	delete(tCore.wallets, tDCR.ID)
 	run()
-	if !errorHasCode(err, walletErr) {
+	if !errorHasCode(err, missingWalletErr) {
 		t.Fatalf("wrong missing wallet error: %v", err)
 	}
 	tCore.wallets[tDCR.ID] = wallet
@@ -4685,7 +4685,7 @@ func TestReconfigureWallet(t *testing.T) {
 	// Connect error
 	tXyzWallet.connectErr = tErr
 	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
-	if !errorHasCode(err, connectErr) {
+	if !errorHasCode(err, connectWalletErr) {
 		t.Fatalf("wrong error when expecting connection error: %v", err)
 	}
 	tXyzWallet.connectErr = nil
