@@ -16,7 +16,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v2
       - name: Install Linters
-        run: "curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.32.0"
+        run: "curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.33.0"
 
       - name: Test
         env:
@@ -38,6 +38,9 @@ jobs:
     - name: npm clean-install
       working-directory: ./client/webserver/site
       run: npm ci
+    - name: npm run lint
+      working-directory: ./client/webserver/site
+      run: npm run lint
     - name: npm run build
       working-directory: ./client/webserver/site
       run: npm run build
