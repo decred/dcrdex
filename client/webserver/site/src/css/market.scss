@@ -19,7 +19,7 @@ div.marketlist {
 div.marketrow {
   font-size: 17px;
   padding: 0.3em;
-  font-family: 'demi-sans', sans-serif;
+  font-family: "demi-sans", sans-serif;
   cursor: pointer;
 }
 
@@ -64,7 +64,7 @@ table.ordertable {
 
   th {
     font-size: 14px;
-    font-family: 'demi-sans', sans-serif;
+    font-family: "demi-sans", sans-serif;
   }
 
   td {
@@ -140,10 +140,6 @@ table.balance-table {
     background-color: #fff1;
   }
 
-  // tbody > tr:first-child {
-  //   font-weight: bold;
-  // }
-
   .ico-expired {
     color: orangered;
   }
@@ -183,7 +179,7 @@ table.balance-table button:hover {
 }
 
 #orderForm {
-  input[type=number] {
+  input[type="number"] {
     height: 30px;
     border: 1px solid #6a6a6a;
     border-radius: 0;
@@ -197,7 +193,7 @@ table.balance-table button:hover {
   span.unitbox {
     position: absolute;
     font-size: 14px;
-    font-family: 'demi-sans', sans-serif;
+    font-family: "demi-sans", sans-serif;
     right: 5px;
     top: 48%; // Looks better than 50 for some reason.
     transform: translateY(-50%);
@@ -275,7 +271,7 @@ table.balance-table button:hover {
       bottom: 2px;
 
       &::after {
-        content: '|';
+        content: "|";
       }
     }
 
@@ -342,7 +338,7 @@ table.balance-table button:hover {
   top: -11px;
   padding: 0 3px;
   font-size: 16px;
-  font-family: 'demi-sans', sans-serif;
+  font-family: "demi-sans", sans-serif;
   background-color: $light_bg_1;
 }
 
@@ -395,6 +391,26 @@ table.balance-table button:hover {
 
     .red {
       color: #f55a;
+    }
+  }
+
+  .header {
+    &.buygreen {
+      background-color: #207a4699;
+    }
+
+    &.sellred {
+      background-color: #99302b99;
+    }
+  }
+
+  button.selected {
+    &.buygreen {
+      background-color: #207a4699;
+    }
+
+    &.sellred {
+      background-color: #99302b99;
     }
   }
 }

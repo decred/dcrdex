@@ -1,5 +1,5 @@
 body.dark {
-  input[type=number] {
+  input[type="number"] {
     border-color: #444;
   }
 
@@ -102,6 +102,28 @@ body.dark {
 
     button.selected,
     button.submit {
+      &.buygreen {
+        background-color: #05a35a99;
+      }
+
+      &.sellred {
+        background-color: #ae333399;
+      }
+    }
+  }
+
+  #verifyForm {
+    .header {
+      &.buygreen {
+        background-color: #05a35a99;
+      }
+
+      &.sellred {
+        background-color: #ae333399;
+      }
+    }
+
+    button.selected {
       &.buygreen {
         background-color: #05a35a99;
       }

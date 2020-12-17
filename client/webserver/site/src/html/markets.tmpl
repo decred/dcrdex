@@ -387,8 +387,8 @@
 
     {{- /* VERIFY ORDER */ -}}
     <form class="card bg1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18 position-relative">
-        Verify Order
+      <div class="px-2 py-1 text-center fs18 position-relative header" id="vHeader">
+        Verify <span id="vSideHeader"></span>  Order
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="py-3 px-4">
@@ -430,7 +430,10 @@
           </div>
           <div class="col-12 p-0 text-right">
             <div>&nbsp;</div>
-            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Submit</button>
+            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
+              <span id="vSideSubmit"></span>
+              <span id="vBaseSubmit"></span>
+            </button>
           </div>
         </div>
         <hr class="dashed my-3">
