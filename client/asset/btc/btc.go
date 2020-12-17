@@ -138,6 +138,7 @@ type rpcClient interface {
 	GetRawMempool() ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
+	Disconnected() bool
 }
 
 // BTCCloneCFG holds clone specific parameters.
@@ -328,7 +329,6 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect      int64
-	client            *rpcclient.Client
 	node              rpcClient
 	wallet            *walletClient
 	walletInfo        *asset.WalletInfo
@@ -434,10 +434,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, fmt.Errorf("error creating BTC RPC client: %w", err)
 	}
 
-	btc := newWallet(cfg, btcCfg, client)
-	btc.client = client
-
-	return btc, nil
+	return newWallet(cfg, btcCfg, client), nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
@@ -1066,6 +1063,9 @@ func (btc *ExchangeWallet) Unlock(pw string) error {
 
 // Lock locks the ExchangeWallet and the underlying bitcoind wallet.
 func (btc *ExchangeWallet) Lock() error {
+	if btc.node.Disconnected() {
+		return asset.ErrConnectionDown
+	}
 	return btc.wallet.Lock()
 }
 

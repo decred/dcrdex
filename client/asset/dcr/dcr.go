@@ -412,7 +412,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
 	dcr.client, err = newClient(walletCfg.RPCListen, walletCfg.RPCUser,
-		walletCfg.RPCPass, walletCfg.RPCCert)
+		walletCfg.RPCPass, walletCfg.RPCCert, logger)
 	if err != nil {
 		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
 	}
@@ -453,7 +453,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
+func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
 
 	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
@@ -469,7 +469,13 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 		DisableConnectOnNew: true,
 	}
 
-	cl, err := rpcclient.New(config, nil)
+	ntfnHandlers := &rpcclient.NotificationHandlers{
+		// Setup an on-connect handler for logging (re)connects.
+		OnClientConnected: func() {
+			logger.Infof("Connected to Decred wallet at %s", host)
+		},
+	}
+	cl, err := rpcclient.New(config, ntfnHandlers)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
 	}
@@ -1832,7 +1838,16 @@ func (dcr *ExchangeWallet) Unlock(pw string) error {
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
-	return translateRPCCancelErr(dcr.node.WalletLock(dcr.ctx))
+	if dcr.client.Disconnected() {
+		return asset.ErrConnectionDown
+	}
+	// Since hung calls to Lock() may block shutdown of the consumer and thus
+	// cancellation of the ExchangeWallet subsystem's Context, dcr.ctx, give
+	// this a timeout in case the connection goes down or the RPC hangs for
+	// other reasons.
+	ctx, cancel := context.WithTimeout(dcr.ctx, 5*time.Second)
+	defer cancel()
+	return translateRPCCancelErr(dcr.node.WalletLock(ctx))
 }
 
 // Locked will be true if the wallet is currently locked.
