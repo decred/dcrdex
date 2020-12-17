@@ -49,9 +49,6 @@ const (
 	// tickCheckDivisions is how many times to tick trades per broadcast timeout
 	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
 	tickCheckDivisions = 8
-	// defaultFeeRateLimit is used to as default when no fee rate limit value
-	// specified by user. unit/kB
-	defaultFeeRateLimit = 10000
 )
 
 var (
@@ -1453,20 +1450,17 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		return nil, fmt.Errorf("error creating wallet: %w", err)
 	}
 	// Parse fee rate limit
-	// NOTE We parse fee rate limit 'feelimit' settings and store it on xcWallet
+	// NOTE We parse fee rate limit 'feeratelimit' settings and store it on xcWallet
 	// unlike other settings which are being configured and set on each asset's
 	// ExchangeWallet instance (see above asset.Setup call) as it required on
 	// order placement time
-	feeLimit := walletCfg.Settings["feelimit"]
+	feeLimit := walletCfg.Settings["feeratelimit"]
 	if feeLimit != "" {
-		floatLimit, err := strconv.ParseUint(feeLimit, 10, 32)
+		uintLimit, err := strconv.ParseUint(feeLimit, 10, 64)
 		if err != nil {
 			return nil, err
 		}
-		wallet.feeRateLimit = uint32(floatLimit)
-	} else {
-		// If user didn't provide limit use default limit
-		wallet.feeRateLimit = defaultFeeRateLimit
+		wallet.feeRateLimit = uintLimit
 	}
 
 	// Construct the unconnected xcWallet.
@@ -2652,27 +2646,6 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
-// validateFeeRateLimit checks if user provided fee rate limit value, if yes
-// it ensures that the server'r MaxFeeRate is smaller than the wallet's
-// configured feeRateLimit.
-func validateFeeRateLimit(w *xcWallet, a dex.Asset) error {
-	// Configured fee rate limit
-	feeRateLimit := w.feeRateLimit
-	// Asset's max fee rate from server
-	maxFeeRate := uint32(a.MaxFeeRate)
-	if feeRateLimit != 0 {
-		if feeRateLimit < maxFeeRate {
-			return newError(orderParamsErr,
-				"%v: server's max fee rate %v higher than configued fee rate limit %v",
-				a.Symbol,
-				maxFeeRate,
-				feeRateLimit)
-		}
-	}
-
-	return nil
-}
-
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
@@ -2700,14 +2673,22 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	fromWallet, toWallet, fromAsset, toAsset := wallets.fromWallet,
 		wallets.toWallet, wallets.fromAsset, wallets.toAsset
 
+	c.log.Tracef("fdfdfdfdfd %v %v %v %v \n\n\n\n\n", fromWallet.feeRateLimit, fromAsset.MaxFeeRate,
+		toWallet.feeRateLimit, toAsset.MaxFeeRate)
 	// Check wallets fee rate limit against server's max fee rate
-	err = validateFeeRateLimit(fromWallet, *fromAsset)
-	if err != nil {
-		return nil, 0, err
+	if fromWallet.feeRateLimit < fromAsset.MaxFeeRate {
+		return nil, 0, newError(orderParamsErr,
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			fromAsset.Symbol,
+			fromAsset.MaxFeeRate,
+			fromWallet.feeRateLimit)
 	}
-	err = validateFeeRateLimit(toWallet, *toAsset)
-	if err != nil {
-		return nil, 0, err
+	if toWallet.feeRateLimit < toAsset.MaxFeeRate {
+		return nil, 0, newError(orderParamsErr,
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			toAsset.Symbol,
+			toAsset.MaxFeeRate,
+			toWallet.feeRateLimit)
 	}
 
 	prepareWallet := func(w *xcWallet) error {

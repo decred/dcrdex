@@ -46,6 +46,8 @@ const (
 
 	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
+	// defaultFeeRateLimit is the default value for the feeratelimit.
+	defaultFeeRateLimit = 100
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -105,9 +107,10 @@ var (
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
-			Key:         "feelimit",
-			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand.  Units: atoms/kB",
+			Key:          "feeratelimit",
+			DisplayName:  "Highest acceptable fee rate",
+			Description:  "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand.  Units: atoms/byte",
+			DefaultValue: defaultFeeRateLimit,
 		},
 		{
 			Key:          "redeemconftarget",
