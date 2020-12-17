@@ -7,10 +7,10 @@ const popupsCK = 'popups'
 // to localStorage.
 export default class State {
   static setCookie (cname, cvalue) {
-    var d = new Date()
+    const d = new Date()
     // Set cookie to expire in ten years.
     d.setTime(d.getTime() + (86400 * 365 * 10 * 1000))
-    var expires = 'expires=' + d.toUTCString()
+    const expires = 'expires=' + d.toUTCString()
     document.cookie = cname + '=' + cvalue + ';' + expires + ';path=/'
   }
 

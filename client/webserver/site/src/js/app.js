@@ -185,14 +185,14 @@ export default class Application {
 
   /* attach binds the common handlers and calls the page constructor. */
   attach (data) {
-    var handlerID = this.main.dataset.handler
+    const handlerID = this.main.dataset.handler
     if (!handlerID) {
       console.error('cannot attach to content with no specified handler')
       return
     }
     this.attachCommon(this.main)
     if (this.loadedPage) this.loadedPage.unload()
-    var constructor = constructors[handlerID]
+    const constructor = constructors[handlerID]
     if (constructor) this.loadedPage = new constructor(this, this.main, data)
     else this.loadedPage = null
 
@@ -205,7 +205,7 @@ export default class Application {
       bind(el, 'mouseenter', () => {
         this.tooltip.textContent = el.dataset.tooltip
         const lyt = Doc.layoutMetrics(el)
-        var left = lyt.centerX - this.tooltip.offsetWidth / 2
+        let left = lyt.centerX - this.tooltip.offsetWidth / 2
         if (left < 0) left = 5
         if (left + this.tooltip.offsetWidth > document.body.offsetWidth) {
           left = document.body.offsetWidth - this.tooltip.offsetWidth - 5
@@ -343,7 +343,7 @@ export default class Application {
       const url = new URL(a.href)
       if (url.origin === pageURL.origin) {
         const token = url.pathname.substring(1)
-        var params = {}
+        const params = {}
         if (url.search) {
           url.searchParams.forEach((v, k) => {
             params[k] = v
@@ -563,7 +563,7 @@ export default class Application {
     if (!skipSave) this.storeNotes()
     // Set the indicator color.
     if (this.notes.length === 0 || (Doc.isDisplayed(this.page.noteBox) && Doc.isDisplayed(noteList))) return
-    var unacked = 0
+    let unacked = 0
     const severity = this.notes.reduce((s, note) => {
       if (!note.acked) unacked++
       if (!note.acked && note.severity > s) return note.severity
@@ -622,7 +622,7 @@ export default class Application {
 
   /* orders retrieves a list of orders for the specified dex and market. */
   orders (host, mktID) {
-    var o = this.user.exchanges[host].markets[mktID].orders
+    let o = this.user.exchanges[host].markets[mktID].orders
     if (!o) {
       o = []
       this.user.exchanges[host].markets[mktID].orders = o
@@ -675,7 +675,7 @@ export default class Application {
 
 /* getSocketURI returns the websocket URI for the client. */
 function getSocketURI () {
-  var protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
+  const protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
   return `${protocol}://${window.location.host}/ws`
 }
 

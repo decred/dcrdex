@@ -206,10 +206,10 @@ export class DepthChart {
       sellBase: 0,
       sellQuote: 0
     }
-    var sum = 0
+    let sum = 0
     // The epoch line is above the non-epoch region, so the epochSum y value
     // must account for non-epoch orders too.
-    var epochSum = 0
+    let epochSum = 0
 
     for (let i = 0; i < buys.length; i++) {
       const ord = buys[i]
@@ -286,7 +286,7 @@ export class DepthChart {
       dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
 
     // A function to be run at the end if there is legend data to display.
-    var mouseData
+    let mouseData
 
     // Draw the grid.
     ctx.lineWidth = 1
@@ -448,8 +448,8 @@ export class DepthChart {
     // Print the y labels.
     this.yRegion.plot(new Extents(0, 1, 0, maxY), (ctx, tools) => {
       const centerY = maxY / 2
-      var lastY = 0
-      var unitCenter = centerY
+      let lastY = 0
+      let unitCenter = centerY
       yLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(0.5), tools.y(lbl.val))
         if (centerY >= lastY && centerY < lbl.val) {
@@ -463,8 +463,8 @@ export class DepthChart {
     // Print the x labels
     this.xRegion.plot(new Extents(low, high, 0, 1), (ctx, tools) => {
       const centerX = (high + low) / 2
-      var lastX = low
-      var unitCenter = centerX
+      let lastX = low
+      let unitCenter = centerX
       xLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
         if (centerX >= lastX && centerX < lbl.val) {
@@ -516,9 +516,9 @@ export class DepthChart {
 
   // Draw a single side's depth chart data.
   drawDepth (depth) {
-    var firstPt = depth[0]
-    var y = firstPt[1]
-    var x
+    const firstPt = depth[0]
+    let y = firstPt[1]
+    let x
     this.plotRegion.plot(this.dataExtents, (ctx, tools) => {
       tools.dataCoords(() => {
         ctx.beginPath()
@@ -649,7 +649,7 @@ class Region {
 
   // Clear the region.
   clear () {
-    var ext = this.extents
+    const ext = this.extents
     this.ctx.clearRect(ext.x.min, ext.y.min, ext.xRange, ext.yRange)
   }
 
@@ -710,18 +710,18 @@ class Region {
 // makeLabels attempts to create the appropriate labels for the specified
 // screen size, context, and label spacing.
 function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
-  var n = screenW / spacingGuess
+  const n = screenW / spacingGuess
   const diff = max - min
-  var tickGuess = diff / n
+  const tickGuess = diff / n
   // make the tick spacing a multiple of the step
   const tick = tickGuess + step - (tickGuess % step)
-  var x = min + tick - (min % tick)
-  var absMax = Math.max(Math.abs(max), Math.abs(min))
+  let x = min + tick - (min % tick)
+  const absMax = Math.max(Math.abs(max), Math.abs(min))
   // The Math.round part is the minimum precision required to see the change in the numbers.
   // The 2 accounts for the precision of the tick.
-  var sigFigs = Math.round(Math.log10(absMax / tick)) + 2
+  const sigFigs = Math.round(Math.log10(absMax / tick)) + 2
   const pts = []
-  var widest = 0
+  let widest = 0
   while (x < max) {
     x = Number(x.toPrecision(sigFigs))
     const lbl = formatLabelValue(x)

@@ -8,7 +8,7 @@ import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
 import * as Order from './orderutil'
 import ws from './ws'
 
-var app
+let app
 const bind = Doc.bind
 
 const bookRoute = 'book'
@@ -254,7 +254,7 @@ export default class MarketsPage extends BasePage {
     bind(page.chartResizer, 'mousedown', e => {
       if (e.button !== 0) return
       e.preventDefault()
-      var chartRatio
+      let chartRatio
       const trackMouse = ee => {
         ee.preventDefault()
         const box = page.rightSide.getBoundingClientRect()
@@ -280,7 +280,7 @@ export default class MarketsPage extends BasePage {
 
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
-    var selected
+    let selected
     if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
       selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
     } else {
@@ -995,7 +995,7 @@ export default class MarketsPage extends BasePage {
       pw: page.cancelPass.value
     }
     page.cancelPass.value = ''
-    var res = await postJSON('/api/cancel', req)
+    const res = await postJSON('/api/cancel', req)
     if (!app.checkResponse(res)) return
     Doc.hide(cancelData.bttn, page.forms)
     order.cancelling = true
@@ -1154,7 +1154,7 @@ export default class MarketsPage extends BasePage {
       pw: pw
     }
     if (!this.validateOrder(order)) return
-    var res = await postJSON('/api/trade', req)
+    const res = await postJSON('/api/trade', req)
     if (!app.checkResponse(res)) return
     // If the wallets are not open locally, they must have been opened during
     // ordering. Grab updated info.
@@ -1304,7 +1304,7 @@ export default class MarketsPage extends BasePage {
   addTableOrder (order) {
     const tbody = order.sell ? this.page.sellRows : this.page.buyRows
     const cssClass = order.sell ? 'sellcolor' : 'buycolor'
-    var row = tbody.firstChild
+    let row = tbody.firstChild
     // Handle market order differently.
     if (order.rate === 0) {
       // This is a market order.
@@ -1384,7 +1384,7 @@ export default class MarketsPage extends BasePage {
     bind(tr, 'click', () => {
       this.reportClick(rate)
     })
-    var qtyTD
+    let qtyTD
     tr.querySelectorAll('td').forEach(td => {
       switch (td.dataset.type) {
         case 'qty':

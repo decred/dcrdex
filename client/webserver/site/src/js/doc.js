@@ -60,8 +60,8 @@ export default class Doc {
    * layoutMetrics gets information about the elements position on the page.
    */
   static layoutMetrics (el) {
-    var box = el.getBoundingClientRect()
-    var docEl = document.documentElement
+    const box = el.getBoundingClientRect()
+    const docEl = document.documentElement
     const top = box.top + docEl.scrollTop
     const left = box.left + docEl.scrollLeft
     const w = el.offsetWidth
@@ -121,7 +121,7 @@ export default class Doc {
     const end = start + duration
     const range = end - start
     const frameDuration = 1000 / FPS
-    var now = start
+    let now = start
     while (now < end) {
       f(easer((now - start) / range))
       await sleep(frameDuration)
@@ -145,7 +145,7 @@ export default class Doc {
 
   // formatCoinValue formats the asset value to a string.
   static formatCoinValue (x) {
-    var [whole, frac] = x.toLocaleString('en-us', fullPrecisionSpecs).split('.')
+    let [whole, frac] = x.toLocaleString('en-us', fullPrecisionSpecs).split('.')
     // toLocalString gives precedence to minimumSignificantDigits, so the result
     // can have no fractional part, despite the minimumFractionDigits setting.
     if (!frac) return whole
@@ -180,15 +180,15 @@ export default class Doc {
    * unix timestamp.
    */
   static timeSince (t) {
-    var seconds = Math.floor(((new Date().getTime()) - t))
-    var result = ''
-    var count = 0
+    let seconds = Math.floor(((new Date().getTime()) - t))
+    let result = ''
+    let count = 0
     const add = (n, s) => {
       if (n > 0 || count > 0) count++
       if (n > 0) result += `${n} ${s} `
       return count >= 2
     }
-    var y, mo, d, h, m, s
+    let y, mo, d, h, m, s
     [y, seconds] = timeMod(seconds, aYear)
     if (add(y, 'y')) { return result }
     [mo, seconds] = timeMod(seconds, aMonth)
@@ -221,7 +221,7 @@ export default class Doc {
 }
 
 /* Easing algorithms for animations. */
-var Easing = {
+const Easing = {
   linear: t => t,
   easeIn: t => t * t,
   easeOut: t => t * (2 - t),

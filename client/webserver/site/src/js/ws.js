@@ -33,12 +33,12 @@ function forward (route, payload, handlers) {
     return
   }
   // call each handler
-  for (var i = 0; i < handlers[route].length; i++) {
+  for (let i = 0; i < handlers[route].length; i++) {
     handlers[route][i](payload)
   }
 }
 
-var id = 0
+let id = 0
 
 class MessageSocket {
   constructor () {
@@ -66,7 +66,7 @@ class MessageSocket {
       return
     }
     id++
-    var message = JSON.stringify({
+    const message = JSON.stringify({
       route: route,
       type: typeRequest,
       id: id,
@@ -86,18 +86,18 @@ class MessageSocket {
   connect (uri, reloader) {
     this.uri = uri
     this.reloader = reloader
-    var retrys = 0
+    let retrys = 0
     const go = () => {
       window.log('ws', `connecting to ${uri}`)
-      var conn = this.connection = new window.WebSocket(uri)
-      var timeout = setTimeout(() => {
+      let conn = this.connection = new window.WebSocket(uri)
+      const timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
         conn.close()
       }, 500)
 
       // unmarshal message, and forward the message to registered handlers
       conn.onmessage = (evt) => {
-        var message = JSON.parse(evt.data)
+        const message = JSON.parse(evt.data)
         forward(message.route, message.payload, this.handlers)
       }
 
@@ -140,5 +140,5 @@ class MessageSocket {
   }
 }
 
-var ws = new MessageSocket()
+const ws = new MessageSocket()
 export default ws

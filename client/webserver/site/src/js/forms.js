@@ -1,7 +1,7 @@
 import Doc from './doc'
 import { postJSON } from './http'
 
-var app
+let app
 
 /*
  * bindNewWallet should be used with the "newWalletForm" template. The enclosing
@@ -35,7 +35,7 @@ export class NewWalletForm {
       }
       fields.nwAppPass.value = ''
       const loaded = app.loading(form)
-      var res = await postJSON('/api/newwallet', createForm)
+      const res = await postJSON('/api/newwallet', createForm)
       loaded()
       if (!app.checkResponse(res)) {
         this.setError(res.msg)
@@ -70,7 +70,7 @@ export class NewWalletForm {
    */
   async loadDefaults () {
     const loaded = app.loading(this.form)
-    var res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
+    const res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
     loaded()
     if (!app.checkResponse(res)) {
       this.setError(res.msg)
@@ -282,7 +282,7 @@ export function bindOpenWallet (app, form, success) {
     'uwAssetLogo', 'uwAssetName',
     'uwAppPass', 'submitUnlock', 'unlockErr'
   ])
-  var currentAsset
+  let currentAsset
   form.setAsset = asset => {
     currentAsset = asset
     fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -302,7 +302,7 @@ export function bindOpenWallet (app, form, success) {
     }
     fields.uwAppPass.value = ''
     const loaded = app.loading(form)
-    var res = await postJSON('/api/openwallet', open)
+    const res = await postJSON('/api/openwallet', open)
     loaded()
     if (!app.checkResponse(res)) {
       fields.unlockErr.textContent = res.msg

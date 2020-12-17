@@ -3,7 +3,7 @@ import BasePage from './basepage'
 import * as Order from './orderutil'
 import { postJSON } from './http'
 
-var app
+let app
 
 const orderBatchSize = 50
 
@@ -35,7 +35,7 @@ export default class OrdersPage extends BasePage {
     const readFilter = (form, filterKey) => {
       const v = search.get(filterKey)
       if (!v || v.length === 0) return
-      var subFilter = v.split(',')
+      const subFilter = v.split(',')
       if (v) {
         filterState[filterKey] = subFilter
       }
@@ -97,8 +97,8 @@ export default class OrdersPage extends BasePage {
       const set = (tmplID, s) => { Doc.tmplElement(tr, tmplID).textContent = s }
       const mktID = `${ord.baseSymbol.toUpperCase()}-${ord.quoteSymbol.toUpperCase()}`
       set('host', `${mktID} @ ${ord.host}`)
-      var from, to, fromQty
-      var toQty = ''
+      let from, to, fromQty
+      let toQty = ''
       if (ord.sell) {
         [from, to] = [ord.baseSymbol, ord.quoteSymbol]
         fromQty = Doc.formatCoinValue(ord.qty / 1e8)

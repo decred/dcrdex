@@ -3,7 +3,7 @@ import BasePage from './basepage'
 import { postJSON } from './http'
 import * as forms from './forms'
 
-var app
+let app
 
 export default class LoginPage extends BasePage {
   constructor (application, body) {
@@ -28,7 +28,7 @@ export default class LoginPage extends BasePage {
       return
     }
     const loaded = app.loading(page.loginForm)
-    var res = await postJSON('/api/login', { pass: pw })
+    const res = await postJSON('/api/login', { pass: pw })
     loaded()
     if (!app.checkResponse(res)) {
       page.errMsg.textContent = res.msg

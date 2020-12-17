@@ -6,7 +6,7 @@ import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
 const DCR_ID = 42
 const animationLength = 300
 
-var app
+let app
 
 export default class RegistrationPage extends BasePage {
   constructor (application, body) {
@@ -111,7 +111,7 @@ export default class RegistrationPage extends BasePage {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app.loading(page.appPWForm)
-    var res = await postJSON('/api/init', { pass: pw })
+    const res = await postJSON('/api/init', { pass: pw })
     loaded()
     if (!app.checkResponse(res)) {
       page.appErrMsg.textContent = res.msg
@@ -134,13 +134,13 @@ export default class RegistrationPage extends BasePage {
       return
     }
 
-    var cert = ''
+    let cert = ''
     if (page.certFile.value) {
       cert = await page.certFile.files[0].text()
     }
 
     const loaded = app.loading(page.dexAddrForm)
-    var res = await postJSON('/api/getfee', {
+    const res = await postJSON('/api/getfee', {
       addr: addr,
       cert: cert
     })
@@ -166,7 +166,7 @@ export default class RegistrationPage extends BasePage {
   async registerDEX () {
     const page = this.page
     Doc.hide(page.regErr)
-    var cert = ''
+    let cert = ''
     if (page.certFile.value) {
       cert = await page.certFile.files[0].text()
     }
@@ -178,7 +178,7 @@ export default class RegistrationPage extends BasePage {
     }
     page.appPass.value = ''
     const loaded = app.loading(page.confirmRegForm)
-    var res = await postJSON('/api/register', registration)
+    const res = await postJSON('/api/register', registration)
     loaded()
     if (!app.checkResponse(res)) {
       page.regErr.textContent = res.msg

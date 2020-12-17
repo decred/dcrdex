@@ -6,7 +6,7 @@ import * as forms from './forms'
 
 const animationLength = 300
 
-var app
+let app
 
 export default class SettingsPage extends BasePage {
   constructor (application, body) {

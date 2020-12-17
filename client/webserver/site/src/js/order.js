@@ -10,7 +10,7 @@ const Testnet = 1
 
 const animationLength = 500
 
-var app, net
+let app, net
 
 export default class OrderPage extends BasePage {
   constructor (application, main) {
@@ -73,7 +73,7 @@ export default class OrderPage extends BasePage {
 
   /* fetchOrder fetches the order from the client. */
   async fetchOrder () {
-    var res = await postJSON('/api/order', this.orderID)
+    const res = await postJSON('/api/order', this.orderID)
     if (!app.checkResponse(res)) return
     this.order = res.order
   }
@@ -114,7 +114,7 @@ export default class OrderPage extends BasePage {
     }
     page.cancelPass.value = ''
     const loaded = app.loading(page.cancelForm)
-    var res = await postJSON('/api/cancel', req)
+    const res = await postJSON('/api/cancel', req)
     loaded()
     if (!app.checkResponse(res)) return
     page.status.textContent = 'cancelling'
@@ -147,7 +147,7 @@ export default class OrderPage extends BasePage {
    * 'order' or 'match' notification.
    */
   processMatch (m) {
-    var card
+    let card
     for (const div of Array.from(this.page.matchBox.querySelectorAll('.match-card'))) {
       if (div.dataset.matchID === m.matchID) {
         card = div
