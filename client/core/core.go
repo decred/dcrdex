@@ -2673,8 +2673,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	fromWallet, toWallet, fromAsset, toAsset := wallets.fromWallet,
 		wallets.toWallet, wallets.fromAsset, wallets.toAsset
 
-	c.log.Tracef("fdfdfdfdfd %v %v %v %v \n\n\n\n\n", fromWallet.feeRateLimit, fromAsset.MaxFeeRate,
-		toWallet.feeRateLimit, toAsset.MaxFeeRate)
 	// Check wallets fee rate limit against server's max fee rate
 	if fromWallet.feeRateLimit < fromAsset.MaxFeeRate {
 		return nil, 0, newError(orderParamsErr,
