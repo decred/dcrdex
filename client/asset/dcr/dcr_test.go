@@ -1682,10 +1682,12 @@ func testSender(t *testing.T, senderType tSenderType) {
 	wallet, node, shutdown := tNewWallet()
 	var sendVal uint64 = 1e8
 	var unspentVal uint64 = 100e8
+	funName := "PayFee"
 	sender := func(addr string, val uint64) (asset.Coin, error) {
 		return wallet.PayFee(addr, val)
 	}
 	if senderType == tWithdrawSender {
+		funName = "Withdraw"
 		// For withdraw, test with unspent total = withdraw value
 		unspentVal = sendVal
 		sender = func(addr string, val uint64) (asset.Coin, error) {
@@ -1704,10 +1706,11 @@ func testSender(t *testing.T, senderType tSenderType) {
 		Confirmations: 5,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
+	//node.unspent = append(node.unspent, node.unspent[0])
 
 	_, err := sender(addr, sendVal)
 	if err != nil {
-		t.Fatalf("PayFee error: %v", err)
+		t.Fatalf(funName+" error: %v", err)
 	}
 
 	// invalid address
@@ -1717,17 +1720,19 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}
 
 	// GetRawChangeAddress error
-	node.changeAddrErr = tErr
-	_, err = sender(addr, sendVal)
-	if err == nil {
-		t.Fatalf("no error for rawchangeaddress: %v", err)
+	if senderType == tPayFeeSender { // withdraw test does not get a change address
+		node.changeAddrErr = tErr
+		_, err = sender(addr, sendVal)
+		if err == nil {
+			t.Fatalf("no error for rawchangeaddress: %v", err)
+		}
+		node.changeAddrErr = nil
 	}
-	node.changeAddrErr = nil
 
 	// good again
 	_, err = sender(addr, sendVal)
 	if err != nil {
-		t.Fatalf("PayFee error afterwards: %v", err)
+		t.Fatalf(funName+" error afterwards: %v", err)
 	}
 }
 
@@ -1737,6 +1742,95 @@ func TestPayFee(t *testing.T) {
 
 func TestWithdraw(t *testing.T) {
 	testSender(t, tWithdrawSender)
+}
+
+func Test_sendMinusFees(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+	address := tPKHAddr.String()
+	node.changeAddr = tPKHAddr
+
+	var unspentVal uint64 = 100e8
+	node.unspent = []walletjson.ListUnspentResult{{
+		TxID:          tTxID,
+		Address:       tPKHAddr.String(),
+		Account:       wallet.acct,
+		Amount:        float64(unspentVal) / 1e8,
+		Confirmations: 5,
+		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+	}}
+
+	addr, err := dcrutil.DecodeAddress(address, chainParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This should make a msgTx with one input and one output.
+	msgTx, val, err := wallet.sendMinusFees(addr, unspentVal, optimalFeeRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgTx.TxOut) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(msgTx.TxOut))
+	}
+	if val != uint64(msgTx.TxOut[0].Value) {
+		t.Errorf("expected non-change output to be %d, got %d", val, msgTx.TxOut[0].Value)
+	}
+	if val >= unspentVal {
+		t.Errorf("expected output to be have fees deducted")
+	}
+
+	// Then with unspentVal just slightly larger than send. This should still
+	// make a msgTx with one output, but larger than before. The sent value is
+	// SMALLER than requested because it was required for fees.
+	avail := unspentVal + 77
+	node.unspent[0].Amount = float64(avail) / 1e8
+	msgTx, val, err = wallet.sendMinusFees(addr, unspentVal, optimalFeeRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgTx.TxOut) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(msgTx.TxOut))
+	}
+	if val != uint64(msgTx.TxOut[0].Value) {
+		t.Errorf("expected non-change output to be %d, got %d", val, msgTx.TxOut[0].Value)
+	}
+	if val >= unspentVal {
+		t.Errorf("expected output to be have fees deducted")
+	}
+
+	// Still no change, but this time the sent value is LARGER than requested
+	// because change would be dust, and we don't over pay fees.
+	avail = unspentVal + 3000
+	node.unspent[0].Amount = float64(avail) / 1e8
+	msgTx, val, err = wallet.sendMinusFees(addr, unspentVal, optimalFeeRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgTx.TxOut) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(msgTx.TxOut))
+	}
+	if val <= unspentVal {
+		t.Errorf("expected output to be more thrifty")
+	}
+
+	// Then with unspentVal considerably larger than (double) send. This should
+	// make a msgTx with two outputs as the change is no longer dust. The change
+	// should be exactly unspentVal and the sent amount should be
+	// unspentVal-fees.
+	node.unspent[0].Amount = float64(unspentVal*2) / 1e8
+	msgTx, val, err = wallet.sendMinusFees(addr, unspentVal, optimalFeeRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgTx.TxOut) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(msgTx.TxOut))
+	}
+	if val != uint64(msgTx.TxOut[0].Value) {
+		t.Errorf("expected non-change output to be %d, got %d", val, msgTx.TxOut[0].Value)
+	}
+	if unspentVal != uint64(msgTx.TxOut[1].Value) {
+		t.Errorf("expected change output to be %d, got %d", unspentVal, msgTx.TxOut[1].Value)
+	}
 }
 
 func TestConfirmations(t *testing.T) {
@@ -1826,9 +1920,10 @@ func TestSendEdges(t *testing.T) {
 	}
 
 	tPKHAddrV3, _ := dcrutilv3.DecodeAddress(tPKHAddr.String(), chainParams)
+	node.changeAddr = tPKHAddrV3
 
 	for _, tt := range tests {
-		tx, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), tPKHAddrV3, tt.funding, swapVal, feeRate, nil)
+		tx, _, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), feeRate, -1)
 		if err != nil {
 			t.Fatalf("sendWithReturn error: %v", err)
 		}
