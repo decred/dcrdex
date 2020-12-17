@@ -1032,20 +1032,21 @@ func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
 func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	wallet, exists := c.wallet(assetID)
 	if !exists {
-		return nil, fmt.Errorf("no wallet found for %d -> %s", assetID, unbip(assetID))
+		return nil, newError(missingWalletErr, "no configured wallet found %s (%d)", unbip(assetID), assetID)
 	}
 	if !wallet.connected() {
-		c.log.Infof("connecting wallet for %s", unbip(assetID))
-		err := wallet.Connect(c.ctx)
+		c.log.Infof("Connecting wallet for %s", unbip(assetID))
+		err := c.connectWallet(wallet)
 		if err != nil {
-			return nil, fmt.Errorf("Connect error: %w", err)
+			return nil, err // core.Error with code connectWalletErr
 		}
 		// If first connecting the wallet, try to get the balance. Ignore errors
 		// here with the assumption that some wallets may not reveal balance
 		// until unlocked.
 		_, err = c.walletBalances(wallet)
 		if err != nil {
-			c.log.Tracef("could not retrieve balances for locked %s wallet: %v", unbip(assetID), err)
+			// Warn because the balances will be stale.
+			c.log.Warnf("Could not retrieve balances %s wallet: %v", unbip(assetID), err)
 		}
 	}
 	return wallet, nil
@@ -1054,7 +1055,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 func (c *Core) connectWallet(w *xcWallet) error {
 	err := w.Connect(c.ctx)
 	if err != nil {
-		return newError(walletErr, "error connecting %s wallet: %v", unbip(w.AssetID), err)
+		return codedError(connectWalletErr, err)
 	}
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
@@ -1303,9 +1304,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
 	}
 
-	err = wallet.Connect(c.ctx)
+	err = c.connectWallet(wallet)
 	if err != nil {
-		return fmt.Errorf("error connecting wallet: %w", err)
+		return err
 	}
 
 	initErr := func(s string, a ...interface{}) error {
@@ -1517,9 +1518,9 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		return newError(walletErr, "error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	// Must connect to ensure settings are good.
-	err = wallet.Connect(c.ctx)
+	err = c.connectWallet(wallet)
 	if err != nil {
-		return newError(connectErr, "error connecting wallet: %v", err)
+		return err
 	}
 	// Get a new address. Definitely want this when the account changes, and
 	// maybe other settings as well.
@@ -1615,8 +1616,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	// Connect if necessary.
 	wasConnected := wallet.connected()
 	if !wasConnected {
-		err := wallet.Connect(c.ctx)
-		if err != nil {
+		if err = c.connectWallet(wallet); err != nil {
 			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
 		}
 	}
@@ -1664,7 +1664,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	w, exists := c.wallet(assetID)
 	if !exists {
-		return "", fmt.Errorf("no wallet found for %s", unbip(assetID))
+		return "", newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
 	if !w.connected() {
@@ -1788,7 +1788,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 	wallet, err := c.connectedWallet(regFeeAssetID)
 	if err != nil {
-		return nil, newError(walletErr, "cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
+		// Wrap the error from connectedWallet, a core.Error coded as
+		// missingWalletErr or connectWalletErr.
+		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %w", regFeeAssetSymbol, err)
 	}
 
 	if !wallet.unlocked() {
@@ -2030,8 +2032,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		go func(wallet *xcWallet) {
 			defer wg.Done()
 			if !wallet.connected() {
-				err := wallet.Connect(c.ctx)
+				err := c.connectWallet(wallet)
 				if err != nil {
+					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
+						unbip(wallet.AssetID), err)
 					return
 				}
 			}
@@ -2502,7 +2506,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
-		return nil, fmt.Errorf("%s wallet not found", unbip(assetID))
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 	err = c.connectAndUnlock(crypter, wallet)
 	if err != nil {
@@ -2842,11 +2846,11 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	// Connect and open the wallets if needed.
 	baseWallet, found := c.wallet(baseID)
 	if !found {
-		return nil, fmt.Errorf("%s wallet not found", unbip(baseID))
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
 	}
 	quoteWallet, found := c.wallet(quoteID)
 	if !found {
-		return nil, fmt.Errorf("%s wallet not found", unbip(quoteID))
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
 	}
 
 	// We actually care less about base/quote, and more about from/to, which
