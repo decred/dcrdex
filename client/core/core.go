@@ -2093,8 +2093,8 @@ func (c *Core) Logout() error {
 func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 	var oid order.OrderID
 	if len(filter.Offset) > 0 {
-		if len(filter.Offset) != order.OrderIDSize*2 {
-			return nil, fmt.Errorf("invalid offset order ID length. wanted %d, got %d", order.OrderIDSize*2, len(filter.Offset))
+		if len(filter.Offset) != order.OrderIDSize {
+			return nil, fmt.Errorf("invalid offset order ID length. wanted %d, got %d", order.OrderIDSize, len(filter.Offset))
 		}
 		copy(oid[:], filter.Offset)
 	}
