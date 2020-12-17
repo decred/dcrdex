@@ -512,6 +512,8 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	return IsDustVal(uint64(txOut.SerializeSize()), uint64(txOut.Value), minRelayTxFee)
 }
 
+// IsDustVal is like IsDust but it only needs the size of the serialized output
+// and its amount.
 func IsDustVal(sz, amt, minRelayTxFee uint64) bool {
 	totalSize := sz + 165
 	return amt/(3*totalSize) < minRelayTxFee

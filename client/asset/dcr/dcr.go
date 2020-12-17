@@ -2191,13 +2191,12 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, dcrutil.Addre
 	return wire.NewTxOut(int64(val), changeScript), changeAddr, nil
 }
 
-// sendWithReturn sends the unsigned transaction with an added output (unless
-// dust) for the change. If a subtractee output is specified, fees will be
-// subtracted from that output, otherwise they will be subtracted from the
-// change output.
+// sendWithReturn sends the unsigned transaction, adding a change output unless
+// the amount is dust. subtractFrom indicates the output from which fees should
+// be subtraced, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
-	// Sign the transaction to get an initial size estimate and calculate whether
-	// a change output would be dust.
+	// Sign the transaction to get an initial size estimate and calculate
+	// whether a change output would be dust.
 	sigCycles := 1
 	msgTx, err := dcr.signTx(baseTx)
 	if err != nil {
@@ -2244,8 +2243,6 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 			changeAdded = true
 			baseTx.AddTxOut(changeOutput) // unsigned txn
 			remaining -= changeValue
-		} else {
-			fmt.Println("DUSTING IT", changeValue, remaining, minFeeWithChange)
 		}
 	}
 
@@ -2257,13 +2254,16 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 		if subtractFrom >= 0 {
 			subtractee = baseTx.TxOut[subtractFrom]
 		}
-		reservoir := remaining + uint64(subtractee.Value)
+		// The amount available for fees is the sum of what is presently
+		// allocated to fees (lastFee) and the value of the subtractee output,
+		// which add to fees or absorb excess fees from lastFee.
+		reservoir := lastFee + uint64(subtractee.Value)
 
 		// Find the best fee rate by closing in on it in a loop.
 		tried := map[uint64]bool{}
 		for {
-			// Each cycle, sign the transaction and see if there appears to be any
-			// room to lower the total fees.
+			// Each cycle, sign the transaction and see if there is a need to
+			// raise or lower the fees.
 			sigCycles++
 			msgTx, err = dcr.signTx(baseTx)
 			if err != nil {
@@ -2559,7 +2559,8 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
 }
 
-// Fees extracts the transaction fees and fee rate from the MsgTx.
+// reduceMsgTx computes the total input and output amounts, the resulting
+// absolute fee and fee rate, and the serialized transaction size.
 func reduceMsgTx(tx *wire.MsgTx) (in, out, fees, rate, size uint64) {
 	for _, txIn := range tx.TxIn {
 		in += uint64(txIn.ValueIn)
