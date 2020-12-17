@@ -1075,8 +1075,8 @@ func (c *Core) connectWallet(w *xcWallet) error {
 				case <-ticker.C:
 					synced, progress, err := w.SyncStatus()
 					if err != nil {
-						c.log.Errorf("error monitoring sync status for %s", unbip(w.AssetID))
-						return
+						c.log.Errorf("Unable to get wallet/node sync status for %s: %v", unbip(w.AssetID), err)
+						continue // keep trying since the loop will break if connection really drops
 					}
 					w.mtx.Lock()
 					w.synced = synced
