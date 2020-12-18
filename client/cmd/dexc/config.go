@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -184,10 +185,10 @@ func configure() (*Config, error) {
 	// If web or RPC server addresses not set, use network specific
 	// defaults
 	if cfg.WebAddr == "" {
-		cfg.WebAddr = defaultHost + ":" + defaultWebPort
+		cfg.WebAddr = net.JoinHostPort(defaultHost, defaultWebPort)
 	}
 	if cfg.RPCAddr == "" {
-		cfg.RPCAddr = defaultHost + ":" + defaultRPCPort
+		cfg.RPCAddr = net.JoinHostPort(defaultHost, defaultRPCPort)
 	}
 
 	if cfg.RPCCert == "" {

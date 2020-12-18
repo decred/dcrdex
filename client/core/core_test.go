@@ -4169,6 +4169,10 @@ func TestAddrHost(t *testing.T) {
 		addr: "https://localhost:5758",
 		want: "localhost:5758",
 	}, {
+		name: "scheme, ipv6 host, and port",
+		addr: "https://[::1]:5758",
+		want: "[::1]:5758",
+	}, {
 		name: "host and port",
 		addr: "localhost:5758",
 		want: "localhost:5758",
