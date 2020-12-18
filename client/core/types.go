@@ -695,7 +695,7 @@ type OrderFilter struct {
 	Statuses []order.OrderStatus `json:"statuses"`
 }
 
-// AccountResponse holds data returned from AccountKeys.
+// AccountResponse holds data returned from Account.
 type AccountResponse struct {
 	OK        bool   `json:"ok"`
 	Host      string `json:"host"`

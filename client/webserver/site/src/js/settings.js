@@ -58,7 +58,7 @@ export default class SettingsPage extends BasePage {
     // eslint-disable-next-line no-unused-vars
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
       exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
-      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountKeysExport(host, page.authorizeAccountExportForm))
+      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
     }
 
     Doc.bind(page.importAccount, 'click', () => this.showForm(page.authorizeAccountImportForm))
@@ -85,7 +85,7 @@ export default class SettingsPage extends BasePage {
     })
   }
 
-  async prepareAccountKeysExport (host, authorizeAccountExportForm) {
+  async prepareAccountExport (host, authorizeAccountExportForm) {
     const page = this.page
     page.exportKeysHost.textContent = host
     page.exportKeysErr.textContent = ''

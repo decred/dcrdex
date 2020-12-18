@@ -196,7 +196,7 @@ func (s *WebServer) apiAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	accountResponse, err := s.core.AccountKeys(form.Pass, form.Host)
+	accountResponse, err := s.core.Account(form.Pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return

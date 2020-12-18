@@ -2265,11 +2265,11 @@ func TestTrade(t *testing.T) {
 	}
 }
 
-func TestAccountKeys(t *testing.T) {
+func TestAccount(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	accountResponse, err := tCore.AccountKeys(tPW, host)
+	accountResponse, err := tCore.Account(tPW, host)
 	if err != nil {
 		t.Fatalf("account keys error: %v", err)
 	}

@@ -2680,8 +2680,8 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
-// AccountKeys is used to retrieve account keys by host.
-func (c *Core) AccountKeys(pw []byte, host string) (*AccountResponse, error) {
+// Account is used to retrieve account keys by host.
+func (c *Core) Account(pw []byte, host string) (*AccountResponse, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Password error: %w", err)

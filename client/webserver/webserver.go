@@ -90,7 +90,7 @@ type clientCore interface {
 	Order(oid dex.Bytes) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error)
-	AccountKeys(pw []byte, host string) (*core.AccountResponse, error)
+	Account(pw []byte, host string) (*core.AccountResponse, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
