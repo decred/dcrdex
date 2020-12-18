@@ -2699,7 +2699,24 @@ func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error)
 		return nil, fmt.Errorf("unknown DEX %s", host)
 	}
 
-	accountKeysResponse := &AccountKeysResponse{Host: host, PrivKey: hex.EncodeToString(dc.acct.privKey.Serialize())}
+	//OK        bool   `json:"ok"`
+	//Host      string `json:"host"`
+	//AccountID string `json:"accountID"`
+	//PrivKey   string `json:"privKey"`
+	//PubKey    string `json:"pubKey"`
+	//EncKey    string `json:"encKey"`
+	//Cert      string `json:"cert"`
+	//FeeCoin   string `json:"feeCoin"`
+
+	accountKeysResponse := &AccountKeysResponse{
+		Host:      host,
+		AccountID: dc.acct.id.String(),
+		PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
+		PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
+		EncKey:    hex.EncodeToString(dc.acct.encKey),
+		Cert:      hex.EncodeToString(dc.acct.cert),
+		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
+	}
 	return accountKeysResponse, nil
 }
 

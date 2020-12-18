@@ -697,9 +697,14 @@ type OrderFilter struct {
 
 // AccountKeysResponse holds data returned from AccountKeys.
 type AccountKeysResponse struct {
-	OK      bool   `json:"ok"`
-	Host    string `json:"host"`
-	PrivKey string `json:"privKey"`
+	OK        bool   `json:"ok"`
+	Host      string `json:"host"`
+	AccountID string `json:"accountID"`
+	PrivKey   string `json:"privKey"`
+	PubKey    string `json:"pubKey"`
+	EncKey    string `json:"encKey"`
+	Cert      string `json:"cert"`
+	FeeCoin   string `json:"feeCoin"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an
