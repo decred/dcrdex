@@ -1925,7 +1925,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
 		wallet, _ := c.wallet(assetID)
-		confs, err := wallet.Confirmations(c.ctx, coinID)
+		confs, _, err := wallet.Confirmations(c.ctx, coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDString(wallet.AssetID, coinID), err)
 		}
@@ -3203,7 +3203,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// Get the coin for the fee.
-	confs, err := dcrWallet.Confirmations(c.ctx, acctInfo.FeeCoin)
+	confs, _, err := dcrWallet.Confirmations(c.ctx, acctInfo.FeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return

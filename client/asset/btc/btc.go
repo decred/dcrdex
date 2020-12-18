@@ -183,36 +183,19 @@ func (pt *outPoint) String() string {
 type output struct {
 	pt    outPoint
 	value uint64
-	node  rpcClient // for calculating confirmations.
 }
 
 // newOutput is the constructor for an output.
-func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64) *output {
+func newOutput(txHash *chainhash.Hash, vout uint32, value uint64) *output {
 	return &output{
 		pt:    newOutPoint(txHash, vout),
 		value: value,
-		node:  node,
 	}
 }
 
 // Value returns the value of the output. Part of the asset.Coin interface.
 func (op *output) Value() uint64 {
 	return op.value
-}
-
-// Confirmations is the number of confirmations on the output's block.
-// Confirmations always pulls the block information fresh from the block chain,
-// and will return an error if the output has been spent. Part of the
-// asset.Coin interface.
-func (op *output) Confirmations(_ context.Context) (uint32, error) {
-	txOut, err := op.node.GetTxOut(op.txHash(), op.vout(), true)
-	if err != nil {
-		return 0, fmt.Errorf("error finding coin: %w", err)
-	}
-	if txOut == nil {
-		return 0, asset.CoinNotFoundError
-	}
-	return uint32(txOut.Confirmations), nil
 }
 
 // ID is the output's coin ID. Part of the asset.Coin interface. For BTC, the
@@ -810,7 +793,7 @@ func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *d
 
 	addUTXO := func(unspent *compositeUTXO) {
 		v := unspent.amount
-		op := newOutput(btc.node, unspent.txHash, unspent.vout, v)
+		op := newOutput(unspent.txHash, unspent.vout, v)
 		coins = append(coins, op)
 		redeemScripts = append(redeemScripts, unspent.redeemScript)
 		spents = append(spents, op)
@@ -932,7 +915,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	}
 	txHash := msgTx.TxHash()
 
-	op := newOutput(btc.node, &txHash, 0, reqFunds)
+	op := newOutput(&txHash, 0, reqFunds)
 
 	// Need to save one funding coin (in the deferred function).
 	fundingCoins = map[outPoint]*utxo{op.pt: {
@@ -1002,7 +985,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		pt := newOutPoint(txHash, vout)
 		fundingCoin, found := btc.fundingCoins[pt]
 		if found {
-			coins = append(coins, newOutput(btc.node, txHash, vout, fundingCoin.amount))
+			coins = append(coins, newOutput(txHash, vout, fundingCoin.amount))
 			continue
 		}
 		notFound[pt] = true
@@ -1039,7 +1022,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			address: address,
 			amount:  toSatoshi(txOut.Value),
 		}
-		coin := newOutput(btc.node, txHash, rpcOP.Vout, toSatoshi(txOut.Value))
+		coin := newOutput(txHash, rpcOP.Vout, toSatoshi(txOut.Value))
 		coins = append(coins, coin)
 		btc.fundingCoins[pt] = utxo
 		delete(notFound, pt)
@@ -1061,7 +1044,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			return nil, fmt.Errorf("funding coin not found: %s", pt.String())
 		}
 		btc.fundingCoins[pt] = utxo.utxo
-		coin := newOutput(btc.node, utxo.txHash, utxo.vout, utxo.amount)
+		coin := newOutput(utxo.txHash, utxo.vout, utxo.amount)
 		coins = append(coins, coin)
 		coinsToLock = append(coinsToLock, coin)
 		delete(notFound, pt)
@@ -1196,7 +1179,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		receipts = append(receipts, &swapReceipt{
-			output:     newOutput(btc.node, &txHash, uint32(i), contract.Value),
+			output:     newOutput(&txHash, uint32(i), contract.Value),
 			contract:   contracts[i],
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
@@ -1342,7 +1325,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	for i := range redemptions {
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
-	return coinIDs, newOutput(btc.node, txHash, 0, uint64(txOut.Value)), fee, nil
+	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value)), fee, nil
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1435,7 +1418,7 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 			contractHash, addr.ScriptAddress())
 	}
 	return &auditInfo{
-		output:     newOutput(btc.node, txHash, vout, toSatoshi(txOut.Value)),
+		output:     newOutput(txHash, vout, toSatoshi(txOut.Value)),
 		recipient:  receiver,
 		contract:   contract,
 		secretHash: secretHash,
@@ -1902,7 +1885,7 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 		btc.log.Errorf("PayFee error address = '%s', fee = %.8f: %v", address, toBTC(regFee), err)
 		return nil, err
 	}
-	return newOutput(btc.node, txHash, vout, sent), nil
+	return newOutput(txHash, vout, sent), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
@@ -1913,7 +1896,7 @@ func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, e
 		btc.log.Errorf("Withdraw error address = '%s', fee = %.8f: %v", address, toBTC(value), err)
 		return nil, err
 	}
-	return newOutput(btc.node, txHash, vout, sent), nil
+	return newOutput(txHash, vout, sent), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -1945,21 +1928,28 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
 }
 
-// Confirmations gets the number of confirmations for the specified coin ID.
-// The coin must be known to the wallet, but need not be unspent.
-func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
-	txHash, _, err := decodeCoinID(id)
+// Confirmations gets the number of confirmations for the specified coin ID by
+// first checking for a unspent output, and if not found, searching indexed
+// wallet transactions.
+func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
+	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
+	// Check for an unspent output.
+	txOut, err := btc.node.GetTxOut(txHash, vout, true)
+	if err == nil && txOut != nil {
+		return uint32(txOut.Confirmations), false, nil
+	}
+	// Check wallet transactions.
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, asset.CoinNotFoundError
+			return 0, false, asset.CoinNotFoundError
 		}
-		return 0, err
+		return 0, false, err
 	}
-	return uint32(tx.Confirmations), nil
+	return uint32(tx.Confirmations), true, nil
 }
 
 // run pings for new blocks and runs the tipChange callback function when the
@@ -2088,7 +2078,7 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newOutput(btc.node, txHash, vout, coin.Value()), nil
+	return newOutput(txHash, vout, coin.Value()), nil
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
@@ -2202,7 +2192,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 
 	var change *output
 	if changeAdded {
-		change = newOutput(btc.node, txHash, uint32(changeIdx), uint64(changeOutput.Value))
+		change = newOutput(txHash, uint32(changeIdx), uint64(changeOutput.Value))
 	}
 	return msgTx, change, fee, nil
 }
