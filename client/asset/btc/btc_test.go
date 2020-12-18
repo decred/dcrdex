@@ -393,13 +393,14 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
-		WalletCFG:          walletCfg,
-		Symbol:             "btc",
-		Logger:             tLogger,
-		ChainParams:        &chaincfg.MainNetParams,
-		WalletInfo:         WalletInfo,
-		DefaultFallbackFee: defaultFee,
-		Segwit:             segwit,
+		WalletCFG:           walletCfg,
+		Symbol:              "btc",
+		Logger:              tLogger,
+		ChainParams:         &chaincfg.MainNetParams,
+		WalletInfo:          WalletInfo,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		Segwit:              segwit,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, client)
 	// Initialize the best block.
@@ -1662,12 +1663,13 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		WalletCFG: &asset.WalletConfig{
 			TipChange: func(error) {},
 		},
-		Symbol:             "btc",
-		Logger:             tLogger,
-		ChainParams:        &chaincfg.MainNetParams,
-		WalletInfo:         WalletInfo,
-		DefaultFallbackFee: defaultFee,
-		Segwit:             segwit,
+		Symbol:              "btc",
+		Logger:              tLogger,
+		ChainParams:         &chaincfg.MainNetParams,
+		WalletInfo:          WalletInfo,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		Segwit:              segwit,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, node)
 	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
