@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -254,26 +255,30 @@ func parseAndSetDebugLevels(debugLevel string, UTC bool) (*dex.LoggerMaker, erro
 	return lm, nil
 }
 
+const missingPort = "missing port in address"
+
 // normalizeNetworkAddress checks for a valid local network address format and
 // adds default host and port if not present. Invalidates addresses that include
 // a protocol identifier.
 func normalizeNetworkAddress(a, defaultHost, defaultPort string) (string, error) {
 	if strings.Contains(a, "://") {
-		return a, fmt.Errorf("Address %s contains a protocol identifier, which is not allowed", a)
+		return a, fmt.Errorf("address %s contains a protocol identifier, which is not allowed", a)
 	}
 	if a == "" {
-		return defaultHost + ":" + defaultPort, nil
+		return net.JoinHostPort(defaultHost, defaultPort), nil
 	}
 	host, port, err := net.SplitHostPort(a)
 	if err != nil {
-		if strings.Contains(err.Error(), "missing port in address") {
-			normalized := a + ":" + defaultPort
+		var addrErr *net.AddrError
+		if errors.As(err, &addrErr) && addrErr.Err == missingPort {
+			host = strings.Trim(addrErr.Addr, "[]") // JoinHostPort expects no brackets for ipv6 hosts
+			normalized := net.JoinHostPort(host, defaultPort)
 			host, port, err = net.SplitHostPort(normalized)
 			if err != nil {
-				return a, fmt.Errorf("Unable to address %s after port resolution: %v", normalized, err)
+				return a, fmt.Errorf("unable to address %s after port resolution: %w", normalized, err)
 			}
 		} else {
-			return a, fmt.Errorf("Unable to normalize address %s: %v", a, err)
+			return a, fmt.Errorf("unable to normalize address %s: %w", a, err)
 		}
 	}
 	if host == "" {
@@ -282,7 +287,7 @@ func normalizeNetworkAddress(a, defaultHost, defaultPort string) (string, error)
 	if port == "" {
 		port = defaultPort
 	}
-	return host + ":" + port, nil
+	return net.JoinHostPort(host, port), nil
 }
 
 // loadConfig initializes and parses the config using a config file and command

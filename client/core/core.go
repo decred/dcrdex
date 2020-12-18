@@ -946,7 +946,8 @@ func addrHost(addr string) (string, error) {
 		// Any address with no colons is appended with the default port.
 		var addrErr *net.AddrError
 		if errors.As(splitErr, &addrErr) && addrErr.Err == missingPort {
-			return addr + ":" + defaultDEXPort, nil
+			host = strings.Trim(addrErr.Addr, "[]") // JoinHostPort expects no brackets for ipv6 hosts
+			return net.JoinHostPort(host, defaultDEXPort), nil
 		}
 		// These are addresses with at least one colon in an unexpected
 		// position.
@@ -958,7 +959,7 @@ func addrHost(addr string) (string, error) {
 		host, port = a.Hostname(), a.Port()
 		// If the address parses but there is no port, append the default port.
 		if port == "" {
-			return host + ":" + defaultDEXPort, nil
+			return net.JoinHostPort(host, defaultDEXPort), nil
 		}
 	}
 	// We have a port but no host. Replace with localhost.
