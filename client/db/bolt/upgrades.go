@@ -19,6 +19,9 @@ var upgrades = [...]upgradefunc{
 	// v0 => v1 adds a version key. Upgrades the MatchProof struct to
 	// differentiate between server revokes and self revokes.
 	v1Upgrade,
+	// v1 => v2 adds a MaxFeeRate field to the OrderMetaData, used for match
+	// validation.
+	v2Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -105,7 +108,7 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 	}
 
 	if dbVersion != oldVersion {
-		return fmt.Errorf("versionedDBUpgrade inappropriately called")
+		return fmt.Errorf("v1Upgrade inappropriately called")
 	}
 
 	bkt := dbtx.Bucket(appBucket)
@@ -141,5 +144,38 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 			return fmt.Errorf("error re-storing match proof: %w", err)
 		}
 		return nil
+	})
+}
+
+// v2Upgrade adds a MaxFeeRate field to the OrderMetaData. The upgrade sets the
+// MaxFeeRate field for all historical orders to the max uint64. This avoids any
+// chance of rejecting a pre-existing active match.
+func v2Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 1
+	const newVersion = 2
+
+	dbVersion, err := fetchDBVersion(dbtx)
+	if err != nil {
+		return fmt.Errorf("error fetching database version: %w", err)
+	}
+
+	if dbVersion != oldVersion {
+		return fmt.Errorf("v2Upgrade inappropriately called")
+	}
+
+	// For each order, set a maxfeerate of max uint64.
+	maxFeeB := uint64Bytes(^uint64(0))
+
+	master := dbtx.Bucket(ordersBucket)
+	if master == nil {
+		return fmt.Errorf("failed to open orders bucket")
+	}
+
+	return master.ForEach(func(oid, _ []byte) error {
+		oBkt := master.Bucket(oid)
+		if oBkt == nil {
+			return fmt.Errorf("order %x bucket is not a bucket", oid)
+		}
+		return oBkt.Put(maxFeeRateKey, maxFeeB)
 	})
 }

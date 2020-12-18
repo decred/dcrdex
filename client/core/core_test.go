@@ -77,6 +77,7 @@ var (
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
 	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
+	tMaxFeeRate         uint64 = 10
 )
 
 type tMsg = *msgjson.Message
@@ -2578,13 +2579,25 @@ func TestTradeTracking(t *testing.T) {
 	counterSwapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
 	sign(tDexPriv, msgMatch)
+
+	// Make sure that a fee rate higher than our recorded MaxFeeRate results in
+	// an error.
+	msgMatch.FeeRateBase = tMaxFeeRate + 1
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err == nil || !strings.Contains(err.Error(), "is > MaxFeeRate") {
+		t.Fatalf("no error for fee rate > MaxFeeRate %t", lo.Trade().Sell)
+	}
+
 	// queue an invalid DEX init ack
+	msgMatch.FeeRateBase = tMaxFeeRate
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err == nil {
 		t.Fatalf("no error for invalid server ack for init route")
 	}
+
 	var found bool
 	match, found = tracker.matches[mid]
 	if !found {
@@ -4144,7 +4157,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Commit:     preImg.Commit(),
 		},
 		T: order.Trade{
-			Sell:     true,
+			Sell:     sell,
 			Quantity: qty,
 			Address:  addr,
 		},
@@ -4158,6 +4171,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Proof: db.OrderProof{
 				Preimage: preImg[:],
 			},
+			MaxFeeRate: tMaxFeeRate,
 		},
 		Order: lo,
 	}

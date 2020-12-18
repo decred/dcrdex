@@ -4,25 +4,34 @@
 package bolt
 
 import (
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"go.etcd.io/bbolt"
 )
 
-var dbUpgradeTests = [...]struct {
-	name     string
-	upgrade  upgradefunc
-	verify   func(*testing.T, *bbolt.DB)
-	filename string // in testdata directory
-}{
-	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz"},
+type upgradeValidator struct {
+	upgrade upgradefunc
+	verify  func(*testing.T, *bbolt.DB)
+}
+
+var validators = []upgradeValidator{
+	{v1Upgrade, verifyV1Upgrade},
+	{v2Upgrade, verifyV2Upgrade},
+}
+
+// The indices of the archives here in outdatedDBs should match the first
+// eligible validator for the database.
+var outdatedDBs = []string{
+	"v0.db.gz", "v1.db.gz",
 }
 
 func TestUpgrades(t *testing.T) {
@@ -30,49 +39,47 @@ func TestUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(d)
 
-	t.Run("group", func(t *testing.T) {
-		for _, tc := range dbUpgradeTests {
-			tc := tc // capture range variable
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-				testFile, err := os.Open(filepath.Join("testdata", tc.filename))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer testFile.Close()
-				r, err := gzip.NewReader(testFile)
-				if err != nil {
-					t.Fatal(err)
-				}
-				dbPath := filepath.Join(d, tc.name+".db")
-				fi, err := os.Create(dbPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = io.Copy(fi, r)
-				fi.Close()
-				if err != nil {
-					t.Fatal(err)
-				}
-				db, err := bbolt.Open(dbPath, 0600,
-					&bbolt.Options{Timeout: 1 * time.Second})
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
-				err = db.Update(func(dbtx *bbolt.Tx) error {
-					return tc.upgrade(dbtx)
-				})
-				if err != nil {
-					t.Fatalf("Upgrade failed: %v", err)
-				}
-				tc.verify(t, db)
-			})
+	for i, db := range outdatedDBs {
+		archive, err := os.Open(filepath.Join("testdata", db))
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
+		defer archive.Close()
+		r, err := gzip.NewReader(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dbPath := filepath.Join(d, strings.TrimSuffix(db, ".gz"))
+		dbFile, err := os.Create(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.Copy(dbFile, r)
+		dbFile.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := bbolt.Open(dbPath, 0600,
+			&bbolt.Options{Timeout: 1 * time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
 
-	os.RemoveAll(d)
+		// Do every validator from the db index up.
+		for j := i; j < len(validators); j++ {
+			validator := validators[j]
+			err = db.Update(func(dbtx *bbolt.Tx) error {
+				return validator.upgrade(dbtx)
+			})
+			if err != nil {
+				t.Fatalf("Upgrade failed: %v", err)
+			}
+			validator.verify(t, db)
+		}
+	}
 }
 
 func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
@@ -92,6 +99,30 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 				expectedVersion, version)
 		}
 		return nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
+	maxFeeB := uint64Bytes(^uint64(0))
+
+	err := db.View(func(dbtx *bbolt.Tx) error {
+		master := dbtx.Bucket(ordersBucket)
+		if master == nil {
+			return fmt.Errorf("orders bucket not found")
+		}
+		return master.ForEach(func(oid, _ []byte) error {
+			oBkt := master.Bucket(oid)
+			if oBkt == nil {
+				return fmt.Errorf("order %x bucket is not a bucket", oid)
+			}
+			if !bytes.Equal(oBkt.Get(maxFeeRateKey), maxFeeB) {
+				return fmt.Errorf("max fee not upgraded")
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		t.Error(err)
