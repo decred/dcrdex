@@ -202,6 +202,7 @@ func (s *WebServer) apiAccountKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Connection", "close")
+	accountKeysResponse.OK = true
 	writeJSON(w, accountKeysResponse, s.indent)
 }
 
