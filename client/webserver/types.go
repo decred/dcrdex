@@ -75,7 +75,7 @@ type withdrawForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 }
 
-type accountKeysAuthForm struct {
+type accountExportAuthForm struct {
 	Pass encode.PassBytes `json:"pw"`
 	Host string           `json:"host"`
 }

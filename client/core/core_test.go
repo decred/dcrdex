@@ -2269,14 +2269,14 @@ func TestAccountKeys(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	accountKeysResponse, err := tCore.AccountKeys(tPW, host)
+	accountResponse, err := tCore.AccountKeys(tPW, host)
 	if err != nil {
 		t.Fatalf("account keys error: %v", err)
 	}
-	if accountKeysResponse == nil {
-		t.Fatalf("accountKeysResponse is nil")
+	if accountResponse == nil {
+		t.Fatalf("accountResponse is nil")
 	}
-	if host != accountKeysResponse.Host {
+	if host != accountResponse.Host {
 		t.Fatalf("host key not equal to account host")
 	}
 }

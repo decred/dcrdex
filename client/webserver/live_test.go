@@ -440,7 +440,7 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, e
 	}, nil
 }
 
-func (c *TCore) AccountKeys(pw []byte, host string) (*core.AccountKeysResponse, error) {
+func (c *TCore) AccountKeys(pw []byte, host string) (*core.AccountResponse, error) {
 	return nil, nil
 }
 

@@ -189,21 +189,21 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiAccountKeys is the handler for the '/accountKeys' API request.
-func (s *WebServer) apiAccountKeys(w http.ResponseWriter, r *http.Request) {
-	form := new(accountKeysAuthForm)
+// apiAccount is the handler for the '/account' API request.
+func (s *WebServer) apiAccount(w http.ResponseWriter, r *http.Request) {
+	form := new(accountExportAuthForm)
 	if !readPost(w, r, form) {
 		return
 	}
 	r.Close = true
-	accountKeysResponse, err := s.core.AccountKeys(form.Pass, form.Host)
+	accountResponse, err := s.core.AccountKeys(form.Pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
-	accountKeysResponse.OK = true
-	writeJSON(w, accountKeysResponse, s.indent)
+	accountResponse.OK = true
+	writeJSON(w, accountResponse, s.indent)
 }
 
 // apiCancel is the handler for the '/cancel' API request.

@@ -103,7 +103,7 @@ export default class SettingsPage extends BasePage {
       host: host
     }
     const loaded = app.loading(this.body)
-    var res = await postJSON('/api/accountKeys', req)
+    var res = await postJSON('/api/account', req)
     loaded()
     if (!app.checkResponse(res)) {
       page.exportKeysErr.textContent = res.msg
@@ -130,7 +130,7 @@ export default class SettingsPage extends BasePage {
     //   host: host
     // }
     const loaded = app.loading(this.body)
-    // var res = await postJSON('/api/accountKeys', req)
+    // var res = await postJSON('/api/account', req)
     loaded()
     // if (!app.checkResponse(res)) {
     //   page.exportKeysErr.textContent = res.msg
@@ -144,7 +144,7 @@ export default class SettingsPage extends BasePage {
   async showForm (form) {
     const page = this.page
     this.currentForm = form
-    Doc.hide(page.dexAddrForm, page.confirmRegForm)
+    Doc.hide(page.dexAddrForm, page.confirmRegForm, page.authorizeAccountExportForm, page.authorizeAccountImportForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2

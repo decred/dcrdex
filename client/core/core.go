@@ -2681,7 +2681,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 }
 
 // AccountKeys is used to retrieve account keys by host.
-func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error) {
+func (c *Core) AccountKeys(pw []byte, host string) (*AccountResponse, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Password error: %w", err)
@@ -2698,7 +2698,7 @@ func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error)
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", host)
 	}
-	accountKeysResponse := &AccountKeysResponse{
+	accountResponse := &AccountResponse{
 		Host:      host,
 		AccountID: dc.acct.id.String(),
 		PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
@@ -2707,7 +2707,7 @@ func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error)
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
 	}
-	return accountKeysResponse, nil
+	return accountResponse, nil
 }
 
 // Send an order, process result, prepare and store the trackedTrade.
