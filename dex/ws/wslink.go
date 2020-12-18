@@ -57,8 +57,6 @@ type Connection interface {
 type WSLink struct {
 	// log is the WSLink's logger
 	log dex.Logger
-	// ip is the peer's IP address key.
-	ip dex.IPKey
 	// addr is a string representation of the peer's IP address
 	addr string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
@@ -88,9 +86,9 @@ type sendData struct {
 }
 
 // NewWSLink is a constructor for a new WSLink.
-func NewWSLink(ip dex.IPKey, addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
+func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
 	return &WSLink{
-		ip:         ip,
+		addr:       addr,
 		log:        logger,
 		conn:       conn,
 		outChan:    make(chan *sendData, outBufferSize),
@@ -454,11 +452,6 @@ out:
 // Off will return true if the link has disconnected.
 func (c *WSLink) Off() bool {
 	return atomic.LoadUint32(&c.on) == 0
-}
-
-// IP is the peer address passed to the constructor.
-func (c *WSLink) IP() dex.IPKey {
-	return c.ip
 }
 
 // Addr returns the string-encoded IP address.

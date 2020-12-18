@@ -40,9 +40,9 @@ type wsClient struct {
 	feedLoop    *dex.StartStopWaiter
 }
 
-func newWSClient(ip dex.IPKey, addr string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
+func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
 	return &wsClient{
-		WSLink: ws.NewWSLink(ip, addr, conn, pingPeriod, hndlr, logger),
+		WSLink: ws.NewWSLink(addr, conn, pingPeriod, hndlr, logger),
 		cid:    atomic.AddInt32(&cidCounter, 1),
 	}
 }
@@ -95,7 +95,6 @@ func (s *Server) Shutdown() {
 // able to cancel the hijacked connection handler at a later time since this
 // function is not blocking.
 func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	ip := dex.NewIPKey(r.RemoteAddr)
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
 		s.log.Errorf("ws connection error: %v", err)
@@ -109,22 +108,20 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.connect(ctx, wsConn, r.RemoteAddr, ip)
+		s.connect(ctx, wsConn, r.RemoteAddr)
 	}()
-
-	s.log.Trace("HandleConnect done.")
 }
 
 // connect handles a new websocket client by creating a new wsClient, starting
 // it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string, ip dex.IPKey) {
+func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.log.Debugf("New websocket client %s", addr)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
 	var cl *wsClient
-	cl = newWSClient(ip, addr, conn, func(msg *msgjson.Message) *msgjson.Error {
+	cl = newWSClient(addr, conn, func(msg *msgjson.Message) *msgjson.Error {
 		return s.handleMessage(cl, msg)
 	}, s.log.SubLogger(addr))
 

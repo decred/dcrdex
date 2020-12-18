@@ -1210,7 +1210,7 @@ func (client *tClient) startNotificationReader(ctx context.Context) *notificatio
 				n.Lock()
 				n.notes = append(n.notes, note)
 				n.Unlock()
-				client.log(note.String())
+				client.log("%s", note)
 
 			case <-ctx.Done():
 				return
