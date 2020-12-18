@@ -2698,16 +2698,6 @@ func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error)
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", host)
 	}
-
-	//OK        bool   `json:"ok"`
-	//Host      string `json:"host"`
-	//AccountID string `json:"accountID"`
-	//PrivKey   string `json:"privKey"`
-	//PubKey    string `json:"pubKey"`
-	//EncKey    string `json:"encKey"`
-	//Cert      string `json:"cert"`
-	//FeeCoin   string `json:"feeCoin"`
-
 	accountKeysResponse := &AccountKeysResponse{
 		Host:      host,
 		AccountID: dc.acct.id.String(),
