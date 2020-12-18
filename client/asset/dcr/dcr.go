@@ -101,30 +101,39 @@ var (
 			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
 		},
 		{
-			Key:          "fallbackfee",
-			DisplayName:  "Fallback fee rate",
-			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: DCR/kB",
+			Key:         "fallbackfee",
+			DisplayName: "Fallback fee rate",
+			Description: "The fee rate to use for fee payment and withdrawals when " +
+				"estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
-			Key:          "feeratelimit",
-			DisplayName:  "Highest acceptable fee rate",
-			Description:  "This is the highest network fee rate you are willing to pay on swap transactions. If you set this too low, you may not be able to place orders with servers that allow for higher swap rates as network conditions demand.  Units: atoms/byte",
+			Key:         "feeratelimit",
+			DisplayName: "Highest acceptable fee rate",
+			Description: "This is the highest network fee rate you are willing to " +
+				"pay on swap transactions. If you set this too low, you may not be able" +
+				" to place orders with servers that allow for higher swap rates as " +
+				" network conditions demand.  Units: atoms/byte",
 			DefaultValue: defaultFeeRateLimit,
 		},
 		{
-			Key:          "redeemconftarget",
-			DisplayName:  "Redeem confirmation target",
-			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 1 block)",
+			Key:         "redeemconftarget",
+			DisplayName: "Redeem confirmation target",
+			Description: "The target number of blocks for the redeem transaction " +
+				"to get a confirmation. Used to set the transaction's fee rate." +
+				" (default: 1 block)",
 			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
 			Key:         "txsplit",
 			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			Description: "When placing an order, create a \"split\" transaction to " +
+				"fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order " +
+				"until the first swap contract is broadcast during match settlement, or" +
+				"the order is canceled. This an extra transaction for which network " +
+				"mining fees are paid.  Used only for standing-type orders, e.g. " +
+				"limit orders without immediate time-in-force.",
 			IsBoolean: true,
 		},
 	}
