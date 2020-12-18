@@ -22,7 +22,7 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
-      'exchanges', 'authorizeExportKeysForm', 'exportKeysAppPass', 'authorizeExportKeysConfirm', 'exportKeysHost', 'exportKeysErr',
+      'exchanges', 'authorizeAccountExportForm', 'exportKeysAppPass', 'authorizeExportKeysConfirm', 'exportKeysHost', 'exportKeysErr',
       // Others
       'showPokes'
     ])
@@ -49,14 +49,14 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
-    forms.bind(page.authorizeExportKeysForm, page.authorizeExportKeysConfirm, () => { this.exportAccountKeys() })
+    forms.bind(page.authorizeAccountExportForm, page.authorizeExportKeysConfirm, () => { this.exportAccount() })
 
     const exchangesDiv = page.exchanges
     var exportAccountKeyButton
     // eslint-disable-next-line no-unused-vars
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
-      exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccountKeys-' + host)
-      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountKeysExport(host, page.authorizeExportKeysForm))
+      exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountKeysExport(host, page.authorizeAccountExportForm))
     }
 
     const closePopups = () => {
@@ -80,15 +80,15 @@ export default class SettingsPage extends BasePage {
     })
   }
 
-  async prepareAccountKeysExport (host, authorizeExportKeysForm) {
+  async prepareAccountKeysExport (host, authorizeAccountExportForm) {
     const page = this.page
     page.exportKeysHost.textContent = host
     page.exportKeysErr.textContent = ''
-    this.showForm(authorizeExportKeysForm)
+    this.showForm(authorizeAccountExportForm)
   }
 
-  // exportAccountKeys exports and downloads the account keys
-  async exportAccountKeys () {
+  // exportAccount exports and downloads the account keys
+  async exportAccount () {
     const page = this.page
     const pw = page.exportKeysAppPass.value
     const host = page.exportKeysHost.textContent

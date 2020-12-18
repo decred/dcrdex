@@ -32,7 +32,7 @@
               {{$xc.AcctID}}
               <br>
             {{end}}</span>
-            <button data-tmpl="exportAccountKeys-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}" >Export Account Keys</button>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}" >Export Account</button>
           </div>
         {{end}}
       </div>
@@ -62,8 +62,8 @@
     </form>
 
     {{- /* AUTHORIZE EXPORT KEYS */ -}}
-    <form class="card bg1 d-hide" id="authorizeExportKeysForm">
-      {{template "authorizeExportKeysForm"}}
+    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+      {{template "authorizeAccountExportForm"}}
     </form>
 
   </div>
