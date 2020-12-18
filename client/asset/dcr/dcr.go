@@ -1905,9 +1905,9 @@ func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (con
 	tx, err := dcr.node.GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, true, asset.CoinNotFoundError
+			return 0, false, asset.CoinNotFoundError
 		}
-		return 0, true, translateRPCCancelErr(err)
+		return 0, false, translateRPCCancelErr(err)
 	}
 	return uint32(tx.Confirmations), true, nil
 }

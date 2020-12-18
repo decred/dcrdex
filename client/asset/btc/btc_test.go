@@ -2029,9 +2029,12 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, _, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, spent, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero for non-nil error")
 	}
 
 	// Short path.
@@ -2051,9 +2054,12 @@ func TestConfirmations(t *testing.T) {
 
 	// gettransaction error
 	node.txOutRes = nil
-	_, _, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero with gettransaction error")
 	}
 	node.rawErr[methodGetTransaction] = nil
 

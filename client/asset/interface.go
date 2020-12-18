@@ -156,8 +156,10 @@ type Wallet interface {
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
-	// If the coin is not unspent, and is not owned by this wallet,
-	// Confirmations may return an error.
+	// If the coin is not unspent, and is not known to this wallet,
+	// Confirmations may return an error. The value of spent should be ignored
+	// if err is non-nil, but Wallet implementations should return spent = false
+	// anyway.
 	Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.

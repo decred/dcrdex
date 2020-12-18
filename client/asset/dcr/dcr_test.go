@@ -1869,9 +1869,12 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, _, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, spent, err := wallet.Confirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero for non-nil error")
 	}
 
 	op := newOutPoint(tTxHash, 0)
@@ -1890,9 +1893,12 @@ func TestConfirmations(t *testing.T) {
 	// gettransaction error
 	node.walletTxErr = tErr
 	delete(node.txOutRes, op)
-	_, _, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.Confirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero with gettransaction error")
 	}
 	node.walletTxErr = nil
 

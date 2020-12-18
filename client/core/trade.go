@@ -581,11 +581,13 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	// Check the confirmations on the counter-party's swap.
 	coin := match.counterSwap.Coin()
 
-	have, spent, err := t.wallets.toWallet.Confirmations(ctx, coin.ID())
+	var err error
+	have, spent, err = t.wallets.toWallet.Confirmations(ctx, coin.ID())
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v: %v",
 			coin, t.wallets.toAsset.Symbol, match.id, t.UID(), err)
-		have = 0 // should already be
+		spent = false // backends should do this for non-nil error, but we'll do it anyway
+		have = 0      // should already be
 		return
 	}
 

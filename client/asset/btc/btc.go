@@ -1945,9 +1945,9 @@ func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (confs
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, true, asset.CoinNotFoundError
+			return 0, false, asset.CoinNotFoundError
 		}
-		return 0, true, err
+		return 0, false, err
 	}
 	return uint32(tx.Confirmations), true, nil
 }
