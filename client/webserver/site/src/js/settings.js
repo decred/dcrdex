@@ -22,7 +22,9 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
-      'exchanges', 'authorizeAccountExportForm', 'exportKeysAppPass', 'authorizeExportKeysConfirm', 'exportKeysHost', 'exportKeysErr',
+      'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm', 'exportKeysHost', 'exportKeysErr',
+      // Import Account
+      'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
       // Others
       'showPokes'
     ])
@@ -49,7 +51,7 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
-    forms.bind(page.authorizeAccountExportForm, page.authorizeExportKeysConfirm, () => { this.exportAccount() })
+    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
 
     const exchangesDiv = page.exchanges
     var exportAccountKeyButton
@@ -58,6 +60,9 @@ export default class SettingsPage extends BasePage {
       exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
       Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountKeysExport(host, page.authorizeAccountExportForm))
     }
+
+    Doc.bind(page.importAccount, 'click', () => this.showForm(page.authorizeAccountImportForm))
+    forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => { this.importAccount() })
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -87,12 +92,12 @@ export default class SettingsPage extends BasePage {
     this.showForm(authorizeAccountExportForm)
   }
 
-  // exportAccount exports and downloads the account keys
+  // exportAccount exports and downloads the account info
   async exportAccount () {
     const page = this.page
-    const pw = page.exportKeysAppPass.value
+    const pw = page.exportAccountAppPass.value
     const host = page.exportKeysHost.textContent
-    page.exportKeysAppPass.value = ''
+    page.exportAccountAppPass.value = ''
     const req = {
       pw: pw,
       host: host
@@ -112,6 +117,26 @@ export default class SettingsPage extends BasePage {
     a.setAttribute('download', 'dcrAccount-' + host + '.json')
     a.setAttribute('href', 'data:application/json,' + JSON.stringify(accountForExport, null, 4))
     a.click()
+    Doc.hide(page.forms)
+  }
+
+  // importAccount imports the account
+  async importAccount () {
+    const page = this.page
+    // const pw = page.exportAccountAppPass.value
+    page.importAccountAppPass.value = ''
+    // const req = {
+    //   pw: pw,
+    //   host: host
+    // }
+    const loaded = app.loading(this.body)
+    // var res = await postJSON('/api/accountKeys', req)
+    loaded()
+    // if (!app.checkResponse(res)) {
+    //   page.exportKeysErr.textContent = res.msg
+    //   Doc.show(page.exportKeysErr)
+    //   return
+    // }
     Doc.hide(page.forms)
   }
 

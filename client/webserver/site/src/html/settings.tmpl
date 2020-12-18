@@ -43,6 +43,7 @@
         servers.
         </p>
         <button id="addADex" class="bg2 selected">Add a DEX</button>
+        <button id="importAccount" class="bg2 selected">Import Account</button>
       </div>
     </div>
     <div>Build ID: <span id="commitHash" class="mono"></span></div>
@@ -61,9 +62,14 @@
       {{template "confirmRegistrationForm"}}
     </form>
 
-    {{- /* AUTHORIZE EXPORT KEYS */ -}}
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
     <form class="card bg1 d-hide" id="authorizeAccountExportForm">
       {{template "authorizeAccountExportForm"}}
+    </form>
+
+    {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountImportForm">
+      {{template "authorizeAccountImportForm"}}
     </form>
 
   </div>
