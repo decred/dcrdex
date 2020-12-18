@@ -2680,7 +2680,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
-// Trade is used to place a market or limit order.
+// AccountKeys is used to retrieve account keys by host.
 func (c *Core) AccountKeys(pw []byte, host string) (*AccountKeysResponse, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {

@@ -2265,6 +2265,22 @@ func TestTrade(t *testing.T) {
 	}
 }
 
+func TestAccountKeys(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	accountKeysResponse, err := tCore.AccountKeys(tPW, host)
+	if err != nil {
+		t.Fatalf("account keys error: %v", err)
+	}
+	if accountKeysResponse == nil {
+		t.Fatalf("accountKeysResponse is nil")
+	}
+	if host != accountKeysResponse.Host {
+		t.Fatalf("host key not equal to account host")
+	}
+}
+
 func TestCancel(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
