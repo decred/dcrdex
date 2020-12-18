@@ -361,6 +361,7 @@ type ExchangeWallet struct {
 	acct             string
 	tipChange        func(error)
 	fallbackFeeRate  uint64
+	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
 
@@ -447,6 +448,14 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	}
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
+	// If set in the user config, the fee rate limit will be in units of
+	// atoms/byte.
+	feesLimitPerByte := dcrCfg.FeeRateLimit
+	if feesLimitPerByte == 0 {
+		feesLimitPerByte = defaultFeeRateLimit
+	}
+	logger.Tracef("Fees rate limit set at %d atoms/byte", feesLimitPerByte)
+
 	redeemConfTarget := dcrCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
 		redeemConfTarget = defaultRedeemConfTarget
@@ -460,6 +469,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
+		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
 	}
@@ -741,6 +751,14 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
+	}
+	// Check wallet's fee rate limit against server's max fee rate
+	if dcr.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			ord.DEXConfig.MaxFeeRate,
+			dcr.feeRateLimit)
 	}
 
 	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))

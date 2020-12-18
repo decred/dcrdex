@@ -2670,24 +2670,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if err != nil {
 		return nil, 0, err
 	}
-	fromWallet, toWallet, fromAsset, toAsset := wallets.fromWallet,
-		wallets.toWallet, wallets.fromAsset, wallets.toAsset
-
-	// Check wallets fee rate limit against server's max fee rate
-	if fromWallet.feeRateLimit < fromAsset.MaxFeeRate {
-		return nil, 0, newError(orderParamsErr,
-			"%v: server's max fee rate %v higher than configued fee rate limit %v",
-			fromAsset.Symbol,
-			fromAsset.MaxFeeRate,
-			fromWallet.feeRateLimit)
-	}
-	if toWallet.feeRateLimit < toAsset.MaxFeeRate {
-		return nil, 0, newError(orderParamsErr,
-			"%v: server's max fee rate %v higher than configued fee rate limit %v",
-			toAsset.Symbol,
-			toAsset.MaxFeeRate,
-			toWallet.feeRateLimit)
-	}
+	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
 	prepareWallet := func(w *xcWallet) error {
 		// NOTE: If the wallet is already internally unlocked (the decrypted

@@ -151,15 +151,16 @@ type rpcClient interface {
 
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
-	WalletCFG          *asset.WalletConfig
-	MinNetworkVersion  uint64
-	WalletInfo         *asset.WalletInfo
-	Symbol             string
-	Logger             dex.Logger
-	Network            dex.Network
-	ChainParams        *chaincfg.Params
-	Ports              dexbtc.NetPorts
-	DefaultFallbackFee uint64 // sats/byte
+	WalletCFG           *asset.WalletConfig
+	MinNetworkVersion   uint64
+	WalletInfo          *asset.WalletInfo
+	Symbol              string
+	Logger              dex.Logger
+	Network             dex.Network
+	ChainParams         *chaincfg.Params
+	Ports               dexbtc.NetPorts
+	DefaultFallbackFee  uint64 // sats/byte
+	DefaultFeeRateLimit uint64 // sats/byte
 	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
 	// call.
 	LegacyBalance bool
@@ -346,6 +347,7 @@ type ExchangeWallet struct {
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
+	feeRateLimit      uint64
 	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
@@ -402,16 +404,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 	cloneCFG := &BTCCloneCFG{
-		WalletCFG:          cfg,
-		MinNetworkVersion:  minNetworkVersion,
-		WalletInfo:         WalletInfo,
-		Symbol:             "btc",
-		Logger:             logger,
-		Network:            network,
-		ChainParams:        params,
-		Ports:              dexbtc.RPCPorts,
-		DefaultFallbackFee: defaultFee,
-		Segwit:             true,
+		WalletCFG:           cfg,
+		MinNetworkVersion:   minNetworkVersion,
+		WalletInfo:          WalletInfo,
+		Symbol:              "btc",
+		Logger:              logger,
+		Network:             network,
+		ChainParams:         params,
+		Ports:               dexbtc.RPCPorts,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		Segwit:              true,
 	}
 
 	return BTCCloneWallet(cloneCFG)
@@ -456,6 +459,14 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
 		fallbackFeesPerByte, cfg.WalletInfo.Units)
 
+	// If set in the user config, the fee rate limit will be in units of
+	// sats/byte.
+	feesLimitPerByte := btcCfg.FeeRateLimit
+	if feesLimitPerByte == 0 {
+		feesLimitPerByte = cfg.DefaultFeeRateLimit
+	}
+	cfg.Logger.Tracef("Fees rate limit set at %d sats/byte", feesLimitPerByte)
+
 	redeemConfTarget := btcCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
 		redeemConfTarget = defaultRedeemConfTarget
@@ -473,6 +484,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
+		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
@@ -754,6 +766,14 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
+	}
+	// Check wallets fee rate limit against server's max fee rate
+	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			ord.DEXConfig.MaxFeeRate,
+			btc.feeRateLimit)
 	}
 
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
