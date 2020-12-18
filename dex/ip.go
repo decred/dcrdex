@@ -5,6 +5,7 @@ package dex
 
 import (
 	"net"
+	"strings"
 )
 
 // IPKey is a IP address byte array.
@@ -16,18 +17,21 @@ func NewIPKey(addr string) IPKey {
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
 		addr = host
+	} else {
+		// If SplitHostPort failed, IPv6 addresses may still have brackets.
+		addr = strings.Trim(addr, "[]")
 	}
 
 	ip := net.ParseIP(addr)
 	if ip == nil {
-		return IPKey{}
+		return IPKey{} // i.e. net.IPv6unspecified
 	}
 	// IPv4 is encoded in a net.IP of length IPv6len as
 	// 00:00:00:00:00:00:00:00:00:00:ff:ff:xx:xx:xx:xx
 	// Thus, must copy all 16 bytes for IPv4.
 	N := net.IPv6len
-	if ip.To4() == nil {
-		// Drop the last 64 bits (interface) of IPv6 addresses.
+	if ip.To4() == nil && !ip.Equal(net.IPv6loopback) {
+		// Drop the last 64 bits (interface) of non-loopback IPv6 addresses.
 		N = net.IPv6len / 2 // i.e. ip = ip.Mask(net.CIDRMask(64, 128))
 	}
 	var ipKey IPKey

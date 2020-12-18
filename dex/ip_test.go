@@ -63,6 +63,13 @@ func TestIPKey(t *testing.T) {
 			wantString1: "127.0.0.1",
 		},
 		{
+			name:        "ipv6 loopback with and without port",
+			addr1:       "[::1]", // brackets to strip
+			addr2:       "[::1]:13245",
+			wantEqual:   true,
+			wantString1: "::1", // mask exception for ipv6 loopback
+		},
+		{
 			name:        "ipv6 port unequal",
 			addr1:       "[a:b:c:d::]:1234",
 			addr2:       "[a:b:c:e::]:1234",
@@ -79,6 +86,13 @@ func TestIPKey(t *testing.T) {
 		{
 			name:        "ipv6 port equal noport",
 			addr1:       "a:b:c:d::",
+			addr2:       "[a:b:c:d::]:1234",
+			wantEqual:   true,
+			wantString1: "a:b:c:d::",
+		},
+		{
+			name:        "ipv6 port equal noport with brackets",
+			addr1:       "[a:b:c:d::]", // brackets to strip
 			addr2:       "[a:b:c:d::]:1234",
 			wantEqual:   true,
 			wantString1: "a:b:c:d::",
