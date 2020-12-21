@@ -144,9 +144,11 @@ type Wallet interface {
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
-	// The ID need not represent an unspent coin, but coin IDs unknown to this
-	// wallet may return an error.
-	Confirmations(id dex.Bytes) (uint32, error)
+	// If the coin is not unspent, and is not known to this wallet,
+	// Confirmations may return an error. The value of spent should be ignored
+	// if err is non-nil, but Wallet implementations should return spent = false
+	// anyway.
+	Confirmations(id dex.Bytes) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value uint64) (Coin, error)
@@ -177,9 +179,6 @@ type Coin interface {
 	String() string
 	// Value is the available quantity, in atoms/satoshi.
 	Value() uint64
-	// Confirmations is the number of confirmations on this Coin's block. If the
-	// coin becomes spent, Confirmations should return an error.
-	Confirmations() (uint32, error)
 }
 
 // Coins a collection of coins as returned by Fund.

@@ -563,18 +563,20 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
-func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed uint32, changed bool) {
+func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed uint32, changed, spent bool) {
 	// Counter-party's swap is the "to" asset.
 	needed = t.wallets.toAsset.SwapConf
 
 	// Check the confirmations on the counter-party's swap.
 	coin := match.counterSwap.Coin()
+
 	var err error
-	have, err = coin.Confirmations()
+	have, spent, err = t.wallets.toWallet.Confirmations(coin.ID())
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v",
-			coin, t.wallets.toAsset.Symbol, match.id, t.UID())
-		have = 0 // should already be
+		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v: %v",
+			coin, t.wallets.toAsset.Symbol, match.id, t.UID(), err)
+		spent = false // backends should do this for non-nil error, but we'll do it anyway
+		have = 0      // should already be
 		return
 	}
 
@@ -765,7 +767,7 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // broadcast.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
-// mutex lock held for reads.
+// mutex lock held for writes.
 func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	dbMatch, metaData, proof, _ := match.parts()
 	if match.swapErr != nil || proof.IsRevoked() || match.tickGovernor != nil {
@@ -785,11 +787,16 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
 		// Check the confirmations on the maker's swap.
-		confs, req, changed := t.counterPartyConfirms(match)
+		confs, req, changed, spent := t.counterPartyConfirms(match)
 		ready := confs >= req
 		if changed && !ready {
 			t.dc.log.Debugf("Match %v not yet swappable: current confs = %d, required confs = %d",
 				match.id, confs, req)
+		}
+		if spent {
+			t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own")
+			proof.SelfRevoked = true
+			return false
 		}
 		return ready
 	}
@@ -823,11 +830,16 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
 		// Check the confirmations on the taker's swap.
-		confs, req, changed := t.counterPartyConfirms(match)
+		confs, req, changed, spent := t.counterPartyConfirms(match)
 		ready := confs >= req
 		if changed && !ready {
 			t.dc.log.Debugf("Match %v not yet redeemable: current confs = %d, required confs = %d",
 				match.id, confs, req)
+		}
+		if spent {
+			t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match.id)
+			proof.SelfRevoked = true
+			return false
 		}
 		return ready
 	}
@@ -936,13 +948,16 @@ func (t *trackedTrade) shouldBeginFindRedemption(match *matchTracker) bool {
 		return false
 	}
 
-	confs, err := t.wallets.fromWallet.Confirmations([]byte(swapCoinID))
+	confs, spent, err := t.wallets.fromWallet.Confirmations([]byte(swapCoinID))
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v",
-			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.id, t.UID())
+		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v: %v",
+			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.id, t.UID(), err)
 		return false
 	}
-	return confs >= t.wallets.fromAsset.SwapConf
+	if spent {
+		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", t.ID(), match.id)
+	}
+	return confs >= t.wallets.fromAsset.SwapConf || spent
 }
 
 // tick will check for and perform any match actions necessary.
@@ -972,7 +987,6 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if !t.matchIsActive(match) {
 			continue // either refunded or revoked requiring no action on this side of the match
 		}
-
 		switch {
 		case t.isSwappable(match):
 			t.dc.log.Debugf("Swappable match %v for order %v (%v)", match.id, t.ID(), side)
@@ -1417,15 +1431,14 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 		CoinID:   coinID,
 		Contract: contract,
 	}
-	// The DEX may wait up to its configured broadcast timeout to locate the
-	// contract txn, so wait at least that long for a response. Note that the
-	// server presently waits an unspecified amount of time that is shorter than
-	// this, which gives the client an msgjson.TransactionUndiscovered error to
-	// signal to the client to try broadcasting again or check their asset
-	// backend connectivity before hitting the broadcast timeout (and being
-	// penalized).
+	// The DEX may wait up to its configured broadcast timeout, but we will
+	// retry on timeout or other error. Note that the server presently waits an
+	// unspecified amount of time, which gives the client an
+	// msgjson.TransactionUndiscovered error to signal to the client to try
+	// broadcasting again or check their asset backend connectivity before
+	// hitting the broadcast timeout (and being penalized).
 	var needsResolution bool
-	timeout := t.broadcastTimeout()
+	timeout := t.broadcastTimeout() / 4
 	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
 		var msgErr *msgjson.Error
 		needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
@@ -1596,9 +1609,9 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 			Secret:  proof.Secret,
 		}
 		ack := new(msgjson.Acknowledgement)
-		// The DEX may wait up to its configured broadcast timeout, so wait at least
-		// that long for a response.
-		timeout := t.broadcastTimeout()
+		// The DEX may wait up to its configured broadcast timeout, but we will
+		// retry on timeout or other error.
+		timeout := t.broadcastTimeout() / 4
 		if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
 			var msgErr *msgjson.Error
 			needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError

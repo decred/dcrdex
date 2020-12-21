@@ -810,7 +810,7 @@ func TestReturnCoins(t *testing.T) {
 
 	// Test it with the local output type.
 	coins := asset.Coins{
-		newOutput(node, tTxHash, 0, 1, wire.TxTreeRegular),
+		newOutput(tTxHash, 0, 1, wire.TxTreeRegular),
 	}
 	err := wallet.ReturnCoins(coins)
 	if err != nil {
@@ -889,7 +889,7 @@ func TestFundingCoins(t *testing.T) {
 	node.unspent = nil
 	opID := newOutPoint(tTxHash, vout)
 	wallet.fundingCoins[opID] = &fundingCoin{
-		op: newOutput(node, tTxHash, vout, 0, 0),
+		op: newOutput(tTxHash, vout, 0, 0),
 	}
 	ensureGood()
 
@@ -1040,8 +1040,8 @@ func TestSwap(t *testing.T) {
 	defer shutdown()
 	swapVal := toAtoms(5)
 	coins := asset.Coins{
-		newOutput(node, tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
-		newOutput(node, tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
 	}
 
 	node.newAddr = tPKHAddr
@@ -1195,7 +1195,7 @@ func TestRedeem(t *testing.T) {
 	}
 
 	ci := &auditInfo{
-		output:     newOutput(node, tTxHash, 0, swapVal, wire.TxTreeRegular),
+		output:     newOutput(tTxHash, 0, swapVal, wire.TxTreeRegular),
 		contract:   contract,
 		recipient:  tPKHAddr,
 		expiration: lockTime,
@@ -1322,7 +1322,7 @@ func TestSignMessage(t *testing.T) {
 
 	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
-	op := newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular)
+	op := newOutput(tTxHash, vout, 5e7, wire.TxTreeRegular)
 
 	wallet.fundingCoins[op.pt] = &fundingCoin{
 		addr: tPKHAddr.String(),
@@ -1600,7 +1600,7 @@ func TestRefund(t *testing.T) {
 	privKey := secp256k1.PrivKeyFromBytes(privBytes)
 	node.privWIF = dcrutil.NewWIF(privKeyAdaptor{privKey}, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
-	contractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular)
+	contractOutput := newOutput(tTxHash, 0, 1e8, wire.TxTreeRegular)
 	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
@@ -1624,7 +1624,7 @@ func TestRefund(t *testing.T) {
 	node.txOutErr = nil
 
 	// bad contract
-	badContractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular)
+	badContractOutput := newOutput(tTxHash, 0, 1e8, wire.TxTreeRegular)
 	_, err = wallet.Refund(badContractOutput.ID(), randBytes(50))
 	if err == nil {
 		t.Fatalf("no error for bad contract")
@@ -1841,23 +1841,46 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, err := wallet.Confirmations(randBytes(35))
+	_, spent, err := wallet.Confirmations(randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
+	if spent {
+		t.Fatalf("spent is non-zero for non-nil error")
+	}
 
-	// listunspent error
+	op := newOutPoint(tTxHash, 0)
+	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
+	confs, spent, err := wallet.Confirmations(coinID)
+	if err != nil {
+		t.Fatalf("error for gettransaction path: %v", err)
+	}
+	if confs != 2 {
+		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
+	}
+	if spent {
+		t.Fatalf("expected spent = false for gettxout path, got true")
+	}
+
+	// gettransaction error
 	node.walletTxErr = tErr
-	_, err = wallet.Confirmations(coinID)
+	delete(node.txOutRes, op)
+	_, spent, err = wallet.Confirmations(coinID)
 	if err == nil {
-		t.Fatalf("no error for listunspent error")
+		t.Fatalf("no error for gettransaction error")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero with gettransaction error")
 	}
 	node.walletTxErr = nil
 
 	node.walletTx = &walletjson.GetTransactionResult{}
-	_, err = wallet.Confirmations(coinID)
+	_, spent, err = wallet.Confirmations(coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("expected spent = true for gettransaction path, got false")
 	}
 }
 

@@ -741,7 +741,7 @@ func TestReturnCoins(t *testing.T) {
 
 	// Test it with the local output type.
 	coins := asset.Coins{
-		newOutput(node, tTxHash, 0, 1),
+		newOutput(tTxHash, 0, 1),
 	}
 	node.rawRes[methodLockUnspent] = []byte(`true`)
 	err := wallet.ReturnCoins(coins)
@@ -1140,8 +1140,8 @@ func testSwap(t *testing.T, segwit bool) {
 	defer shutdown()
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
-		newOutput(node, tTxHash, 0, toSatoshi(3)),
-		newOutput(node, tTxHash, 0, toSatoshi(3)),
+		newOutput(tTxHash, 0, toSatoshi(3)),
+		newOutput(tTxHash, 0, toSatoshi(3)),
 	}
 	addrStr := tP2PKHAddr
 	if segwit {
@@ -1283,7 +1283,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	addr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
 	ci := &auditInfo{
-		output:     newOutput(node, tTxHash, 0, swapVal),
+		output:     newOutput(tTxHash, 0, swapVal),
 		contract:   contract,
 		recipient:  addr,
 		expiration: lockTime,
@@ -1429,7 +1429,7 @@ func TestSignMessage(t *testing.T) {
 		return r, nil
 	}
 
-	var coin asset.Coin = newOutput(node, tTxHash, vout, 5e7)
+	var coin asset.Coin = newOutput(tTxHash, vout, 5e7)
 	pubkeys, sigs, err := wallet.SignMessage(coin, msg)
 	if err != nil {
 		t.Fatalf("SignMessage error: %v", err)
@@ -1770,7 +1770,7 @@ func testRefund(t *testing.T, segwit bool) {
 	}
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
-	contractOutput := newOutput(node, tTxHash, 0, 1e8)
+	contractOutput := newOutput(tTxHash, 0, 1e8)
 	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
@@ -1794,7 +1794,7 @@ func testRefund(t *testing.T, segwit bool) {
 	node.txOutErr = nil
 
 	// bad contract
-	badContractOutput := newOutput(node, tTxHash, 0, 1e8)
+	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
 	_, err = wallet.Refund(badContractOutput.ID(), badContract)
 	if err == nil {
@@ -1969,23 +1969,47 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, err := wallet.Confirmations(randBytes(35))
+	_, spent, err := wallet.Confirmations(randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
+	if spent {
+		t.Fatalf("spent is non-zero for non-nil error")
+	}
 
-	// listunspent error
-	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.Confirmations(coinID)
+	// Short path.
+	node.txOutRes = &btcjson.GetTxOutResult{
+		Confirmations: 2,
+	}
+	confs, spent, err := wallet.Confirmations(coinID)
+	if err != nil {
+		t.Fatalf("error for gettransaction path: %v", err)
+	}
+	if confs != 2 {
+		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
+	}
+	if spent {
+		t.Fatalf("expected spent = false for gettxout path, got true")
+	}
+
+	// gettransaction error
+	node.txOutRes = nil
+	_, spent, err = wallet.Confirmations(coinID)
 	if err == nil {
-		t.Fatalf("no error for listunspent error")
+		t.Fatalf("no error for gettransaction error")
+	}
+	if spent {
+		t.Fatalf("spent is non-zero with gettransaction error")
 	}
 	node.rawErr[methodGetTransaction] = nil
 
 	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
-	_, err = wallet.Confirmations(coinID)
+	_, spent, err = wallet.Confirmations(coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("expected spent = true for gettransaction path, got false")
 	}
 }
 
