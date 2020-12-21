@@ -25,6 +25,7 @@ export default class SettingsPage extends BasePage {
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm', 'exportKeysHost', 'exportKeysErr',
       // Import Account
       'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
+      'accountFile', 'selectedAccount', 'removeAccount', 'addAccount',
       // Others
       'showPokes'
     ])
@@ -63,6 +64,11 @@ export default class SettingsPage extends BasePage {
 
     Doc.bind(page.importAccount, 'click', () => this.showForm(page.authorizeAccountImportForm))
     forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => { this.importAccount() })
+
+    Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
+    Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
+    Doc.bind(page.addAccount, 'click', () => this.page.accountFile.click())
+    // Doc.bind(page.addAccount, 'click', () => this.testAccountFile())
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -103,7 +109,8 @@ export default class SettingsPage extends BasePage {
       host: host
     }
     const loaded = app.loading(this.body)
-    var res = await postJSON('/api/account', req)
+    var res = await postJSON('/api/exportaccount', req)
+    // var res = await getJSON('/api/account' + '?pw=' + pw + '&host=' + host)
     loaded()
     if (!app.checkResponse(res)) {
       page.exportKeysErr.textContent = res.msg
@@ -120,17 +127,45 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
   }
 
+  async onAccountFileChange () {
+    const page = this.page
+    const files = page.accountFile.files
+    if (!files.length) return
+    page.selectedAccount.textContent = files[0].name
+    Doc.show(page.removeAccount)
+    Doc.hide(page.addAccount)
+  }
+
+  /* clearAccountFile cleanup accountFile value and selectedAccount text */
+  clearAccountFile () {
+    const page = this.page
+    page.accountFile.value = ''
+    page.selectedAccount.textContent = this.defaultTLSText
+    Doc.hide(page.removeAccount)
+    Doc.show(page.addAccount)
+  }
+
+  testAccountFile () {
+    console.log('testAccountFile')
+  }
+
   // importAccount imports the account
   async importAccount () {
     const page = this.page
-    // const pw = page.exportAccountAppPass.value
+    const pw = page.exportAccountAppPass.value
     page.importAccountAppPass.value = ''
-    // const req = {
-    //   pw: pw,
-    //   host: host
-    // }
+    let accountString = ''
+    if (page.accountFile.value) {
+      accountString = await page.accountFile.files[0].text()
+    }
+    const account = JSON.parse(accountString)
+    const req = {
+      pw: pw,
+      account: account
+    }
     const loaded = app.loading(this.body)
-    // var res = await postJSON('/api/account', req)
+    // var res = await postJSON('/api/importaccount', req)
+    postJSON('/api/importaccount', req)
     loaded()
     // if (!app.checkResponse(res)) {
     //   page.exportKeysErr.textContent = res.msg

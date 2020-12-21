@@ -189,14 +189,31 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiAccount is the handler for the '/account' API request.
-func (s *WebServer) apiAccount(w http.ResponseWriter, r *http.Request) {
+// apiAccountExport is the handler for the '/account' API request.
+func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	form := new(accountExportAuthForm)
 	if !readPost(w, r, form) {
 		return
 	}
 	r.Close = true
-	accountResponse, err := s.core.Account(form.Pass, form.Host)
+	accountResponse, err := s.core.AccountExport(form.Pass, form.Host)
+	if err != nil {
+		s.writeAPIError(w, "error retrieving keys: %v", err)
+		return
+	}
+	w.Header().Set("Connection", "close")
+	accountResponse.OK = true
+	writeJSON(w, accountResponse, s.indent)
+}
+
+// apiAccountImport is the handler for the '/account' API request.
+func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
+	form := new(accountImportAuthForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	r.Close = true
+	accountResponse, err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return

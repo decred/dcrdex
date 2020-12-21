@@ -2269,7 +2269,7 @@ func TestAccount(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	accountResponse, err := tCore.Account(tPW, host)
+	accountResponse, err := tCore.AccountExport(tPW, host)
 	if err != nil {
 		t.Fatalf("account keys error: %v", err)
 	}

@@ -695,8 +695,8 @@ type OrderFilter struct {
 	Statuses []order.OrderStatus `json:"statuses"`
 }
 
-// AccountResponse holds data returned from Account.
-type AccountResponse struct {
+// Account holds data returned from AccountExport.
+type Account struct {
 	OK        bool   `json:"ok"`
 	Host      string `json:"host"`
 	AccountID string `json:"accountID"`
@@ -705,6 +705,12 @@ type AccountResponse struct {
 	EncKey    string `json:"encKey"`
 	Cert      string `json:"cert"`
 	FeeCoin   string `json:"feeCoin"`
+}
+
+// AccountResponse is an Account with ok status.
+type AccountResponse struct {
+	Account Account `json:"account"`
+	OK      bool    `json:"ok"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

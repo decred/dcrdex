@@ -2680,8 +2680,8 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	return corder, nil
 }
 
-// Account is used to retrieve account keys by host.
-func (c *Core) Account(pw []byte, host string) (*AccountResponse, error) {
+// AccountExport is used to retrieve account by host for export.
+func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Password error: %w", err)
@@ -2698,7 +2698,7 @@ func (c *Core) Account(pw []byte, host string) (*AccountResponse, error) {
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", host)
 	}
-	accountResponse := &AccountResponse{
+	account := &Account{
 		Host:      host,
 		AccountID: dc.acct.id.String(),
 		PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
@@ -2707,7 +2707,37 @@ func (c *Core) Account(pw []byte, host string) (*AccountResponse, error) {
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
 	}
-	return accountResponse, nil
+	return account, nil
+}
+
+// AccountImport is used import an existing account into the db.
+func (c *Core) AccountImport(pw []byte, account Account) (*Account, error) {
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("Password error: %w", err)
+	}
+	_, err = addrHost(account.Host)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	// Get the dexConnection and the dex.Asset for each asset.
+	//c.connMtx.RLock()
+	//dc, found := c.conns[account.Host]
+	//c.connMtx.RUnlock()
+	//if !found {
+	//	return nil, fmt.Errorf("unknown DEX %s", host)
+	//}
+	//account := &Account{
+	//	Host:      host,
+	//	AccountID: dc.acct.id.String(),
+	//	PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
+	//	PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
+	//	EncKey:    hex.EncodeToString(dc.acct.encKey),
+	//	Cert:      hex.EncodeToString(dc.acct.cert),
+	//	FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
+	//}
+	return &account, nil
 }
 
 // Send an order, process result, prepare and store the trackedTrade.
