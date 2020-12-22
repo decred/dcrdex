@@ -26,7 +26,7 @@ const (
 	user    = "user"
 	pass    = "pass"
 	addr    = "127.0.0.1:5757"
-	dexAddr = "127.0.0.1:17273"
+	dexAddr = "127.0.0.1:17232"
 )
 
 func main() {

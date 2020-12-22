@@ -14,7 +14,7 @@ The [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/RE
 must be running to use the dcrdex harness.
 
 The dcrdex config file created and used by the harness sets
-`pgdbname=dcrdex_simnet_test` and `rpclisten=127.0.0.1:17273`.
+`pgdbname=dcrdex_simnet_test` and `rpclisten=127.0.0.1:17232`.
 You can override these or set additional config opts by passing them as
 arguments when executing the harness script e.g.:
 
@@ -26,7 +26,7 @@ The harness script will drop any existing `dcrdex_simnet_test` PostgreSQL db
 and create a fresh database for the session. The script will also create a
 markets.json file referencing dcr and btc node config files created by the
 respective node harnesses; and start a dcrdex instance listening at
-`127.0.0.1:17273` or any address you specify in cli args.
+`127.0.0.1:17232` or any address you specify in cli args.
 
 The rpc cert for the dcrdex instance will be created in `~/dextest/dcrdex/rpc.cert`
 with the following content:

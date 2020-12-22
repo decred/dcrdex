@@ -88,7 +88,7 @@ cat > "./dcrdex.conf" <<EOF
 regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
 pgdbname=${TEST_DB}
 simnet=1
-rpclisten=127.0.0.1:17273
+rpclisten=127.0.0.1:17232
 debuglevel=trace
 loglocal=true
 regfeeconfirms=1

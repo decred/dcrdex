@@ -65,7 +65,7 @@ var (
 	}
 	clients = []*tClient{client1, client2}
 
-	dexHost = "127.0.0.1:17273"
+	dexHost = "127.0.0.1:17232"
 	dexCert []byte
 
 	// dex/testing/harness.sh => markets.json settings

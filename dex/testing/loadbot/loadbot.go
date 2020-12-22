@@ -51,7 +51,7 @@ var (
 	btcID, _ = dex.BipSymbolID("btc")
 	// ltcID, _    = dex.BipSymbolID("ltc") // TODO
 	loggerMaker *dex.LoggerMaker
-	hostAddr    = "127.0.0.1:17273"
+	hostAddr    = "127.0.0.1:17232"
 	pass        = []byte("abc")
 	log         dex.Logger
 	unbip       = dex.BipIDSymbol
