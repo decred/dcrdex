@@ -440,8 +440,11 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, e
 	}, nil
 }
 
-func (c *TCore) Account(pw []byte, host string) (*core.AccountResponse, error) {
+func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
 	return nil, nil
+}
+func (c *TCore) AccountImport(pw []byte, account core.Account) error {
+	return nil
 }
 
 func toAtoms(v float64) uint64 {
