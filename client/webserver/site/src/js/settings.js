@@ -152,7 +152,7 @@ export default class SettingsPage extends BasePage {
   // importAccount imports the account
   async importAccount () {
     const page = this.page
-    const pw = page.exportAccountAppPass.value
+    const pw = page.importAccountAppPass.value
     page.importAccountAppPass.value = ''
     let accountString = ''
     if (page.accountFile.value) {

@@ -2706,38 +2706,52 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		EncKey:    hex.EncodeToString(dc.acct.encKey),
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
+		IsPaid:    dc.acct.isPaid,
 	}
 	return account, nil
 }
 
 // AccountImport is used import an existing account into the db.
-func (c *Core) AccountImport(pw []byte, account Account) (*Account, error) {
+func (c *Core) AccountImport(pw []byte, account Account) error {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("Password error: %w", err)
+		return fmt.Errorf("Password error: %w", err)
 	}
 	_, err = addrHost(account.Host)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return newError(addressParseErr, "error parsing address: %v", err)
 	}
-
-	// Get the dexConnection and the dex.Asset for each asset.
-	//c.connMtx.RLock()
-	//dc, found := c.conns[account.Host]
-	//c.connMtx.RUnlock()
-	//if !found {
-	//	return nil, fmt.Errorf("unknown DEX %s", host)
-	//}
-	//account := &Account{
-	//	Host:      host,
-	//	AccountID: dc.acct.id.String(),
-	//	PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
-	//	PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
-	//	EncKey:    hex.EncodeToString(dc.acct.encKey),
-	//	Cert:      hex.EncodeToString(dc.acct.cert),
-	//	FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
-	//}
-	return &account, nil
+	var accountInfo db.AccountInfo
+	accountInfo.Host = account.Host
+	pubKey, err := hex.DecodeString(account.PubKey)
+	if err != nil {
+		return err
+	}
+	accountInfo.DEXPubKey, err = secp256k1.ParsePubKey(pubKey)
+	if err != nil {
+		return err
+	}
+	encKey, err := hex.DecodeString(account.EncKey)
+	if err != nil {
+		return err
+	}
+	accountInfo.EncKey = encKey
+	cert, err := hex.DecodeString(account.Cert)
+	if err != nil {
+		return err
+	}
+	accountInfo.Cert = cert
+	feeCoin, err := hex.DecodeString(account.FeeCoin)
+	if err != nil {
+		return err
+	}
+	accountInfo.FeeCoin = feeCoin
+	accountInfo.Paid = account.IsPaid
+	err = c.db.CreateAccount(&accountInfo)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Send an order, process result, prepare and store the trackedTrade.

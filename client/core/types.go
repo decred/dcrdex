@@ -705,6 +705,7 @@ type Account struct {
 	EncKey    string `json:"encKey"`
 	Cert      string `json:"cert"`
 	FeeCoin   string `json:"feeCoin"`
+	IsPaid    bool   `json:"isPaid"`
 }
 
 // AccountResponse is an Account with ok status.

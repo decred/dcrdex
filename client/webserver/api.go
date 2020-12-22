@@ -213,14 +213,13 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	accountResponse, err := s.core.AccountImport(form.Pass, form.Account)
+	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
-	accountResponse.OK = true
-	writeJSON(w, accountResponse, s.indent)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // apiCancel is the handler for the '/cancel' API request.

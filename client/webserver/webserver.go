@@ -91,7 +91,7 @@ type clientCore interface {
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error)
 	AccountExport(pw []byte, host string) (*core.Account, error)
-	AccountImport(pw []byte, account core.Account) (*core.Account, error)
+	AccountImport(pw []byte, account core.Account) error
 }
 
 var _ clientCore = (*core.Core)(nil)
