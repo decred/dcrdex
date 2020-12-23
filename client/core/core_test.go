@@ -4735,16 +4735,16 @@ func TestReconfigureWallet(t *testing.T) {
 	}
 	var assetID uint32 = 54321
 
-	// Password error
+	// App Password error
 	rig.crypter.recryptErr = tErr
-	err := tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	err := tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, authErr) {
 		t.Fatalf("wrong error for password error: %v", err)
 	}
 	rig.crypter.recryptErr = nil
 
 	// Missing wallet error
-	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, missingWalletErr) {
 		t.Fatalf("wrong error for missing wallet: %v", err)
 	}
@@ -4760,7 +4760,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// Connect error
 	tXyzWallet.connectErr = tErr
-	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, connectWalletErr) {
 		t.Fatalf("wrong error when expecting connection error: %v", err)
 	}
@@ -4769,9 +4769,9 @@ func TestReconfigureWallet(t *testing.T) {
 	// Unlock error
 	tXyzWallet.Unlock(wPW)
 	tXyzWallet.unlockErr = tErr
-	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, walletAuthErr) {
-		t.Fatalf("wrong error when expecting connection error: %v", err)
+		t.Fatalf("wrong error when expecting auth error: %v", err)
 	}
 	tXyzWallet.unlockErr = nil
 
@@ -4798,8 +4798,8 @@ func TestReconfigureWallet(t *testing.T) {
 		},
 	}
 
-	// Success
-	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	// Success updating settings.
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if err != nil {
 		t.Fatalf("ReconfigureWallet error: %v", err)
 	}
@@ -4811,6 +4811,19 @@ func TestReconfigureWallet(t *testing.T) {
 
 	if match.tickGovernor != nil {
 		t.Fatalf("tickGovernor not removed")
+	}
+
+	// Success updating wallet PW.
+	newWalletPW := []byte("password")
+	err = tCore.ReconfigureWallet(tPW, newWalletPW, assetID, newSettings)
+	if err != nil {
+		t.Fatalf("ReconfigureWallet error: %v", err)
+	}
+
+	// Check that the xcWallet was updated.
+	xyzWallet = tCore.wallets[assetID]
+	if !bytes.Equal(xyzWallet.encPW, newWalletPW) {
+		t.Fatalf("xcWallet encPW field not updated want: %x got: %x", newWalletPW, xyzWallet.encPW)
 	}
 }
 

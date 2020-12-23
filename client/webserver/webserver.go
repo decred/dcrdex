@@ -75,8 +75,7 @@ type clientCore interface {
 	Wallets() []*core.WalletState
 	WalletState(assetID uint32) *core.WalletState
 	WalletSettings(uint32) (map[string]string, error)
-	ReconfigureWallet([]byte, uint32, map[string]string) error
-	SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error
+	ReconfigureWallet([]byte, []byte, uint32, map[string]string) error
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
@@ -262,7 +261,6 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			apiAuth.Post("/parseconfig", s.apiParseConfig)
 			apiAuth.Post("/reconfigurewallet", s.apiReconfig)
 			apiAuth.Post("/walletsettings", s.apiWalletSettings)
-			apiAuth.Post("/setwalletpass", s.apiSetWalletPass)
 			apiAuth.Post("/orders", s.apiOrders)
 			apiAuth.Post("/order", s.apiOrder)
 			apiAuth.Post("/withdraw", s.apiWithdraw)

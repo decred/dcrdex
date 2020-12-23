@@ -339,26 +339,6 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
-// apiSetWalletPass updates the current password for the specified wallet.
-func (s *WebServer) apiSetWalletPass(w http.ResponseWriter, r *http.Request) {
-	form := &struct {
-		AssetID uint32           `json:"assetID"`
-		NewPW   encode.PassBytes `json:"newPW"`
-		AppPW   encode.PassBytes `json:"appPW"`
-	}{}
-	defer form.NewPW.Clear()
-	defer form.AppPW.Clear()
-	if !readPost(w, r, form) {
-		return
-	}
-	err := s.core.SetWalletPassword(form.AppPW, form.AssetID, form.NewPW)
-	if err != nil {
-		s.writeAPIError(w, "password change error: %v", err)
-		return
-	}
-	writeJSON(w, simpleAck(), s.indent)
-}
-
 // apiDefaultWalletCfg attempts to load configuration settings from the
 // asset's default path on the server.
 func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) {
@@ -429,17 +409,26 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32            `json:"assetID"`
 		Config  map[string]string `json:"config"`
-		AppPW   encode.PassBytes  `json:"pw"`
+		// newWalletPW json field should be omitted in case caller isn't interested
+		// in setting new password, passing null JSON value will cause an unmarshal
+		// error.
+		NewWalletPW encode.PassBytes `json:"newWalletPW"`
+		AppPW       encode.PassBytes `json:"appPW"`
 	}{}
+	defer form.NewWalletPW.Clear()
 	defer form.AppPW.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.ReconfigureWallet(form.AppPW, form.AssetID, form.Config)
+
+	// Update wallet settings
+	err := s.core.ReconfigureWallet(form.AppPW, form.NewWalletPW, form.AssetID,
+		form.Config)
 	if err != nil {
 		s.writeAPIError(w, "reconfig error: %v", err)
 		return
 	}
+
 	writeJSON(w, simpleAck(), s.indent)
 }
 

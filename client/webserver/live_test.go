@@ -907,7 +907,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {
 	return c.wallets[assetID].settings, nil
 }
-func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]string) error {
+func (c *TCore) ReconfigureWallet(aPW, nPW []byte, assetID uint32, cfg map[string]string) error {
 	c.wallets[assetID].settings = cfg
 	return nil
 }
