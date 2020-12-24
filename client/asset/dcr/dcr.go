@@ -394,6 +394,10 @@ type combinedClient struct {
 	*walletClient
 }
 
+func (cc *combinedClient) ValidateAddress(ctx context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return cc.walletClient.ValidateAddress(ctx, address)
+}
+
 // Check that ExchangeWallet satisfies the Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
@@ -418,7 +422,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
 	}
 	// Beyond this point, only node
-	dcr.node = combinedClient{dcr.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)}
+	dcr.node = &combinedClient{dcr.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)}
 
 	return dcr, nil
 }
