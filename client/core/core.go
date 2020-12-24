@@ -1057,6 +1057,9 @@ func (c *Core) connectWallet(w *xcWallet) error {
 	if err != nil {
 		return codedError(connectWalletErr, err)
 	}
+	// Check if known address belongs to connected wallet
+	mine, err := w.IsAddressMine(w.address)
+	c.log.Tracef("%v address is mine %v", w.address, mine)
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
 	if !w.synced {
@@ -1530,7 +1533,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		return newError(addrErr, "error getting wallet address: %v", err)
 	}
 	dbWallet.Address = addr
-	wallet.address = addr
+	wallet.setAddress(addr)
 	if oldWallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
@@ -1677,7 +1680,7 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	}
 
 	c.walletMtx.Lock()
-	w.address = addr
+	w.setAddress(addr)
 	c.walletMtx.Unlock()
 
 	dbWallet, err := c.db.Wallet(w.dbID)

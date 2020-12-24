@@ -151,6 +151,7 @@ type rpcClient interface {
 	Disconnected() bool
 	RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error)
 	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
+	ValidateAddress(ctx context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled
@@ -547,6 +548,16 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.shutdown()
 	}()
 	return &wg, nil
+}
+
+// IsAddressMine returns wether given address belongs to wallet or not
+func (dcr *ExchangeWallet) IsAddressMine(address string) (bool, error) {
+	a, err := dcrutil.DecodeAddress(address, chainParams)
+	va, err := dcr.node.ValidateAddress(dcr.ctx, a)
+	if err != nil {
+		return false, err
+	}
+	return va.IsMine, nil
 }
 
 // Balance should return the total available funds in the wallet. Note that

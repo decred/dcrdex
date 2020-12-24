@@ -565,6 +565,15 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	return true, 1, nil
 }
 
+// IsAddressMine returns wether given address belongs to wallet or not
+func (btc *ExchangeWallet) IsAddressMine(address string) (bool, error) {
+	ai, err := btc.wallet.GetAddressInfo(address)
+	if err != nil {
+		return false, err
+	}
+	return ai.IsMine, nil
+}
+
 // Balance returns the total available funds in the wallet. Part of the
 // asset.Wallet interface.
 func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
