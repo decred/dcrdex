@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -201,6 +202,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	filter := new(core.OrderFilter)
 	err := r.ParseForm()
 	if err != nil {
+		log.Errorf("error parsing form for export order: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -211,6 +213,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	for k, assetStrId := range assets {
 		assetNumId, err := strconv.Atoi(assetStrId)
 		if err != nil {
+			log.Errorf("error parsing asset id: %v", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
@@ -222,6 +225,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		statusNumId, err := strconv.Atoi(statusStrId)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			log.Errorf("error parsing status id: %v", err)
 			return
 		}
 		filter.Statuses[k] = order.OrderStatus(statusNumId)
@@ -229,16 +233,22 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 
 	ords, err := s.core.Orders(filter)
 	if err != nil {
+		log.Errorf("error retrieving order: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	var buffer bytes.Buffer
 	csvWriter := csv.NewWriter(&buffer)
+	// UseCRLF for Window users
+	csvWriter.UseCRLF = strings.Contains(r.UserAgent(), "Windows")
 
 	err = csvWriter.Write([]string{
-		"Trade",
-		"Market",
+		"Host",
+		"Base",
+		"Quote",
+		"Ask",
+		"Offer",
 		"Type",
 		"Status",
 		"Rate",
@@ -248,20 +258,20 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		"Time",
 	})
 	if err != nil {
+		log.Errorf("error writing CSV: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	for _, ord := range ords {
 		ordReader := orderReader{ord}
 
-		tradeStr := fmt.Sprintf("%s %s → %s %s",
-			ordReader.OfferString(), ordReader.FromSymbol(),
-			ordReader.AskString(), ordReader.ToSymbol())
-
 		srvTime := encode.UnixTimeMilli(int64(ord.Stamp))
 		err = csvWriter.Write([]string{
-			tradeStr, // Trade
-			fmt.Sprintf("%s-%s @ %s", ord.BaseSymbol, ord.QuoteSymbol, ord.Host), // Market
+			ord.Host,                                  // Host
+			ord.BaseSymbol,                            // Base
+			ord.QuoteSymbol,                           // Quote
+			ordReader.AskString(),                     // Ask
+			ordReader.OfferString(),                   // Offer
 			ordReader.TypeString(),                    // Type
 			ordReader.StatusString(),                  // Status
 			ordReader.RateString(),                    // Rate
@@ -271,6 +281,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 			srvTime.Format("02/01/2006, 03:04:05 PM"), // Time
 		})
 		if err != nil {
+			log.Errorf("error writing CSV: %v", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
@@ -282,6 +293,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	_, err = w.Write(data)
 	if err != nil {
+		log.Errorf("error writing to client body: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}

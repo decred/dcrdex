@@ -185,12 +185,8 @@ export default class OrdersPage extends BasePage {
 
   /* exportOrders open a new page to export orders based on the current filter */
   exportOrders () {
-    const page = this.page
     this.offset = ''
-    const filterState = this.filterState
-    filterState.hosts = parseSubFilter(page.hostFilter)
-    filterState.assets = parseSubFilter(page.assetFilter)
-    filterState.statuses = parseSubFilter(page.statusFilter)
+    const filterState = this.currentFilter()
 
     const url = new URL(window.location)
     const search = new URLSearchParams(url.search)
@@ -200,13 +196,9 @@ export default class OrdersPage extends BasePage {
       const subFilter = filterState[k]
       search.delete(k)
       if (subFilter.length !== 0) {
-        if (Array.isArray(subFilter)) {
-          subFilter.forEach(e => {
-            search.append(k, e)
-          })
-        } else {
-          search.set(k, subFilter)
-        }
+        subFilter.forEach(e => {
+          search.append(k, e)
+        })
       }
     }
     setQuery('hosts')
