@@ -553,6 +553,10 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{}
 }
 
+func (w *TXCWallet) ValidateAddress(adress string) (bool, error) {
+	return true, nil
+}
+
 func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return w.connectWG, w.connectErr
 }

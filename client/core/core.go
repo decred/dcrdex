@@ -2050,15 +2050,15 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 			defer wg.Done()
 			if !wallet.connected() {
 				err := c.connectWallet(wallet)
-				// We wait for connectWalleet to finish before holding the lock as it
-				// may update the deposit address
-				c.walletMtx.Lock()
 				if err != nil {
 					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 						unbip(wallet.AssetID), err)
 					return
 				}
 			}
+			// We wait for connectWalleet to finish before holding the lock as it
+			// may update the deposit address
+			c.walletMtx.Lock()
 			atomic.AddUint32(&connectCount, 1)
 			_, err := c.walletBalances(wallet)
 			if err == nil {

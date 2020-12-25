@@ -366,8 +366,8 @@ func (c *tRPCClient) WalletInfo(_ context.Context) (*walletjson.WalletInfoResult
 	}, nil
 }
 
-func (c *tRPCClient) ValidateAddress(_ context.Context) (*walletjson.ValidateAddressResult, error) {
-	return &walletjson.ValidateAddressResult{
+func (c *tRPCClient) ValidateAddress(_ context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return &walletjson.ValidateAddressWalletResult{
 		IsMine: true,
 	}, nil
 }

@@ -557,6 +557,9 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 // ValidateAddress returns wether given address belongs to wallet or not
 func (dcr *ExchangeWallet) ValidateAddress(address string) (bool, error) {
 	a, err := dcrutil.DecodeAddress(address, chainParams)
+	if err != nil {
+		return false, err
+	}
 	va, err := dcr.node.ValidateAddress(dcr.ctx, a)
 	if err != nil {
 		return false, err
