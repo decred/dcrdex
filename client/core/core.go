@@ -1052,14 +1052,28 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
+// connectWallet connects to wallet and validate the known deposit address
+// after successfull connectection, if deposit address does not belong to
+// wallet it generates new address and updates xcWallet and dbWallet, therefore
+// it might hold the wallet lock
 func (c *Core) connectWallet(w *xcWallet) error {
 	err := w.Connect(c.ctx)
 	if err != nil {
 		return codedError(connectWalletErr, err)
 	}
 	// Check if known address belongs to connected wallet
-	mine, err := w.IsAddressMine(w.address)
-	c.log.Tracef("%v address is mine %v", w.address, mine)
+	mine, err := w.ValidateAddress(w.address)
+	if err != nil {
+		return err
+	}
+	if !mine {
+		c.log.Infof("[%v]: Deposit address %v does not belong to connected wallet"+
+			", generating new address", unbip(w.AssetID), w.address)
+		_, err := c.NewDepositAddress(w.AssetID)
+		if err != nil {
+			return err
+		}
+	}
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
 	if !w.synced {
@@ -1520,11 +1534,6 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return newError(walletErr, "error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
-	// Must connect to ensure settings are good.
-	err = c.connectWallet(wallet)
-	if err != nil {
-		return err
-	}
 	// Get a new address. Definitely want this when the account changes, and
 	// maybe other settings as well.
 	addr, err := wallet.Address()
@@ -1534,6 +1543,12 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	}
 	dbWallet.Address = addr
 	wallet.setAddress(addr)
+
+	// Must connect to ensure settings are good.
+	err = c.connectWallet(wallet)
+	if err != nil {
+		return err
+	}
 	if oldWallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
@@ -2028,7 +2043,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// resolveActiveTrades and the balance updated there.
 	var wg sync.WaitGroup
 	var connectCount, balanceCount uint32
-	c.walletMtx.Lock()
 	walletCount := len(c.wallets)
 	for _, wallet := range c.wallets {
 		wg.Add(1)
@@ -2036,6 +2050,9 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 			defer wg.Done()
 			if !wallet.connected() {
 				err := c.connectWallet(wallet)
+				// We wait for connectWalleet to finish before holding the lock as it
+				// may update the deposit address
+				c.walletMtx.Lock()
 				if err != nil {
 					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 						unbip(wallet.AssetID), err)
@@ -2047,9 +2064,9 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 			if err == nil {
 				atomic.AddUint32(&balanceCount, 1)
 			}
+			c.walletMtx.Unlock()
 		}(wallet)
 	}
-	c.walletMtx.Unlock()
 	wg.Wait()
 	if walletCount > 0 {
 		c.log.Infof("Connected to %d of %d wallets. Updated %d balances.", connectCount, walletCount, balanceCount)
