@@ -565,7 +565,7 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	return true, 1, nil
 }
 
-// ValidateAddress returns wether given address belongs to wallet or not
+// ValidateAddress indicates if an address belongs to the wallet.
 func (btc *ExchangeWallet) ValidateAddress(address string) (bool, error) {
 	ai, err := btc.wallet.GetAddressInfo(address)
 	if err != nil {
