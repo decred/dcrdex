@@ -111,9 +111,9 @@ var (
 			Key:         "feeratelimit",
 			DisplayName: "Highest acceptable fee rate",
 			Description: "This is the highest network fee rate you are willing to " +
-				"pay on swap transactions. If you set this too low, you may not be able" +
-				" to place orders with servers that allow for higher swap rates as " +
-				" network conditions demand.  Units: atoms/byte",
+				"pay on swap transactions. If feeratelimit is lower than a market's " +
+				"maxfeerate, you will not be able to trade on that market with this " +
+				"wallet.  Units: atoms/byte",
 			DefaultValue: defaultFeeRateLimit,
 		},
 		{
