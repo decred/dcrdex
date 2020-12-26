@@ -553,7 +553,7 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{}
 }
 
-func (w *TXCWallet) ValidateAddress(adress string) (bool, error) {
+func (w *TXCWallet) OwnsAddress(adress string) (bool, error) {
 	return true, nil
 }
 

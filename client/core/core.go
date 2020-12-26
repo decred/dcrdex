@@ -1063,7 +1063,7 @@ func (c *Core) connectWallet(w *xcWallet) error {
 	}
 	// Check if known address belongs to connected wallet
 	addr := w.address
-	mine, err := w.ValidateAddress(addr)
+	mine, err := w.OwnsAddress(addr)
 	if err != nil {
 		return err
 	}

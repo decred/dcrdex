@@ -147,8 +147,8 @@ type Wallet interface {
 	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
-	// ValidateAddress indicates if an address belongs to the wallet.
-	ValidateAddress(address string) (bool, error)
+	// OwnsAddress indicates if an address belongs to the wallet.
+	OwnsAddress(address string) (bool, error)
 	// Unlock unlocks the exchange wallet.
 	Unlock(pw string) error
 	// Lock locks the exchange wallet.
