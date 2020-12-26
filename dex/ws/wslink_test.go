@@ -115,7 +115,8 @@ func TestWSLink_handleMessageRecover(t *testing.T) {
 		inMsg: make(chan []byte, 1),
 		inErr: make(chan error, 1),
 	}
-	wsLink := NewWSLink(dex.IPKey{}, "addr", conn, time.Second, inMsgHandler, tLogger)
+	ipk := dex.IPKey{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255 /* ipv4 */, 127, 0, 0, 1}
+	wsLink := NewWSLink(ipk.String(), conn, time.Second, inMsgHandler, tLogger)
 
 	msg := new(msgjson.Message)
 	wsLink.handleMessage(msg)
@@ -143,7 +144,8 @@ func TestWSLink_send(t *testing.T) {
 		inMsg: make(chan []byte, 1),
 		inErr: make(chan error, 1),
 	}
-	wsLink := NewWSLink(dex.IPKey{}, "addr", conn, time.Second, inMsgHandler, tLogger)
+	ipk := dex.IPKey{16, 16, 120, 120 /* ipv6 1010:7878:: */}
+	wsLink := NewWSLink(ipk.String(), conn, time.Second, inMsgHandler, tLogger)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

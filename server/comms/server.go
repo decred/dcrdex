@@ -282,10 +282,11 @@ func (s *Server) Run(ctx context.Context) {
 		// http.HandlerFunc), but not the long running upgraded websocket
 		// connections. We must wait on each websocketHandler to return in
 		// response to disconnectClients.
+		log.Debugf("Starting websocket handler for %s", r.RemoteAddr) // includes source port
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.websocketHandler(ctx, wsConn, ip, r.RemoteAddr)
+			s.websocketHandler(ctx, wsConn, ip)
 		}()
 	})
 
@@ -380,16 +381,18 @@ func (s *Server) banish(ip dex.IPKey) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey, addr string) {
-	log.Tracef("New websocket client %s", ip)
+func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip dex.IPKey) {
+	addr := ip.String()
+	log.Tracef("New websocket client %s", addr)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newWSLink(ip, addr, conn, s.meterIP)
+	meter := func() (int, error) { return s.meterIP(ip) }
+	client := newWSLink(addr, conn, meter)
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
-		log.Errorf("Failed to add client %s", ip)
+		log.Errorf("Failed to add client %s", addr)
 		return
 	}
 	defer s.removeClient(client.id)
@@ -400,9 +403,9 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip de
 
 	// If the ban flag is set, quarantine the client's IP address.
 	if client.ban {
-		s.banish(client.IP())
+		s.banish(ip)
 	}
-	log.Tracef("Disconnected websocket client %s", ip)
+	log.Tracef("Disconnected websocket client %s", addr)
 }
 
 // Broadcast sends a message to all connected clients. The message should be a

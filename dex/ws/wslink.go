@@ -57,8 +57,6 @@ type Connection interface {
 type WSLink struct {
 	// log is the WSLink's logger
 	log dex.Logger
-	// ip is the peer's IP address key.
-	ip dex.IPKey
 	// addr is a string representation of the peer's IP address
 	addr string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
@@ -88,9 +86,9 @@ type sendData struct {
 }
 
 // NewWSLink is a constructor for a new WSLink.
-func NewWSLink(ip dex.IPKey, addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
+func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error, logger dex.Logger) *WSLink {
 	return &WSLink{
-		ip:         ip,
+		addr:       addr,
 		log:        logger,
 		conn:       conn,
 		outChan:    make(chan *sendData, outBufferSize),
@@ -145,7 +143,7 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	}
 	err = c.Send(msg)
 	if err != nil {
-		c.log.Debugf("SendError: failed to send message to peer %s: %v", c.ip, err)
+		c.log.Debugf("SendError: failed to send message to peer %s: %v", c.addr, err)
 	}
 }
 
@@ -166,10 +164,10 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c.stopped = make(chan struct{}) // control signal to block send
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %w", c.ip, err)
+		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %w", c.addr, err)
 	}
 
-	c.log.Tracef("Starting websocket messaging with peer %s", c.ip)
+	c.log.Tracef("Starting websocket messaging with peer %s", c.addr)
 	// Start processing input and output.
 	c.wg.Add(3)
 	go c.inHandler(linkCtx)
@@ -211,7 +209,7 @@ func (c *WSLink) handleMessage(msg *msgjson.Message) {
 	defer func() {
 		if pv := recover(); pv != nil {
 			c.log.Criticalf("Uh-oh! Panic while handling message from %v.\n\n"+
-				"Message:\n\n%#v\n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n", c.ip, msg, pv, string(debug.Stack()))
+				"Message:\n\n%#v\n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n", c.addr, msg, pv, string(debug.Stack()))
 			if msg.Type == msgjson.Request {
 				c.SendError(msg.ID, msgjson.NewError(msgjson.RPCInternalError, "internal error"))
 			}
@@ -252,7 +250,7 @@ out:
 				break out
 			}
 
-			c.log.Errorf("Websocket receive error from peer %s: %v (%T)", c.ip, err, err)
+			c.log.Errorf("Websocket receive error from peer %s: %v (%T)", c.addr, err, err)
 			break out
 		}
 		// Attempt to unmarshal the request. Only requests that successfully decode
@@ -354,7 +352,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 		// need to drain it, just the outQueue so SendNow never hangs.
 
 		c.log.Tracef("Sent %d and dropped %d messages to %v before shutdown.",
-			writeCount, lostCount, c.ip)
+			writeCount, lostCount, c.addr)
 	}()
 
 	// Top of defer stack: before clean-up, wait for writer goroutine
@@ -402,7 +400,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			outQueue = append(outQueue, sd)
 			if newCap := cap(outQueue); newCap > initCap {
 				c.log.Infof("Outgoing message queue capacity increased from %d to %d for %v.",
-					initCap, newCap, c.ip)
+					initCap, newCap, c.addr)
 				// The capacity 7168 is a heuristic for when the slice shift on
 				// the pop front operation starts to become a performance issue.
 				// It is also a reasonable queue size limitation to prevent
@@ -411,7 +409,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 				// is spamming excessively.
 				if newCap >= 7168 {
 					c.log.Warnf("Stopping client %v with outgoing message queue of length %d, capacity %d",
-						c.ip, len(outQueue), newCap)
+						c.addr, len(outQueue), newCap)
 					c.stop()
 				}
 			}
@@ -454,11 +452,6 @@ out:
 // Off will return true if the link has disconnected.
 func (c *WSLink) Off() bool {
 	return atomic.LoadUint32(&c.on) == 0
-}
-
-// IP is the peer address passed to the constructor.
-func (c *WSLink) IP() dex.IPKey {
-	return c.ip
 }
 
 // Addr returns the string-encoded IP address.

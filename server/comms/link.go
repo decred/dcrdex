@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 )
@@ -27,8 +26,6 @@ type Link interface {
 	Done() <-chan struct{}
 	// ID returns a unique ID by which this connection can be identified.
 	ID() uint64
-	// IP returns the IP address of the peer.
-	IP() dex.IPKey
 	// Addr returns the string-encoded IP address.
 	Addr() string
 	// Send sends the msgjson.Message to the peer.
@@ -68,20 +65,20 @@ type wsLink struct {
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
 	ban bool
-	// meterIP is a function that will be checked to see if certain data API
+	// meter is a function that will be checked to see if certain data API
 	// requests should be denied due to rate limits or if the API disabled.
-	meterIP func(dex.IPKey) (int, error)
+	meter func() (int, error)
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(ip dex.IPKey, addr string, conn ws.Connection, limitRate func(dex.IPKey) (int, error)) *wsLink {
+func newWSLink(addr string, conn ws.Connection, limitRate func() (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
-		WSLink: ws.NewWSLink(ip, addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
+		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
-		meterIP:      limitRate,
+		meter:        limitRate,
 	}
 	return c
 }
@@ -95,11 +92,6 @@ func (c *wsLink) Banish() {
 // ID returns a unique ID by which this connection can be identified.
 func (c *wsLink) ID() uint64 {
 	return c.id
-}
-
-// IP returns the IP address of the peer.
-func (c *wsLink) IP() dex.IPKey {
-	return c.WSLink.IP()
 }
 
 // Addr returns the string-encoded IP address.
@@ -138,7 +130,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 
 		// If it's not a critical route, check the rate limiters.
 		if !criticalRoutes[msg.Route] {
-			if _, err := c.meterIP(c.IP()); err != nil {
+			if _, err := c.meter(); err != nil {
 				// These errors are actually formatted nicely for sending, since
 				// they are used directly in HTTP errors as well.
 				return msgjson.NewError(msgjson.RouteUnavailableError, err.Error())
