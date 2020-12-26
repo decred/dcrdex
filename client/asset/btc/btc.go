@@ -127,9 +127,9 @@ var (
 			DisplayName: "Pre-size funding inputs",
 			Description: "When placing an order, create a \"split\" transaction to " +
 				"fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order" +
+				"necessary. Otherwise, excess funds may be reserved to fund the order " +
 				"until the first swap contract is broadcast during match settlement, " +
-				"or the order is canceled. This an extra transaction for which network" +
+				"or the order is canceled. This an extra transaction for which network " +
 				"mining fees are paid. Used only for standing-type orders, e.g. limit " +
 				"orders without immediate time-in-force.",
 			IsBoolean: true,
