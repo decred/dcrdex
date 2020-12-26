@@ -84,7 +84,7 @@ export default class OrderBook {
    * orders.
    */
   bestGapOrder (side) {
-    var best = null
+    let best = null
     for (const ord of side) {
       if (!ord.epoch) return ord
       if (!best) {

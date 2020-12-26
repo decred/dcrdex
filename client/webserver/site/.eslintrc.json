@@ -1,4 +1,11 @@
 {
     "extends": "standard",
-    "parser": "babel-eslint"
+    "parser": "babel-eslint",
+    "rules": {
+        "no-trailing-spaces": "error",
+        "no-console": ["off"],
+        "no-alert": "error",
+        "no-eval": "error",
+        "no-implied-eval": "error"
+    }
 }
