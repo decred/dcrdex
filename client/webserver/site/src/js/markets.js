@@ -50,8 +50,8 @@ export default class MarketsPage extends BasePage {
       // Wallet unlock form
       'forms', 'openForm', 'uwAppPass',
       // Order submission is verified with the user's password.
-      'verifyForm', 'vSide', 'vQty', 'vBase', 'vRate',
-      'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
+      'verifyForm', 'vHeader', 'vSideHeader', 'vSide', 'vQty', 'vBase', 'vRate',
+      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit', 'verifyLimit', 'verifyMarket',
       'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
       // Create wallet form
       'walletForm',
@@ -930,7 +930,7 @@ export default class MarketsPage extends BasePage {
     await Doc.animate(animationLength, progress => {
       form.style.right = `${(1 - progress) * shift}px`
     }, 'easeOutHard')
-    form.style.right = '0px'
+    form.style.right = '0'
   }
 
   /* showOpen shows the form to unlock a wallet. */
@@ -960,8 +960,25 @@ export default class MarketsPage extends BasePage {
       page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
       page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
-      page.vSide.textContent = order.sell ? 'sell' : 'buy'
       page.vTotal.textContent = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+      const isSell = order.sell
+      page.vSideHeader.textContent = isSell ? 'Sell' : 'Buy'
+      page.vSide.textContent = isSell ? 'sell' : 'buy'
+      page.vSideSubmit.textContent = page.vSideHeader.textContent
+      page.vBaseSubmit.textContent = page.vBase.textContent
+      const buyBtnClass = 'buygreen'
+      const sellBtnClass = 'sellred'
+      if (isSell) {
+        page.vHeader.classList.add(sellBtnClass)
+        page.vHeader.classList.remove(buyBtnClass)
+        page.vSubmit.classList.add(sellBtnClass)
+        page.vSubmit.classList.remove(buyBtnClass)
+      } else {
+        page.vHeader.classList.add(buyBtnClass)
+        page.vHeader.classList.remove(sellBtnClass)
+        page.vSubmit.classList.add(buyBtnClass)
+        page.vSubmit.classList.remove(sellBtnClass)
+      }
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)

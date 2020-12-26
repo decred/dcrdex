@@ -140,10 +140,6 @@ table.balance-table {
     background-color: #fff1;
   }
 
-  // tbody > tr:first-child {
-  //   font-weight: bold;
-  // }
-
   .ico-expired {
     color: orangered;
   }
@@ -395,6 +391,26 @@ table.balance-table button:hover {
 
     .red {
       color: #f55a;
+    }
+  }
+
+  .header {
+    &.buygreen {
+      background-color: #207a4699;
+    }
+
+    &.sellred {
+      background-color: #99302b99;
+    }
+  }
+
+  button.selected {
+    &.buygreen {
+      background-color: #207a4699;
+    }
+
+    &.sellred {
+      background-color: #99302b99;
     }
   }
 }

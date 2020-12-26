@@ -111,4 +111,26 @@ body.dark {
       }
     }
   }
+
+  #verifyForm {
+    .header {
+      &.buygreen {
+        background-color: #05a35a99;
+      }
+
+      &.sellred {
+        background-color: #ae333399;
+      }
+    }
+
+    button.selected {
+      &.buygreen {
+        background-color: #05a35a99;
+      }
+
+      &.sellred {
+        background-color: #ae333399;
+      }
+    }
+  }
 }
