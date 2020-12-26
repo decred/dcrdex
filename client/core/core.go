@@ -1053,7 +1053,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 }
 
 // connectWallet connects to wallet and validate the known deposit address
-// after successfull connection, if deposit address does not belong to
+// after successful connection, if deposit address does not belong to
 // wallet it generates new address and updates xcWallet and dbWallet, therefore
 // it might hold the wallet lock
 func (c *Core) connectWallet(w *xcWallet) error {
@@ -1276,7 +1276,8 @@ func (c *Core) setUserWalletState(state *WalletState) {
 
 	sa, found := c.user.Assets[state.AssetID]
 	if !found {
-		c.log.Errorf("Unknown assed %d", state.AssetID)
+		c.log.Errorf("Unknown asset %d", state.AssetID)
+		return
 	}
 	sa.Wallet = state
 }
@@ -1722,12 +1723,7 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 		return "", newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
-	addr, err := c.newDepositAddress(w)
-	if err != nil {
-		return "", err
-	}
-
-	return addr, nil
+	return c.newDepositAddress(w)
 }
 
 // AutoWalletConfig attempts to load setting from a wallet package's
