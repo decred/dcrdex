@@ -88,8 +88,17 @@ func (db *BoltDB) upgradeDB() error {
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		// Execute all necessary upgrades in order.
-		for _, upgrade := range upgrades[version:] {
-			err := upgrade(tx)
+		for i, upgrade := range upgrades[version:] {
+			// err := upgrade(tx)
+			// if err != nil {
+			// 	return fmt.Errorf("error upgrading DB: %v", err)
+			// }
+			// // Persist the database version.
+			// err = setDBVersion(tx, uint32(i+1))
+			// if err != nil {
+			// 	return fmt.Errorf("error setting DB version: %v", err)
+			// }
+			err := doUpgrade(tx, upgrade, uint32(i+1))
 			if err != nil {
 				return err
 			}
@@ -100,7 +109,6 @@ func (db *BoltDB) upgradeDB() error {
 
 func v1Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 0
-	const newVersion = 1
 
 	dbVersion, err := fetchDBVersion(dbtx)
 	if err != nil {
@@ -114,12 +122,6 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 	bkt := dbtx.Bucket(appBucket)
 	if bkt == nil {
 		return fmt.Errorf("appBucket not found")
-	}
-
-	// Persist the database version.
-	err = setDBVersion(dbtx, newVersion)
-	if err != nil {
-		return err
 	}
 
 	// Upgrade the match proof. We just have to retrieve and re-store the
@@ -152,7 +154,6 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 // chance of rejecting a pre-existing active match.
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
-	const newVersion = 2
 
 	dbVersion, err := fetchDBVersion(dbtx)
 	if err != nil {
@@ -178,4 +179,17 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 		}
 		return oBkt.Put(maxFeeRateKey, maxFeeB)
 	})
+}
+
+func doUpgrade(tx *bbolt.Tx, upgrade upgradefunc, newVersion uint32) error {
+	err := upgrade(tx)
+	if err != nil {
+		return fmt.Errorf("error upgrading DB: %v", err)
+	}
+	// Persist the database version.
+	err = setDBVersion(tx, newVersion)
+	if err != nil {
+		return fmt.Errorf("error setting DB version: %v", err)
+	}
+	return nil
 }

@@ -21,11 +21,12 @@ import (
 type upgradeValidator struct {
 	upgrade upgradefunc
 	verify  func(*testing.T, *bbolt.DB)
+	expVer  uint32
 }
 
 var validators = []upgradeValidator{
-	{v1Upgrade, verifyV1Upgrade},
-	{v2Upgrade, verifyV2Upgrade},
+	{v1Upgrade, verifyV1Upgrade, 1},
+	{v2Upgrade, verifyV2Upgrade, 2},
 }
 
 // The indices of the archives here in outdatedDBs should match the first
@@ -72,7 +73,7 @@ func TestUpgrades(t *testing.T) {
 		for j := i; j < len(validators); j++ {
 			validator := validators[j]
 			err = db.Update(func(dbtx *bbolt.Tx) error {
-				return validator.upgrade(dbtx)
+				return doUpgrade(dbtx, validator.upgrade, validator.expVer)
 			})
 			if err != nil {
 				t.Fatalf("Upgrade failed: %v", err)
@@ -83,22 +84,8 @@ func TestUpgrades(t *testing.T) {
 }
 
 func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
-	expectedVersion := uint32(1)
 	err := db.View(func(dbtx *bbolt.Tx) error {
-		bkt := dbtx.Bucket(appBucket)
-		if bkt == nil {
-			return fmt.Errorf("appBucket not found")
-		}
-		versionB := bkt.Get(versionKey)
-		if versionB == nil {
-			return fmt.Errorf("expected a non-nil version value")
-		}
-		version := intCoder.Uint32(versionB)
-		if version != expectedVersion {
-			return fmt.Errorf("expected db version %d, got %d",
-				expectedVersion, version)
-		}
-		return nil
+		return checkVersion(dbtx, 1)
 	})
 	if err != nil {
 		t.Error(err)
@@ -109,6 +96,11 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 	maxFeeB := uint64Bytes(^uint64(0))
 
 	err := db.View(func(dbtx *bbolt.Tx) error {
+		err := checkVersion(dbtx, 2)
+		if err != nil {
+			return err
+		}
+
 		master := dbtx.Bucket(ordersBucket)
 		if master == nil {
 			return fmt.Errorf("orders bucket not found")
@@ -127,4 +119,21 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 	if err != nil {
 		t.Error(err)
 	}
+}
+
+func checkVersion(dbtx *bbolt.Tx, expectedVersion uint32) error {
+	bkt := dbtx.Bucket(appBucket)
+	if bkt == nil {
+		return fmt.Errorf("appBucket not found")
+	}
+	versionB := bkt.Get(versionKey)
+	if versionB == nil {
+		return fmt.Errorf("expected a non-nil version value")
+	}
+	version := intCoder.Uint32(versionB)
+	if version != expectedVersion {
+		return fmt.Errorf("expected db version %d, got %d",
+			expectedVersion, version)
+	}
+	return nil
 }
