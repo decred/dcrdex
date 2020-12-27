@@ -555,7 +555,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-// OwnsAddress returns wether given address belongs to wallet or not
+// OwnsAddress indicates if an address belongs to the wallet.
 func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 	a, err := dcrutil.DecodeAddress(address, chainParams)
 	if err != nil {

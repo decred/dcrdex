@@ -1053,7 +1053,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 }
 
 // connectWallet connects to wallet and validate the known deposit address
-// after successful connection, if deposit address does not belong to
+// after successful connection, if the deposit address does not belong to
 // wallet it generates new address and updates xcWallet and dbWallet, therefore
 // it might hold the wallet lock
 func (c *Core) connectWallet(w *xcWallet) error {

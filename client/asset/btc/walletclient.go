@@ -226,7 +226,7 @@ func (wc *walletClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
-// GetAddressInfo gets information about given address by calling
+// GetAddressInfo gets information about the given address by calling
 // getaddressinfo RPC command.
 func (wc *walletClient) GetAddressInfo(address string) (*GetAddressInfoResult, error) {
 	ai := new(GetAddressInfoResult)
