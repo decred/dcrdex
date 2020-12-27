@@ -1052,28 +1052,34 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
-// connectWallet connects to wallet and validate the known deposit address
-// after successful connection, if the deposit address does not belong to
-// wallet it generates new address and updates xcWallet and dbWallet, therefore
-// it might hold the wallet lock
+// connectWallet connects to wallet and validates the known deposit address
+// after successful connection, if address found & it does not belong to
+// wallet, it generates new address then updates xcWallet and dbWallet,
+// therefore it might hold the wallet lock
 func (c *Core) connectWallet(w *xcWallet) error {
 	err := w.Connect(c.ctx)
 	if err != nil {
 		return codedError(connectWalletErr, err)
 	}
-	// Check if known address belongs to connected wallet
+	// If wallet has deposit address check if it's belongs to connected
+	// wallet.
+	// If found address doesn't belong to wallet generate new one.
 	addr := w.address
-	mine, err := w.OwnsAddress(addr)
-	if err != nil {
-		return err
-	}
-	if !mine {
-		nAddr, err := c.newDepositAddress(w)
-		c.log.Warnf("[%v]: Deposit address %v does not belong to connected wallet"+
-			", generated new address: %v", unbip(w.AssetID), addr, nAddr)
+	var mine bool
+	if addr != "" {
+		mine, err = w.OwnsAddress(addr)
 		if err != nil {
 			return err
 		}
+	}
+	if !mine && addr != "" {
+		nAddr, err := c.newDepositAddress(w)
+		if err != nil {
+			return err
+		}
+		// Found address doesn't belong to connected wallet
+		c.log.Warnf("[%v]: Deposit address %v does not belong to connected wallet"+
+			", generated new address: %v", unbip(w.AssetID), addr, nAddr)
 	}
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
