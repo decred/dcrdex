@@ -1979,8 +1979,8 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate u
 	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
 		regFeeDCR := dcrutil.Amount(regFee).ToCoin()
-		return nil, 0, fmt.Errorf("unable to pay registration fee of %f DCR to address %s with fee rate of %d atoms/byte: %w",
-			regFeeDCR, addr, netFeeRate, err)
+		return nil, 0, fmt.Errorf("unable to pay registration fee of %f DCR with fee rate of %d atoms/byte: %w",
+			regFeeDCR, netFeeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)
 }
