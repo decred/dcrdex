@@ -1053,17 +1053,16 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 }
 
 // connectWallet connects to wallet and validates the known deposit address
-// after successful connection, if address found & it does not belong to
-// wallet, it generates new address then updates xcWallet and dbWallet,
-// therefore it might hold the wallet lock
+// after successful connection.
+// If address found & it does not belong to wallet, it generates new address,
+// then updates xcWallet and dbWallet.
 func (c *Core) connectWallet(w *xcWallet) error {
 	err := w.Connect(c.ctx)
 	if err != nil {
 		return codedError(connectWalletErr, err)
 	}
-	// If wallet has deposit address check if it's belongs to connected
+	// If xcWallet has deposit address ensure that it belongs to connected
 	// wallet.
-	// If found address doesn't belong to wallet generate new one.
 	w.mtx.RLock()
 	addr := w.address
 	w.mtx.RUnlock()
@@ -1073,7 +1072,8 @@ func (c *Core) connectWallet(w *xcWallet) error {
 		if err != nil {
 			return err
 		}
-		// Found address doesn't belong to connected wallet
+		// If Existing address doesn't belong to connected wallet,
+		// generate new one.
 		if !mine {
 			nAddr, err := c.newDepositAddress(w)
 			if err != nil {
@@ -1276,8 +1276,7 @@ func (c *Core) refreshUser() {
 	c.userMtx.Unlock()
 }
 
-// setUserWalletState updates user's struct wallet state to the given wallet
-// state
+// setUserWalletState updates wallet state on current User.
 func (c *Core) setUserWalletState(state *WalletState) {
 	c.userMtx.Lock()
 	defer c.userMtx.Unlock()
@@ -1692,7 +1691,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	return nil
 }
 
-// newDepositAddress retrieves a new deposit address from specific xcWallet.
+// newDepositAddress retrieves a new deposit address from given xcWallet.
 func (c *Core) newDepositAddress(w *xcWallet) (string, error) {
 	if !w.connected() {
 		return "", fmt.Errorf("cannot get address from unconnected %s wallet",
