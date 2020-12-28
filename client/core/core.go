@@ -1064,9 +1064,9 @@ func (c *Core) connectWallet(w *xcWallet) error {
 	// If wallet has deposit address check if it's belongs to connected
 	// wallet.
 	// If found address doesn't belong to wallet generate new one.
-	c.walletMtx.RLock()
+	w.mtx.RLock()
 	addr := w.address
-	c.walletMtx.RUnlock()
+	w.mtx.RUnlock()
 	var mine bool
 	if addr != "" {
 		mine, err = w.OwnsAddress(addr)
@@ -1538,7 +1538,9 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return newError(authErr, "ReconfigureWallet password error: %v", err)
 	}
-	oldWallet, found := c.wallet(assetID)
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	oldWallet, found := c.wallets[assetID]
 	if !found {
 		return newError(missingWalletErr, "%d -> %s wallet not found", assetID, unbip(assetID))
 	}
@@ -1594,9 +1596,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if oldWallet.connected() {
 		oldWallet.Disconnect()
 	}
-	c.walletMtx.Lock()
 	c.wallets[assetID] = wallet
-	c.walletMtx.Unlock()
 
 	details := fmt.Sprintf("Configuration for %s wallet has been updated.", unbip(assetID))
 	c.notify(newWalletConfigNote(SubjectWalletConfigurationUpdated, details, db.Success, wallet.state()))
