@@ -394,7 +394,7 @@ type combinedClient struct {
 	*walletClient
 }
 
-// ValidateAddress disambiguates the node and wallet methods
+// ValidateAddress disambiguates the node and wallet methods.
 func (cc *combinedClient) ValidateAddress(ctx context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
 	return cc.walletClient.ValidateAddress(ctx, address)
 }
