@@ -114,7 +114,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: atoms/byte",
-			DefaultValue: defaultFeeRateLimit,
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -457,9 +457,9 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	}
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
-	// If set in the user config, the fee rate limit will be in units of
-	// atoms/byte.
-	feesLimitPerByte := dcrCfg.FeeRateLimit
+	// If set in the user config, the fee rate limit will be in units of DCR/KB.
+	// Convert to atoms/byte.
+	feesLimitPerByte := toAtoms(dcrCfg.FeeRateLimit / 1000)
 	if feesLimitPerByte == 0 {
 		feesLimitPerByte = defaultFeeRateLimit
 	}

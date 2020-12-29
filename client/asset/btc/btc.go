@@ -112,7 +112,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: sats/byte",
-			DefaultValue: defaultFeeRateLimit,
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -460,7 +460,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 // newWallet creates the ExchangeWallet and starts the block monitor.
 func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
 	// If set in the user config, the fallback fee will be in conventional units
-	// per kB, e.g. BTC/kB. Translate that to sats/B.
+	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
 	if fallbackFeesPerByte == 0 {
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
@@ -468,9 +468,9 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
 		fallbackFeesPerByte, cfg.WalletInfo.Units)
 
-	// If set in the user config, the fee rate limit will be in units of
-	// sats/byte.
-	feesLimitPerByte := btcCfg.FeeRateLimit
+	// If set in the user config, the fee rate limit will be in units of BTC/KB.
+	// Convert to sats/byte.
+	feesLimitPerByte := toSatoshi(btcCfg.FeeRateLimit / 1000)
 	if feesLimitPerByte == 0 {
 		feesLimitPerByte = cfg.DefaultFeeRateLimit
 	}
