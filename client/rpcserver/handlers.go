@@ -448,15 +448,45 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // parseCoreOrder converts a *core.Order into a *myOrder.
 func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
-	// settled calculates how much of the order has been finalized.
-	settled := func(qty uint64, matches []*core.Match) (settled uint64) {
-		for _, match := range matches {
-			if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
-				(match.Side == order.Taker && match.Status >= order.MatchComplete) {
-				settled += match.Qty
+	// matchesParser parses core.Match slice & calculates how much of the order
+	// has been settled/finalized.
+	matchesParser := func(matches []*core.Match) (ms []match, settled uint64) {
+		ms = make([]match, 0, len(matches))
+		for _, m := range matches {
+			// Sum up settled value
+			if (m.Side == order.Maker && m.Status >= order.MakerRedeemed) ||
+				(m.Side == order.Taker && m.Status >= order.MatchComplete) {
+				settled += m.Qty
 			}
+			match := match{
+				MatchID:  m.MatchID.String(),
+				Status:   m.Status.String(),
+				Revoked:  m.Revoked,
+				Rate:     m.Rate,
+				Qty:      m.Qty,
+				Side:     m.Side.String(),
+				FeeRate:  m.FeeRate,
+				Stamp:    m.Stamp,
+				IsCancel: m.IsCancel,
+			}
+			if m.Swap != nil {
+				match.Swap = m.Swap.StringID
+			}
+			if m.CounterSwap != nil {
+				match.CounterSwap = m.CounterSwap.StringID
+			}
+			if m.Redeem != nil {
+				match.Redeem = m.Redeem.StringID
+			}
+			if m.CounterRedeem != nil {
+				match.CounterRedeem = m.CounterRedeem.StringID
+			}
+			if m.Refund != nil {
+				match.Refund = m.Refund.StringID
+			}
+			ms = append(ms, match)
 		}
-		return settled
+		return ms, settled
 	}
 	srvTime := encode.UnixTimeMilli(int64(co.Stamp))
 	age := time.Since(srvTime).Round(time.Millisecond)
@@ -465,7 +495,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	if co.Status >= order.OrderStatusExecuted {
 		cancelling = false
 	}
-	return &myOrder{
+	o := &myOrder{
 		Host:        co.Host,
 		MarketName:  co.MarketID,
 		BaseID:      b,
@@ -478,12 +508,16 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		Rate:        co.Rate,
 		Quantity:    co.Qty,
 		Filled:      co.Filled,
-		Settled:     settled(co.Qty, co.Matches),
 		Status:      co.Status.String(),
 		Cancelling:  cancelling,
 		Canceled:    co.Canceled,
 		TimeInForce: co.TimeInForce.String(),
 	}
+
+	// Parese matches & calculate settled value
+	o.Matches, o.Settled = matchesParser(co.Matches)
+
+	return o
 }
 
 // handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
