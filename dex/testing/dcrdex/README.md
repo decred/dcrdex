@@ -22,6 +22,13 @@ arguments when executing the harness script e.g.:
 ./harness.sh --pgpass=dexpass
 ```
 
+You can also override the default markets' epoch duration by passing a number
+(not less than 1000) as the first argument when executing the harness script:
+
+```sh
+./harness.sh 2000 --pgpass=dexpass # to set the epoch duration to 2000ms and also set the pgpass.
+```
+
 The harness script will drop any existing `dcrdex_simnet_test` PostgreSQL db
 and create a fresh database for the session. The script will also create a
 markets.json file referencing dcr and btc node config files created by the

@@ -277,6 +277,11 @@ if [ "$MINE" = "1" ]; then
   done
 fi
 
+# Hack to enable further mining on alpha or beta
+tmux send-keys -t $SESSION:0 "./mine-beta 1${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} add${WAIT}" C-m\; wait-for donedcr
+
 # Have alpha share a little more wealth, esp. for trade_simnet_test.go
 RECIPIENTS="{\"${TRADING_WALLET1_ADDRESS}\":24,\"${TRADING_WALLET2_ADDRESS}\":24,\"${BETA_MINING_ADDR}\":24}"
 for i in {1..60}; do
