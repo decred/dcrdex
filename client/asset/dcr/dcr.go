@@ -616,9 +616,9 @@ func (dcr *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
 	return feeRate
 }
 
-type atoms uint64
+type amount uint64
 
-func (a atoms) String() string {
+func (a amount) String() string {
 	return strconv.FormatFloat(dcrutil.Amount(a).ToCoin(), 'f', -1, 64) // dec, but no trailing zeros
 }
 
@@ -719,7 +719,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
-			atoms(ord.Value), err)
+			amount(ord.Value), err)
 	}
 
 	// Send a split, if preferred.
@@ -736,7 +736,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return splitCoins, redeemScripts, nil // splitCoins == coins
 	}
 
-	dcr.log.Infof("Funding %s DCR order with coins %v worth %s", atoms(ord.Value), coins, atoms(sum))
+	dcr.log.Infof("Funding %s DCR order with coins %v worth %s", amount(ord.Value), coins, amount(sum))
 
 	return coins, redeemScripts, nil
 }
@@ -879,7 +879,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			return 0, 0, nil, nil, nil, err
 		}
 		if !ok {
-			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %s DCR available", atoms(sum))
+			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %s DCR available", amount(sum))
 		}
 	}
 
@@ -916,12 +916,13 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		coinSum += coin.Value()
 	}
 
-	valStr := atoms(value).String()
+	valStr := amount(value).String()
 
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
-		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %s > %s.", atoms(baggageFees), atoms(excess))
-		dcr.log.Infof("Funding %s DCR order with coins %v worth %s", valStr, coins, atoms(coinSum))
+		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %s > %s.",
+			amount(baggageFees), amount(excess))
+		dcr.log.Infof("Funding %s DCR order with coins %v worth %s", valStr, coins, amount(coinSum))
 		return coins, false, nil
 	}
 
@@ -968,7 +969,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	dcr.log.Infof("Funding %s DCR order with split output coin %v from original coins %v", valStr, op, coins)
 	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %s + fees = %s DCR",
-		op.txHash(), valStr, atoms(reqFunds))
+		op.txHash(), valStr, amount(reqFunds))
 
 	return asset.Coins{op}, true, nil
 }
@@ -2094,8 +2095,8 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	}
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		return nil, 0, fmt.Errorf("unable to send %.8f DCR to address %s with feeRate %d atoms/byte: %w",
-			toDCR(val), addr, feeRate, err)
+		return nil, 0, fmt.Errorf("unable to send %s DCR to address %s with feeRate %d atoms/byte: %w",
+			amount(val), addr, feeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, val, feeRate, true)
 }
@@ -2111,7 +2112,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate u
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("unable to pay registration fee of %s DCR with fee rate of %d atoms/byte: %w",
-			atoms(regFee), netFeeRate, err)
+			amount(regFee), netFeeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)
 }
@@ -2225,8 +2226,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 
 	minFee := feeRate * size
 	if subtractFrom == -1 && minFee > remaining {
-		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate. %.8f < %.8f",
-			toDCR(minFee), toDCR(remaining))
+		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate. %s < %s",
+			amount(minFee), amount(remaining))
 	}
 	if int(subtractFrom) >= len(baseTx.TxOut) {
 		return nil, nil, "", 0, fmt.Errorf("invalid subtractFrom output %d for tx with %d outputs",
@@ -2596,7 +2597,7 @@ func isTxNotFoundErr(err error) bool {
 	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
 }
 
-// toSats returns a float representation in conventional units for the given
+// toDCR returns a float representation in conventional units for the given
 // atoms.
 func toDCR(v uint64) float64 {
 	return dcrutil.Amount(v).ToCoin()
