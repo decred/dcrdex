@@ -608,9 +608,29 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected 1 spendable, got %d", len(spendables))
 	}
 	v = spendables[0].Value()
+	if v != lottaFunds { // picks the bigger output because it is confirmed
+		t.Fatalf("expected spendable of value %d, got %d", littleFunds, v)
+	}
+	// Return/unlock the reserved coins to avoid warning in subsequent tests
+	// about fundingCoins map containing the coins already. i.e.
+	// "Known order-funding coin %v returned by listunspent"
+	_ = wallet.ReturnCoins(spendables)
+
+	// Make lottaOrder unconfirmed like littleOrder, favoring little now.
+	lottaUTXO.Confirmations = 0
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	spendables, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding small amount: %v", err)
+	}
+	if len(spendables) != 1 {
+		t.Fatalf("expected 1 spendable, got %d", len(spendables))
+	}
+	v = spendables[0].Value()
 	if v != littleFunds { // now picks the smaller output
 		t.Fatalf("expected spendable of value %d, got %d", littleFunds, v)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// Fund a lotta bit, covered by just the lottaBit UTXO.
 	setOrderValue(lottaOrder)
@@ -625,6 +645,7 @@ func TestAvailableFund(t *testing.T) {
 	if v != lottaFunds {
 		t.Fatalf("expected spendable of value %d, got %d", lottaFunds, v)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// require both spendables
 	extraLottaOrder := littleOrder + lottaOrder
@@ -641,6 +662,7 @@ func TestAvailableFund(t *testing.T) {
 	if v != lottaFunds {
 		t.Fatalf("expected spendable of value %d, got %d", lottaFunds, v)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// Not enough to cover transaction fees.
 	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots, tBTC)+1) / 1e8
@@ -662,11 +684,11 @@ func TestAvailableFund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for no-split split: %v", err)
 	}
-
 	// Should be both coins.
 	if len(coins) != 2 {
 		t.Fatalf("no-split split didn't return both coins")
 	}
+	_ = wallet.ReturnCoins(coins)
 
 	// No split because not standing order.
 	ord.Immediate = true
@@ -678,6 +700,7 @@ func TestAvailableFund(t *testing.T) {
 	if len(coins) != 2 {
 		t.Fatalf("no-split split didn't return both coins")
 	}
+	_ = wallet.ReturnCoins(coins)
 
 	// With a little more locked, the split should be performed.
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
@@ -689,7 +712,6 @@ func TestAvailableFund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for split tx: %v", err)
 	}
-
 	// Should be just one coin.
 	if len(coins) != 1 {
 		t.Fatalf("split failed - coin count != 1")
@@ -697,6 +719,7 @@ func TestAvailableFund(t *testing.T) {
 	if node.sentRawTx == nil {
 		t.Fatalf("split failed - no tx sent")
 	}
+	_ = wallet.ReturnCoins(coins)
 
 	// // Hit some error paths.
 
