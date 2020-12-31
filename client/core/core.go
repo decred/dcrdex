@@ -1145,8 +1145,14 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 			return err
 		}
 	}
+	// Unlock if either the backend itself is locked or if we lack a cached
+	// unencrypted password for encrypted wallets.
 	if !wallet.unlocked() {
-		err := unlockWallet(wallet, crypter)
+		// Note that in cases where we already had the cached decrypted password
+		// but it was just the backend reporting as locked, only unlocking the
+		// backend is needed but this redecrypts the password using the provided
+		// crypter. This case could instead be handled with a refreshUnlock.
+		err := wallet.Unlock(crypter)
 		if err != nil {
 			return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
@@ -1456,11 +1462,11 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = unlockWallet(wallet, crypter)
+	err = wallet.Unlock(crypter)
 	if err != nil {
-		return err
+		return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(assetID), err)
 	}
 
 	state := wallet.state()
@@ -1480,15 +1486,6 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 
 	c.notify(newWalletStateNote(state))
 
-	return nil
-}
-
-// unlockWallet unlocks the wallet with the crypter.
-func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
-	err := wallet.Unlock(crypter)
-	if err != nil {
-		return fmt.Errorf("unlockWallet unlock error: %v", err)
-	}
 	return nil
 }
 
@@ -1571,8 +1568,12 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return err
 	}
-	if oldWallet.unlocked() {
-		err := unlockWallet(wallet, crypter)
+
+	// Carry over any cached password regardless of backend lock state.
+	// loadWallet already copied encPW, so this will decrypt pw rather than
+	// actually copying it, and it will ensure the backend is also unlocked.
+	if oldWallet.locallyUnlocked() {
+		err := wallet.Unlock(crypter)
 		if err != nil {
 			wallet.Disconnect()
 			return newError(walletAuthErr, "wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err)
@@ -1675,7 +1676,9 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	if !wasConnected {
 		wallet.Disconnect()
 	} else if !wasUnlocked {
-		wallet.Lock()
+		if err = wallet.Lock(); err != nil {
+			c.log.Warnf("Unable to relock %s wallet: %v", unbip(assetID), err)
+		}
 	}
 
 	// Encrypt the password.
@@ -1823,7 +1826,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	if !wallet.unlocked() {
-		err = unlockWallet(wallet, crypter)
+		err = wallet.Unlock(crypter)
 		if err != nil {
 			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
@@ -2277,7 +2280,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				continue
 			}
 			if !dcrWallet.unlocked() {
-				err = unlockWallet(dcrWallet, crypter)
+				err = dcrWallet.Unlock(crypter)
 				if err != nil {
 					details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.host, err)
 					c.notify(newFeePaymentNote("Wallet unlock error", details, db.ErrorLevel, dc.acct.host))
@@ -2517,6 +2520,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
 	prepareWallet := func(w *xcWallet) error {
+		// NOTE: If the wallet is already internally unlocked (the decrypted
+		// password cached in xcWallet.pw), this could be done without the
+		// crypter via refreshUnlock.
 		err := c.connectAndUnlock(crypter, w)
 		if err != nil {
 			return fmt.Errorf("%s connectAndUnlock error: %w", wallets.fromAsset.Symbol, err)
@@ -3327,7 +3333,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 				baseFailed = true
 				failed[base] = struct{}{}
 			} else if !baseWallet.unlocked() {
-				err = unlockWallet(baseWallet, crypter)
+				err = baseWallet.Unlock(crypter)
 				if err != nil {
 					baseFailed = true
 					failed[base] = struct{}{}
@@ -3340,7 +3346,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 				quoteFailed = true
 				failed[quote] = struct{}{}
 			} else if !quoteWallet.unlocked() {
-				err = unlockWallet(quoteWallet, crypter)
+				err = quoteWallet.Unlock(crypter)
 				if err != nil {
 					quoteFailed = true
 					failed[quote] = struct{}{}
