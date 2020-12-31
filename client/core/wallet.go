@@ -29,7 +29,8 @@ type xcWallet struct {
 	syncProgress float32
 }
 
-// Unlock unlocks the wallet.
+// Unlock unlocks the wallet backend and caches the decrypted wallet password so
+// the wallet may be unlocked without user interaction using refreshUnlock.
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if len(w.encPW) == 0 {
 		if w.Locked() {
@@ -53,7 +54,10 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 }
 
 // refreshUnlock checks that the wallet is unlocked, and if not, uses the cached
-// password to attempt unlocking.
+// password to attempt unlocking. If the wallet is not encrypted (no encPW set)
+// or the decrypted password is not cached, a non-nil error is returned. A
+// non-nil error may also be returned if the cached password fails to unlock the
+// wallet, in which case unlockAttempted will be true.
 func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	// Check if the wallet is already unlocked.
 	if !w.Locked() {
@@ -70,7 +74,8 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	return true, w.Wallet.Unlock(w.pw)
 }
 
-// Lock the wallet.
+// Lock the wallet. For encrypted wallets (encPW set), this clears the cached
+// decrypted password and attempts to lock the wallet backend.
 func (w *xcWallet) Lock() error {
 	if len(w.encPW) == 0 {
 		return nil
@@ -81,20 +86,26 @@ func (w *xcWallet) Lock() error {
 	return w.Wallet.Lock()
 }
 
-// unlocked will return true if the wallet is unlocked. The wallet is queried
-// directly, likely involving an RPC call. Use locallyUnlocked if it's not
-// critical.
+// unlocked will only return true if both the wallet backend is unlocked and we
+// have cached the decryped wallet password. The wallet backend may be queried
+// directly, likely involving an RPC call. Use locallyUnlocked to determine if
+// the wallet is automatically unlockable rather than actually unlocked.
 func (w *xcWallet) unlocked() bool {
-	return !w.Locked()
+	return w.locallyUnlocked() && !w.Locked()
 }
 
 // locallyUnlocked checks whether we think the wallet is unlocked, but without
-// asking the wallet itself. Use this to prevent spamming the RPC every time
-// refreshUser is called.
+// asking the wallet itself. More precisely, for encrypted wallets (encPW set)
+// this is true only if the decrypted password is cached. Use this to determine
+// if the wallet may be unlocked without user interaction (via refreshUnlock).
 func (w *xcWallet) locallyUnlocked() bool {
+	// return len(w.encPW) == 0 || len(w.pw) > 0
+	if len(w.encPW) == 0 {
+		return true // unencrypted wallet
+	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	return len(w.encPW) == 0 || len(w.pw) > 0
+	return len(w.pw) > 0 // cached password for encrypted wallet
 }
 
 // state returns the current WalletState.
