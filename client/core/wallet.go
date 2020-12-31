@@ -13,18 +13,19 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 )
 
-// xcWallet is a wallet.
+// xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
-	connector    *dex.ConnectionMaster
-	AssetID      uint32
+	connector *dex.ConnectionMaster
+	AssetID   uint32
+	dbID      []byte
+	encPW     []byte // empty means wallet not password protected
+
 	mtx          sync.RWMutex
-	hookedUp     bool
 	balance      *WalletBalance
-	encPW        []byte
 	pw           string
 	address      string
-	dbID         []byte
+	hookedUp     bool
 	synced       bool
 	syncProgress float32
 }
