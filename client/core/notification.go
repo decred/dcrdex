@@ -57,10 +57,22 @@ func (c *Core) notify(n Notification) {
 	c.noteMtx.RUnlock()
 }
 
+type NotificationFeed <-chan Notification
+
+func (notes NotificationFeed) drain() {
+	for {
+		select {
+		case <-notes:
+		default:
+			return
+		}
+	}
+}
+
 // NotificationFeed returns a new receiving channel for notifications. The
 // channel has capacity 1024, and should be monitored for the lifetime of the
 // Core. Blocking channels are silently ignored.
-func (c *Core) NotificationFeed() <-chan Notification {
+func (c *Core) NotificationFeed() NotificationFeed {
 	ch := make(chan Notification, 1024)
 	c.noteMtx.Lock()
 	c.noteChans = append(c.noteChans, ch)

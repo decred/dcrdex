@@ -1524,7 +1524,8 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		auth := &match.MetaData.Proof.Auth
 		auth.InitSig = ack.Sig
 		auth.InitStamp = encode.UnixMilliU(time.Now())
-		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+		err = t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
 			err = fmt.Errorf("error storing init ack sig in database: %v", err)
 		}
 		t.mtx.Unlock()
@@ -1716,7 +1717,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			// which still needs taker's redeem.
 			match.SetStatus(order.MatchComplete)
 		}
-		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+		err = t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
 			err = fmt.Errorf("error storing redeem ack sig in database: %v", err)
 		}
 		t.mtx.Unlock()

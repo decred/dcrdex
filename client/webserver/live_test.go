@@ -992,7 +992,7 @@ func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
 	return nil
 }
 
-func (c *TCore) NotificationFeed() <-chan core.Notification { return c.noteFeed }
+func (c *TCore) NotificationFeed() core.NotificationFeed { return c.noteFeed }
 
 func (c *TCore) runEpochs() {
 	epochTick := time.NewTimer(time.Second).C
