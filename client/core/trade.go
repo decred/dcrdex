@@ -59,6 +59,14 @@ type matchTracker struct {
 	// trying to redeem this match. If suspectRedeem is true, the match will not
 	// be grouped when attempting future redemptions.
 	suspectRedeem bool
+	// sendingInitAsync will be set to true if this match's init request is being
+	// sent to the server asynchronously. While true, no other attempts will be
+	// made to send another init request for this match.
+	sendingInitAsync bool
+	// sendingRedeemAsync will be set to true if this match's redeem request is
+	// being sent to the server asynchronously. While true, no other attempts will
+	// be made to send another redeem request for this match.
+	sendingRedeemAsync bool
 	// refundErr will be set to true if we attempt a refund and get a
 	// CoinNotFoundError, indicating there is nothing to refund. Prevents
 	// retries.
@@ -1011,9 +1019,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
 	// Check all matches for and resend pending requests as necessary.
-	if err := c.resendPendingRequests(t); err != nil {
-		errs.addErr(err)
-	}
+	c.resendPendingRequests(t)
 
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
@@ -1151,9 +1157,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) resendPendingRequests(t *trackedTrade) error {
-	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
-
+func (c *Core) resendPendingRequests(t *trackedTrade) {
 	for _, match := range t.matches {
 		dbMatch, _, proof, auth := match.parts()
 		// Do not resend pending requests for revoked matches.
@@ -1174,18 +1178,12 @@ func (c *Core) resendPendingRequests(t *trackedTrade) error {
 		case side == order.Taker && status == order.MatchComplete:
 			redeemCoinID = proof.TakerRedeem
 		}
-		var err error
 		if len(swapCoinID) != 0 && len(auth.InitSig) == 0 { // resend pending `init` request
-			err = c.finalizeSwapAction(t, match, swapCoinID, proof.Script)
+			c.sendInitAsync(t, match, swapCoinID, proof.Script)
 		} else if len(redeemCoinID) != 0 && len(auth.RedeemSig) == 0 { // resend pending `redeem` request
-			err = c.finalizeRedeemAction(t, match, redeemCoinID)
-		}
-		if err != nil {
-			errs.addErr(err)
+			c.sendRedeemAsync(t, match, redeemCoinID, proof.Secret)
 		}
 	}
-
-	return errs.ifAny()
 }
 
 // revoke sets the trade status to Revoked, either because the market is
@@ -1428,10 +1426,11 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		c.log.Errorf("Error updating order metadata for order %s: %v", t.ID(), err)
 	}
 
-	// Process the swap for each match by sending the `init` request
-	// to the DEX and updating the match with swap details.
-	// Add any errors encountered to `errs` and proceed to next match
-	// to ensure that swap details are saved for all matches.
+	// Process the swap for each match by updating the match with swap
+	// details and sending the `init` request to the DEX.
+	// Saving the swap details now makes it possible to resend the `init`
+	// reqeust at a later time if sending it now fails OR to refund the
+	// swap after locktime expires if the trade does not progress as expected.
 	for i, receipt := range receipts {
 		match := matches[i]
 		coin := receipt.Coin()
@@ -1440,83 +1439,96 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			c.log.Tracef("Contract coin %v secret = %x", coin, secret)
 		}
-		err := c.finalizeSwapAction(t, match, coin.ID(), receipt.Contract())
-		if err != nil {
-			errs.addErr(err)
+
+		// Update the match db data with the swap details before attempting
+		// to notify the server of the swap.
+		proof := &match.MetaData.Proof
+		contract, coinID := receipt.Contract(), []byte(coin.ID())
+		proof.Script = contract
+		if match.Match.Side == order.Taker {
+			proof.TakerSwap = coinID
+			match.SetStatus(order.TakerSwapCast)
+		} else {
+			proof.MakerSwap = coinID
+			match.SetStatus(order.MakerSwapCast)
 		}
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			errs.add("error storing swap details in database for match %s, coin %s: %v",
+				match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
+		}
+
+		c.sendInitAsync(t, match, coin.ID(), contract)
 	}
 }
 
-// finalizeSwapAction sends an `init` request for the specified match, waits
-// for and validates the server's acknowledgement, then saves the swap details
-// to db.
-// The swap details are always saved even if sending the `init` request errors
-// or a valid ack is not received from the server. This makes it possible to
-// resend the `init` request at a later time OR refund the swap after locktime
-// expires if the trade does not progress as expected.
+// sendInitAsync starts a goroutine to send an `init` request for the specified
+// match and save the server's ack sig to db. Sends a notification if an error
+// occurs while sending the request or validating the server's response.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, contract []byte) error {
-	_, _, proof, auth := match.parts()
-	if len(auth.InitSig) != 0 {
-		return fmt.Errorf("'init' already sent for match %v", match.id)
+func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contract []byte) {
+	if match.sendingInitAsync {
+		return
 	}
-	errs := newErrorSet("")
+	match.sendingInitAsync = true
 
-	// attempt to send `init` request and validate server ack.
-	ack := new(msgjson.Acknowledgement)
-	init := &msgjson.Init{
-		OrderID:  t.ID().Bytes(),
-		MatchID:  match.id[:],
-		CoinID:   coinID,
-		Contract: contract,
-	}
-	// The DEX may wait up to its configured broadcast timeout, but we will
-	// retry on timeout or other error. Note that the server presently waits an
-	// unspecified amount of time, which gives the client an
-	// msgjson.TransactionUndiscovered error to signal to the client to try
-	// broadcasting again or check their asset backend connectivity before
-	// hitting the broadcast timeout (and being penalized).
-	var needsResolution bool
-	timeout := t.broadcastTimeout() / 4
-	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
-		var msgErr *msgjson.Error
-		needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
-		errs.add("error sending 'init' message for match %s: %v", match.id, err)
-	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
-		errs.add("'init' ack signature error for match %s: %v", match.id, err)
-	}
+	// Send the init request asynchronously.
+	go func() {
+		var err error
+		defer func() {
+			t.mtx.Lock()
+			match.sendingInitAsync = false
+			if err != nil {
+				corder := t.coreOrderInternal()
+				details := fmt.Sprintf("Error notifying DEX of swap for match %s: %v", match.id, err)
+				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
+			}
+			t.mtx.Unlock()
+		}()
 
-	// Update the match db data with the swap details.
-	proof.Script = contract
-	if match.Match.Side == order.Taker {
-		proof.TakerSwap = coinID
-		match.SetStatus(order.TakerSwapCast)
-	} else {
-		proof.MakerSwap = coinID
-		match.SetStatus(order.MakerSwapCast)
-	}
-	if len(ack.Sig) != 0 {
+		ack := new(msgjson.Acknowledgement)
+		init := &msgjson.Init{
+			OrderID:  t.ID().Bytes(),
+			MatchID:  match.id[:],
+			CoinID:   coinID,
+			Contract: contract,
+		}
+		// The DEX may wait up to its configured broadcast timeout to locate the
+		// contract txn, so wait at least that long for a response.
+		timeout := t.broadcastTimeout()
+		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
+		if err != nil {
+			err = fmt.Errorf("error sending 'init' message: %v", err)
+			var msgErr *msgjson.Error
+			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
+				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+					t.ID(): {
+						trade:   t,
+						matches: []*matchTracker{match},
+					},
+				})
+			}
+			return
+		}
+
+		// Validate server ack.
+		err = t.dc.acct.checkSig(init.Serialize(), ack.Sig)
+		if err != nil {
+			err = fmt.Errorf("'init' ack signature error: %v", err)
+			return
+		}
+
+		// Save init ack sig.
+		t.mtx.Lock()
+		auth := &match.MetaData.Proof.Auth
 		auth.InitSig = ack.Sig
 		auth.InitStamp = encode.UnixMilliU(time.Now())
-	}
-	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
-		errs.add("error storing swap details in database for match %s, coin %s: %v",
-			match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
-	}
-
-	// With updated swap data, attempt match status resolution.
-	if needsResolution {
-		go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-			t.ID(): {
-				trade:   t,
-				matches: []*matchTracker{match},
-			},
-		})
-	}
-
-	return errs.ifAny()
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			err = fmt.Errorf("error storing init ack sig in database: %v", err)
+		}
+		t.mtx.Unlock()
+	}()
 }
 
 // redeemMatches will send a transaction redeeming the specified matches.
@@ -1614,90 +1626,101 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		)
 	}
 
-	// Send the redemption information to the DEX.
+	// Save redemption details and send the redeem message to the DEX.
+	// Saving the redemption details now makes it possible to resend the
+	// `redeem` reqeust at a later time if sending it now fails.
 	for i, match := range matches {
-		err := c.finalizeRedeemAction(t, match, coinIDs[i])
-		if err != nil {
-			errs.addErr(err)
+		proof := &match.MetaData.Proof
+		coinID := []byte(coinIDs[i])
+		if match.Match.Side == order.Taker {
+			match.SetStatus(order.MatchComplete) // could this cause the match to be retired before the `redeem` request succeeds?
+			proof.TakerRedeem = coinID
+		} else {
+			match.SetStatus(order.MakerRedeemed)
+			proof.MakerRedeem = coinID
 		}
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			errs.add("error storing swap details in database for match %s, coin %s: %v",
+				match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
+		}
+
+		c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
 	}
 }
 
-// finalizeRedeemAction sends a `redeem` request for the specified match,
-// waits for and validates the server's acknowledgement, then saves the
-// redeem details to db.
-// The redeem details are always saved even if sending the `redeem` request
-// errors or a valid ack is not received from the server. This makes it
-// possible to resend the `redeem` request at a later time.
+// sendInitAsync starts a goroutine to send an `redeem` request for the specified
+// match and save the server's ack sig to db. Sends a notification if an error
+// occurs while sending the request or validating the server's response.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID []byte) error {
-	_, _, proof, auth := match.parts()
-	if len(auth.RedeemSig) != 0 {
-		return fmt.Errorf("'redeem' already sent for match %v", match.id)
+func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, secret []byte) {
+	if match.sendingRedeemAsync || match.MetaData.Proof.IsRevoked() {
+		return // no need sending `redeem` request for a revoked match
 	}
-	errs := newErrorSet("")
+	match.sendingRedeemAsync = true
 
-	// Attempt to send `redeem` request and validate server ack.
-	// Not necessary for revoked matches.
-	var needsResolution bool
-	if !proof.IsRevoked() {
+	// Send the redeem request asynchronously.
+	go func() {
+		var err error
+		defer func() {
+			t.mtx.Lock()
+			match.sendingRedeemAsync = false
+			if err != nil {
+				corder := t.coreOrderInternal()
+				details := fmt.Sprintf("Error notifying DEX of redemption for match %s: %v", match.id, err)
+				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
+			}
+			t.mtx.Unlock()
+		}()
+
 		msgRedeem := &msgjson.Redeem{
 			OrderID: t.ID().Bytes(),
 			MatchID: match.id.Bytes(),
 			CoinID:  coinID,
-			Secret:  proof.Secret,
+			Secret:  secret,
 		}
 		ack := new(msgjson.Acknowledgement)
-		// The DEX may wait up to its configured broadcast timeout, but we will
-		// retry on timeout or other error.
-		timeout := t.broadcastTimeout() / 4
-		if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
+		// The DEX may wait up to its configured broadcast timeout to locate the
+		// redemption txn, so wait at least that long for a response.
+		timeout := t.broadcastTimeout()
+		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
+		if err != nil {
+			err = fmt.Errorf("error sending 'redeem' message: %v", err)
 			var msgErr *msgjson.Error
-			needsResolution = errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError
-			ack.Sig = nil // in case of partial unmarshal
-			errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
-		} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
-			ack.Sig = nil // don't record an invalid signature
-			errs.add("'redeem' ack signature error for match %s: %v", match.id, err)
+			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
+				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+					t.ID(): {
+						trade:   t,
+						matches: []*matchTracker{match},
+					},
+				})
+			}
+			return
 		}
-		// Update the match db data with the redeem details.
-		if len(ack.Sig) != 0 {
-			auth.RedeemSig = ack.Sig
-			auth.RedeemStamp = encode.UnixMilliU(time.Now())
-		}
-	}
 
-	if match.Match.Side == order.Taker {
-		match.SetStatus(order.MatchComplete)
-		proof.TakerRedeem = coinID
-	} else {
-		if len(auth.RedeemSig) > 0 {
+		// Validate server ack.
+		err = t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig)
+		if err != nil {
+			err = fmt.Errorf("'redeem' ack signature error: %v", err)
+			return
+		}
+
+		// Save redeem ack sig.
+		t.mtx.Lock()
+		auth := &match.MetaData.Proof.Auth
+		auth.RedeemSig = ack.Sig
+		auth.RedeemStamp = encode.UnixMilliU(time.Now())
+		if match.Match.Side == order.Maker {
 			// As maker, this is the end. However, this diverges from server,
-			// which is still needs taker's redeem.
+			// which still needs taker's redeem.
 			match.SetStatus(order.MatchComplete)
-		} else {
-			match.SetStatus(order.MakerRedeemed)
 		}
-		proof.MakerRedeem = coinID
-	}
-	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
-		errs.add("error storing redeem details in database for match %s, coin %s: %v",
-			match.id, coinIDString(t.wallets.toAsset.ID, coinID), err)
-	}
-
-	// With updated swap data, attempt match status resolution.
-	if needsResolution {
-		go c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-			t.ID(): {
-				trade:   t,
-				matches: []*matchTracker{match},
-			},
-		})
-	}
-
-	return errs.ifAny()
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			err = fmt.Errorf("error storing redeem ack sig in database: %v", err)
+		}
+		t.mtx.Unlock()
+	}()
 }
 
 // findMakersRedemption starts a goroutine to search for the redemption of
