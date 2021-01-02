@@ -1577,9 +1577,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 
 	// If connectWallet generated new xcWallet address store it on dbWallet.
 	if generatedNewAddress {
-		wallet.mtx.RLock()
 		dbWallet.Address = wallet.address
-		wallet.mtx.RUnlock()
 	}
 
 	err = c.db.UpdateWallet(dbWallet)
