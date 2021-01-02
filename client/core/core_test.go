@@ -5733,7 +5733,7 @@ func TestWalletSyncing(t *testing.T) {
 		return false, progress, nil
 	}
 
-	err := tCore.connectWallet(dcrWallet)
+	_, err := tCore.connectWallet(dcrWallet)
 	if err != nil {
 		t.Fatalf("connectWallet error: %v", err)
 	}
