@@ -78,9 +78,6 @@ type dexConnection struct {
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
 
-	marketMtx sync.RWMutex
-	marketMap map[string]*Market
-
 	// tradeMtx is used to synchronize access to the trades map.
 	tradeMtx sync.RWMutex
 	trades   map[order.OrderID]*trackedTrade
@@ -112,10 +109,17 @@ func (dc *dexConnection) running(mkt string) bool {
 	return mktCfg.Running()
 }
 
+// market is the market's configuration.
+func (dc *dexConnection) market(mktID string) *msgjson.Market {
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+	return dc.marketConfig(mktID)
+}
+
 // refreshMarkets rebuilds the market map. The updated markets map may be safely
-// accessed with the markets method. refreshMarkets is used when a change to the
-// status of a market or the user's orders on a market has changed.
-func (dc *dexConnection) refreshMarkets() {
+// accessed with the markets method. refreshMarkets should be called when the
+// market configuration changes.
+func (dc *dexConnection) markets() map[string]*Market {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
 
@@ -126,7 +130,7 @@ func (dc *dexConnection) refreshMarkets() {
 		dc.assetsMtx.RLock()
 		base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
 		dc.assetsMtx.RUnlock()
-		market := &Market{
+		mkt := &Market{
 			Name:            mkt.Name,
 			BaseID:          base.ID,
 			BaseSymbol:      base.Symbol,
@@ -136,42 +140,28 @@ func (dc *dexConnection) refreshMarkets() {
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
 		}
-		mid := market.marketName()
-		dc.tradeMtx.RLock()
-		mktTrades := make([]*trackedTrade, 0, len(dc.trades))
-		for _, trade := range dc.trades {
-			if trade.mktID == mid {
-				mktTrades = append(mktTrades, trade)
-			}
-		}
-		dc.tradeMtx.RUnlock()
+		mid := mkt.marketName()
 
-		for _, trade := range mktTrades {
-			trade.mtx.RLock()
-			ord := trade.coreOrderInternal()
-			market.Orders = append(market.Orders, ord)
-			if ord.Sell {
-				market.BaseOrderLocked += trade.lockedAmount()
-				market.BaseContractLocked += trade.unspentContractAmounts()
-			} else {
-				market.QuoteOrderLocked += trade.lockedAmount()
-				market.QuoteContractLocked += trade.unspentContractAmounts()
-			}
-			trade.mtx.RUnlock()
+		for _, trade := range dc.marketTrades(mid) {
+			mkt.Orders = append(mkt.Orders, trade.coreOrder())
 		}
-		marketMap[mid] = market
+
+		marketMap[mid] = mkt
 	}
 
-	dc.marketMtx.Lock()
-	dc.marketMap = marketMap
-	dc.marketMtx.Unlock()
+	return marketMap
 }
 
-// markets returns the current market map.
-func (dc *dexConnection) markets() map[string]*Market {
-	dc.marketMtx.RLock()
-	defer dc.marketMtx.RUnlock()
-	return dc.marketMap
+// marketTrades is a slice of trades in the trades map.
+func (dc *dexConnection) marketTrades(mktID string) (trades []*trackedTrade) {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+	for _, trade := range dc.trades {
+		if trade.mktID == mktID {
+			trades = append(trades, trade)
+		}
+	}
+	return
 }
 
 // getRegConfirms returns the number of confirmations received for the
@@ -758,13 +748,6 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 	return updated
 }
 
-// market gets the *Market from the marketMap, or nil if mktID is unknown.
-func (dc *dexConnection) market(mktID string) *Market {
-	dc.marketMtx.RLock()
-	defer dc.marketMtx.RUnlock()
-	return dc.marketMap[mktID]
-}
-
 // setEpoch sets the epoch. If the passed epoch is greater than the highest
 // previously passed epoch, an epoch notification is sent to all subscribers and
 // true is returned.
@@ -856,9 +839,6 @@ type Core struct {
 	tickSchedMtx sync.Mutex
 	tickSched    map[order.OrderID]*time.Timer
 
-	userMtx sync.RWMutex
-	user    *User
-
 	noteMtx   sync.RWMutex
 	noteChans []chan Notification
 
@@ -903,7 +883,6 @@ func New(cfg *Config) (*Core, error) {
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
-	core.refreshUser()
 	core.log.Debugf("new client core created")
 	return core, nil
 }
@@ -931,6 +910,7 @@ func (c *Core) Run(ctx context.Context) {
 		defer c.wg.Done()
 		c.latencyQ.Run(ctx)
 	}()
+
 	c.wg.Wait()
 
 	// Stop the DB after dexConnections and other goroutines are done.
@@ -995,9 +975,15 @@ func (c *Core) Network() dex.Network {
 	return c.net
 }
 
-// Exchanges returns a map of Exchange keyed by host, including a list of markets
-// and their orders.
+// Exchanges creates a map of *Exchange keyed by host, including markets and
+// orders.
 func (c *Core) Exchanges() map[string]*Exchange {
+	return c.exchangeMap()
+}
+
+// exchangeMap creates a map of *Exchange keyed by host, including markets and
+// orders.
+func (c *Core) exchangeMap() map[string]*Exchange {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	infos := make(map[string]*Exchange, len(c.conns))
@@ -1081,9 +1067,7 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 		c.log.Warnf("Could not retrieve balances from %s wallet: %v", unbip(assetID), err)
 	}
 
-	walletState := w.state() // includes updated balances
-	c.setUserWalletState(walletState)
-	c.notify(newWalletStateNote(walletState))
+	c.notify(newWalletStateNote(w.state()))
 	return nil
 }
 
@@ -1245,7 +1229,7 @@ func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64
 }
 
 // updateBalances updates the balance for every key in the counter map.
-// Notifications are sent and refreshUser is called.
+// Notifications are sent.
 func (c *Core) updateBalances(assets assetMap) {
 	if len(assets) == 0 {
 		return
@@ -1264,11 +1248,10 @@ func (c *Core) updateBalances(assets assetMap) {
 			continue
 		}
 	}
-	c.refreshUser()
 }
 
 // updateAssetBalance updates the balance for the specified asset. A
-// notification is sent and refreshUser is called.
+// notification is sent.
 func (c *Core) updateAssetBalance(assetID uint32) {
 	c.updateBalances(assetMap{assetID: struct{}{}})
 }
@@ -1284,9 +1267,15 @@ func (c *Core) Wallets() []*WalletState {
 	return state
 }
 
-// SupportedAssets returns a list of asset information for supported assets that
+// SupportedAssets returns a map of asset information for supported assets that
 // may or may not have a wallet yet.
 func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
+	return c.assetMap()
+}
+
+// assetMap returns a map of asset information for supported assets that may or
+// may not have a wallet yet.
+func (c *Core) assetMap() map[uint32]*SupportedAsset {
 	supported := asset.Assets()
 	assets := make(map[uint32]*SupportedAsset, len(supported))
 	c.walletMtx.RLock()
@@ -1309,39 +1298,15 @@ func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
 
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
-	c.userMtx.RLock()
-	defer c.userMtx.RUnlock()
-	return c.user
-}
-
-// refreshUser is a thread-safe way to update the current User. This method
-// should be called after adding wallets and DEXes.
-func (c *Core) refreshUser() {
 	initialized, err := c.IsInitialized()
 	if err != nil {
-		c.log.Errorf("refreshUser: error checking if app is initialized: %v", err)
+		c.log.Errorf("User: error checking if app is initialized: %v", err)
 	}
-	u := &User{
-		Assets:      c.SupportedAssets(),
-		Exchanges:   c.Exchanges(),
+	return &User{
+		Assets:      c.assetMap(),
+		Exchanges:   c.exchangeMap(),
 		Initialized: initialized,
 	}
-	c.userMtx.Lock()
-	c.user = u
-	c.userMtx.Unlock()
-}
-
-// setUserWalletState updates wallet state on current User.
-func (c *Core) setUserWalletState(state *WalletState) {
-	c.userMtx.Lock()
-	defer c.userMtx.Unlock()
-
-	sa, found := c.user.Assets[state.AssetID]
-	if !found {
-		c.log.Errorf("Unknown asset %d", state.AssetID)
-		return
-	}
-	sa.Wallet = state
 }
 
 // CreateWallet creates a new exchange wallet.
@@ -1436,9 +1401,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
 
-	c.refreshUser()
-
-	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet state note?
 	c.notify(newWalletStateNote(wallet.state()))
 
 	return nil
@@ -1522,7 +1484,6 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
 	}
-	c.refreshUser()
 
 	c.notify(newWalletStateNote(state))
 
@@ -1547,7 +1508,6 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return err
 	}
-	c.refreshUser()
 
 	c.notify(newWalletStateNote(wallet.state()))
 
@@ -1807,9 +1767,7 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	}
 
 	// Update wallet state in the User data struct and emit a WalletStateNote.
-	walletState := w.state()
-	c.setUserWalletState(walletState)
-	c.notify(newWalletStateNote(walletState))
+	c.notify(newWalletStateNote(w.state()))
 
 	return addr, nil
 }
@@ -2016,14 +1974,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	requiredConfs := dc.cfg.RegFeeConfirms
 	dc.cfgMtx.RUnlock()
 
-	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", requiredConfs, dc.acct.host)
-	c.notify(newFeePaymentNote(SubjectFeePaymentInProgress, details, db.Success, dc.acct.host))
-
 	// Set up the coin waiter, which waits for the required number of
 	// confirmations to notify the DEX and establish an authenticated
 	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
-	c.refreshUser()
+
+	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", requiredConfs, dc.acct.host)
+	c.notify(newFeePaymentNote(SubjectFeePaymentInProgress, details, db.Success, dc.acct.host))
+
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
 	return res, nil
 }
@@ -2039,7 +1997,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 	dc.cfgMtx.RUnlock()
 
 	dc.setRegConfirms(confs)
-	c.refreshUser()
 
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
@@ -2052,7 +2009,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 
 		if confs < reqConfs {
 			dc.setRegConfirms(confs)
-			c.refreshUser()
 			c.notify(newFeePaymentNoteWithConfirmations(SubjectRegUpdate, details, db.Data, confs, dc.acct.host))
 		}
 
@@ -2069,7 +2025,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 			} else {
 				details := fmt.Sprintf("You may now trade at %s", dc.acct.host)
 				dc.setRegConfirms(regConfirmationsPaid)
-				c.refreshUser()
 				c.notify(newFeePaymentNote(SubjectAccountRegistered, details, db.Success, dc.acct.host))
 			}
 		}()
@@ -2086,7 +2041,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		if err != nil {
 			c.log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 		}
-		c.refreshUser()
 	})
 
 }
@@ -2113,7 +2067,6 @@ func (c *Core) InitializeClient(pw []byte) error {
 	if err != nil {
 		return fmt.Errorf("error storing key parameters: %w", err)
 	}
-	c.refreshUser()
 	return nil
 }
 
@@ -2176,7 +2129,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		c.log.Errorf("Login -> NotificationsN error: %v", err)
 	}
 
-	c.refreshUser()
 	result := &LoginResult{
 		Notifications: notes,
 		DEXes:         dexStats,
@@ -2187,7 +2139,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 // Logout logs the user out
 func (c *Core) Logout() error {
 	c.connMtx.Lock()
-	defer c.refreshUser()
 	defer c.connMtx.Unlock()
 
 	// Check active orders
@@ -2198,14 +2149,15 @@ func (c *Core) Logout() error {
 	}
 
 	// Lock wallets
-	for assetID := range c.User().Assets {
-		wallet, found := c.wallet(assetID)
-		if found && wallet.connected() {
-			if err := wallet.Lock(); err != nil {
+	c.walletMtx.RLock()
+	for _, w := range c.wallets {
+		if w.connected() {
+			if err := w.Lock(); err != nil {
 				return err
 			}
 		}
 	}
+	c.walletMtx.RUnlock()
 
 	// With no open orders for any of the dex connections, and all wallets locked,
 	// lock each dex account.
@@ -2538,7 +2490,6 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 			relocks.merge(locks)
 		}
 		loaded += len(ready)
-		dc.refreshMarkets()
 	}
 	c.updateBalances(relocks)
 	return loaded
@@ -2672,20 +2623,14 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 	c.updateAssetBalance(fromID)
 
-	// Refresh the markets.
-	dc.refreshMarkets()
-	c.refreshUser()
-
 	return corder, nil
 }
 
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
-	mkt := dc.market(mktID)
-	if mkt == nil {
-		return nil, 0, newError(marketErr, "order placed for unknown market %q",
-			mktID)
+	if dc.market(mktID) == nil {
+		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
@@ -2907,7 +2852,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
+	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
 		c.db, c.latencyQ, wallets, coins, c.notify)
 
 	dc.tradeMtx.Lock()
@@ -3170,11 +3115,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.resolveMatchConflicts(dc, matchConflicts)
 	}
 
-	// Order, match statuses should now be in sync with the DEX.
-	// Refresh the user's orders for each of the DEX's markets and
-	// log updated locked funds info.
-	dc.refreshMarkets()
-
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
@@ -3242,7 +3182,6 @@ func (c *Core) initialize() {
 		}
 	}
 	c.connMtx.RUnlock()
-	c.refreshUser()
 }
 
 // verifyAccount verifies AccountInfo by making a connection to the DEX.
@@ -3432,15 +3371,14 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 
 		mktID := marketName(ord.Base(), ord.Quote())
-		mkt := dc.market(mktID)
-		if mkt == nil {
+		if dc.market(mktID) == nil {
 			c.log.Errorf("Active %s order retrieved for unknown market %s", oid, mktID)
 			continue
 		}
 
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
+		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
 			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
 		trackers[dbOrder.Order.ID()] = tracker
 
@@ -3697,13 +3635,14 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		}
 
 		dc.trades[tracker.ID()] = tracker
+		c.notify(newOrderNote(SubjectOrderLoaded, "", db.Data, tracker.coreOrder()))
 	}
 	return relocks
 }
 
 // generateDEXMaps creates the associated assets, market and epoch maps of the
 // DEXs from the provided configuration.
-func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.Asset, map[string]*Market, map[string]uint64, error) {
+func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.Asset, map[string]uint64, error) {
 	assets := make(map[uint32]*dex.Asset, len(cfg.Assets))
 	for _, asset := range cfg.Assets {
 		assets[asset.ID] = convertAssetInfo(asset)
@@ -3712,36 +3651,22 @@ func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.As
 	for _, mkt := range cfg.Markets {
 		_, ok := assets[mkt.Base]
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("%s reported a market with base "+
+			return nil, nil, fmt.Errorf("%s reported a market with base "+
 				"asset %d, but did not provide the asset info.", host, mkt.Base)
 		}
 		_, ok = assets[mkt.Quote]
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("%s reported a market with quote "+
+			return nil, nil, fmt.Errorf("%s reported a market with quote "+
 				"asset %d, but did not provide the asset info.", host, mkt.Quote)
 		}
 	}
 
-	marketMap := make(map[string]*Market)
 	epochMap := make(map[string]uint64)
 	for _, mkt := range cfg.Markets {
-		base, quote := assets[mkt.Base], assets[mkt.Quote]
-		market := &Market{
-			Name:            mkt.Name,
-			BaseID:          base.ID,
-			BaseSymbol:      base.Symbol,
-			QuoteID:         quote.ID,
-			QuoteSymbol:     quote.Symbol,
-			EpochLen:        mkt.EpochLen,
-			StartEpoch:      mkt.StartEpoch,
-			MarketBuyBuffer: mkt.MarketBuyBuffer,
-			// no Orders yet
-		}
-		marketMap[mkt.Name] = market
 		epochMap[mkt.Name] = 0
 	}
 
-	return assets, marketMap, epochMap, nil
+	return assets, epochMap, nil
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
@@ -3811,9 +3736,6 @@ func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*ser
 		}
 	}
 
-	// Update Market.Orders for each market.
-	dc.refreshMarkets()
-
 	return assetsUpdated, errs.ifAny()
 }
 
@@ -3876,7 +3798,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("Error fetching DEX server config: %w", err)
 	}
 
-	assets, marketMap, epochMap, err := generateDEXMaps(host, dexCfg)
+	assets, epochMap, err := generateDEXMaps(host, dexCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -3892,7 +3814,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		tickInterval: bTimeout / tickCheckDivisions,
 		books:        make(map[string]*bookie),
 		acct:         newDEXAccount(acctInfo),
-		marketMap:    marketMap,
 		trades:       make(map[order.OrderID]*trackedTrade),
 		notify:       c.notify,
 		epoch:        epochMap,
@@ -3901,7 +3822,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 
 	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
 
-	dc.refreshMarkets()
 	c.wg.Add(1)
 	go c.listen(dc)
 	c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
@@ -3934,7 +3854,7 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	resubMkt := func(mkt *Market) {
+	resubMkt := func(mkt *msgjson.Market) {
 		// Locate any bookie for this market.
 		dc.booksMtx.Lock()
 		defer dc.booksMtx.Unlock()
@@ -3946,7 +3866,7 @@ func (c *Core) handleReconnect(host string) {
 
 		// Resubscribe since our old subscription was probably lost by the
 		// server when the connection dropped.
-		snap, err := dc.subscribe(mkt.BaseID, mkt.QuoteID)
+		snap, err := dc.subscribe(mkt.Base, mkt.Quote)
 		if err != nil {
 			c.log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
 			return
@@ -3964,22 +3884,19 @@ func (c *Core) handleReconnect(host string) {
 			Host:     dc.acct.host,
 			MarketID: mkt.Name,
 			Payload: &MarketOrderBook{
-				Base:  mkt.BaseID,
-				Quote: mkt.QuoteID,
+				Base:  mkt.Base,
+				Quote: mkt.Quote,
 				Book:  booky.book(),
 			},
 		})
 	}
 
 	// For each market, resubscribe to any market books.
-	dc.marketMtx.RLock()
-	for _, mkt := range dc.marketMap {
+	dc.cfgMtx.RLock()
+	for _, mkt := range dc.cfg.Markets {
 		resubMkt(mkt)
 	}
-	dc.marketMtx.RUnlock()
-
-	dc.refreshMarkets()
-	c.refreshUser()
+	dc.cfgMtx.RUnlock()
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
@@ -3998,7 +3915,6 @@ func (c *Core) handleConnectEvent(host string, connected bool) {
 	}
 	details := fmt.Sprintf("DEX at %s has %s", host, statusStr)
 	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, db.Poke))
-	c.refreshUser()
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.
@@ -4010,9 +3926,7 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	}
 
 	// Expire the epoch
-	if dc.setEpoch(note.MarketID, note.Epoch+1) {
-		c.refreshUser() // maybe remove if this was pre-nomatch
-	}
+	dc.setEpoch(note.MarketID, note.Epoch+1)
 
 	dc.booksMtx.RLock()
 	defer dc.booksMtx.RUnlock()
@@ -4048,7 +3962,6 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	c.notify(newOrderNote(SubjectOrderRevoked, details, db.ErrorLevel, tracker.coreOrder()))
 
 	// Update market orders, and the balance to account for unlocked coins.
-	dc.refreshMarkets()
 	c.updateAssetBalance(tracker.fromAssetID)
 	return nil
 }
@@ -4084,7 +3997,6 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	}
 
 	// Update market orders, and the balance to account for unlocked coins.
-	dc.refreshMarkets()
 	c.updateAssetBalance(tracker.fromAssetID)
 	return nil
 }
@@ -4205,6 +4117,7 @@ func (c *Core) listen(dc *dexConnection) {
 		if len(doneTrades) > 0 {
 			dc.tradeMtx.Lock()
 			for _, trade := range doneTrades {
+				c.notify(newOrderNote(SubjectOrderRetired, "", db.Data, trade.coreOrder()))
 				delete(dc.trades, trade.ID())
 			}
 			dc.tradeMtx.Unlock()
@@ -4230,7 +4143,6 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 
 		if len(updatedAssets) > 0 {
-			dc.refreshMarkets()
 			c.updateBalances(updatedAssets)
 		}
 	}
@@ -4418,8 +4330,6 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	updatedAssets, err := c.runMatches(dc, matches)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
-	} else {
-		c.refreshUser() // would be called by updateBalances
 	}
 
 	return err
@@ -4444,7 +4354,6 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
-	dc.refreshMarkets()
 	return err
 }
 
@@ -4459,7 +4368,6 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	tick := func() {
 		assets, err := c.tick(tracker)
 		if len(assets) > 0 {
-			tracker.dc.refreshMarkets()
 			c.updateBalances(assets)
 		}
 		if err != nil {
@@ -4581,7 +4489,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	for _, dc := range conns {
 		newUpdates := c.tickAsset(dc, assetID)
 		if len(newUpdates) > 0 {
-			dc.refreshMarkets()
 			assets.merge(newUpdates)
 		}
 	}
@@ -4603,14 +4510,15 @@ func (c *Core) PromptShutdown() bool {
 
 	lockWallets := func() {
 		// Lock wallets
-		for assetID := range c.User().Assets {
-			wallet, found := c.wallet(assetID)
-			if found && wallet.connected() {
-				if err := wallet.Lock(); err != nil {
+		c.walletMtx.RLock()
+		for _, w := range c.wallets {
+			if w.connected() {
+				if err := w.Lock(); err != nil {
 					c.log.Errorf("error locking wallet: %v", err)
 				}
 			}
 		}
+		c.walletMtx.RUnlock()
 		// If all wallets locked, lock each dex account.
 		for _, dc := range c.conns {
 			dc.acct.lock()

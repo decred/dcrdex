@@ -4,7 +4,6 @@
 package core
 
 import (
-	"bytes"
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
@@ -47,11 +46,6 @@ func (c *Core) notify(n Notification) {
 	}
 	logFun("notify: %v", n)
 
-	switch nt := n.(type) {
-	case *MatchNote:
-		c.updateCoreMatch(nt)
-	}
-
 	c.noteMtx.RLock()
 	for _, ch := range c.noteChans {
 		select {
@@ -61,26 +55,6 @@ func (c *Core) notify(n Notification) {
 		}
 	}
 	c.noteMtx.RUnlock()
-}
-
-// updateCoreMatch performs a targeted update of a match in the User struct.
-func (c *Core) updateCoreMatch(n *MatchNote) {
-	c.userMtx.Lock()
-	defer c.userMtx.Unlock()
-	xc := c.user.Exchanges[n.Host]
-	mkt := xc.Markets[n.MarketID]
-	for _, cord := range mkt.Orders {
-		if !bytes.Equal(cord.ID, n.OrderID) {
-			continue
-		}
-		for i, m := range cord.Matches {
-			if bytes.Equal(m.MatchID, n.Match.MatchID) {
-				cord.Matches[i] = n.Match
-				return
-			}
-		}
-		cord.Matches = append(cord.Matches, n.Match)
-	}
 }
 
 // NotificationFeed returns a new receiving channel for notifications. The
@@ -222,6 +196,8 @@ const (
 	SubjectOrderStatusUpdate    = "Order status update"
 	SubjectMatchResolutionError = "Match resolution error"
 	SubjectFailedCancel         = "Failed cancel"
+	SubjectOrderLoaded          = "Order loaded"
+	SubjectOrderRetired         = "Order retired"
 )
 
 func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
@@ -317,7 +293,7 @@ func newBalanceNote(assetID uint32, bal *WalletBalance) *BalanceNote {
 	return &BalanceNote{
 		Notification: db.NewNotification(NoteTypeBalance, "balance updated", "", db.Data),
 		AssetID:      assetID,
-		Balance:      bal,
+		Balance:      bal, // Once created, balance is never modified by Core.
 	}
 }
 

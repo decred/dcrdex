@@ -174,15 +174,12 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
 
-	mkt := marketName(base, quote)
-	booky, found := dc.books[mkt]
+	mktID := marketName(base, quote)
+	booky, found := dc.books[mktID]
 	if !found {
 		// Make sure the market exists.
-		dc.marketMtx.RLock()
-		_, found = dc.marketMap[mkt]
-		dc.marketMtx.RUnlock()
-		if !found {
-			return nil, fmt.Errorf("unknown market %s", mkt)
+		if dc.market(mktID) == nil {
+			return nil, fmt.Errorf("unknown market %s", mktID)
 		}
 
 		obRes, err := dc.subscribe(base, quote)
@@ -190,12 +187,12 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(dc.log.SubLogger(mkt), func() { dc.stopBook(base, quote) })
+		booky = newBookie(dc.log.SubLogger(mktID), func() { dc.stopBook(base, quote) })
 		err = booky.Sync(obRes)
 		if err != nil {
 			return nil, err
 		}
-		dc.books[mkt] = booky
+		dc.books[mktID] = booky
 	}
 
 	// Get the feed and the book under a single lock to make sure the first
@@ -207,7 +204,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 	feed.C <- &BookUpdate{
 		Action:   FreshBookAction,
 		Host:     dc.acct.host,
-		MarketID: mkt,
+		MarketID: mktID,
 		Payload: &MarketOrderBook{
 			Base:  base,
 			Quote: quote,
@@ -461,6 +458,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if mkt == nil {
 		return fmt.Errorf("no market found with ID %s", sp.MarketID)
 	}
+	mktName, baseID, quoteID := mkt.Name, mkt.Base, mkt.Quote
 
 	// Update the data in the stored ConfigResponse.
 	dc.setMarketFinalEpoch(sp.MarketID, sp.FinalEpoch, sp.Persist)
@@ -503,11 +501,11 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Return any non-nil error, but still revoke purged orders.
 
 	// Revoke all active orders of the suspended market for the dex.
-	c.log.Warnf("Revoking all active orders for market %s at %s.", mkt.Name, dc.acct.host)
+	c.log.Warnf("Revoking all active orders for market %s at %s.", mktName, dc.acct.host)
 	updatedAssets := make(assetMap)
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {
-		if tracker.Order.Base() == mkt.BaseID && tracker.Order.Quote() == mkt.QuoteID &&
+		if tracker.Order.Base() == baseID && tracker.Order.Quote() == quoteID &&
 			tracker.metaData.Host == dc.acct.host && tracker.metaData.Status == order.OrderStatusBooked {
 			// Locally revoke the purged book order.
 			tracker.revoke()
@@ -524,17 +522,14 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		Host:     dc.acct.host,
 		MarketID: sp.MarketID,
 		Payload: &MarketOrderBook{
-			Base:  mkt.BaseID,
-			Quote: mkt.QuoteID,
+			Base:  baseID,
+			Quote: quoteID,
 			Book:  book.book(), // empty
 		},
 	})
 
-	dc.refreshMarkets()
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
-	} else {
-		c.refreshUser() // would be called by updateBalances
 	}
 
 	return err
@@ -603,7 +598,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 	defer dc.cfgMtx.Unlock()
 	dc.cfg = cfg
 
-	assets, markets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
+	assets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
 	if err != nil {
 		return fmt.Errorf("Inconsistent 'config' response: %w", err)
 	}
@@ -616,10 +611,6 @@ func (dc *dexConnection) refreshServerConfig() error {
 	dc.epochMtx.Lock()
 	dc.epoch = epochs
 	dc.epochMtx.Unlock()
-
-	dc.marketMtx.Lock()
-	dc.marketMap = markets
-	dc.marketMtx.Unlock()
 
 	return nil
 }
@@ -716,10 +707,6 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	err := msg.Unmarshal(note)
 	if err != nil {
 		return fmt.Errorf("epoch order note unmarshal error: %w", err)
-	}
-
-	if dc.setEpoch(note.MarketID, note.Epoch) {
-		c.refreshUser() // maybe remove if this was pre-nomatch
 	}
 
 	dc.booksMtx.RLock()

@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
@@ -283,6 +284,7 @@ type Order struct {
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
 	FundingCoins []*Coin           `json:"fundingCoins"`
 	LockedAmt    uint64            `json:"lockedamt"`
+	Change       *Coin             `json:"change"`
 	Rate         uint64            `json:"rate"` // limit only
 	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
 }
@@ -360,19 +362,71 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 // Market is market info.
 type Market struct {
-	Name                string   `json:"name"`
-	BaseID              uint32   `json:"baseid"`
-	BaseSymbol          string   `json:"basesymbol"`
-	QuoteID             uint32   `json:"quoteid"`
-	QuoteSymbol         string   `json:"quotesymbol"`
-	EpochLen            uint64   `json:"epochlen"`
-	StartEpoch          uint64   `json:"startepoch"`
-	MarketBuyBuffer     float64  `json:"buybuffer"`
-	Orders              []*Order `json:"orders"`
-	BaseOrderLocked     uint64   `json:"baseorderlocked"`
-	QuoteOrderLocked    uint64   `json:"quoteorderlocked"`
-	BaseContractLocked  uint64   `json:"basecontractlocked"`
-	QuoteContractLocked uint64   `json:"quotecontractlocked"`
+	Name            string   `json:"name"`
+	BaseID          uint32   `json:"baseid"`
+	BaseSymbol      string   `json:"basesymbol"`
+	QuoteID         uint32   `json:"quoteid"`
+	QuoteSymbol     string   `json:"quotesymbol"`
+	EpochLen        uint64   `json:"epochlen"`
+	StartEpoch      uint64   `json:"startepoch"`
+	MarketBuyBuffer float64  `json:"buybuffer"`
+	Orders          []*Order `json:"orders"`
+}
+
+// BaseContractLocked is the amount of base asset locked in un-redeemed
+// contracts.
+func (m *Market) BaseContractLocked() uint64 {
+	return m.sideContractLocked(true)
+}
+
+// QuoteContractLocked is the amount of quote asset locked in un-redeemed
+// contracts.
+func (m *Market) QuoteContractLocked() uint64 {
+	return m.sideContractLocked(false)
+}
+
+func (m *Market) sideContractLocked(sell bool) (amt uint64) {
+	for _, ord := range m.Orders {
+		if ord.Sell != sell {
+			continue
+		}
+		for _, m := range ord.Matches {
+			if m.Status >= order.MakerRedeemed || m.Refund != nil {
+				continue
+			}
+			if (m.Side == order.Maker && m.Status >= order.MakerSwapCast) ||
+				(m.Side == order.Taker && m.Status == order.TakerSwapCast) {
+
+				swapAmount := m.Qty
+				if !ord.Sell {
+					swapAmount = calc.BaseToQuote(m.Rate, m.Qty)
+				}
+				amt += swapAmount
+			}
+		}
+	}
+	return
+}
+
+// BaseOrderLocked is the amount of base asset locked in epoch or booked orders.
+func (m *Market) BaseOrderLocked() uint64 {
+	return m.sideOrderLocked(true)
+}
+
+// QuoteOrderLocked is the amount of quote asset locked in epoch or booked
+// orders.
+func (m *Market) QuoteOrderLocked() uint64 {
+	return m.sideOrderLocked(false)
+}
+
+func (m *Market) sideOrderLocked(sell bool) (amt uint64) {
+	for _, ord := range m.Orders {
+		if ord.Sell != sell {
+			continue
+		}
+		amt += ord.LockedAmt
+	}
+	return
 }
 
 // Display returns an ID string suitable for displaying in a UI.

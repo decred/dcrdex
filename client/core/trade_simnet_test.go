@@ -1253,8 +1253,8 @@ func (client *tClient) placeOrder(qty, rate uint64, tifNow bool) (string, error)
 	if dcrBtcMkt == nil {
 		return "", fmt.Errorf("no dcr_btc market found")
 	}
-	baseAsset := dc.assets[dcrBtcMkt.BaseID]
-	quoteAsset := dc.assets[dcrBtcMkt.QuoteID]
+	baseAsset := dc.assets[dcrBtcMkt.Base]
+	quoteAsset := dc.assets[dcrBtcMkt.Quote]
 
 	tradeForm := &TradeForm{
 		Host:    dexHost,
