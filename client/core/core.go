@@ -2723,19 +2723,6 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 	}
 	var accountInfo db.AccountInfo
 
-	// Get the dexConnection and the dex.Asset for each asset.
-	c.connMtx.RLock()
-	dc, found := c.conns[account.Host]
-	c.connMtx.RUnlock()
-	if !found {
-		return fmt.Errorf("unknown DEX %s", account.Host)
-	}
-
-	if !dc.acct.isPaid {
-		return fmt.Errorf("account not paid for DEX %s", account.Host)
-	}
-	accountInfo.Paid = true
-
 	accountInfo.Host = account.Host
 	pubKey, err := hex.DecodeString(account.PubKey)
 	if err != nil {
@@ -2760,6 +2747,9 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 		return err
 	}
 	accountInfo.FeeCoin = feeCoin
+	if !c.verifyAccount(&accountInfo) {
+		return fmt.Errorf("Account not verified for host: %s", account.Host)
+	}
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
 		return err
@@ -3292,30 +3282,9 @@ func (c *Core) initialize() {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			host, err := addrHost(acct.Host)
-			if err != nil {
-				c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
+			if !c.verifyAccount(acct) {
 				return
 			}
-			dc, err := c.connectDEX(acct)
-			if err != nil {
-				c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
-				return
-			}
-			c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
-			if !acct.Paid {
-				if len(acct.FeeCoin) == 0 {
-					// Register should have set this when creating the account
-					// that was obtained via db.Accounts.
-					c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-						"Discarding account.", acct.Host)
-					return
-				}
-			}
-			c.connMtx.Lock()
-			c.conns[host] = dc
-			c.connMtx.Unlock()
-			c.log.Debugf("dex connection to %s ready", acct.Host)
 		}(acct)
 	}
 	dbWallets, err := c.db.Wallets()
@@ -3353,6 +3322,34 @@ func (c *Core) initialize() {
 	}
 	c.connMtx.RUnlock()
 	c.refreshUser()
+}
+
+func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
+	host, err := addrHost(acct.Host)
+	if err != nil {
+		c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
+		return false
+	}
+	dc, err := c.connectDEX(acct)
+	if err != nil {
+		c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
+		return false
+	}
+	c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
+	if !acct.Paid {
+		if len(acct.FeeCoin) == 0 {
+			// Register should have set this when creating the account
+			// that was obtained via db.Accounts.
+			c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+				"Discarding account.", acct.Host)
+			return false
+		}
+	}
+	c.connMtx.Lock()
+	c.conns[host] = dc
+	c.connMtx.Unlock()
+	c.log.Debugf("dex connection to %s ready", acct.Host)
+	return true
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
