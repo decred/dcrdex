@@ -2722,6 +2722,20 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
 	var accountInfo db.AccountInfo
+
+	// Get the dexConnection and the dex.Asset for each asset.
+	c.connMtx.RLock()
+	dc, found := c.conns[account.Host]
+	c.connMtx.RUnlock()
+	if !found {
+		return fmt.Errorf("unknown DEX %s", account.Host)
+	}
+
+	if !dc.acct.isPaid {
+		return fmt.Errorf("account not paid for DEX %s", account.Host)
+	}
+	accountInfo.Paid = true
+
 	accountInfo.Host = account.Host
 	pubKey, err := hex.DecodeString(account.PubKey)
 	if err != nil {
@@ -2746,11 +2760,11 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 		return err
 	}
 	accountInfo.FeeCoin = feeCoin
-	accountInfo.Paid = account.IsPaid
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
