@@ -164,14 +164,9 @@ export default class SettingsPage extends BasePage {
       account: account
     }
     const loaded = app.loading(this.body)
-    // var res = await postJSON('/api/importaccount', req)
     postJSON('/api/importaccount', req)
     loaded()
-    // if (!app.checkResponse(res)) {
-    //   page.exportKeysErr.textContent = res.msg
-    //   Doc.show(page.exportKeysErr)
-    //   return
-    // }
+    await app.fetchUser()
     Doc.hide(page.forms)
   }
 
