@@ -2265,7 +2265,7 @@ func TestTrade(t *testing.T) {
 	}
 }
 
-func TestAccount(t *testing.T) {
+func TestAccountExport(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
@@ -2278,6 +2278,25 @@ func TestAccount(t *testing.T) {
 	}
 	if host != accountResponse.Host {
 		t.Fatalf("host key not equal to account host")
+	}
+}
+
+func TestAccountImport(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	account := Account{
+		Host:    host,
+		PubKey:  hex.EncodeToString(tDexKey.SerializeUncompressed()),
+		PrivKey: hex.EncodeToString(tDexPriv.Serialize()),
+		EncKey:  hex.EncodeToString(tDexPriv.Serialize()),
+		Cert:    hex.EncodeToString([]byte{}),
+		FeeCoin: hex.EncodeToString([]byte("somecoin")),
+	}
+	rig.queueConfig()
+	err := tCore.AccountImport(tPW, account)
+	if err != nil {
+		t.Fatalf("account import error: %v", err)
 	}
 }
 
