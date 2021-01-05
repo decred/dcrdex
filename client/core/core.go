@@ -2722,7 +2722,6 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
 	var accountInfo db.AccountInfo
-
 	accountInfo.Host = account.Host
 	pubKey, err := hex.DecodeString(account.PubKey)
 	if err != nil {
@@ -2750,6 +2749,7 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 	if !c.verifyAccount(&accountInfo) {
 		return fmt.Errorf("Account not verified for host: %s", account.Host)
 	}
+	accountInfo.Paid = c.conns[account.Host].acct.isPaid
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
 		return err

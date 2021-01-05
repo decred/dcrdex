@@ -57,8 +57,7 @@ export default class SettingsPage extends BasePage {
 
     const exchangesDiv = page.exchanges
     var exportAccountButton
-    // eslint-disable-next-line no-unused-vars
-    for (const [host, xc] of Object.entries(app.user.exchanges)) {
+    for (const host of Object.keys(app.user.exchanges)) {
       exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
       Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
     }
@@ -111,7 +110,6 @@ export default class SettingsPage extends BasePage {
     }
     const loaded = app.loading(this.body)
     var res = await postJSON('/api/exportaccount', req)
-    // var res = await getJSON('/api/account' + '?pw=' + pw + '&host=' + host)
     loaded()
     if (!app.checkResponse(res)) {
       page.exportAccountErr.textContent = res.msg
