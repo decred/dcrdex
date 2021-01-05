@@ -123,11 +123,27 @@ func (w *xcWallet) setBalance(bal *WalletBalance) {
 	w.mtx.Unlock()
 }
 
-// setAddress sets the wallet's deposit address.
-func (w *xcWallet) setAddress(addr string) {
+func (w *xcWallet) currentDepositAddress() string {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.address
+}
+
+func (w *xcWallet) refreshDepositAddress() (string, error) {
 	w.mtx.Lock()
+	defer w.mtx.Unlock()
+	if !w.hookedUp {
+		return "", fmt.Errorf("cannot get address from unconnected %s wallet",
+			unbip(w.AssetID))
+	}
+
+	addr, err := w.Address()
+	if err != nil {
+		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
+	}
+
 	w.address = addr
-	w.mtx.Unlock()
+	return addr, nil
 }
 
 // connected is true if the wallet has already been connected.
@@ -137,8 +153,8 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
-// Connect calls the dex.Connector's Connect method and sets the
-// xcWallet.hookedUp flag to true.
+// Connect calls the dex.Connector's Connect method, sets the xcWallet.hookedUp
+// flag to true, and validates the deposit address.
 func (w *xcWallet) Connect(ctx context.Context) error {
 	err := w.connector.Connect(ctx)
 	if err != nil {
@@ -148,11 +164,26 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	w.mtx.Lock()
+	defer w.mtx.Unlock()
+	haveAddress := w.address != ""
+	if haveAddress {
+		haveAddress, err = w.OwnsAddress(w.address)
+		if err != nil {
+			return err
+		}
+	}
+	if !haveAddress {
+		w.address, err = w.Address()
+		if err != nil {
+			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
+		}
+	}
 	w.hookedUp = true
 	w.synced = synced
 	w.syncProgress = progress
-	w.mtx.Unlock()
+
 	return nil
 }
 
