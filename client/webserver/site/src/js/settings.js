@@ -118,9 +118,7 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.exportAccountErr)
       return
     }
-    const accountForExport = JSON.parse(JSON.stringify(res))
-    delete accountForExport.ok
-    delete accountForExport.requestSuccessful
+    const accountForExport = JSON.parse(JSON.stringify(res.account))
     const a = document.createElement('a')
     a.setAttribute('download', 'dcrAccount-' + host + '.json')
     a.setAttribute('href', 'data:application/json,' + JSON.stringify(accountForExport, null, 4))

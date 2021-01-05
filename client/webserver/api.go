@@ -196,14 +196,20 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	accountResponse, err := s.core.AccountExport(form.Pass, form.Host)
+	account, err := s.core.AccountExport(form.Pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error retrieving keys: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
-	accountResponse.OK = true
-	writeJSON(w, accountResponse, s.indent)
+	res := &struct {
+		OK      bool          `json:"ok"`
+		Account *core.Account `json:"account"`
+	}{
+		OK:      true,
+		Account: account,
+	}
+	writeJSON(w, res, s.indent)
 }
 
 // apiAccountImport is the handler for the '/account' API request.
