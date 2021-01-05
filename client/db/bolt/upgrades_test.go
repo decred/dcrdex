@@ -42,26 +42,9 @@ func TestUpgrades(t *testing.T) {
 	}
 	defer os.RemoveAll(d)
 
-	for i, db := range outdatedDBs {
-		archive, err := os.Open(filepath.Join("testdata", db))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer archive.Close()
-		r, err := gzip.NewReader(archive)
-		if err != nil {
-			t.Fatal(err)
-		}
-		dbPath := filepath.Join(d, strings.TrimSuffix(db, ".gz"))
-		dbFile, err := os.Create(dbPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = io.Copy(dbFile, r)
-		dbFile.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
+	for i, archiveName := range outdatedDBs {
+		dbPath, close := unpack(t, archiveName)
+		defer close()
 		db, err := bbolt.Open(dbPath, 0600,
 			&bbolt.Options{Timeout: 1 * time.Second})
 		if err != nil {
@@ -78,9 +61,55 @@ func TestUpgrades(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Upgrade failed: %v", err)
 			}
+
+			var ver uint32
+			err = db.View(func(tx *bbolt.Tx) error {
+				ver, err = getVersionTx(tx)
+				return err
+			})
+			if err != nil {
+				t.Fatalf("Error retrieving version: %v", err)
+			}
+
+			if ver != validator.expVer {
+				t.Fatalf("Wrong version. Expected %d, got %d", validator.expVer, ver)
+			}
+
 			validator.verify(t, db)
 		}
 	}
+}
+
+func TestUpgradeDB(t *testing.T) {
+	runUpgrade := func(archiveName string) error {
+		dbPath, close := unpack(t, archiveName)
+		defer close()
+		dbi, err := NewDB(dbPath, tLogger)
+		if err != nil {
+			return fmt.Errorf("database initialization error: %w", err)
+		}
+		db := dbi.(*BoltDB)
+		err = db.upgradeDB()
+		if err != nil {
+			return fmt.Errorf("upgradeDB error: %v", err)
+		}
+		newVersion, err := db.getVersion()
+		if err != nil {
+			return fmt.Errorf("getVersion error: %v", err)
+		}
+		if newVersion != DBVersion {
+			return fmt.Errorf("DB version not set. Expected %d, got %d", DBVersion, newVersion)
+		}
+		return nil
+	}
+
+	for v, archiveName := range outdatedDBs {
+		err := runUpgrade(archiveName)
+		if err != nil {
+			t.Fatalf("upgrade error for version %d database: %v", v, err)
+		}
+	}
+
 }
 
 func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
@@ -136,4 +165,36 @@ func checkVersion(dbtx *bbolt.Tx, expectedVersion uint32) error {
 			expectedVersion, version)
 	}
 	return nil
+}
+
+func unpack(t *testing.T, db string) (string, func()) {
+	d, err := ioutil.TempDir("", "dcrdex_test_upgrades")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Helper()
+	archive, err := os.Open(filepath.Join("testdata", db))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := gzip.NewReader(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(d, strings.TrimSuffix(db, ".gz"))
+	dbFile, err := os.Create(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = io.Copy(dbFile, r)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dbPath, func() {
+		dbFile.Close()
+		archive.Close()
+	}
 }

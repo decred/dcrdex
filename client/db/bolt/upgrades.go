@@ -56,20 +56,7 @@ func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 // ready for application usage.  If any are, they are performed.
 func (db *BoltDB) upgradeDB() error {
 	var version uint32
-	err := db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(appBucket)
-		if bucket == nil {
-			return fmt.Errorf("appBucket not found")
-		}
-
-		versionB := bucket.Get(versionKey)
-		if versionB == nil {
-			// A nil version indicates a version 0 database.
-			return nil
-		}
-		version = intCoder.Uint32(versionB)
-		return nil
-	})
+	version, err := db.getVersion()
 	if err != nil {
 		return err
 	}
@@ -89,22 +76,35 @@ func (db *BoltDB) upgradeDB() error {
 	return db.Update(func(tx *bbolt.Tx) error {
 		// Execute all necessary upgrades in order.
 		for i, upgrade := range upgrades[version:] {
-			// err := upgrade(tx)
-			// if err != nil {
-			// 	return fmt.Errorf("error upgrading DB: %v", err)
-			// }
-			// // Persist the database version.
-			// err = setDBVersion(tx, uint32(i+1))
-			// if err != nil {
-			// 	return fmt.Errorf("error setting DB version: %v", err)
-			// }
-			err := doUpgrade(tx, upgrade, uint32(i+1))
+			err := doUpgrade(tx, upgrade, version+uint32(i)+1)
 			if err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// Get the currently stored DB version.
+func (db *BoltDB) getVersion() (version uint32, err error) {
+	return version, db.View(func(tx *bbolt.Tx) error {
+		version, err = getVersionTx(tx)
+		return err
+	})
+}
+
+// Get the uint32 stored in the appBucket's versionKey entry.
+func getVersionTx(tx *bbolt.Tx) (uint32, error) {
+	bucket := tx.Bucket(appBucket)
+	if bucket == nil {
+		return 0, fmt.Errorf("appBucket not found")
+	}
+	versionB := bucket.Get(versionKey)
+	if versionB == nil {
+		// A nil version indicates a version 0 database.
+		return 0, nil
+	}
+	return intCoder.Uint32(versionB), nil
 }
 
 func v1Upgrade(dbtx *bbolt.Tx) error {
