@@ -22,10 +22,11 @@ export default class SettingsPage extends BasePage {
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
-      'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm', 'exportKeysHost', 'exportKeysErr',
+      'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
+      'exportAccountHost', 'exportAccountErr',
       // Import Account
       'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
-      'accountFile', 'selectedAccount', 'removeAccount', 'addAccount',
+      'accountFile', 'selectedAccount', 'removeAccount', 'addAccount', 'importAccountErr',
       // Others
       'showPokes'
     ])
@@ -55,14 +56,14 @@ export default class SettingsPage extends BasePage {
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
 
     const exchangesDiv = page.exchanges
-    var exportAccountKeyButton
+    var exportAccountButton
     // eslint-disable-next-line no-unused-vars
     for (const [host, xc] of Object.entries(app.user.exchanges)) {
-      exportAccountKeyButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
-      Doc.bind(exportAccountKeyButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
+      exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+      Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
     }
 
-    Doc.bind(page.importAccount, 'click', () => this.showForm(page.authorizeAccountImportForm))
+    Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
     forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => { this.importAccount() })
 
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
@@ -93,8 +94,8 @@ export default class SettingsPage extends BasePage {
 
   async prepareAccountExport (host, authorizeAccountExportForm) {
     const page = this.page
-    page.exportKeysHost.textContent = host
-    page.exportKeysErr.textContent = ''
+    page.exportAccountHost.textContent = host
+    page.exportAccountErr.textContent = ''
     this.showForm(authorizeAccountExportForm)
   }
 
@@ -102,7 +103,7 @@ export default class SettingsPage extends BasePage {
   async exportAccount () {
     const page = this.page
     const pw = page.exportAccountAppPass.value
-    const host = page.exportKeysHost.textContent
+    const host = page.exportAccountHost.textContent
     page.exportAccountAppPass.value = ''
     const req = {
       pw: pw,
@@ -113,8 +114,8 @@ export default class SettingsPage extends BasePage {
     // var res = await getJSON('/api/account' + '?pw=' + pw + '&host=' + host)
     loaded()
     if (!app.checkResponse(res)) {
-      page.exportKeysErr.textContent = res.msg
-      Doc.show(page.exportKeysErr)
+      page.exportAccountErr.textContent = res.msg
+      Doc.show(page.exportAccountErr)
       return
     }
     const accountForExport = JSON.parse(JSON.stringify(res))
@@ -149,6 +150,12 @@ export default class SettingsPage extends BasePage {
     console.log('testAccountFile')
   }
 
+  async prepareAccountImport (authorizeAccountImportForm) {
+    const page = this.page
+    page.importAccountErr.textContent = ''
+    this.showForm(authorizeAccountImportForm)
+  }
+
   // importAccount imports the account
   async importAccount () {
     const page = this.page
@@ -164,10 +171,23 @@ export default class SettingsPage extends BasePage {
       account: account
     }
     const loaded = app.loading(this.body)
-    postJSON('/api/importaccount', req)
+    const importResponse = await postJSON('/api/importaccount', req)
     loaded()
+    if (!app.checkResponse(importResponse)) {
+      page.importAccountErr.textContent = importResponse.msg
+      Doc.show(page.importAccountErr)
+      return
+    }
+    const loginResponse = await postJSON('/api/login', { pass: pw })
+    if (!app.checkResponse(loginResponse)) {
+      page.importAccountErr.textContent = loginResponse.msg
+      Doc.show(page.importAccountErr)
+      return
+    }
     await app.fetchUser()
     Doc.hide(page.forms)
+    // Initial method of displaying imported account.
+    window.location.reload()
   }
 
   /* showForm shows a modal form with a little animation. */
@@ -267,6 +287,8 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
     await app.fetchUser()
     loaded()
+    // Initial method of displaying added dex.
+    window.location.reload()
   }
 
   /*
