@@ -1037,7 +1037,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	}
 	if !wallet.connected() {
 		c.log.Infof("Connecting wallet for %s", unbip(assetID))
-		err := c.connectWallet(wallet)
+		_, err := c.connectWallet(wallet)
 		if err != nil {
 			return nil, err // core.Error with code connectWalletErr
 		}
@@ -1053,10 +1053,40 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
-func (c *Core) connectWallet(w *xcWallet) error {
-	err := w.Connect(c.ctx)
+// connectWallet connects to wallet and validates the known deposit address
+// after successful connection.
+// If address found & it does not belong to wallet, it generates new address,
+// then updates xcWallet and dbWallet.
+// If connectWallet generates new address then first returned bool will
+// be set to true.
+func (c *Core) connectWallet(w *xcWallet) (generatedNewAddr bool, err error) {
+	err = w.Connect(c.ctx)
 	if err != nil {
-		return codedError(connectWalletErr, err)
+		return false, codedError(connectWalletErr, err)
+	}
+	// If xcWallet has deposit address ensure that it belongs to connected
+	// wallet.
+	w.mtx.RLock()
+	addr := w.address
+	w.mtx.RUnlock()
+	var mine bool
+
+	if addr != "" {
+		mine, err = w.OwnsAddress(addr)
+		if err != nil {
+			return generatedNewAddr, err
+		}
+		// If Existing address doesn't belong to connected wallet,
+		// generate new one.
+		if !mine {
+			nAddr, err := c.newDepositAddress(w)
+			if err != nil {
+				return generatedNewAddr, err
+			}
+			generatedNewAddr = true
+			c.log.Warnf("[%v]: Deposit address %v does not belong to connected wallet"+
+				", generated new address: %v", unbip(w.AssetID), addr, nAddr)
+		}
 	}
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
@@ -1095,14 +1125,14 @@ func (c *Core) connectWallet(w *xcWallet) error {
 			}
 		}()
 	}
-	return nil
+	return generatedNewAddr, nil
 }
 
 // Connect to the wallet if not already connected. Unlock the wallet if not
 // already unlocked.
 func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
 	if !wallet.connected() {
-		err := c.connectWallet(wallet)
+		_, err := c.connectWallet(wallet)
 		if err != nil {
 			return err
 		}
@@ -1251,6 +1281,19 @@ func (c *Core) refreshUser() {
 	c.userMtx.Unlock()
 }
 
+// setUserWalletState updates wallet state on current User.
+func (c *Core) setUserWalletState(state *WalletState) {
+	c.userMtx.Lock()
+	defer c.userMtx.Unlock()
+
+	sa, found := c.user.Assets[state.AssetID]
+	if !found {
+		c.log.Errorf("Unknown asset %d", state.AssetID)
+		return
+	}
+	sa.Wallet = state
+}
+
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	assetID := form.AssetID
@@ -1305,7 +1348,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
 	}
 
-	err = c.connectWallet(wallet)
+	_, err = c.connectWallet(wallet)
 	if err != nil {
 		return err
 	}
@@ -1509,6 +1552,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
 		EncryptedPW: oldWallet.encPW,
+		Address:     oldWallet.address,
 	}
 	if oldWallet.balance != nil {
 		dbWallet.Balance = oldWallet.balance.Balance
@@ -1518,20 +1562,12 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	if err != nil {
 		return newError(walletErr, "error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
+
 	// Must connect to ensure settings are good.
-	err = c.connectWallet(wallet)
+	generatedNewAddress, err := c.connectWallet(wallet)
 	if err != nil {
 		return err
 	}
-	// Get a new address. Definitely want this when the account changes, and
-	// maybe other settings as well.
-	addr, err := wallet.Address()
-	if err != nil {
-		wallet.Disconnect()
-		return newError(addrErr, "error getting wallet address: %v", err)
-	}
-	dbWallet.Address = addr
-	wallet.address = addr
 	if oldWallet.unlocked() {
 		err := unlockWallet(wallet, crypter)
 		if err != nil {
@@ -1539,6 +1575,12 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 			return newError(walletAuthErr, "wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err)
 		}
 	}
+
+	// If connectWallet generated new xcWallet address store it on dbWallet.
+	if generatedNewAddress {
+		dbWallet.Address = wallet.address
+	}
+
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
 		wallet.Disconnect()
@@ -1617,7 +1659,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	// Connect if necessary.
 	wasConnected := wallet.connected()
 	if !wasConnected {
-		if err = c.connectWallet(wallet); err != nil {
+		if _, err = c.connectWallet(wallet); err != nil {
 			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
 		}
 	}
@@ -1660,26 +1702,19 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	return nil
 }
 
-// NewDepositAddress retrieves a new deposit address from the specified wallet
-// and saves it to the database.
-func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
-	w, exists := c.wallet(assetID)
-	if !exists {
-		return "", newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
-	}
-
+// newDepositAddress retrieves a new deposit address from given xcWallet.
+func (c *Core) newDepositAddress(w *xcWallet) (string, error) {
 	if !w.connected() {
-		return "", fmt.Errorf("cannot get address from unconnected %s wallet", unbip(assetID))
+		return "", fmt.Errorf("cannot get address from unconnected %s wallet",
+			unbip(w.AssetID))
 	}
 
 	addr, err := w.Address()
 	if err != nil {
-		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(assetID), err)
+		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 	}
-
-	c.walletMtx.Lock()
-	w.address = addr
-	c.walletMtx.Unlock()
+	// Set xcWallet's new address
+	w.setAddress(addr)
 
 	dbWallet, err := c.db.Wallet(w.dbID)
 	if err != nil {
@@ -1688,14 +1723,25 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	dbWallet.Address = addr
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
-		return "", fmt.Errorf("UpdateWallet error for %s: %w", unbip(assetID), err)
+		return "", fmt.Errorf("UpdateWallet error for %s: %w", unbip(w.AssetID), err)
 	}
-
-	c.refreshUser()
-
-	c.notify(newWalletStateNote(w.state()))
+	// Update wallet state on user struct
+	walletState := w.state()
+	c.setUserWalletState(walletState)
+	c.notify(newWalletStateNote(walletState))
 
 	return addr, nil
+}
+
+// NewDepositAddress retrieves a new deposit address from the specified asset's
+// wallet and saves it to the database.
+func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
+	w, exists := c.wallet(assetID)
+	if !exists {
+		return "", newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return c.newDepositAddress(w)
 }
 
 // AutoWalletConfig attempts to load setting from a wallet package's
@@ -2033,7 +2079,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		go func(wallet *xcWallet) {
 			defer wg.Done()
 			if !wallet.connected() {
-				err := c.connectWallet(wallet)
+				_, err := c.connectWallet(wallet)
 				if err != nil {
 					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 						unbip(wallet.AssetID), err)

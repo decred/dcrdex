@@ -32,6 +32,7 @@ const (
 	methodSendToAddress     = "sendtoaddress"
 	methodSetTxFee          = "settxfee"
 	methodGetWalletInfo     = "getwalletinfo"
+	methodGetAddressInfo    = "getaddressinfo"
 )
 
 // walletClient is a bitcoind wallet RPC client that uses rpcclient.Client's
@@ -225,7 +226,14 @@ func (wc *walletClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
-// call is used internally to  marshal parmeters and send requests to  the RPC
+// GetAddressInfo gets information about the given address by calling
+// getaddressinfo RPC command.
+func (wc *walletClient) GetAddressInfo(address string) (*GetAddressInfoResult, error) {
+	ai := new(GetAddressInfoResult)
+	return ai, wc.call(methodGetAddressInfo, anylist{address}, ai)
+}
+
+// call is used internally to marshal parmeters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
 func (wc *walletClient) call(method string, args anylist, thing interface{}) error {

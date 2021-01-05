@@ -553,6 +553,10 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{}
 }
 
+func (w *TXCWallet) OwnsAddress(address string) (bool, error) {
+	return true, nil
+}
+
 func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return w.connectWG, w.connectErr
 }
@@ -5733,7 +5737,7 @@ func TestWalletSyncing(t *testing.T) {
 		return false, progress, nil
 	}
 
-	err := tCore.connectWallet(dcrWallet)
+	_, err := tCore.connectWallet(dcrWallet)
 	if err != nil {
 		t.Fatalf("connectWallet error: %v", err)
 	}

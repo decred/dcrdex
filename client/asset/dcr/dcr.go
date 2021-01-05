@@ -151,6 +151,7 @@ type rpcClient interface {
 	Disconnected() bool
 	RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error)
 	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
+	ValidateAddress(ctx context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled
@@ -393,6 +394,11 @@ type combinedClient struct {
 	*walletClient
 }
 
+// ValidateAddress disambiguates the node and wallet methods.
+func (cc *combinedClient) ValidateAddress(ctx context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return cc.walletClient.ValidateAddress(ctx, address)
+}
+
 // Check that ExchangeWallet satisfies the Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
@@ -417,7 +423,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
 	}
 	// Beyond this point, only node
-	dcr.node = combinedClient{dcr.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)}
+	dcr.node = &combinedClient{dcr.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)}
 
 	return dcr, nil
 }
@@ -547,6 +553,19 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.shutdown()
 	}()
 	return &wg, nil
+}
+
+// OwnsAddress indicates if an address belongs to the wallet.
+func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
+	a, err := dcrutil.DecodeAddress(address, chainParams)
+	if err != nil {
+		return false, err
+	}
+	va, err := dcr.node.ValidateAddress(dcr.ctx, a)
+	if err != nil {
+		return false, err
+	}
+	return va.IsMine, nil
 }
 
 // Balance should return the total available funds in the wallet. Note that
