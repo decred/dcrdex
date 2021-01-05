@@ -542,7 +542,7 @@ func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return va.IsMine, nil
+	return va.IsMine && dcr.acct == va.Account, nil
 }
 
 // Balance should return the total available funds in the wallet. Note that
