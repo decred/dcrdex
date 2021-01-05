@@ -151,6 +151,7 @@ type rpcClient interface {
 	Disconnected() bool
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
 	WalletInfo() (*walletjson.WalletInfoResult, error)
+	ValidateAddress(address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error)
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -529,6 +530,19 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.shutdown()
 	}()
 	return &wg, nil
+}
+
+// OwnsAddress indicates if an address belongs to the wallet.
+func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
+	a, err := dcrutil.DecodeAddress(address, chainParams)
+	if err != nil {
+		return false, err
+	}
+	va, err := dcr.node.ValidateAddress(a)
+	if err != nil {
+		return false, err
+	}
+	return va.IsMine, nil
 }
 
 // Balance should return the total available funds in the wallet. Note that
