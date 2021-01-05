@@ -905,17 +905,27 @@ func (c *Core) Run(ctx context.Context) {
 	c.ctx = ctx
 	c.initialize()
 	close(c.ready)
-	c.wg.Add(1)
+
+	// The DB starts first and stops last.
+	ctxDB, stopDB := context.WithCancel(context.Background())
+	var dbWG sync.WaitGroup
+	dbWG.Add(1)
 	go func() {
-		defer c.wg.Done()
-		c.db.Run(ctx)
+		defer dbWG.Done()
+		c.db.Run(ctxDB)
 	}()
+
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		c.latencyQ.Run(ctx)
 	}()
 	c.wg.Wait()
+
+	// Stop the DB after dexConnections and other goroutines are done.
+	stopDB()
+	dbWG.Wait()
+
 	c.log.Infof("DEX client core off")
 }
 
