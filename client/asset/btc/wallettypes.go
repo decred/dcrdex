@@ -125,3 +125,8 @@ type GetWalletInfoResult struct {
 	// 	Progress float32 `json:"progress"`
 	// } `json:"scanning"`
 }
+
+// GetAddressInfoResult models the data from the getaddressinfo command.
+type GetAddressInfoResult struct {
+	IsMine bool `json:"ismine"`
+}

@@ -367,6 +367,12 @@ func (c *tRPCClient) WalletInfo() (*walletjson.WalletInfoResult, error) {
 	}, nil
 }
 
+func (c *tRPCClient) ValidateAddress(address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return &walletjson.ValidateAddressWalletResult{
+		IsMine: true,
+	}, nil
+}
+
 func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
 }
