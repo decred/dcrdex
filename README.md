@@ -1,8 +1,8 @@
 # <img src="docs/images/logo_wide_v1.svg" width="250">
 
 [![Build Status](https://github.com/decred/dcrdex/workflows/Build%20and%20Test/badge.svg)](https://github.com/decred/dcrdex/actions)
-[![ISC License](https://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/decred.org/dcrdex)
+[![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](http://copyfree.org)
+[![GoDoc](https://img.shields.io/badge/go.dev-reference-blue.svg?logo=go&logoColor=lightblue)](https://pkg.go.dev/decred.org/dcrdex)
 
 ## What is DEX?
 
