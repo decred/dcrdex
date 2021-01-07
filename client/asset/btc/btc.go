@@ -111,14 +111,14 @@ var (
 			Description: "This is the highest network fee rate you are willing to " +
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: sats/byte",
+				"wallet.  Units: BTC/kB",
 			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "redeemconftarget",
 			DisplayName: "Redeem confirmation target",
 			Description: "The target number of blocks for the redeem transaction " +
-				"to get a confirmation. Used to set the transaction's fee rate. " +
+				"to be mined. Used to set the transaction's fee rate. " +
 				"(default: 2 blocks)",
 			DefaultValue: defaultRedeemConfTarget,
 		},

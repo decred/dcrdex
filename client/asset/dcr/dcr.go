@@ -113,7 +113,7 @@ var (
 			Description: "This is the highest network fee rate you are willing to " +
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: atoms/byte",
+				"wallet.  Units: DCR/kB",
 			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
