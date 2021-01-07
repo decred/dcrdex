@@ -54,16 +54,22 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	return nil
 }
 
-// refreshUnlock checks that the wallet is unlocked, and if not, uses the cached
-// password to attempt unlocking. If the wallet is not encrypted (no encPW set)
-// or the decrypted password is not cached, a non-nil error is returned. A
-// non-nil error may also be returned if the cached password fails to unlock the
-// wallet, in which case unlockAttempted will be true.
+// refreshUnlock is used to ensure the wallet is unlocked. If the wallet backend
+// reports as already unlocked, which includes a wallet with no password
+// protection, no further action is taken and a nil error is returned. If the
+// wallet is reporting as locked, and the wallet is not known to be password
+// protected (no encPW set) or the decrypted password is not cached, a non-nil
+// error is returned. If no encrypted password is set, the xcWallet is
+// misconfigured and should be recreated. If the decrypted password is not
+// stored, the Unlock method should be used to decrypt the password. Finally, a
+// non-nil error will be returned if the cached password fails to unlock the
+// wallet, in which case unlockAttempted will also be true.
 func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
-	// Check if the wallet is already unlocked.
+	// Check if the wallet backend is already unlocked.
 	if !w.Locked() {
-		return false, nil
+		return false, nil // unlocked
 	}
+	// Locked backend requires both encrypted and decrypted passwords.
 	if len(w.encPW) == 0 {
 		return false, fmt.Errorf("%s wallet reporting as locked but no password has been set", unbip(w.AssetID))
 	}
