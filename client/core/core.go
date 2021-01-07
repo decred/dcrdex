@@ -1582,9 +1582,13 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	newPasswordSet := newWalletPW != nil // INcludes empty but non-nil
 	// If newWalletPW is non-nil, update the wallet's password.
 	if newPasswordSet {
-		encPW, err := crypter.Encrypt(newWalletPW) // TODO: not correct if string(newWalletPW) == ""
-		if err != nil {
-			return newError(encryptionErr, "encryption error: %v", err)
+		// Encrypt password if it's not an empty string
+		encPW := newWalletPW
+		if string(newWalletPW) != "" {
+			encPW, err = crypter.Encrypt(newWalletPW)
+			if err != nil {
+				return newError(encryptionErr, "encryption error: %v", err)
+			}
 		}
 		err = c.setWalletPassword(wallet, newWalletPW, encPW)
 		if err != nil {
@@ -1747,14 +1751,15 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW, encNewPW []byte) error
 			return newError(authErr,
 				"setWalletPassword unlocking wallet error, is the new password correct?: %v", err)
 		}
+		wallet.encPW = encNewPW
+	} else {
+		wallet.encPW = nil
 	}
 
-	err := c.db.SetWalletPassword(wallet.dbID, encNewPW)
+	err := c.db.SetWalletPassword(wallet.dbID, wallet.encPW)
 	if err != nil {
 		return codedError(dbErr, err)
 	}
-
-	wallet.encPW = encNewPW
 
 	details := fmt.Sprintf("Password for %s wallet has been updated.",
 		unbip(wallet.AssetID))
