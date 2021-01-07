@@ -617,7 +617,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 
 	if !tunnel.Running() {
 		mktName, _ := dex.MarketName(cancel.Base, cancel.Quote)
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders", mktName)
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market closed to new orders: %s", mktName)
 	}
 
 	if len(cancel.TargetID) != order.OrderIDSize {
@@ -627,7 +627,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	copy(targetID[:], cancel.TargetID)
 
 	if !tunnel.Cancelable(targetID) {
-		return msgjson.NewError(msgjson.OrderParameterError, "target order not known")
+		return msgjson.NewError(msgjson.OrderParameterError, "target order not known: %v", targetID)
 	}
 
 	// Check that OrderType is set correctly
