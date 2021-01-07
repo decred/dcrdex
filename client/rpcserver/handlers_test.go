@@ -993,9 +993,9 @@ func TestParseCoreOrder(t *testing.T) {
     "settled": 100000000,
     "status": "booked",
     "tif": "standing",
- 		"matches": [                                                                                                                                                                                 
-			{                                                                                                                                                                                                         
-      	"matchID": "992f15e89bbd670663b690b4da4a859609d83866e200f3c4cd5c916442b8ea46",                                                                                                                             
+    "matches": [                                                                                                                                                                                 
+      {                                                                                                                                                                                                         
+        "matchID": "992f15e89bbd670663b690b4da4a859609d83866e200f3c4cd5c916442b8ea46",                                                                                                                             
         "status": "MatchComplete",                                                                                                                                                                                 
         "revoked": false,                                                                                                                                                                                                     
         "rate": 200000000,
@@ -1011,7 +1011,7 @@ func TestParseCoreOrder(t *testing.T) {
         "isCancel": false
      	},
       {
-      	"matchID": "69d7453d8ad3b52851c2c9925499a1b158301e8a08da594428ef0ad4cd6fd3a5",
+        "matchID": "69d7453d8ad3b52851c2c9925499a1b158301e8a08da594428ef0ad4cd6fd3a5",
         "status": "MakerSwapCast",
         "revoked": false,
         "rate": 200000000,
@@ -1025,7 +1025,7 @@ func TestParseCoreOrder(t *testing.T) {
         "refund": "",
         "tamp": 0,
         "isCancel": false
-			}
+      }
     ]
   }`
 	coreOrder := new(core.Order)

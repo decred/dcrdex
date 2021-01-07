@@ -826,8 +826,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     sell (bool): Whether the order is selling.
     base (int): The BIP-44 coin index for the market's base asset.
     quote (int): The BIP-44 coin index for the market's quote asset.
-    qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
-    rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
+    qty (int): The number of units to buy/sell. Must be a multiple of the lot siz          rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
       156000 satoshi/DCR for the DCR(base)_BTC(quote).
     immediate (bool): Require immediate match. Do not book the order.`,
 		returns: `Returns:
@@ -948,6 +947,24 @@ Registration is complete after the fee transaction has been confirmed.`,
       "canceled" (bool): Whether this order has been canceled.
       "tif" (string): "immediate" if this limit order will only match for one epoch.
         "standing" if the order can continue matching until filled or cancelled.
+			"matches": (array): An array of matches associated with the order.
+			[
+        {
+          "matchID (string): The match's ID."
+          "status" (string): The match's status."
+          "revoked" (bool): Indicates if match was revoked.
+          "rate"    (int): The match's rate.
+					"qty"     (int): The match's amount.
+          "side"    (string): The match's side, "maker" or "taker".
+          "feerate" (int): The match's fee rate.
+          "swap"    (string): The match's swap transaction.
+          "counterSwap" (string): The match's counter swap transaction.
+          "refund" (string): The match's refund transaction.
+          "stamp" (int): The match's stamp.
+          "isCancel" (bool): Indicates if match is canceled.
+        },
+        ....
+      ]
     },...
   ]`,
 	},
