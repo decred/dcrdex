@@ -4836,11 +4836,17 @@ func TestSetWalletPassword(t *testing.T) {
 	newPW := []byte("def")
 	var assetID uint32 = 54321
 
-	// Password error
+	// Nil password error
+	err := tCore.SetWalletPassword(tPW, assetID, nil)
+	if !errorHasCode(err, passwordErr) {
+		t.Fatalf("wrong error for nil password error: %v", err)
+	}
+
+	// Auth error
 	rig.crypter.recryptErr = tErr
-	err := tCore.SetWalletPassword(tPW, assetID, newPW)
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
 	if !errorHasCode(err, authErr) {
-		t.Fatalf("wrong error for password error: %v", err)
+		t.Fatalf("wrong error for auth error: %v", err)
 	}
 	rig.crypter.recryptErr = nil
 

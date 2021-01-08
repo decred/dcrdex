@@ -1678,7 +1678,13 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 }
 
 // SetWalletPassword updates the (encrypted) password for the wallet.
+// Return passwordErr is provided newPW is nil.
 func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error {
+	// Ensure newPW isn't nil.
+	if newPW == nil {
+		return newError(passwordErr, "SetWalletPassword password can't be nil")
+	}
+
 	// Check the app password and get the crypter.
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
@@ -1693,12 +1699,10 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
 	}
 
-	isSettingNewPW := newPW != nil // includes empty but non-nil
-	if isSettingNewPW {
-		err = c.setWalletPassword(wallet, newPW, crypter)
-		if err != nil {
-			return err
-		}
+	// Set new password.
+	err = c.setWalletPassword(wallet, newPW, crypter)
+	if err != nil {
+		return err
 	}
 
 	return nil
