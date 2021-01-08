@@ -1579,9 +1579,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 			assetID, unbip(assetID), err)
 	}
 
-	newPasswordSet := newWalletPW != nil // Includes empty but non-nil
+	isSettingNewPW := newWalletPW != nil // Includes empty but non-nil
 	// If newWalletPW is non-nil, update the wallet's password.
-	if newPasswordSet {
+	if isSettingNewPW {
 		err = c.setWalletPassword(wallet, newWalletPW, crypter)
 		if err != nil {
 			return err
@@ -1598,7 +1598,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	// regardless of backend lock state. loadWallet already copied encPW, so
 	// this will decrypt pw rather than actually copying it, and it will
 	// ensure the backend is also unlocked.
-	if !newPasswordSet && oldWallet.locallyUnlocked() {
+	if !isSettingNewPW && oldWallet.locallyUnlocked() {
 		err := wallet.Unlock(crypter)
 		if err != nil {
 			wallet.Disconnect()
@@ -1685,8 +1685,6 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(authErr, "SetWalletPassword password error: %v", err)
 	}
 
-	newPasswordSet := len(newPW) > 0 // excludes empty but non-nil
-
 	// Check that the specified wallet exists.
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()
@@ -1695,7 +1693,8 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
 	}
 
-	if newPasswordSet {
+	isSettingNewPW := newPW != nil // includes empty but non-nil
+	if isSettingNewPW {
 		err = c.setWalletPassword(wallet, newPW, crypter)
 		if err != nil {
 			return err
