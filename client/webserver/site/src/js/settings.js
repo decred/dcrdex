@@ -56,9 +56,8 @@ export default class SettingsPage extends BasePage {
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
 
     const exchangesDiv = page.exchanges
-    var exportAccountButton
     for (const host of Object.keys(app.user.exchanges)) {
-      exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+      const exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
       Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
     }
 
@@ -109,7 +108,7 @@ export default class SettingsPage extends BasePage {
       host: host
     }
     const loaded = app.loading(this.body)
-    var res = await postJSON('/api/exportaccount', req)
+    const res = await postJSON('/api/exportaccount', req)
     loaded()
     if (!app.checkResponse(res)) {
       page.exportAccountErr.textContent = res.msg
