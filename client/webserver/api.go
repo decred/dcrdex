@@ -421,7 +421,7 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update wallet settings
+	// Update wallet settings.
 	err := s.core.ReconfigureWallet(form.AppPW, form.NewWalletPW, form.AssetID,
 		form.Config)
 	if err != nil {
