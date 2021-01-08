@@ -1678,7 +1678,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 }
 
 // SetWalletPassword updates the (encrypted) password for the wallet.
-// Returns passwordErr is provided newPW is nil.
+// Returns passwordErr if provided newPW is nil.
 func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error {
 	// Ensure newPW isn't nil.
 	if newPW == nil {
