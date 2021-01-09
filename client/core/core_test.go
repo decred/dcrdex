@@ -2281,6 +2281,41 @@ func TestAccountExport(t *testing.T) {
 	}
 }
 
+func TestAccountExportPasswordError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	rig.crypter.recryptErr = tErr
+	_, err := tCore.AccountExport(tPW, host)
+	if err == nil {
+		t.Fatalf("expected password error")
+	}
+}
+
+func TestAccountExportAddressError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := "bad"
+	_, err := tCore.AccountExport(tPW, host)
+	if err == nil {
+		t.Fatalf("expected password error")
+	}
+}
+
+func TestAccountExportUnknowDEX(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	// Lose the dexConnection
+	tCore.connMtx.Lock()
+	delete(tCore.conns, tDexHost)
+	tCore.connMtx.Unlock()
+	_, err := tCore.AccountExport(tPW, host)
+	if err == nil {
+		t.Fatalf("expected unknown dex error")
+	}
+}
+
 func TestAccountImport(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
