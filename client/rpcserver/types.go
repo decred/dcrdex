@@ -60,24 +60,24 @@ type myOrdersResponse []*myOrder
 
 // myOrder represents an order when responding to the myorders route.
 type myOrder struct {
-	Host        string  `json:"host"`
-	MarketName  string  `json:"marketName"`
-	BaseID      uint32  `json:"baseID"`
-	QuoteID     uint32  `json:"quoteID"`
-	ID          string  `json:"id"`
-	Type        string  `json:"type"`
-	Sell        bool    `json:"sell"`
-	Stamp       uint64  `json:"stamp"`
-	Age         string  `json:"age"`
-	Rate        uint64  `json:"rate,omitempty"`
-	Quantity    uint64  `json:"quantity"`
-	Filled      uint64  `json:"filled"`
-	Settled     uint64  `json:"settled"`
-	Status      string  `json:"status"`
-	Cancelling  bool    `json:"cancelling,omitempty"`
-	Canceled    bool    `json:"canceled,omitempty"`
-	TimeInForce string  `json:"tif,omitempty"`
-	Matches     []match `json:"matches,omitempty"`
+	Host        string   `json:"host"`
+	MarketName  string   `json:"marketName"`
+	BaseID      uint32   `json:"baseID"`
+	QuoteID     uint32   `json:"quoteID"`
+	ID          string   `json:"id"`
+	Type        string   `json:"type"`
+	Sell        bool     `json:"sell"`
+	Stamp       uint64   `json:"stamp"`
+	Age         string   `json:"age"`
+	Rate        uint64   `json:"rate,omitempty"`
+	Quantity    uint64   `json:"quantity"`
+	Filled      uint64   `json:"filled"`
+	Settled     uint64   `json:"settled"`
+	Status      string   `json:"status"`
+	Cancelling  bool     `json:"cancelling,omitempty"`
+	Canceled    bool     `json:"canceled,omitempty"`
+	TimeInForce string   `json:"tif,omitempty"`
+	Matches     []*match `json:"matches,omitempty"`
 }
 
 // match represents a match on an order. An order may have many matches.

@@ -450,15 +450,15 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	// matchesParser parses core.Match slice & calculates how much of the order
 	// has been settled/finalized.
-	matchesParser := func(matches []*core.Match) (ms []match, settled uint64) {
-		ms = make([]match, 0, len(matches))
+	parseMatches := func(matches []*core.Match) (ms []*match, settled uint64) {
+		ms = make([]*match, 0, len(matches))
 		for _, m := range matches {
-			// Sum up settled value
+			// Sum up settled value.
 			if (m.Side == order.Maker && m.Status >= order.MakerRedeemed) ||
 				(m.Side == order.Taker && m.Status >= order.MatchComplete) {
 				settled += m.Qty
 			}
-			match := match{
+			match := &match{
 				MatchID:  m.MatchID.String(),
 				Status:   m.Status.String(),
 				Revoked:  m.Revoked,
@@ -469,21 +469,18 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 				Stamp:    m.Stamp,
 				IsCancel: m.IsCancel,
 			}
-			if m.Swap != nil {
-				match.Swap = m.Swap.StringID
+			// coinSafeString gets the Coin's StringID safely.
+			coinSafeString := func(c *core.Coin) string {
+				if c == nil {
+					return ""
+				}
+				return c.StringID
 			}
-			if m.CounterSwap != nil {
-				match.CounterSwap = m.CounterSwap.StringID
-			}
-			if m.Redeem != nil {
-				match.Redeem = m.Redeem.StringID
-			}
-			if m.CounterRedeem != nil {
-				match.CounterRedeem = m.CounterRedeem.StringID
-			}
-			if m.Refund != nil {
-				match.Refund = m.Refund.StringID
-			}
+			match.Swap = coinSafeString(m.Swap)
+			match.CounterSwap = coinSafeString(m.CounterSwap)
+			match.Redeem = coinSafeString(m.Redeem)
+			match.CounterRedeem = coinSafeString(m.CounterRedeem)
+			match.Refund = coinSafeString(m.Refund)
 			ms = append(ms, match)
 		}
 		return ms, settled
@@ -515,7 +512,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	}
 
 	// Parese matches & calculate settled value
-	o.Matches, o.Settled = matchesParser(co.Matches)
+	o.Matches, o.Settled = parseMatches(co.Matches)
 
 	return o
 }
@@ -959,11 +956,12 @@ Registration is complete after the fee transaction has been confirmed.`,
           "feerate" (int): The match's fee rate.
           "swap"    (string): The match's swap transaction.
           "counterSwap" (string): The match's counter swap transaction.
+          "redeem" (string): The match's redeem transaction.
+          "counterRedeem" (string): The match's counter redeem transaction.
           "refund" (string): The match's refund transaction.
           "stamp" (int): The match's stamp.
           "isCancel" (bool): Indicates if match is canceled.
-        },
-        ....
+        },...
       ]
     },...
   ]`,
