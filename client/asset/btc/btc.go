@@ -461,7 +461,6 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating BTC ExchangeWallet: %v", err)
 	}
-	btc.client = client
 
 	return btc, nil
 }

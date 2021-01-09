@@ -497,8 +497,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
-
+func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
 	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
@@ -821,7 +820,7 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // needed value. Preference is given to selecting coins with 1 or more confs,
 // falling back to 0-conf coins where there are not enough 1+ confs coins.
 func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
-	coins asset.Coins, redeemScripts []dex.Bytes, sum, size uint64, spents []*fundingCoin, err error) {
+	coins asset.Coins, redeemScripts []dex.Bytes, sum, size uint64, err error) {
 
 	// Keep a consistent view of spendable and locked coins in the wallet and
 	// the fundingCoins map to make this safe for concurrent use.
@@ -970,7 +969,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
-func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64, fundingCoins []*fundingCoin, nfo *dex.Asset) (asset.Coins, bool, error) {
+func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.

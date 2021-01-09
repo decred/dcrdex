@@ -1449,19 +1449,6 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating wallet: %w", err)
 	}
-	// Parse fee rate limit
-	// NOTE We parse fee rate limit 'feeratelimit' settings and store it on xcWallet
-	// unlike other settings which are being configured and set on each asset's
-	// ExchangeWallet instance (see above asset.Setup call) as it required on
-	// order placement time
-	feeLimit := walletCfg.Settings["feeratelimit"]
-	if feeLimit != "" {
-		uintLimit, err := strconv.ParseUint(feeLimit, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		wallet.feeRateLimit = uintLimit
-	}
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
@@ -1478,7 +1465,6 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		address: dbWallet.Address,
 		dbID:    dbWallet.ID(),
 	}, nil
-	wallet.Wallet = w
 }
 
 // WalletState returns the *WalletState for the asset ID.
