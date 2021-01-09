@@ -21,7 +21,9 @@ const (
 	defaultFee = 10
 	// defaultFeeRateLimit is the default value for the feeratelimit.
 	defaultFeeRateLimit = 100
-	minNetworkVersion   = 180100
+	// smallest unit is 1/1e8 LTC
+	smallestUnit      = 1e8
+	minNetworkVersion = 180100
 )
 
 var (
@@ -58,7 +60,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: defaultFee * 1000 / smallestUnit,
 		},
 		{
 			Key:         "feeratelimit",
@@ -67,7 +69,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: LTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
 		},
 		{
 			Key:          "redeemconftarget",
@@ -143,17 +145,18 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "19443",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:          cfg,
-		MinNetworkVersion:  minNetworkVersion,
-		WalletInfo:         WalletInfo,
-		Symbol:             "ltc",
-		Logger:             logger,
-		Network:            network,
-		ChainParams:        params,
-		Ports:              ports,
-		DefaultFallbackFee: defaultFee,
-		LegacyBalance:      true,
-		Segwit:             false,
+		WalletCFG:           cfg,
+		MinNetworkVersion:   minNetworkVersion,
+		WalletInfo:          WalletInfo,
+		Symbol:              "ltc",
+		Logger:              logger,
+		Network:             network,
+		ChainParams:         params,
+		Ports:               ports,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		LegacyBalance:       true,
+		Segwit:              false,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

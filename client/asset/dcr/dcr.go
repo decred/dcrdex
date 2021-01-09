@@ -52,6 +52,8 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 1
+	// Smallest unit is 1 atom = 1e8 DCR.
+	smallestUnit = 1e8
 
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
@@ -105,7 +107,7 @@ var (
 			DisplayName: "Fallback fee rate",
 			Description: "The fee rate to use for fee payment and withdrawals when " +
 				"estimatesmartfee is not available. Units: DCR/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: defaultFee * 1000 / smallestUnit,
 		},
 		{
 			Key:         "feeratelimit",
@@ -114,7 +116,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: DCR/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -431,7 +433,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	dcr := unconnectedWallet(cfg, walletCfg, logger)
+	dcr, err := unconnectedWallet(cfg, walletCfg, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
@@ -448,7 +453,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a node. The node should
 // be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) *ExchangeWallet {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -458,7 +463,13 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
 	// If set in the user config, the fee rate limit will be in units of DCR/KB.
-	// Convert to atoms/byte.
+	// Ensure value isn't smaller than smallest unit & convert to atoms/byte.
+	if dcrCfg.FeeRateLimit != 0 &&
+		// Reject rate < 1e-5
+		dcrCfg.FeeRateLimit < 1/(smallestUnit/1000) {
+		return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+			dcrCfg.FeeRateLimit)
+	}
 	feesLimitPerByte := toAtoms(dcrCfg.FeeRateLimit / 1000)
 	if feesLimitPerByte == 0 {
 		feesLimitPerByte = defaultFeeRateLimit
@@ -481,7 +492,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
-	}
+	}, nil
 }
 
 // newClient attempts to create a new websocket connection to a dcrwallet
@@ -2608,7 +2619,7 @@ func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing int
 
 // Convert the DCR value to atoms.
 func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * smallestUnit))
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.

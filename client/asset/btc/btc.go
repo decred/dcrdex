@@ -53,6 +53,7 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
+	smallestUnit            = 1e8
 
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015
@@ -103,7 +104,7 @@ var (
 			DisplayName: "Fallback fee rate",
 			Description: "The fee rate to use for fee payment and withdrawals when" +
 				" estimatesmartfee is not available. Units: BTC/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: defaultFee * 1000 / smallestUnit,
 		},
 		{
 			Key:         "feeratelimit",
@@ -112,7 +113,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -435,7 +436,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 	// Read the configuration parameters
-	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings,
+		cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
 		return nil, err
 	}
@@ -451,14 +453,20 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		Pass:         btcCfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC RPC client: %w", err)
+		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	return newWallet(cfg, btcCfg, client), nil
+	btc, err := newWallet(cfg, btcCfg, client)
+	if err != nil {
+		return nil, fmt.Errorf("error creating BTC ExchangeWallet: %v", err)
+	}
+	btc.client = client
+
+	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -469,7 +477,13 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		fallbackFeesPerByte, cfg.WalletInfo.Units)
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
-	// Convert to sats/byte.
+	// Ensure value isn't smaller than smallest unit & convert to sats/byte.
+	if btcCfg.FeeRateLimit != 0 &&
+		// Reject rate < 1e-5
+		btcCfg.FeeRateLimit < 1/(smallestUnit/1000) {
+		return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+			btcCfg.FeeRateLimit)
+	}
 	feesLimitPerByte := toSatoshi(btcCfg.FeeRateLimit / 1000)
 	if feesLimitPerByte == 0 {
 		feesLimitPerByte = cfg.DefaultFeeRateLimit
@@ -499,7 +513,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
 		walletInfo:          cfg.WalletInfo,
-	}
+	}, nil
 }
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
@@ -2421,7 +2435,7 @@ func (btc *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 
 // Convert the BTC value to satoshi.
 func toSatoshi(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * smallestUnit))
 }
 
 // blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime

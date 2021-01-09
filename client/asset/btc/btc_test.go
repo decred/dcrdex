@@ -141,8 +141,6 @@ func newTRPCClient() *tRPCClient {
 
 func (c *tRPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
-	//fmt.Println((float64(optimalFeeRate) * 1e-5) - optimalRate)
-	//fmt.Println(uint64(math.Round(feefloat * 1e5)))
 	return &btcjson.EstimateSmartFeeResult{
 		Blocks:  2,
 		FeeRate: &optimalRate,
