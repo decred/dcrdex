@@ -452,6 +452,13 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	// has been settled/finalized.
 	parseMatches := func(matches []*core.Match) (ms []*match, settled uint64) {
 		ms = make([]*match, 0, len(matches))
+		// coinSafeString gets the Coin's StringID safely.
+		coinSafeString := func(c *core.Coin) string {
+			if c == nil {
+				return ""
+			}
+			return c.StringID
+		}
 		for _, m := range matches {
 			// Sum up settled value.
 			if (m.Side == order.Maker && m.Status >= order.MakerRedeemed) ||
@@ -469,13 +476,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 				Stamp:    m.Stamp,
 				IsCancel: m.IsCancel,
 			}
-			// coinSafeString gets the Coin's StringID safely.
-			coinSafeString := func(c *core.Coin) string {
-				if c == nil {
-					return ""
-				}
-				return c.StringID
-			}
+
 			match.Swap = coinSafeString(m.Swap)
 			match.CounterSwap = coinSafeString(m.CounterSwap)
 			match.Redeem = coinSafeString(m.Redeem)
