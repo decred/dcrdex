@@ -53,7 +53,8 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
-	smallestUnit            = 1e8
+	// Smallest unit is 1 satoshi = 1e-8 BTC
+	smallestUnit = 1e8
 
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015

@@ -21,7 +21,7 @@ const (
 	defaultFee = 10
 	// defaultFeeRateLimit is the default value for the feeratelimit.
 	defaultFeeRateLimit = 100
-	// smallest unit is 1/1e8 LTC
+	// Smallest unit is 1/1e-8 LTC
 	smallestUnit      = 1e8
 	minNetworkVersion = 180100
 )

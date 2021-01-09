@@ -52,7 +52,7 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 1
-	// Smallest unit is 1 atom = 1e8 DCR.
+	// Smallest unit is 1 atom = 1e-8 DCR.
 	smallestUnit = 1e8
 
 	// splitTxBaggage is the total number of additional bytes associated with
