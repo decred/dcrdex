@@ -376,7 +376,7 @@ func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutR
 	}
 }
 
-func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
+func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 	if segwit {
 		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
@@ -400,7 +400,11 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet := newWallet(cfg, &dexbtc.Config{}, client)
+	wallet, err := newWallet(cfg, &dexbtc.Config{}, client)
+	if err != nil {
+		shutdown()
+		return nil, nil, nil, err
+	}
 	// Initialize the best block.
 	bestHash, _ := client.GetBestBlockHash() // does not return error
 	wallet.tipMtx.Lock()
@@ -408,7 +412,7 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func()) {
 	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
-	return wallet, client, shutdown
+	return wallet, client, shutdown, nil
 }
 
 func mustMarshal(t *testing.T, thing interface{}) []byte {
@@ -437,8 +441,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestAvailableFund(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
@@ -760,15 +767,18 @@ func (c *tCoin) Value() uint64                                 { return 100 }
 func (c *tCoin) Confirmations(context.Context) (uint32, error) { return 2, nil }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Test it with the local output type.
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, 1),
 	}
 	node.rawRes[methodLockUnspent] = []byte(`true`)
-	err := wallet.ReturnCoins(coins)
+	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with output type coins: %v", err)
 	}
@@ -795,8 +805,11 @@ func TestReturnCoins(t *testing.T) {
 }
 
 func TestFundingCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	vout := uint32(123)
 	coinID := toCoinID(tTxHash, vout)
@@ -890,8 +903,11 @@ func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees,
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(false)
+	wallet, node, shutdown, err := tNewWallet(false)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
@@ -949,7 +965,7 @@ func TestFundEdges(t *testing.T) {
 	estFeeReduction := swapSize * estFeeRate
 	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
 
-	_, _, err := wallet.FundOrder(ord)
+	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
@@ -1102,8 +1118,11 @@ func TestFundEdges(t *testing.T) {
 }
 
 func TestFundEdgesSegwit(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
@@ -1160,7 +1179,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	estFeeReduction := swapSize * estFeeRate
 	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
 
-	_, _, err := wallet.FundOrder(ord)
+	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
 	}
@@ -1220,8 +1239,11 @@ func TestSwap(t *testing.T) {
 }
 
 func testSwap(t *testing.T, segwit bool) {
-	wallet, node, shutdown := tNewWallet(segwit)
+	wallet, node, shutdown, err := tNewWallet(segwit)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, toSatoshi(3)),
@@ -1349,8 +1371,11 @@ func TestRedeem(t *testing.T) {
 }
 
 func testRedeem(t *testing.T, segwit bool) {
-	wallet, node, shutdown := tNewWallet(segwit)
+	wallet, node, shutdown, err := tNewWallet(segwit)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := toSatoshi(5)
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -1467,8 +1492,11 @@ func testRedeem(t *testing.T, segwit bool) {
 }
 
 func TestSignMessage(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	vout := uint32(5)
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
@@ -1565,8 +1593,11 @@ func TestAuditContract(t *testing.T) {
 }
 
 func testAuditContract(t *testing.T, segwit bool) {
-	wallet, node, shutdown := tNewWallet(segwit)
+	wallet, node, shutdown, err := tNewWallet(segwit)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	vout := uint32(5)
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
@@ -1669,7 +1700,10 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet := newWallet(cfg, &dexbtc.Config{}, node)
+	wallet, err := newWallet(cfg, &dexbtc.Config{}, node)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
 
 	contractHeight := node.GetBestBlockHeight() + 1
@@ -1826,8 +1860,11 @@ func TestRefund(t *testing.T) {
 }
 
 func testRefund(t *testing.T, segwit bool) {
-	wallet, node, shutdown := tNewWallet(segwit)
+	wallet, node, shutdown, err := tNewWallet(segwit)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -1936,13 +1973,16 @@ func testRefund(t *testing.T, segwit bool) {
 }
 
 func TestLockUnlock(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// just checking that the errors come through.
 	node.rawRes[methodUnlock] = mustMarshal(t, true)
 	node.rawRes[methodLockUnspent] = []byte(`true`)
-	err := wallet.Unlock("pass")
+	err = wallet.Unlock("pass")
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
@@ -1973,7 +2013,11 @@ const (
 )
 
 func testSender(t *testing.T, senderType tSenderType) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
+	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	sender := func(addr string, val uint64) (asset.Coin, error) {
 		return wallet.PayFee(addr, val)
 	}
@@ -1982,7 +2026,6 @@ func testSender(t *testing.T, senderType tSenderType) {
 			return wallet.Withdraw(addr, val)
 		}
 	}
-	defer shutdown()
 	addr := tP2PKHAddr
 	fee := float64(1) // BTC
 	node.rawRes[methodSetTxFee] = mustMarshal(t, true)
@@ -2010,7 +2053,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	_, err := sender(addr, toSatoshi(fee))
+	_, err = sender(addr, toSatoshi(fee))
 	if err != nil {
 		t.Fatalf("PayFee error: %v", err)
 	}
@@ -2047,8 +2090,11 @@ func TestWithdraw(t *testing.T) {
 }
 
 func TestConfirmations(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	coinID := make([]byte, 36)
 	copy(coinID[:32], tTxHash[:])
@@ -2108,8 +2154,11 @@ func TestSendEdges(t *testing.T) {
 }
 
 func testSendEdges(t *testing.T, segwit bool) {
-	wallet, node, shutdown := tNewWallet(segwit)
+	wallet, node, shutdown, err := tNewWallet(segwit)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const feeRate uint64 = 3
 
@@ -2188,8 +2237,11 @@ func testSendEdges(t *testing.T, segwit bool) {
 }
 
 func TestSyncStatus(t *testing.T) {
-	wallet, node, shutdown := tNewWallet(false)
+	wallet, node, shutdown, err := tNewWallet(false)
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	node.rawRes[methodGetBlockchainInfo] = mustMarshal(t, &getBlockchainInfoResult{
 		Headers: 100,
 		Blocks:  99,

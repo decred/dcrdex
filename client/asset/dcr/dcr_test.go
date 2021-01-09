@@ -141,7 +141,7 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 	}
 }
 
-func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
+func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
 		Settings: map[string]string{
@@ -150,7 +150,11 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet := unconnectedWallet(walletCfg, &Config{}, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &Config{}, tLogger)
+	if err != nil {
+		shutdown()
+		return nil, nil, nil, err
+	}
 	wallet.node = client
 	wallet.ctx = walletCtx
 
@@ -161,7 +165,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 
 	go wallet.monitorBlocks(walletCtx)
 
-	return wallet, client, shutdown
+	return wallet, client, shutdown, nil
 }
 
 func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
@@ -509,8 +513,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestAvailableFund(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
@@ -810,14 +817,17 @@ func (c *tCoin) Value() uint64                                     { return 100 
 func (c *tCoin) Confirmations(ctx context.Context) (uint32, error) { return 2, nil }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Test it with the local output type.
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, 1, wire.TxTreeRegular),
 	}
-	err := wallet.ReturnCoins(coins)
+	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with output type coins: %v", err)
 	}
@@ -862,8 +872,11 @@ func TestReturnCoins(t *testing.T) {
 }
 
 func TestFundingCoins(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	vout := uint32(123)
 	coinID := toCoinID(tTxHash, vout)
@@ -948,8 +961,11 @@ func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees,
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := uint64(1e8)
 	lots := swapVal / tDCR.LotSize
 	var estFeeRate uint64 = optimalFeeRate + 1 // +1 added in feeRate
@@ -996,7 +1012,7 @@ func TestFundEdges(t *testing.T) {
 	estFeeReduction := swapSize * estFeeRate
 	checkMax(lots-1, swapVal-tDCR.LotSize, fees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+fees-1)
 
-	_, _, err := wallet.FundOrder(ord)
+	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
@@ -1083,8 +1099,11 @@ func TestFundEdges(t *testing.T) {
 }
 
 func TestSwap(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := toAtoms(5)
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
@@ -1207,8 +1226,11 @@ func (ai *TAuditInfo) Contract() dex.Bytes   { return nil }
 func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
 func TestRedeem(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	swapVal := toAtoms(5)
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -1325,8 +1347,11 @@ const (
 )
 
 func TestSignMessage(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	vout := uint32(5)
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
@@ -1348,7 +1373,6 @@ func TestSignMessage(t *testing.T) {
 		},
 	}
 
-	var err error
 	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
@@ -1411,8 +1435,11 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	vout := uint32(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
@@ -1481,8 +1508,11 @@ func (r *tReceipt) Coin() asset.Coin      { return r.coin }
 func (r *tReceipt) Contract() dex.Bytes   { return r.contract }
 
 func TestFindRedemption(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, bestBlockHeight, err := node.GetBestBlock(context.Background())
 	if err != nil {
@@ -1610,8 +1640,11 @@ func TestFindRedemption(t *testing.T) {
 }
 
 func TestRefund(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -1713,7 +1746,11 @@ const (
 )
 
 func testSender(t *testing.T, senderType tSenderType) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
+	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var sendVal uint64 = 1e8
 	var unspentVal uint64 = 100e8
 	funName := "PayFee"
@@ -1728,7 +1765,6 @@ func testSender(t *testing.T, senderType tSenderType) {
 			return wallet.Withdraw(addr, val)
 		}
 	}
-	defer shutdown()
 	addr := tPKHAddr.String()
 	node.changeAddr = tPKHAddr
 
@@ -1742,7 +1778,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}}
 	//node.unspent = append(node.unspent, node.unspent[0])
 
-	_, err := sender(addr, sendVal)
+	_, err = sender(addr, sendVal)
 	if err != nil {
 		t.Fatalf(funName+" error: %v", err)
 	}
@@ -1779,8 +1815,11 @@ func TestWithdraw(t *testing.T) {
 }
 
 func Test_sendMinusFees(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	address := tPKHAddr.String()
 	node.changeAddr = tPKHAddr
 
@@ -1868,8 +1907,11 @@ func Test_sendMinusFees(t *testing.T) {
 }
 
 func TestConfirmations(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	coinID := make([]byte, 36)
 	copy(coinID[:32], tTxHash[:])
@@ -1919,8 +1961,11 @@ func TestConfirmations(t *testing.T) {
 }
 
 func TestSendEdges(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const feeRate uint64 = 3
 
@@ -1994,8 +2039,11 @@ func TestSendEdges(t *testing.T) {
 }
 
 func TestSyncStatus(t *testing.T) {
-	wallet, node, shutdown := tNewWallet()
+	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
 	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
 		Headers: 100,
 		Blocks:  99,
