@@ -29,10 +29,14 @@ const (
 	connectWalletErr
 	missingWalletErr
 	encryptionErr
+	decodeErr
+	accountVerificationErr
+	parseKeyErr
 	marketErr
 	addressParseErr
 	addrErr
 	fileReadErr
+	unknownDEXErr
 )
 
 // Error is an error message and an error code.

@@ -2684,7 +2684,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("Password error: %w", err)
+		return nil, codedError(passwordErr, err)
 	}
 	_, err = addrHost(host)
 	if err != nil {
@@ -2696,7 +2696,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, fmt.Errorf("unknown DEX %s", host)
+		return nil, newError(unknownDEXErr, "DEX: %s", host)
 	}
 	account := &Account{
 		Host:      host,
@@ -2715,7 +2715,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 func (c *Core) AccountImport(pw []byte, account Account) error {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
-		return fmt.Errorf("Password error: %w", err)
+		return codedError(passwordErr, err)
 	}
 	_, err = addrHost(account.Host)
 	if err != nil {
@@ -2725,34 +2725,34 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 	accountInfo.Host = account.Host
 	pubKey, err := hex.DecodeString(account.PubKey)
 	if err != nil {
-		return err
+		return codedError(decodeErr, err)
 	}
 	accountInfo.DEXPubKey, err = secp256k1.ParsePubKey(pubKey)
 	if err != nil {
-		return err
+		return codedError(parseKeyErr, err)
 	}
 	encKey, err := hex.DecodeString(account.EncKey)
 	if err != nil {
-		return err
+		return codedError(decodeErr, err)
 	}
 	accountInfo.EncKey = encKey
 	cert, err := hex.DecodeString(account.Cert)
 	if err != nil {
-		return err
+		return codedError(decodeErr, err)
 	}
 	accountInfo.Cert = cert
 	feeCoin, err := hex.DecodeString(account.FeeCoin)
 	if err != nil {
-		return err
+		return codedError(decodeErr, err)
 	}
 	accountInfo.FeeCoin = feeCoin
 	if !c.verifyAccount(&accountInfo) {
-		return fmt.Errorf("Account not verified for host: %s", account.Host)
+		return newError(accountVerificationErr, "Account not verified for host: "+account.Host, err)
 	}
 	accountInfo.Paid = c.conns[account.Host].acct.isPaid
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
-		return err
+		return codedError(dbErr, err)
 	}
 	c.refreshUser()
 	return nil
