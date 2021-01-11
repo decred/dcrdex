@@ -944,7 +944,7 @@ Registration is complete after the fee transaction has been confirmed.`,
       "cancelling" (bool): Whether this order is in the process of cancelling.
       "canceled" (bool): Whether this order has been canceled.
       "tif" (string): "immediate" if this limit order will only match for one epoch.
-      "standing" if the order can continue matching until filled or cancelled.
+        "standing" if the order can continue matching until filled or cancelled.
       "matches": (array): An array of matches associated with the order.
       [
         {
