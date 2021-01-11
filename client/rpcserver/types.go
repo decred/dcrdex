@@ -58,24 +58,44 @@ type tradeResponse struct {
 // myOrdersResponse is used when responding to the myorders route.
 type myOrdersResponse []*myOrder
 
+// myOrder represents an order when responding to the myorders route.
 type myOrder struct {
-	Host        string `json:"host"`
-	MarketName  string `json:"marketName"`
-	BaseID      uint32 `json:"baseID"`
-	QuoteID     uint32 `json:"quoteID"`
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Sell        bool   `json:"sell"`
-	Stamp       uint64 `json:"stamp"`
-	Age         string `json:"age"`
-	Rate        uint64 `json:"rate,omitempty"`
-	Quantity    uint64 `json:"quantity"`
-	Filled      uint64 `json:"filled"`
-	Settled     uint64 `json:"settled"`
-	Status      string `json:"status"`
-	Cancelling  bool   `json:"cancelling,omitempty"`
-	Canceled    bool   `json:"canceled,omitempty"`
-	TimeInForce string `json:"tif,omitempty"`
+	Host        string   `json:"host"`
+	MarketName  string   `json:"marketName"`
+	BaseID      uint32   `json:"baseID"`
+	QuoteID     uint32   `json:"quoteID"`
+	ID          string   `json:"id"`
+	Type        string   `json:"type"`
+	Sell        bool     `json:"sell"`
+	Stamp       uint64   `json:"stamp"`
+	Age         string   `json:"age"`
+	Rate        uint64   `json:"rate,omitempty"`
+	Quantity    uint64   `json:"quantity"`
+	Filled      uint64   `json:"filled"`
+	Settled     uint64   `json:"settled"`
+	Status      string   `json:"status"`
+	Cancelling  bool     `json:"cancelling,omitempty"`
+	Canceled    bool     `json:"canceled,omitempty"`
+	TimeInForce string   `json:"tif,omitempty"`
+	Matches     []*match `json:"matches,omitempty"`
+}
+
+// match represents a match on an order. An order may have many matches.
+type match struct {
+	MatchID       string `json:"matchID"`
+	Status        string `json:"status"`
+	Revoked       bool   `json:"revoked"`
+	Rate          uint64 `json:"rate"`
+	Qty           uint64 `json:"qty"`
+	Side          string `json:"side"`
+	FeeRate       uint64 `json:"feeRate"`
+	Swap          string `json:"swap,omitempty"`
+	CounterSwap   string `json:"counterSwap,omitempty"`
+	Redeem        string `json:"redeem,omitempty"`
+	CounterRedeem string `json:"counterRedeem,omitempty"`
+	Refund        string `json:"refund,omitempty"`
+	Stamp         uint64 `json:"stamp"`
+	IsCancel      bool   `json:"isCancel"`
 }
 
 // openWalletForm is information necessary to open a wallet.

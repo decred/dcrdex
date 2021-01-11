@@ -139,7 +139,7 @@ type Match struct {
 	IsCancel      bool              `json:"isCancel"`
 }
 
-// A coin encodes both the coin ID and the asset-dependent string representation
+// Coin encodes both the coin ID and the asset-dependent string representation
 // of the coin ID.
 type Coin struct {
 	ID       dex.Bytes `json:"id"`

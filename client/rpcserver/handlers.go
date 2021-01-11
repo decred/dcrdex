@@ -448,15 +448,43 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // parseCoreOrder converts a *core.Order into a *myOrder.
 func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
-	// settled calculates how much of the order has been finalized.
-	settled := func(qty uint64, matches []*core.Match) (settled uint64) {
-		for _, match := range matches {
-			if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
-				(match.Side == order.Taker && match.Status >= order.MatchComplete) {
-				settled += match.Qty
+	// matchesParser parses core.Match slice & calculates how much of the order
+	// has been settled/finalized.
+	parseMatches := func(matches []*core.Match) (ms []*match, settled uint64) {
+		ms = make([]*match, 0, len(matches))
+		// coinSafeString gets the Coin's StringID safely.
+		coinSafeString := func(c *core.Coin) string {
+			if c == nil {
+				return ""
 			}
+			return c.StringID
 		}
-		return settled
+		for _, m := range matches {
+			// Sum up settled value.
+			if (m.Side == order.Maker && m.Status >= order.MakerRedeemed) ||
+				(m.Side == order.Taker && m.Status >= order.MatchComplete) {
+				settled += m.Qty
+			}
+			match := &match{
+				MatchID:  m.MatchID.String(),
+				Status:   m.Status.String(),
+				Revoked:  m.Revoked,
+				Rate:     m.Rate,
+				Qty:      m.Qty,
+				Side:     m.Side.String(),
+				FeeRate:  m.FeeRate,
+				Stamp:    m.Stamp,
+				IsCancel: m.IsCancel,
+			}
+
+			match.Swap = coinSafeString(m.Swap)
+			match.CounterSwap = coinSafeString(m.CounterSwap)
+			match.Redeem = coinSafeString(m.Redeem)
+			match.CounterRedeem = coinSafeString(m.CounterRedeem)
+			match.Refund = coinSafeString(m.Refund)
+			ms = append(ms, match)
+		}
+		return ms, settled
 	}
 	srvTime := encode.UnixTimeMilli(int64(co.Stamp))
 	age := time.Since(srvTime).Round(time.Millisecond)
@@ -465,7 +493,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	if co.Status >= order.OrderStatusExecuted {
 		cancelling = false
 	}
-	return &myOrder{
+	o := &myOrder{
 		Host:        co.Host,
 		MarketName:  co.MarketID,
 		BaseID:      b,
@@ -478,12 +506,16 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		Rate:        co.Rate,
 		Quantity:    co.Qty,
 		Filled:      co.Filled,
-		Settled:     settled(co.Qty, co.Matches),
 		Status:      co.Status.String(),
 		Cancelling:  cancelling,
 		Canceled:    co.Canceled,
 		TimeInForce: co.TimeInForce.String(),
 	}
+
+	// Parese matches & calculate settled value
+	o.Matches, o.Settled = parseMatches(co.Matches)
+
+	return o
 }
 
 // handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
@@ -794,7 +826,6 @@ Registration is complete after the fee transaction has been confirmed.`,
     quote (int): The BIP-44 coin index for the market's quote asset.
     qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
     rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
-      156000 satoshi/DCR for the DCR(base)_BTC(quote).
     immediate (bool): Require immediate match. Do not book the order.`,
 		returns: `Returns:
     obj: The order details.
@@ -914,6 +945,25 @@ Registration is complete after the fee transaction has been confirmed.`,
       "canceled" (bool): Whether this order has been canceled.
       "tif" (string): "immediate" if this limit order will only match for one epoch.
         "standing" if the order can continue matching until filled or cancelled.
+      "matches": (array): An array of matches associated with the order.
+      [
+        {
+          "matchID (string): The match's ID."
+          "status" (string): The match's status."
+          "revoked" (bool): Indicates if match was revoked.
+          "rate"    (int): The match's rate.
+          "qty"     (int): The match's amount.
+          "side"    (string): The match's side, "maker" or "taker".
+          "feerate" (int): The match's fee rate.
+          "swap"    (string): The match's swap transaction.
+          "counterSwap" (string): The match's counter swap transaction.
+          "redeem" (string): The match's redeem transaction.
+          "counterRedeem" (string): The match's counter redeem transaction.
+          "refund" (string): The match's refund transaction.
+          "stamp" (int): The match's stamp.
+          "isCancel" (bool): Indicates if match is canceled.
+        },...
+      ]
     },...
   ]`,
 	},
