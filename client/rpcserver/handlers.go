@@ -826,6 +826,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     quote (int): The BIP-44 coin index for the market's quote asset.
     qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
     rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
+      156000 satoshi/DCR for the DCR(base)_BTC(quote).
     immediate (bool): Require immediate match. Do not book the order.`,
 		returns: `Returns:
     obj: The order details.
