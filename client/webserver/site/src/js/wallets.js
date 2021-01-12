@@ -24,10 +24,8 @@ export default class WalletsPage extends BasePage {
       'walletForm', 'openForm',
       // Wallet configuration
       'walletReconfig', 'recfgAssetLogo', 'recfgAssetName', 'reconfigInputs',
-      'submitReconfig', 'reconfigErr', 'reconfigPW', 'changePW',
-      // Wallet password change
-      'walletRepw', 'repwAssetLogo', 'repwAssetName', 'repwNewPw', 'repwAppPw',
-      'submitRepw', 'repwErr',
+      'submitReconfig', 'reconfigErr', 'appPW', 'showChangePW', 'changePW',
+      'switchPWMsg', 'hideIcon', 'showIcon', 'newPW',
       // Deposit
       'deposit', 'depositName', 'depositAddress', 'newDepAddrBttn',
       'depositErr', 'depositLogo',
@@ -140,12 +138,11 @@ export default class WalletsPage extends BasePage {
       page.withdrawAmt.value = page.withdrawAvail.textContent
     })
 
-    // A link on the wallet reconfiguration form to show the password change
-    // form.
-    bind(page.changePW, 'click', () => { this.showChangePW() })
-
-    // Submit the password change form.
-    bindForm(page.walletRepw, page.submitRepw, () => { this.submitChangePW() })
+    // A link on the wallet reconfiguration form to show/hide the password field.
+    bind(page.showChangePW, 'click', () => {
+      this.changeWalletPW = !this.changeWalletPW
+      this.setPWSettingViz(this.changeWalletPW)
+    })
 
     if (!firstRow) return
     this.showMarkets(firstRow.assetID)
@@ -155,6 +152,21 @@ export default class WalletsPage extends BasePage {
       walletstate: note => { this.handleWalletStateNote(note) },
       walletconfig: note => { this.handleWalletStateNote(note) }
     }
+  }
+
+  /*
+   * setPWSettingViz sets the visibility of the password field section.
+   */
+  setPWSettingViz (visible) {
+    if (visible) {
+      Doc.hide(this.page.showIcon)
+      Doc.show(this.page.hideIcon, this.page.changePW)
+      this.page.switchPWMsg.textContent = 'keep current wallet password'
+      return
+    }
+    Doc.hide(this.page.hideIcon, this.page.changePW)
+    Doc.show(this.page.showIcon)
+    this.page.switchPWMsg.textContent = 'set a new wallet password'
   }
 
   /*
@@ -246,6 +258,9 @@ export default class WalletsPage extends BasePage {
   async showReconfig (assetID) {
     const page = this.page
     Doc.hide(page.reconfigErr)
+    // Hide update password section by default
+    this.changeWalletPW = false
+    this.setPWSettingViz(this.changeWalletPW)
     const asset = app.assets[assetID]
     this.walletReconfig.update(asset.info)
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -264,46 +279,6 @@ export default class WalletsPage extends BasePage {
       return
     }
     this.walletReconfig.setConfig(res.map)
-  }
-
-  /* showChangePW shows the form to change the wallet password. */
-  async showChangePW () {
-    const page = this.page
-    Doc.hide(page.repwErr)
-    const assetID = this.lastFormAsset = this.reconfigAsset
-    const asset = app.assets[assetID]
-    page.repwAssetLogo.src = Doc.logoPath(asset.symbol)
-    page.repwAssetName.textContent = asset.info.name
-    await this.hideBox()
-    this.animation = this.showBox(page.walletRepw)
-  }
-
-  /*
-   * submitChangePW is called when the wallet password change form is submitted.
-   */
-  async submitChangePW () {
-    const page = this.page
-    Doc.hide(page.repwErr)
-    if (!page.repwAppPw.value) {
-      page.repwErr.textContent = 'app password cannot be empty'
-      Doc.show(page.repwErr)
-      return
-    }
-    const loaded = app.loading(page.walletRepw)
-    const res = await postJSON('/api/setwalletpass', {
-      assetID: this.reconfigAsset,
-      newPW: page.repwNewPw.value,
-      appPW: page.repwAppPw.value
-    })
-    page.repwNewPw.value = ''
-    page.repwAppPw.value = ''
-    loaded()
-    if (!app.checkResponse(res, true)) {
-      page.repwErr.textContent = res.msg
-      Doc.show(page.repwErr)
-      return
-    }
-    this.showMarkets(this.reconfigAsset)
   }
 
   /* Display a deposit address. */
@@ -426,18 +401,21 @@ export default class WalletsPage extends BasePage {
   async reconfig () {
     const page = this.page
     Doc.hide(page.reconfigErr)
-    if (!page.reconfigPW.value) {
+    if (!page.appPW.value) {
       page.reconfigErr.textContent = 'app password cannot be empty'
       Doc.show(page.reconfigErr)
       return
     }
     const loaded = app.loading(page.walletReconfig)
-    const res = await postJSON('/api/reconfigurewallet', {
+    const req = {
       assetID: this.reconfigAsset,
       config: this.walletReconfig.map(),
-      pw: page.reconfigPW.value
-    })
-    page.reconfigPW.value = ''
+      appPW: page.appPW.value
+    }
+    if (this.changeWalletPW) req.newWalletPW = page.newPW.value
+    const res = await postJSON('/api/reconfigurewallet', req)
+    page.appPW.value = ''
+    page.newPW.value = ''
     loaded()
     if (!app.checkResponse(res, true)) {
       page.reconfigErr.textContent = res.msg
