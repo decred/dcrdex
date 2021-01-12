@@ -21,9 +21,7 @@ const (
 	defaultFee = 10
 	// defaultFeeRateLimit is the default value for the feeratelimit.
 	defaultFeeRateLimit = 100
-	// Smallest unit is 1/1e-8 LTC
-	smallestUnit      = 1e8
-	minNetworkVersion = 180100
+	minNetworkVersion   = 180100
 )
 
 var (
@@ -60,7 +58,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
-			DefaultValue: defaultFee * 1000 / smallestUnit,
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
 			Key:         "feeratelimit",
@@ -69,7 +67,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: LTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:          "redeemconftarget",

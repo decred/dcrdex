@@ -53,8 +53,6 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
-	// Smallest unit is 1 satoshi = 1e-8 BTC
-	smallestUnit = 1e8
 
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015
@@ -105,7 +103,7 @@ var (
 			DisplayName: "Fallback fee rate",
 			Description: "The fee rate to use for fee payment and withdrawals when" +
 				" estimatesmartfee is not available. Units: BTC/kB",
-			DefaultValue: defaultFee * 1000 / smallestUnit,
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
 			Key:         "feeratelimit",
@@ -114,7 +112,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -477,16 +475,14 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 		fallbackFeesPerByte, cfg.WalletInfo.Units)
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
-	// Ensure value isn't smaller than smallest unit & convert to sats/byte.
-	if btcCfg.FeeRateLimit != 0 &&
-		// Reject rate < 1e-5
-		btcCfg.FeeRateLimit < 1/(smallestUnit/1000) {
-		return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
-			btcCfg.FeeRateLimit)
-	}
-	feesLimitPerByte := toSatoshi(btcCfg.FeeRateLimit / 1000)
-	if feesLimitPerByte == 0 {
-		feesLimitPerByte = cfg.DefaultFeeRateLimit
+	// Convert to sats/byte & error if value is smaller than smallest unit.
+	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	if btcCfg.FeeRateLimit > 0 {
+		feesLimitPerByte = toSatoshi(btcCfg.FeeRateLimit / 1000)
+		if feesLimitPerByte == 0 {
+			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+				btcCfg.FeeRateLimit)
+		}
 	}
 	cfg.Logger.Tracef("Fees rate limit set at %d sats/byte", feesLimitPerByte)
 
@@ -2435,7 +2431,7 @@ func (btc *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 
 // Convert the BTC value to satoshi.
 func toSatoshi(v float64) uint64 {
-	return uint64(math.Round(v * smallestUnit))
+	return uint64(math.Round(v * 1e8))
 }
 
 // blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime

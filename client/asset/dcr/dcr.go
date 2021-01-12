@@ -52,8 +52,6 @@ const (
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
 	defaultRedeemConfTarget = 1
-	// Smallest unit is 1 atom = 1e-8 DCR.
-	smallestUnit = 1e8
 
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
@@ -107,7 +105,7 @@ var (
 			DisplayName: "Fallback fee rate",
 			Description: "The fee rate to use for fee payment and withdrawals when " +
 				"estimatesmartfee is not available. Units: DCR/kB",
-			DefaultValue: defaultFee * 1000 / smallestUnit,
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
 			Key:         "feeratelimit",
@@ -116,7 +114,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: DCR/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / smallestUnit,
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "redeemconftarget",
@@ -463,16 +461,14 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
 
 	// If set in the user config, the fee rate limit will be in units of DCR/KB.
-	// Ensure value isn't smaller than smallest unit & convert to atoms/byte.
-	if dcrCfg.FeeRateLimit != 0 &&
-		// Reject rate < 1e-5
-		dcrCfg.FeeRateLimit < 1/(smallestUnit/1000) {
-		return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
-			dcrCfg.FeeRateLimit)
-	}
-	feesLimitPerByte := toAtoms(dcrCfg.FeeRateLimit / 1000)
-	if feesLimitPerByte == 0 {
-		feesLimitPerByte = defaultFeeRateLimit
+	// Convert to atoms/byte & error if value is smaller than smallest unit.
+	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	if dcrCfg.FeeRateLimit > 0 {
+		feesLimitPerByte = toAtoms(dcrCfg.FeeRateLimit / 1000)
+		if feesLimitPerByte == 0 {
+			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+				dcrCfg.FeeRateLimit)
+		}
 	}
 	logger.Tracef("Fees rate limit set at %d atoms/byte", feesLimitPerByte)
 
@@ -2618,7 +2614,7 @@ func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing int
 
 // Convert the DCR value to atoms.
 func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * smallestUnit))
+	return uint64(math.Round(v * 1e8))
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.
