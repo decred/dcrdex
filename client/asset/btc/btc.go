@@ -47,6 +47,8 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultFee = 100
+	// defaultFeeRateLimit is the default value for the feeratelimit.
+	defaultFeeRateLimit = 600
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -97,24 +99,39 @@ var (
 			DefaultValue: "8332",
 		},
 		{
-			Key:          "fallbackfee",
-			DisplayName:  "Fallback fee rate",
-			Description:  "Bitcoin's 'fallbackfee' rate. Units: BTC/kB",
+			Key:         "fallbackfee",
+			DisplayName: "Fallback fee rate",
+			Description: "The fee rate to use for fee payment and withdrawals when" +
+				" estimatesmartfee is not available. Units: BTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
-			Key:          "redeemconftarget",
-			DisplayName:  "Redeem confirmation target",
-			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 2 blocks)",
+			Key:         "feeratelimit",
+			DisplayName: "Highest acceptable fee rate",
+			Description: "This is the highest network fee rate you are willing to " +
+				"pay on swap transactions. If feeratelimit is lower than a market's " +
+				"maxfeerate, you will not be able to trade on that market with this " +
+				"wallet.  Units: BTC/kB",
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+		},
+		{
+			Key:         "redeemconftarget",
+			DisplayName: "Redeem confirmation target",
+			Description: "The target number of blocks for the redeem transaction " +
+				"to be mined. Used to set the transaction's fee rate. " +
+				"(default: 2 blocks)",
 			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
 			Key:         "txsplit",
 			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			Description: "When placing an order, create a \"split\" transaction to " +
+				"fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order " +
+				"until the first swap contract is broadcast during match settlement, " +
+				"or the order is canceled. This an extra transaction for which network " +
+				"mining fees are paid. Used only for standing-type orders, e.g. limit " +
+				"orders without immediate time-in-force.",
 			IsBoolean: true,
 		},
 	}
@@ -143,15 +160,16 @@ type rpcClient interface {
 
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
-	WalletCFG          *asset.WalletConfig
-	MinNetworkVersion  uint64
-	WalletInfo         *asset.WalletInfo
-	Symbol             string
-	Logger             dex.Logger
-	Network            dex.Network
-	ChainParams        *chaincfg.Params
-	Ports              dexbtc.NetPorts
-	DefaultFallbackFee uint64 // sats/byte
+	WalletCFG           *asset.WalletConfig
+	MinNetworkVersion   uint64
+	WalletInfo          *asset.WalletInfo
+	Symbol              string
+	Logger              dex.Logger
+	Network             dex.Network
+	ChainParams         *chaincfg.Params
+	Ports               dexbtc.NetPorts
+	DefaultFallbackFee  uint64 // sats/byte
+	DefaultFeeRateLimit uint64 // sats/byte
 	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
 	// call.
 	LegacyBalance bool
@@ -338,6 +356,7 @@ type ExchangeWallet struct {
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
+	feeRateLimit      uint64
 	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
@@ -394,16 +413,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 	cloneCFG := &BTCCloneCFG{
-		WalletCFG:          cfg,
-		MinNetworkVersion:  minNetworkVersion,
-		WalletInfo:         WalletInfo,
-		Symbol:             "btc",
-		Logger:             logger,
-		Network:            network,
-		ChainParams:        params,
-		Ports:              dexbtc.RPCPorts,
-		DefaultFallbackFee: defaultFee,
-		Segwit:             true,
+		WalletCFG:           cfg,
+		MinNetworkVersion:   minNetworkVersion,
+		WalletInfo:          WalletInfo,
+		Symbol:              "btc",
+		Logger:              logger,
+		Network:             network,
+		ChainParams:         params,
+		Ports:               dexbtc.RPCPorts,
+		DefaultFallbackFee:  defaultFee,
+		DefaultFeeRateLimit: defaultFeeRateLimit,
+		Segwit:              true,
 	}
 
 	return BTCCloneWallet(cloneCFG)
@@ -415,7 +435,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 	// Read the configuration parameters
-	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings,
+		cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
 		return nil, err
 	}
@@ -431,21 +452,39 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		Pass:         btcCfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC RPC client: %w", err)
+		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	return newWallet(cfg, btcCfg, client), nil
+	btc, err := newWallet(cfg, btcCfg, client)
+	if err != nil {
+		return nil, fmt.Errorf("error creating BTC ExchangeWallet: %v", err)
+	}
+
+	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
-	// per kB, e.g. BTC/kB. Translate that to sats/B.
+	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
 	if fallbackFeesPerByte == 0 {
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
 	}
-	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte", fallbackFeesPerByte, cfg.WalletInfo.Units)
+	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
+		fallbackFeesPerByte, cfg.WalletInfo.Units)
+
+	// If set in the user config, the fee rate limit will be in units of BTC/KB.
+	// Convert to sats/byte & error if value is smaller than smallest unit.
+	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	if btcCfg.FeeRateLimit > 0 {
+		feesLimitPerByte = toSatoshi(btcCfg.FeeRateLimit / 1000)
+		if feesLimitPerByte == 0 {
+			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+				btcCfg.FeeRateLimit)
+		}
+	}
+	cfg.Logger.Tracef("Fees rate limit set at %d sats/byte", feesLimitPerByte)
 
 	redeemConfTarget := btcCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
@@ -464,12 +503,13 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
+		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
 		walletInfo:          cfg.WalletInfo,
-	}
+	}, nil
 }
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
@@ -745,6 +785,14 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
+	}
+	// Check wallets fee rate limit against server's max fee rate
+	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			ord.DEXConfig.MaxFeeRate,
+			btc.feeRateLimit)
 	}
 
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet

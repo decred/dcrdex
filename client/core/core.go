@@ -2683,7 +2683,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
+		return nil, 0, newError(marketErr, "order placed for unknown market %q",
+			mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
@@ -2709,12 +2710,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		// crypter via refreshUnlock.
 		err := c.connectAndUnlock(crypter, w)
 		if err != nil {
-			return fmt.Errorf("%s connectAndUnlock error: %w", wallets.fromAsset.Symbol, err)
+			return fmt.Errorf("%s connectAndUnlock error: %w",
+				wallets.fromAsset.Symbol, err)
 		}
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
 		if !w.synced {
-			return fmt.Errorf("%s still syncing. progress = %.2f", unbip(w.AssetID), w.syncProgress)
+			return fmt.Errorf("%s still syncing. progress = %.2f", unbip(w.AssetID),
+				w.syncProgress)
 		}
 		return nil
 	}

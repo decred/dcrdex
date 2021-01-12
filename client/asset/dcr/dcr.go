@@ -46,6 +46,8 @@ const (
 
 	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
+	// defaultFeeRateLimit is the default value for the feeratelimit.
+	defaultFeeRateLimit = 100
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -99,24 +101,39 @@ var (
 			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
 		},
 		{
-			Key:          "fallbackfee",
-			DisplayName:  "Fallback fee rate",
-			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: DCR/kB",
+			Key:         "fallbackfee",
+			DisplayName: "Fallback fee rate",
+			Description: "The fee rate to use for fee payment and withdrawals when " +
+				"estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
-			Key:          "redeemconftarget",
-			DisplayName:  "Redeem confirmation target",
-			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 1 block)",
+			Key:         "feeratelimit",
+			DisplayName: "Highest acceptable fee rate",
+			Description: "This is the highest network fee rate you are willing to " +
+				"pay on swap transactions. If feeratelimit is lower than a market's " +
+				"maxfeerate, you will not be able to trade on that market with this " +
+				"wallet.  Units: DCR/kB",
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+		},
+		{
+			Key:         "redeemconftarget",
+			DisplayName: "Redeem confirmation target",
+			Description: "The target number of blocks for the redeem transaction " +
+				"to get a confirmation. Used to set the transaction's fee rate." +
+				" (default: 1 block)",
 			DefaultValue: defaultRedeemConfTarget,
 		},
 		{
 			Key:         "txsplit",
 			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			Description: "When placing an order, create a \"split\" transaction to " +
+				"fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order " +
+				"until the first swap contract is broadcast during match settlement, or " +
+				"the order is canceled. This an extra transaction for which network " +
+				"mining fees are paid.  Used only for standing-type orders, e.g. " +
+				"limit orders without immediate time-in-force.",
 			IsBoolean: true,
 		},
 	}
@@ -353,6 +370,7 @@ type ExchangeWallet struct {
 	acct             string
 	tipChange        func(error)
 	fallbackFeeRate  uint64
+	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
 
@@ -413,7 +431,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	dcr := unconnectedWallet(cfg, walletCfg, logger)
+	dcr, err := unconnectedWallet(cfg, walletCfg, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
@@ -430,7 +451,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a node. The node should
 // be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) *ExchangeWallet {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -438,6 +459,18 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fallbackFeesPerByte = defaultFee
 	}
 	logger.Tracef("Fallback fees set at %d atoms/byte", fallbackFeesPerByte)
+
+	// If set in the user config, the fee rate limit will be in units of DCR/KB.
+	// Convert to atoms/byte & error if value is smaller than smallest unit.
+	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	if dcrCfg.FeeRateLimit > 0 {
+		feesLimitPerByte = toAtoms(dcrCfg.FeeRateLimit / 1000)
+		if feesLimitPerByte == 0 {
+			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+				dcrCfg.FeeRateLimit)
+		}
+	}
+	logger.Tracef("Fees rate limit set at %d atoms/byte", feesLimitPerByte)
 
 	redeemConfTarget := dcrCfg.RedeemConfTarget
 	if redeemConfTarget == 0 {
@@ -452,15 +485,15 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
+		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
-	}
+	}, nil
 }
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
 func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
-
 	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
@@ -733,6 +766,14 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
+	}
+	// Check wallet's fee rate limit against server's max fee rate
+	if dcr.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configued fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			ord.DEXConfig.MaxFeeRate,
+			dcr.feeRateLimit)
 	}
 
 	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))
