@@ -200,7 +200,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	mux.Group(func(web chi.Router) {
 		// The register page and settings page are always allowed.
 		// The register page performs init if needed, along with
-		// initial setup and is also used to register more DEXs
+		// initial setup and settings is used to register more DEXs
 		// after initial setup.
 		web.Get(registerRoute, s.handleRegister)
 		web.Get(settingsRoute, s.handleSettings)
@@ -234,12 +234,6 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/init", s.apiInit)
 
-		// TODO: Allow register page to not require /user and /defaultwalletcfg
-		// until authorized with a cookie. These currently must be accessible to
-		// set the app password on the browser.
-		r.Get("/user", s.apiUser)
-		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
-
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
@@ -248,6 +242,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 
 		r.Group(func(apiAuth chi.Router) {
 			apiAuth.Use(s.rejectUnauthed)
+			apiAuth.Get("/user", s.apiUser)
+			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
