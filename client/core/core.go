@@ -2698,14 +2698,20 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	if !found {
 		return nil, newError(unknownDEXErr, "DEX: %s", host)
 	}
+
+	dc.acct.keyMtx.RLock()
+	accountId := dc.acct.id.String()
+	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
+	dc.acct.keyMtx.RUnlock()
+
 	account := &Account{
 		Host:      host,
-		AccountID: dc.acct.id.String(),
-		PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
+		AccountID: accountId,
+		PrivKey:   privKey,
 		PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
-		IsPaid:    dc.acct.isPaid,
+		IsPaid:    dc.acct.feePaid(),
 	}
 	return account, nil
 }
