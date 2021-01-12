@@ -413,7 +413,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		if tracker.Trade().Sell {
 			swapRate = msgMatch.FeeRateBase
 		}
-		if swapRate > tracker.metaData.MaxFeeRate {
+		if !isCancel && swapRate > tracker.metaData.MaxFeeRate {
 			errs = append(errs, fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
 				msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate))
 			continue
