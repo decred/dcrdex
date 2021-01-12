@@ -41,14 +41,12 @@ export default class RegistrationPage extends BasePage {
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
       this.changeForm(page.newWalletForm, page.dexAddrForm)
     })
-    this.walletForm.setAsset(app.assets[DCR_ID])
 
     // OPEN DCR WALLET
     // This form is only shown if there is a wallet, but it's not open.
     bindOpenWallet(app, page.unlockWalletForm, () => {
       this.changeForm(page.unlockWalletForm, page.dexAddrForm)
     })
-    page.unlockWalletForm.setAsset(app.assets[DCR_ID])
 
     // ADD DEX
     // tls certificate upload
@@ -67,6 +65,14 @@ export default class RegistrationPage extends BasePage {
     bindForm(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
 
     // Attempt to load the dcrwallet configuration from the default location.
+    if (app.user.authed) this.auth()
+  }
+
+  // auth should be called once user is known to be authed with the server.
+  async auth () {
+    await app.fetchUser()
+    this.walletForm.setAsset(app.assets[DCR_ID])
+    this.page.unlockWalletForm.setAsset(app.assets[DCR_ID])
     this.walletForm.loadDefaults()
   }
 
@@ -118,7 +124,7 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appErrMsg)
       return
     }
-    app.user.authed = true // no need to call app.fetchUser(), much hasn't changed.
+    this.auth()
     app.updateMenuItemsDisplay()
     this.changeForm(page.appPWForm, page.newWalletForm)
   }

@@ -32,11 +32,17 @@ const constructors = {
   order: OrderPage
 }
 
+// unathedPages are pages that don't require authorization to load.
+// These are endpoints outside of the requireLogin block in webserver.New.
+const unauthedPages = ['register', 'login', 'settings']
+
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   constructor () {
     this.notes = []
     this.pokes = []
+    // The "user" is a large data structure that contains nearly all state
+    // information, including exchanges, markets, wallets, and orders.
     this.user = {
       accounts: {},
       wallets: {}
@@ -90,10 +96,6 @@ export default class Application {
    * point. Read the id = main element and attach handlers.
    */
   async start () {
-    // The "user" is a large data structure that contains nearly all state
-    // information, including exchanges, markets, wallets, and orders. It must
-    // be loaded immediately.
-    await this.fetchUser()
     // Handle back navigation from the browser.
     bind(window, 'popstate', (e) => {
       const page = e.state.page
@@ -105,6 +107,8 @@ export default class Application {
     // associated with  one of the available constructors.
     this.main = idel(document, 'main')
     const handler = this.main.dataset.handler
+    // Don't fetch the user until we know what page we're on.
+    await this.fetchUser()
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
@@ -141,7 +145,9 @@ export default class Application {
    */
   async fetchUser () {
     const user = await getJSON('/api/user')
-    if (!this.checkResponse(user)) return
+    // If it's not a page that requires auth, skip the error notification.
+    const skipNote = unauthedPages.indexOf(this.main.dataset.handler) > -1
+    if (!this.checkResponse(user, skipNote)) return
     this.user = user
     this.assets = user.assets
     this.exchanges = user.exchanges
