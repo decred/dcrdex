@@ -380,12 +380,17 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 
 		t.cancel.matches.maker = cancelMatch // taker is stored via processCancelMatch before negotiate
-		// Set the order status for the canceled order.
-		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
+		// Set the order status for the cancel order.
+		err := t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
+		if err != nil {
+			t.dc.log.Errorf("Failed to update status of cancel order %v to executed: %v",
+				t.cancel.ID(), err)
+			// Try to store the match anyway.
+		}
 		// Store a completed maker cancel match in the DB.
 		makerCancelMeta := t.makeMetaMatch(cancelMatch)
 		makerCancelMeta.SetStatus(order.MatchComplete)
-		err := t.db.UpdateMatch(makerCancelMeta)
+		err = t.db.UpdateMatch(makerCancelMeta)
 		if err != nil {
 			return fmt.Errorf("failed to update match in db: %w", err)
 		}
@@ -703,7 +708,7 @@ func (t *trackedTrade) matchIsRevoked(match *matchTracker) bool {
 
 // Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
 // it is revoked and this side of the match requires no further action like
-// refund or auto-redeem.
+// refund or auto-redeem. This should not be applied to cancel order matches.
 func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 	proof := &match.MetaData.Proof
 	// MatchComplete only means inactive if redeem request was accepted, but
