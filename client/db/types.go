@@ -188,6 +188,9 @@ type OrderMetaData struct {
 	// RedemptionFeesPaid is the sum of the actual fees paid for all
 	// redemptions.
 	RedemptionFeesPaid uint64
+	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
+	// assigned to matches will be validated against this value.
+	MaxFeeRate uint64
 }
 
 // MetaMatch is the match and its metadata.

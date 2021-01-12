@@ -407,7 +407,18 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			errs = append(errs, "order "+oid.String()+" not found")
 			continue
 		}
-		// TODO: consider checking the fee rates against the max fee rate
+
+		// Check the fee rate against the maxfeerate recorded at order time.
+		swapRate := msgMatch.FeeRateQuote
+		if tracker.Trade().Sell {
+			swapRate = msgMatch.FeeRateBase
+		}
+		if !isCancel && swapRate > tracker.metaData.MaxFeeRate {
+			errs = append(errs, fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
+				msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate))
+			continue
+		}
+
 		sigMsg := msgMatch.Serialize()
 		if checkSigs {
 			err := dc.acct.checkSig(sigMsg, msgMatch.Sig)
@@ -2874,8 +2885,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusEpoch,
-			Host:   dc.acct.host,
+			Status:     order.OrderStatusEpoch,
+			Host:       dc.acct.host,
+			MaxFeeRate: wallets.fromAsset.MaxFeeRate,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],

@@ -79,6 +79,7 @@ var (
 	severityKey            = []byte("severity")
 	ackKey                 = []byte("ack")
 	swapFeesKey            = []byte("swapFees")
+	maxFeeRateKey          = []byte("maxFeeRate")
 	redemptionFeesKey      = []byte("redeemFees")
 	typeKey                = []byte("type")
 	byteTrue               = encode.ByteTrue
@@ -423,6 +424,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(typeKey, []byte{byte(ord.Type())}).
 			put(orderKey, order.EncodeOrder(ord)).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			err()
 	})
@@ -674,6 +676,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			ChangeCoin:         getCopy(oBkt, changeKey),
 			LinkedOrder:        linkedID,
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
+			MaxFeeRate:         intCoder.Uint64(oBkt.Get(maxFeeRateKey)),
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 		},
 		Order: ord,
@@ -700,6 +703,7 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(changeKey, md.ChangeCoin).
 			put(linkedKey, linkedB).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			err()
 	})
