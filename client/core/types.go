@@ -701,7 +701,6 @@ type Account struct {
 	AccountID string `json:"accountID"`
 	PrivKey   string `json:"privKey"`
 	PubKey    string `json:"pubKey"`
-	EncKey    string `json:"encKey"`
 	Cert      string `json:"cert"`
 	FeeCoin   string `json:"feeCoin"`
 	IsPaid    bool   `json:"isPaid"`

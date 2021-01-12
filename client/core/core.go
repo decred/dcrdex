@@ -2703,7 +2703,6 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		AccountID: dc.acct.id.String(),
 		PrivKey:   hex.EncodeToString(dc.acct.privKey.Serialize()),
 		PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
-		EncKey:    hex.EncodeToString(dc.acct.encKey),
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
 		IsPaid:    dc.acct.isPaid,
@@ -2731,11 +2730,6 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 	if err != nil {
 		return codedError(parseKeyErr, err)
 	}
-	encKey, err := hex.DecodeString(account.EncKey)
-	if err != nil {
-		return codedError(decodeErr, err)
-	}
-	accountInfo.EncKey = encKey
 	cert, err := hex.DecodeString(account.Cert)
 	if err != nil {
 		return codedError(decodeErr, err)

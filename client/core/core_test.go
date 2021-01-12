@@ -2322,7 +2322,6 @@ func buildTestAccount(host string) Account {
 		Host:    host,
 		PubKey:  hex.EncodeToString(tDexKey.SerializeUncompressed()),
 		PrivKey: hex.EncodeToString(tDexPriv.Serialize()),
-		EncKey:  hex.EncodeToString(tDexPriv.Serialize()),
 		Cert:    hex.EncodeToString([]byte{}),
 		FeeCoin: hex.EncodeToString([]byte("somecoin")),
 	}
@@ -2388,19 +2387,6 @@ func TestAccountImportParsePubKeyError(t *testing.T) {
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, parseKeyErr) {
 		t.Fatalf("expected parse key error, actual error: '%v'", err)
-	}
-}
-
-func TestAccountImportDecodeEncKeyError(t *testing.T) {
-	rig := newTestRig()
-	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
-	account.EncKey = "bad"
-	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
-	if !errorHasCode(err, decodeErr) {
-		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
 }
 
