@@ -2282,7 +2282,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		if dc.acct.authed() {
 			result.Authed = true
 			result.AcctID = dc.acct.ID().String()
-			continue
+			continue // authDEX already done
 		}
 		result.AcctID = dc.acct.ID().String()
 		dcrID, _ := dex.BipSymbolID("dcr")
@@ -2367,13 +2367,10 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 		if err != nil {
 			details := fmt.Sprintf("Some orders failed to load from the database: %v", err)
 			c.notify(newOrderNote("Order load failure", details, db.ErrorLevel, nil))
+			// Keep going since some trades may still have loaded.
 		}
 		if len(ready) > 0 {
 			locks := c.resumeTrades(dc, ready) // fills out dc.trades
-			// if err != nil {
-			// 	details := fmt.Sprintf("Some active orders failed to resume: %v", err)
-			// 	c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
-			// }
 			relocks.merge(locks)
 		}
 		loaded += len(ready)
@@ -3410,6 +3407,12 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 	dc.tradeMtx.Lock()
 	defer dc.tradeMtx.Unlock()
 	for _, tracker = range trackers {
+		// Never overwrite existing trackedTrades.
+		if _, found := dc.trades[tracker.ID()]; found {
+			c.log.Tracef("Trade %v already running.", tracker.ID())
+			continue
+		}
+
 		// See if the order is 100% filled.
 		trade := tracker.Trade()
 		// Make sure we have the necessary wallets.
