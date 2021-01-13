@@ -1494,9 +1494,9 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			CoinID:   coinID,
 			Contract: contract,
 		}
-		// The DEX may wait up to its configured broadcast timeout to locate the
-		// contract txn, so wait at least that long for a response.
-		timeout := t.broadcastTimeout()
+		// The DEX may wait up to its configured broadcast timeout, but we will
+		// retry on timeout or other error.
+		timeout := t.broadcastTimeout() / 4
 		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
 		if err != nil {
 			err = fmt.Errorf("error sending 'init' message: %v", err)
@@ -1682,9 +1682,9 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			Secret:  secret,
 		}
 		ack := new(msgjson.Acknowledgement)
-		// The DEX may wait up to its configured broadcast timeout to locate the
-		// redemption txn, so wait at least that long for a response.
-		timeout := t.broadcastTimeout()
+		// The DEX may wait up to its configured broadcast timeout, but we will
+		// retry on timeout or other error.
+		timeout := t.broadcastTimeout() / 4
 		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
 		if err != nil {
 			err = fmt.Errorf("error sending 'redeem' message: %v", err)
