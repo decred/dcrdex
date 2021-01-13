@@ -38,6 +38,7 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -681,6 +682,151 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	}
 }
 
+// TestResendPendingRequests runs a simple trade test, simulates init/redeem
+// request errors during trade negotiation and ensures that failed reqeusts
+// are retried and the trades complete successfully.
+func TestResendPendingRequests(t *testing.T) {
+	tLog.Info("=== SETUP")
+	cancelCtx, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tLog.Info("=== SETUP COMPLETED")
+	defer teardown(cancelCtx)
+
+	var qty, rate uint64 = 1 * lotSize, 250 * rateStep // 10 DCR at 0.00025 BTC/DCR
+	client1.isSeller, client2.isSeller = true, false
+
+	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Monitor trades and stop at order.MakerSwapCast.
+	monitorTrades, ctx := errgroup.WithContext(context.Background())
+	monitorTrades.Go(func() error {
+		return monitorOrderMatchingAndTradeNeg(ctx, client1, c1OrderID, order.MakerSwapCast)
+	})
+	monitorTrades.Go(func() error {
+		return monitorOrderMatchingAndTradeNeg(ctx, client2, c2OrderID, order.MakerSwapCast)
+	})
+	if err = monitorTrades.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// invalidateMatchesAndResumeNegotiations sets an invalid match ID for all
+	// matches of the specified side. This ensures that susbequent attempts by
+	// the client to send a match-related request to the server will fail. The
+	// swapErr is also unset to resume match negotiations.
+	// Returns the original match IDs for the invalidated matches.
+	// Taker matches are invalidated at MakerSwapCast before taker bcasts their swap.
+	// Maker matches are invalidated at TakerSwapCast before maker bcasts their redeem.
+	invalidateMatchesAndResumeNegotiations := func(tracker *trackedTrade, side order.MatchSide) map[*matchTracker]order.MatchID {
+		var invalidMid order.MatchID
+		copy(invalidMid[:], encode.RandomBytes(32))
+
+		tracker.mtx.Lock()
+		invalidatedMatchIDs := make(map[*matchTracker]order.MatchID, len(tracker.matches))
+		for _, match := range tracker.matches {
+			if match.Match.Side == side {
+				invalidatedMatchIDs[match] = match.id
+				match.id = invalidMid
+			}
+			match.swapErr = nil
+		}
+		tracker.mtx.Unlock()
+
+		return invalidatedMatchIDs
+	}
+
+	// restoreMatchesAfterRequestErrors waits for init/redeem request errors
+	// and restores match IDs to stop further errors.
+	restoreMatchesAfterRequestErrors := func(client *tClient, tracker *trackedTrade, invalidatedMatchIDs map[*matchTracker]order.MatchID) error {
+		// create new notification feed to catch swap-related errors from send{Init,Redeem}Async
+		notes := client.core.NotificationFeed()
+
+		var foundSwapErrorNote bool
+		for !foundSwapErrorNote {
+			select {
+			case note := <-notes:
+				foundSwapErrorNote = note.Severity() == db.ErrorLevel && note.Subject() == SubjectSwapError
+			case <-time.After(time.Second):
+				return fmt.Errorf("client %d: no init/redeem error note after 1 second", client.id)
+			}
+		}
+
+		tracker.mtx.Lock()
+		for match, mid := range invalidatedMatchIDs {
+			match.id = mid
+		}
+		tracker.mtx.Unlock()
+		return nil
+	}
+
+	// Resume and monitor trades but set up both taker's init and maker's redeem
+	// requests to fail.
+	resumeTrade := func(ctx context.Context, client *tClient, orderID string) error {
+		tracker, err := client.findOrder(orderID)
+		if err != nil {
+			return err
+		}
+
+		// if this is Taker, invalidate the matches to cause init request failure
+		invalidatedMatchIDs := invalidateMatchesAndResumeNegotiations(tracker, order.Taker)
+		client.log("resumed trade negotiations from %s", order.MakerSwapCast)
+
+		if len(invalidatedMatchIDs) > 0 { // client is taker
+			client.log("invalidated taker matches, waiting for init request error")
+			if err = restoreMatchesAfterRequestErrors(client, tracker, invalidatedMatchIDs); err != nil {
+				return err
+			}
+			client.log("taker matches restored, now monitoring trade to completion")
+			return monitorTrackedTrade(ctx, client, tracker, order.MakerSwapCast, order.MatchComplete)
+		}
+
+		// client is maker, pause trade neg after auditing taker's init swap, but before sending redeem
+		if err = monitorTrackedTrade(ctx, client, tracker, order.MakerSwapCast, order.TakerSwapCast); err != nil {
+			return err
+		}
+		client.log("trade paused for maker at %s", order.TakerSwapCast)
+
+		// invalidate maker matches to cause redeem to fail
+		invalidatedMatchIDs = invalidateMatchesAndResumeNegotiations(tracker, order.Maker)
+		client.log("trade resumed for maker, matches invalidated, waiting for redeem request error")
+		if err = restoreMatchesAfterRequestErrors(client, tracker, invalidatedMatchIDs); err != nil {
+			return err
+		}
+		client.log("maker matches restored, now monitoring trade to completion")
+		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, order.MatchComplete)
+	}
+
+	resumeTrades, ctx := errgroup.WithContext(context.Background())
+	resumeTrades.Go(func() error {
+		return resumeTrade(ctx, client1, c1OrderID)
+	})
+	resumeTrades.Go(func() error {
+		return resumeTrade(ctx, client2, c2OrderID)
+	})
+	if err = resumeTrades.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Allow some time for balance changes to be properly reported.
+	// There is usually a split-second window where a locked output
+	// has been spent but the spending tx is still in mempool. This
+	// will cause the txout to be included in the wallets locked
+	// balance, causing a higher than actual balance report.
+	time.Sleep(1 * time.Second)
+
+	for _, client := range clients {
+		if err = client.assertBalanceChanges(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tLog.Infof("Trades completed. Init and redeem requests failed and were resent for taker and maker respectively.")
+}
+
 // simpleTradeTest uses client1 and client2 to place similar orders but on
 // either sides that get matched and monitors the resulting trades up till the
 // specified final status.
@@ -1210,7 +1356,6 @@ func (client *tClient) startNotificationReader(ctx context.Context) *notificatio
 				n.Lock()
 				n.notes = append(n.notes, note)
 				n.Unlock()
-				client.log("%s", note)
 
 			case <-ctx.Done():
 				return
