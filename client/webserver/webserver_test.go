@@ -131,7 +131,7 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 
 func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error { return nil }
 
-func (c *TCore) NotificationFeed() core.NotificationFeed { return make(chan core.Notification, 1) }
+func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 

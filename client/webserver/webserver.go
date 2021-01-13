@@ -84,7 +84,7 @@ type clientCore interface {
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	Cancel(pw []byte, oid dex.Bytes) error
-	NotificationFeed() core.NotificationFeed
+	NotificationFeed() <-chan core.Notification
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)
 	Order(oid dex.Bytes) (*core.Order, error)

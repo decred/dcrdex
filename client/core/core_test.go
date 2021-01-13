@@ -2602,6 +2602,16 @@ func TestTradeTracking(t *testing.T) {
 
 	// create new notification feed to catch swap-related errors from goroutines
 	notes := tCore.NotificationFeed()
+	drainNotes := func() {
+		for {
+			select {
+			case <-notes:
+			default:
+				return
+			}
+		}
+	}
+
 	lastSwapErrorNote := func() Notification {
 		for {
 			select {
@@ -2623,7 +2633,7 @@ func TestTradeTracking(t *testing.T) {
 		expectSwapErrorNote  bool
 	}
 	testSwapRelatedAction := func(action swapRelatedAction) {
-		notes.drain() // clear previous (swap error) notes before exec'ing swap-related action
+		drainNotes() // clear previous (swap error) notes before exec'ing swap-related action
 		if action.expectMatchDBUpdates > 0 {
 			rig.db.setUpdateMatchHook(make(chan order.MatchStatus, action.expectMatchDBUpdates))
 			defer rig.db.setUpdateMatchHook(nil)
