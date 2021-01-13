@@ -401,13 +401,8 @@ type findRedemptionReq struct {
 	resultChan   chan *findRedemptionResult
 }
 
-func (frr *findRedemptionReq) contextCancelled() bool {
-	select {
-	case <-frr.ctx.Done():
-		return true
-	default:
-		return false
-	}
+func (frr *findRedemptionReq) canceled() bool {
+	return frr.ctx.Err() != nil
 }
 
 // findRedemptionResult models the result of a find redemption attempt.
@@ -1559,14 +1554,10 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	case <-ctx.Done():
 	}
 
-	// If this contract is still in the findRedemptionQueue, close the result
-	// channel and remove from the queue to prevent further redemption search
-	// attempts for this contract.
+	// If this contract is still in the findRedemptionQueue, remove from the queue
+	// to prevent further redemption search attempts for this contract.
 	dcr.findRedemptionMtx.Lock()
-	if req, exists := dcr.findRedemptionQueue[contractOutpoint]; exists {
-		close(req.resultChan)
-		delete(dcr.findRedemptionQueue, contractOutpoint)
-	}
+	delete(dcr.findRedemptionQueue, contractOutpoint)
 	dcr.findRedemptionMtx.Unlock()
 
 	// result would be nil if ctx is canceled or the result channel
@@ -1759,59 +1750,66 @@ rangeBlocks:
 // contract's secret or any error encountered while trying to parse the secret
 // is returned to the redemption finder via the registered result chan; and the
 // contract is purged from the findRedemptionQueue.
-// Returns the number of redemptions found.
+// Returns the number of redemptions found and canceled.
 func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.TxRawResult, contractOutpoints []outPoint) (found, cancelled int) {
 	dcr.findRedemptionMtx.Lock()
 	defer dcr.findRedemptionMtx.Unlock()
 
-	contractsCount := len(contractOutpoints)
+	extractSecret := func(vin int, contractHash []byte) (*chainhash.Hash, []byte, error) {
+		redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if tx.Vin[vin].ScriptSig == nil {
+			return nil, nil, fmt.Errorf("no sigScript")
+		}
+		sigScript, err := hex.DecodeString(tx.Vin[vin].ScriptSig.Hex)
+		if err != nil {
+			return nil, nil, err
+		}
+		secret, err := dexdcr.FindKeyPush(sigScript, contractHash, dcr.chainParams)
+		if err != nil {
+			return nil, nil, err
+		}
+		return redeemTxHash, secret, nil
+	}
 
-	for inputIndex := 0; inputIndex < len(tx.Vin) && found+cancelled < contractsCount; inputIndex++ {
-		input := &tx.Vin[inputIndex]
-		for _, contractOutpoint := range contractOutpoints {
-			req, exists := dcr.findRedemptionQueue[contractOutpoint]
-			if !exists {
-				continue // check this input against next contract
-			}
+	for _, contractOutpoint := range contractOutpoints {
+		req, exists := dcr.findRedemptionQueue[contractOutpoint]
+		if !exists {
+			continue // no find request for this outpoint (impossible now?)
+		}
+		if req.canceled() {
+			cancelled++
+			delete(dcr.findRedemptionQueue, contractOutpoint)
+			continue // this find request has been cancelled
+		}
 
-			if req.contextCancelled() {
-				cancelled++
-				close(req.resultChan)
-				delete(dcr.findRedemptionQueue, contractOutpoint)
-				continue // check this input against next contract
-			}
-
+		for i := range tx.Vin {
+			input := &tx.Vin[i]
 			if input.Vout != contractOutpoint.vout || input.Txid != contractOutpoint.txHash.String() {
-				continue // input doesn't redeem this contract, check against next contract
+				continue // input doesn't redeem this contract, check next input
 			}
-
 			found++
-			var sigScript, secret []byte
-			redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
-			if err == nil {
-				sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
-			}
-			if err == nil {
-				secret, err = dexdcr.FindKeyPush(sigScript, req.contractHash, dcr.chainParams)
-			}
 
+			redeemTxHash, secret, err := extractSecret(i, req.contractHash)
 			if err != nil {
-				dcr.log.Debugf("error parsing contract secret for %s from tx input %s:%d in %s: %v",
-					contractOutpoint.String(), tx.Txid, inputIndex, scanPoint, err)
+				dcr.log.Errorf("Error parsing contract secret for %s from tx input %s:%d in %s: %v",
+					contractOutpoint.String(), tx.Txid, i, scanPoint, err)
 				req.resultChan <- &findRedemptionResult{
 					Err: err,
 				}
 			} else {
-				dcr.log.Debugf("redemption for contract %s found in tx input %s:%d in %s",
-					contractOutpoint.String(), tx.Txid, inputIndex, scanPoint)
+				dcr.log.Infof("Redemption for contract %s found in tx input %s:%d in %s",
+					contractOutpoint.String(), tx.Txid, i, scanPoint)
 				req.resultChan <- &findRedemptionResult{
-					RedemptionCoinID: toCoinID(redeemTxHash, uint32(inputIndex)),
+					RedemptionCoinID: toCoinID(redeemTxHash, uint32(i)),
 					Secret:           secret,
 				}
 			}
-			close(req.resultChan)
+
 			delete(dcr.findRedemptionQueue, contractOutpoint)
-			break // skip checking other contracts for this input and check next input
+			break // stop checking inputs for this contract
 		}
 	}
 
@@ -1834,7 +1832,6 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 		req.resultChan <- &findRedemptionResult{
 			Err: err,
 		}
-		close(req.resultChan)
 		delete(dcr.findRedemptionQueue, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.Unlock()

@@ -387,13 +387,8 @@ type findRedemptionReq struct {
 	resultChan   chan *findRedemptionResult
 }
 
-func (frr *findRedemptionReq) contextCancelled() bool {
-	select {
-	case <-frr.ctx.Done():
-		return true
-	default:
-		return false
-	}
+func (frr *findRedemptionReq) canceled() bool {
+	return frr.ctx.Err() != nil
 }
 
 // findRedemptionResult models the result of a find redemption attempt.
@@ -1603,14 +1598,10 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	case <-ctx.Done():
 	}
 
-	// If this contract is still in the findRedemptionQueue, close the result
-	// channel and remove from the queue to prevent further redemption search
-	// attempts for this contract.
+	// If this contract is still in the findRedemptionQueue, remove from the queue
+	// to prevent further redemption search attempts for this contract.
 	btc.findRedemptionMtx.Lock()
-	if req, exists := btc.findRedemptionQueue[contractOutpoint]; exists {
-		close(req.resultChan)
-		delete(btc.findRedemptionQueue, contractOutpoint)
-	}
+	delete(btc.findRedemptionQueue, contractOutpoint)
 	btc.findRedemptionMtx.Unlock()
 
 	// result would be nil if ctx is canceled or the result channel
@@ -1786,72 +1777,76 @@ rangeBlocks:
 // contract's secret or any error encountered while trying to parse the secret
 // is returned to the redemption finder via the registered result chan; and the
 // contract is purged from the findRedemptionQueue.
-// Returns the number of redemptions found.
+// Returns the number of redemptions found and canceled.
 func (btc *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *btcjson.TxRawResult, contractOutpoints []outPoint) (found, cancelled int) {
 	btc.findRedemptionMtx.Lock()
 	defer btc.findRedemptionMtx.Unlock()
 
-	contractsCount := len(contractOutpoints)
-
-	for inputIndex := 0; inputIndex < len(tx.Vin) && found+cancelled < contractsCount; inputIndex++ {
-		input := &tx.Vin[inputIndex]
-		for _, contractOutpoint := range contractOutpoints {
-			req, exists := btc.findRedemptionQueue[contractOutpoint]
-			if !exists {
-				continue // contract no longer in queue, check this input against next contract
-			}
-
-			if req.contextCancelled() {
-				cancelled++
-				close(req.resultChan)
-				delete(btc.findRedemptionQueue, contractOutpoint)
-				continue // check this input against next contract
-			}
-
-			if input.Vout != contractOutpoint.vout || input.Txid != contractOutpoint.txHash.String() {
-				continue // input doesn't redeem this contract, check against next contract
-			}
-
-			found++
-			var secret []byte
-			redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
-			var witness [][]byte
-			for _, hexB := range input.Witness {
-				var b []byte
-				b, err = hex.DecodeString(hexB)
-				if err != nil {
-					break
-				}
-				witness = append(witness, b)
-			}
-			var sigScript []byte
-			if input.ScriptSig != nil {
-				sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
-			}
-
-			txIn := wire.NewTxIn(new(wire.OutPoint), sigScript, witness)
-
-			if err == nil {
-				secret, err = dexbtc.FindKeyPush(txIn, req.contractHash, btc.segwit, btc.chainParams)
-			}
-
+	extractSecret := func(vin int, contractHash []byte) (*chainhash.Hash, []byte, error) {
+		redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
+		if err != nil {
+			return nil, nil, err
+		}
+		if tx.Vin[vin].ScriptSig == nil {
+			return nil, nil, fmt.Errorf("no sigScript")
+		}
+		sigScript, err := hex.DecodeString(tx.Vin[vin].ScriptSig.Hex)
+		if err != nil {
+			return nil, nil, err
+		}
+		var witness [][]byte
+		for _, hexB := range tx.Vin[vin].Witness {
+			var b []byte
+			b, err = hex.DecodeString(hexB)
 			if err != nil {
-				btc.log.Debugf("error parsing contract secret for %s from tx input %s:%d in %s: %v",
-					contractOutpoint.String(), tx.Txid, inputIndex, scanPoint, err)
+				break
+			}
+			witness = append(witness, b)
+		}
+		txIn := wire.NewTxIn(new(wire.OutPoint), sigScript, witness)
+		secret, err := dexbtc.FindKeyPush(txIn, contractHash, btc.segwit, btc.chainParams)
+		if err != nil {
+			return nil, nil, err
+		}
+		return redeemTxHash, secret, nil
+	}
+
+	for _, contractOutpoint := range contractOutpoints {
+		req, exists := btc.findRedemptionQueue[contractOutpoint]
+		if !exists {
+			continue // no find request for this outpoint (impossible now?)
+		}
+		if req.canceled() {
+			cancelled++
+			delete(btc.findRedemptionQueue, contractOutpoint)
+			continue // this find request has been cancelled
+		}
+
+		for i := range tx.Vin {
+			input := &tx.Vin[i]
+			if input.Vout != contractOutpoint.vout || input.Txid != contractOutpoint.txHash.String() {
+				continue // input doesn't redeem this contract, check next input
+			}
+			found++
+
+			redeemTxHash, secret, err := extractSecret(i, req.contractHash)
+			if err != nil {
+				btc.log.Errorf("Error parsing contract secret for %s from tx input %s:%d in %s: %v",
+					contractOutpoint.String(), tx.Txid, i, scanPoint, err)
 				req.resultChan <- &findRedemptionResult{
 					Err: err,
 				}
 			} else {
-				btc.log.Debugf("redemption for contract %s found in tx input %s:%d in %s",
-					contractOutpoint.String(), tx.Txid, inputIndex, scanPoint)
+				btc.log.Infof("Redemption for contract %s found in tx input %s:%d in %s",
+					contractOutpoint.String(), tx.Txid, i, scanPoint)
 				req.resultChan <- &findRedemptionResult{
-					RedemptionCoinID: toCoinID(redeemTxHash, uint32(inputIndex)),
+					RedemptionCoinID: toCoinID(redeemTxHash, uint32(i)),
 					Secret:           secret,
 				}
 			}
-			close(req.resultChan)
+
 			delete(btc.findRedemptionQueue, contractOutpoint)
-			break // skip checking other contracts for this input and check next input
+			break // stop checking inputs for this contract
 		}
 	}
 
@@ -1874,7 +1869,6 @@ func (btc *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 		req.resultChan <- &findRedemptionResult{
 			Err: err,
 		}
-		close(req.resultChan)
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
