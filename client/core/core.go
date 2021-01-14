@@ -1430,7 +1430,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	walletCfg := &asset.WalletConfig{
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
-			c.tipChange(assetID, err)
+			go c.tipChange(assetID, err)
 		},
 	}
 	logger := c.log.SubLogger(unbip(assetID))
@@ -1625,10 +1625,9 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	}
 	c.connMtx.RUnlock()
 
-	if oldWallet.connected() {
-		oldWallet.Disconnect()
-	}
 	c.wallets[assetID] = wallet
+
+	go oldWallet.Disconnect()
 
 	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
 	details := fmt.Sprintf("Configuration for %s wallet has been updated. Deposit address = %s", unbip(assetID), wallet.address)
