@@ -67,6 +67,7 @@ var (
 	}
 	tDexPriv            *secp256k1.PrivateKey
 	tDexKey             *secp256k1.PublicKey
+	tDexAccountID       account.AccountID
 	tPW                        = []byte("dexpw")
 	wPW                        = "walletpw"
 	tDexHost                   = "somedex.tld:7232"
@@ -154,6 +155,7 @@ func tNewAccount() *dexAccount {
 		encKey:    privKey.Serialize(),
 		dexPubKey: tDexKey,
 		privKey:   privKey,
+		id:        tDexAccountID,
 		feeCoin:   []byte("somecoin"),
 	}
 }
@@ -886,6 +888,7 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
 	tDexKey = tDexPriv.PubKey()
+	tDexAccountID = account.NewID(tDexPriv.PubKey().SerializeCompressed())
 
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
@@ -2319,11 +2322,12 @@ func TestAccountExportUnknownDEX(t *testing.T) {
 
 func buildTestAccount(host string) Account {
 	return Account{
-		Host:    host,
-		PubKey:  hex.EncodeToString(tDexKey.SerializeUncompressed()),
-		PrivKey: hex.EncodeToString(tDexPriv.Serialize()),
-		Cert:    hex.EncodeToString([]byte{}),
-		FeeCoin: hex.EncodeToString([]byte("somecoin")),
+		Host:      host,
+		AccountID: tDexAccountID.String(),
+		DEXPubKey: hex.EncodeToString(tDexKey.SerializeUncompressed()),
+		PrivKey:   hex.EncodeToString(tDexPriv.Serialize()),
+		Cert:      hex.EncodeToString([]byte{}),
+		FeeCoin:   hex.EncodeToString([]byte("somecoin")),
 	}
 }
 
@@ -2369,7 +2373,7 @@ func TestAccountImportDecodePubKeyError(t *testing.T) {
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	account := buildTestAccount(host)
-	account.PubKey = "bad"
+	account.DEXPubKey = "bad"
 	rig.queueConfig()
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, decodeErr) {
@@ -2382,7 +2386,7 @@ func TestAccountImportParsePubKeyError(t *testing.T) {
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	account := buildTestAccount(host)
-	account.PubKey = hex.EncodeToString([]byte("bad"))
+	account.DEXPubKey = hex.EncodeToString([]byte("bad"))
 	rig.queueConfig()
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, parseKeyErr) {
@@ -2427,6 +2431,45 @@ func TestAccountImportAccountVerificationError(t *testing.T) {
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, accountVerificationErr) {
 		t.Fatalf("expected account verification error, actual error: '%v'", err)
+	}
+}
+
+func TestAccountImportAccountIDValidationError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	account := buildTestAccount(host)
+	account.AccountID = "bad"
+	rig.queueConfig()
+	err := tCore.AccountImport(tPW, account)
+	if !errorHasCode(err, accountIDValidationErr) {
+		t.Fatalf("expected account id validation error, actual error: '%v'", err)
+	}
+}
+
+func TestAccountImportDecodePrivKeyError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	account := buildTestAccount(host)
+	account.PrivKey = "bad"
+	rig.queueConfig()
+	err := tCore.AccountImport(tPW, account)
+	if !errorHasCode(err, decodeErr) {
+		t.Fatalf("expected decode error, actual error: '%v'", err)
+	}
+}
+
+func TestAccountImportEncryptPrivKeyError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	account := buildTestAccount(host)
+	rig.crypter.encryptErr = tErr
+	rig.queueConfig()
+	err := tCore.AccountImport(tPW, account)
+	if !errorHasCode(err, encryptionErr) {
+		t.Fatalf("expected encryption error, actual error: '%v'", err)
 	}
 }
 

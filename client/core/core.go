@@ -2708,7 +2708,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		Host:      host,
 		AccountID: accountId,
 		PrivKey:   privKey,
-		PubKey:    hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
+		DEXPubKey: hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
 		IsPaid:    dc.acct.feePaid(),
@@ -2731,7 +2731,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	var accountInfo db.AccountInfo
 	accountInfo.Host = acct.Host
 
-	pubKey, err := hex.DecodeString(acct.PubKey)
+	pubKey, err := hex.DecodeString(acct.DEXPubKey)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
@@ -2751,19 +2751,26 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	}
 
 	if !c.verifyAccount(&accountInfo) {
-		return newError(accountVerificationErr, "Account not verified for host: "+acct.Host, err)
+		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
 	}
 
-	if acct.AccountID != c.conns[acct.Host].acct.id.String() {
-		return newError(accountIDValidationErr, "Account ID: %v validation failed", acct.AccountID)
+	accountIDFromDEXPubKey := account.NewID(accountInfo.DEXPubKey.SerializeCompressed()).String()
+	if acct.AccountID != accountIDFromDEXPubKey {
+		return newError(accountIDValidationErr, "Account ID validation failed. imported account id: %s does not"+
+			" match dex account id: %s", acct.AccountID, accountIDFromDEXPubKey)
 	}
 
 	// verifyAccount populates c.conns, now we can access c.conns acct data.
 	accountInfo.Paid = c.conns[acct.Host].acct.isPaid
 
-	accountInfo.EncKey, err = crypter.Encrypt(c.conns[acct.Host].acct.privKey.Serialize())
+	privKey, err := hex.DecodeString(acct.PrivKey)
 	if err != nil {
 		return codedError(decodeErr, err)
+	}
+
+	accountInfo.EncKey, err = crypter.Encrypt(privKey)
+	if err != nil {
+		return codedError(encryptionErr, err)
 	}
 
 	err = c.db.CreateAccount(&accountInfo)

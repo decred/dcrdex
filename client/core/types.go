@@ -700,7 +700,7 @@ type Account struct {
 	Host      string `json:"host"`
 	AccountID string `json:"accountID"`
 	PrivKey   string `json:"privKey"`
-	PubKey    string `json:"pubKey"`
+	DEXPubKey string `json:"DEXPubKey"`
 	Cert      string `json:"cert"`
 	FeeCoin   string `json:"feeCoin"`
 	IsPaid    bool   `json:"isPaid"`
