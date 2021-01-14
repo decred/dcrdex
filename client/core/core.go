@@ -2718,16 +2718,19 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 
 // AccountImport is used import an existing account into the db.
 func (c *Core) AccountImport(pw []byte, account Account) error {
-	_, err := c.encryptionKey(pw)
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return codedError(passwordErr, err)
 	}
+
 	_, err = addrHost(account.Host)
 	if err != nil {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
+
 	var accountInfo db.AccountInfo
 	accountInfo.Host = account.Host
+
 	pubKey, err := hex.DecodeString(account.PubKey)
 	if err != nil {
 		return codedError(decodeErr, err)
@@ -2736,20 +2739,28 @@ func (c *Core) AccountImport(pw []byte, account Account) error {
 	if err != nil {
 		return codedError(parseKeyErr, err)
 	}
-	cert, err := hex.DecodeString(account.Cert)
+
+	accountInfo.Cert, err = hex.DecodeString(account.Cert)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-	accountInfo.Cert = cert
-	feeCoin, err := hex.DecodeString(account.FeeCoin)
+
+	accountInfo.FeeCoin, err = hex.DecodeString(account.FeeCoin)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-	accountInfo.FeeCoin = feeCoin
+
 	if !c.verifyAccount(&accountInfo) {
 		return newError(accountVerificationErr, "Account not verified for host: "+account.Host, err)
 	}
+	// verifyAccount populates c.conns, now we can access c.conns account data.
 	accountInfo.Paid = c.conns[account.Host].acct.isPaid
+
+	accountInfo.EncKey, err = crypter.Encrypt(c.conns[account.Host].acct.privKey.Serialize())
+	if err != nil {
+		return codedError(decodeErr, err)
+	}
+
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
 		return codedError(dbErr, err)
