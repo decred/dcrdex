@@ -480,11 +480,16 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	// Make tipChange an asynchronous call to the opaque callback, which could
+	// take any amount of time and for which we do not need to wait.
+	tipChange := func(err error) {
+		go cfg.TipChange(err)
+	}
 	return &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
 		acct:                cfg.Settings["account"],
-		tipChange:           cfg.TipChange,
+		tipChange:           tipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,

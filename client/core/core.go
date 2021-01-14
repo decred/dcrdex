@@ -1452,7 +1452,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	walletCfg := &asset.WalletConfig{
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
-			go c.tipChange(assetID, err)
+			c.tipChange(assetID, err)
 		},
 	}
 	logger := c.log.SubLogger(unbip(assetID))

@@ -492,13 +492,18 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	// Make tipChange an asynchronous call to the opaque callback, which could
+	// take any amount of time and for which we do not need to wait.
+	tipChange := func(err error) {
+		go cfg.WalletCFG.TipChange(err)
+	}
 	return &ExchangeWallet{
 		node:                node,
 		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
-		tipChange:           cfg.WalletCFG.TipChange,
+		tipChange:           tipChange,
 		fundingCoins:        make(map[outPoint]*utxo),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
