@@ -2753,6 +2753,11 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	if !c.verifyAccount(&accountInfo) {
 		return newError(accountVerificationErr, "Account not verified for host: "+acct.Host, err)
 	}
+
+	if acct.AccountID != c.conns[acct.Host].acct.id.String() {
+		return newError(accountIDValidationErr, "Account ID: %v validation failed", acct.AccountID)
+	}
+
 	// verifyAccount populates c.conns, now we can access c.conns acct data.
 	accountInfo.Paid = c.conns[acct.Host].acct.isPaid
 
