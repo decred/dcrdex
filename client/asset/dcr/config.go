@@ -23,7 +23,6 @@ const (
 var (
 	// A global *chaincfg.Params will be set if loadConfig completes without
 	// error.
-	chainParams       *chaincfg.Params
 	dcrwHomeDir       = dcrutil.AppDataDir("dcrwallet", false)
 	defaultRPCCert    = filepath.Join(dcrwHomeDir, "rpc.cert")
 	defaultConfigPath = filepath.Join(dcrwHomeDir, "dcrwallet.conf")
@@ -44,14 +43,14 @@ type Config struct {
 	Context context.Context `ini:"-"`
 }
 
-// loadConfig loads the DCRConfig from a settings map. If no values are found
-// for RPCListen or RPCCert in the specified file, default values will be used.
-// If there is no error, the module-level chainParams variable will be set
+// loadConfig loads the Config from a settings map. If no values are found for
+// RPCListen or RPCCert in the specified file, default values will be used. If
+// there is no error, the module-level chainParams variable will be set
 // appropriately for the network.
-func loadConfig(settings map[string]string, network dex.Network) (*Config, error) {
+func loadConfig(settings map[string]string, network dex.Network) (*Config, *chaincfg.Params, error) {
 	cfg := new(Config)
 	if err := config.Unmapify(settings, cfg); err != nil {
-		return nil, fmt.Errorf("error parsing config: %v", err)
+		return nil, nil, fmt.Errorf("error parsing config: %w", err)
 	}
 
 	missing := ""
@@ -62,12 +61,13 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 		missing += " password"
 	}
 	if missing != "" {
-		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
+		return nil, nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
 	}
 
 	// Get network settings. Zero value is mainnet, but unknown non-zero cfg.Net
 	// is an error.
 	var defaultServer string
+	var chainParams *chaincfg.Params
 	switch network {
 	case dex.Simnet:
 		chainParams = chaincfg.SimNetParams()
@@ -79,7 +79,7 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 		chainParams = chaincfg.MainNetParams()
 		defaultServer = defaultMainnet
 	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+		return nil, nil, fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
 	if cfg.RPCListen == "" {
 		cfg.RPCListen = defaultServer
@@ -88,5 +88,5 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 		cfg.RPCCert = defaultRPCCert
 	}
 
-	return cfg, nil
+	return cfg, chainParams, nil
 }
