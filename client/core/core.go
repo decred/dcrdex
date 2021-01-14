@@ -1590,7 +1590,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		Settings:    cfg,
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
 		EncryptedPW: oldWallet.encPW,
-		Address:     oldWallet.address,
+		Address:     oldWallet.currentDepositAddress(),
 	}
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
