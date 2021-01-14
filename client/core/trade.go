@@ -1471,7 +1471,10 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 	if match.sendingInitAsync {
 		return
 	}
+
 	match.sendingInitAsync = true
+	c.log.Debugf("Sending 'init' request for match %s, contract coin %v (%s)",
+		match.id, coinIDString(t.fromAssetID, coinID), t.wallets.fromAsset.Symbol)
 
 	// Send the init request asynchronously.
 	go func() {
@@ -1518,6 +1521,8 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			err = fmt.Errorf("'init' ack signature error: %v", err)
 			return
 		}
+
+		c.log.Debugf("Received valid ack for 'init' request for match %s)", match.id)
 
 		// Save init ack sig.
 		t.mtx.Lock()
@@ -1659,7 +1664,10 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 	if match.sendingRedeemAsync || match.MetaData.Proof.IsRevoked() {
 		return // no need sending `redeem` request for a revoked match
 	}
+
 	match.sendingRedeemAsync = true
+	c.log.Debugf("Sending 'redeem' request for match %s, redeem coin %v (%s)",
+		match.id, coinIDString(t.fromAssetID, coinID), t.wallets.fromAsset.Symbol)
 
 	// Send the redeem request asynchronously.
 	go func() {
@@ -1706,6 +1714,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			err = fmt.Errorf("'redeem' ack signature error: %v", err)
 			return
 		}
+
+		c.log.Debugf("Received valid ack for 'redeem' request for match %s)", match.id)
 
 		// Save redeem ack sig.
 		t.mtx.Lock()
