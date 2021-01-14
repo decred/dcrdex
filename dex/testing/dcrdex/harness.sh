@@ -21,13 +21,10 @@ TEST_DB=dcrdex_simnet_test
 sudo -u postgres -H psql -c "DROP DATABASE IF EXISTS ${TEST_DB}" \
 -c "CREATE DATABASE ${TEST_DB} OWNER dcrdex"
 
-EPOCH_DURATION=15000
-if [ "$1" -eq "$1" ]; then # check that arg1 is a number and not a flag to append to the dcrdex cmd below
-    if [ "$1" -lt 1000 ]; then
-        echo "epoch duration cannot be < 1000 ms"
-        exit 1
-    fi
-    EPOCH_DURATION=$1
+EPOCH_DURATION=${EPOCH:-15000} 
+if [ "${EPOCH_DURATION}" -lt 1000 ]; then
+    echo "epoch duration cannot be < 1000 ms"
+    exit 1
 fi
 
 echo "Writing markets.json and dcrdex.conf"
