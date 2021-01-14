@@ -52,6 +52,7 @@ var (
 	tTxHash        *chainhash.Hash
 	tPKHAddr       dcrutil.Address
 	tP2PKHScript   []byte
+	tChainParams   = chaincfg.MainNetParams()
 )
 
 func randBytes(l int) []byte {
@@ -150,7 +151,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet, err := unconnectedWallet(walletCfg, &Config{}, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &Config{}, tChainParams, tLogger)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
@@ -496,8 +497,8 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 }
 
 func TestMain(m *testing.M) {
-	chainParams = chaincfg.MainNetParams()
-	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", chainParams)
+	tChainParams = chaincfg.MainNetParams()
+	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
 	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -1237,7 +1238,7 @@ func TestRedeem(t *testing.T) {
 	lockTime := time.Now().Add(time.Hour * 12)
 	addr := tPKHAddr.String()
 
-	contract, err := dexdcr.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), chainParams)
+	contract, err := dexdcr.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), tChainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
@@ -1257,7 +1258,7 @@ func TestRedeem(t *testing.T) {
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 
 	node.changeAddr = tPKHAddr
-	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
 	}
@@ -1373,7 +1374,7 @@ func TestSignMessage(t *testing.T) {
 		},
 	}
 
-	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
 	}
@@ -1444,11 +1445,11 @@ func TestAuditContract(t *testing.T) {
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
-	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash, lockTime.Unix(), chainParams)
+	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash, lockTime.Unix(), tChainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	addr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
+	addr, _ := dcrutil.NewAddressScriptHash(contract, tChainParams)
 	pkScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", addr, addr)
@@ -1486,7 +1487,7 @@ func TestAuditContract(t *testing.T) {
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
-	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
+	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, tChainParams, dcrec.STEcdsaSecp256k1)
 	badContract, err := txscript.PayToAddrScript(wrongAddr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
@@ -1529,17 +1530,17 @@ func TestFindRedemption(t *testing.T) {
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
-	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), chainParams)
+	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), tChainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	contractAddr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
+	contractAddr, _ := dcrutil.NewAddressScriptHash(contract, tChainParams)
 	pkScript, err := txscript.PayToAddrScript(contractAddr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
 	}
 
-	tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), chainParams)
+	tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), tChainParams)
 	otherScript, err := txscript.PayToAddrScript(tPKHAddrV3)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", tPKHAddrV3, tPKHAddrV3)
@@ -1650,7 +1651,7 @@ func TestRefund(t *testing.T) {
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
-	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), chainParams)
+	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), tChainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
@@ -1662,7 +1663,7 @@ func TestRefund(t *testing.T) {
 	node.newAddr = tPKHAddr
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	node.privWIF, err = dcrutil.NewWIF(privBytes, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
 	}
@@ -1833,7 +1834,7 @@ func Test_sendMinusFees(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 
-	addr, err := dcrutil.DecodeAddress(address, chainParams)
+	addr, err := dcrutil.DecodeAddress(address, tChainParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1971,7 +1972,7 @@ func TestSendEdges(t *testing.T) {
 
 	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
 
-	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), chainParams)
+	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), tChainParams)
 	// See dexdcr.IsDust for the source of this dustCoverage voodoo.
 	dustCoverage := (dexdcr.P2PKHOutputSize + 165) * feeRate * 3
 	dexReqFees := dexdcr.InitTxSize * feeRate
@@ -2021,7 +2022,7 @@ func TestSendEdges(t *testing.T) {
 		},
 	}
 
-	// tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), chainParams)
+	// tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), tChainParams)
 	node.changeAddr = tPKHAddr
 
 	for _, tt := range tests {
