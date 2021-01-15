@@ -2704,11 +2704,12 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
 	dc.acct.keyMtx.RUnlock()
 
+	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
 		Host:      host,
 		AccountID: accountId,
 		PrivKey:   privKey,
-		DEXPubKey: hex.EncodeToString(dc.acct.dexPubKey.SerializeUncompressed()),
+		DEXPubKey: hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
 		Cert:      hex.EncodeToString(dc.acct.cert),
 		FeeCoin:   hex.EncodeToString(dc.acct.feeCoin),
 		IsPaid:    dc.acct.feePaid(),
@@ -2752,12 +2753,6 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 
 	if !c.verifyAccount(&accountInfo) {
 		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
-	}
-
-	accountIDFromDEXPubKey := account.NewID(accountInfo.DEXPubKey.SerializeCompressed()).String()
-	if acct.AccountID != accountIDFromDEXPubKey {
-		return newError(accountIDValidationErr, "Account ID validation failed. imported account id: %s does not"+
-			" match dex account id: %s", acct.AccountID, accountIDFromDEXPubKey)
 	}
 
 	// verifyAccount populates c.conns, now we can access c.conns acct data.

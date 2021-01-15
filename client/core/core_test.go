@@ -2324,7 +2324,7 @@ func buildTestAccount(host string) Account {
 	return Account{
 		Host:      host,
 		AccountID: tDexAccountID.String(),
-		DEXPubKey: hex.EncodeToString(tDexKey.SerializeUncompressed()),
+		DEXPubKey: hex.EncodeToString(tDexKey.SerializeCompressed()),
 		PrivKey:   hex.EncodeToString(tDexPriv.Serialize()),
 		Cert:      hex.EncodeToString([]byte{}),
 		FeeCoin:   hex.EncodeToString([]byte("somecoin")),
