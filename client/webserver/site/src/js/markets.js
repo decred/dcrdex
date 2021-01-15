@@ -1096,7 +1096,10 @@ export default class MarketsPage extends BasePage {
   handleOrderNote (note) {
     const order = note.order
     const metaOrder = this.metaOrders[order.id]
-    if (!metaOrder) return
+    // If metaOrder doesn't exist for the gived order we call it means it was
+    // created by dexcctl and the GUI isn't aware of it.
+    // Call refreshActiveOrders to grab the order.
+    if (!metaOrder) return this.refreshActiveOrders()
     const oldStatus = metaOrder.status
     metaOrder.order = order
     const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')

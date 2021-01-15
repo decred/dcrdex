@@ -468,17 +468,28 @@ export default class Application {
         const order = note.order
         const mkt = this.user.exchanges[order.host].markets[order.market]
         if (mkt.orders) {
+          let found = false
           for (const i in mkt.orders) {
             if (mkt.orders[i].id === order.id) {
               mkt.orders[i] = order
+              found = true
               break
             }
           }
+          // If notifaction order isn't part of the market orders list
+          // we add the order to list manually as it means this order was
+          // placed using dexcctl
+          if (!found) mkt.orders = [...mkt.orders, order]
+        } else {
+          // If user obj has no orders this means order was placed using dexcctl
+          // we add the order to the list
+          mkt.order = [order]
         }
         break
       }
       case 'balance': {
-        const wallet = this.user.assets[note.assetID].wallet
+        const wallet = this.user.assets &&
+          this.user.assets[note.assetID].wallet
         if (wallet) wallet.balance = note.balance
         break
       }
