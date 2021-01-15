@@ -2434,19 +2434,6 @@ func TestAccountImportAccountVerificationError(t *testing.T) {
 	}
 }
 
-func TestAccountImportAccountIDValidationError(t *testing.T) {
-	rig := newTestRig()
-	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
-	account.AccountID = "bad"
-	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
-	if !errorHasCode(err, accountIDValidationErr) {
-		t.Fatalf("expected account id validation error, actual error: '%v'", err)
-	}
-}
-
 func TestAccountImportDecodePrivKeyError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
