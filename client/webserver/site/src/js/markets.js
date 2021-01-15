@@ -1096,8 +1096,8 @@ export default class MarketsPage extends BasePage {
   handleOrderNote (note) {
     const order = note.order
     const metaOrder = this.metaOrders[order.id]
-    // If metaOrder doesn't exist for the gived order we call it means it was
-    // created by dexcctl and the GUI isn't aware of it.
+    // If metaOrder doesn't exist for the given order it means it was
+    // created via dexcctl and the GUI isn't aware of it.
     // Call refreshActiveOrders to grab the order.
     if (!metaOrder) return this.refreshActiveOrders()
     const oldStatus = metaOrder.status
@@ -1187,7 +1187,6 @@ export default class MarketsPage extends BasePage {
     // ordering. Grab updated info.
     const baseWallet = app.walletMap[market.base.id]
     const quoteWallet = app.walletMap[market.quote.id]
-    await app.fetchUser()
     if (!baseWallet.open || !quoteWallet.open) {
       this.balanceWgt.updateAsset(market.base.id)
       this.balanceWgt.updateAsset(market.quote.id)

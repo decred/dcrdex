@@ -478,11 +478,11 @@ export default class Application {
           }
           // If notifaction order isn't part of the market orders list
           // we add the order to list manually as it means this order was
-          // placed using dexcctl
+          // just placed.
           if (!found) mkt.orders = [...mkt.orders, order]
         } else {
-          // If user obj has no orders this means order was placed using dexcctl
-          // we add the order to the list
+          // If user obj has no orders this also means order was just placed, we
+          // add it manually.
           mkt.order = [order]
         }
         break
