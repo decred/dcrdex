@@ -1,7 +1,5 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 decred.org/cspp v0.3.0/go.mod h1:UygjYilC94dER3BEU65Zzyoqy9ngJfWCD2rdJqvUs2A=
-decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa h1:cafi5DQOEU3frG3wAvlbkUhFB7+gMKLRQ5VICSuity4=
-decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa/go.mod h1:WflBF81Mt/FIcEEuSBx0uc5ng2rNDb+CKM8qHISYhNQ=
 github.com/Azure/azure-pipeline-go v0.2.1/go.mod h1:UGSo8XybXnIGZ3epmeBw7Jdz+HiUVpqIlpz/HKHylF4=
 github.com/Azure/azure-pipeline-go v0.2.2/go.mod h1:4rQ/NZncSvGqNkkOsNpOU1tgoNuIlp9AfUH5G1tvCHc=
 github.com/Azure/azure-storage-blob-go v0.7.0/go.mod h1:f9YQKtsG1nMisotuTPpO0tjNuEjKRYAcJU8/ydDI++4=
@@ -74,7 +72,8 @@ github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea h1:j4317fAZh7X
 github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea/go.mod h1:93vsz/8Wt4joVM7c2AVqh+YRMiUSc14yDtF28KmMOgQ=
 github.com/decred/base58 v1.0.3 h1:KGZuh8d1WEMIrK0leQRM47W85KqCAdl2N+uagbctdDI=
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
-github.com/decred/dcrd/addrmgr/v2 v2.0.0-20210412162101-76f80ba180f0/go.mod h1:VKxDZPQTcFkUhJjEsr+dcnExKlp8qdS4sUR5XUsonwg=
+github.com/decred/dcrd/addrmgr v1.2.0/go.mod h1:QlZF9vkzwYh0qs25C76SAFZBRscjETga/K28GEE6qIc=
+github.com/decred/dcrd/blockchain/stake/v3 v3.0.0/go.mod h1:5GIUwsrHQCJauacgCegIR6t92SaeVi28Qls/BLN9vOw=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210129192908-660d0518b4cf/go.mod h1:zALtZt59lCrhoj6dVMptHHAMw1hq0Zz9s2ZULWjhtZs=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210330065944-a2366e6e0b3b h1:youRwH9SuH/g4YctM9K8/3/Awmi5aQ+WlFMZDXkHqd4=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210330065944-a2366e6e0b3b/go.mod h1:zALtZt59lCrhoj6dVMptHHAMw1hq0Zz9s2ZULWjhtZs=
@@ -94,6 +93,7 @@ github.com/decred/dcrd/crypto/blake256 v1.0.0 h1:/8DMNYp9SGi5f0w7uCm6d6M4OU2rGFK
 github.com/decred/dcrd/crypto/blake256 v1.0.0/go.mod h1:sQl2p6Y26YV+ZOcSTP6thNdn47hh8kt6rqSlvmrXFAc=
 github.com/decred/dcrd/crypto/ripemd160 v1.0.1 h1:TjRL4LfftzTjXzaufov96iDAkbY2R3aTvH2YMYa1IOc=
 github.com/decred/dcrd/crypto/ripemd160 v1.0.1/go.mod h1:F0H8cjIuWTRoixr/LM3REB8obcWkmYx0gbxpQWR8RPg=
+github.com/decred/dcrd/database/v2 v2.0.2/go.mod h1:S78KbTCCJWUTJDVTByiQuB+HmL0DM2vIMsa2WsrF9KM=
 github.com/decred/dcrd/database/v2 v2.0.3-0.20210129190127-4ebd135a82f1 h1:+oUVvEK/+TQeJqJs0bbnVcs2IvFkL4Z8nIKupeFDV3A=
 github.com/decred/dcrd/database/v2 v2.0.3-0.20210129190127-4ebd135a82f1/go.mod h1:C5nb1qImTy2sxAfV1KJFW6KHae+NbD6lSMJl58KY7XM=
 github.com/decred/dcrd/dcrec v1.0.0 h1:W+z6Es+Rai3MXYVoPAxYr5U1DGis0Co33scJ6uH2J6o=
@@ -111,6 +111,7 @@ github.com/decred/dcrd/dcrutil/v3 v3.0.0/go.mod h1:iVsjcqVzLmYFGCZLet2H7Nq+7imV9
 github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210129181600-6ae0142d3b28/go.mod h1:xe59jKcMx5G/dbRmsZ8+FzY+WQDE/7YBP3k3uzJTtmI=
 github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210330065944-a2366e6e0b3b h1:f+dc0qcWjeq7DZbxye36HpZTL+hh0+bU4ATR4AKmCOg=
 github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210330065944-a2366e6e0b3b/go.mod h1:xe59jKcMx5G/dbRmsZ8+FzY+WQDE/7YBP3k3uzJTtmI=
+github.com/decred/dcrd/gcs/v2 v2.1.0/go.mod h1:MbnJOINFcp42NMRAQ+CjX/xGz+53AwNgMzKZhwBibdM=
 github.com/decred/dcrd/gcs/v3 v3.0.0-20210129195202-a4265d63b619 h1:YEx0oEkwh9uBPVzzZTkemyKieBpQwmHSI+BdW0VHoAA=
 github.com/decred/dcrd/gcs/v3 v3.0.0-20210129195202-a4265d63b619/go.mod h1:aGuAajYbDJB2oal17G371wiosGgVCc5d5FlT2EwZtoE=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.0 h1:hOPb4c8+K6bE3a/qFtzt2Z2yzK4SpmXmxvCTFp8vMxI=
@@ -122,6 +123,7 @@ github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b h
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
 github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b h1:m85c5YGIqwAc49bVTer0XYwDm8Q5ZjvqGnyklr0+bSA=
 github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b/go.mod h1:6hJkpRGYSSgW4BYOg5VgTvyUVTP7ElaWscn2t/Z7Y0U=
+github.com/decred/dcrd/txscript/v3 v3.0.0/go.mod h1:pdvnlD4KGdDoc09cvWRJ8EoRQUaiUz41uDevOWuEfII=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210129190127-4ebd135a82f1/go.mod h1:EnS4vtxTESoI59geLo9M8AUOvIprJy+O4gSVsQp6/h4=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b h1:mF1urWXmlga45kz6PdD4k1/ZJi7446ARF276bm7Dfxk=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b/go.mod h1:G6b6ERb4KkSqMOCcfSS6m5QV2dgXKVohRpK0HEECw5Q=
@@ -224,6 +226,8 @@ github.com/huin/goutil v0.0.0-20170803182201-1ca381bf3150/go.mod h1:PpLOETDnJ0o3
 github.com/improbable-eng/grpc-web v0.9.1/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
 github.com/improbable-eng/grpc-web v0.13.0/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
 github.com/influxdata/influxdb v1.2.3-0.20180221223340-01288bdb0883/go.mod h1:qZna6X/4elxqT3yI9iZYdZrWWdeFOOprn86kgg4+IzY=
+github.com/itswisdomagain/dcrwallet/v2 v2.0.0-20210203133250-b3f470a90b70 h1:weCQjDQ5AdX2nfbVifU7CfYM1e6iOdNpV016pWElHD8=
+github.com/itswisdomagain/dcrwallet/v2 v2.0.0-20210203133250-b3f470a90b70/go.mod h1:a/gCARd0EX8yS4iML21MQME75+bxtaGqVKjgCPAXeno=
 github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458 h1:6OvNmYgJyexcZ3pYbTI9jWx5tHo1Dee/tWbLMfPe2TA=
 github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458/go.mod h1:QPH045xvCAeXUZOxsnwmrtiCoxIr9eob+4orBN1SBKc=
 github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e/go.mod h1:G1CVv03EnqU1wYL2dFwXxW2An0az9JTl/ZsqXQeBlkU=
@@ -353,6 +357,7 @@ golang.org/x/crypto v0.0.0-20200115085410-6d4e4cb37c7d/go.mod h1:LzIPMQfyMNhhGPh
 golang.org/x/crypto v0.0.0-20200221231518-2aa609cf4a9d/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
+golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.0.0-20201016220609-9e8e0b390897/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 h1:/ZScEX8SfEmUGRHs0gxpqteO5nfNW6axyZbBdw9A12g=
 golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83/go.mod h1:jdWPYTVW3xRLrWPugEBEK3UY2ZEsg3UU495nc5E+M+I=

@@ -67,6 +67,7 @@ const (
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
+	methodSyncStatus         = "syncstatus"
 )
 
 var (
@@ -156,7 +157,6 @@ var (
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
-	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
@@ -404,6 +404,7 @@ type ExchangeWallet struct {
 	client           *rpcclient.Client
 	node             rpcClient
 	chainParams      *chaincfg.Params
+	spvMode          bool
 	log              dex.Logger
 	acct             string
 	tipChange        func(error)
@@ -605,19 +606,25 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
 			walletSemver, requiredWalletVersion)
 	}
+
 	ver, exists = versions["dcrdjsonrpcapi"]
 	if !exists {
-		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
-	}
-	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
-	}
+		dcr.spvMode = true
+		dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
+	} else {
+		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+			return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+				nodeSemver, requiredNodeVersion)
+		}
 
-	curnet, err := dcr.client.GetCurrentNet(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
+		curnet, err := dcr.client.GetCurrentNet(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("getcurrentnet failure: %w", err)
+		}
+
+		dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
+			walletSemver, nodeSemver, curnet)
 	}
 
 	// Initialize the best block.
@@ -628,9 +635,6 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 	atomic.StoreInt64(&dcr.tipAtConnect, dcr.currentTip.height)
-
-	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, curnet)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -2354,21 +2358,12 @@ func (dcr *ExchangeWallet) shutdown() {
 
 // SyncStatus is information about the blockchain sync status.
 func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
-	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
+	syncStatus := new(walletjson.SyncStatusResult)
+	err := dcr.nodeRawRequest(methodSyncStatus, nil, syncStatus)
 	if err != nil {
-		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
+		return false, 0, fmt.Errorf("rawrequest error: %w", err)
 	}
-	toGo := chainInfo.Headers - chainInfo.Blocks
-	if chainInfo.InitialBlockDownload || toGo > 1 {
-		ogTip := atomic.LoadInt64(&dcr.tipAtConnect)
-		totalToSync := chainInfo.Headers - ogTip
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
-		}
-		return false, progress, nil
-	}
-	return true, 1, nil
+	return syncStatus.Synced || syncStatus.InitialBlockDownload, syncStatus.HeadersFetchProgress, nil
 }
 
 // Combines the RPC type with the spending input information.
