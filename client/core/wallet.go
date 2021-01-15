@@ -172,9 +172,11 @@ func (w *xcWallet) connected() bool {
 }
 
 // Connect calls the dex.Connector's Connect method, sets the xcWallet.hookedUp
-// flag to true, and validates the deposit address.
-func (w *xcWallet) Connect(ctx context.Context) error {
-	err := w.connector.Connect(ctx)
+// flag to true, and validates the deposit address. Use Disconnect to cleanly
+// shutdown the wallet.
+func (w *xcWallet) Connect() error {
+	// No parent context; use Disconnect instead.
+	err := w.connector.Connect(context.Background())
 	if err != nil {
 		return err
 	}

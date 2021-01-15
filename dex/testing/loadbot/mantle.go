@@ -110,7 +110,8 @@ out:
 		}
 	}
 
-	m.ForceShutdown()
+	// Let Core shutdown and lock up.
+	m.waiter.WaitForShutdown()
 }
 
 // A Mantle is a wrapper for *core.Core that adds some useful LoadBot methods
