@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync/atomic"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -37,17 +36,15 @@ const (
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
+	methodSyncStatus         = "syncstatus"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
 // with the json-rpc server of an external dcrwallet daemon.
 type rpcWallet struct {
-	// 64-bit atomic variables first. See
-	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect int64
-
 	chainParams *chaincfg.Params
 	log         dex.Logger
+	spvMode     bool
 
 	// rpcConnector is a rpcclient.Client, does not need to be
 	// set for testing.
@@ -90,7 +87,6 @@ type rpcConnector interface {
 type rpcClient interface {
 	GetCurrentNet(ctx context.Context) (wire.CurrencyNet, error)
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
-	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
@@ -214,26 +210,25 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 		return fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
 			walletSemver, requiredWalletVersion)
 	}
+
 	ver, exists = versions["dcrdjsonrpcapi"]
 	if !exists {
-		return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
+		w.spvMode = true
+		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
+		// TODO: Thr wallet may actually not be connected to an spv syncer, use the walletinfo
+		// rpc to confirm and return the following error if this is not spv wallet.
+		// return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
+	} else {
+		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+			return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+				nodeSemver, requiredNodeVersion)
+		}
+		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
+			walletSemver, nodeSemver, w.chainParams.Name)
 	}
-	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-		return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
-	}
-
-	// Set the tipAtConnect, we'll use it later in determining SyncStatus.
-	_, currentTip, err := w.GetBestBlock(ctx)
-	if err != nil {
-		return fmt.Errorf("error getting best block height: %w", translateRPCCancelErr(err))
-	}
-	atomic.StoreInt64(&w.tipAtConnect, currentTip)
 
 	success = true
-	w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, w.chainParams.Name)
 	return nil
 }
 
@@ -494,21 +489,13 @@ func (w *rpcWallet) UnlockAccount(ctx context.Context, account, passphrase strin
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
 func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
-	chainInfo, err := w.rpcClient.GetBlockChainInfo(ctx)
+	syncStatus := new(walletjson.SyncStatusResult)
+	err := w.rpcClientRawRequest(ctx, methodSyncStatus, nil, syncStatus)
 	if err != nil {
-		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
+		return false, 0, fmt.Errorf("rawrequest error: %w", err)
 	}
-	toGo := chainInfo.Headers - chainInfo.Blocks
-	if chainInfo.InitialBlockDownload || toGo > 1 {
-		ogTip := atomic.LoadInt64(&w.tipAtConnect)
-		totalToSync := chainInfo.Headers - ogTip
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
-		}
-		return false, progress, nil
-	}
-	return true, 1, nil
+	ready := syncStatus.Synced && !syncStatus.InitialBlockDownload
+	return ready, syncStatus.HeadersFetchProgress, nil
 }
 
 // AddressPrivKey fetches the privkey for the specified address.

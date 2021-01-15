@@ -182,40 +182,38 @@ func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
 }
 
 type tRPCClient struct {
-	sendRawHash       *chainhash.Hash
-	sendRawErr        error
-	sentRawTx         *wire.MsgTx
-	txOutRes          map[outPoint]*chainjson.GetTxOutResult
-	txOutErr          error
-	bestBlockErr      error
-	mempoolErr        error
-	rawTxErr          error
-	unspent           []walletjson.ListUnspentResult
-	unspentErr        error
-	balanceResult     *walletjson.GetBalanceResult
-	balanceErr        error
-	lockUnspentErr    error
-	changeAddr        stdaddr.Address
-	changeAddrErr     error
-	newAddr           stdaddr.Address
-	newAddrErr        error
-	signFunc          func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
-	privWIF           *dcrutil.WIF
-	privWIFErr        error
-	walletTx          *walletjson.GetTransactionResult
-	walletTxErr       error
-	lockErr           error
-	passErr           error
-	disconnected      bool
-	rawRes            map[string]json.RawMessage
-	rawErr            map[string]error
-	blockchain        *tBlockchain
-	lluCoins          []walletjson.ListUnspentResult // Returned from ListLockUnspent
-	lockedCoins       []*wire.OutPoint               // Last submitted to LockUnspent
-	listLockedErr     error
-	blockchainInfo    *chainjson.GetBlockChainInfoResult
-	blockchainInfoErr error
-	estFeeErr         error
+	sendRawHash    *chainhash.Hash
+	sendRawErr     error
+	sentRawTx      *wire.MsgTx
+	txOutRes       map[outPoint]*chainjson.GetTxOutResult
+	txOutErr       error
+	bestBlockErr   error
+	mempoolErr     error
+	rawTxErr       error
+	unspent        []walletjson.ListUnspentResult
+	unspentErr     error
+	balanceResult  *walletjson.GetBalanceResult
+	balanceErr     error
+	lockUnspentErr error
+	changeAddr     stdaddr.Address
+	changeAddrErr  error
+	newAddr        stdaddr.Address
+	newAddrErr     error
+	signFunc       func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
+	privWIF        *dcrutil.WIF
+	privWIFErr     error
+	walletTx       *walletjson.GetTransactionResult
+	walletTxErr    error
+	lockErr        error
+	passErr        error
+	disconnected   bool
+	rawRes         map[string]json.RawMessage
+	rawErr         map[string]error
+	blockchain     *tBlockchain
+	lluCoins       []walletjson.ListUnspentResult // Returned from ListLockUnspent
+	lockedCoins    []*wire.OutPoint               // Last submitted to LockUnspent
+	listLockedErr  error
+	estFeeErr      error
 }
 
 type tBlockchain struct {
@@ -338,10 +336,6 @@ func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mo
 	optimalRate := float64(optimalFeeRate) * 1e-5 // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return &chainjson.EstimateSmartFeeResult{FeeRate: optimalRate}, nil
-}
-
-func (c *tRPCClient) GetBlockChainInfo(_ context.Context) (*chainjson.GetBlockChainInfoResult, error) {
-	return c.blockchainInfo, c.blockchainInfoErr
 }
 
 func (c *tRPCClient) SendRawTransaction(_ context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
@@ -2313,46 +2307,45 @@ func TestSyncStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 100,
-		Blocks:  99,
-	}
 
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(&walletjson.SyncStatusResult{
+		Synced:               true,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 1,
+	})
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
 	if !synced {
-		t.Fatalf("synced = false for 1 block to go")
+		t.Fatalf("synced = false for progress=1")
 	}
 	if progress < 1 {
-		t.Fatalf("progress not complete when loading last block")
+		t.Fatalf("progress not complete with sync true")
 	}
 
-	node.blockchainInfoErr = tErr
+	node.rawErr[methodSyncStatus] = tErr
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
-	node.blockchainInfoErr = nil
+	node.rawErr[methodSyncStatus] = nil
 
-	wallet.wallet = &rpcWallet{
-		rpcClient:    node,
-		tipAtConnect: 100,
+	nodeSyncStatusResult := &walletjson.SyncStatusResult{
+		Synced:               false,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 0.5, // Headers: 200, WalletTip: 100
 	}
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 200,
-		Blocks:  150,
-	}
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(nodeSyncStatusResult)
 	synced, progress, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
 	if synced {
-		t.Fatalf("synced = true for 50 blocks to go")
+		t.Fatalf("synced = true for progress=0.5")
 	}
-	if progress > 0.500001 || progress < 0.4999999 {
-		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	if progress != nodeSyncStatusResult.HeadersFetchProgress {
+		t.Fatalf("progress out of range. Expected %.2f, got %.2f", nodeSyncStatusResult.HeadersFetchProgress, progress)
 	}
 }
 
