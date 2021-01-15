@@ -2751,21 +2751,19 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(decodeErr, err)
 	}
 
-	if !c.verifyAccount(&accountInfo) {
-		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
-	}
+	accountInfo.Paid = acct.IsPaid
 
-	// verifyAccount populates c.conns, now we can access c.conns acct data.
-	accountInfo.Paid = c.conns[acct.Host].acct.isPaid
-
-	privKey, err := hex.DecodeString(acct.PrivKey)
+	privKeyBytes, err := hex.DecodeString(acct.PrivKey)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-
-	accountInfo.EncKey, err = crypter.Encrypt(privKey)
+	accountInfo.EncKey, err = crypter.Encrypt(secp256k1.PrivKeyFromBytes(privKeyBytes).Serialize())
 	if err != nil {
 		return codedError(encryptionErr, err)
+	}
+
+	if !c.verifyAccount(&accountInfo) {
+		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
 	}
 
 	err = c.db.CreateAccount(&accountInfo)
