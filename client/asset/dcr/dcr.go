@@ -25,6 +25,8 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
+	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -1484,64 +1486,52 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
-// AuditContract retrieves information about a swap contract on the
-// blockchain. This would be used to verify the counter-party's contract
-// during a swap.
+// AuditContract retrieves information about a swap contract from the provided
+// txData if the provided txData
+// - represents a valid transaction that pays to the provided contract at the
+// specified coinID and
+// - can be broadcasted or is already broadcasted to the blockchain network.
+// This information would be used to verify the counter-party's contract during
+// a swap.
 func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
+
 	// Get the receiving address.
 	_, receiver, stamp, secretHash, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
-	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOutRes, txTree, err := dcr.getTxOut(txHash, vout, true)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", err)
+
+	// Validate the provided txData against the provided coinID (hash and vout).
+	contractTx := wire.NewMsgTx()
+	if err := contractTx.Deserialize(bytes.NewReader(txData)); err != nil {
+		return nil, fmt.Errorf("invalid contract tx data: %w", err)
 	}
-	coinNotFound := txOutRes == nil
-	var pkScript []byte
-	var value uint64
-	var version uint16
-	if txOutRes != nil {
-		pkScript, err = hex.DecodeString(txOutRes.ScriptPubKey.Hex)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
-				txOutRes.ScriptPubKey.Hex, err)
-		}
-		value = toAtoms(txOutRes.Value)
-		version = txOutRes.ScriptPubKey.Version
-	} else {
-		tx, err := msgTxFromBytes(txData)
-		if err != nil {
-			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
-		}
-		if len(tx.TxOut) <= int(vout) {
-			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
-		}
-		txOut := tx.TxOut[vout]
-		pkScript = txOut.PkScript
-		value = uint64(txOut.Value)
-		version = txOut.Version
+	if checkHash := contractTx.TxHash(); checkHash != *txHash {
+		return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
+	}
+	if int(vout) >= len(contractTx.TxOut) {
+		return nil, fmt.Errorf("invalid contract tx data: no output at %d", vout)
 	}
 
-	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(version,
-		pkScript, dcr.chainParams, false)
+	// Verify that the output of interest pays to the hash of the provided contract.
+	// Output script must be P2SH, with 1 address and 1 required signature.
+	contractTxOut := contractTx.TxOut[vout]
+	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams, false)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
+		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", contractTxOut.PkScript, err)
 	}
 	if scriptClass != txscript.ScriptHashTy {
 		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
 	}
-	if numReq != 1 {
-		return nil, fmt.Errorf("unexpected number of signatures expected for P2SH script: %d", numReq)
-	}
 	if len(addrs) != 1 {
 		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
+	}
+	if sigsReq != 1 {
+		return nil, fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
 	}
 	// Compare the contract hash to the P2SH address.
 	contractHash := dcrutil.Hash160(contract)
@@ -1554,16 +1544,60 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addrScript)
 	}
-	if coinNotFound {
-		return nil, asset.CoinNotFoundError
+
+	// SPV clients don't check tx sanity before broadcasting, so do that here.
+	if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
+		return nil, fmt.Errorf("invalid contract tx data: %v", err)
 	}
+
+	// The counter-party should have broadcasted the contract tx but
+	// rebroadcast just in case to ensure that the tx is sent to the
+	// network and so this wallet records the tx and can treat it just
+	// like any other of its own.
+	dcr.log.Debugf("Rebroadcasting contract tx %v.", txData)
+	allowHighFees := true // high fees shouldn't prevent this tx from being bcast
+	finalTxHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, allowHighFees)
+	if err != nil {
+		// TODO: Check if the error indicates that the tx is mined and
+		// use cfilters to find and validate the contract.
+		// If the error indicates that the tx is in mempool, how do we
+		// confirm that the rawtx we just valided is the same as the one
+		// in mempool?
+		return nil, translateRPCCancelErr(err)
+	}
+	// TODO: SPV wallets broadcasts without any error. What if the tx was actually
+	// invalid? Do we later re-validate the contract once it is observed on the
+	// blockchain? Err, if the tx is later found in a block with the same fullhash
+	// as this audited tx, the audited tx very, very likley coudn't have been invalid.
+	// Perhaps safe to re-audit the mined tx before acting.
+	if !finalTxHash.IsEqual(txHash) {
+		return nil, fmt.Errorf("broadcasted contract tx, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s", txHash, finalTxHash)
+	}
+
 	return &asset.AuditInfo{
-		Coin:       newOutput(txHash, vout, value, txTree),
+		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), determineTxTree(contractTx)),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
+}
+
+func determineTxTree(msgTx *wire.MsgTx) int8 {
+	// Try with treasury disabled first.
+	txType := stake.DetermineTxType(msgTx, false, false)
+	if txType != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+
+	// Try with treasury enabled.
+	txType = stake.DetermineTxType(msgTx, true, false)
+	if txType != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+
+	return wire.TxTreeRegular
 }
 
 // RefundAddress extracts and returns the refund address from a contract.
@@ -2015,7 +2049,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
+			"expected %s, got %s", checkHash, *refundHash)
 	}
 	return toCoinID(refundHash, 0), nil
 }

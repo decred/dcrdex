@@ -1650,12 +1650,11 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet()
+	wallet, _, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	vout := uint32(2)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
@@ -1666,21 +1665,23 @@ func TestAuditContract(t *testing.T) {
 	addr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
 	_, pkScript := addr.PaymentScript()
 
-	txoutRes := makeGetTxOutRes(1, 5, pkScript) // 1 conf
-	node.txOutRes[newOutPoint(tTxHash, vout)] = txoutRes
-
-	// need getblock, getblockhash, and getrawtransaction results too
-	_, bestBlockHeight, err := node.GetBestBlock(context.Background())
+	// Prepare the contract tx data.
+	contractTx := wire.NewMsgTx()
+	contractTx.AddTxIn(&wire.TxIn{})
+	contractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: pkScript,
+	})
+	contractTxData, err := contractTx.Bytes()
 	if err != nil {
-		t.Fatalf("unexpected GetBestBlock error: %v", err)
+		t.Fatalf("error preparing contract txdata: %v", err)
 	}
-	contractHeight := bestBlockHeight + 1
-	inputs := []chainjson.Vin{makeRPCVin("feeddabeef", 0, nil)}
-	newBlockHash, _ := node.blockchain.addRawTx(makeRawTx(contractHeight, tTxHash.String(), inputs, []dex.Bytes{nil, nil, pkScript /* vout 2 */}))
 
-	txoutRes.BestBlock = newBlockHash.String() // with 1 conf and this best block hash, the tx is in this block
+	contractHash := contractTx.TxHash()
+	contractVout := uint32(0)
+	contractCoinID := toCoinID(&contractHash, contractVout)
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
+	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData, time.Time{})
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1695,26 +1696,62 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil, time.Time{})
+	_, err = wallet.AuditContract(make([]byte, 15), contract, contractTxData, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
-	// GetTxOut error
-	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
-	if err == nil {
-		t.Fatalf("no error for unknown txout")
-	}
-	node.txOutErr = nil
-
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
-	_, badContract := wrongAddr.PaymentScript()
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil, time.Time{})
+	wrongAddrStr := wrongAddr.String()
+	wrongContract, err := dexdcr.MakeContract(wrongAddrStr, wrongAddrStr, secretHash, lockTime.Unix(), tChainParams)
+	if err != nil {
+		t.Fatalf("error making wrong swap contract: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, wrongContract, contractTxData, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
+	}
+
+	// Invalid contract
+	_, wrongPkScript := wrongAddr.PaymentScript()
+	_, err = wallet.AuditContract(contractCoinID, wrongPkScript, contractTxData, time.Time{}) // addrPkScript not a valid contract
+	if err == nil {
+		t.Fatalf("no error for invalid contract")
+	}
+
+	// No txdata
+	_, err = wallet.AuditContract(contractCoinID, contract, nil, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for no txdata")
+	}
+
+	// Invalid txdata, zero inputs
+	contractTx.TxIn = nil
+	invalidContractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing invalid contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, invalidContractTxData, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
+	}
+
+	// Wrong txdata, wrong output script
+	wrongContractTx := wire.NewMsgTx()
+	wrongContractTx.AddTxIn(&wire.TxIn{})
+	wrongContractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: wrongPkScript,
+	})
+	wrongContractTxData, err := wrongContractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing wrong contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
 	}
 }
 
