@@ -480,7 +480,7 @@ export default class Application {
         }
         // If the notification order already exists we update it.
         // In case market's orders list is empty or the notifaction order isn't
-        // part of it we add it to list manually as it means this order was
+        // part of it we add it manually as this means the order was
         // just placed.
         if (!mkt.orders) mkt.orders = [order]
         else if (!updateOrder(mkt, order)) mkt.orders.push(order)
