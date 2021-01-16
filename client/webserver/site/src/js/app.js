@@ -467,8 +467,8 @@ export default class Application {
       case 'order': {
         const order = note.order
         const mkt = this.user.exchanges[order.host].markets[order.market]
-        // Updates given order in market's orders list and returns true
-        // if order was found in original list or false otherwise.
+        // Updates given order in market's orders list if it finds it.
+        // Returns a bool which indicates if order was found.
         const updateOrder = (mkt, ord) => {
           for (const i in mkt.orders || []) {
             if (mkt.orders[i].id === ord.id) {
