@@ -2753,11 +2753,11 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 
 	accountInfo.Paid = acct.IsPaid
 
-	privKeyBytes, err := hex.DecodeString(acct.PrivKey)
+	privKey, err := hex.DecodeString(acct.PrivKey)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-	accountInfo.EncKey, err = crypter.Encrypt(secp256k1.PrivKeyFromBytes(privKeyBytes).Serialize())
+	accountInfo.EncKey, err = crypter.Encrypt(privKey)
 	if err != nil {
 		return codedError(encryptionErr, err)
 	}
