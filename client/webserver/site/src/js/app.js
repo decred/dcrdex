@@ -467,24 +467,23 @@ export default class Application {
       case 'order': {
         const order = note.order
         const mkt = this.user.exchanges[order.host].markets[order.market]
-        if (mkt.orders) {
-          let found = false
-          for (const i in mkt.orders) {
-            if (mkt.orders[i].id === order.id) {
-              mkt.orders[i] = order
-              found = true
-              break
+        // Updates given order in market's orders list and returns true
+        // if order was found in original list or false otherwise.
+        const updateOrder = (mkt, ord) => {
+          for (const i in mkt.orders || []) {
+            if (mkt.orders[i].id === ord.id) {
+              mkt.orders[i] = ord
+              return true
             }
           }
-          // If notifaction order isn't part of the market orders list
-          // we add the order to list manually as it means this order was
-          // just placed.
-          if (!found) mkt.orders = [...mkt.orders, order]
-        } else {
-          // If user obj has no orders this also means order was just placed, we
-          // add it manually.
-          mkt.order = [order]
+          return false
         }
+        // If the notification order already exists we update it.
+        // In case market's orders list is empty or the notifaction order isn't
+        // part of it we add it to list manually as it means this order was
+        // just placed.
+        if (!mkt.orders) mkt.orders = [order]
+        else if (!updateOrder(mkt, order)) mkt.orders.push(order)
         break
       }
       case 'balance': {
