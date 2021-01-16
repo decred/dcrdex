@@ -56,9 +56,11 @@ export default class SettingsPage extends BasePage {
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
 
     const exchangesDiv = page.exchanges
-    for (const host of Object.keys(app.user.exchanges)) {
-      const exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
-      Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
+    if (typeof app.user.exchanges !== 'undefined') {
+      for (const host of Object.keys(app.user.exchanges)) {
+        const exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+        Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
+      }
     }
 
     Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
