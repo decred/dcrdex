@@ -2283,6 +2283,27 @@ func TestAccountExport(t *testing.T) {
 	if host != accountResponse.Host {
 		t.Fatalf("host key not equal to account host")
 	}
+	if accountResponse.AccountID != rig.acct.id.String() {
+		t.Fatal("unexpected AccountID")
+	}
+	if accountResponse.DEXPubKey != hex.EncodeToString(rig.acct.dexPubKey.SerializeCompressed()) {
+		t.Fatal("unexpected DEXPubKey")
+	}
+	if accountResponse.IsPaid != rig.acct.isPaid {
+		t.Fatal("unexpected isPaid value")
+	}
+	if accountResponse.PrivKey != hex.EncodeToString(rig.acct.privKey.Serialize()) {
+		t.Fatal("unexpected PrivKey")
+	}
+	if accountResponse.FeeCoin != hex.EncodeToString(rig.acct.feeCoin) {
+		t.Fatal("unexpected FeeCoin")
+	}
+	if accountResponse.Cert != hex.EncodeToString(rig.acct.cert) {
+		t.Fatal("unexpected Cert")
+	}
+	if accountResponse.FeeProofSig != hex.EncodeToString(rig.acct.) {
+		t.Fatal("unexpected FeeProofSig")
+	}
 }
 
 func TestAccountExportPasswordError(t *testing.T) {

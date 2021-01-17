@@ -359,6 +359,23 @@ func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
 	})
 }
 
+func (db *BoltDB) AccountProof(url string) (*dexdb.AccountProof, error) {
+	var acctProof *dexdb.AccountProof
+	acctKey := []byte(url)
+	return acctProof, db.acctsView(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", url)
+		}
+		var err error
+		acctProof, err = dexdb.DecodeAccountProof(getCopy(acct, feeProofKey))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // AccountPaid marks the account as paid by setting the "fee proof".
 func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.Host)
