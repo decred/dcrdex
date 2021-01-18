@@ -99,6 +99,18 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	if err != nil {
 		return codedError(encryptionErr, err)
 	}
+
+	var accountProof db.AccountProof
+	if acct.FeeProofSig != "" && acct.FeeProofStamp != 0 {
+		accountProof.Sig, err = hex.DecodeString(acct.FeeProofSig)
+		if err != nil {
+			return codedError(decodeErr, err)
+		}
+		accountProof.Stamp = acct.FeeProofStamp
+		accountProof.Host = acct.Host
+		accountInfo.Paid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
+	}
+
 	// verifyAccount makes a connection to the DEX.
 	if !c.verifyAccount(&accountInfo) {
 		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
@@ -109,18 +121,9 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(dbErr, err)
 	}
 
-	var accountProof db.AccountProof
-	if acct.FeeProofSig != "" && acct.FeeProofStamp != 0 {
-		accountProof.Sig, err = hex.DecodeString(acct.FeeProofSig)
-		if err != nil {
-			return codedError(decodeErr, err)
-		}
-		accountProof.Stamp = acct.FeeProofStamp
-		accountProof.Host = acct.Host
-		err = c.db.AccountPaid(&accountProof)
-		if err != nil {
-			return codedError(dbErr, err)
-		}
+	err = c.db.AccountPaid(&accountProof)
+	if err != nil {
+		return codedError(dbErr, err)
 	}
 
 	c.refreshUser()

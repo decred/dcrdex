@@ -281,6 +281,20 @@ func TestAccountImportDecodeFeeCoinError(t *testing.T) {
 	}
 }
 
+func TestAccountImportAccountVerificationError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	account := buildTestAccount(host)
+	account.FeeProofSig = ""
+	account.FeeCoin = ""
+	rig.queueConfig()
+	err := tCore.AccountImport(tPW, account)
+	if !errorHasCode(err, accountVerificationErr) {
+		t.Fatalf("expected account verification error, actual error: '%v'", err)
+	}
+}
+
 func TestAccountImportDecodePrivKeyError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
