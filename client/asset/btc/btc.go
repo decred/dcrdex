@@ -492,18 +492,13 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	// Make tipChange an asynchronous call to the opaque callback, which could
-	// take any amount of time and for which we do not need to wait.
-	tipChange := func(err error) {
-		go cfg.WalletCFG.TipChange(err)
-	}
 	return &ExchangeWallet{
 		node:                node,
 		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
-		tipChange:           tipChange,
+		tipChange:           cfg.WalletCFG.TipChange,
 		fundingCoins:        make(map[outPoint]*utxo),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
@@ -2063,7 +2058,7 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 func (btc *ExchangeWallet) checkForNewBlocks() {
 	newTipHash, err := btc.node.GetBestBlockHash()
 	if err != nil {
-		btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
+		go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
 		return
 	}
 
@@ -2081,14 +2076,14 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 
 	newTip, err := btc.blockFromHash(newTipHash.String())
 	if err != nil {
-		btc.tipChange(fmt.Errorf("error setting new tip: %w", err))
+		go btc.tipChange(fmt.Errorf("error setting new tip: %w", err))
 		return
 	}
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
-	btc.tipChange(nil)
+	go btc.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

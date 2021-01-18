@@ -1452,7 +1452,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	walletCfg := &asset.WalletConfig{
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
-			c.tipChange(assetID, err)
+			// asset.Wallet implementations should not need wait for the
+			// callback, as they don't know what it is, and will likely launch
+			// TipChange as a goroutine. However, guard against the possibility
+			// of deadlocking a Core method that calls Wallet.Disconnect.
+			go c.tipChange(assetID, err)
 		},
 	}
 	logger := c.log.SubLogger(unbip(assetID))

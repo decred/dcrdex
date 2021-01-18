@@ -480,16 +480,11 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	// Make tipChange an asynchronous call to the opaque callback, which could
-	// take any amount of time and for which we do not need to wait.
-	tipChange := func(err error) {
-		go cfg.TipChange(err)
-	}
 	return &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
 		acct:                cfg.Settings["account"],
-		tipChange:           tipChange,
+		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		fallbackFeeRate:     fallbackFeesPerByte,
@@ -2494,7 +2489,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer cancel()
 	newTip, err := dcr.getBestBlock(ctx)
 	if err != nil {
-		dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		go dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
@@ -2513,7 +2508,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	prevTip := dcr.currentTip
 	dcr.currentTip = newTip
 	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
-	dcr.tipChange(nil)
+	go dcr.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.
