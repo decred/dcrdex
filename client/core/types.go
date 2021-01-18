@@ -697,13 +697,15 @@ type OrderFilter struct {
 
 // Account holds data returned from AccountExport.
 type Account struct {
-	Host      string `json:"host"`
-	AccountID string `json:"accountID"`
-	PrivKey   string `json:"privKey"`
-	DEXPubKey string `json:"DEXPubKey"`
-	Cert      string `json:"cert"`
-	FeeCoin   string `json:"feeCoin"`
-	IsPaid    bool   `json:"isPaid"`
+	Host          string `json:"host"`
+	AccountID     string `json:"accountID"`
+	PrivKey       string `json:"privKey"`
+	DEXPubKey     string `json:"DEXPubKey"`
+	Cert          string `json:"cert"`
+	FeeCoin       string `json:"feeCoin"`
+	IsPaid        bool   `json:"isPaid"`
+	FeeProofSig   string `json:"feeProofSig"`
+	FeeProofStamp uint64 `json:"FeeProofStamp"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

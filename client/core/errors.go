@@ -31,6 +31,7 @@ const (
 	encryptionErr
 	decodeErr
 	accountVerificationErr
+	accountProofErr
 	parseKeyErr
 	marketErr
 	addressParseErr

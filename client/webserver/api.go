@@ -198,7 +198,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	account, err := s.core.AccountExport(form.Pass, form.Host)
 	if err != nil {
-		s.writeAPIError(w, "error retrieving keys: %v", err)
+		s.writeAPIError(w, "error exporting account: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
@@ -221,7 +221,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
-		s.writeAPIError(w, "error retrieving keys: %v", err)
+		s.writeAPIError(w, "error importing account: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
