@@ -3245,6 +3245,7 @@ func (c *Core) initialize() {
 	c.refreshUser()
 }
 
+// verifyAccount verifies AccountInfo by making a connection to the DEX.
 func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
 	host, err := addrHost(acct.Host)
 	if err != nil {

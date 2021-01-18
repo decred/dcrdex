@@ -99,6 +99,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	if err != nil {
 		return codedError(encryptionErr, err)
 	}
+	// verifyAccount makes a connection to the DEX.
 	if !c.verifyAccount(&accountInfo) {
 		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
 	}
