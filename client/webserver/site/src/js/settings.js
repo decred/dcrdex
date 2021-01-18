@@ -69,7 +69,6 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
     Doc.bind(page.addAccount, 'click', () => this.page.accountFile.click())
-    // Doc.bind(page.addAccount, 'click', () => this.testAccountFile())
 
     const closePopups = () => {
       Doc.hide(page.forms)
