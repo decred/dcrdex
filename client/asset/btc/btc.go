@@ -2058,7 +2058,7 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 func (btc *ExchangeWallet) checkForNewBlocks() {
 	newTipHash, err := btc.node.GetBestBlockHash()
 	if err != nil {
-		btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
+		go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
 		return
 	}
 
@@ -2076,14 +2076,14 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 
 	newTip, err := btc.blockFromHash(newTipHash.String())
 	if err != nil {
-		btc.tipChange(fmt.Errorf("error setting new tip: %w", err))
+		go btc.tipChange(fmt.Errorf("error setting new tip: %w", err))
 		return
 	}
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
-	btc.tipChange(nil)
+	go btc.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

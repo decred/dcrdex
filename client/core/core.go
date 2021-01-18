@@ -1452,7 +1452,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	walletCfg := &asset.WalletConfig{
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
-			c.tipChange(assetID, err)
+			// asset.Wallet implementations should not need wait for the
+			// callback, as they don't know what it is, and will likely launch
+			// TipChange as a goroutine. However, guard against the possibility
+			// of deadlocking a Core method that calls Wallet.Disconnect.
+			go c.tipChange(assetID, err)
 		},
 	}
 	logger := c.log.SubLogger(unbip(assetID))
@@ -1573,15 +1577,14 @@ func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
 }
 
 // ReconfigureWallet updates the wallet configuration settings, it also updates
-// the password if newWalletPW is non-nil.
+// the password if newWalletPW is non-nil. Do not make concurrent calls to
+// ReconfigureWallet for the same asset.
 func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg map[string]string) error {
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return newError(authErr, "ReconfigureWallet password error: %v", err)
 	}
-	c.walletMtx.Lock()
-	defer c.walletMtx.Unlock()
-	oldWallet, found := c.wallets[assetID]
+	oldWallet, found := c.wallet(assetID)
 	if !found {
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
@@ -1591,7 +1594,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		Settings:    cfg,
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
 		EncryptedPW: oldWallet.encPW,
-		Address:     oldWallet.address,
+		Address:     oldWallet.currentDepositAddress(),
 	}
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
@@ -1660,10 +1663,11 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	}
 	c.connMtx.RUnlock()
 
-	if oldWallet.connected() {
-		oldWallet.Disconnect()
-	}
+	c.walletMtx.Lock()
 	c.wallets[assetID] = wallet
+	c.walletMtx.Unlock()
+
+	go oldWallet.Disconnect()
 
 	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
 	details := fmt.Sprintf("Configuration for %s wallet has been updated. Deposit address = %s",
@@ -4558,16 +4562,22 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		}(id, waiter)
 	}
 	c.waiterMtx.Unlock()
+
 	c.connMtx.RLock()
-	assets := make(assetMap)
+	conns := make([]*dexConnection, 0, len(c.conns))
 	for _, dc := range c.conns {
+		conns = append(conns, dc)
+	}
+	c.connMtx.RUnlock()
+	assets := make(assetMap)
+	for _, dc := range conns {
 		newUpdates := c.tickAsset(dc, assetID)
 		if len(newUpdates) > 0 {
 			dc.refreshMarkets()
 			assets.merge(newUpdates)
 		}
 	}
-	c.connMtx.RUnlock()
+
 	// Ensure we always at least update this asset's balance regardless of trade
 	// status changes.
 	assets.count(assetID)

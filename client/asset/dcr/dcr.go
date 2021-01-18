@@ -2489,7 +2489,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer cancel()
 	newTip, err := dcr.getBestBlock(ctx)
 	if err != nil {
-		dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		go dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
@@ -2508,7 +2508,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	prevTip := dcr.currentTip
 	dcr.currentTip = newTip
 	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
-	dcr.tipChange(nil)
+	go dcr.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.

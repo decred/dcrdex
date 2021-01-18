@@ -54,11 +54,13 @@ type WalletConfig struct {
 	// Settings are supplied by the user according the the WalletInfo's
 	// ConfigOpts.
 	Settings map[string]string
-	// TipChange is a function that will be called when the blockchain monitoring
-	// loop detects a new block. If the error supplied is nil, the client should
-	// check the confirmations on any negotiating swaps to see if action is
-	// needed. If the error is non-nil, the wallet monitoring loop encountered an
-	// error while retrieving tip information.
+	// TipChange is a function that will be called when the blockchain
+	// monitoring loop detects a new block. If the error supplied is nil, the
+	// client should check the confirmations on any negotiating swaps to see if
+	// action is needed. If the error is non-nil, the wallet monitoring loop
+	// encountered an error while retrieving tip information. This function
+	// should not be blocking, and Wallet implementations should not rely on any
+	// specific side effect of the function call.
 	TipChange func(error)
 }
 
