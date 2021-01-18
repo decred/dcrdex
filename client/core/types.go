@@ -703,7 +703,6 @@ type Account struct {
 	DEXPubKey     string `json:"DEXPubKey"`
 	Cert          string `json:"cert"`
 	FeeCoin       string `json:"feeCoin"`
-	IsPaid        bool   `json:"isPaid"`
 	FeeProofSig   string `json:"feeProofSig"`
 	FeeProofStamp uint64 `json:"FeeProofStamp"`
 }

@@ -34,9 +34,6 @@ func TestAccountExport(t *testing.T) {
 	if accountResponse.DEXPubKey != hex.EncodeToString(rig.acct.dexPubKey.SerializeCompressed()) {
 		t.Fatal("unexpected DEXPubKey")
 	}
-	if accountResponse.IsPaid != rig.acct.isPaid {
-		t.Fatal("unexpected isPaid value")
-	}
 	if accountResponse.PrivKey != hex.EncodeToString(rig.acct.privKey.Serialize()) {
 		t.Fatal("unexpected PrivKey")
 	}
@@ -281,20 +278,6 @@ func TestAccountImportDecodeFeeCoinError(t *testing.T) {
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
-	}
-}
-
-func TestAccountImportAccountVerificationError(t *testing.T) {
-	rig := newTestRig()
-	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
-	account.IsPaid = false
-	account.FeeCoin = ""
-	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
-	if !errorHasCode(err, accountVerificationErr) {
-		t.Fatalf("expected account verification error, actual error: '%v'", err)
 	}
 }
 
