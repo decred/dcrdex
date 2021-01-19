@@ -24,7 +24,7 @@ require (
 	github.com/decred/dcrd/wire v1.4.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
-	github.com/go-chi/chi v4.0.2+incompatible
+	github.com/go-chi/chi v1.5.1
 	github.com/gorilla/websocket v1.4.2
 	github.com/jessevdk/go-flags v1.4.1-0.20200711081900-c17162fe8fd7
 	github.com/jrick/logrotate v1.0.0
