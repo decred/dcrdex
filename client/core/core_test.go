@@ -259,36 +259,38 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 }
 
 type TDB struct {
-	updateWalletErr     error
-	acct                *db.AccountInfo
-	acctErr             error
-	getErr              error
-	storeErr            error
-	encKeyErr           error
-	createAccountErr    error
-	accountPaidErr      error
-	accts               []*db.AccountInfo
-	updateOrderErr      error
-	activeDEXOrders     []*db.MetaOrder
-	matchesForOID       []*db.MetaMatch
-	matchesForOIDErr    error
-	updateMatchChan     chan order.MatchStatus
-	activeMatchOIDs     []order.OrderID
-	activeMatchOIDSErr  error
-	lastStatusID        order.OrderID
-	lastStatus          order.OrderStatus
-	wallet              *db.Wallet
-	walletErr           error
-	setWalletPwErr      error
-	orderOrders         map[order.OrderID]*db.MetaOrder
-	orderErr            error
-	linkedFromID        order.OrderID
-	linkedToID          order.OrderID
-	existValues         map[string]bool
-	accountProof        *db.AccountProof
-	accountProofErr     error
-	verifyAccountPaid   bool
-	verifyCreateAccount bool
+	updateWalletErr       error
+	acct                  *db.AccountInfo
+	acctErr               error
+	getErr                error
+	storeErr              error
+	encKeyErr             error
+	createAccountErr      error
+	accountPaidErr        error
+	accts                 []*db.AccountInfo
+	updateOrderErr        error
+	activeDEXOrders       []*db.MetaOrder
+	matchesForOID         []*db.MetaMatch
+	matchesForOIDErr      error
+	updateMatchChan       chan order.MatchStatus
+	activeMatchOIDs       []order.OrderID
+	activeMatchOIDSErr    error
+	lastStatusID          order.OrderID
+	lastStatus            order.OrderStatus
+	wallet                *db.Wallet
+	walletErr             error
+	setWalletPwErr        error
+	orderOrders           map[order.OrderID]*db.MetaOrder
+	orderErr              error
+	linkedFromID          order.OrderID
+	linkedToID            order.OrderID
+	existValues           map[string]bool
+	accountProof          *db.AccountProof
+	accountProofErr       error
+	verifyAccountPaid     bool
+	verifyCreateAccount   bool
+	accountInfoPersisted  *db.AccountInfo
+	accountProofPersisted *db.AccountProof
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -307,6 +309,7 @@ func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
 
 func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	tdb.verifyCreateAccount = true
+	tdb.accountInfoPersisted = ai
 	return tdb.createAccountErr
 }
 
@@ -408,6 +411,7 @@ func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
 
 func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
 	tdb.verifyAccountPaid = true
+	tdb.accountProofPersisted = proof
 	return tdb.accountPaidErr
 }
 

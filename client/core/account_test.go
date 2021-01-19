@@ -3,8 +3,8 @@
 package core
 
 import (
+	"bytes"
 	"encoding/hex"
-
 	"testing"
 
 	"decred.org/dcrdex/client/db"
@@ -163,6 +163,34 @@ func TestAccountImport(t *testing.T) {
 	}
 	if !rig.db.verifyCreateAccount {
 		t.Fatalf("expected execution of db.CreateAccount")
+	}
+	if rig.db.accountInfoPersisted.Host != host {
+		t.Fatalf("unexprected accountInfo Host")
+	}
+	DEXpubKey, _ := hex.DecodeString(account.DEXPubKey)
+	if !bytes.Equal(rig.db.accountInfoPersisted.DEXPubKey.SerializeCompressed(), DEXpubKey) {
+		t.Fatal("unexpected DEXPubKey")
+	}
+	feeCoin, _ := hex.DecodeString(account.FeeCoin)
+	if !bytes.Equal(rig.db.accountInfoPersisted.FeeCoin, feeCoin) {
+		t.Fatal("unexpected FeeCoin")
+	}
+	cert, _ := hex.DecodeString(account.Cert)
+	if !bytes.Equal(rig.db.accountInfoPersisted.Cert, cert) {
+		t.Fatal("unexpected Cert")
+	}
+	if !rig.db.accountInfoPersisted.Paid {
+		t.Fatal("unexpected Paid value")
+	}
+	if rig.db.accountProofPersisted.Host != host {
+		t.Fatal("unexpected accountProof Host")
+	}
+	feeProofSig, _ := hex.DecodeString(account.FeeProofSig)
+	if !bytes.Equal(rig.db.accountProofPersisted.Sig, feeProofSig) {
+		t.Fatal("unset FeeProofSig")
+	}
+	if rig.db.accountProofPersisted.Stamp != account.FeeProofStamp {
+		t.Fatal("unexpected FeeProofStamp")
 	}
 }
 
