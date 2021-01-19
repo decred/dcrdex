@@ -824,6 +824,8 @@ type Config struct {
 	TorProxy string
 	// TorIsolation specifies whether to enable Tor circuit isolation.
 	TorIsolation bool
+	// ViewOnly specifies whether Core is operating in view only mode.
+	ViewOnly bool
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -871,12 +873,8 @@ func New(cfg *Config) (*Core, error) {
 	if cfg.Logger == nil {
 		return nil, fmt.Errorf("Core.Config must specify a Logger")
 	}
-	db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
-	if err != nil {
-		return nil, fmt.Errorf("database initialization error: %w", err)
-	}
 	if cfg.TorProxy != "" {
-		if _, _, err = net.SplitHostPort(cfg.TorProxy); err != nil {
+		if _, _, err := net.SplitHostPort(cfg.TorProxy); err != nil {
 			return nil, err
 		}
 	}
@@ -885,7 +883,6 @@ func New(cfg *Config) (*Core, error) {
 		cfg:           cfg,
 		ready:         make(chan struct{}),
 		log:           cfg.Logger,
-		db:            db,
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
 		net:           cfg.Net,
@@ -901,9 +898,19 @@ func New(cfg *Config) (*Core, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 	}
 
-	// Populate the initial user data. User won't include any DEX info yet, as
-	// those are retrieved when Run is called and the core connects to the DEXes.
-	core.refreshUser()
+	// If operating in view only mode, skip db connection & initial user data
+	// population.
+	if !cfg.ViewOnly {
+		// Init db.
+		db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
+		if err != nil {
+			return nil, fmt.Errorf("database initialization error: %w", err)
+		}
+		core.db = db
+		// Populate the initial user data. User won't include any DEX info yet, as
+		// those are retrieved when Run is called and the core connects to the DEXes.
+		core.refreshUser()
+	}
 	core.log.Debugf("new client core created")
 	return core, nil
 }
@@ -914,6 +921,11 @@ func (c *Core) Run(ctx context.Context) {
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
+	// If operating in view only mode skip accounts, wallets & DEXes
+	// initialization.
+	if c.cfg.ViewOnly {
+		return
+	}
 	c.initialize()
 	close(c.ready)
 
@@ -3205,7 +3217,8 @@ func (c *Core) initialize() {
 			defer wg.Done()
 			host, err := addrHost(acct.Host)
 			if err != nil {
-				c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
+				c.log.Errorf("skipping loading of %s due to address parse error: %v",
+					acct.Host, err)
 				return
 			}
 			dc, err := c.connectDEX(acct)
@@ -3213,13 +3226,14 @@ func (c *Core) initialize() {
 				c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
 				return
 			}
-			c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
+			c.log.Debugf("connectDEX for %s completed, checking account...",
+				acct.Host)
 			if !acct.Paid {
 				if len(acct.FeeCoin) == 0 {
 					// Register should have set this when creating the account
 					// that was obtained via db.Accounts.
-					c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-						"Discarding account.", acct.Host)
+					c.log.Warnf("Incomplete registration without fee payment detected"+
+						" for DEX %s. Discarding account.", acct.Host)
 					return
 				}
 			}
@@ -3249,17 +3263,22 @@ func (c *Core) initialize() {
 	numWallets := len(c.wallets)
 	c.walletMtx.Unlock()
 	if len(dbWallets) > 0 {
-		c.log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
+		c.log.Infof("successfully loaded %d of %d wallets", numWallets,
+			len(dbWallets))
 	}
 	// Wait for DEXes to be connected to ensure DEXes are ready
 	// for authentication when Login is triggered.
 	wg.Wait()
 	c.connMtx.RLock()
-	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
+	c.log.Infof("Successfully connected to %d out of %d DEX servers",
+		len(c.conns), len(accts))
 	for dexName, dc := range c.conns {
-		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
+		// non-nil error will load 0 orders, and any subsequent db error will cause
+		// a shutdown on dex auth or sooner.
+		activeOrders, _ := c.dbOrders(dc)
 		if n := len(activeOrders); n > 0 {
-			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active orders on %s. LOGIN immediately!  **** \n", n, dexName)
+			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active orders on %s."+
+				" LOGIN immediately!  **** \n", n, dexName)
 		}
 	}
 	c.connMtx.RUnlock()

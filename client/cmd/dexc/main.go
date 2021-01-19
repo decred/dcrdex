@@ -35,7 +35,8 @@ func main() {
 	// If explicitly running without web server then you must run the rpc
 	// server.
 	if cfg.NoWeb && !cfg.RPCOn {
-		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc is specified\n")
+		fmt.Fprintf(os.Stderr,
+			"Cannot run without web server unless --rpc is specified\n")
 		os.Exit(1)
 	}
 
@@ -46,7 +47,8 @@ func main() {
 	}
 	logMaker := initLogging(cfg.DebugLevel, utc)
 	log = logMaker.Logger("DEXC")
-	log.Infof("%s version %v (Go version %s)", version.AppName, version.Version(), runtime.Version())
+	log.Infof("%s version %v (Go version %s)",
+		version.AppName, version.Version(), runtime.Version())
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
@@ -59,6 +61,7 @@ func main() {
 		Logger:       logMaker.Logger("CORE"),
 		TorProxy:     cfg.TorProxy,
 		TorIsolation: cfg.TorIsolation,
+		ViewOnly:     cfg.ViewOnly,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)
@@ -120,7 +123,8 @@ func main() {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr,
+			logMaker.Logger("WEB"), cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
 			cancel()
