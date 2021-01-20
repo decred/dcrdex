@@ -84,6 +84,7 @@ type Config struct {
 	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
 	WebAddr      string `long:"webaddr" description:"HTTP server address"`
 	NoWeb        bool   `long:"noweb" description:"disable the web server."`
+	ViewOnly     bool   `long:"viewonly" description:"Operate in view only mode."`
 	Testnet      bool   `long:"testnet" description:"use testnet"`
 	Simnet       bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML   bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
