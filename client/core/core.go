@@ -120,10 +120,11 @@ func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 // [base]_[quote].
 func (dc *dexConnection) marketMap() map[string]*Market {
 	dc.cfgMtx.RLock()
-	defer dc.cfgMtx.RUnlock()
+	mktConfigs := dc.cfg.Markets
+	dc.cfgMtx.RUnlock()
 
-	marketMap := make(map[string]*Market, len(dc.cfg.Markets))
-	for _, mkt := range dc.cfg.Markets {
+	marketMap := make(map[string]*Market, len(mktConfigs))
+	for _, mkt := range mktConfigs {
 		// The presence of the asset for every market was already verified when the
 		// dexConnection was created in connectDEX.
 		dc.assetsMtx.RLock()
@@ -980,34 +981,49 @@ func (c *Core) Exchanges() map[string]*Exchange {
 	return c.exchangeMap()
 }
 
+// dexConnections creates a slice of the *dexConnection in c.conns.
+func (c *Core) dexConnections() []*dexConnection {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	conns := make([]*dexConnection, 0, len(c.conns))
+	for _, conn := range c.conns {
+		conns = append(conns, conn)
+	}
+	return conns
+}
+
 // exchangeMap creates a map of *Exchange keyed by host, including markets and
 // orders.
 func (c *Core) exchangeMap() map[string]*Exchange {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
 	infos := make(map[string]*Exchange, len(c.conns))
-	for host, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.cfgMtx.RLock()
-		dc.assetsMtx.RLock()
 		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
+		dc.cfgMtx.RUnlock()
+
+		dc.assetsMtx.RLock()
+		assets := make(map[uint32]*dex.Asset, len(dc.assets))
+		for assetID, dexAsset := range dc.assets {
+			assets[assetID] = dexAsset
+		}
+		dc.assetsMtx.RUnlock()
+
 		// Set AcctID to empty string if not initialized.
 		acctID := dc.acct.ID().String()
 		var emptyAcctID account.AccountID
 		if dc.acct.ID() == emptyAcctID {
 			acctID = ""
 		}
-		infos[host] = &Exchange{
-			Host:          host,
+		infos[dc.acct.host] = &Exchange{
+			Host:          dc.acct.host,
 			AcctID:        acctID,
 			Markets:       dc.marketMap(),
-			Assets:        dc.assets,
+			Assets:        assets,
 			FeePending:    dc.acct.feePending(),
 			Connected:     dc.connected,
 			ConfsRequired: requiredConfs,
 			RegConfirms:   dc.getRegConfirms(),
 		}
-		dc.cfgMtx.RUnlock()
-		dc.assetsMtx.RUnlock()
 	}
 	return infos
 }
@@ -1210,9 +1226,7 @@ func (c *Core) updateWalletBalance(wallet *xcWallet) (*WalletBalance, error) {
 // swaps (orderLocked). Only applies to trades where the specified assetID is
 // the fromAssetID.
 func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64) {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
 			tracker.mtx.RLock()
@@ -1255,12 +1269,22 @@ func (c *Core) updateAssetBalance(assetID uint32) {
 	c.updateBalances(assetMap{assetID: struct{}{}})
 }
 
-// Wallets creates a slice of WalletState for all known wallets.
-func (c *Core) Wallets() []*WalletState {
+// xcWallets creates a slice of the c.wallets xcWallets.
+func (c *Core) xcWallets() []*xcWallet {
 	c.walletMtx.RLock()
 	defer c.walletMtx.RUnlock()
-	state := make([]*WalletState, 0, len(c.wallets))
+	wallets := make([]*xcWallet, 0, len(c.wallets))
 	for _, wallet := range c.wallets {
+		wallets = append(wallets, wallet)
+	}
+	return wallets
+}
+
+// Wallets creates a slice of WalletState for all known wallets.
+func (c *Core) Wallets() []*WalletState {
+	wallets := c.xcWallets()
+	state := make([]*WalletState, 0, len(wallets))
+	for _, wallet := range wallets {
 		state = append(state, wallet.state())
 	}
 	return state
@@ -1490,9 +1514,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 // CloseWallet closes the wallet for the specified asset. The wallet cannot be
 // closed if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		if dc.hasActiveAssetOrders(assetID) {
 			return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
 		}
@@ -1604,8 +1626,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	}
 
 	// Update all relevant trackedTrades' toWallet and fromWallet.
-	c.connMtx.RLock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
 			tracker.mtx.Lock()
@@ -1618,7 +1639,6 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		}
 		dc.tradeMtx.RUnlock()
 	}
-	c.connMtx.RUnlock()
 
 	c.walletMtx.Lock()
 	c.wallets[assetID] = wallet
@@ -1633,9 +1653,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		details, db.Success, wallet.state()))
 
 	// Clear any existing tickGovernors for suspect matches.
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, t := range dc.trades {
 			if t.Base() != assetID && t.Quote() != assetID {
@@ -2092,9 +2110,9 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// resolveActiveTrades and the balance updated there.
 	var wg sync.WaitGroup
 	var connectCount uint32
-	c.walletMtx.Lock()
-	walletCount := len(c.wallets)
-	for _, wallet := range c.wallets {
+	wallets := c.xcWallets()
+	walletCount := len(wallets)
+	for _, wallet := range wallets {
 		wg.Add(1)
 		go func(wallet *xcWallet) {
 			defer wg.Done()
@@ -2109,7 +2127,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 			atomic.AddUint32(&connectCount, 1)
 		}(wallet)
 	}
-	c.walletMtx.Unlock()
 	wg.Wait()
 	if walletCount > 0 {
 		c.log.Infof("Connected to %d of %d wallets.", connectCount, walletCount)
@@ -2135,30 +2152,27 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 
 // Logout logs the user out
 func (c *Core) Logout() error {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
 
 	// Check active orders
-	for _, dc := range c.conns {
+	conns := c.dexConnections()
+	for _, dc := range conns {
 		if dc.hasActiveOrders() {
 			return fmt.Errorf("cannot log out with active orders")
 		}
 	}
 
 	// Lock wallets
-	c.walletMtx.RLock()
-	for _, w := range c.wallets {
+	for _, w := range c.xcWallets() {
 		if w.connected() {
 			if err := w.Lock(); err != nil {
 				return err
 			}
 		}
 	}
-	c.walletMtx.RUnlock()
 
 	// With no open orders for any of the dex connections, and all wallets locked,
 	// lock each dex account.
-	for _, dc := range c.conns {
+	for _, dc := range conns {
 		dc.acct.lock()
 	}
 
@@ -2226,14 +2240,12 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	copy(oid[:], oidB)
 	// See if its an active order first.
 	var tracker *trackedTrade
-	c.connMtx.RLock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		tracker, _, _ = dc.findOrder(oid)
 		if tracker != nil {
 			break
 		}
 	}
-	c.connMtx.RUnlock()
 	if tracker != nil {
 		return tracker.coreOrder(), nil
 	}
@@ -2342,7 +2354,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
 	var wg sync.WaitGroup
-	c.connMtx.RLock()
 	results := make([]*DEXBrief, 0, len(c.conns))
 	var reconcileConnectionsWg sync.WaitGroup
 	reconcileConnectionsWg.Add(1)
@@ -2355,7 +2366,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			disabledAccountHosts = append(disabledAccountHosts, disabledAccountHost)
 		}
 		if len(disabledAccountHosts) > 0 {
-			c.connMtx.Lock()
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
@@ -2363,11 +2373,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 					"It is disconnected and has been removed from core connections.",
 					disabledAccountHost)
 			}
-			c.connMtx.Unlock()
 		}
 	}()
 
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
 		for tradeID := range dc.trades {
@@ -2459,7 +2468,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		}(dc)
 	}
 	wg.Wait()
-	c.connMtx.RUnlock()
 	close(disabledAccountHostChan)
 	reconcileConnectionsWg.Wait()
 	return results
@@ -2472,9 +2480,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 	failed := make(map[uint32]struct{})
 	relocks := make(assetMap)
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		// loadDBTrades can add to the failed map.
 		ready, err := c.loadDBTrades(dc, crypter, failed)
 		if err != nil {
@@ -2945,9 +2951,7 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	var oid order.OrderID
 	copy(oid[:], oidB)
 
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		found, err := c.tryCancel(dc, oid)
 		if err != nil {
 			return err
@@ -3170,15 +3174,13 @@ func (c *Core) initialize() {
 	// Wait for DEXes to be connected to ensure DEXes are ready
 	// for authentication when Login is triggered.
 	wg.Wait()
-	c.connMtx.RLock()
 	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
-	for dexName, dc := range c.conns {
+	for dexName, dc := range c.dexConnections() {
 		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
 		if n := len(activeOrders); n > 0 {
 			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active orders on %s. LOGIN immediately!  **** \n", n, dexName)
 		}
 	}
-	c.connMtx.RUnlock()
 }
 
 // verifyAccount verifies AccountInfo by making a connection to the DEX.
@@ -3217,13 +3219,11 @@ var feeLock uint32
 // checkUnpaidFees checks whether the registration fee info has an acceptable
 // state, and tries to rectify any inconsistencies.
 func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
 	if !atomic.CompareAndSwapUint32(&feeLock, 0, 1) {
 		return
 	}
 	var wg sync.WaitGroup
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		if dc.acct.feePaid() {
 			continue
 		}
@@ -4476,14 +4476,8 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	}
 	c.waiterMtx.Unlock()
 
-	c.connMtx.RLock()
-	conns := make([]*dexConnection, 0, len(c.conns))
-	for _, dc := range c.conns {
-		conns = append(conns, dc)
-	}
-	c.connMtx.RUnlock()
 	assets := make(assetMap)
-	for _, dc := range conns {
+	for _, dc := range c.dexConnections() {
 		newUpdates := c.tickAsset(dc, assetID)
 		if len(newUpdates) > 0 {
 			assets.merge(newUpdates)
@@ -4502,28 +4496,25 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // prompt and force the shutdown with out answering the prompt in the
 // affirmative.
 func (c *Core) PromptShutdown() bool {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
+	conns := c.dexConnections()
 
 	lockWallets := func() {
 		// Lock wallets
-		c.walletMtx.RLock()
-		for _, w := range c.wallets {
+		for _, w := range c.xcWallets() {
 			if w.connected() {
 				if err := w.Lock(); err != nil {
 					c.log.Errorf("error locking wallet: %v", err)
 				}
 			}
 		}
-		c.walletMtx.RUnlock()
 		// If all wallets locked, lock each dex account.
-		for _, dc := range c.conns {
+		for _, dc := range conns {
 			dc.acct.lock()
 		}
 	}
 
 	ok := true
-	for _, dc := range c.conns {
+	for _, dc := range conns {
 		if dc.hasActiveOrders() {
 			ok = false
 			break
@@ -4559,14 +4550,10 @@ func (c *Core) PromptShutdown() bool {
 
 // ForceShutdown shuts down the client, ignoring any active trades.
 func (c *Core) ForceShutdown() {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-	c.walletMtx.Lock()
-	defer c.walletMtx.Unlock()
-	for _, wallet := range c.wallets {
+	for _, wallet := range c.xcWallets() {
 		wallet.Lock()
 	}
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.acct.lock()
 	}
 }
