@@ -161,7 +161,19 @@ export default class SettingsPage extends BasePage {
     if (page.accountFile.value) {
       accountString = await page.accountFile.files[0].text()
     }
-    const account = JSON.parse(accountString)
+    let account
+    try {
+      account = JSON.parse(accountString)
+    } catch (e) {
+      page.importAccountErr.textContent = e.message
+      Doc.show(page.importAccountErr)
+      return
+    }
+    if (typeof account === 'undefined') {
+      page.importAccountErr.textContent = 'Account undefined.'
+      Doc.show(page.importAccountErr)
+      return
+    }
     const req = {
       pw: pw,
       account: account
