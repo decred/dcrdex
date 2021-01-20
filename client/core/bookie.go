@@ -458,7 +458,6 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if mkt == nil {
 		return fmt.Errorf("no market found with ID %s", sp.MarketID)
 	}
-	mktName, baseID, quoteID := mkt.Name, mkt.Base, mkt.Quote
 
 	// Update the data in the stored ConfigResponse.
 	dc.setMarketFinalEpoch(sp.MarketID, sp.FinalEpoch, sp.Persist)
@@ -501,11 +500,11 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Return any non-nil error, but still revoke purged orders.
 
 	// Revoke all active orders of the suspended market for the dex.
-	c.log.Warnf("Revoking all active orders for market %s at %s.", mktName, dc.acct.host)
+	c.log.Warnf("Revoking all active orders for market %s at %s.", sp.MarketID, dc.acct.host)
 	updatedAssets := make(assetMap)
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {
-		if tracker.Order.Base() == baseID && tracker.Order.Quote() == quoteID &&
+		if tracker.Order.Base() == mkt.Base && tracker.Order.Quote() == mkt.Quote &&
 			tracker.metaData.Host == dc.acct.host && tracker.metaData.Status == order.OrderStatusBooked {
 			// Locally revoke the purged book order.
 			tracker.revoke()
@@ -522,8 +521,8 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		Host:     dc.acct.host,
 		MarketID: sp.MarketID,
 		Payload: &MarketOrderBook{
-			Base:  baseID,
-			Quote: quoteID,
+			Base:  mkt.Base,
+			Quote: mkt.Quote,
 			Book:  book.book(), // empty
 		},
 	})

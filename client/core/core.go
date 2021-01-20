@@ -116,10 +116,9 @@ func (dc *dexConnection) market(mktID string) *msgjson.Market {
 	return dc.marketConfig(mktID)
 }
 
-// refreshMarkets rebuilds the market map. The updated markets map may be safely
-// accessed with the markets method. refreshMarkets should be called when the
-// market configuration changes.
-func (dc *dexConnection) markets() map[string]*Market {
+// marketMap creates a map of this DEX's *Market keyed by name/ID,
+// [base]_[quote].
+func (dc *dexConnection) marketMap() map[string]*Market {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
 
@@ -140,13 +139,13 @@ func (dc *dexConnection) markets() map[string]*Market {
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
 		}
-		mid := mkt.marketName()
+		mktID := mkt.marketName()
 
-		for _, trade := range dc.marketTrades(mid) {
+		for _, trade := range dc.marketTrades(mktID) {
 			mkt.Orders = append(mkt.Orders, trade.coreOrder())
 		}
 
-		marketMap[mid] = mkt
+		marketMap[mktID] = mkt
 	}
 
 	return marketMap
@@ -1000,7 +999,7 @@ func (c *Core) exchangeMap() map[string]*Exchange {
 		infos[host] = &Exchange{
 			Host:          host,
 			AcctID:        acctID,
-			Markets:       dc.markets(),
+			Markets:       dc.marketMap(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
 			Connected:     dc.connected,
@@ -1267,14 +1266,12 @@ func (c *Core) Wallets() []*WalletState {
 	return state
 }
 
-// SupportedAssets returns a map of asset information for supported assets that
-// may or may not have a wallet yet.
+// SupportedAssets returns a map of asset information for supported assets.
 func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
 	return c.assetMap()
 }
 
-// assetMap returns a map of asset information for supported assets that may or
-// may not have a wallet yet.
+// assetMap returns a map of asset information for supported assets.
 func (c *Core) assetMap() map[uint32]*SupportedAsset {
 	supported := asset.Assets()
 	assets := make(map[uint32]*SupportedAsset, len(supported))

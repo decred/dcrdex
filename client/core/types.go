@@ -284,7 +284,6 @@ type Order struct {
 	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
 	FundingCoins []*Coin           `json:"fundingCoins"`
 	LockedAmt    uint64            `json:"lockedamt"`
-	Change       *Coin             `json:"change"`
 	Rate         uint64            `json:"rate"` // limit only
 	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
 }
