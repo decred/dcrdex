@@ -102,18 +102,18 @@ const (
 func (dc *dexConnection) running(mkt string) bool {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
-	mktCfg := dc.marketConfig(mkt)
+	mktCfg := dc.findMarketConfig(mkt)
 	if mktCfg == nil {
 		return false // not found means not running
 	}
 	return mktCfg.Running()
 }
 
-// market is the market's configuration.
-func (dc *dexConnection) market(mktID string) *msgjson.Market {
+// marketConfig is the market's configuration.
+func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
-	return dc.marketConfig(mktID)
+	return dc.findMarketConfig(mktID)
 }
 
 // marketMap creates a map of this DEX's *Market keyed by name/ID,
@@ -764,7 +764,7 @@ func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 // marketEpochDuration gets the market's epoch duration. If the market is not
 // known, an error is logged and 0 is returned.
 func (dc *dexConnection) marketEpochDuration(mktID string) uint64 {
-	mkt := dc.market(mktID)
+	mkt := dc.marketConfig(mktID)
 	if mkt == nil {
 		dc.log.Errorf("marketEpoch called for unknown market %s", mktID)
 		return 0
@@ -2626,7 +2626,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
-	if dc.market(mktID) == nil {
+	if dc.marketConfig(mktID) == nil {
 		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
@@ -3368,7 +3368,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 
 		mktID := marketName(ord.Base(), ord.Quote())
-		if dc.market(mktID) == nil {
+		if dc.marketConfig(mktID) == nil {
 			c.log.Errorf("Active %s order retrieved for unknown market %s", oid, mktID)
 			continue
 		}

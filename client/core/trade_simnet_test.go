@@ -1249,7 +1249,7 @@ func (n *notificationReader) find(ctx context.Context, waitDuration time.Duratio
 
 func (client *tClient) placeOrder(qty, rate uint64, tifNow bool) (string, error) {
 	dc := client.dc()
-	dcrBtcMkt := dc.market("dcr_btc")
+	dcrBtcMkt := dc.marketConfig("dcr_btc")
 	if dcrBtcMkt == nil {
 		return "", fmt.Errorf("no dcr_btc market found")
 	}

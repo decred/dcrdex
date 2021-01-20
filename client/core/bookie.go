@@ -178,7 +178,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 	booky, found := dc.books[mktID]
 	if !found {
 		// Make sure the market exists.
-		if dc.market(mktID) == nil {
+		if dc.marketConfig(mktID) == nil {
 			return nil, fmt.Errorf("unknown market %s", mktID)
 		}
 
@@ -400,9 +400,9 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	return nil
 }
 
-// marketConfig searches the stored ConfigResponse for the named market. This
-// must be called with cfgMtx at least read locked.
-func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
+// findMarketConfig searches the stored ConfigResponse for the named market.
+// This must be called with cfgMtx at least read locked.
+func (dc *dexConnection) findMarketConfig(name string) *msgjson.Market {
 	for _, mktConf := range dc.cfg.Markets {
 		if mktConf.Name == name {
 			return mktConf
@@ -417,7 +417,7 @@ func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
 func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, clearFinal bool) {
 	dc.cfgMtx.Lock()
 	defer dc.cfgMtx.Unlock()
-	mkt := dc.marketConfig(name)
+	mkt := dc.findMarketConfig(name)
 	if mkt == nil {
 		return
 	}
@@ -434,7 +434,7 @@ func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, cle
 func (dc *dexConnection) setMarketFinalEpoch(name string, finalEpoch uint64, persist bool) {
 	dc.cfgMtx.Lock()
 	defer dc.cfgMtx.Unlock()
-	mkt := dc.marketConfig(name)
+	mkt := dc.findMarketConfig(name)
 	if mkt == nil {
 		return
 	}
@@ -454,7 +454,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 
 	// Ensure the provided market exists for the dex.
-	mkt := dc.market(sp.MarketID)
+	mkt := dc.marketConfig(sp.MarketID)
 	if mkt == nil {
 		return fmt.Errorf("no market found with ID %s", sp.MarketID)
 	}
@@ -546,7 +546,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 
 	// Ensure the provided market exists for the dex.
-	if dc.market(rs.MarketID) == nil {
+	if dc.marketConfig(rs.MarketID) == nil {
 		return fmt.Errorf("no market at %v found with ID %s", dc.acct.host, rs.MarketID)
 	}
 

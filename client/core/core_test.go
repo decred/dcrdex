@@ -1659,7 +1659,7 @@ func TestLogin(t *testing.T) {
 	qty := 3 * tDCR.LotSize
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
 	oid := lo.ID()
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
@@ -2280,7 +2280,7 @@ func TestCancel(t *testing.T) {
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	lo.Force = order.StandingTiF
 	oid := lo.ID()
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
@@ -2433,7 +2433,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	}
 
 	// Now store the order in dc.trades.
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify)
@@ -2491,7 +2491,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -2559,7 +2559,7 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -3016,7 +3016,7 @@ func TestReconcileTrades(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
 
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	rig.core.wallets[mkt.Base], _ = newTWallet(mkt.Base)
 	rig.core.wallets[mkt.Quote], _ = newTWallet(mkt.Quote)
 	walletSet, err := rig.core.walletSet(dc, mkt.Base, mkt.Quote, true)
@@ -3299,7 +3299,7 @@ func TestRefunds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
@@ -3706,7 +3706,7 @@ func TestCompareServerMatches(t *testing.T) {
 		MetaData: &db.OrderMetaData{},
 		Order:    lo,
 	}
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, nil, nil, nil)
 	metaMatch := db.MetaMatch{
@@ -4304,7 +4304,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.Unlock(rig.crypter)
 
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 
 	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
@@ -4346,7 +4346,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	// Suspend a running market.
 	rig.dc.cfgMtx.Lock()
-	mktConf := rig.dc.marketConfig(tDcrBtcMktName)
+	mktConf := rig.dc.findMarketConfig(tDcrBtcMktName)
 	mktConf.StartEpoch = 12
 	rig.dc.cfgMtx.Unlock()
 
@@ -4500,7 +4500,7 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.Unlock(rig.crypter)
 
-	epochLen := rig.dc.market(tDcrBtcMktName).EpochLen
+	epochLen := rig.dc.marketConfig(tDcrBtcMktName).EpochLen
 
 	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
 		// Need to stamp and sign the message with the server's key.
@@ -4549,7 +4549,7 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 
 	// Notify of scheduled resume.
 	rig.dc.cfgMtx.Lock()
-	mktConf := rig.dc.marketConfig(tDcrBtcMktName)
+	mktConf := rig.dc.findMarketConfig(tDcrBtcMktName)
 	mktConf.StartEpoch = 12
 	mktConf.FinalEpoch = mktConf.StartEpoch + 1 // long since closed
 	rig.dc.cfgMtx.Unlock()
@@ -4589,7 +4589,7 @@ func TestHandleNomatch(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	dc := rig.dc
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
@@ -5071,7 +5071,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	dc := rig.dc
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
@@ -5567,7 +5567,7 @@ func TestSuspectTrades(t *testing.T) {
 
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
-	mkt := dc.market(tDcrBtcMktName)
+	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	dc.trades[oid] = tracker
