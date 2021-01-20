@@ -119,7 +119,7 @@ export default class SettingsPage extends BasePage {
     const accountForExport = JSON.parse(JSON.stringify(res.account))
     const a = document.createElement('a')
     a.setAttribute('download', 'dcrAccount-' + host + '.json')
-    a.setAttribute('href', 'data:application/json,' + JSON.stringify(accountForExport, null, 4))
+    a.setAttribute('href', 'data:text/json,' + JSON.stringify(accountForExport, null, 2))
     a.click()
     Doc.hide(page.forms)
   }
