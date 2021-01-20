@@ -19,7 +19,21 @@ You can override these or set additional config opts by passing them as
 arguments when executing the harness script e.g.:
 
 ```sh
-./harness.sh --pgpass=dexpass
+./harness.sh --pgpass=dexpass # arguments will be passed verbatim to the dcrdex cmd
+```
+
+To persist the postgres db password to the harness' dcrdex.conf (ideal if using
+the config file externally), set a `PG_PASS` env variable:
+
+```sh
+PG_PASS=dexpass ./harness.sh # dcrdex.conf will include pgpass="${PG_PASS}"
+```
+
+You can also override the default markets' epoch duration (15000ms) by setting
+an `EPOCH` env variable (lowest value allowed is 1000, unit is ms)
+
+```sh
+EPOCH=20000 ./harness.sh # to set the epoch duration to 20000ms
 ```
 
 The harness script will drop any existing `dcrdex_simnet_test` PostgreSQL db

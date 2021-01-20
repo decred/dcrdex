@@ -181,6 +181,12 @@ func teardown(cancelCtx context.CancelFunc) {
 	}
 }
 
+func TestMain(m *testing.M) {
+	tmpDir, _ = ioutil.TempDir("", "")
+	defer os.RemoveAll(tmpDir)
+	os.Exit(m.Run())
+}
+
 // TestTradeSuccess runs a simple trade test and ensures that the resulting
 // trades are completed successfully.
 func TestTradeSuccess(t *testing.T) {
@@ -347,12 +353,6 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 
 	tLog.Infof("Trades completed. Maker went dark at %s, Taker continued till %s.",
 		order.MakerRedeemed, order.MatchComplete)
-}
-
-func TestMain(m *testing.M) {
-	tmpDir, _ = ioutil.TempDir("", "")
-	defer os.RemoveAll(tmpDir)
-	os.Exit(m.Run())
 }
 
 // TestOrderStatusReconciliation simulates a few conditions that could cause a

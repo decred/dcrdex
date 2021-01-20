@@ -34,7 +34,6 @@ rpccert=${WALLET_DIR}/rpc.cert
 pass=${WALLET_PASS}
 rpcconnect=127.0.0.1:${DCRD_RPC_PORT}
 cafile=${DCRD_RPC_CERT}
-${VOTING_CFG}
 EOF
 
 if [ "${ENABLE_VOTING}" = "1" ]; then
