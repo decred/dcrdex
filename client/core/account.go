@@ -9,7 +9,7 @@ import (
 
 // AccountExport is used to retrieve account by host for export.
 func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
-	_, err := c.encryptionKey(pw)
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
@@ -26,6 +26,10 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		return nil, newError(unknownDEXErr, "DEX: %s", host)
 	}
 
+	// Unlock account if it is locked so that account id and privKey can be retrieved.
+	if err = dc.acct.unlock(crypter); err != nil {
+		return nil, codedError(acctKeyErr, err)
+	}
 	dc.acct.keyMtx.RLock()
 	accountId := dc.acct.id.String()
 	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())

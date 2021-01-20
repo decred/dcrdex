@@ -123,6 +123,17 @@ func TestAccountExportUnknownDEX(t *testing.T) {
 	}
 }
 
+func TestAccountExportAccountKeyError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	host := tCore.conns[tDexHost].acct.host
+	rig.crypter.decryptErr = tErr
+	_, err := tCore.AccountExport(tPW, host)
+	if !errorHasCode(err, acctKeyErr) {
+		t.Fatalf("expected password error, actual error: '%v'", err)
+	}
+}
+
 func TestAccountExportAccountProofError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
