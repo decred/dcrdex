@@ -131,6 +131,5 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		}
 	}
 
-	c.refreshUser()
 	return nil
 }
