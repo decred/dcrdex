@@ -695,6 +695,18 @@ type OrderFilter struct {
 	Statuses []order.OrderStatus `json:"statuses"`
 }
 
+// Account holds data returned from AccountExport.
+type Account struct {
+	Host          string `json:"host"`
+	AccountID     string `json:"accountID"`
+	PrivKey       string `json:"privKey"`
+	DEXPubKey     string `json:"DEXPubKey"`
+	Cert          string `json:"cert"`
+	FeeCoin       string `json:"feeCoin"`
+	FeeProofSig   string `json:"feeProofSig"`
+	FeeProofStamp uint64 `json:"FeeProofStamp"`
+}
+
 // assetMap tracks a series of assets and provides methods for registering an
 // asset and merging with another assetMap.
 type assetMap map[uint32]struct{}

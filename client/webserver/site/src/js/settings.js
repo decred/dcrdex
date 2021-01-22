@@ -12,6 +12,7 @@ export default class SettingsPage extends BasePage {
   constructor (application, body) {
     super()
     app = application
+    this.body = body
     const page = this.page = Doc.parsePage(body, [
       'darkMode', 'commitHash',
       'addADex',
@@ -20,6 +21,12 @@ export default class SettingsPage extends BasePage {
       'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      // Export Account
+      'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
+      'exportAccountHost', 'exportAccountErr',
+      // Import Account
+      'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
+      'accountFile', 'selectedAccount', 'removeAccount', 'addAccount', 'importAccountErr',
       // Others
       'showPokes'
     ])
@@ -46,6 +53,22 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
+
+    const exchangesDiv = page.exchanges
+    if (typeof app.user.exchanges !== 'undefined') {
+      for (const host of Object.keys(app.user.exchanges)) {
+        const exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+        Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
+      }
+    }
+
+    Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
+    forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => { this.importAccount() })
+
+    Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
+    Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
+    Doc.bind(page.addAccount, 'click', () => this.page.accountFile.click())
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -68,11 +91,118 @@ export default class SettingsPage extends BasePage {
     })
   }
 
+  async prepareAccountExport (host, authorizeAccountExportForm) {
+    const page = this.page
+    page.exportAccountHost.textContent = host
+    page.exportAccountErr.textContent = ''
+    this.showForm(authorizeAccountExportForm)
+  }
+
+  // exportAccount exports and downloads the account info
+  async exportAccount () {
+    const page = this.page
+    const pw = page.exportAccountAppPass.value
+    const host = page.exportAccountHost.textContent
+    page.exportAccountAppPass.value = ''
+    const req = {
+      pw: pw,
+      host: host
+    }
+    const loaded = app.loading(this.body)
+    const res = await postJSON('/api/exportaccount', req)
+    loaded()
+    if (!app.checkResponse(res)) {
+      page.exportAccountErr.textContent = res.msg
+      Doc.show(page.exportAccountErr)
+      return
+    }
+    const accountForExport = JSON.parse(JSON.stringify(res.account))
+    const a = document.createElement('a')
+    a.setAttribute('download', 'dcrAccount-' + host + '.json')
+    a.setAttribute('href', 'data:text/json,' + JSON.stringify(accountForExport, null, 2))
+    a.click()
+    Doc.hide(page.forms)
+  }
+
+  async onAccountFileChange () {
+    const page = this.page
+    const files = page.accountFile.files
+    if (!files.length) return
+    page.selectedAccount.textContent = files[0].name
+    Doc.show(page.removeAccount)
+    Doc.hide(page.addAccount)
+  }
+
+  /* clearAccountFile cleanup accountFile value and selectedAccount text */
+  clearAccountFile () {
+    const page = this.page
+    page.accountFile.value = ''
+    page.selectedAccount.textContent = this.defaultTLSText
+    Doc.hide(page.removeAccount)
+    Doc.show(page.addAccount)
+  }
+
+  testAccountFile () {
+    console.log('testAccountFile')
+  }
+
+  async prepareAccountImport (authorizeAccountImportForm) {
+    const page = this.page
+    page.importAccountErr.textContent = ''
+    this.showForm(authorizeAccountImportForm)
+  }
+
+  // importAccount imports the account
+  async importAccount () {
+    const page = this.page
+    const pw = page.importAccountAppPass.value
+    page.importAccountAppPass.value = ''
+    let accountString = ''
+    if (page.accountFile.value) {
+      accountString = await page.accountFile.files[0].text()
+    }
+    let account
+    try {
+      account = JSON.parse(accountString)
+    } catch (e) {
+      page.importAccountErr.textContent = e.message
+      Doc.show(page.importAccountErr)
+      return
+    }
+    if (typeof account === 'undefined') {
+      page.importAccountErr.textContent = 'Account undefined.'
+      Doc.show(page.importAccountErr)
+      return
+    }
+    const req = {
+      pw: pw,
+      account: account
+    }
+    const loaded = app.loading(this.body)
+    const importResponse = await postJSON('/api/importaccount', req)
+    loaded()
+    if (!app.checkResponse(importResponse)) {
+      page.importAccountErr.textContent = importResponse.msg
+      Doc.show(page.importAccountErr)
+      return
+    }
+    const loginResponse = await postJSON('/api/login', { pass: pw })
+    if (!app.checkResponse(loginResponse)) {
+      page.importAccountErr.textContent = loginResponse.msg
+      Doc.show(page.importAccountErr)
+      return
+    }
+    await app.fetchUser()
+    Doc.hide(page.forms)
+    // Initial method of displaying imported account.
+    window.location.reload()
+  }
+
   /* showForm shows a modal form with a little animation. */
   async showForm (form) {
     const page = this.page
     this.currentForm = form
-    Doc.hide(page.dexAddrForm, page.confirmRegForm)
+    Doc.hide(page.dexAddrForm, page.confirmRegForm, page.authorizeAccountExportForm, page.authorizeAccountImportForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -165,6 +295,8 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
     await app.fetchUser()
     loaded()
+    // Initial method of displaying added dex.
+    window.location.reload()
   }
 
   /*

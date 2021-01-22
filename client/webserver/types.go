@@ -75,6 +75,16 @@ type withdrawForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 }
 
+type accountExportAuthForm struct {
+	Pass encode.PassBytes `json:"pw"`
+	Host string           `json:"host"`
+}
+
+type accountImportAuthForm struct {
+	Pass    encode.PassBytes `json:"pw"`
+	Account core.Account     `json:"account"`
+}
+
 // orderReader wraps a core.Order and provides methods for info display.
 // Whenever possible, add an orderReader methods rather than a template func.
 type orderReader struct {

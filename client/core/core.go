@@ -3203,30 +3203,9 @@ func (c *Core) initialize() {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			host, err := addrHost(acct.Host)
-			if err != nil {
-				c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
+			if !c.verifyAccount(acct) {
 				return
 			}
-			dc, err := c.connectDEX(acct)
-			if err != nil {
-				c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
-				return
-			}
-			c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
-			if !acct.Paid {
-				if len(acct.FeeCoin) == 0 {
-					// Register should have set this when creating the account
-					// that was obtained via db.Accounts.
-					c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-						"Discarding account.", acct.Host)
-					return
-				}
-			}
-			c.connMtx.Lock()
-			c.conns[host] = dc
-			c.connMtx.Unlock()
-			c.log.Debugf("dex connection to %s ready", acct.Host)
 		}(acct)
 	}
 	dbWallets, err := c.db.Wallets()
@@ -3264,6 +3243,35 @@ func (c *Core) initialize() {
 	}
 	c.connMtx.RUnlock()
 	c.refreshUser()
+}
+
+// verifyAccount verifies AccountInfo by making a connection to the DEX.
+func (c *Core) verifyAccount(acct *db.AccountInfo) bool {
+	host, err := addrHost(acct.Host)
+	if err != nil {
+		c.log.Errorf("skipping loading of %s due to address parse error: %v", acct.Host, err)
+		return false
+	}
+	dc, err := c.connectDEX(acct)
+	if err != nil {
+		c.log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
+		return false
+	}
+	c.log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
+	if !acct.Paid {
+		if len(acct.FeeCoin) == 0 {
+			// Register should have set this when creating the account
+			// that was obtained via db.Accounts.
+			c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+				"Discarding account.", acct.Host)
+			return false
+		}
+	}
+	c.connMtx.Lock()
+	c.conns[host] = dc
+	c.connMtx.Unlock()
+	c.log.Debugf("dex connection to %s ready", acct.Host)
+	return true
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a

@@ -189,6 +189,45 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiAccountExport is the handler for the '/account' API request.
+func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
+	form := new(accountExportAuthForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	r.Close = true
+	account, err := s.core.AccountExport(form.Pass, form.Host)
+	if err != nil {
+		s.writeAPIError(w, "error exporting account: %v", err)
+		return
+	}
+	w.Header().Set("Connection", "close")
+	res := &struct {
+		OK      bool          `json:"ok"`
+		Account *core.Account `json:"account"`
+	}{
+		OK:      true,
+		Account: account,
+	}
+	writeJSON(w, res, s.indent)
+}
+
+// apiAccountImport is the handler for the '/account' API request.
+func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
+	form := new(accountImportAuthForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	r.Close = true
+	err := s.core.AccountImport(form.Pass, form.Account)
+	if err != nil {
+		s.writeAPIError(w, "error importing account: %v", err)
+		return
+	}
+	w.Header().Set("Connection", "close")
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiCancel is the handler for the '/cancel' API request.
 func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	form := new(cancelForm)

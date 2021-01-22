@@ -18,16 +18,23 @@
       </label>
     </div>
     <div>
-      <div {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
-        <div>
-          {{range $host, $xc := .UserInfo.Exchanges}}
-            <div>
+      <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
+        {{range $host, $xc := .UserInfo.Exchanges}}
+          <div class="settings-exchange border1">
+            <span>
               DEX Address: {{$host}}
+            </span>
+            <br>
+            Account ID: <span class="fs12">
+            {{if eq (len $xc.AcctID) 0}}
+              &lt;login to show&gt;
+            {{else}}
+              {{$xc.AcctID}}
               <br>
-              Account ID: <span class="fs12">{{if eq (len $xc.AcctID) 0}}&lt;login to show&gt;{{else}}{{$xc.AcctID}}{{end}}</span>
-            </div>
-          {{end}}
-        </div>
+            {{end}}</span>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}" >Export Account</button>
+          </div>
+        {{end}}
       </div>
       <br>
       <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
@@ -36,6 +43,7 @@
         servers.
         </p>
         <button id="addADex" class="bg2 selected">Add a DEX</button>
+        <button id="importAccount" class="bg2 selected">Import Account</button>
       </div>
     </div>
     <div>Build ID: <span id="commitHash" class="mono"></span></div>
@@ -52,6 +60,16 @@
     {{- /* CONFIRM REGISTRATION */ -}}
     <form class="card bg1 d-hide" id="confirmRegForm">
       {{template "confirmRegistrationForm"}}
+    </form>
+
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+      {{template "authorizeAccountExportForm"}}
+    </form>
+
+    {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
+    <form class="card bg1" id="authorizeAccountImportForm">
+      {{template "authorizeAccountImportForm"}}
     </form>
 
   </div>

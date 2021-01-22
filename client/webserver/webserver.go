@@ -90,6 +90,8 @@ type clientCore interface {
 	Order(oid dex.Bytes) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error)
+	AccountExport(pw []byte, host string) (*core.Account, error)
+	AccountImport(pw []byte, account core.Account) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -262,6 +264,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			apiAuth.Post("/withdraw", s.apiWithdraw)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
+			apiAuth.Post("/exportaccount", s.apiAccountExport)
+			apiAuth.Post("/importaccount", s.apiAccountImport)
 		})
 	})
 

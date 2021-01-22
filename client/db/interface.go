@@ -30,6 +30,8 @@ type DB interface {
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(ai *AccountInfo) error
+	// AccountProof retrieves the AccountPoof value specified by url.
+	AccountProof(url string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.
 	AccountPaid(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing

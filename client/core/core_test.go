@@ -67,6 +67,7 @@ var (
 	}
 	tDexPriv            *secp256k1.PrivateKey
 	tDexKey             *secp256k1.PublicKey
+	tDexAccountID       account.AccountID
 	tPW                        = []byte("dexpw")
 	wPW                        = "walletpw"
 	tDexHost                   = "somedex.tld:7232"
@@ -154,6 +155,7 @@ func tNewAccount() *dexAccount {
 		encKey:    privKey.Serialize(),
 		dexPubKey: tDexKey,
 		privKey:   privKey,
+		id:        tDexAccountID,
 		feeCoin:   []byte("somecoin"),
 	}
 }
@@ -257,30 +259,38 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 }
 
 type TDB struct {
-	updateWalletErr    error
-	acct               *db.AccountInfo
-	acctErr            error
-	getErr             error
-	storeErr           error
-	encKeyErr          error
-	accts              []*db.AccountInfo
-	updateOrderErr     error
-	activeDEXOrders    []*db.MetaOrder
-	matchesForOID      []*db.MetaMatch
-	matchesForOIDErr   error
-	updateMatchChan    chan order.MatchStatus
-	activeMatchOIDs    []order.OrderID
-	activeMatchOIDSErr error
-	lastStatusID       order.OrderID
-	lastStatus         order.OrderStatus
-	wallet             *db.Wallet
-	walletErr          error
-	setWalletPwErr     error
-	orderOrders        map[order.OrderID]*db.MetaOrder
-	orderErr           error
-	linkedFromID       order.OrderID
-	linkedToID         order.OrderID
-	existValues        map[string]bool
+	updateWalletErr       error
+	acct                  *db.AccountInfo
+	acctErr               error
+	getErr                error
+	storeErr              error
+	encKeyErr             error
+	createAccountErr      error
+	accountPaidErr        error
+	accts                 []*db.AccountInfo
+	updateOrderErr        error
+	activeDEXOrders       []*db.MetaOrder
+	matchesForOID         []*db.MetaMatch
+	matchesForOIDErr      error
+	updateMatchChan       chan order.MatchStatus
+	activeMatchOIDs       []order.OrderID
+	activeMatchOIDSErr    error
+	lastStatusID          order.OrderID
+	lastStatus            order.OrderStatus
+	wallet                *db.Wallet
+	walletErr             error
+	setWalletPwErr        error
+	orderOrders           map[order.OrderID]*db.MetaOrder
+	orderErr              error
+	linkedFromID          order.OrderID
+	linkedToID            order.OrderID
+	existValues           map[string]bool
+	accountProof          *db.AccountProof
+	accountProofErr       error
+	verifyAccountPaid     bool
+	verifyCreateAccount   bool
+	accountInfoPersisted  *db.AccountInfo
+	accountProofPersisted *db.AccountProof
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -298,7 +308,9 @@ func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
 }
 
 func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
-	return nil
+	tdb.verifyCreateAccount = true
+	tdb.accountInfoPersisted = ai
+	return tdb.createAccountErr
 }
 
 func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
@@ -393,8 +405,14 @@ func (tdb *TDB) Wallet([]byte) (*db.Wallet, error) {
 	return tdb.wallet, tdb.walletErr
 }
 
+func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
+	return tdb.accountProof, tdb.accountProofErr
+}
+
 func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
-	return nil
+	tdb.verifyAccountPaid = true
+	tdb.accountProofPersisted = proof
+	return tdb.accountPaidErr
 }
 
 func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
@@ -885,6 +903,7 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
 	tDexKey = tDexPriv.PubKey()
+	tDexAccountID = account.NewID(tDexPriv.PubKey().SerializeCompressed())
 
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.

@@ -257,6 +257,31 @@ func TestDisableAccount(t *testing.T) {
 	}
 }
 
+func TestAccountProof(t *testing.T) {
+	boltdb := newTestDB(t)
+	acct := dbtest.RandomAccountInfo()
+	host := acct.Host
+
+	err := boltdb.CreateAccount(acct)
+	if err != nil {
+		t.Fatalf("Unexpected CreateAccount error: %v", err)
+	}
+
+	boltdb.AccountPaid(&db.AccountProof{
+		Host:  acct.Host,
+		Stamp: 123456789,
+		Sig:   []byte("some signature here"),
+	})
+
+	accountProof, err := boltdb.AccountProof(host)
+	if err != nil {
+		t.Fatalf("Unexpected AccountProof error: %v", err)
+	}
+	if accountProof == nil {
+		t.Fatal("AccountProof not found")
+	}
+}
+
 func TestWallets(t *testing.T) {
 	boltdb := newTestDB(t)
 	wallets, err := boltdb.Wallets()
