@@ -104,25 +104,25 @@ type dexConf struct {
 
 type flagsData struct {
 	// General application behavior
-	AppDataDir  string `short:"A" long:"appdata" description:"Path to application home directory"`
-	ConfigFile  string `short:"C" long:"configfile" description:"Path to configuration file"`
-	DataDir     string `short:"b" long:"datadir" description:"Directory to store data"`
+	AppDataDir  string `short:"A" long:"appdata" description:"Path to application home directory."`
+	ConfigFile  string `short:"C" long:"configfile" description:"Path to configuration file."`
+	DataDir     string `short:"b" long:"datadir" description:"Directory to store data."`
 	LogDir      string `long:"logdir" description:"Directory to log output."`
-	DebugLevel  string `short:"d" long:"debuglevel" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	DebugLevel  string `short:"d" long:"debuglevel" description:"Logging level {trace, debug, info, warn, error, critical}."`
 	LocalLogs   bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	MaxLogZips  int    `long:"maxlogzips" description:"The number of zipped log files created by the log rotator to be retained. Setting to 0 will keep all."`
-	ShowVersion bool   `short:"V" long:"version" description:"Display version information and exit"`
+	ShowVersion bool   `short:"V" long:"version" description:"Display version information and exit."`
 
-	Testnet bool `long:"testnet" description:"Use the test network (default mainnet)"`
-	Simnet  bool `long:"simnet" description:"Use the simulation test network (default mainnet)"`
+	Testnet bool `long:"testnet" description:"Use the test network (default mainnet)."`
+	Simnet  bool `long:"simnet" description:"Use the simulation test network (default mainnet)."`
 
-	RPCCert     string   `long:"rpccert" description:"RPC server TLS certificate file"`
-	RPCKey      string   `long:"rpckey" description:"RPC server TLS private key file"`
-	RPCListen   []string `long:"rpclisten" description:"IP addresses on which the RPC server should listen for incoming connections"`
-	AltDNSNames []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)"`
+	RPCCert     string   `long:"rpccert" description:"RPC server TLS certificate file."`
+	RPCKey      string   `long:"rpckey" description:"RPC server TLS private key file."`
+	RPCListen   []string `long:"rpclisten" description:"IP addresses on which the RPC server should listen for incoming connections."`
+	AltDNSNames []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
 
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
-	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"How long clients have to broadcast expected swap transactions following new blocks"`
+	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
@@ -145,8 +145,8 @@ type flagsData struct {
 	PGHost             string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
 	ShowPGConfig       bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
 	SigningKeyPassword string `long:"signingkeypass" description:"Password for encrypting/decrypting the dex privkey. INSECURE. Do not set unless absolutely necessary."`
-	AdminSrvOn         bool   `long:"adminsrvon" description:"Turn on the admin server"`
-	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)"`
+	AdminSrvOn         bool   `long:"adminsrvon" description:"Turn on the admin server."`
+	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)."`
 	AdminSrvPassword   string `long:"adminsrvpass" description:"Admin server password. INSECURE. Do not set unless absolutely necessary."`
 
 	NoResumeSwaps bool `long:"noresumeswaps" description:"Do not attempt to resume swaps that are active in the DB."`
