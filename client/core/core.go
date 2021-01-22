@@ -109,7 +109,8 @@ func (dc *dexConnection) running(mkt string) bool {
 	return mktCfg.Running()
 }
 
-// marketConfig is the market's configuration.
+// marketConfig is the market's configuration, as returned by the server in the
+// 'config' response.
 func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
@@ -3851,11 +3852,17 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	resubMkt := func(mkt *msgjson.Market) {
+	type market struct {
+		name  string
+		base  uint32
+		quote uint32
+	}
+
+	resubMkt := func(mkt *market) {
 		// Locate any bookie for this market.
 		dc.booksMtx.Lock()
 		defer dc.booksMtx.Unlock()
-		booky := dc.books[mkt.Name]
+		booky := dc.books[mkt.name]
 		if booky == nil {
 			// Was not previously subscribed with the server for this market.
 			return
@@ -3863,37 +3870,47 @@ func (c *Core) handleReconnect(host string) {
 
 		// Resubscribe since our old subscription was probably lost by the
 		// server when the connection dropped.
-		snap, err := dc.subscribe(mkt.Base, mkt.Quote)
+		snap, err := dc.subscribe(mkt.base, mkt.quote)
 		if err != nil {
-			c.log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
+			c.log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.name, err)
 			return
 		}
 
 		// Create a fresh OrderBook for the bookie.
 		err = booky.reset(snap)
 		if err != nil {
-			c.log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.Name, err)
+			c.log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.name, err)
 		}
 
 		// Send a FreshBookAction to the subscribers.
 		booky.send(&BookUpdate{
 			Action:   FreshBookAction,
 			Host:     dc.acct.host,
-			MarketID: mkt.Name,
+			MarketID: mkt.name,
 			Payload: &MarketOrderBook{
-				Base:  mkt.Base,
-				Quote: mkt.Quote,
+				Base:  mkt.base,
+				Quote: mkt.quote,
 				Book:  booky.book(),
 			},
 		})
 	}
 
-	// For each market, resubscribe to any market books.
+	// Create a list of books to check.
 	dc.cfgMtx.RLock()
-	for _, mkt := range dc.cfg.Markets {
-		resubMkt(mkt)
+	mkts := make([]*market, 0, len(dc.cfg.Markets))
+	for _, m := range dc.cfg.Markets {
+		mkts = append(mkts, &market{
+			name:  m.Name,
+			base:  m.Base,
+			quote: m.Quote,
+		})
 	}
 	dc.cfgMtx.RUnlock()
+
+	// For each market, resubscribe to any market books.
+	for _, mkt := range mkts {
+		resubMkt(mkt)
+	}
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
