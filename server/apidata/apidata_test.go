@@ -16,15 +16,9 @@ import (
 	"decred.org/dcrdex/server/matcher"
 )
 
+const tEpochDur = 1000
+
 var dummyErr = fmt.Errorf("dummy error")
-
-type TMarketSource struct {
-	base, quote uint32
-}
-
-func (m *TMarketSource) EpochDuration() uint64 { return 1000 }
-func (m *TMarketSource) Base() uint32          { return m.base }
-func (m *TMarketSource) Quote() uint32         { return m.quote }
 
 type TDBSource struct {
 	loadEpochErr error
@@ -62,24 +56,24 @@ func TestAddMarketSource(t *testing.T) {
 	rig := newTestRig()
 	defer rig.cancel()
 	// initial sucess
-	err := rig.api.AddMarketSource(&TMarketSource{42, 0})
+	err := rig.api.AddMarketSource(42, 0, tEpochDur)
 	if err != nil {
 		t.Fatalf("AddMarketSource error: %v", err)
 	}
 	// unknown asset
-	err = rig.api.AddMarketSource(&TMarketSource{42, 54321})
+	err = rig.api.AddMarketSource(42, 54321, tEpochDur)
 	if err == nil {
 		t.Fatalf("no error for unknown asset")
 	}
 	// DB error
 	rig.db.loadEpochErr = dummyErr
-	err = rig.api.AddMarketSource(&TMarketSource{42, 0})
+	err = rig.api.AddMarketSource(42, 0, tEpochDur)
 	if err == nil {
 		t.Fatalf("no error for DB error")
 	}
 	rig.db.loadEpochErr = nil
 	// success again
-	err = rig.api.AddMarketSource(&TMarketSource{42, 0})
+	err = rig.api.AddMarketSource(42, 0, tEpochDur)
 	if err != nil {
 		t.Fatalf("AddMarketSource error after: %v", err)
 	}
@@ -88,13 +82,13 @@ func TestAddMarketSource(t *testing.T) {
 func TestReportEpoch(t *testing.T) {
 	rig := newTestRig()
 	defer rig.cancel()
-	mktSrc := &TMarketSource{42, 0}
-	err := rig.api.AddMarketSource(mktSrc)
+
+	err := rig.api.AddMarketSource(42, 0, tEpochDur)
 	if err != nil {
 		t.Fatalf("AddMarketSource error: %v", err)
 	}
-	epoch := encode.UnixMilliU(time.Now()) / mktSrc.EpochDuration()
-	epochsPerDay := uint64(time.Hour*24/time.Millisecond) / mktSrc.EpochDuration()
+	epoch := encode.UnixMilliU(time.Now()) / tEpochDur
+	epochsPerDay := uint64(time.Hour*24/time.Millisecond) / tEpochDur
 	epochYesterday := epoch - epochsPerDay - 1
 	// initial success
 	stats := &matcher.MatchCycleStats{

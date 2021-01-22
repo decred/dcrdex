@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/book"
@@ -232,7 +233,7 @@ func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid o
 func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
 func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
 }
-func (a *TAuth) Inaction(user account.AccountID, step dex.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+func (a *TAuth) Inaction(user account.AccountID, step reputation.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 }
 func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
 	return initLotLimit // everyone gets a clean slate

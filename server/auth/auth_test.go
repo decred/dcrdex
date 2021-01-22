@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -512,8 +513,8 @@ func setViolations() (wantScore int32) {
 		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
 	}
 
-	return dex.DefaultBaselineScore + (4+10)*dex.SuccessScore + 1*dex.PreimageMissScore +
-		2*dex.NoSwapAsMakerScore + dex.NoSwapAsTakerScore + 2*dex.NoRedeemAsMakerScore + 1*dex.NoRedeemAsTakerScore
+	return reputation.DefaultBaselineScore + (4+10)*reputation.SuccessScore + 1*reputation.PreimageMissScore +
+		2*reputation.NoSwapAsMakerScore + reputation.NoSwapAsTakerScore + 2*reputation.NoRedeemAsMakerScore + 1*reputation.NoRedeemAsTakerScore
 }
 
 func clearViolations() {
@@ -538,7 +539,7 @@ func TestAuthManager_loadUserReputation(t *testing.T) {
 	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes,
 		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()))
-	wantScore += dex.NoSwapAsTakerScore
+	wantScore += reputation.NoSwapAsTakerScore
 
 	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
@@ -608,8 +609,8 @@ func TestAuthManager_loadUserReputation(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(false, nextTime()),
 			},
-			wantScore: bs + 2*dex.NoSwapAsMakerScore + 1*dex.NoSwapAsTakerScore + 0*dex.NoRedeemAsMakerScore +
-				1*dex.NoRedeemAsTakerScore + 1*dex.PreimageMissScore + (5+1)*dex.SuccessScore,
+			wantScore: bs + 2*reputation.NoSwapAsMakerScore + 1*reputation.NoSwapAsTakerScore + 0*reputation.NoRedeemAsMakerScore +
+				1*reputation.NoRedeemAsTakerScore + 1*reputation.PreimageMissScore + (5+1)*reputation.SuccessScore,
 		},
 	}
 	for _, tt := range tests {
@@ -741,7 +742,7 @@ func TestConnect(t *testing.T) {
 
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
-	wantScore -= dex.NoSwapAsTakerScore
+	wantScore -= reputation.NoSwapAsTakerScore
 	if wantScore <= 0 {
 		t.Fatalf("test score of %v is > 0, revise the test", wantScore)
 	}

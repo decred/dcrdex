@@ -473,7 +473,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
-		err = dataAPI.AddMarketSource(mkt)
+		err = dataAPI.AddMarketSource(mktInf.Base, mktInf.Quote, mktInf.EpochDuration)
 		if err != nil {
 			abort()
 			return nil, fmt.Errorf("DataSource.AddMarket: %w", err)

@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/reputation"
 )
 
 func randomOrderID() (oid order.OrderID) {
@@ -15,7 +15,7 @@ func randomOrderID() (oid order.OrderID) {
 }
 
 func Test_latestOrders(t *testing.T) {
-	cap := int16(dex.CancelThreshWindow)
+	cap := int16(reputation.CancelThreshWindow)
 	ordList := newLatestOrders(cap)
 
 	maybeCancel := func() *order.OrderID {

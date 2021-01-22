@@ -45,14 +45,6 @@ type DBSource interface {
 	LoadEpochStats(base, quote uint32, caches []*db.CandleCache) error
 }
 
-// MarketSource is a source of market information. Markets are added after
-// construction but before use using the AddMarketSource method.
-type MarketSource interface {
-	EpochDuration() uint64
-	Base() uint32
-	Quote() uint32
-}
-
 // BookSource is a source of order book information. The BookSource is added
 // after construction but before use.
 type BookSource interface {
@@ -91,12 +83,11 @@ func NewDataAPI(ctx context.Context, dbSrc DBSource) *DataAPI {
 }
 
 // AddMarketSource should be called before any markets are running.
-func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
-	mktName, err := dex.MarketName(mkt.Base(), mkt.Quote())
+func (s *DataAPI) AddMarketSource(base, quote uint32, epochDur uint64) error {
+	mktName, err := dex.MarketName(base, quote)
 	if err != nil {
 		return err
 	}
-	epochDur := mkt.EpochDuration()
 	s.epochDurations[mktName] = epochDur
 	binCaches := make(map[uint64]*db.CandleCache, len(binSizes)+1)
 	s.marketCaches[mktName] = binCaches
@@ -112,7 +103,7 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 	if s.cache5min == nil {
 		panic("no 5-minute cache")
 	}
-	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
+	err = s.db.LoadEpochStats(base, quote, cacheList)
 	if err != nil {
 		return err
 	}

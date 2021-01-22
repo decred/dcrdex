@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/admin"
 	"decred.org/dcrdex/server/auth"
@@ -315,7 +316,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
-		BaselineScore:    dex.DefaultBaselineScore,
+		BaselineScore:    reputation.DefaultBaselineScore,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file

@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
@@ -56,7 +57,7 @@ type AuthManager interface {
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
 	SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time)
-	Inaction(user account.AccountID, misstep dex.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
+	Inaction(user account.AccountID, misstep reputation.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -815,22 +816,22 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	// From the match status, determine maker/taker fault and the corresponding
 	// dex.NoActionStep.
 	var makerFault bool
-	var misstep dex.NoActionStep
+	var misstep reputation.NoActionStep
 	var refTime time.Time // a reference time found in the DB for reproducibly sorting outcomes
 	switch match.Status {
 	case order.NewlyMatched:
-		misstep = dex.NoSwapAsMaker
+		misstep = reputation.NoSwapAsMaker
 		refTime = match.Epoch.End()
 		makerFault = true
 	case order.MakerSwapCast:
-		misstep = dex.NoSwapAsTaker
+		misstep = reputation.NoSwapAsTaker
 		refTime = match.makerStatus.swapTime // swapConfirmed time is not in the DB
 	case order.TakerSwapCast:
-		misstep = dex.NoRedeemAsMaker
+		misstep = reputation.NoRedeemAsMaker
 		refTime = match.takerStatus.swapTime // swapConfirmed time is not in the DB
 		makerFault = true
 	case order.MakerRedeemed:
-		misstep = dex.NoRedeemAsTaker
+		misstep = reputation.NoRedeemAsTaker
 		refTime = match.makerStatus.redeemTime
 	default:
 		log.Errorf("Invalid failMatch status %v for match %v", match.Status, match.ID())

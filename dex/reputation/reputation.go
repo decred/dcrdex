@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package dex
+package reputation
 
 import (
 	"bytes"
@@ -134,8 +134,8 @@ type Reputation struct {
 	ords     *latestPreimageOutcomes
 }
 
-// NewReputation is the constructor for a *Reputation.
-func NewReputation(baseline int32) *Reputation {
+// New is the constructor for a *Reputation.
+func New(baseline int32) *Reputation {
 	return &Reputation{
 		baseline: baseline,
 		matches:  newLatestMatchOutcomes(ScoringMatchLimit),

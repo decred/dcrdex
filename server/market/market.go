@@ -2056,7 +2056,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	}
 
 	// Update the API data collector.
-	_, err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
+
+	_, err = m.dataCollector.ReportEpoch(m.marketInfo.Base, m.marketInfo.Quote, uint64(epoch.Epoch), stats)
 	if err != nil {
 		log.Errorf("Error updating API data collector: %v", err)
 	}
