@@ -156,8 +156,8 @@ export default class RegistrationPage extends BasePage {
         Doc.hide(page.dexShowMore)
         Doc.show(page.dexCertBox, page.dexNeedCert)
       } else {
-        page.regErr.textContent = res.msg
-        Doc.show(page.regErr)
+        page.dexAddrErr.textContent = res.msg
+        Doc.show(page.dexAddrErr)
       }
 
       return
