@@ -344,7 +344,6 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect      int64
-	ctx               context.Context // the asset subsystem starts with Connect(ctx)
 	node              *walletClient
 	wallet            *walletClient
 	walletInfo        *asset.WalletInfo
