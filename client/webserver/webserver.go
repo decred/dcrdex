@@ -88,8 +88,8 @@ type clientCore interface {
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)
 	Order(oid dex.Bytes) (*core.Order, error)
-	MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error)
-	MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error)
+	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
+	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AccountExport(pw []byte, host string) (*core.Account, error)
 	AccountImport(pw []byte, account core.Account) error
 }

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -20,10 +21,10 @@ const (
 	descending
 )
 
-// fill represents an order fill.
-type fill struct {
-	match    *Order
-	quantity uint64
+// Fill represents an order fill.
+type Fill struct {
+	Rate     uint64
+	Quantity uint64
 }
 
 // bookSide represents a side of the order book.
@@ -139,125 +140,93 @@ func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 	count := n
 	best := make([]*Order, 0)
 
-	// Fetch the best N orders per order preference.
-	switch d.orderPref {
-	case ascending:
-		for i := 0; i < len(d.rateIndex.Rates); i++ {
-			bin := d.bins[d.rateIndex.Rates[i]]
-
-			for idx := 0; idx < len(bin); idx++ {
-				if count == 0 {
-					break
-				}
-
-				best = append(best, bin[idx])
-				count--
-			}
-
-			if count == 0 {
-				break
-			}
+	d.iterateOrders(func(ord *Order) bool {
+		if count == 0 {
+			return false
 		}
-
-	case descending:
-		for i := len(d.rateIndex.Rates) - 1; i >= 0; i-- {
-			group := d.bins[d.rateIndex.Rates[i]]
-
-			for idx := 0; idx < len(group); idx++ {
-				if count == 0 {
-					break
-				}
-
-				best = append(best, group[idx])
-				count--
-			}
-
-			if count == 0 {
-				break
-			}
-		}
-
-	default:
-		panic(fmt.Sprintf("unknown order preference %v", d.orderPref))
-	}
+		best = append(best, ord)
+		count--
+		return true
+	})
 
 	return best, len(best) == n
 }
 
 // BestFill returns the best fill for the provided quantity.
-func (d *bookSide) BestFill(quantity uint64) ([]*fill, error) {
+func (d *bookSide) BestFill(qty uint64) ([]*Fill, bool) {
+	return d.bestFill(qty, false, 0)
+}
+
+func (d *bookSide) bestFill(quantity uint64, convert bool, lotSize uint64) ([]*Fill, bool) {
 	remainingQty := quantity
-	best := make([]*fill, 0)
+	best := make([]*Fill, 0)
 
-	// Fetch the best fill for the provided quantity.
-	switch d.orderPref {
-	case ascending:
-		for i := 0; i < len(d.rateIndex.Rates); i++ {
-			bin := d.bins[d.rateIndex.Rates[i]]
-
-			for idx := 0; idx < len(bin); idx++ {
-				if remainingQty == 0 {
-					break
-				}
-
-				var entry *fill
-				if remainingQty < bin[idx].Quantity {
-					entry = &fill{
-						match:    bin[idx],
-						quantity: remainingQty,
-					}
-					remainingQty = 0
-				} else {
-					entry = &fill{
-						match:    bin[idx],
-						quantity: bin[idx].Quantity,
-					}
-					remainingQty -= bin[idx].Quantity
-				}
-
-				best = append(best, entry)
-			}
-
-			if remainingQty == 0 {
-				break
-			}
+	d.iterateOrders(func(ord *Order) bool {
+		if remainingQty == 0 {
+			return false
 		}
 
-	case descending:
-		for i := len(d.rateIndex.Rates) - 1; i >= 0; i-- {
-			bin := d.bins[d.rateIndex.Rates[i]]
-
-			for idx := 0; idx < len(bin); idx++ {
-				if remainingQty == 0 {
-					break
-				}
-
-				var entry *fill
-				if remainingQty < bin[idx].Quantity {
-					entry = &fill{
-						match:    bin[idx],
-						quantity: remainingQty,
-					}
-					remainingQty = 0
-				} else {
-					entry = &fill{
-						match:    bin[idx],
-						quantity: bin[idx].Quantity,
-					}
-					remainingQty -= bin[idx].Quantity
-				}
-
-				best = append(best, entry)
+		qty := ord.Quantity
+		if convert {
+			if calc.QuoteToBase(ord.Rate, remainingQty) < lotSize {
+				return false
 			}
-
-			if remainingQty == 0 {
-				break
-			}
+			qty = calc.BaseToQuote(ord.Rate, ord.Quantity)
 		}
 
-	default:
-		return nil, fmt.Errorf("unknown order preference %v", d.orderPref)
+		var entry *Fill
+		if remainingQty < qty {
+			fillQty := remainingQty
+			if convert {
+				r := calc.QuoteToBase(ord.Rate, remainingQty)
+				fillQty = r - (r % lotSize)
+				// remainingQty -= calc.BaseToQuote(ord.Rate, ord.Quantity-fillQty)
+			}
+
+			// remainingQty almost certainly not zero for market buy orders, but
+			// set to zero to return filled=true to indicate that the order was
+			// exhausted before the book.
+			remainingQty = 0
+
+			entry = &Fill{
+				Rate:     ord.Rate,
+				Quantity: fillQty,
+			}
+		} else {
+			entry = &Fill{
+				Rate:     ord.Rate,
+				Quantity: ord.Quantity,
+			}
+			remainingQty -= qty
+		}
+
+		best = append(best, entry)
+		return true
+	})
+
+	// Or maybe should return calc.QuoteToBase(ord.Rate, remainingQty) < lotSize
+	// when convert = true?
+	return best, remainingQty == 0
+}
+
+func (d *bookSide) idxCalculator() func(i int) int {
+	if d.orderPref == ascending {
+		return func(i int) int { return i }
 	}
+	binCount := len(d.rateIndex.Rates)
+	return func(i int) int { return binCount - 1 - i }
+}
 
-	return best, nil
+func (d *bookSide) iterateOrders(check func(*Order) bool) {
+	calcIdx := d.idxCalculator()
+
+	for i := 0; i < len(d.rateIndex.Rates); i++ {
+		bin := d.bins[d.rateIndex.Rates[calcIdx(i)]]
+
+		for idx := 0; idx < len(bin); idx++ {
+			if !check(bin[idx]) {
+				break
+			}
+		}
+	}
 }

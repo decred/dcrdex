@@ -170,7 +170,7 @@ export default class MarketsPage extends BasePage {
     })
     bind(page.maxOrd, 'click', () => {
       if (this.isSell()) page.lotField.value = this.market.maxSell.lots
-      else page.lotField.value = this.market.maxBuys[this.adjustedRate()].lots
+      else page.lotField.value = this.market.maxBuys[this.adjustedRate()].swap.lots
       this.lotChanged()
     })
 
@@ -613,16 +613,19 @@ export default class MarketsPage extends BasePage {
   preSell () {
     const mkt = this.market
     const baseWallet = app.assets[mkt.base.id].wallet
-    if (baseWallet.available < mkt.baseCfg.lotSize) mkt.maxSell = { lots: 0, value: 0 }
+    if (baseWallet.available < mkt.baseCfg.lotSize) {
+      this.setMaxOrder(0, this.adjustedRate() / 1e8)
+      return
+    }
     if (mkt.maxSell) {
-      this.setMaxOrder(mkt.maxSell, this.adjustedRate() / 1e8)
+      this.setMaxOrder(mkt.maxSell.swap, this.adjustedRate() / 1e8)
       return
     }
     // We only fetch pre-sell once per balance update, so don't delay.
     this.schedulePreOrder('/api/maxsell', {}, 0, res => {
       mkt.maxSell = res.maxSell
       mkt.sellBalance = baseWallet.balance.available
-      this.setMaxOrder(res.maxSell, this.adjustedRate() / 1e8)
+      this.setMaxOrder(res.maxSell.swap, this.adjustedRate() / 1e8)
     })
   }
 
@@ -634,9 +637,12 @@ export default class MarketsPage extends BasePage {
     const rate = this.adjustedRate()
     const quoteWallet = app.assets[mkt.quote.id].wallet
     const aLot = mkt.baseCfg.lotSize * (rate / 1e8)
-    if (quoteWallet.balance.available < aLot) mkt.maxBuys[rate] = { lots: 0, value: 0 }
+    if (quoteWallet.balance.available < aLot) {
+      this.setMaxOrder(0, 1e8 / rate)
+      return
+    }
     if (mkt.maxBuys[rate]) {
-      this.setMaxOrder(mkt.maxBuys[rate], 1e8 / rate)
+      this.setMaxOrder(mkt.maxBuys[rate].swap, 1e8 / rate)
       return
     }
     // 0 delay for first fetch after balance update or market change, otherwise
@@ -645,7 +651,7 @@ export default class MarketsPage extends BasePage {
     this.schedulePreOrder('/api/maxbuy', { rate: rate }, delay, res => {
       mkt.maxBuys[rate] = res.maxBuy
       mkt.buyBalance = app.assets[mkt.quote.id].wallet.balance.available
-      this.setMaxOrder(res.maxBuy, 1e8 / rate)
+      this.setMaxOrder(res.maxBuy.swap, 1e8 / rate)
     })
   }
 
