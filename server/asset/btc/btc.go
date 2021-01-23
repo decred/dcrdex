@@ -234,7 +234,7 @@ func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 	return contract, nil
 }
 
-// VerifySecret checks that the secret satisfies the contract.
+// ValidateSecret checks that the secret satisfies the contract.
 func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 	_, _, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {

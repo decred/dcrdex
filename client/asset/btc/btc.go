@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -27,10 +26,10 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/rpcclient/v6"
 )
 
 const (
@@ -145,7 +144,7 @@ var (
 )
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
-// rpcclient.Client. A stub can be used for testing.
+// walletClient. A stub can be used for testing.
 type rpcClient interface {
 	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
 	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
@@ -154,8 +153,6 @@ type rpcClient interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 	GetRawMempool() ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
-	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
-	Disconnected() bool
 }
 
 // BTCCloneCFG holds clone specific parameters.
@@ -347,7 +344,8 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect      int64
-	node              rpcClient
+	ctx               context.Context // the asset subsystem starts with Connect(ctx)
+	node              *walletClient
 	wallet            *walletClient
 	walletInfo        *asset.WalletInfo
 	chainParams       *chaincfg.Params
@@ -434,6 +432,29 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	return BTCCloneWallet(cloneCFG)
 }
 
+func newRequester(host, user, pass, symbol string, logger dex.Logger) (*rpcclient.Client, error) {
+	config := &rpcclient.ConnConfig{
+		HTTPPostMode: true,
+		DisableTLS:   true,
+		Host:         host,
+		User:         user,
+		Pass:         pass,
+	}
+
+	ntfnHandlers := &rpcclient.NotificationHandlers{
+		// Setup an on-connect handler for logging (re)connects.
+		OnClientConnected: func() {
+			logger.Infof("Connected to %s wallet at %s", symbol, host)
+		},
+	}
+	cl, err := rpcclient.New(config, ntfnHandlers)
+	if err != nil {
+		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", symbol, err)
+	}
+
+	return cl, nil
+}
+
 // BTCCloneWallet creates a wallet backend for a set of network parameters and
 // default network ports. A BTC clone can use this method, possibly in
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
@@ -449,27 +470,20 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.WalletCFG.Settings["walletname"]
 	cfg.Logger.Infof("Setting up new %s wallet at %s.", cfg.Symbol, endpoint)
 
-	client, err := rpcclient.New(&rpcclient.ConnConfig{
-		HTTPPostMode: true,
-		DisableTLS:   true,
-		Host:         endpoint,
-		User:         btcCfg.RPCUser,
-		Pass:         btcCfg.RPCPass,
-	}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
-	}
+	requester, err := newRequester(endpoint, btcCfg.RPCUser, btcCfg.RPCPass,
+		cfg.Symbol, cfg.Logger)
 
-	btc, err := newWallet(cfg, btcCfg, client)
+	btc, err := newWallet(requester, cfg, btcCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC ExchangeWallet: %v", err)
+		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
+			err)
 	}
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*ExchangeWallet, error) {
+func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -497,9 +511,11 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	walletClient := newWalletClient(requester, cfg.Segwit, cfg.ChainParams)
+
 	return &ExchangeWallet{
-		node:                node,
-		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
+		node:                walletClient,
+		wallet:              walletClient,
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
@@ -527,6 +543,7 @@ func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	btc.wallet.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := btc.getVersion()
 	if err != nil {
@@ -625,7 +642,7 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if btc.useLegacyBalance {
 		return btc.legacyBalance()
 	}
-	balances, err := btc.wallet.Balances()
+	balances, err := btc.wallet.Balances(btc.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +680,8 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
+	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget),
+		&btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -1153,9 +1171,6 @@ func (btc *ExchangeWallet) Unlock(pw string) error {
 
 // Lock locks the ExchangeWallet and the underlying bitcoind wallet.
 func (btc *ExchangeWallet) Lock() error {
-	if btc.node.Disconnected() {
-		return asset.ErrConnectionDown
-	}
 	return btc.wallet.Lock()
 }
 
@@ -2124,15 +2139,18 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 	prevTipBlock, err := btc.getBlockHeader(prevTip.hash)
 	switch {
 	case err != nil:
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w", prevTip.hash, err)
+		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w",
+			prevTip.hash, err)
 	case prevTipBlock.Confirmations < 0:
 		// There's been a re-org, common ancestor will be height
 		// plus negative confirmation e.g. 155 + (-3) = 152.
 		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
-		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight, newTip.height)
+		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight,
+			newTip.height)
 		reorgHash, err := btc.node.GetBlockHash(reorgHeight)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w", reorgHeight, err)
+			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w",
+				reorgHeight, err)
 		} else {
 			startPoint = &block{hash: reorgHash.String(), height: reorgHeight}
 		}
@@ -2141,7 +2159,8 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		afterPrivTip := prevTipBlock.Height + 1
 		hashAfterPrevTip, err := btc.node.GetBlockHash(afterPrivTip)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w", afterPrivTip, err)
+			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w",
+				afterPrivTip, err)
 		} else {
 			startPoint = &block{hash: hashAfterPrevTip.String(), height: afterPrivTip}
 		}
@@ -2335,6 +2354,7 @@ type utxo struct {
 	vout    uint32
 	address string
 	amount  uint64
+	tree    int8
 }
 
 // Combines utxo info with the spending input information.
@@ -2463,7 +2483,8 @@ type blockHeader struct {
 // getBlockHeader gets the block header for the specified block hash.
 func (btc *ExchangeWallet) getBlockHeader(blockHash string) (*blockHeader, error) {
 	blkHeader := new(blockHeader)
-	err := btc.wallet.call(methodGetBlockHeader, anylist{blockHash, true}, blkHeader)
+	err := btc.wallet.call(methodGetBlockHeader,
+		anylist{blockHash, true}, blkHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -2486,7 +2507,8 @@ type verboseBlockTxs struct {
 func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs, error) {
 	blk := new(verboseBlockTxs)
 	// verbosity = 2 -> verbose transactions
-	err := btc.wallet.call(methodGetBlockVerboseTx, anylist{blockID, 2}, blk)
+	err := btc.wallet.call(methodGetBlockVerboseTx, anylist{blockID, 2},
+		blk)
 	if err != nil {
 		return nil, err
 	}

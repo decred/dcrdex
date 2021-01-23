@@ -227,7 +227,7 @@ func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 
 func (c *tRPCClient) Disconnected() bool { return false }
 
-func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	case methodSignTx:
 		if c.rawErr[method] == nil {
@@ -400,7 +400,7 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(cfg, &dexbtc.Config{}, client)
+	wallet, err := newWallet(client, cfg, &dexbtc.Config{})
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
@@ -1700,7 +1700,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(cfg, &dexbtc.Config{}, node)
+	wallet, err := newWallet(node, cfg, &dexbtc.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
