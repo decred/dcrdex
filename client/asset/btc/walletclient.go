@@ -111,7 +111,7 @@ func (wc *walletClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjs
 }
 
 // Balances retrieves a wallet's balance details.
-func (wc *walletClient) Balances(ctx context.Context) (*GetBalancesResult, error) {
+func (wc *walletClient) Balances() (*GetBalancesResult, error) {
 	var balances GetBalancesResult
 	return &balances, wc.call(methodGetBalances, nil, &balances)
 }

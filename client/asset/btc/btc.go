@@ -641,7 +641,7 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if btc.useLegacyBalance {
 		return btc.legacyBalance()
 	}
-	balances, err := btc.wallet.Balances(btc.ctx)
+	balances, err := btc.wallet.Balances()
 	if err != nil {
 		return nil, err
 	}
@@ -2353,7 +2353,6 @@ type utxo struct {
 	vout    uint32
 	address string
 	amount  uint64
-	tree    int8
 }
 
 // Combines utxo info with the spending input information.
