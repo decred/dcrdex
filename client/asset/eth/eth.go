@@ -415,7 +415,6 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 		MaxFees:            maxFees,
 		RealisticWorstCase: lots * dexeth.InitGas(1, nfo.Version) * feeSuggestion,
 		RealisticBestCase:  dexeth.InitGas(int(lots), nfo.Version) * feeSuggestion,
-		Locked:             value + maxFees,
 	}
 }
 

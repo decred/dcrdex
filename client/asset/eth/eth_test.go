@@ -894,7 +894,6 @@ func TestPreSwap(t *testing.T) {
 			wantMaxFees:   100 * gases.InitGas,
 			wantBestCase:  90 * gases.InitGas,
 			wantWorstCase: 90 * gases.InitGas,
-			wantLocked:    ethToGwei(10) + (100 * gases.InitGas),
 		},
 		{
 			name:          "more lots than max lots",
@@ -919,7 +918,6 @@ func TestPreSwap(t *testing.T) {
 			wantMaxFees:   4 * 100 * gases.InitGas,
 			wantBestCase:  90 * (gases.InitGas + 3*gases.AdditionalInitGas),
 			wantWorstCase: 4 * 90 * gases.InitGas,
-			wantLocked:    ethToGwei(40) + (4 * 100 * gases.InitGas),
 		},
 		{
 			name:          "balanceError",

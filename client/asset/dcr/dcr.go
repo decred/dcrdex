@@ -1082,7 +1082,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 
 		splitCoins, split, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
-			inputsSize, splitFeeRate, ord.DEXConfig)
+			inputsSize, splitFeeRate, bumpedMaxRate, ord.DEXConfig)
 		if err != nil {
 			if errRet := dcr.returnCoins(coins); errRet != nil {
 				dcr.log.Warnf("Failed to unlock funding coins %v: %v", coins, errRet)
@@ -1254,11 +1254,11 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64,
-	feeRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
+	splitFeeRate, bumpedMaxRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
-	baggageFees := nfo.MaxFeeRate * splitTxBaggage
+	baggageFees := bumpedMaxRate * splitTxBaggage
 
 	var coinSum uint64
 	for _, coin := range coins {
@@ -1267,7 +1267,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	valStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
+	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
+
 	if baggageFees > excess {
 		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %s > %s.",
 			amount(baggageFees), amount(excess))
@@ -1281,12 +1282,12 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
-	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
+	reqFunds := calc.RequiredOrderFundsAlt(value, dexdcr.P2PKHInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, feeRate, false)
+	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, splitFeeRate, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("error sending split transaction: %w", err)
 	}

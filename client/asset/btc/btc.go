@@ -1207,8 +1207,8 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 
 	// Math for split transactions is a little different.
 	if trySplit {
-		_, extraMaxFees := btc.splitBaggageFees(nfo.MaxFeeRate)
-		_, splitFees := btc.splitBaggageFees(feeSuggestion)
+		_, extraMaxFees := btc.splitBaggageFees(bumpedMaxRate)
+		_, splitFees := btc.splitBaggageFees(bumpedNetRate)
 		locked := val + maxFees + extraMaxFees
 
 		if avail >= reqFunds+extraMaxFees {
@@ -1396,7 +1396,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 
 		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents,
-			uint64(size), fundingCoins, splitFeeRate, ord.DEXConfig)
+			uint64(size), fundingCoins, splitFeeRate, bumpedMaxRate, ord.DEXConfig)
 		if err != nil {
 			return nil, nil, err
 		} else if split {
@@ -1504,7 +1504,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
-	inputsSize uint64, fundingCoins map[outPoint]*utxo, suggestedFeeRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
+	inputsSize uint64, fundingCoins map[outPoint]*utxo, suggestedFeeRate, bumpedMaxRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
 
 	var err error
 	defer func() {
@@ -1522,7 +1522,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
-	swapInputSize, baggage := btc.splitBaggageFees(nfo.MaxFeeRate)
+	swapInputSize, baggage := btc.splitBaggageFees(bumpedMaxRate)
 
 	var coinSum uint64
 	coins := make(asset.Coins, 0, len(outputs))
@@ -1533,7 +1533,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 
 	valueStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
+	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 	if baggage > excess {
 		btc.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
 			"%s > %s", amount(baggage), amount(excess))
@@ -1548,7 +1548,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
+	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 
 	baseTx, _, _, err := btc.fundedTx(coins)
 	splitScript, err := txscript.PayToAddrScript(addr)
