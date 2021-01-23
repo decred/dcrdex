@@ -27,10 +27,10 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/rpcclient/v6"
 )
 
 const (
@@ -154,8 +154,10 @@ type rpcClient interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 	GetRawMempool() ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
-	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
-	Disconnected() bool
+}
+
+type RawRequester interface {
+	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
 }
 
 // BTCCloneCFG holds clone specific parameters.
@@ -464,7 +466,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*ExchangeWallet, error) {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, requester RawRequester) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -492,9 +494,11 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	wc := newWalletClient(requester, cfg.Segwit, cfg.ChainParams)
+
 	return &ExchangeWallet{
-		node:                node,
-		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
+		node:                wc,
+		wallet:              wc,
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
@@ -523,6 +527,7 @@ func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 // interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Check the version. Do it here, so we can also diagnose a bad connection.
+	btc.wallet.ctx = ctx
 	netVer, codeVer, err := btc.getVersion()
 	if err != nil {
 		return nil, fmt.Errorf("error getting version: %w", err)
@@ -1148,9 +1153,6 @@ func (btc *ExchangeWallet) Unlock(pw string) error {
 
 // Lock locks the ExchangeWallet and the underlying bitcoind wallet.
 func (btc *ExchangeWallet) Lock() error {
-	if btc.node.Disconnected() {
-		return asset.ErrConnectionDown
-	}
 	return btc.wallet.Lock()
 }
 

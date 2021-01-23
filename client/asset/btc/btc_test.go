@@ -227,7 +227,7 @@ func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 
 func (c *tRPCClient) Disconnected() bool { return false }
 
-func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	case methodSignTx:
 		if c.rawErr[method] == nil {
@@ -405,6 +405,9 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		shutdown()
 		return nil, nil, nil, err
 	}
+
+	wallet.node = client
+
 	// Initialize the best block.
 	bestHash, _ := client.GetBestBlockHash() // does not return error
 	wallet.tipMtx.Lock()
