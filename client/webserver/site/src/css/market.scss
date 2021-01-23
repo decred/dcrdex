@@ -174,6 +174,7 @@ table.balance-table {
     font-size: 14px;
     border: 1px solid #444;
     border-radius: 3px;
+    background-color: transparent;
   }
 
   td:not(:first-child) {
@@ -215,6 +216,64 @@ table.balance-table {
     width: 13px;
     height: 13px;
     bottom: 1px;
+  }
+}
+
+.card {
+  .grey {
+    color: #939b99;
+  }
+
+  .buygreen {
+    background-color: #207a4699;
+  }
+
+  .micro-icon {
+    bottom: auto;
+  }
+}
+
+table#vFeeTable {
+  width: 100%;
+  font-size: 15px;
+
+  tbody {
+    width: 100%;
+  }
+
+  td {
+    padding: 3px 6px;
+    border-color: #333;
+  }
+
+  td:first-child {
+    white-space: nowrap;
+  }
+
+  td.squeeze {
+    width: 1px;
+  }
+
+  tr:not(:first-child) > td {
+    border-style: solid;
+    border-width: 1px;
+
+    &:first-child {
+      border-style: solid solid solid none;
+    }
+
+    &:last-child {
+      border-style: solid none solid solid;
+    }
+  }
+
+  tr.heavy-bottom > td,
+  td.heavy-bottom {
+    border-bottom-color: #555;
+  }
+
+  tr.heavy-top > td {
+    border-top-color: #555;
   }
 }
 
@@ -400,6 +459,8 @@ table.balance-table button:hover {
 
 .markettab {
   background-color: transparent;
+  border-top-style: none;
+  border-bottom-style: none;
   border-right: 1px solid black;
   border-radius: 4px 4px 0 0;
 }
@@ -484,12 +545,12 @@ table.balance-table button:hover {
     margin: 0 5px;
   }
 
+  .red {
+    color: #f55a;
+  }
+
   .disclaimer {
     text-align: justify;
-
-    .red {
-      color: #f55a;
-    }
   }
 
   .header {
@@ -514,6 +575,66 @@ table.balance-table button:hover {
 
   .loader {
     height: 40px;
+  }
+
+  .order-opt {
+    border: 1px solid #424242;
+    border-radius: 3px;
+    padding: 4px;
+    margin-top: 8px;
+    opacity: 0.7;
+
+    div.opt-check {
+      width: 15px;
+      height: 15px;
+      border-radius: 7.5px;
+      border: 2px solid #424242;
+      margin-top: 5px;
+      cursor: pointer;
+    }
+
+    .xy-range-input {
+      width: 35px;
+      font-size: 14px;
+      height: 16px;
+    }
+
+    .slider {
+      margin: 10px 10px 5px;
+      height: 2px;
+      background-color: grey;
+      position: relative;
+
+      .slider-handle {
+        position: absolute;
+        height: 20px;
+        width: 14px;
+        top: -9px;
+        border-radius: 7px;
+        background-color: #2cce9c;
+        border: 2px solid #424242;
+        cursor: pointer;
+      }
+    }
+
+    &:not(.selected) {
+      cursor: pointer;
+    }
+
+    &.selected {
+      opacity: 1;
+      background-color: #e8ebed;
+
+      div.opt-check {
+        background-color: #2cce9c;
+      }
+    }
+  }
+
+  #vUnlockPreorder {
+    .ico-locked {
+      font-size: 35px;
+    }
   }
 }
 
@@ -573,5 +694,23 @@ div.numorders {
   .ico-cross {
     font-size: 12px;
     cursor: pointer;
+  }
+}
+
+#vDetailPane {
+  max-width: 425px;
+
+  .indent {
+    border-left: 2px solid #777a;
+  }
+
+  table.fee-breakout {
+    margin: 5px 0;
+
+    td {
+      border: 1px solid #777a;
+      text-align: center;
+      padding: 2px 5px;
+    }
   }
 }

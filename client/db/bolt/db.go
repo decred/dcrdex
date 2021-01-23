@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
@@ -93,6 +94,7 @@ var (
 	legacyKeyParamsKey     = []byte("keyParams")
 	fromVersionKey         = []byte("fromVersion")
 	toVersionKey           = []byte("toVersion")
+	optionsKey             = []byte("options")
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
 )
@@ -597,6 +599,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(optionsKey, config.Data(md.Options)).
 			err()
 	})
 }
@@ -886,6 +889,12 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		toVersion = intCoder.Uint32(toVersionB)
 	}
 
+	optionsB := oBkt.Get(optionsKey)
+	options, err := config.Parse(optionsB)
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode order options")
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -898,6 +907,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 			FromVersion:        fromVersion,
 			ToVersion:          toVersion,
+			Options:            options,
 		},
 		Order: ord,
 	}, nil
@@ -971,6 +981,7 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			put(fromVersionKey, uint32Bytes(md.FromVersion)).
 			put(toVersionKey, uint32Bytes(md.ToVersion)).
+			put(optionsKey, config.Data(md.Options)).
 			err()
 	})
 }

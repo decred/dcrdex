@@ -860,7 +860,6 @@ func TestPreSwap(t *testing.T) {
 		wantMaxFees   uint64
 		wantWorstCase uint64
 		wantBestCase  uint64
-		wantLocked    uint64
 	}{
 		{
 			name:          "no balance",
@@ -989,9 +988,6 @@ func TestPreSwap(t *testing.T) {
 		}
 		if preSwap.Estimate.RealisticWorstCase != test.wantWorstCase {
 			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, preSwap.Estimate.RealisticWorstCase, test.name)
-		}
-		if preSwap.Estimate.Locked != test.wantLocked {
-			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, preSwap.Estimate.Locked, test.name)
 		}
 	}
 }
@@ -1618,9 +1614,6 @@ func TestMaxOrder(t *testing.T) {
 		}
 		if maxOrder.RealisticWorstCase != test.wantWorstCase {
 			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, maxOrder.RealisticWorstCase, test.name)
-		}
-		if maxOrder.Locked != test.wantLocked {
-			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, maxOrder.Locked, test.name)
 		}
 	}
 }

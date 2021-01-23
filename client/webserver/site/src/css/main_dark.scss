@@ -60,8 +60,13 @@ body.dark {
     text-decoration: underline;
   }
 
-  button.selected {
-    background-color: #0b5831;
+  button {
+    color: $font-color-dark;
+    background-color: transparent;
+
+    &.selected {
+      background-color: #0b5831;
+    }
   }
 
   select,

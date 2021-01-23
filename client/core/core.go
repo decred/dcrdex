@@ -3703,6 +3703,15 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 			return nil, fmt.Errorf("Cannot estimate market order without a synced book")
 		}
 
+		midGap, err := book.MidGap()
+		if err != nil {
+			return nil, fmt.Errorf("Cannot estimate market order with an empty order book")
+		}
+
+		if !form.Sell && calc.BaseToQuote(lotSize, midGap) > form.Qty {
+			return nil, fmt.Errorf("Market order quantity buys less than a single lot")
+		}
+
 		var fills []*orderbook.Fill
 		var filled bool
 		if form.Sell {
@@ -3743,20 +3752,22 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
-		LotSize:       fromLotSize,
-		Lots:          lots,
-		AssetConfig:   wallets.fromAsset,
-		Immediate:     (form.IsLimit && form.TifNow),
-		FeeSuggestion: swapFeeSuggestion,
+		LotSize:         fromLotSize,
+		Lots:            lots,
+		AssetConfig:     wallets.fromAsset,
+		Immediate:       (form.IsLimit && form.TifNow),
+		FeeSuggestion:   swapFeeSuggestion,
+		SelectedOptions: form.Options,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting swap estimate: %v", err)
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       toLotSize,
-		Lots:          lots,
-		FeeSuggestion: redeemFeeSuggestion,
+		LotSize:         toLotSize,
+		Lots:            lots,
+		FeeSuggestion:   redeemFeeSuggestion,
+		SelectedOptions: form.Options,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting redemption estimate: %v", err)
@@ -3775,7 +3786,6 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Trade password error: %w", err)
 	}
-
 	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
 		return nil, err
@@ -3905,6 +3915,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		DEXConfig:     wallets.fromAsset,
 		Immediate:     isImmediate,
 		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell),
+		Options:       form.Options,
 	})
 	if err != nil {
 		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
@@ -4021,6 +4032,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			},
 			FromVersion: wallets.fromAsset.Version,
 			ToVersion:   wallets.toAsset.Version,
+			Options:     form.Options,
 		},
 		Order: ord,
 	}
@@ -4033,7 +4045,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options)
 
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -4637,7 +4649,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails)
+			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails, dbOrder.MetaData.Options)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.

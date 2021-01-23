@@ -263,6 +263,8 @@ type OrderMetaData struct {
 	FromVersion uint32
 	// ToVersion is the version of the to asset.
 	ToVersion uint32
+	// Options are the options offered by the wallet and selected by the user.
+	Options map[string]string
 }
 
 // MetaMatch is a match and its metadata.

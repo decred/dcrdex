@@ -56,10 +56,13 @@ export default class MarketsPage extends BasePage {
     this.openAsset = null
     this.openFunc = null
     this.currentCreate = null
-    this.preorderTimer = null
+    this.maxEstimateTimer = null
     this.book = null
     this.cancelData = null
     this.metaOrders = {}
+    this.orderOpts = {}
+    this.preorderCache = {}
+    this.currentOrder = null
     this.depthLines = {
       hover: [],
       input: []
@@ -109,7 +112,8 @@ export default class MarketsPage extends BasePage {
     }
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate)
+    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
+    Order.setOptionTemplates(page)
 
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
@@ -198,8 +202,13 @@ export default class MarketsPage extends BasePage {
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
+    // Unlock for order estimation
+    Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
+    // Order detail view
+    Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
+    Doc.bind(page.closeDetailPane, 'click', () => this.showForm(page.verifyForm))
     // Bind active orders list's header sort events.
     page.liveTable.querySelectorAll('[data-ordercol]')
       .forEach(th => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol)))
@@ -247,6 +256,7 @@ export default class MarketsPage extends BasePage {
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
+      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showForm(page.verifyForm)
       if (!Doc.mouseInElement(e, this.currentForm)) {
         closePopups()
       }
@@ -543,9 +553,9 @@ export default class MarketsPage extends BasePage {
     const [baseAsset, quoteAsset] = [app().assets[base], app().assets[quote]]
     const rateConversionFactor = Order.RateEncodingFactor / baseAsset.info.unitinfo.conventional.conversionFactor * quoteAsset.info.unitinfo.conventional.conversionFactor
     Doc.hide(page.maxOrd, page.chartErrMsg)
-    if (this.preorderTimer) {
-      window.clearTimeout(this.preorderTimer)
-      this.preorderTimer = null
+    if (this.maxEstimateTimer) {
+      window.clearTimeout(this.maxEstimateTimer)
+      this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
     this.market = {
@@ -677,7 +687,8 @@ export default class MarketsPage extends BasePage {
       quote: market.quote.id,
       qty: convertConventional(qtyField.value, conventionalFactor(market.base)),
       rate: convertConventional(page.rateField.value, market.rateConversionFactor), // message-rate
-      tifnow: page.tifNow.checked
+      tifnow: page.tifNow.checked,
+      options: this.orderOpts
     }
   }
 
@@ -731,7 +742,7 @@ export default class MarketsPage extends BasePage {
       return
     }
     // We only fetch pre-sell once per balance update, so don't delay.
-    this.schedulePreOrder('/api/maxsell', {}, 0, res => {
+    this.scheduleMaxEstimate('/api/maxsell', {}, 0, res => {
       mkt.maxSell = res.maxSell
       mkt.sellBalance = baseWallet.balance.available
       this.setMaxOrder(res.maxSell.swap)
@@ -758,7 +769,7 @@ export default class MarketsPage extends BasePage {
     // 0 delay for first fetch after balance update or market change, otherwise
     // meter these at 1 / sec.
     const delay = mkt.maxBuys ? 1000 : 0
-    this.schedulePreOrder('/api/maxbuy', { rate: rate }, delay, res => {
+    this.scheduleMaxEstimate('/api/maxbuy', { rate: rate }, delay, res => {
       mkt.maxBuys[rate] = res.maxBuy
       mkt.buyBalance = app().assets[mkt.quote.id].wallet.balance.available
       this.setMaxOrder(res.maxBuy.swap)
@@ -766,25 +777,25 @@ export default class MarketsPage extends BasePage {
   }
 
   /**
-   * schedulePreorder shows the loading icon and schedules a call to an order
-   * estimate api endpoint. If another call to schedulePreorder is made before
+   * scheduleMaxEstimate shows the loading icon and schedules a call to an order
+   * estimate api endpoint. If another call to scheduleMaxEstimate is made before
    * this one is fired (after delay), this call will be canceled.
    */
-  schedulePreOrder (path, args, delay, success) {
+  scheduleMaxEstimate (path, args, delay, success) {
     const page = this.page
     if (!this.maxLoaded) this.maxLoaded = app().loading(page.maxOrd)
     const [bid, qid] = [this.market.base.id, this.market.quote.id]
     const [bWallet, qWallet] = [app().assets[bid].wallet, app().assets[qid].wallet]
     if (!bWallet || !bWallet.running || !qWallet || !qWallet.running) return
-    if (this.preorderTimer) window.clearTimeout(this.preorderTimer)
+    if (this.maxEstimateTimer) window.clearTimeout(this.maxEstimateTimer)
 
     Doc.show(page.maxOrd, page.maxLotBox)
     Doc.hide(page.maxAboveZero)
     page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
     const counter = this.maxOrderUpdateCounter
-    this.preorderTimer = window.setTimeout(async () => {
-      this.preorderTimer = null
+    this.maxEstimateTimer = window.setTimeout(async () => {
+      this.maxEstimateTimer = null
       if (counter !== this.maxOrderUpdateCounter) return
       const res = await postJSON(path, {
         host: this.market.dex.host,
@@ -822,7 +833,7 @@ export default class MarketsPage extends BasePage {
       Doc.hide(page.maxAboveZero)
       return
     }
-    // Could add the maxOrder.estimatedFees here, but that might also be
+    // Could add the estimatedFees here, but that might also be
     // confusing.
     const [fromAsset, toAsset] = sell ? [this.market.base, this.market.quote] : [this.market.quote, this.market.base]
     page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value, fromAsset.info.unitinfo)
@@ -1170,7 +1181,7 @@ export default class MarketsPage extends BasePage {
   async showForm (form) {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm, page.cancelForm)
+    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm, page.cancelForm, page.vDetailPane)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -1194,42 +1205,56 @@ export default class MarketsPage extends BasePage {
    * and confirm submission of the order to the dex.
    */
   showVerify () {
+    this.orderOpts = {}
+    this.preorderCache = {}
     const page = this.page
-    const order = this.parseOrder()
+    const order = this.currentOrder = this.parseOrder()
     const isSell = order.sell
     const baseAsset = app().assets[order.base]
     const quoteAsset = app().assets[order.quote]
     const toAsset = isSell ? quoteAsset : baseAsset
     const fromAsset = isSell ? baseAsset : quoteAsset
 
-    page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.info.unitinfo)
-    page.vSideHeader.textContent = isSell ? intl.prep(intl.ID_SELL) : intl.prep(intl.ID_BUY)
-    page.vSideSubmit.textContent = page.vSideHeader.textContent
-    page.vBaseSubmit.textContent = baseAsset.symbol.toUpperCase()
+    // Set the to and from icons in the fee details pane.
+    for (const icon of page.vDetailPane.querySelectorAll('[data-icon]')) {
+      switch (icon.dataset.icon) {
+        case 'from':
+          icon.src = Doc.logoPath(fromAsset.symbol)
+          break
+        case 'to':
+          icon.src = Doc.logoPath(toAsset.symbol)
+      }
+    }
+
+    Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
+    Doc.show(page.vPreorder)
+
+    page.vBuySell.textContent = isSell ? 'Selling' : 'Buying'
+    const buySellStr = isSell ? intl.prep(intl.ID_SELL) : intl.prep(intl.ID_BUY)
+    page.vSideSubmit.textContent = buySellStr
+    page.vOrderHost.textContent = order.host
     if (order.isLimit) {
       Doc.show(page.verifyLimit)
       Doc.hide(page.verifyMarket)
+      const orderDesc = `Limit ${buySellStr} Order`
+      page.vOrderType.textContent = order.tifnow ? orderDesc + ' (immediate)' : orderDesc
       page.vRate.textContent = Doc.formatCoinValue(order.rate / this.market.rateConversionFactor)
-      page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
+      page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.info.unitinfo)
       page.vTotal.textContent = Doc.formatCoinValue(order.rate / Order.RateEncodingFactor * order.qty, quoteAsset.info.unitinfo)
-      page.vBase.textContent = baseAsset.symbol.toUpperCase()
-      page.vSide.textContent = isSell ? intl.prep(intl.ID_SELL).toLowerCase() : intl.prep(intl.ID_BUY).toLowerCase()
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
-      page.vSide.textContent = intl.prep(intl.ID_TRADE)
-      page.vBase.textContent = fromAsset.symbol.toUpperCase()
+      page.vOrderType.textContent = `Market ${buySellStr} Order`
+      page.vmFromTotal.textContent = Doc.formatCoinValue(order.qty / 1e8)
+      page.vmFromAsset.textContent = fromAsset.symbol.toUpperCase()
       const gap = this.midGap()
       if (gap) {
+        Doc.show(page.vMarketEstimate)
         const received = order.sell ? order.qty * gap : order.qty / gap
-        const lotSize = this.market.cfg.lotsize
-        const lots = order.sell ? order.qty / lotSize : received / lotSize
-        // TODO: Some kind of adjustment to align with lot sizes for market buy?
-        page.vmTotal.textContent = Doc.formatCoinValue(received, toAsset.info.unitinfo)
-        page.vmAsset.textContent = toAsset.symbol.toUpperCase()
-        page.vmLots.textContent = lots.toFixed(1)
+        page.vmToTotal.textContent = Doc.formatCoinValue(received, toAsset.info.unitinfo)
+        page.vmToAsset.textContent = toAsset.symbol.toUpperCase()
       } else {
-        Doc.hide(page.verifyMarket)
+        Doc.hide(page.vMarketEstimate)
       }
     }
     // Visually differentiate between buy/sell orders.
@@ -1248,6 +1273,150 @@ export default class MarketsPage extends BasePage {
     }
     this.showForm(page.verifyForm)
     page.vPass.focus()
+
+    if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
+    else {
+      Doc.hide(page.vPreorder)
+      if (State.passwordIsCached()) this.unlockWalletsForEstimates()
+      else Doc.show(page.vUnlockPreorder)
+    }
+  }
+
+  /*
+   * submitEstimateUnlock reads the current vUnlockPass and unlocks any locked
+   * wallets.
+   */
+  async submitEstimateUnlock () {
+    const pw = this.page.vUnlockPass.value
+    return await this.unlockWalletsForEstimates(pw)
+  }
+
+  /*
+   * unlockWalletsForEstimates unlocks any locked wallets with the provided
+   * password.
+   */
+  async unlockWalletsForEstimates (pw) {
+    const page = this.page
+    const loaded = app().loading(page.verifyForm)
+    const err = await this.attemptWalletUnlock(pw)
+    loaded()
+    if (err) return this.setPreorderErr(err)
+    Doc.show(page.vPreorder)
+    Doc.hide(page.vUnlockPreorder)
+    this.preOrder(this.parseOrder())
+  }
+
+  /*
+   * attemptWalletUnlock unlocks both the base and quote wallets for the current
+   * market, if locked.
+   */
+  async attemptWalletUnlock (pw) {
+    const { base, quote } = this.market
+    const assetIDs = []
+    if (!base.wallet.open) assetIDs.push(base.id)
+    if (!quote.wallet.open) assetIDs.push(quote.id)
+    const req = {
+      pass: pw
+    }
+    for (const assetID of assetIDs) {
+      req.assetID = assetID
+      const res = await postJSON('/api/openwallet', req)
+      if (!app().checkResponse(res, true)) {
+        return res.msg
+      }
+    }
+  }
+
+  /* fetchPreorder fetches the pre-order estimates and options. */
+  async fetchPreorder (order) {
+    const page = this.page
+    const cacheKey = JSON.stringify(order.options)
+    const cached = this.preorderCache[cacheKey]
+    if (cached) return cached
+
+    Doc.hide(page.vPreorderErr)
+    const loaded = app().loading(page.verifyForm)
+    const res = await postJSON('/api/preorder', wireOrder(order))
+    loaded()
+    if (!app().checkResponse(res, true)) return { err: res.msg }
+    this.preorderCache[cacheKey] = res.estimate
+    return res.estimate
+  }
+
+  /*
+   * setPreorderErr sets and displays the pre-order error message and hides the
+   * pre-order details box.
+   */
+  setPreorderErr (msg) {
+    const page = this.page
+    Doc.hide(page.vPreorder)
+    Doc.show(page.vPreorderErr)
+    page.vPreorderErrTip.dataset.tooltip = msg
+  }
+
+  /* preOrder loads the options and fetches pre-order estimates */
+  async preOrder (order) {
+    // if (!this.validateOrder(order)) return
+    const page = this.page
+
+    // Add swap options.
+    const refreshPreorder = async () => {
+      const res = await this.fetchPreorder(order)
+      if (res.err) return this.setPreorderErr(res.err)
+      Doc.hide(page.vPreorderErr)
+      Doc.show(page.vPreorder)
+      const { swap, redeem } = res
+      Doc.empty(page.vOrderOpts)
+      swap.options = swap.options || []
+      redeem.options = redeem.options || []
+      this.setFeeEstimates(swap, redeem, order)
+
+      const changed = async () => {
+        await refreshPreorder()
+        Doc.animate(400, progress => {
+          page.vFeeSummary.style.backgroundColor = `rgba(128, 128, 128, ${0.5 - 0.5 * progress})`
+        })
+      }
+      const addOption = (opt, isSwap) => page.vOrderOpts.appendChild(Order.optionElement(opt, order, changed, isSwap))
+      for (const opt of swap.options || []) addOption(opt, true)
+      for (const opt of redeem.options || []) addOption(opt, false)
+      app().bindTooltips(page.vOrderOpts)
+    }
+
+    refreshPreorder()
+  }
+
+  /* setFeeEstimates sets all of the pre-order estimate fields */
+  setFeeEstimates (swap, redeem, order) {
+    const page = this.page
+    const swapped = swap.estimate.value
+    const fmtPct = percentFormatter.format
+
+    // Set swap fee estimates in the details pane.
+    const bestSwapPct = swap.estimate.realisticBestCase / swapped * 100
+    page.vSwapFeesLowPct.textContent = `${fmtPct(bestSwapPct)}%`
+    page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase / 1e8)
+    const worstSwapPct = swap.estimate.realisticWorstCase / swapped * 100
+    page.vSwapFeesHighPct.textContent = `${fmtPct(worstSwapPct)}%`
+    page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase / 1e8)
+    page.vSwapFeesMaxPct.textContent = `${fmtPct(swap.estimate.maxFees / swapped * 100)}%`
+    page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees / 1e8)
+
+    // Set redemption fee estimates in the details pane.
+    const midGap = this.midGap()
+    const estRate = midGap || order.rate / 1e8
+    const received = order.sell ? swapped * estRate : swapped / estRate
+    const bestRedeemPct = redeem.estimate.realisticBestCase / received * 100
+    page.vRedeemFeesLowPct.textContent = `${fmtPct(bestRedeemPct)}%`
+    page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase / 1e8)
+    const worstRedeemPct = redeem.estimate.realisticWorstCase / received * 100
+    page.vRedeemFeesHighPct.textContent = `${fmtPct(worstRedeemPct)}%`
+    page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase / 1e8)
+
+    // Set the summary percent, which is a simple addition of swap and redeem
+    // loss percents.
+    page.vFeeSummaryLow.textContent = fmtPct(bestSwapPct + bestRedeemPct)
+    page.vFeeSummaryHigh.textContent = fmtPct(worstSwapPct + worstRedeemPct)
   }
 
   async submitCancel () {
@@ -1445,8 +1614,11 @@ export default class MarketsPage extends BasePage {
     const order = this.parseOrder()
     const pw = page.vPass.value
     page.vPass.value = ''
+    // order options must be a string -> string map.
+    const stringyOptions = {}
+    for (const [k, v] of Object.entries(order.options)) stringyOptions[k] = JSON.stringify(v)
     const req = {
-      order: order,
+      order: wireOrder(order),
       pw: pw
     }
     if (!this.validateOrder(order)) return
@@ -2188,6 +2360,16 @@ function swapBttns (before, now) {
  */
 function updateDataCol (tr, col, s) {
   Doc.tmplElement(tr, col).textContent = s
+}
+
+/*
+ * wireOrder prepares a copy of the order with the options field converted to a
+ * string -> string map.
+ */
+function wireOrder (order) {
+  const stringyOptions = {}
+  for (const [k, v] of Object.entries(order.options)) stringyOptions[k] = JSON.stringify(v)
+  return Object.assign({}, order, { options: stringyOptions })
 }
 
 // OrderTableRowManager manages the data within a row in an order table. Each row
