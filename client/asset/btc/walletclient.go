@@ -19,29 +19,29 @@ import (
 )
 
 const (
-	methodGetBalances              = "getbalances"
-	methodListUnspent              = "listunspent"
-	methodLockUnspent              = "lockunspent"
-	methodListLockUnspent          = "listlockunspent"
-	methodChangeAddress            = "getrawchangeaddress"
-	methodNewAddress               = "getnewaddress"
-	methodSignTx                   = "signrawtransactionwithwallet"
-	methodUnlock                   = "walletpassphrase"
-	methodLock                     = "walletlock"
-	methodPrivKeyForAddress        = "dumpprivkey"
-	methodSignMessage              = "signmessagewithprivkey"
-	methodGetTransaction           = "gettransaction"
-	methodSendToAddress            = "sendtoaddress"
-	methodSetTxFee                 = "settxfee"
-	methodGetWalletInfo            = "getwalletinfo"
-	methodGetAddressInfo           = "getaddressinfo"
-	methodEstimateSmartFee         = "estimatesmartfee"
-	methodSendRawTransaction       = "sendrawtransaction"
-	methodGetTxOut                 = "gettxout"
-	methodGetBlockHash             = "getblockhash"
-	methodGetBestBlockHash         = "getbestblockhash"
-	methodGetRawMempool            = "getrawmempool"
-	methodGetRawTransactionVerbose = "getrawtransactionverbose"
+	methodGetBalances        = "getbalances"
+	methodListUnspent        = "listunspent"
+	methodLockUnspent        = "lockunspent"
+	methodListLockUnspent    = "listlockunspent"
+	methodChangeAddress      = "getrawchangeaddress"
+	methodNewAddress         = "getnewaddress"
+	methodSignTx             = "signrawtransactionwithwallet"
+	methodUnlock             = "walletpassphrase"
+	methodLock               = "walletlock"
+	methodPrivKeyForAddress  = "dumpprivkey"
+	methodSignMessage        = "signmessagewithprivkey"
+	methodGetTransaction     = "gettransaction"
+	methodSendToAddress      = "sendtoaddress"
+	methodSetTxFee           = "settxfee"
+	methodGetWalletInfo      = "getwalletinfo"
+	methodGetAddressInfo     = "getaddressinfo"
+	methodEstimateSmartFee   = "estimatesmartfee"
+	methodSendRawTransaction = "sendrawtransaction"
+	methodGetTxOut           = "gettxout"
+	methodGetBlockHash       = "getblockhash"
+	methodGetBestBlockHash   = "getbestblockhash"
+	methodGetRawMempool      = "getrawmempool"
+	methodGetRawTransaction  = "getrawtransaction"
 )
 
 type RawRequester interface {
@@ -71,43 +71,51 @@ func newWalletClient(requester RawRequester, segwit bool, chainParams *chaincfg.
 type anylist []interface{}
 
 func (wc *walletClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	var esfr *btcjson.EstimateSmartFeeResult
-	return esfr, wc.call(methodEstimateSmartFee, anylist{confTarget},
-		esfr)
+	res := new(btcjson.EstimateSmartFeeResult)
+	return res, wc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
 }
 
 func (wc *walletClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
-	var txHash *chainhash.Hash
-	return txHash, wc.call(methodSendRawTransaction,
-		anylist{tx, allowHighFees}, txHash)
+	txBytes, err := serializeMsgTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	return wc.callHashGetter(methodSendRawTransaction, anylist{
+		hex.EncodeToString(txBytes), allowHighFees})
 }
 
 func (wc *walletClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
-	var gtor *btcjson.GetTxOutResult
-	return gtor, wc.call(methodGetTxOut, anylist{txHash, index, mempool},
-		gtor)
+	res := new(btcjson.GetTxOutResult)
+	return res, wc.call(methodGetTxOut, anylist{txHash.String(), index, mempool},
+		res)
+}
+
+func (wc *walletClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
+	var txid string
+	err := wc.call(method, args, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
 }
 
 func (wc *walletClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
-	var blockHash *chainhash.Hash
-	return blockHash, wc.call(methodGetBlockHash, anylist{blockHeight},
-		blockHash)
+	return wc.callHashGetter(methodGetBlockHash, anylist{blockHeight})
 }
 
 func (wc *walletClient) GetBestBlockHash() (*chainhash.Hash, error) {
-	var bestBlockHash *chainhash.Hash
-	return bestBlockHash, wc.call(methodGetBestBlockHash, nil, bestBlockHash)
+	return wc.callHashGetter(methodGetBestBlockHash, nil)
 }
 
 func (wc *walletClient) GetRawMempool() ([]*chainhash.Hash, error) {
-	pool := make([]*chainhash.Hash, 0)
-	return pool, wc.call(methodGetRawMempool, nil, pool)
+	var mempool []*chainhash.Hash
+	return mempool, wc.call(methodGetRawMempool, nil, &mempool)
 }
 
 func (wc *walletClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	var trr *btcjson.TxRawResult
-	return trr, wc.call(methodGetRawTransactionVerbose, anylist{txHash},
-		trr)
+	res := new(btcjson.TxRawResult)
+	return res, wc.call(methodGetRawTransaction, anylist{txHash.String(),
+		true}, res)
 }
 
 // Balances retrieves a wallet's balance details.

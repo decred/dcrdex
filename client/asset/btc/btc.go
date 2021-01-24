@@ -440,16 +440,11 @@ func newRequester(host, user, pass, symbol string, logger dex.Logger) (*rpcclien
 		Pass:         pass,
 	}
 
-	ntfnHandlers := &rpcclient.NotificationHandlers{
-		// Setup an on-connect handler for logging (re)connects.
-		OnClientConnected: func() {
-			logger.Infof("Connected to %s wallet at %s", symbol, host)
-		},
-	}
-	cl, err := rpcclient.New(config, ntfnHandlers)
+	cl, err := rpcclient.New(config, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", symbol, err)
 	}
+	logger.Infof("Connected to %s wallet at %s", symbol, host)
 
 	return cl, nil
 }

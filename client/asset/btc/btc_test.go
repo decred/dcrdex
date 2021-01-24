@@ -225,8 +225,6 @@ func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 	return c.mpVerboseTxs[txHash.String()], c.rawVerboseErr
 }
 
-func (c *tRPCClient) Disconnected() bool { return false }
-
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	case methodSignTx:
