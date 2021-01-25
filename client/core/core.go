@@ -2891,8 +2891,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Set the account as authenticated.
-	c.log.Debugf("Authenticated connection to %s, %d active orders, %d active matches, score %d",
-		dc.acct.host, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score)
+	c.log.Debugf("Authenticated connection to %s, acct %v, %d active orders, %d active matches, score %d",
+		dc.acct.host, acctID, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score)
 	dc.acct.auth()
 
 	// Associate the matches with known trades.
