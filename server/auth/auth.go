@@ -1223,10 +1223,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	err = conn.Send(respMsg)
 	if err != nil {
-		log.Error("error sending connect response: " + err.Error())
+		log.Error("Failed to send connect response: " + err.Error())
 		return nil
 	}
 
+	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches",
+		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches))
 	auth.addClient(client)
 	return nil
 }
