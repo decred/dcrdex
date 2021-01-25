@@ -64,7 +64,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
-	log.Infof("Created new user account %v with fee address %v", acct.ID, feeAddr)
+	log.Infof("Created new user account %v from %v with fee address %v", acct.ID, conn.IP(), feeAddr)
 
 	// Prepare, sign, and send response.
 	regRes := &msgjson.RegisterResult{
@@ -247,7 +247,7 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 		return wait.DontTryAgain
 	}
 
-	log.Infof("New user registered: acct %v, paid %d to %v", acctID, val, addr)
+	log.Infof("New user registered: acct %v from %v paid %d to %v", acctID, conn.IP(), val, addr)
 
 	// Create, sign, and send the the response.
 	err = auth.Sign(notifyFee)
