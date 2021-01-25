@@ -344,7 +344,6 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect      int64
-	node              *walletClient
 	wallet            *walletClient
 	walletInfo        *asset.WalletInfo
 	chainParams       *chaincfg.Params
@@ -505,11 +504,8 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	walletClient := newWalletClient(requester, cfg.Segwit, cfg.ChainParams)
-
 	return &ExchangeWallet{
-		node:                walletClient,
-		wallet:              walletClient,
+		wallet:              newWalletClient(requester, cfg.Segwit, cfg.ChainParams),
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
@@ -550,7 +546,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
 	// Initialize the best block.
-	h, err := btc.node.GetBestBlockHash()
+	h, err := btc.wallet.GetBestBlockHash()
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
 	}
@@ -558,7 +554,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	btc.currentTip, err = btc.blockFromHash(h.String())
 	btc.tipMtx.Unlock()
 	if err != nil {
-		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
+		return nil, fmt.Errorf("error parsing best block for %s: %w", btc.symbol, err)
 	}
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 	var wg sync.WaitGroup
@@ -674,7 +670,7 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget),
+	feeResult, err := btc.wallet.EstimateSmartFee(int64(confTarget),
 		&btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
@@ -1107,7 +1103,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if !notFound[pt] {
 			continue
 		}
-		txOut, err := btc.node.GetTxOut(txHash, rpcOP.Vout, true)
+		txOut, err := btc.wallet.GetTxOut(txHash, rpcOP.Vout, true)
 		if err != nil {
 			return nil, fmt.Errorf("gettxout error for locked outpoint %v: %w", pt.String(), err)
 		}
@@ -1411,7 +1407,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 
 	// Send the transaction.
 	checkHash := msgTx.TxHash()
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.wallet.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1469,7 +1465,7 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, err := btc.node.GetTxOut(txHash, vout, true)
+	txOut, err := btc.wallet.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %s:%d : %w", txHash, vout, err)
 	}
@@ -1533,7 +1529,7 @@ func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	bestBlockHash, err := btc.node.GetBestBlockHash()
+	bestBlockHash, err := btc.wallet.GetBestBlockHash()
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("get best block hash error: %w", err)
 	}
@@ -1694,14 +1690,14 @@ func (btc *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint
 			contractsCount-totalFound-totalCanceled, reason)
 	}
 
-	mempoolTxs, err := btc.node.GetRawMempool()
+	mempoolTxs, err := btc.wallet.GetRawMempool()
 	if err != nil {
 		logAbandon(fmt.Sprintf("error retrieving transactions: %v", err))
 		return
 	}
 
 	for _, txHash := range mempoolTxs {
-		tx, err := btc.node.GetRawTransactionVerbose(txHash)
+		tx, err := btc.wallet.GetRawTransactionVerbose(txHash)
 		if err != nil {
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
@@ -1895,7 +1891,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := btc.node.GetTxOut(txHash, vout, true)
+	utxo, err := btc.wallet.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", err)
 	}
@@ -1967,7 +1963,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 	// Send it.
 	checkHash := msgTx.TxHash()
-	refundHash, err := btc.node.SendRawTransaction(msgTx, false)
+	refundHash, err := btc.wallet.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, fmt.Errorf("SendRawTransaction: %w", err)
 	}
@@ -2047,7 +2043,7 @@ func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (confs
 		return 0, false, err
 	}
 	// Check for an unspent output.
-	txOut, err := btc.node.GetTxOut(txHash, vout, true)
+	txOut, err := btc.wallet.GetTxOut(txHash, vout, true)
 	if err == nil && txOut != nil {
 		return uint32(txOut.Confirmations), false, nil
 	}
@@ -2081,7 +2077,7 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (btc *ExchangeWallet) checkForNewBlocks() {
-	newTipHash, err := btc.node.GetBestBlockHash()
+	newTipHash, err := btc.wallet.GetBestBlockHash()
 	if err != nil {
 		go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
 		return
@@ -2141,7 +2137,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
 		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight,
 			newTip.height)
-		reorgHash, err := btc.node.GetBlockHash(reorgHeight)
+		reorgHash, err := btc.wallet.GetBlockHash(reorgHeight)
 		if err != nil {
 			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w",
 				reorgHeight, err)
@@ -2151,7 +2147,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 	case newTip.height-prevTipBlock.Height > 1:
 		// 2 or more blocks mined since last tip, start at prevTip height + 1.
 		afterPrivTip := prevTipBlock.Height + 1
-		hashAfterPrevTip, err := btc.node.GetBlockHash(afterPrivTip)
+		hashAfterPrevTip, err := btc.wallet.GetBlockHash(afterPrivTip)
 		if err != nil {
 			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w",
 				afterPrivTip, err)
@@ -2295,7 +2291,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
 		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.wallet.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}
@@ -2431,7 +2427,7 @@ func (btc *ExchangeWallet) lockedSats() (uint64, error) {
 			sum += utxo.amount
 			continue
 		}
-		txOut, err := btc.node.GetTxOut(txHash, rpcOP.Vout, true)
+		txOut, err := btc.wallet.GetTxOut(txHash, rpcOP.Vout, true)
 		if err != nil {
 			return 0, err
 		}

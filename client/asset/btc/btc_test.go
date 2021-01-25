@@ -139,23 +139,6 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
-func (c *tRPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
-	return &btcjson.EstimateSmartFeeResult{
-		Blocks:  2,
-		FeeRate: &optimalRate,
-	}, nil
-}
-
-func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, _ bool) (*chainhash.Hash, error) {
-	c.sentRawTx = tx
-	if c.sendErr == nil && c.sendHash == nil {
-		h := tx.TxHash()
-		return &h, nil
-	}
-	return c.sendHash, c.sendErr
-}
-
 func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
 	return c.txOutRes, c.txOutErr
 }
@@ -227,6 +210,24 @@ func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
+	case methodEstimateSmartFee:
+		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
+		return json.Marshal(&btcjson.EstimateSmartFeeResult{
+			Blocks:  2,
+			FeeRate: &optimalRate,
+		})
+	case methodSendRawTransaction:
+		var tx *wire.MsgTx
+		_ = json.Unmarshal(params[0], &tx)
+		c.sentRawTx = tx
+		if c.sendErr == nil && c.sendHash == nil {
+			h := tx.TxHash()
+			return json.Marshal(&h)
+		}
+		if c.sendErr != nil {
+			return nil, c.sendErr
+		}
+		return json.Marshal(c.sendHash)
 	case methodSignTx:
 		if c.rawErr[method] == nil {
 			return c.signFunc(params)

@@ -255,7 +255,7 @@ func (wc *walletClient) Unlock(pass string) error {
 	return wc.call(methodUnlock, anylist{pass, 100000000}, nil)
 }
 
-// Lock locks the wallet
+// Lock locks the wallet.
 func (wc *walletClient) Lock() error {
 	return wc.call(methodLock, nil, nil)
 }
