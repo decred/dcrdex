@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -59,14 +60,14 @@ type matchTracker struct {
 	// trying to redeem this match. If suspectRedeem is true, the match will not
 	// be grouped when attempting future redemptions.
 	suspectRedeem bool
-	// sendingInitAsync will be set to true if this match's init request is being
-	// sent to the server asynchronously. While true, no other attempts will be
-	// made to send another init request for this match.
-	sendingInitAsync bool
-	// sendingRedeemAsync will be set to true if this match's redeem request is
-	// being sent to the server asynchronously. While true, no other attempts will
-	// be made to send another redeem request for this match.
-	sendingRedeemAsync bool
+	// sendingInitAsync indicates if this match's init request is being sent to
+	// the server and awaiting a response. No attempts will be made to send
+	// another init request for this match while one is already active.
+	sendingInitAsync uint32 // atomic
+	// sendingRedeemAsync indicates if this match's redeem request is being sent
+	// to the server and awaiting a response. No attempts will be made to send
+	// another redeem request for this match while one is already active.
+	sendingRedeemAsync uint32 // atomic
 	// refundErr will be set to true if we attempt a refund and get a
 	// CoinNotFoundError, indicating there is nothing to refund. Prevents
 	// retries.
@@ -1429,7 +1430,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// Process the swap for each match by updating the match with swap
 	// details and sending the `init` request to the DEX.
 	// Saving the swap details now makes it possible to resend the `init`
-	// reqeust at a later time if sending it now fails OR to refund the
+	// request at a later time if sending it now fails OR to refund the
 	// swap after locktime expires if the trade does not progress as expected.
 	for i, receipt := range receipts {
 		match := matches[i]
@@ -1464,30 +1465,24 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 // sendInitAsync starts a goroutine to send an `init` request for the specified
 // match and save the server's ack sig to db. Sends a notification if an error
 // occurs while sending the request or validating the server's response.
-//
-// This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
 func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contract []byte) {
-	if match.sendingInitAsync {
+	if !atomic.CompareAndSwapUint32(&match.sendingInitAsync, 0, 1) {
 		return
 	}
 
-	match.sendingInitAsync = true
-	c.log.Debugf("Sending 'init' request for match %s, contract coin %v (%s)",
-		match.id, coinIDString(t.fromAssetID, coinID), t.wallets.fromAsset.Symbol)
+	c.log.Infof("Notifying DEX %s of our %s swap contract %v for match %v",
+		t.dc.acct.host, t.wallets.fromAsset.Symbol, coinIDString(t.fromAssetID, coinID), match.id)
 
 	// Send the init request asynchronously.
 	go func() {
 		var err error
 		defer func() {
-			t.mtx.Lock()
-			match.sendingInitAsync = false
+			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
-				corder := t.coreOrderInternal()
+				corder := t.coreOrder()
 				details := fmt.Sprintf("Error notifying DEX of swap for match %s: %v", match.id, err)
 				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
 			}
-			t.mtx.Unlock()
 		}()
 
 		ack := new(msgjson.Acknowledgement)
@@ -1502,9 +1497,9 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		timeout := t.broadcastTimeout() / 4
 		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
 		if err != nil {
-			err = fmt.Errorf("error sending 'init' message: %v", err)
 			var msgErr *msgjson.Error
 			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
+				c.log.Errorf("Starting match status resolution for 'init' request SettlementSequenceError")
 				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
 					t.ID(): {
 						trade:   t,
@@ -1512,6 +1507,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 					},
 				})
 			}
+			err = fmt.Errorf("error sending 'init' message: %w", err)
 			return
 		}
 
@@ -1634,7 +1630,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 
 	// Save redemption details and send the redeem message to the DEX.
 	// Saving the redemption details now makes it possible to resend the
-	// `redeem` reqeust at a later time if sending it now fails.
+	// `redeem` request at a later time if sending it now fails.
 	for i, match := range matches {
 		proof := &match.MetaData.Proof
 		coinID := []byte(coinIDs[i])
@@ -1654,33 +1650,27 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	}
 }
 
-// sendInitAsync starts a goroutine to send an `redeem` request for the specified
+// sendRedeemAsync starts a goroutine to send a `redeem` request for the specified
 // match and save the server's ack sig to db. Sends a notification if an error
 // occurs while sending the request or validating the server's response.
-//
-// This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
 func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, secret []byte) {
-	if match.sendingRedeemAsync || match.MetaData.Proof.IsRevoked() {
-		return // no need sending `redeem` request for a revoked match
+	if !atomic.CompareAndSwapUint32(&match.sendingRedeemAsync, 0, 1) {
+		return
 	}
 
-	match.sendingRedeemAsync = true
-	c.log.Debugf("Sending 'redeem' request for match %s, redeem coin %v (%s)",
-		match.id, coinIDString(t.fromAssetID, coinID), t.wallets.fromAsset.Symbol)
+	c.log.Infof("Notifying DEX %s of our %s swap redemption %v for match %v",
+		t.dc.acct.host, t.wallets.toAsset.Symbol, coinIDString(t.wallets.toAsset.ID, coinID), match.id)
 
 	// Send the redeem request asynchronously.
 	go func() {
 		var err error
 		defer func() {
-			t.mtx.Lock()
-			match.sendingRedeemAsync = false
+			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
-				corder := t.coreOrderInternal()
+				corder := t.coreOrder()
 				details := fmt.Sprintf("Error notifying DEX of redemption for match %s: %v", match.id, err)
 				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
 			}
-			t.mtx.Unlock()
 		}()
 
 		msgRedeem := &msgjson.Redeem{
@@ -1695,9 +1685,9 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		timeout := t.broadcastTimeout() / 4
 		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
 		if err != nil {
-			err = fmt.Errorf("error sending 'redeem' message: %v", err)
 			var msgErr *msgjson.Error
 			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
+				c.log.Errorf("Starting match status resolution for 'redeem' request SettlementSequenceError")
 				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
 					t.ID(): {
 						trade:   t,
@@ -1705,6 +1695,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 					},
 				})
 			}
+			err = fmt.Errorf("error sending 'redeem' message: %w", err)
 			return
 		}
 

@@ -683,7 +683,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 }
 
 // TestResendPendingRequests runs a simple trade test, simulates init/redeem
-// request errors during trade negotiation and ensures that failed reqeusts
+// request errors during trade negotiation and ensures that failed requests
 // are retried and the trades complete successfully.
 func TestResendPendingRequests(t *testing.T) {
 	tLog.Info("=== SETUP")

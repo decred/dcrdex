@@ -2633,6 +2633,7 @@ func TestTradeTracking(t *testing.T) {
 		expectSwapErrorNote  bool
 	}
 	testSwapRelatedAction := func(action swapRelatedAction) {
+		t.Helper()
 		drainNotes() // clear previous (swap error) notes before exec'ing swap-related action
 		if action.expectMatchDBUpdates > 0 {
 			rig.db.setUpdateMatchHook(make(chan order.MatchStatus, action.expectMatchDBUpdates))
