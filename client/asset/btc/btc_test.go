@@ -139,10 +139,6 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
-func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
-	return c.txOutRes, c.txOutErr
-}
-
 func (c *tRPCClient) getBlock(blockHash string) *btcjson.GetBlockVerboseResult {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
@@ -164,16 +160,6 @@ func (c *tRPCClient) GetBlockVerboseTx(blockHash *chainhash.Hash) (*btcjson.GetB
 	return blk, nil
 }
 
-func (c *tRPCClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	h, found := c.mainchain[blockHeight]
-	if !found {
-		return nil, fmt.Errorf("no test block at height %d", blockHeight)
-	}
-	return h, nil
-}
-
 func (c *tRPCClient) GetBestBlockHeight() int64 {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
@@ -184,28 +170,6 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 		}
 	}
 	return bestBlkHeight
-}
-
-func (c *tRPCClient) GetBestBlockHash() (*chainhash.Hash, error) {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	var bestHash *chainhash.Hash
-	var bestBlkHeight int64
-	for height, hash := range c.mainchain {
-		if height >= bestBlkHeight {
-			bestBlkHeight = height
-			bestHash = hash
-		}
-	}
-	return bestHash, nil
-}
-
-func (c *tRPCClient) GetRawMempool() ([]*chainhash.Hash, error) {
-	return c.mempoolTxs, c.mpErr
-}
-
-func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	return c.mpVerboseTxs[txHash.String()], c.rawVerboseErr
 }
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
@@ -228,6 +192,45 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			return nil, c.sendErr
 		}
 		return json.Marshal(c.sendHash)
+	case methodGetTxOut:
+		if c.txOutErr != nil {
+			return nil, c.txOutErr
+		}
+		return json.Marshal(c.txOutRes)
+	case methodGetBlockHash:
+		var blockHeight int64
+		_ = json.Unmarshal(params[0], &blockHeight)
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
+		h, found := c.mainchain[blockHeight]
+		if !found {
+			return nil, fmt.Errorf("no test block at height %d", blockHeight)
+		}
+		return json.Marshal(h)
+	case methodGetBestBlockHash:
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
+		var bestHash *chainhash.Hash
+		var bestBlkHeight int64
+		for height, hash := range c.mainchain {
+			if height >= bestBlkHeight {
+				bestBlkHeight = height
+				bestHash = hash
+			}
+		}
+		return json.Marshal(bestHash)
+	case methodGetRawMempool:
+		if c.mpErr != nil {
+			return nil, c.mpErr
+		}
+		return json.Marshal(c.mempoolTxs)
+	case methodGetRawTransaction:
+		if c.rawVerboseErr != nil {
+			return nil, c.rawVerboseErr
+		}
+		var txHash *chainhash.Hash
+		_ = json.Unmarshal(params[0], txHash)
+		return json.Marshal(c.mpVerboseTxs[txHash.String()])
 	case methodSignTx:
 		if c.rawErr[method] == nil {
 			return c.signFunc(params)
@@ -405,7 +408,17 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		return nil, nil, nil, err
 	}
 	// Initialize the best block.
-	bestHash, _ := client.GetBestBlockHash() // does not return error
+	var bestHash *chainhash.Hash
+	res, err := client.RawRequest(nil, methodGetBestBlockHash, nil)
+	if err != nil {
+		shutdown()
+		return nil, nil, nil, err
+	}
+	err = json.Unmarshal(res, &bestHash)
+	if err != nil {
+		shutdown()
+		return nil, nil, nil, err
+	}
 	wallet.tipMtx.Lock()
 	wallet.currentTip = &block{height: client.GetBestBlockHeight(), hash: bestHash.String()}
 	wallet.tipMtx.Unlock()
