@@ -222,9 +222,12 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		if c.rawVerboseErr != nil {
 			return nil, c.rawVerboseErr
 		}
-		var txHash *chainhash.Hash
-		_ = json.Unmarshal(params[0], txHash)
-		return json.Marshal(c.mpVerboseTxs[txHash.String()])
+		var txHash string
+		err := json.Unmarshal(params[0], &txHash)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c.mpVerboseTxs[txHash])
 	case methodSignTx:
 		if c.rawErr[method] == nil {
 			return c.signFunc(params)
