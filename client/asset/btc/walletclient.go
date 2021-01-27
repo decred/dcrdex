@@ -108,8 +108,21 @@ func (wc *walletClient) GetBestBlockHash() (*chainhash.Hash, error) {
 }
 
 func (wc *walletClient) GetRawMempool() ([]*chainhash.Hash, error) {
-	var mempool []*chainhash.Hash
-	return mempool, wc.call(methodGetRawMempool, nil, &mempool)
+	var mempool []string
+	err := wc.call(methodGetRawMempool, nil, &mempool)
+	if err != nil {
+		return nil, err
+	}
+	// Convert recieved hex hashes to chainhash.Hash
+	hashes := make([]*chainhash.Hash, len(mempool))
+	for _, h := range mempool {
+		hash, err := chainhash.NewHashFromStr(h)
+		if err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, hash)
+	}
+	return hashes, nil
 }
 
 func (wc *walletClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {

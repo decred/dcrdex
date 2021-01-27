@@ -114,8 +114,6 @@ type tRPCClient struct {
 	blockchainMtx sync.RWMutex
 	verboseBlocks map[string]*btcjson.GetBlockVerboseResult
 	mainchain     map[int64]*chainhash.Hash
-	mempoolTxs    []*chainhash.Hash
-	mpErr         error
 	mpVerboseTxs  map[string]*btcjson.TxRawResult
 	rawVerboseErr error
 	lockedCoins   []*RPCOutpoint
@@ -174,7 +172,8 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
-	// TODO: handle methodGetBlockHash and add test to cover it.
+	// TODO: handle methodGetBlockHash, methodGetRawMempool  and add actual tests
+	// to cover them.
 	case methodEstimateSmartFee:
 		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
 		return json.Marshal(&btcjson.EstimateSmartFeeResult{
@@ -218,10 +217,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		}
 		return json.Marshal(bestHash)
 	case methodGetRawMempool:
-		if c.mpErr != nil {
-			return nil, c.mpErr
-		}
-		return json.Marshal(c.mempoolTxs)
+		return json.Marshal([]string{})
 	case methodGetRawTransaction:
 		if c.rawVerboseErr != nil {
 			return nil, c.rawVerboseErr
