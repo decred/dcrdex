@@ -174,6 +174,7 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
+	// TODO: handle methodGetBlockHash and add test to cover it.
 	case methodEstimateSmartFee:
 		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
 		return json.Marshal(&btcjson.EstimateSmartFeeResult{
@@ -181,32 +182,29 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			FeeRate: &optimalRate,
 		})
 	case methodSendRawTransaction:
-		var tx *wire.MsgTx
-		_ = json.Unmarshal(params[0], &tx)
+		var txHash string
+		err := json.Unmarshal(params[0], &txHash)
+		if err != nil {
+			return nil, err
+		}
+		tx, err := msgTxFromHex(txHash)
+		if err != nil {
+			return nil, err
+		}
 		c.sentRawTx = tx
 		if c.sendErr == nil && c.sendHash == nil {
-			h := tx.TxHash()
+			h := tx.TxHash().String()
 			return json.Marshal(&h)
 		}
 		if c.sendErr != nil {
 			return nil, c.sendErr
 		}
-		return json.Marshal(c.sendHash)
+		return json.Marshal(c.sendHash.String())
 	case methodGetTxOut:
 		if c.txOutErr != nil {
 			return nil, c.txOutErr
 		}
 		return json.Marshal(c.txOutRes)
-	case methodGetBlockHash:
-		var blockHeight int64
-		_ = json.Unmarshal(params[0], &blockHeight)
-		c.blockchainMtx.RLock()
-		defer c.blockchainMtx.RUnlock()
-		h, found := c.mainchain[blockHeight]
-		if !found {
-			return nil, fmt.Errorf("no test block at height %d", blockHeight)
-		}
-		return json.Marshal(h)
 	case methodGetBestBlockHash:
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
@@ -837,7 +835,7 @@ func TestFundingCoins(t *testing.T) {
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{})
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 	coinIDs := []dex.Bytes{coinID}
 
 	ensureGood := func() {
@@ -922,7 +920,7 @@ func TestFundEdges(t *testing.T) {
 	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
 
 	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
@@ -1268,6 +1266,7 @@ func testSwap(t *testing.T, segwit bool) {
 
 	node.rawRes[methodNewAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	contract := &asset.Contract{
