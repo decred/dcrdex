@@ -215,7 +215,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 				bestHash = hash
 			}
 		}
-		return json.Marshal(bestHash)
+		return json.Marshal(bestHash.String())
 	case methodGetRawMempool:
 		return json.Marshal(&[]string{})
 	case methodGetRawTransaction:
@@ -405,19 +405,14 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		return nil, nil, nil, err
 	}
 	// Initialize the best block.
-	var bestHash *chainhash.Hash
-	res, err := client.RawRequest(nil, methodGetBestBlockHash, nil)
-	if err != nil {
-		shutdown()
-		return nil, nil, nil, err
-	}
-	err = json.Unmarshal(res, &bestHash)
+	bestHash, err := wallet.wallet.GetBestBlockHash()
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
 	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{height: client.GetBestBlockHeight(), hash: bestHash.String()}
+	wallet.currentTip = &block{height: client.GetBestBlockHeight(),
+		hash: bestHash.String()}
 	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
