@@ -85,9 +85,11 @@ func (wc *walletClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (
 }
 
 func (wc *walletClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
-	res := new(btcjson.GetTxOutResult)
+	// Note that we pass to call pointer to a pointer (&res) so that
+	//json.Unmarshal can  nil the pointer if the method returns the JSON null.
+	var res *btcjson.GetTxOutResult
 	return res, wc.call(methodGetTxOut, anylist{txHash.String(), index, mempool},
-		res)
+		&res)
 }
 
 func (wc *walletClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
@@ -113,7 +115,7 @@ func (wc *walletClient) GetRawMempool() ([]*chainhash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Convert recieved hex hashes to chainhash.Hash
+	// Convert received hex hashes to chainhash.Hash
 	hashes := make([]*chainhash.Hash, 0, len(mempool))
 	for _, h := range mempool {
 		hash, err := chainhash.NewHashFromStr(h)

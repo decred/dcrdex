@@ -465,7 +465,9 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 	requester, err := newRequester(endpoint, btcCfg.RPCUser, btcCfg.RPCPass,
 		cfg.Symbol, cfg.Logger)
-
+	if err != nil {
+		return nil, err
+	}
 	btc, err := newWallet(requester, cfg, btcCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
