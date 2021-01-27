@@ -114,7 +114,7 @@ func (wc *walletClient) GetRawMempool() ([]*chainhash.Hash, error) {
 		return nil, err
 	}
 	// Convert recieved hex hashes to chainhash.Hash
-	hashes := make([]*chainhash.Hash, len(mempool))
+	hashes := make([]*chainhash.Hash, 0, len(mempool))
 	for _, h := range mempool {
 		hash, err := chainhash.NewHashFromStr(h)
 		if err != nil {

@@ -217,7 +217,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		}
 		return json.Marshal(bestHash)
 	case methodGetRawMempool:
-		return json.Marshal([]string{})
+		return json.Marshal(&[]string{})
 	case methodGetRawTransaction:
 		if c.rawVerboseErr != nil {
 			return nil, c.rawVerboseErr
