@@ -5,6 +5,7 @@ package bolt
 
 import (
 	"fmt"
+	"path/filepath"
 
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
@@ -72,6 +73,14 @@ func (db *BoltDB) upgradeDB() error {
 	}
 
 	db.log.Infof("Upgrading database from version %d to %d", version, DBVersion)
+
+	// Backup the current version's DB file before processing the upgrades to
+	// DBVersion. Note that any intermediate versions are not stored.
+	currentFile := filepath.Base(db.Path())
+	backupPath := fmt.Sprintf("%s.v%d.bak", currentFile, version) // e.g. dexc.db.v1.bak
+	if err = db.backup(backupPath); err != nil {
+		return fmt.Errorf("failed to backup DB prior to upgrade: %w", err)
+	}
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		// Execute all necessary upgrades in order.
