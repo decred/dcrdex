@@ -85,8 +85,8 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	}, nil
 }
 
-// BCHBackend embeds *btc.Backend and re-implements a couple of methods to
-// deal with Cash Address translation.
+// BCHBackend embeds *btc.Backend and re-implements the Contract method to deal
+// with Cash Address translation.
 type BCHBackend struct {
 	*btc.Backend
 }
