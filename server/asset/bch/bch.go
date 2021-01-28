@@ -25,9 +25,9 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
-// Litecoin.
+// Bitcoin Cash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Litecoin and Bitcoin have the same tx hash and output format.
+	// Bitcoin Cash and Bitcoin have the same tx hash and output format.
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
@@ -108,7 +108,7 @@ func (bch *BCHBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Cont
 // estimateFee estimates the network transaction fee rate using the estimatefee
 // RPC.
 func estimateFee(node btc.BTCNode) (uint64, error) {
-	resp, err := node.RawRequest("estimatefee", []json.RawMessage{})
+	resp, err := node.RawRequest("estimatefee", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -118,7 +118,7 @@ func estimateFee(node btc.BTCNode) (uint64, error) {
 		return 0, err
 	}
 	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estiamted")
+		return 0, fmt.Errorf("fee could not be estimated")
 	}
 	return uint64(math.Round(feeRate * 1e5)), nil
 }

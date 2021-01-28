@@ -58,7 +58,7 @@ type rpcClient struct {
 	requester   RawRequester
 	chainParams *chaincfg.Params
 	segwit      bool
-	addrDecoder dexbtc.AddressDecoder
+	decodeAddr  dexbtc.AddressDecoder
 	// arglessChangeAddrRPC true will pass no arguments to the
 	// getrawchangeaddress RPC.
 	arglessChangeAddrRPC bool
@@ -74,7 +74,7 @@ func newWalletClient(requester RawRequester, segwit bool, addrDecoder dexbtc.Add
 		requester:            requester,
 		chainParams:          chainParams,
 		segwit:               segwit,
-		addrDecoder:          addrDecoder,
+		decodeAddr:           addrDecoder,
 		arglessChangeAddrRPC: arglessChangeAddrRPC,
 	}
 }
@@ -215,7 +215,7 @@ func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wc.addrDecoder(addrStr, wc.chainParams)
+	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
 // AddressPKH gets a new base58-encoded (P2PKH) external address from the
@@ -238,7 +238,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wc.addrDecoder(addrStr, wc.chainParams)
+	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
 // SignTx attempts to have the wallet sign the transaction inputs.

@@ -12,8 +12,8 @@ import (
 	"github.com/gcash/bchutil"
 )
 
-// RecodeCashAddress takes a faux BTC address and converts it into a Cash
-// Address.
+// RecodeCashAddress takes a BTC base-58 encoded address and converts it into a
+// Cash Address.
 func RecodeCashAddress(addr string, net *chaincfg.Params) (string, error) {
 	btcAddr, err := btcutil.DecodeAddress(addr, net)
 	if err != nil {
@@ -38,7 +38,7 @@ func RecodeCashAddress(addr string, net *chaincfg.Params) (string, error) {
 	return withPrefix(bchAddr, net), nil
 }
 
-// DecodeCashAddress decodes a Cash Address string into a faux btcutil.Address
+// DecodeCashAddress decodes a Cash Address string into a btcutil.Address
 // that the BTC backend can use internally.
 func DecodeCashAddress(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 	bchAddr, err := bchutil.DecodeAddress(addr, convertParams(net))

@@ -379,9 +379,7 @@ func (dcr *Backend) ValidateContract(contract []byte) error {
 func (dcr *Backend) CheckAddress(addr string) bool {
 	_, err := dcrutil.DecodeAddress(addr, chainParams)
 	if err != nil {
-		if err != nil {
-			dcr.log.Errorf("DecodeAddress error for %s: %v", addr, err)
-		}
+		dcr.log.Errorf("DecodeAddress error for %s: %v", addr, err)
 	}
 
 	return err == nil

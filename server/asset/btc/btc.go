@@ -104,7 +104,7 @@ type Backend struct {
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
 	log         dex.Logger
-	addrDecoder dexbtc.AddressDecoder
+	decodeAddr  dexbtc.AddressDecoder
 	estimateFee func(BTCNode) (uint64, error)
 }
 
@@ -162,7 +162,7 @@ func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.Config) *Backend {
 		chainParams: cloneCfg.ChainParams,
 		log:         cloneCfg.Logger,
 		segwit:      cloneCfg.Segwit,
-		addrDecoder: addrDecoder,
+		decodeAddr:  addrDecoder,
 		estimateFee: feeEstimator,
 	}
 }
@@ -399,9 +399,9 @@ func (btc *Backend) FeeRate() (uint64, error) {
 
 // CheckAddress checks that the given address is parseable.
 func (btc *Backend) CheckAddress(addr string) bool {
-	_, err := btc.addrDecoder(addr, btc.chainParams)
+	_, err := btc.decodeAddr(addr, btc.chainParams)
 	if err != nil {
-		btc.log.Errorf("CheckAddress error for %s %s using %v: %v", btc.name, addr, btc.addrDecoder, err)
+		btc.log.Errorf("CheckAddress error for %s %s: %v", btc.name, addr, err)
 	}
 	return err == nil
 }
@@ -743,10 +743,11 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 		if verboseTx.Vsize > 0 {
 			feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
 		}
-	} else {
-		if verboseTx.Size > 0 {
-			feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
-		}
+	} else if verboseTx.Size > 0 {
+		// For non-segwit transactions, Size = Vsize anyway, so use Size to
+		// cover assets that won't set Vsize in their RPC response.
+		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
+
 	}
 
 	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate), nil
@@ -1014,7 +1015,8 @@ func isTxNotFoundErr(err error) bool {
 	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
 }
 
-// feeRate returns the current optimal fee rate in sat / byte.
+// feeRate returns the current optimal fee rate in sat / byte using the
+// estimatesmartfee RPC.
 func feeRate(node BTCNode) (uint64, error) {
 	feeResult, err := node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
 	if err != nil {

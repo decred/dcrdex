@@ -65,7 +65,7 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Bitcoin Cash 'fallbackfee' rate. Units: LTC/kB",
+			Description:  "Bitcoin Cash 'fallbackfee' rate. Units: BCH/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
@@ -95,7 +95,7 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the LTC exchange wallet. Start the wallet with its Run method.
+// Setup creates the BCH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
@@ -232,7 +232,7 @@ func serializeBtcTx(msgTx *wire.MsgTx) ([]byte, error) {
 // estimateFee uses Bitcoin Cash's estimatefee RPC, since estimatesmartfee
 // is not implemented.
 func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) (uint64, error) {
-	resp, err := node.RawRequest(ctx, "estimatefee", []json.RawMessage{})
+	resp, err := node.RawRequest(ctx, "estimatefee", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -242,7 +242,7 @@ func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) 
 		return 0, err
 	}
 	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estiamted")
+		return 0, fmt.Errorf("fee could not be estimated")
 	}
 	return uint64(math.Round(feeRate * 1e5)), nil
 }

@@ -364,9 +364,9 @@ type ExchangeWallet struct {
 	useLegacyBalance  bool
 	segwit            bool
 	legacyRawFeeLimit bool
-	nonSegwitSigner   TxInSigner
+	signNonSegwit     TxInSigner
 	estimateFee       func(context.Context, RawRequester, uint64) (uint64, error)
-	addrDecoder       dexbtc.AddressDecoder
+	decodeAddr        dexbtc.AddressDecoder
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -476,10 +476,6 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
 func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) (*ExchangeWallet, error) {
-	addrDecoder := cfg.AddressDecoder
-	if addrDecoder == nil {
-		addrDecoder = btcutil.DecodeAddress
-	}
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -507,9 +503,14 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	nonSegwitSigner := cfg.NonSegwitSigner
-	if nonSegwitSigner == nil {
-		nonSegwitSigner = rawTxInSig
+	addrDecoder := btcutil.DecodeAddress
+	if cfg.AddressDecoder != nil {
+		addrDecoder = cfg.AddressDecoder
+	}
+
+	nonSegwitSigner := rawTxInSig
+	if cfg.NonSegwitSigner != nil {
+		nonSegwitSigner = cfg.NonSegwitSigner
 	}
 
 	w := &ExchangeWallet{
@@ -528,9 +529,9 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
 		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
-		nonSegwitSigner:     nonSegwitSigner,
+		signNonSegwit:       nonSegwitSigner,
 		estimateFee:         cfg.FeeEstimator,
-		addrDecoder:         addrDecoder,
+		decodeAddr:          addrDecoder,
 		walletInfo:          cfg.WalletInfo,
 	}
 
@@ -1335,7 +1336,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
 
-		contractAddr, err := btc.addrDecoder(contract.Address, btc.chainParams)
+		contractAddr, err := btc.decodeAddr(contract.Address, btc.chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("address decode error: %v", err)
 		}
@@ -1557,7 +1558,7 @@ func (btc *ExchangeWallet) convertAuditInfo(ai *asset.AuditInfo) (*auditInfo, er
 		return nil, err
 	}
 
-	recip, err := btc.addrDecoder(ai.Recipient, btc.chainParams)
+	recip, err := btc.decodeAddr(ai.Recipient, btc.chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -2478,7 +2479,7 @@ func (btc *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 	if err != nil {
 		return nil, nil, err
 	}
-	sig, err = btc.nonSegwitSigner(tx, idx, pkScript, txscript.SigHashAll, privKey, val)
+	sig, err = btc.signNonSegwit(tx, idx, pkScript, txscript.SigHashAll, privKey, val)
 	if err != nil {
 		return nil, nil, err
 	}
