@@ -211,6 +211,7 @@ func (t *trackedTrade) coreOrder() *Order {
 // should be called with the mtx >= RLocked.
 func (t *trackedTrade) coreOrderInternal() *Order {
 	corder := coreOrderFromTrade(t.Order, t.metaData)
+
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 	corder.LockedAmt = t.lockedAmount()
 
@@ -465,6 +466,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	if cancelMatch != nil {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
+
 		t.notify(newOrderNote(SubjectOrderCanceled, details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote(SubjectCancel, "", db.Data, corder))
