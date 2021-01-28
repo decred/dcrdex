@@ -1667,7 +1667,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
 
-	go oldWallet.Disconnect()
+	if oldWallet.connected() {
+		go oldWallet.Disconnect()
+	}
 
 	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
 	details := fmt.Sprintf("Configuration for %s wallet has been updated. Deposit address = %s",
@@ -3221,8 +3223,7 @@ func (c *Core) initialize() {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		c.log.Infof("Loaded %s wallet configuration. Deposit address = %s",
-			unbip(aid), dbWallet.Address)
+		c.log.Infof("Loaded %s wallet configuration.", unbip(aid))
 		c.wallets[dbWallet.AssetID] = wallet
 	}
 	numWallets := len(c.wallets)
