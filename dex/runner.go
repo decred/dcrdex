@@ -108,15 +108,26 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	return err
 }
 
-// Disconnect closes the connection and waits for shutdown.
+// Disconnect closes the connection and waits for shutdown. This is safe to use
+// on an unconnected ConnectionMaster as long as it was constructed with
+// NewConnectionMaster.
 func (c *ConnectionMaster) Disconnect() {
-	c.cancel()
 	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	if c.ctx == nil {
+		// The contextManager was never initialized via Connect.
+		return
+	}
+	c.cancel()
+	if c.wg == nil {
+		// The Connector failed on Connect, assigning a nil *WaitGroup.
+		return
+	}
 	c.wg.Wait()
-	c.mtx.RUnlock()
 }
 
-// Wait waits for the the WaitGroup returned by Connect.
+// Wait waits for the the WaitGroup returned by Connect. This is NOT safe to use
+// unless Connect has already been called without error.
 func (c *ConnectionMaster) Wait() {
 	c.wg.Wait()
 	c.cancel() // if not called from Disconnect, would leak context
