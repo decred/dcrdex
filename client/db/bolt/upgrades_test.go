@@ -196,5 +196,6 @@ func unpack(t *testing.T, db string) (string, func()) {
 	return dbPath, func() {
 		dbFile.Close()
 		archive.Close()
+		os.RemoveAll(d)
 	}
 }

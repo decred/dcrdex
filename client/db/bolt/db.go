@@ -1174,6 +1174,13 @@ func (db *BoltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 
 // Backup makes a copy of the database.
 func (db *BoltDB) Backup() error {
+	return db.backup("")
+}
+
+// backup makes a copy of the database to the specified file name in the backup
+// subfolder of the current DB file's folder. If fileName is empty, the current
+// DB's file name is used.
+func (db *BoltDB) backup(fileName string) error {
 	dir := filepath.Join(filepath.Dir(db.Path()), backupDir)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err := os.Mkdir(dir, 0700)
@@ -1182,7 +1189,10 @@ func (db *BoltDB) Backup() error {
 		}
 	}
 
-	path := filepath.Join(dir, filepath.Base(db.Path()))
+	if fileName == "" {
+		fileName = filepath.Base(db.Path())
+	}
+	path := filepath.Join(dir, fileName)
 	err := db.View(func(tx *bbolt.Tx) error {
 		return tx.CopyFile(path, 0600)
 	})
