@@ -1670,9 +1670,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
 
-	if oldWallet.connected() {
-		go oldWallet.Disconnect()
-	}
+	go oldWallet.Disconnect()
 
 	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
 	details := fmt.Sprintf("Configuration for %s wallet has been updated. Deposit address = %s",
@@ -4563,8 +4561,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // or if the user has confirmed they want to shutdown with active orders.
 func (c *Core) PromptShutdown() bool {
 	conns := c.dexConnections()
-
-
 	var haveActive bool
 	for _, dc := range conns {
 		if dc.hasActiveOrders() {

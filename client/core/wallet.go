@@ -180,8 +180,12 @@ func (w *xcWallet) Connect() error {
 	if err != nil {
 		return err
 	}
+	// Now that we are connected, we must Disconnect if any calls fail below
+	// since we are considering this wallet not "hookedUp".
+
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
+		w.connector.Disconnect()
 		return err
 	}
 
@@ -191,12 +195,14 @@ func (w *xcWallet) Connect() error {
 	if haveAddress {
 		haveAddress, err = w.OwnsAddress(w.address)
 		if err != nil {
+			w.connector.Disconnect()
 			return err
 		}
 	}
 	if !haveAddress {
 		w.address, err = w.Address()
 		if err != nil {
+			w.connector.Disconnect()
 			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 		}
 	}
