@@ -154,15 +154,16 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 }
 
 // marketTrades is a slice of trades in the trades map.
-func (dc *dexConnection) marketTrades(mktID string) (trades []*trackedTrade) {
+func (dc *dexConnection) marketTrades(mktID string) []*trackedTrade {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
+	trades := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range dc.trades {
 		if trade.mktID == mktID {
 			trades = append(trades, trade)
 		}
 	}
-	return
+	return trades
 }
 
 // getRegConfirms returns the number of confirmations received for the

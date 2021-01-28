@@ -389,16 +389,16 @@ func (m *Market) sideContractLocked(sell bool) (amt uint64) {
 		if ord.Sell != sell {
 			continue
 		}
-		for _, m := range ord.Matches {
-			if m.Status >= order.MakerRedeemed || m.Refund != nil {
+		for _, match := range ord.Matches {
+			if match.Status >= order.MakerRedeemed || match.Refund != nil {
 				continue
 			}
-			if (m.Side == order.Maker && m.Status >= order.MakerSwapCast) ||
-				(m.Side == order.Taker && m.Status == order.TakerSwapCast) {
+			if (match.Side == order.Maker && match.Status >= order.MakerSwapCast) ||
+				(match.Side == order.Taker && match.Status == order.TakerSwapCast) {
 
-				swapAmount := m.Qty
+				swapAmount := match.Qty
 				if !ord.Sell {
-					swapAmount = calc.BaseToQuote(m.Rate, m.Qty)
+					swapAmount = calc.BaseToQuote(match.Rate, match.Qty)
 				}
 				amt += swapAmount
 			}

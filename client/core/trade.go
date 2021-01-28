@@ -213,12 +213,7 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 	corder := coreOrderFromTrade(t.Order, t.metaData)
 
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
-
-	if t.coinsLocked {
-		corder.LockedAmt = sumCoinMap(t.coins)
-	} else if t.changeLocked {
-		corder.LockedAmt = t.change.Value()
-	}
+	corder.LockedAmt = t.lockedAmount()
 
 	for _, mt := range t.matches {
 		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t,
@@ -2216,11 +2211,4 @@ func sellString(sell bool) string {
 		return "sell"
 	}
 	return "buy"
-}
-
-func sumCoinMap(cs map[string]asset.Coin) (sum uint64) {
-	for _, c := range cs {
-		sum += c.Value()
-	}
-	return
 }
