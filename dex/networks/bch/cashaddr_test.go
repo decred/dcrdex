@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/encode"
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcutil"
 	"github.com/gcash/bchutil"
@@ -19,46 +20,83 @@ func TestCashAddr(t *testing.T) {
 		highB[i] = 255
 	}
 
+	lowPubKey := make([]byte, 33)
+	lowPubKey[0] = 2
+	lowPubKey[32] = 1
+
 	checkHash := func(net *chaincfg.Params, h []byte) {
 		t.Helper()
-		var bchAddr bchutil.Address
-		bchAddr, err := bchutil.NewAddressPubKeyHash(h, convertParams(net))
-		if err != nil {
-			t.Fatalf("bchutil.AddressScriptHash error: %v", err)
-		}
-		testRoundTripFromBCH(t, withPrefix(bchAddr, net), net)
 
-		bchAddr, err = bchutil.NewAddressScriptHashFromHash(h, convertParams(net))
-		if err != nil {
-			t.Fatalf("bchutil.AddressScriptHash error: %v", err)
-		}
-		testRoundTripFromBCH(t, withPrefix(bchAddr, net), net)
+		switch len(h) {
+		case 20:
+			var bchAddr bchutil.Address
+			bchAddr, err := bchutil.NewAddressPubKeyHash(h, convertParams(net))
+			if err != nil {
+				t.Fatalf("bchutil.AddressScriptHash error: %v", err)
+			}
+			testRoundTripFromBCH(t, withPrefix(bchAddr, net), net)
 
-		var btcAddr btcutil.Address
-		btcAddr, err = btcutil.NewAddressPubKeyHash(h, net)
-		if err != nil {
-			t.Fatalf("btcutil.NewAddressPubkeyHash error: %v", err)
+			bchAddr, err = bchutil.NewAddressScriptHashFromHash(h, convertParams(net))
+			if err != nil {
+				t.Fatalf("bchutil.AddressScriptHash error: %v", err)
+			}
+			testRoundTripFromBCH(t, withPrefix(bchAddr, net), net)
+
+			var btcAddr btcutil.Address
+			btcAddr, err = btcutil.NewAddressPubKeyHash(h, net)
+			if err != nil {
+				t.Fatalf("btcutil.NewAddressPubkeyHash error: %v", err)
+			}
+
+			testRoundTripFromBTC(t, btcAddr.String(), net)
+
+			btcAddr, err = btcutil.NewAddressScriptHashFromHash(h, net)
+			if err != nil {
+				t.Fatalf("btcutil.NewAddressPubkeyHash error: %v", err)
+			}
+			testRoundTripFromBTC(t, btcAddr.String(), net)
+
+		case 33, 65: // See btcec.PubKeyBytesLen(Un)Compressed
+			var bchAddr bchutil.Address
+			bchAddr, err := bchutil.NewAddressPubKey(h, convertParams(net))
+			if err != nil {
+				t.Fatalf("bchutil.NewAddressPubKey error: %v", err)
+			}
+			testRoundTripFromBCH(t, withPrefix(bchAddr, net), net)
+
+			var btcAddr btcutil.Address
+			btcAddr, err = btcutil.NewAddressPubKey(h, net)
+			if err != nil {
+				t.Fatalf("btcutil.NewAddressPubKey error: %v", err)
+			}
+
+			testRoundTripFromBTC(t, btcAddr.String(), net)
+
+		default:
+			t.Fatalf("unknown address data length %d", len(h))
 		}
 
-		testRoundTripFromBTC(t, btcAddr.String(), net)
-
-		btcAddr, err = btcutil.NewAddressScriptHashFromHash(h, net)
-		if err != nil {
-			t.Fatalf("btcutil.NewAddressPubkeyHash error: %v", err)
-		}
-		testRoundTripFromBTC(t, btcAddr.String(), net)
 	}
 
 	nets := []*chaincfg.Params{MainNetParams, TestNet3Params, RegressionNetParams}
 	for _, net := range nets {
 		// Check the lowest and highest possible hashes.
-		for _, h := range [][]byte{lowB, highB} {
-			checkHash(net, h)
-		}
+		checkHash(net, lowB)
+		checkHash(net, highB)
 		// Check a bunch of random addresses.
 		for i := 0; i < 1000; i++ {
 			checkHash(net, encode.RandomBytes(20))
 		}
+		// Check Pubkey addresses. These just encode to the hex encoding of the
+		// serialized pubkey for both bch and btc, so there's little that can go
+		// wrong.
+		checkHash(net, lowPubKey)
+		for i := 0; i < 100; i++ {
+			_, pubKey := btcec.PrivKeyFromBytes(btcec.S256(), encode.RandomBytes(33))
+			checkHash(net, pubKey.SerializeUncompressed())
+			checkHash(net, pubKey.SerializeCompressed())
+		}
+
 	}
 }
 

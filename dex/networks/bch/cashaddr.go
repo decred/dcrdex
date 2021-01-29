@@ -26,7 +26,8 @@ func RecodeCashAddress(addr string, net *chaincfg.Params) (string, error) {
 		bchAddr, err = bchutil.NewAddressPubKeyHash(btcAddr.ScriptAddress(), convertParams(net))
 	case *btcutil.AddressScriptHash:
 		bchAddr, err = bchutil.NewAddressScriptHashFromHash(btcAddr.ScriptAddress(), convertParams(net))
-	// case *btcutil.AddressPubKey: // Do we need?
+	case *btcutil.AddressPubKey:
+		bchAddr, err = bchutil.NewAddressPubKey(btcAddr.ScriptAddress(), convertParams(net))
 	default:
 		return "", fmt.Errorf("unsupported address type %T", at)
 	}
@@ -47,11 +48,14 @@ func DecodeCashAddress(addr string, net *chaincfg.Params) (btcutil.Address, erro
 	}
 
 	switch at := bchAddr.(type) {
-	case *bchutil.AddressPubKeyHash:
+	// From what I can tell, the legacy address formats are probably
+	// unnecessary, but I'd hate to be wrong.
+	case *bchutil.AddressPubKeyHash, *bchutil.LegacyAddressPubKeyHash:
 		return btcutil.NewAddressPubKeyHash(bchAddr.ScriptAddress(), net)
-	case *bchutil.AddressScriptHash:
+	case *bchutil.AddressScriptHash, *bchutil.LegacyAddressScriptHash:
 		return btcutil.NewAddressScriptHashFromHash(bchAddr.ScriptAddress(), net)
-	// case *btcutil.AddressPubKey: // Do we need?
+	case *bchutil.AddressPubKey:
+		return btcutil.NewAddressPubKey(bchAddr.ScriptAddress(), net)
 	default:
 		return nil, fmt.Errorf("unsupported address type %T", at)
 	}
@@ -73,5 +77,10 @@ func convertParams(btcParams *chaincfg.Params) *bchchaincfg.Params {
 // withPrefix adds the Bech32 prefix to the bchutil.Address, since the stringers
 // don't, for some reason.
 func withPrefix(bchAddr bchutil.Address, net *chaincfg.Params) string {
-	return net.Bech32HRPSegwit + ":" + bchAddr.String()
+	switch bchAddr.(type) {
+	case *bchutil.AddressPubKeyHash, *bchutil.AddressScriptHash:
+		return net.Bech32HRPSegwit + ":" + bchAddr.String()
+	}
+	// Must be a pubkey address, which gets no prefix.
+	return bchAddr.String()
 }
