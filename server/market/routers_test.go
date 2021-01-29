@@ -18,9 +18,9 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -233,10 +233,10 @@ func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid o
 func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
 func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
 }
-func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+func (a *TAuth) Inaction(user account.AccountID, step reputation.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 }
 func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
-	return dcrLotSize * initLotLimit // everyone gets a clean slate
+	return initLotLimit // everyone gets a clean slate
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
@@ -291,8 +291,10 @@ func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
 	return m.locked
 }
 
-func (m *TMarketTunnel) MarketBuyBuffer() float64 {
-	return m.mbBuffer
+func (m *TMarketTunnel) Info() *dex.MarketInfo {
+	return &dex.MarketInfo{
+		MarketBuyBuffer: m.mbBuffer,
+	}
 }
 
 func (m *TMarketTunnel) pop() *orderRecord {

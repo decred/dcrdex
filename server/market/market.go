@@ -335,7 +335,7 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 	m.epochMtx.Lock()
 	defer m.epochMtx.Unlock()
 
-	dur := int64(m.EpochDuration())
+	dur := int64(m.Info().EpochDuration)
 
 	epochEnd := func(idx int64) time.Time {
 		start := encode.UnixTimeMilli(idx * dur)
@@ -385,7 +385,7 @@ func (m *Market) ResumeEpoch(asSoonAs time.Time) (startEpochIdx int64) {
 		return
 	}
 
-	dur := int64(m.EpochDuration())
+	dur := int64(m.Info().EpochDuration)
 
 	now := encode.UnixMilli(time.Now())
 	nextEpochIdx := 1 + now/dur
@@ -469,24 +469,9 @@ func (m *Market) Running() bool {
 	}
 }
 
-// EpochDuration returns the Market's epoch duration in milliseconds.
-func (m *Market) EpochDuration() uint64 {
-	return m.marketInfo.EpochDuration
-}
-
-// MarketBuyBuffer returns the Market's market-buy buffer.
-func (m *Market) MarketBuyBuffer() float64 {
-	return m.marketInfo.MarketBuyBuffer
-}
-
-// Base is the base asset ID.
-func (m *Market) Base() uint32 {
-	return m.marketInfo.Base
-}
-
-// Quote is the quote asset ID.
-func (m *Market) Quote() uint32 {
-	return m.marketInfo.Quote
+// Info returns the Market's MarketInfo.
+func (m *Market) Info() *dex.MarketInfo {
+	return m.marketInfo
 }
 
 // OrderFeed provides a new order book update channel. Channels provided before
@@ -995,7 +980,7 @@ func (m *Market) Run(ctx context.Context) {
 	if nextEpochIdx == 0 {
 		log.Warnf("Run: startEpochIdx not set. Starting at the next epoch.")
 		now := encode.UnixMilli(time.Now())
-		nextEpochIdx = 1 + now/int64(m.EpochDuration())
+		nextEpochIdx = 1 + now/int64(m.Info().EpochDuration)
 		m.startEpochIdx = nextEpochIdx
 	}
 	m.epochMtx.Unlock()
@@ -1352,9 +1337,10 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		// Get the settling amount limit in units of the base asset from the
 		// AuthManager, which tracks the user's swap outcome amount history.
-		userLimit := m.auth.UserSettlingLimit(user, m.marketInfo) // hard to make this lots across all markets, partly because db stores base value
+		userLotLimit := m.auth.UserSettlingLimit(user, m.marketInfo) // hard to make this lots across all markets, partly because db stores base value
 		// Subtract the user's total active amount from their limit.
-		orderQtyAllowed := userLimit - int64(amtInSwaps+userTakerEpochQty)
+		userQtyLimit := userLotLimit * int64(m.marketInfo.LotSize)
+		orderQtyAllowed := userQtyLimit - int64(amtInSwaps+userTakerEpochQty)
 
 		qty := baseQty(ord)
 		symb := dex.BipIDSymbol(m.marketInfo.Base)
@@ -1365,8 +1351,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 		if int64(qty) > orderQtyAllowed {
 			log.Infof("Rejecting user %v likely-taker order %v: qty %d > %d allowed "+
-				"(already have %d swapping and %d epoch takers with %d limit)",
-				user, oid, qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty, userLimit)
+				"(already have %d swapping and %d epoch takers with %d lot limit = %d)",
+				user, oid, qty, orderQtyAllowed, amtInSwaps, userTakerEpochQty, userLotLimit, userQtyLimit)
 			errChan <- dex.NewError(ErrQuantityTooHigh,
 				fmt.Sprintf("Order quantity %d too large. Current likely-taker order limit: %d "+
 					"(you have %d settling already and %d in epoch taker orders)",
@@ -1967,7 +1953,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			matchProof: &order.MatchProof{
 				Epoch: order.EpochID{
 					Idx: uint64(epoch.Epoch),
-					Dur: m.EpochDuration(),
+					Dur: m.Info().EpochDuration,
 				},
 				Preimages: preimages,
 				Misses:    misses,
@@ -2070,7 +2056,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	}
 
 	// Update the API data collector.
-	_, err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
+
+	_, err = m.dataCollector.ReportEpoch(m.marketInfo.Base, m.marketInfo.Quote, uint64(epoch.Epoch), stats)
 	if err != nil {
 		log.Errorf("Error updating API data collector: %v", err)
 	}

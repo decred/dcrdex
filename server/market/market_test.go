@@ -457,7 +457,7 @@ func TestMarket_Suspend(t *testing.T) {
 		return
 	}
 	defer cleanup()
-	epochDurationMSec := int64(mkt.EpochDuration())
+	epochDurationMSec := int64(mkt.Info().EpochDuration)
 
 	// Suspend before market start.
 	finalIdx, _ := mkt.Suspend(time.Now(), false)
@@ -601,7 +601,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 		return
 	}
 	defer cleanup()
-	epochDurationMSec := int64(mkt.EpochDuration())
+	epochDurationMSec := int64(mkt.Info().EpochDuration)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -731,7 +731,7 @@ func TestMarket_Run(t *testing.T) {
 		cleanup()
 		return
 	}
-	epochDurationMSec := int64(mkt.EpochDuration())
+	epochDurationMSec := int64(mkt.Info().EpochDuration)
 	// This test wants to know when epoch order matching booking is done.
 	storage.epochInserted = make(chan struct{}, 1)
 	// and when handlePreimage is done.
@@ -1403,7 +1403,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	// and when handlePreimage is done.
 	auth.handlePreimageDone = make(chan struct{}, 1)
 
-	epochDurationMSec := int64(mkt.EpochDuration())
+	epochDurationMSec := int64(mkt.Info().EpochDuration)
 	startEpochIdx := 1 + encode.UnixMilli(time.Now().Truncate(time.Millisecond))/epochDurationMSec
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup

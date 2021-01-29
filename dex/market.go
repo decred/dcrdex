@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+const (
+	defaultProbationaryLots = 6
+	defaultPrivilegedLots   = 375
+)
+
 // MarketInfo specifies a market that the Archiver must support.
 type MarketInfo struct {
 	Name                   string
@@ -19,6 +24,8 @@ type MarketInfo struct {
 	MarketBuyBuffer        float64
 	MaxUserCancelsPerEpoch uint32
 	BookedLotLimit         uint32
+	ProbationaryLots       uint32
+	PrivilegedLots         uint32
 }
 
 func marketName(base, quote string) string {
@@ -61,6 +68,8 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyB
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,
 		BookedLotLimit:         math.MaxUint32,
+		ProbationaryLots:       defaultProbationaryLots,
+		PrivilegedLots:         defaultPrivilegedLots,
 	}, nil
 }
 
@@ -89,5 +98,7 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64,
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,
 		BookedLotLimit:         math.MaxUint32,
+		ProbationaryLots:       defaultProbationaryLots,
+		PrivilegedLots:         defaultPrivilegedLots,
 	}, nil
 }

@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/dex/reputation"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -498,51 +499,58 @@ func setViolations() (wantScore int32) {
 		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
 		newMatchOutcome(order.NewlyMatched, randomMatchID(), true, 7, nextTime()),
-		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()), // noSwapAsTaker at index 3
-		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),
+		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoSwapAsTaker at index 3
+		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoRedeemAsMaker
 		newMatchOutcome(order.MakerRedeemed, randomMatchID(), false, 7, nextTime()), // success (for maker)
 		newMatchOutcome(order.MakerRedeemed, randomMatchID(), true, 7, nextTime()),
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
 		newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()), // success
+		newMatchOutcome(order.TakerSwapCast, randomMatchID(), true, 7, nextTime()),  // NoRedeemAsMaker
 	}
 	t0 -= 4000
 	rig.storage.userPreimageResults = []*db.PreimageResult{newPreimageResult(true, nextTime())}
 	for range rig.storage.userMatchOutcomes {
 		rig.storage.userPreimageResults = append(rig.storage.userPreimageResults, newPreimageResult(false, nextTime()))
 	}
-	return 4*successScore + 1*preimageMissScore +
-		2*noSwapAsMakerScore + noSwapAsTakerScore + noRedeemAsMakerScore + 1*noRedeemAsTakerScore
+
+	return reputation.DefaultBaselineScore + (4+10)*reputation.SuccessScore + 1*reputation.PreimageMissScore +
+		2*reputation.NoSwapAsMakerScore + reputation.NoSwapAsTakerScore + 2*reputation.NoRedeemAsMakerScore + 1*reputation.NoRedeemAsTakerScore
 }
 
 func clearViolations() {
 	rig.storage.userMatchOutcomes = []*db.MatchOutcome{}
 }
 
-func TestAuthManager_loadUserScore(t *testing.T) {
+func TestAuthManager_loadUserReputation(t *testing.T) {
 	// Spot test with all violations set
 	wantScore := setViolations()
 	defer clearViolations()
 	user := tNewUser(t)
-	score, err := rig.mgr.loadUserScore(user.acctID)
+	rep, err := rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+
+	rawScore := rep.RawScore()
+	if rawScore != wantScore {
+		t.Fatalf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// add one NoSwapAsTaker (match inactive at MakerSwapCast)
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes,
 		newMatchOutcome(order.MakerSwapCast, randomMatchID(), true, 7, nextTime()))
-	wantScore += noSwapAsTakerScore
+	wantScore += reputation.NoSwapAsTakerScore
 
-	score, err = rig.mgr.loadUserScore(user.acctID)
+	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore = rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
+
+	bs := rig.mgr.baselineScore
 
 	tests := []struct {
 		name           string
@@ -560,13 +568,13 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 				newMatchOutcome(order.MatchComplete, randomMatchID(), false, 7, nextTime()),
 			},
-			wantScore: -4,
+			wantScore: bs + 4,
 		},
 		{
 			name:          "nuthin",
 			user:          user.acctID,
 			matchOutcomes: []*db.MatchOutcome{},
-			wantScore:     0,
+			wantScore:     bs,
 		},
 		{
 			name: "balance",
@@ -581,7 +589,7 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(true, nextTime()),
 			},
-			wantScore: 0,
+			wantScore: bs,
 		},
 		{
 			name: "tipping red",
@@ -601,20 +609,21 @@ func TestAuthManager_loadUserScore(t *testing.T) {
 				newPreimageResult(true, nextTime()),
 				newPreimageResult(false, nextTime()),
 			},
-			wantScore: 2*noSwapAsMakerScore + 1*noSwapAsTakerScore + 0*noRedeemAsMakerScore +
-				1*noRedeemAsTakerScore + 1*preimageMissScore + 5*successScore,
+			wantScore: bs + 2*reputation.NoSwapAsMakerScore + 1*reputation.NoSwapAsTakerScore + 0*reputation.NoRedeemAsMakerScore +
+				1*reputation.NoRedeemAsTakerScore + 1*reputation.PreimageMissScore + (5+1)*reputation.SuccessScore,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rig.storage.userMatchOutcomes = tt.matchOutcomes
 			rig.storage.userPreimageResults = tt.preimageMisses
-			score, err := rig.mgr.loadUserScore(tt.user)
+			rep, err := rig.mgr.loadUserReputation(tt.user)
 			if err != nil {
 				t.Fatalf("got err: %v", err)
 			}
-			if score != tt.wantScore {
-				t.Errorf("incorrect user score. got %d, want %d", score, tt.wantScore)
+			rawScore := rep.RawScore()
+			if rawScore != tt.wantScore {
+				t.Errorf("incorrect user score. got %d, want %d", rawScore, tt.wantScore)
 			}
 		})
 	}
@@ -706,22 +715,22 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
 	}
 
-	// Connect with a violation score above ban score.
+	// Connect with a raw score <= 0.
 	wantScore := setViolations()
 	defer clearViolations()
 
-	if wantScore < int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not at least the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	if wantScore > 0 {
+		t.Fatalf("test score of %v is not at least less than zero (baseline = %d), revise the test", wantScore, rig.mgr.baselineScore)
 	}
 
 	// Test loadUserScore while here.
-	score, err := rig.mgr.loadUserScore(user.acctID)
+	rep, err := rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore := rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// No error, but Penalize account that was not previously closed.
@@ -733,16 +742,17 @@ func TestConnect(t *testing.T) {
 
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
-	wantScore -= noSwapAsTakerScore
-	if wantScore >= int32(rig.mgr.banScore) {
-		t.Fatalf("test score of %v is not less than the ban score of %v, revise the test", wantScore, rig.mgr.banScore)
+	wantScore -= reputation.NoSwapAsTakerScore
+	if wantScore <= 0 {
+		t.Fatalf("test score of %v is > 0, revise the test", wantScore)
 	}
-	score, err = rig.mgr.loadUserScore(user.acctID)
+	rep, err = rig.mgr.loadUserReputation(user.acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if score != wantScore {
-		t.Errorf("wrong score. got %d, want %d", score, wantScore)
+	rawScore = rep.RawScore()
+	if rawScore != wantScore {
+		t.Errorf("wrong score. got %d, want %d", rawScore, wantScore)
 	}
 
 	// Connect the user.
