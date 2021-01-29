@@ -172,7 +172,7 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
-	// TODO: handle methodGetBlockHash, methodGetRawMempool  and add actual tests
+	// TODO: handle methodGetBlockHash, methodGetRawMempool and add actual tests
 	// to cover them.
 	case methodEstimateSmartFee:
 		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024

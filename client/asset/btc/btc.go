@@ -40,6 +40,7 @@ const (
 	methodGetBlockVerboseTx = "getblock"
 	methodGetNetworkInfo    = "getnetworkinfo"
 	methodGetBlockchainInfo = "getblockchaininfo"
+	methodSendRawTx         = "sendrawtransaction"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
 
@@ -173,6 +174,9 @@ type BTCCloneCFG struct {
 	// If segwit is false, legacy addresses and contracts will be used. This
 	// setting must match the configuration of the server's asset backend.
 	Segwit bool
+	// LegacyRawFeeLimit can be true if the RPC only supports the boolean
+	// allowHighFees argument to the sendrawtransaction RPC.
+	LegacyRawFeeLimit bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -357,6 +361,7 @@ type ExchangeWallet struct {
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
+	legacyRawFeeLimit bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -521,6 +526,7 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
+		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
 		walletInfo:          cfg.WalletInfo,
 	}, nil
 }
@@ -1409,7 +1415,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 
 	// Send the transaction.
 	checkHash := msgTx.TxHash()
-	txHash, err := btc.wallet.SendRawTransaction(msgTx, false)
+	txHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1965,9 +1971,9 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 	// Send it.
 	checkHash := msgTx.TxHash()
-	refundHash, err := btc.wallet.SendRawTransaction(msgTx, false)
+	refundHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
-		return nil, fmt.Errorf("SendRawTransaction: %w", err)
+		return nil, fmt.Errorf("sendRawTransaction: %w", err)
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
@@ -2034,6 +2040,28 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 		}
 	}
 	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
+}
+
+func (btc *ExchangeWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+	if btc.legacyRawFeeLimit {
+		return btc.wallet.SendRawTransaction(tx, false)
+	}
+	b, err := serializeMsgTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	var txid string
+	err = btc.wallet.call(methodSendRawTx,
+		anylist{hex.EncodeToString(b), float64(btc.feeRateLimit) * 1e-5}, &txid)
+	if err != nil {
+		return nil, err
+	}
+	if err != nil {
+		btc.log.Errorf("Error unmarshaling hash returned from sendrawtransaction."+
+			" Expected hash %s: %v", tx.TxHash(), err)
+		txid = tx.TxHash().String()
+	}
+	return chainhash.NewHashFromStr(txid)
 }
 
 // Confirmations gets the number of confirmations for the specified coin ID by
@@ -2293,7 +2321,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
 		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
-	txHash, err := btc.wallet.SendRawTransaction(msgTx, false)
+	txHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
 		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}
