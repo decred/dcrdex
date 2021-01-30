@@ -26,7 +26,7 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
-var version = semver{major: 0, minor: 1, patch: 4}
+var version = semver{major: 0, minor: 1, patch: 5}
 
 // semver holds dexcctl's semver values.
 type semver struct {
