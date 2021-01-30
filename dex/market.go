@@ -91,3 +91,8 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64,
 		BookedLotLimit:         math.MaxUint32,
 	}, nil
 }
+
+// String returns the market's Name.
+func (mi *MarketInfo) String() string {
+	return mi.Name
+}

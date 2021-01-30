@@ -55,6 +55,10 @@ type sqlExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 }
 
+type sqlQueryer interface {
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+}
+
 // sqlExec executes the SQL statement string with any optional arguments, and
 // returns the number of rows affected.
 func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
@@ -88,7 +92,7 @@ func sqlExecStmt(stmt *sql.Stmt, args ...interface{}) (int64, error) {
 }
 
 // namespacedTableExists checks if the specified table exists.
-func namespacedTableExists(db *sql.DB, schema, tableName string) (bool, error) {
+func namespacedTableExists(db sqlQueryer, schema, tableName string) (bool, error) {
 	rows, err := db.Query(`SELECT 1
 		FROM   pg_tables
 		WHERE  schemaname = $1
@@ -103,7 +107,7 @@ func namespacedTableExists(db *sql.DB, schema, tableName string) (bool, error) {
 }
 
 // tableExists checks if the specified table exists.
-func tableExists(db *sql.DB, tableName string) (bool, error) {
+func tableExists(db sqlQueryer, tableName string) (bool, error) {
 	rows, err := db.Query(`select relname from pg_class where relname = $1`,
 		tableName)
 	if err != nil {
@@ -114,8 +118,21 @@ func tableExists(db *sql.DB, tableName string) (bool, error) {
 	return rows.Next(), rows.Err()
 }
 
+func columnExists(db *sql.DB, schema, table, col string) (bool, error) {
+	var found bool
+	err := db.QueryRow(`SELECT EXISTS (
+			SELECT column_name
+			FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = $2 AND column_name = $3
+		);`, schema, table, col).Scan(&found)
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
 // schemaExists checks if the specified schema exists.
-func schemaExists(db *sql.DB, tableName string) (bool, error) {
+func schemaExists(db sqlQueryer, tableName string) (bool, error) {
 	rows, err := db.Query(`select 1 from pg_catalog.pg_namespace where nspname = $1`,
 		tableName)
 	if err != nil {
@@ -126,9 +143,14 @@ func schemaExists(db *sql.DB, tableName string) (bool, error) {
 	return rows.Next(), rows.Err()
 }
 
-// createTable creates a table with the given name using the provided SQL
+type sqlQueryExecutor interface {
+	sqlQueryer
+	sqlExecutor
+}
+
+// createTableStmt creates a table with the given name using the provided SQL
 // statement, if it does not already exist.
-func createTable(db *sql.DB, fmtStmt, schema, tableName string) (bool, error) {
+func createTableStmt(db sqlQueryExecutor, fmtStmt, schema, tableName string) (bool, error) {
 	exists, err := namespacedTableExists(db, schema, tableName)
 	if err != nil {
 		return false, err
@@ -138,14 +160,12 @@ func createTable(db *sql.DB, fmtStmt, schema, tableName string) (bool, error) {
 	var created bool
 	if !exists {
 		stmt := fmt.Sprintf(fmtStmt, nameSpacedTable)
-		log.Tracef(`Creating the "%s" table.`, nameSpacedTable)
+		log.Debugf("Creating the %q table.", nameSpacedTable)
 		_, err = db.Exec(stmt)
 		if err != nil {
 			return false, err
 		}
 		created = true
-	} else {
-		log.Tracef(`Table "%s" exists.`, nameSpacedTable)
 	}
 
 	return created, nil
@@ -445,15 +465,12 @@ func createSchema(db *sql.DB, schema string) (bool, error) {
 
 	var created bool
 	if !exists {
-		log.Tracef(`Creating schema "%s".`, schema)
 		stmt := fmt.Sprintf(internal.CreateSchema, schema)
 		_, err = db.Exec(stmt)
 		if err != nil {
 			return false, err
 		}
 		created = true
-	} else {
-		log.Tracef(`Schema "%s" exists.`, schema)
 	}
 
 	return created, err

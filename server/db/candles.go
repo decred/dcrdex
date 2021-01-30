@@ -25,7 +25,7 @@ type Candle struct {
 }
 
 // CandleCache is a sized cache of candles. CandleCache provides methods for
-// adding to the cache and reading cache data out. CancleCache is a typical
+// adding to the cache and reading cache data out. CandleCache is a typical
 // slice until it reaches capacity, when it becomes a "circular array" to avoid
 // re-allocations.
 type CandleCache struct {
@@ -125,7 +125,6 @@ func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
 		return 0, vol
 	}
 	return (float64(endRate) - float64(startRate)) / float64(startRate), vol
-
 }
 
 // last gets the most recent candle in the cache.
