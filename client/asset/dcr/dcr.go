@@ -34,6 +34,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/gcs/v3"
+	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/txscript/v4"
@@ -63,6 +65,7 @@ const (
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
 	// RawRequest RPC methods
+	methodGetCFilterV2       = "getcfilterv2"
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
@@ -439,7 +442,7 @@ type block struct {
 // key.
 type findRedemptionReq struct {
 	ctx                     context.Context
-	contractHash            []byte
+	contractP2SHScript      []byte
 	contractOutputScriptVer uint16
 	resultChan              chan *findRedemptionResult
 }
@@ -1745,7 +1748,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		dcr.tipMtx.RLock()
 		bestBlock := dcr.currentTip
 		dcr.tipMtx.RUnlock()
-		dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOutpoint})
+		dcr.findRedemptionsInBlockRange(contractBlock.height, bestBlock.height, []outPoint{contractOutpoint})
 	}
 
 	// Wait for a find redemption result or context cancellation.
@@ -1806,8 +1809,8 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 	if int(vout) > len(msgTx.TxOut)-1 {
 		return nil, nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 	}
-	contractHash := dexdcr.ExtractScriptHash(msgTx.TxOut[vout].PkScript)
-	if contractHash == nil {
+	contractP2shScript := msgTx.TxOut[vout].PkScript
+	if !dexdcr.IsScriptHashScript(contractP2shScript) {
 		return nil, nil, fmt.Errorf("coin %s not a valid contract", contractOutpoint.String())
 	}
 	var contractBlock *block
@@ -1827,7 +1830,7 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 	resultChan := make(chan *findRedemptionResult, 1)
 	dcr.findRedemptionQueue[contractOutpoint] = &findRedemptionReq{
 		ctx:                     ctx,
-		contractHash:            contractHash,
+		contractP2SHScript:      contractP2shScript,
 		contractOutputScriptVer: msgTx.TxOut[vout].Version,
 		resultChan:              resultChan,
 	}
@@ -1882,67 +1885,100 @@ func (dcr *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint
 }
 
 // findRedemptionsInBlockRange attempts to find spending info for the specified
-// contracts by searching every input of all txs in the provided block range.
+// contracts by checking the cfilters of each block in the provided range for
+// likely inclusion of ANY of the specified contracts' P2SH script. If a block's
+// cfilters reports possible inclusion of ANY of the contracts' P2SH script,
+// all inputs of the matching block's txs are checked to determine if any of the
+// inputs spends any of the provided contracts.
 // If spending info is found for any contract, the contract is purged from the
 // findRedemptionQueue and the contract's secret (if successfully parsed) or any
 // error that occurs during parsing is returned to the redemption finder via the
 // registered result chan.
-// Also checks mempool for potential redemptions if spending info is not found
-// for any of these contracts in the specified block range.
-// TODO: Improve redemption search in mined blocks by scanning block filters
-// rather than every input of every tx in a block.
-func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlock, endBlock *block, contractOutpoints []outPoint) {
-	contractsCount := len(contractOutpoints)
+// If spending info is not found for any of these contracts after checking the
+// specified block range, a mempool search is triggered to attempt finding unmined
+// redemptions for the remaining contracts.
+// NOTE:
+// Any error encountered while checking a block's cfilters or fetching a matching
+// block's txs compromises the redemption search for this set of contracts because
+// subsequent attempts to find these contracts' redemption will not repeat any
+// block in the specified range unless the contracts are first removed from the
+// findRedemptionQueue. Thus, any such error will cause this set of contracts to
+// be purged from the findRedemptionQueue. The error will be propagated to the
+// redemption finder(s) and these may re-call dcr.FindRedemption to restart find
+// redemption attempts for any of these contracts.
+func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlockHeight, endBlockHeight int64, contractOutpoints []outPoint) {
+	totalContracts := len(contractOutpoints)
 	dcr.log.Debugf("finding redemptions for %d contracts in blocks %d - %d",
-		contractsCount, startBlock.height, endBlock.height)
+		totalContracts, startBlockHeight, endBlockHeight)
 
-	nextBlockHash := startBlock.hash
 	var lastScannedBlockHeight int64
 	var totalFound, totalCanceled int
 
 rangeBlocks:
-	for nextBlockHash != nil && lastScannedBlockHeight < endBlock.height {
-		blk, err := dcr.node.GetBlockVerbose(dcr.ctx, nextBlockHash, true)
-		if err != nil {
-			// Redemption search for this set of contracts is compromised. Notify
-			// the redemption finder(s) of this fatal error and cancel redemption
-			// search for these contracts. The redemption finder(s) may re-call
-			// dcr.FindRedemption to restart find redemption attempts for any of
-			// these contracts.
-			err = fmt.Errorf("error fetching verbose block %s: %w", nextBlockHash, translateRPCCancelErr(err))
+	for blockHeight := startBlockHeight; blockHeight <= endBlockHeight; blockHeight++ {
+		// Get the hash for this block.
+		blockHash, err := dcr.node.GetBlockHash(dcr.ctx, blockHeight)
+		if err != nil { // unable to get block hash is a fatal error
+			err = fmt.Errorf("unable to get hash for block %d: %w", blockHeight, translateRPCCancelErr(err))
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
-		scanPoint := fmt.Sprintf("block %d", blk.Height)
-		lastScannedBlockHeight = blk.Height
+
+		// Combine the p2sh scripts for all contracts (excluding contracts whose redemption
+		// have been found) to check against this block's cfilters.
+		dcr.findRedemptionMtx.RLock()
+		contractP2SHScripts := make([][]byte, 0)
+		for _, contractOutpoint := range contractOutpoints {
+			if req, stillInQueue := dcr.findRedemptionQueue[contractOutpoint]; stillInQueue {
+				contractP2SHScripts = append(contractP2SHScripts, req.contractP2SHScript)
+			}
+		}
+		dcr.findRedemptionMtx.RUnlock()
+
+		// Check if any of the above p2sh scripts is possibly included in this block.
+		hit, err := dcr.blockMaybeContainsScripts(blockHash.String(), contractP2SHScripts)
+		if err != nil { // error checking a block's cfilters is a fatal error
+			err = fmt.Errorf("error checking cfilters for block %d (%s) for likely contract inclusion: %w",
+				blockHeight, blockHash, translateRPCCancelErr(err))
+			dcr.fatalFindRedemptionsError(err, contractOutpoints)
+			return
+		}
+		if !hit {
+			lastScannedBlockHeight = blockHeight
+			continue // block does not reference any of these contracts, continue to next block
+		}
+
+		// Pull the block info to confirm if any of its inputs spends a contract of interest.
+		// TODO: We don't really need getblock with either verbose=true or verboseTx=true
+		// since with a block's bytes we could deserialize and work on the MsgTxs.
+		blk, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, true)
+		if err != nil { // error pulling a matching block's transactions is a fatal error
+			err = fmt.Errorf("error retrieving transactions for block %d (%s): %w",
+				blockHeight, blockHash, translateRPCCancelErr(err))
+			dcr.fatalFindRedemptionsError(err, contractOutpoints)
+			return
+		}
+
+		lastScannedBlockHeight = blockHeight
+		scanPoint := fmt.Sprintf("block %d", blockHeight)
 		blkTxs := append(blk.RawTx, blk.RawSTx...)
 		for t := range blkTxs {
 			tx := &blkTxs[t]
 			found, canceled := dcr.findRedemptionsInTx(scanPoint, tx, contractOutpoints)
 			totalFound += found
 			totalCanceled += canceled
-			if totalFound+totalCanceled == contractsCount {
+			if totalFound+totalCanceled == totalContracts {
 				break rangeBlocks
-			}
-		}
-		if blk.NextHash == "" {
-			nextBlockHash = nil
-		} else {
-			nextBlockHash, err = chainhash.NewHashFromStr(blk.NextHash)
-			if err != nil {
-				err = fmt.Errorf("hash decode error %s: %w", blk.NextHash, err)
-				dcr.fatalFindRedemptionsError(err, contractOutpoints)
-				return
 			}
 		}
 	}
 
-	dcr.log.Debugf("%d redemptions found, %d canceled out of %d contracts in blocks %d - %d",
-		totalFound, totalCanceled, contractsCount, startBlock.height, lastScannedBlockHeight)
+	dcr.log.Debugf("%d redemptions found, %d canceled out of %d contracts in blocks %d to %d",
+		totalFound, totalCanceled, totalContracts, startBlockHeight, lastScannedBlockHeight)
 
 	// Search for redemptions in mempool if there are yet unredeemed
 	// contracts after searching this block range.
-	pendingContractsCount := contractsCount - totalFound - totalCanceled
+	pendingContractsCount := totalContracts - totalFound - totalCanceled
 	if pendingContractsCount > 0 {
 		dcr.findRedemptionMtx.RLock()
 		pendingContracts := make([]outPoint, 0, pendingContractsCount)
@@ -2003,7 +2039,7 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 			}
 			found++
 
-			redeemTxHash, secret, err := extractSecret(i, req.contractHash, req.contractOutputScriptVer)
+			redeemTxHash, secret, err := extractSecret(i, dexdcr.ExtractScriptHash(req.contractP2SHScript), req.contractOutputScriptVer)
 			if err != nil {
 				dcr.log.Errorf("Error parsing contract secret for %s from tx input %s:%d in %s: %v",
 					contractOutpoint.String(), tx.Txid, i, scanPoint, err)
@@ -2046,6 +2082,33 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 		delete(dcr.findRedemptionQueue, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.Unlock()
+}
+
+// blockMaybeContainsScripts uses the cfilters of the specified block to
+// determine if the block likely includes any of the passed scripts.
+func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [][]byte) (bool, error) {
+	var cfRes walletjson.GetCFilterV2Result
+	err := dcr.nodeRawRequest(methodGetCFilterV2, anylist{blockHash}, &cfRes)
+	if err != nil {
+		return false, err
+	}
+
+	filterB, err := hex.DecodeString(cfRes.Filter)
+	if err != nil {
+		return false, err
+	}
+	keyB, err := hex.DecodeString(cfRes.Key)
+	if err != nil {
+		return false, err
+	}
+
+	filter, err := gcs.FromBytesV2(blockcf2.B, blockcf2.M, filterB)
+	if err != nil {
+		return false, err
+	}
+	var bcf2Key [gcs.KeySize]byte
+	copy(bcf2Key[:], keyB)
+	return filter.MatchAny(bcf2Key, scripts), nil
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -2862,7 +2925,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	if startPointErr != nil {
 		dcr.fatalFindRedemptionsError(fmt.Errorf("new blocks handler error: %w", startPointErr), contractOutpoints)
 	} else {
-		go dcr.findRedemptionsInBlockRange(startPoint, newTip, contractOutpoints)
+		go dcr.findRedemptionsInBlockRange(startPoint.height, newTip.height, contractOutpoints)
 	}
 }
 

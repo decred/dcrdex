@@ -19,6 +19,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0
 	github.com/decred/dcrd/dcrjson/v3 v3.1.1-0.20210715032435-c9521b468f95
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210715032435-c9521b468f95
+	github.com/decred/dcrd/gcs/v3 v3.0.0-20210715032435-c9521b468f95
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95
 	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210715032435-c9521b468f95
 	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210715032435-c9521b468f95

@@ -166,8 +166,9 @@ github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210525214639-70483c835b7f/go.mod h1:1
 github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210715032435-c9521b468f95 h1:x4DUbIq6wDfmX2M0EamuoOOpjGBEoUNWXEb/v8l5Es0=
 github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210715032435-c9521b468f95/go.mod h1:16XDlrGxq3sQd9YwzydmZUA/ojnP0MTJiYRt/7cpjrE=
 github.com/decred/dcrd/gcs/v3 v3.0.0-20210129195202-a4265d63b619/go.mod h1:aGuAajYbDJB2oal17G371wiosGgVCc5d5FlT2EwZtoE=
-github.com/decred/dcrd/gcs/v3 v3.0.0-20210525214639-70483c835b7f h1:9et+p3oBEY12xcuGWnnGl30KISgm2EyF1djBrB2mYuI=
 github.com/decred/dcrd/gcs/v3 v3.0.0-20210525214639-70483c835b7f/go.mod h1:LFTyj3BaDsYioc/4QVUY5Wfkk+JjTu9MQB8Q6U9sC4I=
+github.com/decred/dcrd/gcs/v3 v3.0.0-20210715032435-c9521b468f95 h1:9Aa61bmQ62hovsBsA/gJvnZEfeygxf6rYXYFMDCLYr0=
+github.com/decred/dcrd/gcs/v3 v3.0.0-20210715032435-c9521b468f95/go.mod h1:LFTyj3BaDsYioc/4QVUY5Wfkk+JjTu9MQB8Q6U9sC4I=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210525214639-70483c835b7f/go.mod h1:A9Aqp4kStmkAwbZeuIlS1hZjTeDkxgVXSg+nSo4FJCs=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95 h1:1RQbVRX/Si9OB2zb8VkB9bL40BVow+hQAjgsu8LNPRY=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95/go.mod h1:A9Aqp4kStmkAwbZeuIlS1hZjTeDkxgVXSg+nSo4FJCs=
