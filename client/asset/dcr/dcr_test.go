@@ -27,6 +27,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/gcs/v3"
+	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -74,12 +76,13 @@ func makeGetTxOutRes(confs, lots int64, pkScript []byte) *chainjson.GetTxOutResu
 	}
 }
 
-func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) *chainjson.TxRawResult {
+func makeRawTx(blockHeight int64, txid string, inputs []chainjson.Vin, outputScripts []dex.Bytes) *chainjson.TxRawResult {
 	tx := &chainjson.TxRawResult{
-		Txid: txid,
-		Vin:  inputs,
+		Txid:        txid,
+		Vin:         inputs,
+		BlockHeight: blockHeight,
 	}
-	for _, pkScript := range pkScripts {
+	for _, pkScript := range outputScripts {
 		tx.Vout = append(tx.Vout, chainjson.Vout{
 			ScriptPubKey: chainjson.ScriptPubKeyResult{
 				Hex: hex.EncodeToString(pkScript),
@@ -89,7 +92,7 @@ func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) *chai
 	return tx
 }
 
-func makeTxHex(pkScripts []dex.Bytes, inputs []chainjson.Vin) (string, error) {
+func makeTxHex(inputs []chainjson.Vin, pkScripts []dex.Bytes) (string, error) {
 	msgTx := wire.NewMsgTx()
 	for _, input := range inputs {
 		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
@@ -179,47 +182,122 @@ func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
 }
 
 type tRPCClient struct {
-	sendRawHash              *chainhash.Hash
-	sendRawErr               error
-	sentRawTx                *wire.MsgTx
-	txOutRes                 map[outPoint]*chainjson.GetTxOutResult
-	txOutErr                 error
-	bestBlockErr             error
-	mempool                  []*chainhash.Hash
-	mempoolErr               error
-	rawTx                    *chainjson.TxRawResult
-	rawTxErr                 error
-	unspent                  []walletjson.ListUnspentResult
-	unspentErr               error
-	balanceResult            *walletjson.GetBalanceResult
-	balanceErr               error
-	lockUnspentErr           error
-	changeAddr               stdaddr.Address
-	changeAddrErr            error
-	newAddr                  stdaddr.Address
-	newAddrErr               error
-	signFunc                 func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
-	privWIF                  *dcrutil.WIF
-	privWIFErr               error
-	walletTx                 *walletjson.GetTransactionResult
-	walletTxErr              error
-	lockErr                  error
-	passErr                  error
-	disconnected             bool
-	rawRes                   map[string]json.RawMessage
-	rawErr                   map[string]error
-	blockchainMtx            sync.RWMutex
-	verboseBlocks            map[string]*chainjson.GetBlockVerboseResult
-	getBlockVerboseErr       error
-	verboseBlockHeaders      map[string]*chainjson.GetBlockHeaderVerboseResult
-	getBlockHeaderVerboseErr error
-	mainchain                map[int64]*chainhash.Hash
-	lluCoins                 []walletjson.ListUnspentResult // Returned from ListLockUnspent
-	lockedCoins              []*wire.OutPoint               // Last submitted to LockUnspent
-	listLockedErr            error
-	blockchainInfo           *chainjson.GetBlockChainInfoResult
-	blockchainInfoErr        error
-	estFeeErr                error
+	sendRawHash       *chainhash.Hash
+	sendRawErr        error
+	sentRawTx         *wire.MsgTx
+	txOutRes          map[outPoint]*chainjson.GetTxOutResult
+	txOutErr          error
+	bestBlockErr      error
+	mempoolErr        error
+	rawTxErr          error
+	unspent           []walletjson.ListUnspentResult
+	unspentErr        error
+	balanceResult     *walletjson.GetBalanceResult
+	balanceErr        error
+	lockUnspentErr    error
+	changeAddr        stdaddr.Address
+	changeAddrErr     error
+	newAddr           stdaddr.Address
+	newAddrErr        error
+	signFunc          func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
+	privWIF           *dcrutil.WIF
+	privWIFErr        error
+	walletTx          *walletjson.GetTransactionResult
+	walletTxErr       error
+	lockErr           error
+	passErr           error
+	disconnected      bool
+	rawRes            map[string]json.RawMessage
+	rawErr            map[string]error
+	blockchain        *tBlockchain
+	lluCoins          []walletjson.ListUnspentResult // Returned from ListLockUnspent
+	lockedCoins       []*wire.OutPoint               // Last submitted to LockUnspent
+	listLockedErr     error
+	blockchainInfo    *chainjson.GetBlockChainInfoResult
+	blockchainInfoErr error
+	estFeeErr         error
+}
+
+type tBlockchain struct {
+	mtx                 sync.RWMutex
+	rawTxs              map[string]*chainjson.TxRawResult
+	mainchain           map[int64]*chainhash.Hash
+	verboseBlocks       map[string]*chainjson.GetBlockVerboseResult
+	verboseBlockHeaders map[string]*chainjson.GetBlockHeaderVerboseResult
+	v2CFilterBuilders   map[string]*tV2CFilterBuilder
+}
+
+func (blockchain *tBlockchain) addRawTx(tx *chainjson.TxRawResult) (*chainhash.Hash, *chainjson.GetBlockVerboseResult) {
+	blockchain.mtx.Lock()
+	defer blockchain.mtx.Unlock()
+
+	blockchain.rawTxs[tx.Txid] = tx
+	if tx.BlockHeight < 0 {
+		return nil, nil
+	}
+
+	// Mined tx. Add to block.
+	blkHash, block := blockchain.blockAt(tx.BlockHeight)
+	block.RawTx = append(block.RawTx, *tx)
+
+	// Save prevout and output scripts in block cfilters.
+	blockFilterBuilder := blockchain.v2CFilterBuilders[block.Hash]
+	if blockFilterBuilder == nil {
+		blockFilterBuilder = &tV2CFilterBuilder{}
+		copy(blockFilterBuilder.key[:], randBytes(16))
+		blockchain.v2CFilterBuilders[block.Hash] = blockFilterBuilder
+	}
+	for i := range tx.Vin {
+		input := &tx.Vin[i]
+		prevTx, found := blockchain.rawTxs[input.Txid]
+		if !found || len(prevTx.Vout) <= int(input.Vout) {
+			continue
+		}
+		prevOutScript, _ := hex.DecodeString(prevTx.Vout[input.Vout].ScriptPubKey.Hex)
+		if input.IsStakeBase() {
+			blockFilterBuilder.data.AddStakePkScript(prevOutScript)
+		} else {
+			blockFilterBuilder.data.AddRegularPkScript(prevOutScript)
+		}
+	}
+	for o := range tx.Vout {
+		pkScript, _ := hex.DecodeString(tx.Vout[o].ScriptPubKey.Hex)
+		blockFilterBuilder.data.AddRegularPkScript(pkScript)
+	}
+
+	return blkHash, block
+}
+
+// blockchain.mtx lock should be held for writes.
+func (blockchain *tBlockchain) blockAt(height int64) (*chainhash.Hash, *chainjson.GetBlockVerboseResult) {
+	blkHash, found := blockchain.mainchain[height]
+	if found {
+		return blkHash, blockchain.verboseBlocks[blkHash.String()]
+	}
+
+	prevBlockHash := blockchain.mainchain[height-1].String()
+	var newBlockHash chainhash.Hash
+	copy(newBlockHash[:], randBytes(32))
+	newBlock := &chainjson.GetBlockVerboseResult{
+		Height:       height,
+		Hash:         newBlockHash.String(),
+		PreviousHash: prevBlockHash,
+	}
+
+	blockchain.mainchain[height] = &newBlockHash
+	blockchain.verboseBlocks[newBlock.Hash] = newBlock
+	blockchain.verboseBlocks[prevBlockHash].NextHash = newBlock.Hash
+
+	return &newBlockHash, newBlock
+}
+
+type tV2CFilterBuilder struct {
+	data blockcf2.Entries
+	key  [gcs.KeySize]byte
+}
+
+func (filterBuilder *tV2CFilterBuilder) build() (*gcs.FilterV2, error) {
+	return gcs.NewFilterV2(blockcf2.B, blockcf2.M, filterBuilder.key, filterBuilder.data)
 }
 
 func defaultSignFunc(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil }
@@ -230,14 +308,18 @@ func newTRPCClient() *tRPCClient {
 	copy(newHash[:], randBytes(32))
 	return &tRPCClient{
 		txOutRes: make(map[outPoint]*chainjson.GetTxOutResult),
-		verboseBlocks: map[string]*chainjson.GetBlockVerboseResult{
-			newHash.String(): {},
-		},
-		verboseBlockHeaders: map[string]*chainjson.GetBlockHeaderVerboseResult{
-			newHash.String(): {},
-		},
-		mainchain: map[int64]*chainhash.Hash{
-			0: &newHash,
+		blockchain: &tBlockchain{
+			rawTxs: map[string]*chainjson.TxRawResult{},
+			mainchain: map[int64]*chainhash.Hash{
+				0: &newHash,
+			},
+			verboseBlocks: map[string]*chainjson.GetBlockVerboseResult{
+				newHash.String(): {},
+			},
+			verboseBlockHeaders: map[string]*chainjson.GetBlockHeaderVerboseResult{
+				newHash.String(): {},
+			},
+			v2CFilterBuilders: map[string]*tV2CFilterBuilder{},
 		},
 		signFunc: defaultSignFunc,
 		rawRes:   make(map[string]json.RawMessage),
@@ -275,23 +357,28 @@ func (c *tRPCClient) GetBestBlock(_ context.Context) (*chainhash.Hash, int64, er
 	if c.bestBlockErr != nil {
 		return nil, -1, c.bestBlockErr
 	}
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
+	bestHash, bestBlkHeight := c.getBestBlock()
+	return bestHash, bestBlkHeight, nil
+}
+
+func (c *tRPCClient) getBestBlock() (*chainhash.Hash, int64) {
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
 	var bestHash *chainhash.Hash
 	var bestBlkHeight int64
-	for height, hash := range c.mainchain {
+	for height, hash := range c.blockchain.mainchain {
 		if height >= bestBlkHeight {
 			bestBlkHeight = height
 			bestHash = hash
 		}
 	}
-	return bestHash, bestBlkHeight, nil
+	return bestHash, bestBlkHeight
 }
 
 func (c *tRPCClient) GetBlockHash(_ context.Context, blockHeight int64) (*chainhash.Hash, error) {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	h, found := c.mainchain[blockHeight]
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
+	h, found := c.blockchain.mainchain[blockHeight]
 	if !found {
 		return nil, fmt.Errorf("no test block at height %d", blockHeight)
 	}
@@ -299,63 +386,72 @@ func (c *tRPCClient) GetBlockHash(_ context.Context, blockHeight int64) (*chainh
 }
 
 func (c *tRPCClient) GetBlockVerbose(_ context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
-	if c.getBlockVerboseErr != nil {
-		return nil, c.getBlockVerboseErr
-	}
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	blk, found := c.verboseBlocks[blockHash.String()]
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
+	blk, found := c.blockchain.verboseBlocks[blockHash.String()]
 	if !found {
 		return nil, fmt.Errorf("no test block found for %s", blockHash)
 	}
-	return blk, nil
+	blkCopy := *blk
+	if !verboseTx {
+		txIDs := make([]string, len(blkCopy.RawTx))
+		for i := range blkCopy.RawTx {
+			txIDs[i] = blkCopy.RawTx[i].Txid
+		}
+		blkCopy.Tx = txIDs
+		blkCopy.RawTx = blkCopy.RawTx[:0]
+
+		stxIDs := make([]string, len(blkCopy.RawSTx))
+		for i := range blkCopy.RawSTx {
+			stxIDs[i] = blkCopy.RawSTx[i].Txid
+		}
+		blkCopy.STx = stxIDs
+		blkCopy.RawSTx = blkCopy.RawSTx[:0]
+	}
+	return &blkCopy, nil
 }
 
 func (c *tRPCClient) GetBlockHeaderVerbose(_ context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error) {
-	if c.getBlockHeaderVerboseErr != nil {
-		return nil, c.getBlockHeaderVerboseErr
-	}
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	blk, found := c.verboseBlockHeaders[blockHash.String()]
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
+	blkHeader, found := c.blockchain.verboseBlockHeaders[blockHash.String()]
 	if !found {
 		return nil, fmt.Errorf("no test block header found for %s", blockHash)
 	}
-	return blk, nil
+	return blkHeader, nil
 }
 
 func (c *tRPCClient) GetRawMempool(_ context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
-	return c.mempool, c.mempoolErr
+	if c.mempoolErr != nil {
+		return nil, c.mempoolErr
+	}
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
+	txHashes := make([]*chainhash.Hash, 0)
+	for _, tx := range c.blockchain.rawTxs {
+		if tx.BlockHeight < 0 {
+			txHash, _ := chainhash.NewHashFromStr(tx.Txid)
+			txHashes = append(txHashes, txHash)
+		}
+	}
+	return txHashes, nil
 }
 
 func (c *tRPCClient) GetRawTransactionVerbose(_ context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
-	return c.rawTx, c.rawTxErr
-}
-
-func (c *tRPCClient) addRawTx(blockHeight int64, tx *chainjson.TxRawResult) (*chainhash.Hash, *chainjson.GetBlockVerboseResult) {
-	c.blockchainMtx.Lock()
-	defer c.blockchainMtx.Unlock()
-	blkHash, found := c.mainchain[blockHeight]
-	if !found {
-		var newHash chainhash.Hash
-		copy(newHash[:], randBytes(32))
-		blkHash = &newHash
-		prevBlockHash := c.mainchain[blockHeight-1]
-		// Modifying c.verboseBlocks[prevBlockHash.String()].NextHash causes
-		// race errors.
-		prevBlock := *c.verboseBlocks[prevBlockHash.String()]
-		prevBlock.NextHash = blkHash.String()
-		c.verboseBlocks[prevBlockHash.String()] = &prevBlock
-		c.verboseBlocks[newHash.String()] = &chainjson.GetBlockVerboseResult{
-			Height:       blockHeight,
-			Hash:         blkHash.String(),
-			PreviousHash: prevBlockHash.String(),
-		}
-		c.mainchain[blockHeight] = blkHash
+	if c.rawTxErr != nil {
+		return nil, c.rawTxErr
 	}
-	block := c.verboseBlocks[blkHash.String()]
-	block.RawTx = append(block.RawTx, *tx)
-	return blkHash, block
+	tx, found := c.blockchain.rawTxs[txHash.String()]
+	if !found {
+		return nil, fmt.Errorf("no text transaction %s", txHash)
+	}
+	if tx.BlockHeight < 0 {
+		tx.Confirmations = -1
+	} else {
+		_, bestBlockHeight := c.getBestBlock()
+		tx.Confirmations = bestBlockHeight - tx.BlockHeight + 1
+	}
+	return tx, nil
 }
 
 func (c *tRPCClient) GetBalanceMinConf(_ context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
@@ -417,7 +513,42 @@ func (c *tRPCClient) Disconnected() bool {
 }
 
 func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
+	if rr, found := c.rawRes[method]; found {
+		return rr, c.rawErr[method] // err probably should be nil, but respect the config
+	}
+	if re, found := c.rawErr[method]; found {
+		return nil, re
+	}
+
 	switch method {
+	case methodGetCFilterV2:
+		if len(params) != 1 {
+			return nil, fmt.Errorf("getcfilterv2 requires 1 param, got %d", len(params))
+		}
+
+		var blkHash string
+		err := json.Unmarshal(params[0], &blkHash)
+		if err != nil {
+			return nil, err
+		}
+
+		c.blockchain.mtx.RLock()
+		defer c.blockchain.mtx.RUnlock()
+		blockFilterBuilder := c.blockchain.v2CFilterBuilders[blkHash]
+		if blockFilterBuilder == nil {
+			return nil, fmt.Errorf("v2cfilter builder not found for block")
+		}
+		v2CFilter, err := blockFilterBuilder.build()
+		if err != nil {
+			return nil, err
+		}
+		res := &walletjson.GetCFilterV2Result{
+			BlockHash: blkHash,
+			Filter:    hex.EncodeToString(v2CFilter.Bytes()),
+			Key:       hex.EncodeToString(blockFilterBuilder.key[:]),
+		}
+		return json.Marshal(res)
+
 	case methodListUnspent:
 		if c.unspentErr != nil {
 			return nil, c.unspentErr
@@ -519,13 +650,6 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			Complete: complete,
 		}
 		return json.Marshal(&res)
-	}
-
-	if rr, found := c.rawRes[method]; found {
-		return rr, c.rawErr[method] // err probably should be nil, but respect the config
-	}
-	if re, found := c.rawErr[method]; found {
-		return nil, re
 	}
 
 	return nil, fmt.Errorf("method %v not implemented by (*tRPCClient).RawRequest", method)
@@ -1548,7 +1672,7 @@ func TestAuditContract(t *testing.T) {
 	}
 	contractHeight := bestBlockHeight + 1
 	inputs := []chainjson.Vin{makeRPCVin("feeddabeef", 0, nil)}
-	newBlockHash, _ := node.addRawTx(contractHeight, makeRawTx(tTxHash.String(), []dex.Bytes{nil, nil, pkScript /* vout 2 */}, inputs))
+	newBlockHash, _ := node.blockchain.addRawTx(makeRawTx(contractHeight, tTxHash.String(), inputs, []dex.Bytes{nil, nil, pkScript /* vout 2 */}))
 
 	txoutRes.BestBlock = newBlockHash.String() // with 1 conf and this best block hash, the tx is in this block
 
@@ -1627,22 +1751,23 @@ func TestFindRedemption(t *testing.T) {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 	contractAddr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
-	_, pkScript := contractAddr.PaymentScript()
+	_, contractP2SHScript := contractAddr.PaymentScript()
 
 	tPKHAddrV3, _ := stdaddr.DecodeAddress(tPKHAddr.String(), tChainParams)
 	_, otherScript := tPKHAddrV3.PaymentScript()
 
+	redeemTxid := "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
 	redemptionScript, _ := dexdcr.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
 	otherSpendScript, _ := txscript.NewScriptBuilder().
 		AddData(randBytes(73)).
 		AddData(randBytes(33)).
 		Script()
 
-	// Prepare the "blockchain"
+	// Prepare and add the contract transaction to the blockchain. Put the pay-to-contract script at index 1.
 	inputs := []chainjson.Vin{makeRPCVin(otherTxid, 0, otherSpendScript)}
-	// Add the contract transaction. Put the pay-to-contract script at index 1.
-	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
-	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
+	outputScripts := []dex.Bytes{otherScript, contractP2SHScript}
+	blockHash, _ := node.blockchain.addRawTx(makeRawTx(contractHeight, contractTxid, inputs, outputScripts))
+	txHex, err := makeTxHex(inputs, outputScripts)
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
 	}
@@ -1660,15 +1785,24 @@ func TestFindRedemption(t *testing.T) {
 	}
 
 	// Add an intermediate block for good measure.
-	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
+	node.blockchain.addRawTx(makeRawTx(contractHeight+1, otherTxid, inputs, []dex.Bytes{otherScript}))
 
-	// Now add the redemption.
+	// Prepare the redemption tx inputs including an input that spends the contract output.
 	inputs = append(inputs, makeRPCVin(contractTxid, contractVout, redemptionScript))
-	rawRedeem := makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs)
-	_, redeemBlock := node.addRawTx(contractHeight+2, rawRedeem)
 
-	// Check find redemption result.
+	// Add the redemption to mempool and check if wallet.FindRedemption finds it.
+	node.blockchain.addRawTx(makeRawTx(-1, redeemTxid, inputs, []dex.Bytes{otherScript}))
 	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	if err != nil {
+		t.Fatalf("error finding redemption: %v", err)
+	}
+	if !bytes.Equal(checkSecret, secret) {
+		t.Fatalf("wrong secret. expected %x, got %x", secret, checkSecret)
+	}
+
+	// Move the redemption to a new block and check if wallet.FindRedemption finds it.
+	_, redeemBlock := node.blockchain.addRawTx(makeRawTx(contractHeight+2, redeemTxid, inputs, []dex.Bytes{otherScript}))
+	_, checkSecret, err = wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -1683,6 +1817,14 @@ func TestFindRedemption(t *testing.T) {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
 	node.walletTxErr = nil
+
+	// getcfilterv2 error
+	node.rawErr[methodGetCFilterV2] = tErr
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for getcfilterv2 rpc error")
+	}
+	delete(node.rawErr, methodGetCFilterV2)
 
 	// missing redemption
 	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
@@ -1712,7 +1854,7 @@ func TestFindRedemption(t *testing.T) {
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 
 	// Wrong script type for output
-	node.walletTx.Hex, _ = makeTxHex([]dex.Bytes{otherScript, otherScript}, inputs)
+	node.walletTx.Hex, _ = makeTxHex(inputs, []dex.Bytes{otherScript, otherScript})
 	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong script type")
