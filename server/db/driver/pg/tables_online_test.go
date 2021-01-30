@@ -3,6 +3,7 @@
 package pg
 
 import (
+	"context"
 	"testing"
 
 	"decred.org/dcrdex/dex"
@@ -29,13 +30,14 @@ func TestPrepareTables(t *testing.T) {
 
 	// Create new tables and schemas.
 	markets := []*dex.MarketInfo{mktConfig}
-	err = PrepareTables(archie.db, markets)
+	err = prepareTables(context.Background(), archie.db, markets)
 	if err != nil {
 		t.Error(err)
 	}
 
-	// Cover the cases where the tables already exist (OK).
-	err = PrepareTables(archie.db, markets)
+	// Cover the cases where the tables already exist (OK). This hits the
+	// upgradeDB path, which returns early with current == dbVersion.
+	err = prepareTables(context.Background(), archie.db, markets)
 	if err != nil {
 		t.Error(err)
 	}
@@ -45,15 +47,15 @@ func TestPrepareTables(t *testing.T) {
 	func() {
 		defer func() {
 			if recover() == nil {
-				t.Error("PrepareTables should have paniced with lot size change.")
+				t.Error("prepareTables should have paniced with lot size change.")
 			}
 		}()
-		_ = PrepareTables(archie.db, []*dex.MarketInfo{mktConfig})
+		_ = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
 	}()
 
 	// Add a new market.
 	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, EpochDuration, MarketBuyBuffer)
-	err = PrepareTables(archie.db, []*dex.MarketInfo{mktConfig})
+	err = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
 	if err != nil {
 		t.Error(err)
 	}

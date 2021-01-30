@@ -59,6 +59,9 @@ const (
 		bRedeemTime INT8          -- server time stamp
 	)`
 
+	RetrieveMatchStatsByEpoch = `SELECT quantity, rate, takerSell FROM %s
+		WHERE takerSell IS NOT NULL AND epochIdx = $1 AND epochDur = $2;`
+
 	AddMatchesForgivenColumn = `ALTER TABLE %s
 		ADD COLUMN IF NOT EXISTS forgiven BOOL;`
 

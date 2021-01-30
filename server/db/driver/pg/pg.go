@@ -179,7 +179,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	// Ensure all tables required by the current market configuration are ready.
-	if err = PrepareTables(db, cfg.MarketCfg); err != nil {
+	if err = prepareTables(ctx, db, cfg.MarketCfg); err != nil {
 		return nil, err
 	}
 

@@ -176,7 +176,7 @@ out:
 // createAccountTables creates the accounts and fee_keys tables.
 func createAccountTables(db *sql.DB) error {
 	for _, c := range createAccountTableStatements {
-		created, err := CreateTable(db, publicSchema, c.name)
+		created, err := createTable(db, publicSchema, c.name)
 		if err != nil {
 			return err
 		}

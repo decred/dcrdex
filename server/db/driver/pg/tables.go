@@ -4,7 +4,9 @@
 package pg
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -55,14 +57,14 @@ var createMarketTableStatements = []tableStmt{
 var tableMap = func() map[string]string {
 	m := make(map[string]string, len(createDEXTableStatements)+
 		len(createMarketTableStatements)+len(createAccountTableStatements))
-	for _, pair := range createDEXTableStatements {
-		m[pair.name] = pair.stmt
+	for _, tbl := range createDEXTableStatements {
+		m[tbl.name] = tbl.stmt
 	}
-	for _, pair := range createMarketTableStatements {
-		m[pair.name] = pair.stmt
+	for _, tbl := range createMarketTableStatements {
+		m[tbl.name] = tbl.stmt
 	}
-	for _, pair := range createAccountTableStatements {
-		m[pair.name] = pair.stmt
+	for _, tbl := range createAccountTableStatements {
+		m[tbl.name] = tbl.stmt
 	}
 	return m
 }()
@@ -101,58 +103,71 @@ func fullEpochReportsTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + "." + epochReportsTableName
 }
 
-// CreateTable creates one of the known tables by name. The table will be
+// createTable creates one of the known tables by name. The table will be
 // created in the specified schema (schema.tableName). If schema is empty,
 // "public" is used.
-func CreateTable(db *sql.DB, schema, tableName string) (bool, error) {
+func createTable(db sqlQueryExecutor, schema, tableName string) (bool, error) {
 	createCommand, tableNameFound := tableMap[tableName]
 	if !tableNameFound {
-		return false, fmt.Errorf("table name %s unknown", tableName)
+		return false, fmt.Errorf("table name %q unknown", tableName)
 	}
 
 	if schema == "" {
 		schema = publicSchema
 	}
-	return createTable(db, createCommand, schema, tableName)
+	return createTableStmt(db, createCommand, schema, tableName)
 }
 
-// PrepareTables ensures that all tables required by the DEX market config,
-// mktConfig, are ready.
-func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
-	// Create the meta table in the public schema. (TODO with version).
-	// created, err := CreateTable(db, publicSchema, metaTableName)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to create meta table: %w", err)
-	// }
-	// if created {
-	// 	log.Trace("Creating new meta table.")
-	// 	_, err := db.Exec(internal.CreateMetaRow)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to create row for meta table")
-	// 	}
-	// }
-
-	// TODO: do something about the existing meta table (add version row if not
-	// exist and delete the swap state hash column).
-
+// prepareTables ensures that all tables required by the DEX market config,
+// mktConfig, are ready. This also runs any required DB scheme upgrades. The
+// Context allows safely canceling upgrades, which may be long running.
+func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo) error {
 	// Create the markets table in the public schema.
-	created, err := CreateTable(db, publicSchema, marketsTableName)
+	created, err := createTable(db, publicSchema, marketsTableName)
 	if err != nil {
 		return fmt.Errorf("failed to create markets table: %w", err)
 	}
-	if created {
-		log.Trace("Creating new markets table.")
+	if created { // Fresh install
+		// Create the meta table in the public schema.
+		created, err = createTable(db, publicSchema, metaTableName)
+		if err != nil {
+			return fmt.Errorf("failed to create meta table: %w", err)
+		}
+		if !created {
+			return fmt.Errorf("existing meta table but no markets table: corrupt DB")
+		}
+		_, err = db.Exec(internal.CreateMetaRow)
+		if err != nil {
+			return fmt.Errorf("failed to create row for meta table: %w", err)
+		}
+		err = setDBVersion(db, dbVersion) // no upgrades
+		if err != nil {
+			return fmt.Errorf("failed to set db version in meta table: %w", err)
+		}
+		log.Infof("Created new meta table at version %d", dbVersion)
+
+		// Prepare the account and registration key counter tables.
+		err = createAccountTables(db)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Attempt upgrade.
+		if err = upgradeDB(ctx, db); err != nil {
+			// If the context is canceled, it will either be context.Canceled
+			// from db.BeginTx, or sql.ErrTxDone from any of the tx operations.
+			if errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrTxDone) {
+				return fmt.Errorf("upgrade DB canceled: %w", err)
+			}
+			return fmt.Errorf("upgrade DB failed: %w", err)
+		}
 	}
 
 	// Verify config of existing markets, creating a new markets table if none
-	// exists.
+	// exists. This is done after upgrades since it can create new tables with
+	// the current DB scheme for newly configured markets.
+	log.Infof("Configuring %d markets tables: %v", len(mktConfig), mktConfig)
 	_, err = prepareMarkets(db, mktConfig)
-	if err != nil {
-		return err
-	}
-
-	// Prepare the account and registration key counter tables.
-	err = createAccountTables(db)
 	if err != nil {
 		return err
 	}
@@ -160,7 +175,7 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 }
 
 // prepareMarkets ensures that the market-specific tables required by the DEX
-// market config, mktConfig, are ready. See also PrepareTables.
+// market config, mktConfig, are ready. See also prepareTables.
 func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.MarketInfo, error) {
 	// Load existing markets and ensure there aren't multiple with the same ID.
 	mkts, err := loadMarkets(db, marketsTableName)
@@ -182,7 +197,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 	for _, mkt := range mktConfig {
 		existingMkt := marketMap[mkt.Name]
 		if existingMkt == nil {
-			log.Tracef("New market specified in config: %s", mkt.Name)
+			log.Infof("New market specified in config: %s", mkt.Name)
 			err = newMarket(db, marketsTableName, mkt)
 			if err != nil {
 				return nil, fmt.Errorf("newMarket failed: %w", err)

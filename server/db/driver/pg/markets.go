@@ -11,7 +11,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-func loadMarkets(db *sql.DB, marketsTableName string) ([]*dex.MarketInfo, error) {
+func loadMarkets(db sqlQueryer, marketsTableName string) ([]*dex.MarketInfo, error) {
 	stmt := fmt.Sprintf(internal.SelectAllMarkets, marketsTableName)
 	rows, err := db.Query(stmt)
 	if err != nil {
@@ -71,12 +71,14 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 	if err != nil {
 		return err
 	}
-	if !created {
-		log.Tracef(`Market schema "%s" already exists.`, marketUID)
+	if created {
+		log.Debugf("Created new market schema %q", marketUID)
+	} else {
+		log.Tracef("Market schema %q already exists.", marketUID)
 	}
 
 	for _, c := range createMarketTableStatements {
-		newTable, err := CreateTable(db, marketUID, c.name)
+		newTable, err := createTable(db, marketUID, c.name)
 		if err != nil {
 			return err
 		}
