@@ -62,6 +62,7 @@ var (
 	linkedKey              = []byte("linked")
 	feeProofKey            = []byte("feecoin")
 	statusKey              = []byte("status")
+	retiredKey             = []byte("retired")
 	baseKey                = []byte("base")
 	quoteKey               = []byte("quote")
 	orderKey               = []byte("order")
@@ -1048,10 +1049,15 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		if err != nil {
 			return fmt.Errorf("order bucket error: %w", err)
 		}
+		retired := encode.ByteFalse
+		if isRetiredMatch(m.UserMatch, &m.MetaData.Proof) {
+			retired = encode.ByteTrue
+		}
 		return newBucketPutter(mBkt).
 			put(baseKey, uint32Bytes(md.Base)).
 			put(quoteKey, uint32Bytes(md.Quote)).
 			put(statusKey, []byte{byte(match.Status)}).
+			put(retiredKey, retired).
 			put(dexKey, []byte(md.DEX)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
@@ -1063,13 +1069,48 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 	})
 }
 
+// isRetiredMatch is true if (1) status is MatchComplete and Proof.RedeemSig
+// is set, (2) match is refunded, or (3) match is revoked and this side of the
+// match requires no further action like refund or auto-redeem.
+func isRetiredMatch(m *order.UserMatch, proof *dexdb.MatchProof) bool {
+	// (1) status is MatchComplete and Proof.RedeemSig is set.
+	if m.Status == order.MatchComplete && len(proof.Auth.RedeemSig) > 0 {
+		return true
+	}
+
+	// (2) match is refunded.
+	if len(proof.RefundCoin) > 0 {
+		return true
+	}
+
+	// (3) match is revoked and this side of the match requires no
+	// further action like refund or auto-redeem.
+	if proof.IsRevoked() {
+		switch m.Status {
+		case order.NewlyMatched:
+			return true // NewlyMatched requires no further action from either side.
+		case order.MakerSwapCast:
+			return m.Side == order.Taker // Taker requires no further action if status is MakerSwapCast.
+		case order.TakerSwapCast:
+			return true // TakerSwapCast match status requires action on both sides.
+		case order.MakerRedeemed:
+			return m.Side == order.Maker // Maker requires no further action if status is MakerRedeemed.
+		case order.MatchComplete:
+			return true // MatchComplete requires no further action from either side.
+		}
+	}
+
+	// None of the match retirement criteria apply, match is still active.
+	return false
+}
+
 // ActiveMatches retrieves the matches that are in an active state, which is
-// any state except order.MatchComplete.
+// any match that is not retired.
 func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
-		status := mBkt.Get(statusKey)
-		return len(status) != 1 || status[0] != uint8(order.MatchComplete)
-	}, true) // cancel matches are immediately complete, never active, but the status filter will apply first anyway
+		retiredB := mBkt.Get(retiredKey)
+		return bytes.Equal(retiredB, encode.ByteFalse) // active => retired == false
+	}, true) // cancel matches are immediately complete, never active
 }
 
 // DEXOrdersWithActiveMatches retrieves order IDs for any order that has active
@@ -1087,60 +1128,10 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			if !bytes.Equal(dexB, mBkt.Get(dexKey)) {
 				return nil
 			}
-			// Inactive with MatchComplete status.
-			statusB := mBkt.Get(statusKey)
-			if len(statusB) != 1 {
-				db.log.Errorf("match %x has no status set", k)
-				return nil
-			}
-			status := order.MatchStatus(statusB[0])
-			if status == order.MatchComplete {
-				return nil
-			}
 
-			// Inactive if refunded.
-			proofB := mBkt.Get(proofKey)
-			if len(proofB) == 0 {
-				db.log.Errorf("empty match proof")
+			retiredB := mBkt.Get(retiredKey)
+			if bytes.Equal(retiredB, encode.ByteTrue) {
 				return nil
-			}
-			proof, _, errM := dexdb.DecodeMatchProof(proofB)
-			if errM != nil {
-				db.log.Errorf("error decoding proof: %v", errM)
-				return nil
-			}
-			if len(proof.RefundCoin) > 0 {
-				return nil
-			}
-
-			// Some revoked matches are inactive depending on match status and
-			// party side. They may need to be refunded or redeemed first.
-			// TakerSwapCast match status requires action on both sides.
-			if proof.IsRevoked() && status != order.TakerSwapCast {
-				// NewlyMatched requires no further action from either side.
-				if status == order.NewlyMatched {
-					return nil
-				}
-
-				// Load the UserMatch to check the match Side.
-				matchB := mBkt.Get(matchKey) // no copy, just need Side
-				if matchB == nil {
-					db.log.Errorf("nil match bytes for %x", k)
-					return nil
-				}
-				match, err := order.DecodeMatch(matchB)
-				if err != nil {
-					db.log.Errorf("error decoding match %x: %v", k, err)
-					return nil
-				}
-				side := match.Side // done with match and matchB
-
-				// MakerSwapCast requires no further action from the taker.
-				// MakerRedeemed requires no further action from the maker.
-				if (status == order.MakerSwapCast && side == order.Taker) ||
-					(status == order.MakerRedeemed && side == order.Maker) {
-					return nil
-				}
 			}
 
 			// The match is active.
