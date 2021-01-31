@@ -32,6 +32,10 @@ var upgrades = [...]upgradefunc{
 	// only thing we need to do during the DB upgrade is to update the
 	// db.AccountInfo to differentiate legacy vs. new-style key.
 	v5Upgrade,
+	// v5 => v6 saves the retirement status for all existing matches, providing
+	// a more straightforward way of determining if a match is retired without
+	// performing extensive checks on the match.
+	v6Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -268,6 +272,48 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 // 		return wBkt.Put(walletKey, w.Encode())
 // 	})
 // }
+
+// v6Upgrade saves the retirement status for all existing matches, providing
+// a more straightforward way of determining if a match is retired without
+// performing extensive checks on the match every time the match is loaded
+// from db.
+func v6Upgrade(tx *bbolt.Tx) error {
+	const oldVersion = 5
+	if err := ensureVersion(tx, oldVersion); err != nil {
+		return err
+	}
+
+	matches := tx.Bucket(matchesBucket)
+	return matches.ForEach(func(k, _ []byte) error {
+		mBkt := matches.Bucket(k)
+		if mBkt == nil {
+			return fmt.Errorf("match %x bucket is not a bucket", k)
+		}
+		matchB := getCopy(mBkt, matchKey)
+		if matchB == nil {
+			return fmt.Errorf("nil match bytes for %x", k)
+		}
+		match, err := order.DecodeMatch(matchB)
+		if err != nil {
+			return fmt.Errorf("error decoding match %x: %w", k, err)
+		}
+		proofB := getCopy(mBkt, proofKey)
+		if len(proofB) == 0 {
+			return fmt.Errorf("empty proof")
+		}
+		proof, _, err := dexdb.DecodeMatchProof(proofB)
+		if err != nil {
+			return fmt.Errorf("error decoding proof: %w", err)
+		}
+		var retired []byte
+		if dexdb.MatchIsActive(match, proof) {
+			retired = encode.ByteFalse
+		} else {
+			retired = encode.ByteTrue
+		}
+		return mBkt.Put(retiredKey, retired)
+	})
+}
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
 	dbVersion, err := getVersionTx(tx)

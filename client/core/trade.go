@@ -786,35 +786,12 @@ func (t *trackedTrade) matchIsRevoked(match *matchTracker) bool {
 // refund or auto-redeem. This should not be applied to cancel order matches.
 func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 	proof := &match.MetaData.Proof
-	// MatchComplete only means inactive if redeem request was accepted, but
-	// MatchComplete is set immediately after bcast for taker.
-	if match.Status == order.MatchComplete && len(proof.Auth.RedeemSig) > 0 {
-		return false
+	isActive := db.MatchIsActive(match.UserMatch, proof)
+	if proof.IsRevoked() && !isActive {
+		t.dc.log.Tracef("Revoked match %s (%v) in status %v considered inactive.",
+			match, match.Side, match.Status)
 	}
-
-	// Refunded matches are inactive regardless of status.
-	if len(proof.RefundCoin) > 0 {
-		return false
-	}
-
-	// Revoked matches may need to be refunded or auto-redeemed first.
-	if proof.IsRevoked() {
-		// - NewlyMatched requires no further action from either side
-		// - MakerSwapCast requires no further action from the taker
-		// - (TakerSwapCast requires action on both sides)
-		// - MakerRedeemed requires no further action from the maker
-		// - MatchComplete requires no further action. This happens if taker
-		//   does not have server's ack of their redeem request (RedeemSig).
-		status, side := match.Status, match.Side
-		if status == order.NewlyMatched || status == order.MatchComplete ||
-			(status == order.MakerSwapCast && side == order.Taker) ||
-			(status == order.MakerRedeemed && side == order.Maker) {
-			t.dc.log.Tracef("Revoked match %s (%v) in status %v considered inactive.",
-				match, side, status)
-			return false
-		}
-	}
-	return true
+	return isActive
 }
 
 func (t *trackedTrade) activeMatches() []*matchTracker {
