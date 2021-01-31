@@ -56,7 +56,7 @@ export default class MarketsPage extends BasePage {
       // Create wallet form
       'walletForm',
       // Active orders
-      'liveTemplate', 'liveList',
+      'liveTemplate', 'liveList', 'liveTable',
       // Cancel order form
       'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
       // Chart and legend
@@ -87,6 +87,10 @@ export default class MarketsPage extends BasePage {
     }
     this.activeMarkerRate = null
     this.hovers = []
+    // 'Your Orders' list sort key and direction.
+    this.ordersSortKey = 'stamp'
+    // 1 if sorting ascendingly, -1 if sorting descendingly.
+    this.ordersSortDirection = 1
 
     const reporters = {
       click: p => { this.reportClick(p) },
@@ -150,7 +154,6 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
       this.drawChartLines()
     })
-    // const tifCheck = tifDiv.querySelector('input[type=checkbox]')
     bind(page.limitBttn, 'click', () => {
       swapBttns(page.marketBttn, page.limitBttn)
       this.setOrderVisibility()
@@ -190,12 +193,50 @@ export default class MarketsPage extends BasePage {
     bindOpenWallet(app, page.openForm, async () => { this.openFunc() })
     // Create a wallet
     this.walletForm = new NewWalletForm(app, page.walletForm, async () => { this.createWallet() })
-    // Main order form
+    // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
-    // Order verification form
+    // Order verification form.
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
-    // Cancel order form
+    // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
+    // Bind active orders list's header sort events.
+    page.liveTable.querySelectorAll('[data-ordercol]')
+      .forEach(th => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol)))
+
+    const setOrdersSortCol = (key) => {
+      // First unset header's current sorted col classes.
+      unsetOrdersSortColClasses()
+      // If already sorting by key change sort direction.
+      if (this.ordersSortKey === key) {
+        this.ordersSortDirection *= -1
+      } else {
+        // Otherwise update sort key and set default direction to ascending.
+        this.ordersSortKey = key
+        this.ordersSortDirection = 1
+      }
+      this.refreshActiveOrders()
+      // Set header's new sorted col classes.
+      setOrdersSortColClasses()
+    }
+
+    const sortClassByDirection = () => {
+      if (this.ordersSortDirection === 1) return 'sorted-asc'
+      return 'sorted-dsc'
+    }
+
+    const unsetOrdersSortColClasses = () => {
+      page.liveTable.querySelectorAll('[data-ordercol]')
+        .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
+    }
+
+    const setOrdersSortColClasses = () => {
+      const key = this.ordersSortKey
+      const sortCls = sortClassByDirection()
+      page.liveTable.querySelector(`[data-ordercol=${key}]`).classList.add(sortCls)
+    }
+
+    // Set default's sorted col header classes.
+    setOrdersSortColClasses()
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -785,6 +826,36 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  /*
+   * ordersSortCompare returns sort compare function according to the active
+   * sort key and direction.
+   */
+  ordersSortCompare () {
+    switch (this.ordersSortKey) {
+      case 'stamp':
+        return (a, b) => this.ordersSortDirection * (b.stamp - a.stamp)
+      case 'rate':
+        return (a, b) => this.ordersSortDirection * (a.rate - b.rate)
+      case 'qty':
+        return (a, b) => this.ordersSortDirection * (a.qty - b.qty)
+      case 'type':
+        return (a, b) => this.ordersSortDirection *
+          Order.typeString(a).localeCompare(Order.typeString(b))
+      case 'sell':
+        return (a, b) => this.ordersSortDirection *
+          (Order.sellString(a)).localeCompare(Order.sellString(b))
+      case 'status':
+        return (a, b) => this.ordersSortDirection *
+          (Order.statusString(a)).localeCompare(Order.statusString(b))
+      case 'settled':
+        return (a, b) => this.ordersSortDirection *
+          ((Order.settled(a) * 100 / a.qty) - (Order.settled(b) * 100 / b.qty))
+      case 'filled':
+        return (a, b) => this.ordersSortDirection *
+          ((a.filled * 100 / a.qty) - (b.filled * 100 / b.qty))
+    }
+  }
+
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const page = this.page
@@ -792,6 +863,9 @@ export default class MarketsPage extends BasePage {
     const market = this.market
     for (const oid in metaOrders) delete metaOrders[oid]
     const orders = app.orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
+    // Sort orders by sort key.
+    const compare = this.ordersSortCompare()
+    orders.sort(compare)
 
     Doc.empty(page.liveList)
     for (const ord of orders) {

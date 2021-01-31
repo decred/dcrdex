@@ -330,15 +330,15 @@
             <table id="liveTable" class="ordertable">
               <thead>
                 <tr>
-                  <th>Type</th>
-                  <th>Side</th>
-                  <th>Age</th>
-                  <th>Rate</th>
-                  <th>Quantity</th>
-                  <th>Filled</th>
-                  <th>Settled</th>
-                  <th>Status</th>
-                  <th></th>
+                  <th data-ordercol="type">Type <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="sell">Side <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="stamp">Age <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="rate">Rate <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="qty">Quantity <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="filled">Filled <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="settled">Settled <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="status">Status <span class="ico-arrowdown"></span></th>
+                  <th class="last"></th>
                 </tr>
               </thead>
               <tbody id="liveList">
@@ -351,7 +351,7 @@
                   <td data-tmpl="filled"></td>
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
-                  <td class="text-right">
+                  <td class="last text-right">
                     <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="cancel order"></span>
                     <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="order details"></a>
                   </td>
