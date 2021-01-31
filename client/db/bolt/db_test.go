@@ -869,10 +869,6 @@ func TestMatches(t *testing.T) {
 	metaMatches := make([]*db.MetaMatch, 0, numToDo)
 	matchIndex := make(map[order.MatchID]*db.MetaMatch, numToDo)
 	nTimes(numToDo, func(i int) {
-		status := order.MatchComplete // inactive
-		if i < numActive {
-			status = order.MatchStatus(rand.Intn(4))
-		}
 		m := &db.MetaMatch{
 			MetaData: &db.MatchMetaData{
 				Proof: *dbtest.RandomMatchProof(0.5),
@@ -883,7 +879,12 @@ func TestMatches(t *testing.T) {
 			},
 			UserMatch: ordertest.RandomUserMatch(),
 		}
-		m.Status = status
+		if i < numActive {
+			m.Status = order.MatchStatus(rand.Intn(4))
+		} else {
+			m.Status = order.MatchComplete              // inactive
+			m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
+		}
 		matchIndex[m.MatchID] = m
 		metaMatches = append(metaMatches, m)
 	})
