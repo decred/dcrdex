@@ -6,6 +6,7 @@ package bolt
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/dex/order"
-
 	dexdb "decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
 
@@ -34,38 +35,17 @@ var dbUpgradeTests = [...]struct {
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
 	{"upgradeFromV3", v4Upgrade, verifyV4Upgrade, "v3.db.gz", 4},
 	{"upgradeFromV4", v5Upgrade, verifyV5Upgrade, "v4.db.gz", 5},
+	{"upgradeFromV5", v6Upgrade, verifyV6Upgrade, "v5.db.gz", 6},
 }
 
 func TestUpgrades(t *testing.T) {
-	d, err := os.MkdirTemp("", "dcrdex_test_upgrades")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	t.Run("group", func(t *testing.T) {
 		for _, tc := range dbUpgradeTests {
 			tc := tc // capture range variable
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				testFile, err := os.Open(filepath.Join("testdata", tc.filename))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer testFile.Close()
-				r, err := gzip.NewReader(testFile)
-				if err != nil {
-					t.Fatal(err)
-				}
-				dbPath := filepath.Join(d, tc.name+".db")
-				fi, err := os.Create(dbPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = io.Copy(fi, r)
-				fi.Close()
-				if err != nil {
-					t.Fatal(err)
-				}
+				dbPath, close := unpack(t, tc.filename)
+				defer close()
 				db, err := bbolt.Open(dbPath, 0600,
 					&bbolt.Options{Timeout: 1 * time.Second})
 				if err != nil {
@@ -82,8 +62,6 @@ func TestUpgrades(t *testing.T) {
 			})
 		}
 	})
-
-	os.RemoveAll(d)
 }
 
 func TestUpgradeDB(t *testing.T) {
@@ -266,6 +244,39 @@ func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
 		}
 		return nil
 	}); err != nil {
+		t.Error(err)
+	}
+}
+
+func verifyV6Upgrade(t *testing.T, db *bbolt.DB) {
+	verifyMatches := map[string]bool{
+		"090f54bc6b13652d4e4c23ec94b4f70751c61db043ae732c014d0f5cf4ccccb7": false, // status < MatchComplete, not revoked, not refunded
+		"5ee45ebb29edf84ab2a7f35aef619b20c3e2cd26017a5e281e7cc1bfde0ed435": true,  // status < MatchComplete, revoked at NewlyMatched
+		"84455dae423b09f149396f09b6063380eeb312e1b67051a695e78cd5c985cb49": false, // status == MakerSwapCast, side Maker, revoked, requires refund
+		"59c054d537fbd98f51621671a84d25b55350d0e33a6b3c2c4abd874054f8a438": true,  // status == TakerSwapCast, side Maker, revoked, refunded
+		"f153a3b8d5824c3e237911cd1b108dfb2e04555f6c5899681d182216caa328fc": false, // status == MatchComplete, no RedeemSig
+		"3996ffea2a3db99262b954cf6dcf883f562baf273d767b7cf91b6aacddd4206f": true,  // status == MatchComplete, RedeemSig set
+	}
+
+	err := db.View(func(dbtx *bbolt.Tx) error {
+		matches := dbtx.Bucket(matchesBucket)
+		return matches.ForEach(func(k, v []byte) error {
+			matchID := hex.EncodeToString(k)
+			mBkt := matches.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("match %s bucket is not a bucket", matchID)
+			}
+			retiredB := mBkt.Get(retiredKey)
+			retired := bytes.Equal(retiredB, encode.ByteTrue)
+			if expectRetired, ok := verifyMatches[matchID]; !ok {
+				return fmt.Errorf("found unexpected match %s", matchID)
+			} else if retired != expectRetired {
+				return fmt.Errorf("expected match %s retired = %t, got %t", matchID, expectRetired, retired)
+			}
+			return nil
+		})
+	})
+	if err != nil {
 		t.Error(err)
 	}
 }
