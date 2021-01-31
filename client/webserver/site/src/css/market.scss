@@ -420,6 +420,43 @@ table.balance-table button:hover {
   td {
     padding: 2px 10px;
     white-space: nowrap;
+
+    &.last {
+      flex: 1;
+      min-width: 57px;
+    }
+  }
+
+  th {
+    align-items: center;
+
+    &:hover {
+      opacity: 0.7;
+    }
+
+    .ico-arrowdown {
+      display: none;
+      vertical-align: middle;
+      font-size: 10px;
+      margin-left: 5px;
+    }
+
+    &.sorted-dsc {
+      .ico-arrowdown {
+        display: inline-block;
+      }
+    }
+
+    &.sorted-asc {
+      .ico-arrowdown {
+        display: inline-block;
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  tr {
+    cursor: pointer;
   }
 
   .ico-cross {
