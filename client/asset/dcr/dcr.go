@@ -810,11 +810,13 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget)
 	// Best is one transaction with req.Lots inputs and 1 output.
-	var best uint64 = dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + dexdcr.TxOutOverhead
+	var best uint64 = dexdcr.MsgTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
-	var worst uint64 = best * req.Lots
-	best += dexdcr.RedeemSwapSigScriptSize*req.Lots + dexdcr.P2PKHOutputSize
-	worst += (dexdcr.RedeemSwapSigScriptSize + dexdcr.P2PKHOutputSize) * req.Lots
+	var worst uint64 = dexdcr.MsgTxOverhead * req.Lots
+	var inputSize uint64 = dexdcr.TxInOverhead + dexdcr.RedeemSwapSigScriptSize
+	var outputSize uint64 = dexdcr.P2PKHOutputSize
+	best += inputSize*req.Lots + outputSize
+	worst += (inputSize + outputSize) * req.Lots
 
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{

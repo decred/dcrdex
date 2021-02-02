@@ -817,17 +817,17 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, ut
 func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget)
 	// Best is one transaction with req.Lots inputs and 1 output.
-	var best uint64 = dexbtc.MinimumTxOverhead + dexbtc.TxInOverhead + dexbtc.TxOutOverhead
+	var best uint64 = dexbtc.MinimumTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
-	var worst uint64 = best * req.Lots
+	var worst uint64 = dexbtc.MinimumTxOverhead * req.Lots
 	var inputSize, outputSize uint64
 	if btc.segwit {
 		// Add the marker and flag weight here.
-		inputSize = (dexbtc.RedeemSwapSigScriptSize + 2 + 3) / 4
+		inputSize = dexbtc.TxInOverhead + (dexbtc.RedeemSwapSigScriptSize+2+3)/4
 		outputSize = dexbtc.P2WPKHOutputSize
 
 	} else {
-		inputSize = dexbtc.RedeemSwapSigScriptSize
+		inputSize = dexbtc.TxInOverhead + dexbtc.RedeemSwapSigScriptSize
 		outputSize = dexbtc.P2PKHOutputSize
 	}
 	best += inputSize*req.Lots + outputSize
