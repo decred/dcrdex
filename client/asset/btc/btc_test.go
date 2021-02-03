@@ -405,7 +405,7 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		return nil, nil, nil, err
 	}
 	// Initialize the best block.
-	bestHash, err := wallet.wallet.GetBestBlockHash()
+	bestHash, err := wallet.node.GetBestBlockHash()
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
