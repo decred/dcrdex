@@ -77,7 +77,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelOff)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
 	tMaxFeeRate         uint64 = 10
 )
 
