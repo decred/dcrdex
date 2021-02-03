@@ -193,29 +193,21 @@ type OrderMetaData struct {
 	MaxFeeRate uint64
 }
 
-// MetaMatch is the match and its metadata.
+// MetaMatch is a match and its metadata.
 type MetaMatch struct {
+	// UserMatch is the match info.
+	*order.UserMatch
 	// MetaData is important auxiliary information about the match.
 	MetaData *MatchMetaData
-	// Match is the match info.
-	Match *order.UserMatch
 }
 
-// SetStatus sets the match status in both the UserMatch and the MatchMetaData.
-func (m *MetaMatch) SetStatus(status order.MatchStatus) {
-	m.MetaData.Status = status
-	m.Match.Status = status
-}
-
-// ID is a unique ID for the match-order pair.
-func (m *MetaMatch) ID() []byte {
-	return hashKey(append(m.Match.MatchID[:], m.Match.OrderID[:]...))
+// MatchOrderUniqueID is a unique ID for the match-order pair.
+func (m *MetaMatch) MatchOrderUniqueID() []byte {
+	return hashKey(append(m.MatchID[:], m.OrderID[:]...))
 }
 
 // MatchMetaData is important auxiliary information about the match.
 type MatchMetaData struct {
-	// Status is the last known match status.
-	Status order.MatchStatus
 	// Proof is the signatures and other verification-related data for the match.
 	Proof MatchProof
 	// DEX is the URL of the server that this match is associated with.

@@ -843,16 +843,16 @@ func TestMatches(t *testing.T) {
 		}
 		m := &db.MetaMatch{
 			MetaData: &db.MatchMetaData{
-				Status: status,
-				Proof:  *dbtest.RandomMatchProof(0.5),
-				DEX:    acct.Host,
-				Base:   base,
-				Quote:  quote,
-				Stamp:  rand.Uint64(),
+				Proof: *dbtest.RandomMatchProof(0.5),
+				DEX:   acct.Host,
+				Base:  base,
+				Quote: quote,
+				Stamp: rand.Uint64(),
 			},
-			Match: ordertest.RandomUserMatch(),
+			UserMatch: ordertest.RandomUserMatch(),
 		}
-		matchIndex[m.Match.MatchID] = m
+		m.Status = status
+		matchIndex[m.MatchID] = m
 		metaMatches = append(metaMatches, m)
 	})
 	tStart := time.Now()
@@ -874,9 +874,9 @@ func TestMatches(t *testing.T) {
 	}
 	activeOrders := make(map[order.OrderID]bool)
 	for _, m1 := range activeMatches {
-		activeOrders[m1.Match.OrderID] = true
-		m2 := matchIndex[m1.Match.MatchID]
-		ordertest.MustCompareUserMatch(t, m1.Match, m2.Match)
+		activeOrders[m1.OrderID] = true
+		m2 := matchIndex[m1.MatchID]
+		ordertest.MustCompareUserMatch(t, m1.UserMatch, m2.UserMatch)
 		dbtest.MustCompareMatchMetaData(t, m1.MetaData, m2.MetaData)
 	}
 	t.Logf("%d milliseconds to retrieve and compare %d active MetaMatch", time.Since(tStart)/time.Millisecond, numActive)
@@ -896,15 +896,15 @@ func TestMatches(t *testing.T) {
 
 	m := &db.MetaMatch{
 		MetaData: &db.MatchMetaData{
-			Status: order.NewlyMatched,
-			Proof:  *dbtest.RandomMatchProof(0.5),
-			DEX:    acct.Host,
-			Base:   base,
-			Quote:  quote,
-			Stamp:  rand.Uint64(),
+			Proof: *dbtest.RandomMatchProof(0.5),
+			DEX:   acct.Host,
+			Base:  base,
+			Quote: quote,
+			Stamp: rand.Uint64(),
 		},
-		Match: ordertest.RandomUserMatch(),
+		UserMatch: ordertest.RandomUserMatch(),
 	}
+	m.Status = order.NewlyMatched
 
 	m.MetaData.DEX = ""
 	err = boltdb.UpdateMatch(m)
@@ -916,7 +916,7 @@ func TestMatches(t *testing.T) {
 	m.MetaData.Base, m.MetaData.Quote = 0, 0
 	err = boltdb.UpdateMatch(m)
 	if err == nil {
-		t.Fatalf("no error on double zero base/quote")
+		t.Fatalf("no error on same base and quote")
 	}
 	m.MetaData.Base, m.MetaData.Quote = base, quote
 

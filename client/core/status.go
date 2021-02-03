@@ -15,7 +15,7 @@ import (
 // statusResolutionID is just a string with the basic information about a match.
 // This is used often while logging during status resolution.
 func statusResolutionID(dc *dexConnection, trade *trackedTrade, match *matchTracker) string {
-	return fmt.Sprintf("host = %s, order = %s, match = %s", dc.acct.host, trade.ID(), match.id)
+	return fmt.Sprintf("host = %s, order = %s, match = %s", dc.acct.host, trade.ID(), match.MatchID)
 }
 
 // resolveMatchConflicts attempts to resolve conflicts between the server's
@@ -32,7 +32,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 			statusRequests = append(statusRequests, &msgjson.MatchRequest{
 				Base:    conflict.trade.Base(),
 				Quote:   conflict.trade.Quote(),
-				MatchID: match.id[:],
+				MatchID: match.MatchID[:],
 			})
 		}
 	}
@@ -61,7 +61,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 			trade.mtx.Lock()
 			defer trade.mtx.Unlock()
 			for _, match := range matches {
-				if srvData := resMap[match.id]; srvData != nil {
+				if srvData := resMap[match.MatchID]; srvData != nil {
 					c.resolveConflictWithServerData(dc, trade, match, srvData)
 					continue
 				}
@@ -71,7 +71,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 					statusResolutionID(dc, trade, match))
 				// revokeMatch only returns an error for a missing match ID, and
 				// we already checked in compareServerMatches.
-				_ = trade.revokeMatch(match.id, false)
+				_ = trade.revokeMatch(match.MatchID, false)
 			}
 		}(conflict.trade, conflict.matches)
 	}
@@ -128,7 +128,7 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 		match.MetaData.Proof.ServerRevoked = true
 	}
 
-	if srvStatus == match.MetaData.Status || match.MetaData.Proof.IsRevoked() {
+	if srvStatus == match.Status || match.MetaData.Proof.IsRevoked() {
 		// On startup, there's no chance for a tick between the connect request
 		// and the match_status request, so this would be unlikely. But if not
 		// during startup, and a tick has snuck in and resolved our status
@@ -139,7 +139,7 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 
 	logID := statusResolutionID(dc, trade, match)
 
-	if resolver := conflictResolver(match.MetaData.Status, srvStatus); resolver != nil {
+	if resolver := conflictResolver(match.Status, srvStatus); resolver != nil {
 		resolver(dc, trade, match, srvData)
 	} else {
 		// We don't know how to handle this. Set the swapErr, and self-revoke
@@ -148,7 +148,7 @@ func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTr
 		// sync.
 		match.MetaData.Proof.SelfRevoked = true
 		match.swapErr = fmt.Errorf("status conflict (%s -> %s) has no handler. %s",
-			match.MetaData.Status, srvStatus, logID)
+			match.Status, srvStatus, logID)
 		c.log.Error(match.swapErr)
 		err := c.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
@@ -178,7 +178,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	}()
 
 	// We can handle this if we're the taker.
-	if match.Match.Side == order.Maker {
+	if match.Side == order.Maker {
 		err = fmt.Errorf("Server is reporting match in MakerSwapCast, but we're the maker and haven't sent a swap. %s", logID)
 		return
 	}
@@ -201,7 +201,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %v: %v", match.id, err)
+				trade.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
 			}
 		}
 	}()
@@ -221,7 +221,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		}
 	}()
 	// This is nonsensical if we're the taker.
-	if match.Match.Side == order.Taker {
+	if match.Side == order.Taker {
 		err = fmt.Errorf("Server is reporting match in TakerSwapCast, but we're the taker and haven't sent a swap. %s", logID)
 		return
 	}
@@ -244,7 +244,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %v: %v", match.id, err)
+				trade.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
 			}
 		}
 	}()
@@ -257,11 +257,10 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, there's nothing we can do.
-	if match.Match.Side != order.Maker {
+	if match.Side != order.Maker {
 		dc.log.Errorf("Server reporting no maker swap, but they've already sent us the swap info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
-
 	}
 	// If we don't have a server acknowledgment, that case will be picked up in
 	// resendPendingRequests at the next tick.
@@ -282,7 +281,7 @@ func resolveServerMissedMakerInit(dc *dexConnection, trade *trackedTrade, match 
 func resolveServerMissedTakerInit(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the taker, there's nothing we can do.
-	if match.Match.Side != order.Taker {
+	if match.Side != order.Taker {
 		dc.log.Errorf("Server reporting no taker swap, but they've already sent us the swap info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
@@ -314,7 +313,7 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 	}()
 	// If we're the maker, this state is nonsense. Just revoke the match for
 	// good measure.
-	if match.Match.Side == order.Maker {
+	if match.Side == order.Maker {
 		coinStr, _ := asset.DecodeCoinID(trade.wallets.toAsset.ID, srvData.MakerRedeem)
 		err = fmt.Errorf("server reported match status MakerRedeemed, but we're the maker and we don't have redemption data."+
 			" self-revoking. %s, reported coin = %s", logID, coinStr)
@@ -345,7 +344,7 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 	logID := statusResolutionID(dc, trade, match)
 	// If we're the taker, this state is nonsense. Just revoke the match for
 	// good measure.
-	if match.Match.Side == order.Taker {
+	if match.Side == order.Taker {
 		match.MetaData.Proof.SelfRevoked = true
 		coinStr, _ := asset.DecodeCoinID(trade.wallets.toAsset.ID, srvData.TakerRedeem)
 		dc.log.Error("server reported match status MatchComplete, but we're the taker and we don't have redemption data."+
@@ -355,7 +354,7 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 	// As maker, set it to MatchComplete. We no longer expect to receive taker
 	// redeem info.
 	dc.log.Warnf("Server reporting MatchComplete while we (maker) have it as MakerRedeemed. Resolved. Detail: %v", logID)
-	match.SetStatus(order.MatchComplete)
+	match.Status = order.MatchComplete
 }
 
 // resolveServerMissedMakerRedeem is a matchConflictResolver to handle the case
@@ -365,7 +364,7 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 func resolveServerMissedMakerRedeem(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	logID := statusResolutionID(dc, trade, match)
 	// If we're not the maker, we can't do anything about this.
-	if match.Match.Side != order.Maker {
+	if match.Side != order.Maker {
 		dc.log.Errorf("server reporting no maker redeem, but they've already sent us the redemption info. self-revoking. %s", logID)
 		match.MetaData.Proof.SelfRevoked = true
 		return
@@ -389,7 +388,7 @@ func resolveServerMissedTakerRedeem(dc *dexConnection, trade *trackedTrade, matc
 	logID := statusResolutionID(dc, trade, match)
 	// If we're the Maker, we really are done. The server is in MakerRedeemed as
 	// it's waiting on the taker.
-	if match.Match.Side == order.Maker {
+	if match.Side == order.Maker {
 		return
 	}
 	// We are the taker. If we don't have an ack from the server, this will be
