@@ -73,7 +73,7 @@ func (rc *RPCClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
 	return chainInfo, nil
 }
 
-// EstimateSmartFee requests the server to estimate a fee level.
+// estimateSmartFee requests the server to estimate a fee level.
 func (rc *RPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	res := new(btcjson.EstimateSmartFeeResult)
 	return res, rc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)

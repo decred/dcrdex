@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -155,6 +156,7 @@ func TestWallet(t *testing.T) {
 }
 
 func runTest(t *testing.T, splitTx bool) {
+	tStart := time.Now()
 	blockReported := false
 	rig := newTestRig(t, func(name string, err error) {
 		blockReported = true
@@ -268,10 +270,12 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	confCoin := receipts[0].Coin()
+	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.beta().Confirmations(tCtx, confCoin.ID())
-		if err != nil {
+		confs, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
+		spent := errors.Is(err, asset.ErrSpentSwap)
+		if err != nil || !spent {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
@@ -296,7 +300,7 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil)
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil, tStart)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
@@ -307,8 +311,9 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, spent, err := rig.alpha().Confirmations(context.TODO(), swapOutput.ID())
-		if err != nil {
+		confs, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
+		spent := errors.Is(err, asset.ErrSpentSwap)
+		if err != nil || !spent {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
 		if confs != 0 {
@@ -343,7 +348,7 @@ func runTest(t *testing.T, splitTx bool) {
 	waitNetwork()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -361,7 +366,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
-	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -397,7 +402,7 @@ func runTest(t *testing.T, splitTx bool) {
 	swapReceipt = receipts[0]
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), tStart)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

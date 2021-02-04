@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -110,26 +111,55 @@ func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete
 		t.Fatalf("error serializing contract: %v", err)
 	}
 	signTxRes.Hex = buf.Bytes()
-	return mustMarshal(t, signTxRes), nil
+	return mustMarshal(signTxRes), nil
+}
+
+type msgBlockWithHeight struct {
+	msgBlock *wire.MsgBlock
+	height   int64
 }
 
 type tRPCClient struct {
-	sendHash      *chainhash.Hash
-	sendErr       error
-	sentRawTx     *wire.MsgTx
-	txOutRes      *btcjson.GetTxOutResult
-	txOutErr      error
-	rawRes        map[string]json.RawMessage
-	rawErr        map[string]error
-	signFunc      func([]json.RawMessage) (json.RawMessage, error)
-	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
-	blockchainMtx sync.RWMutex
-	verboseBlocks map[string]*btcjson.GetBlockVerboseResult
-	mainchain     map[int64]*chainhash.Hash
-	mpVerboseTxs  map[string]*btcjson.TxRawResult
-	rawVerboseErr error
-	lockedCoins   []*RPCOutpoint
-	estFeeErr     error
+	sendHash          *chainhash.Hash
+	sendErr           error
+	sentRawTx         *wire.MsgTx
+	txOutRes          *btcjson.GetTxOutResult
+	txOutErr          error
+	signFunc          func([]json.RawMessage) (json.RawMessage, error)
+	signMsgFunc       func([]json.RawMessage) (json.RawMessage, error)
+	blockchainMtx     sync.RWMutex
+	verboseBlocks     map[string]*msgBlockWithHeight
+	mainchain         map[int64]*chainhash.Hash
+	mpVerboseTxs      map[string]*btcjson.TxRawResult
+	rawVerboseErr     error
+	lockedCoins       []*RPCOutpoint
+	estFeeErr         error
+	listLockUnspent   []*RPCOutpoint
+	getBalances       *GetBalancesResult
+	getBalancesErr    error
+	lockUnspentErr    error
+	changeAddr        string
+	changeAddrErr     error
+	newAddress        string
+	newAddressErr     error
+	privKeyForAddr    *btcutil.WIF
+	privKeyForAddrErr error
+
+	getTransaction    *GetTransactionResult
+	getTransactionErr error
+
+	getBlockchainInfo    *getBlockchainInfoResult
+	getBlockchainInfoErr error
+	unlock               bool
+	unlockErr            error
+	lock                 bool
+	lockErr              error
+	sendToAddress        string
+	sendToAddressErr     error
+	setTxFee             bool
+	signTxErr            error
+	listUnspent          []*ListUnspentResult
+	listUnspentErr       error
 }
 
 func newTRPCClient() *tRPCClient {
@@ -138,10 +168,8 @@ func newTRPCClient() *tRPCClient {
 	copy(newHash[:], randBytes(32))
 	return &tRPCClient{
 		txOutRes: newTxOutResult([]byte{}, 1, 0),
-		rawRes:   make(map[string]json.RawMessage),
-		rawErr:   make(map[string]error),
-		verboseBlocks: map[string]*btcjson.GetBlockVerboseResult{
-			newHash.String(): {},
+		verboseBlocks: map[string]*msgBlockWithHeight{
+			newHash.String(): {msgBlock: &wire.MsgBlock{}},
 		},
 		mainchain: map[int64]*chainhash.Hash{
 			0: &newHash,
@@ -150,25 +178,10 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
-func (c *tRPCClient) getBlock(blockHash string) *btcjson.GetBlockVerboseResult {
+func (c *tRPCClient) getBlock(blockHash string) *msgBlockWithHeight {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
-	blk, found := c.verboseBlocks[blockHash]
-	if !found {
-		return nil
-	}
-	if nextHash, exists := c.mainchain[blk.Height+1]; exists {
-		blk.NextHash = nextHash.String()
-	}
-	return blk
-}
-
-func (c *tRPCClient) GetBlockVerboseTx(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
-	blk := c.getBlock(blockHash.String())
-	if blk == nil {
-		return nil, fmt.Errorf("no test block found for %s", blockHash)
-	}
-	return blk, nil
+	return c.verboseBlocks[blockHash]
 }
 
 func (c *tRPCClient) GetBestBlockHeight() int64 {
@@ -183,13 +196,24 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 	return bestBlkHeight
 }
 
-func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
+func encodeOrError(thing interface{}, err error) (json.RawMessage, error) {
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(thing)
+}
+
+type tRawRequester struct {
+	*tRPCClient
+}
+
+func (c *tRawRequester) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	// TODO: handle methodGetBlockHash, methodGetRawMempool and add actual tests
 	// to cover them.
 	case methodEstimateSmartFee:
-		if c.estFeeErr != nil {
-			return nil, c.estFeeErr
+		if c.tRPCClient.estFeeErr != nil {
+			return nil, c.tRPCClient.estFeeErr
 		}
 		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
 		return json.Marshal(&btcjson.EstimateSmartFeeResult{
@@ -197,12 +221,12 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			FeeRate: &optimalRate,
 		})
 	case methodSendRawTransaction:
-		var txHash string
-		err := json.Unmarshal(params[0], &txHash)
+		var txHex string
+		err := json.Unmarshal(params[0], &txHex)
 		if err != nil {
 			return nil, err
 		}
-		tx, err := msgTxFromHex(txHash)
+		tx, err := msgTxFromHex(txHex)
 		if err != nil {
 			return nil, err
 		}
@@ -216,10 +240,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		}
 		return json.Marshal(c.sendHash.String())
 	case methodGetTxOut:
-		if c.txOutErr != nil {
-			return nil, c.txOutErr
-		}
-		return json.Marshal(c.txOutRes)
+		return encodeOrError(c.txOutRes, c.txOutErr)
 	case methodGetBestBlockHash:
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
@@ -232,11 +253,25 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 			}
 		}
 		return json.Marshal(bestHash.String())
+	case methodGetBlockHash:
+		var blockHeight int64
+		if err := json.Unmarshal(params[0], &blockHeight); err != nil {
+			return nil, err
+		}
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
+		for height, blockHash := range c.mainchain {
+			if height == blockHeight {
+				return json.Marshal(blockHash.String())
+			}
+		}
+		return nil, fmt.Errorf("block not found")
+
 	case methodGetRawMempool:
 		return json.Marshal(&[]string{})
 	case methodGetRawTransaction:
-		if c.rawVerboseErr != nil {
-			return nil, c.rawVerboseErr
+		if c.tRPCClient.rawVerboseErr != nil {
+			return nil, c.tRPCClient.rawVerboseErr
 		}
 		var txHash string
 		err := json.Unmarshal(params[0], &txHash)
@@ -245,29 +280,30 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		}
 		return json.Marshal(c.mpVerboseTxs[txHash])
 	case methodSignTx:
-		if c.rawErr[method] == nil {
-			return c.signFunc(params)
+		if c.signTxErr != nil {
+			return nil, c.signTxErr
 		}
-	case methodSignMessage:
-		if c.rawErr[method] == nil {
-			return c.signMsgFunc(params)
+		return c.signFunc(params)
+	case methodGetBlock:
+		c.blockchainMtx.Lock()
+		defer c.blockchainMtx.Unlock()
+		var blockHashStr string
+		err := json.Unmarshal(params[0], &blockHashStr)
+		if err != nil {
+			return nil, err
 		}
-	case methodGetBlockVerboseTx:
-		var blkHash string
-		_ = json.Unmarshal(params[0], &blkHash)
-		block := c.getBlock(blkHash)
-		if block == nil {
-			return nil, fmt.Errorf("no block verbose found")
+
+		blk, found := c.verboseBlocks[blockHashStr]
+		if !found {
+			return nil, fmt.Errorf("block not found")
 		}
-		// block may get modified concurrently, lock mtx before reading fields.
-		c.blockchainMtx.RLock()
-		defer c.blockchainMtx.RUnlock()
-		return json.Marshal(&verboseBlockTxs{
-			Hash:     block.Hash,
-			Height:   uint64(block.Height),
-			NextHash: block.NextHash,
-			Tx:       block.RawTx,
-		})
+		var buf bytes.Buffer
+		err = blk.msgBlock.Serialize(&buf)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(hex.EncodeToString(buf.Bytes()))
+
 	case methodGetBlockHeader:
 		var blkHash string
 		_ = json.Unmarshal(params[0], &blkHash)
@@ -279,78 +315,90 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
 		return json.Marshal(&blockHeader{
-			Hash:          block.Hash,
-			Height:        block.Height,
-			Confirmations: block.Confirmations,
-			Time:          block.Time,
+			Hash:   block.msgBlock.BlockHash().String(),
+			Height: block.height,
+			// Confirmations: block.Confirmations,
+			// Time:          block.Time,
 		})
 	case methodLockUnspent:
+		if c.lockUnspentErr != nil {
+			return json.Marshal(false)
+		}
 		coins := make([]*RPCOutpoint, 0)
 		_ = json.Unmarshal(params[1], &coins)
 		if string(params[0]) == "false" {
 			c.lockedCoins = coins
 		}
+		return json.Marshal(true)
+	case methodListLockUnspent:
+		return mustMarshal(c.listLockUnspent), nil
+	case methodGetBalances:
+		return encodeOrError(c.getBalances, c.getBalancesErr)
+	case methodChangeAddress:
+		return encodeOrError(c.changeAddr, c.changeAddrErr)
+	case methodNewAddress:
+		return encodeOrError(c.newAddress, c.newAddressErr)
+	case methodPrivKeyForAddress:
+		if c.privKeyForAddrErr != nil {
+			return nil, c.privKeyForAddrErr
+		}
+		return json.Marshal(c.privKeyForAddr.String())
+	case methodGetTransaction:
+		return encodeOrError(c.getTransaction, c.getTransactionErr)
+	case methodGetBlockchainInfo:
+		return encodeOrError(c.getBlockchainInfo, c.getBlockchainInfoErr)
+	case methodLock:
+		return encodeOrError(c.lock, c.lockErr)
+	case methodUnlock:
+		return encodeOrError(c.unlock, c.unlockErr)
+	case methodSendToAddress:
+		return encodeOrError(c.sendToAddress, c.sendToAddressErr)
+	case methodSetTxFee:
+		return json.Marshal(c.setTxFee)
+	case methodListUnspent:
+		return encodeOrError(c.listUnspent, c.listUnspentErr)
 	}
-	return c.rawRes[method], c.rawErr[method]
+	panic("method not registered: " + method)
 }
 
-func (c *tRPCClient) addRawTx(blockHeight int64, tx *btcjson.TxRawResult) (*chainhash.Hash, *btcjson.GetBlockVerboseResult) {
+func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash, *wire.MsgBlock) {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
-	blkHash, found := c.mainchain[blockHeight]
+	blockHash, found := c.mainchain[blockHeight]
 	if !found {
 		var newHash chainhash.Hash
 		copy(newHash[:], randBytes(32))
-		blkHash = &newHash
-		c.verboseBlocks[newHash.String()] = &btcjson.GetBlockVerboseResult{
-			Height: blockHeight,
-			Hash:   blkHash.String(),
+		blockHash = &newHash
+		prevBlock, found := c.mainchain[blockHeight]
+		if !found {
+			prevBlock = &chainhash.Hash{}
 		}
-		c.mainchain[blockHeight] = blkHash
+		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{}, 1, 2)
+		msgBlock := wire.NewMsgBlock(header)
+		c.verboseBlocks[blockHash.String()] = &msgBlockWithHeight{
+			msgBlock: msgBlock,
+			height:   blockHeight,
+		}
+		c.mainchain[blockHeight] = blockHash
 	}
-	block := c.verboseBlocks[blkHash.String()]
-	block.RawTx = append(block.RawTx, *tx)
-	return blkHash, block
+	block := c.verboseBlocks[blockHash.String()]
+	block.msgBlock.AddTransaction(tx)
+	return blockHash, block.msgBlock
 }
 
-func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []btcjson.Vin) *btcjson.TxRawResult {
-	tx := &btcjson.TxRawResult{
-		Txid: txid,
-		Vin:  inputs,
+func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []*wire.TxIn) *wire.MsgTx {
+	tx := &wire.MsgTx{
+		TxIn: inputs,
 	}
 	for _, pkScript := range pkScripts {
-		tx.Vout = append(tx.Vout, btcjson.Vout{
-			ScriptPubKey: btcjson.ScriptPubKeyResult{
-				Hex: hex.EncodeToString(pkScript),
-			},
-		})
+		tx.TxOut = append(tx.TxOut, wire.NewTxOut(1, pkScript))
 	}
 	return tx
 }
 
-func makeTxHex(pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte, error) {
+func makeTxHex(pkScripts []dex.Bytes, inputs []*wire.TxIn) ([]byte, error) {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	for _, input := range inputs {
-		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
-		if err != nil {
-			return nil, err
-		}
-		var sigScript []byte
-		if input.ScriptSig != nil {
-			sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		witness := make([][]byte, len(input.Witness))
-		for i, witnessHex := range input.Witness {
-			witness[i], err = hex.DecodeString(witnessHex)
-			if err != nil {
-				return nil, err
-			}
-		}
-		txIn := wire.NewTxIn(wire.NewOutPoint(prevOutHash, input.Vout), sigScript, witness)
+	for _, txIn := range inputs {
 		msgTx.AddTxIn(txIn)
 	}
 	for _, pkScript := range pkScripts {
@@ -365,20 +413,13 @@ func makeTxHex(pkScripts []dex.Bytes, inputs []btcjson.Vin) ([]byte, error) {
 	return txBuf.Bytes(), nil
 }
 
-func makeRPCVin(txid string, vout uint32, sigScript []byte, witness [][]byte) btcjson.Vin {
+func makeRPCVin(txHash *chainhash.Hash, vout uint32, sigScript []byte, witness [][]byte) *wire.TxIn {
 	var rpcWitness []string
 	for _, b := range witness {
 		rpcWitness = append(rpcWitness, hex.EncodeToString(b))
 	}
 
-	return btcjson.Vin{
-		Txid: txid,
-		Vout: vout,
-		ScriptSig: &btcjson.ScriptSig{
-			Hex: hex.EncodeToString(sigScript),
-		},
-		Witness: rpcWitness,
-	}
+	return wire.NewTxIn(wire.NewOutPoint(txHash, vout), sigScript, witness)
 }
 
 func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutResult {
@@ -415,13 +456,16 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(client, cfg, &dexbtc.Config{})
+
+	// rpcClient := newRPCClient(requester, segwit, nil, false, minNetworkVersion, dex.StdOutLogger("RPCTEST", dex.LevelTrace), &chaincfg.MainNetParams)
+
+	wallet, err := newWallet(&tRawRequester{client}, cfg, &dexbtc.Config{})
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
 	}
 	// Initialize the best block.
-	bestHash, err := wallet.node.GetBestBlockHash()
+	bestHash, err := wallet.node.getBestBlockHash()
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
@@ -435,11 +479,10 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 	return wallet, client, shutdown, nil
 }
 
-func mustMarshal(t *testing.T, thing interface{}) []byte {
-	t.Helper()
+func mustMarshal(thing interface{}) []byte {
 	b, err := json.Marshal(thing)
 	if err != nil {
-		t.Fatalf("mustMarshal error: %v", err)
+		panic("mustMarshal error: " + err.Error())
 	}
 	return b
 }
@@ -470,10 +513,10 @@ func TestAvailableFund(t *testing.T) {
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
 	unspents := make([]*ListUnspentResult, 0)
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents) // only needed for Fund, not Balance
-	node.rawRes[methodListLockUnspent] = mustMarshal(t, make([]*RPCOutpoint, 0))
+	node.listUnspent = unspents // only needed for Fund, not Balance
+	node.listLockUnspent = []*RPCOutpoint{}
 	var bals GetBalancesResult
-	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
+	node.getBalances = &bals
 	bal, err := wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
@@ -485,12 +528,12 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected unconf = 0, got %d", bal.Immature)
 	}
 
-	node.rawErr[methodGetBalances] = tErr
+	node.getBalancesErr = tErr
 	_, err = wallet.Balance()
 	if err == nil {
 		t.Fatalf("no wallet error for rpc error")
 	}
-	node.rawErr[methodGetBalances] = nil
+	node.getBalancesErr = nil
 	var littleLots uint64 = 12
 	littleOrder := tLotSize * littleLots
 	littleFunds := calc.RequiredOrderFunds(littleOrder, dexbtc.RedeemP2PKHInputSize, littleLots, tBTC)
@@ -505,19 +548,24 @@ func TestAvailableFund(t *testing.T) {
 		Safe:          true,
 	}
 	unspents = append(unspents, littleUTXO)
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	bals.Mine.Trusted = float64(littleFunds) / 1e8
-	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
+	node.getBalances = &bals
 	lockedVal := uint64(1e6)
-	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{
+	node.listLockUnspent = []*RPCOutpoint{
 		{
 			TxID: tTxID,
 			Vout: 5,
 		},
-	})
-	node.txOutRes = &btcjson.GetTxOutResult{
-		Confirmations: 2,
-		Value:         float64(lockedVal) / 1e8,
+	}
+
+	node.getTransaction = &GetTransactionResult{
+		Details: []*WalletTxDetails{
+			{
+				Amount: float64(lockedVal) / 1e8,
+				Vout:   5,
+			},
+		},
 	}
 
 	bal, err = wallet.Balance()
@@ -551,9 +599,9 @@ func TestAvailableFund(t *testing.T) {
 	}
 	unspents = append(unspents, lottaUTXO)
 	littleUTXO.Confirmations = 1
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	bals.Mine.Trusted += float64(lottaFunds) / 1e8
-	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
+	node.getBalances = &bals
 	bal, err = wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
@@ -584,34 +632,34 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	// Nothing to spend
-	node.rawRes[methodListUnspent] = mustMarshal(t, []struct{}{})
+	node.listUnspent = []*ListUnspentResult{}
 	setOrderValue(littleOrder)
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for zero utxos")
 	}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	// RPC error
-	node.rawErr[methodListUnspent] = tErr
+	node.listUnspentErr = tErr
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no funding error for rpc error")
 	}
-	node.rawErr[methodListUnspent] = nil
+	node.listUnspentErr = nil
 
 	// Negative response when locking outputs.
-	node.rawRes[methodLockUnspent] = []byte(`false`)
+	node.lockUnspentErr = tErr
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for lockunspent result = false: %v", err)
 	}
-	node.rawRes[methodLockUnspent] = []byte(`true`)
+	node.lockUnspentErr = nil
 
 	// Fund a little bit, with unsafe littleUTXO.
 	littleUTXO.Safe = false
 	littleUTXO.Confirmations = 0
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	spendables, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
@@ -627,7 +675,7 @@ func TestAvailableFund(t *testing.T) {
 	// Now with safe confirmed littleUTXO.
 	littleUTXO.Safe = true
 	littleUTXO.Confirmations = 2
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
@@ -647,7 +695,7 @@ func TestAvailableFund(t *testing.T) {
 
 	// Make lottaOrder unconfirmed like littleOrder, favoring little now.
 	lottaUTXO.Confirmations = 0
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
@@ -696,17 +744,17 @@ func TestAvailableFund(t *testing.T) {
 	// Not enough to cover transaction fees.
 	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots, tBTC)+1) / 1e8
 	lottaUTXO.Amount -= tweak
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough to cover tx fees")
 	}
 	lottaUTXO.Amount += tweak
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	// Prepare for a split transaction.
 	baggageFees := tBTC.MaxFeeRate * splitTxBaggage
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.changeAddr = tP2WPKHAddr
 	wallet.useSplitTx = true
 	// No error when no split performed cuz math.
 	coins, _, err := wallet.FundOrder(ord)
@@ -736,7 +784,7 @@ func TestAvailableFund(t *testing.T) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
 	lottaUTXO.Amount += float64(baggageFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for split tx: %v", err)
@@ -774,12 +822,12 @@ func TestAvailableFund(t *testing.T) {
 	_ = wallet.ReturnCoins(coins)
 
 	// GetRawChangeAddress error
-	node.rawErr[methodChangeAddress] = tErr
+	node.changeAddrErr = tErr
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for split tx change addr error")
 	}
-	node.rawErr[methodChangeAddress] = nil
+	node.changeAddrErr = nil
 
 	// SendRawTx error
 	node.sendErr = tErr
@@ -806,9 +854,8 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
-func (c *tCoin) String() string                                { return hex.EncodeToString(c.id) }
-func (c *tCoin) Value() uint64                                 { return 100 }
-func (c *tCoin) Confirmations(context.Context) (uint32, error) { return 2, nil }
+func (c *tCoin) String() string { return hex.EncodeToString(c.id) }
+func (c *tCoin) Value() uint64  { return 100 }
 
 func TestReturnCoins(t *testing.T) {
 	wallet, node, shutdown, err := tNewWallet(true)
@@ -821,7 +868,6 @@ func TestReturnCoins(t *testing.T) {
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, 1),
 	}
-	node.rawRes[methodLockUnspent] = []byte(`true`)
 	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with output type coins: %v", err)
@@ -834,12 +880,12 @@ func TestReturnCoins(t *testing.T) {
 	}
 
 	// Have the RPC return negative response.
-	node.rawRes[methodLockUnspent] = []byte(`false`)
+	node.lockUnspentErr = tErr
 	err = wallet.ReturnCoins(coins)
 	if err == nil {
 		t.Fatalf("no error for RPC failure")
 	}
-	node.rawRes[methodLockUnspent] = []byte(`true`)
+	node.lockUnspentErr = nil
 
 	// ReturnCoins should accept any type that implements asset.Coin.
 	err = wallet.ReturnCoins(asset.Coins{&tCoin{}, &tCoin{}})
@@ -865,14 +911,15 @@ func TestFundingCoins(t *testing.T) {
 		Spendable:    true,
 		Solvable:     true,
 		Safe:         true,
+		Amount:       1,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
-	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{})
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	node.rawRes[methodLockUnspent] = []byte(`true`)
+	node.listLockUnspent = []*RPCOutpoint{}
+	node.listUnspent = unspents
 	coinIDs := []dex.Bytes{coinID}
 
 	ensureGood := func() {
+		t.Helper()
 		coins, err := wallet.FundingCoins(coinIDs)
 		if err != nil {
 			t.Fatalf("FundingCoins error: %v", err)
@@ -884,6 +931,7 @@ func TestFundingCoins(t *testing.T) {
 	ensureGood()
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		// Clear the cache.
 		wallet.fundingCoins = make(map[outPoint]*utxo)
 		_, err := wallet.FundingCoins(coinIDs)
@@ -893,14 +941,14 @@ func TestFundingCoins(t *testing.T) {
 	}
 
 	// No coins
-	node.rawRes[methodListUnspent] = mustMarshal(t, []*ListUnspentResult{})
+	node.listUnspent = []*ListUnspentResult{}
 	ensureErr("no coins")
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	// RPC error
-	node.rawErr[methodListUnspent] = tErr
+	node.listUnspentErr = tErr
 	ensureErr("rpc coins")
-	node.rawErr[methodListUnspent] = nil
+	node.listUnspentErr = nil
 
 	// Bad coin ID.
 	ogIDs := coinIDs
@@ -909,17 +957,20 @@ func TestFundingCoins(t *testing.T) {
 	coinIDs = ogIDs
 
 	// Coins locked but not in wallet.fundingCoins.
-	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{
+	node.listLockUnspent = []*RPCOutpoint{
 		{TxID: p2pkhUnspent.TxID, Vout: p2pkhUnspent.Vout},
-	})
-	node.rawRes[methodListUnspent] = mustMarshal(t, []*ListUnspentResult{})
-	node.txOutRes = &btcjson.GetTxOutResult{
-		Value: p2pkhUnspent.Amount,
-		ScriptPubKey: btcjson.ScriptPubKeyResult{
-			Hex:       hex.EncodeToString(p2pkhUnspent.ScriptPubKey),
-			Addresses: []string{p2pkhUnspent.Address},
+	}
+	node.listUnspent = []*ListUnspentResult{}
+	getTxRes := &GetTransactionResult{
+		Details: []*WalletTxDetails{
+			{
+				Vout:   p2pkhUnspent.Vout,
+				Amount: p2pkhUnspent.Amount,
+			},
 		},
 	}
+	node.getTransaction = getTxRes
+
 	ensureGood()
 }
 
@@ -962,7 +1013,6 @@ func TestFundEdges(t *testing.T) {
 	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tLotSize
-	node.rawRes[methodLockUnspent] = []byte(`true`)
 
 	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 		t.Helper()
@@ -1010,7 +1060,7 @@ func TestFundEdges(t *testing.T) {
 		Safe:          true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	ord := &asset.Order{
 		Value:         swapVal,
 		MaxSwapCount:  lots,
@@ -1029,7 +1079,7 @@ func TestFundEdges(t *testing.T) {
 	}
 	// Now add the needed satoshi and try again.
 	p2pkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	checkMax(lots, swapVal, backingFees, totalBytes*feeSuggestion, bestCaseBytes*feeSuggestion, swapVal+backingFees)
 
@@ -1041,7 +1091,7 @@ func TestFundEdges(t *testing.T) {
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
 	wallet.useSplitTx = true
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
@@ -1049,7 +1099,7 @@ func TestFundEdges(t *testing.T) {
 	// 1 too few atoms
 	v := swapVal + backingFees - 1
 	p2pkhUnspent.Amount = float64(v) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	coins, _, err := wallet.FundOrder(ord)
 	if err != nil {
@@ -1061,7 +1111,7 @@ func TestFundEdges(t *testing.T) {
 	// Just enough.
 	v = swapVal + backingFees
 	p2pkhUnspent.Amount = float64(v) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggage)*feeSuggestion, (bestCaseBytes+splitTxBaggage)*feeSuggestion, v)
 
@@ -1098,13 +1148,13 @@ func TestFundEdges(t *testing.T) {
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees-1) / 1e8
 	unspents = []*ListUnspentResult{p2pkhUnspent, p2shUnspent}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in two utxos")
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in two utxos: %v", err)
@@ -1128,13 +1178,13 @@ func TestFundEdges(t *testing.T) {
 		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpkhUnspent}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
 	}
 	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
@@ -1162,13 +1212,13 @@ func TestFundEdges(t *testing.T) {
 		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpshUnspent}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wsh utxo")
 	}
 	p2wpshUnspent.Amount = float64(swapVal+backingFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wsh utxo: %v", err)
@@ -1183,7 +1233,6 @@ func TestFundEdgesSegwit(t *testing.T) {
 	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tLotSize
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 
 	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 		t.Helper()
@@ -1230,7 +1279,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 		Safe:          true,
 	}
 	unspents := []*ListUnspentResult{p2wpkhUnspent}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	ord := &asset.Order{
 		Value:         swapVal,
 		MaxSwapCount:  lots,
@@ -1249,7 +1298,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	}
 	// Now add the needed satoshi and try again.
 	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	checkMax(lots, swapVal, backingFees, totalBytes*feeSuggestion, bestCaseBytes*feeSuggestion, swapVal+backingFees)
 
@@ -1261,14 +1310,14 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
 	wallet.useSplitTx = true
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
+	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		return signFunc(t, params, 0, true, wallet.segwit)
 	}
 	backingFees = uint64(totalBytes+splitTxBaggageSegwit) * tBTC.MaxFeeRate
 	v := swapVal + backingFees - 1
 	p2wpkhUnspent.Amount = float64(v) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 	coins, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when skipping split tx because not enough to cover baggage: %v", err)
@@ -1279,7 +1328,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// Now get the split.
 	v = swapVal + backingFees
 	p2wpkhUnspent.Amount = float64(v) / 1e8
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggageSegwit)*feeSuggestion, (bestCaseBytes+splitTxBaggageSegwit)*feeSuggestion, v)
 
@@ -1319,9 +1368,8 @@ func testSwap(t *testing.T, segwit bool) {
 		addrStr = tP2WPKHAddr
 	}
 
-	node.rawRes[methodNewAddress] = mustMarshal(t, addrStr)
-	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
-	node.rawRes[methodLockUnspent] = []byte(`true`)
+	node.newAddress = addrStr
+	node.changeAddr = addrStr
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -1329,7 +1377,7 @@ func testSwap(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)
 	}
-	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
+	node.privKeyForAddr = wif
 
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	contract := &asset.Contract{
@@ -1389,28 +1437,28 @@ func testSwap(t *testing.T, segwit bool) {
 	swaps.Inputs = coins
 
 	// AddressPKH error
-	node.rawErr[methodNewAddress] = tErr
+	node.newAddressErr = tErr
 	_, _, _, err = wallet.Swap(swaps)
 	if err == nil {
 		t.Fatalf("no error for getnewaddress rpc error")
 	}
-	node.rawErr[methodNewAddress] = nil
+	node.newAddressErr = nil
 
 	// ChangeAddress error
-	node.rawErr[methodChangeAddress] = tErr
+	node.changeAddrErr = tErr
 	_, _, _, err = wallet.Swap(swaps)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
-	node.rawErr[methodChangeAddress] = nil
+	node.changeAddrErr = nil
 
 	// SignTx error
-	node.rawErr[methodSignTx] = tErr
+	node.signTxErr = tErr
 	_, _, _, err = wallet.Swap(swaps)
 	if err == nil {
 		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
 	}
-	node.rawErr[methodSignTx] = nil
+	node.signTxErr = nil
 
 	// incomplete signatures
 	signatureComplete = false
@@ -1481,8 +1529,13 @@ func testRedeem(t *testing.T, segwit bool) {
 		t.Fatalf("error encoding wif: %v", err)
 	}
 
-	node.rawRes[methodChangeAddress] = mustMarshal(t, addr.String())
-	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+
+	node.changeAddr = addrStr
+	node.privKeyForAddr = wif
 
 	redemptions := &asset.RedeemForm{
 		Redemptions: []*asset.Redemption{redemption},
@@ -1532,20 +1585,20 @@ func testRedeem(t *testing.T, segwit bool) {
 	coin.value = swapVal
 
 	// Change address error
-	node.rawErr[methodChangeAddress] = tErr
+	node.changeAddrErr = tErr
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for change address error")
 	}
-	node.rawErr[methodChangeAddress] = nil
+	node.changeAddrErr = nil
 
 	// Missing priv key error
-	node.rawErr[methodPrivKeyForAddress] = tErr
+	node.privKeyForAddrErr = tErr
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
-	node.rawErr[methodPrivKeyForAddress] = nil
+	node.privKeyForAddrErr = nil
 
 	// Send error
 	node.sendErr = tErr
@@ -1592,7 +1645,7 @@ func TestSignMessage(t *testing.T) {
 	pt := newOutPoint(tTxHash, vout)
 	utxo := &utxo{address: tP2PKHAddr}
 	wallet.fundingCoins[pt] = utxo
-	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
+	node.privKeyForAddr = wif
 	node.signMsgFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		if len(params) != 2 {
 			t.Fatalf("expected 2 params, found %d", len(params))
@@ -1643,12 +1696,12 @@ func TestSignMessage(t *testing.T) {
 	wallet.fundingCoins[pt] = utxo
 
 	// dumpprivkey error
-	node.rawErr[methodPrivKeyForAddress] = tErr
+	node.privKeyForAddrErr = tErr
 	_, _, err = wallet.SignMessage(coin, msg)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
-	node.rawErr[methodPrivKeyForAddress] = nil
+	node.privKeyForAddrErr = nil
 
 	// bad coin
 	badCoin := &tCoin{id: make([]byte, 15)}
@@ -1677,7 +1730,11 @@ func testAuditContract(t *testing.T, segwit bool) {
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
-	addr := btcAddr(segwit)
+	now := time.Now()
+	addr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
+	if segwit {
+		addr, _ = btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
+	}
 
 	contract, err := dexbtc.MakeContract(addr, addr, secretHash, lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
@@ -1701,7 +1758,7 @@ func testAuditContract(t *testing.T, segwit bool) {
 		},
 	}
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
+	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, now)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1716,14 +1773,14 @@ func testAuditContract(t *testing.T, segwit bool) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
 	// GetTxOut error
 	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
@@ -1733,7 +1790,7 @@ func testAuditContract(t *testing.T, segwit bool) {
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
@@ -1772,7 +1829,8 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(node, cfg, &dexbtc.Config{})
+
+	wallet, err := newWallet(&tRawRequester{node}, cfg, &dexbtc.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1782,6 +1840,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	contractTxid := "e1b7c47df70d7d8f4c9c26f8ba9a59102c10885bd49024d32fdef08242f0c26c"
 	contractTxHash, _ := chainhash.NewHashFromStr(contractTxid)
 	otherTxid := "7a7b3b5c3638516bc8e7f19b4a3dec00f052a599fed5036c2b89829de2367bb6"
+	otherTxHash, _ := chainhash.NewHashFromStr(otherTxid)
 	contractVout := uint32(1)
 	coinID := toCoinID(contractTxHash, contractVout)
 
@@ -1797,7 +1856,6 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	}
 	contractAddr, _ := wallet.scriptHashAddress(contract)
 	pkScript, _ := txscript.PayToAddrScript(contractAddr)
-
 	otherScript, _ := txscript.PayToAddrScript(addr)
 
 	var redemptionWitness, otherWitness [][]byte
@@ -1814,7 +1872,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	}
 
 	// Prepare the "blockchain"
-	inputs := []btcjson.Vin{makeRPCVin(otherTxid, 0, otherSigScript, otherWitness)}
+	inputs := []*wire.TxIn{makeRPCVin(otherTxHash, 0, otherSigScript, otherWitness)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
 	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
@@ -1833,22 +1891,21 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		},
 		Hex: txHex,
 	}
-	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
+	node.getTransaction = getTxRes
 
 	// Add an intermediate block for good measure.
 	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
 
 	// Now add the redemption.
-	rpcVin := makeRPCVin(contractTxid, contractVout, redemptionSigScript, redemptionWitness)
-	inputs = append(inputs, rpcVin)
-	_, redeemBlock := node.addRawTx(contractHeight+2, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
-	redeemVin := &redeemBlock.RawTx[0].Vin[1]
+	redeemVin := makeRPCVin(contractTxHash, contractVout, redemptionSigScript, redemptionWitness)
+	inputs = append(inputs, redeemVin)
+	node.addRawTx(contractHeight+2, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
 
 	// Update currentTip from "RPC". Normally run() would do this.
 	wallet.checkForNewBlocks()
 
 	// Check find redemption result.
-	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, contract)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -1857,62 +1914,52 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	}
 
 	// gettransaction error
-	node.rawErr[methodGetTransaction] = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	node.getTransactionErr = tErr
+	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
-	node.rawErr[methodGetTransaction] = nil
+	node.getTransactionErr = nil
 
 	// timeout finding missing redemption
-	redeemVin.Txid = otherTxid
+	redeemVin.PreviousOutPoint.Hash = *otherTxHash
 	ctx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
 	defer cancel()
-	_, k, err := wallet.FindRedemption(ctx, coinID)
+	_, k, err := wallet.FindRedemption(ctx, coinID, contract)
 	if ctx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
 	}
-	redeemVin.Txid = contractTxid
+
+	node.blockchainMtx.Lock()
+	redeemVin.PreviousOutPoint.Hash = *contractTxHash
+	node.blockchainMtx.Unlock()
 
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
 	cancelCtx()
-	_, _, err = wallet.FindRedemption(deadCtx, coinID)
+	_, _, err = wallet.FindRedemption(deadCtx, coinID, contract)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
 
 	// Expect FindRedemption to error because of bad input sig.
 	node.blockchainMtx.Lock()
-	redeemVin.Witness = []string{string(randBytes(100))}
-	redeemVin.ScriptSig.Hex = hex.EncodeToString(randBytes(100))
+	redeemVin.Witness = [][]byte{randBytes(100)}
+	redeemVin.SignatureScript = randBytes(100)
 
 	node.blockchainMtx.Unlock()
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
 	node.blockchainMtx.Lock()
-	redeemVin.Witness = rpcVin.Witness
-	redeemVin.ScriptSig.Hex = hex.EncodeToString(redemptionSigScript)
+	redeemVin.Witness = redemptionWitness
+	redeemVin.SignatureScript = redemptionSigScript
 	node.blockchainMtx.Unlock()
 
-	// Wrong script type for contract output
-	getTxRes.Hex, err = makeTxHex([]dex.Bytes{otherScript, otherScript}, inputs)
-	if err != nil {
-		t.Fatalf("makeTxHex: %v", err)
-	}
-	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
-	if err == nil {
-		t.Fatalf("no error for wrong script type")
-	}
-	getTxRes.Hex = txHex
-	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
-
 	// Sanity check to make sure it passes again.
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}
@@ -1947,7 +1994,7 @@ func testRefund(t *testing.T, segwit bool) {
 
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut
-	node.rawRes[methodChangeAddress] = mustMarshal(t, addr.String())
+	node.changeAddr = addr.String()
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -1955,10 +2002,10 @@ func testRefund(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)
 	}
-	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
+	node.privKeyForAddr = wif
 
 	contractOutput := newOutput(tTxHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -1967,14 +2014,14 @@ func testRefund(t *testing.T, segwit bool) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract())
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	// gettxout error
 	node.txOutErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for missing utxo")
 	}
@@ -1983,38 +2030,38 @@ func testRefund(t *testing.T, segwit bool) {
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract)
+	_, err = wallet.Refund(badContractOutput.ID(), badContract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
 
 	// Too small.
 	node.txOutRes = newTxOutResult(nil, 100, 2)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for value < fees")
 	}
 	node.txOutRes = bigTxOut
 
 	// getrawchangeaddress error
-	node.rawErr[methodChangeAddress] = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	node.changeAddrErr = tErr
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
-	node.rawErr[methodChangeAddress] = nil
+	node.changeAddrErr = nil
 
 	// signature error
-	node.rawErr[methodPrivKeyForAddress] = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	node.privKeyForAddrErr = tErr
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
-	node.rawErr[methodPrivKeyForAddress] = nil
+	node.privKeyForAddrErr = nil
 
 	// send error
 	node.sendErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for sendrawtransaction rpc error")
 	}
@@ -2024,14 +2071,14 @@ func testRefund(t *testing.T, segwit bool) {
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.sendHash = &badHash
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for tx hash")
 	}
 	node.sendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -2045,25 +2092,24 @@ func TestLockUnlock(t *testing.T) {
 	}
 
 	// just checking that the errors come through.
-	node.rawRes[methodUnlock] = mustMarshal(t, true)
-	node.rawRes[methodLockUnspent] = []byte(`true`)
+	node.unlock = true
 	err = wallet.Unlock("pass")
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
-	node.rawErr[methodUnlock] = tErr
+	node.unlockErr = tErr
 	err = wallet.Unlock("pass")
 	if err == nil {
 		t.Fatalf("no error for walletpassphrase error")
 	}
 
 	// same for locking
-	node.rawRes[methodLock] = mustMarshal(t, true)
+	node.lock = true
 	err = wallet.Lock()
 	if err != nil {
 		t.Fatalf("lock error: %v", err)
 	}
-	node.rawErr[methodLock] = tErr
+	node.lockErr = tErr
 	err = wallet.Lock()
 	if err == nil {
 		t.Fatalf("no error for walletlock rpc error")
@@ -2093,10 +2139,10 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}
 	addr := tP2PKHAddr
 	fee := float64(1) // BTC
-	node.rawRes[methodSetTxFee] = mustMarshal(t, true)
-	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2PKHAddr)
-	node.rawRes[methodSendToAddress] = mustMarshal(t, tTxID)
-	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{
+	node.setTxFee = true
+	node.changeAddr = tP2PKHAddr
+	node.sendToAddress = tTxID
+	node.getTransaction = &GetTransactionResult{
 		Details: []*WalletTxDetails{
 			{
 				Address:  tP2PKHAddr,
@@ -2105,7 +2151,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 				Amount:   -fee,
 			},
 		},
-	})
+	}
 
 	unspents := []*ListUnspentResult{{
 		TxID:          tTxID,
@@ -2116,7 +2162,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 		ScriptPubKey:  tP2PKH,
 		Safe:          true,
 	}}
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.listUnspent = unspents
 
 	_, err = sender(addr, toSatoshi(fee))
 	if err != nil {
@@ -2124,20 +2170,20 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}
 
 	// SendToAddress error
-	node.rawErr[methodSendToAddress] = tErr
+	node.sendToAddressErr = tErr
 	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for SendToAddress error: %v", err)
 	}
-	node.rawErr[methodSendToAddress] = nil
+	node.sendToAddressErr = nil
 
 	// GetTransaction error
-	node.rawErr[methodGetTransaction] = tErr
+	node.getTransactionErr = tErr
 	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error: %v", err)
 	}
-	node.rawErr[methodGetTransaction] = nil
+	node.getTransactionErr = nil
 
 	// good again
 	_, err = sender(addr, toSatoshi(fee))
@@ -2165,47 +2211,36 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, spent, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, err = wallet.SwapConfirmations(context.Background(), randBytes(35), nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
-	}
-	if spent {
-		t.Fatalf("spent is non-zero for non-nil error")
 	}
 
 	// Short path.
 	node.txOutRes = &btcjson.GetTxOutResult{
 		Confirmations: 2,
 	}
-	confs, spent, err := wallet.Confirmations(context.Background(), coinID)
+	confs, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
 	if confs != 2 {
 		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
 	}
-	if spent {
-		t.Fatalf("expected spent = false for gettxout path, got true")
-	}
 
 	// gettransaction error
 	node.txOutRes = nil
-	_, spent, err = wallet.Confirmations(context.Background(), coinID)
+	node.getTransactionErr = tErr
+	_, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
-	if spent {
-		t.Fatalf("spent is non-zero with gettransaction error")
-	}
-	node.rawErr[methodGetTransaction] = nil
+	node.getTransactionErr = nil
+	node.getTransaction = &GetTransactionResult{}
 
-	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
-	_, spent, err = wallet.Confirmations(context.Background(), coinID)
-	if err != nil {
-		t.Fatalf("coin error: %v", err)
-	}
-	if !spent {
-		t.Fatalf("expected spent = true for gettransaction path, got false")
+	confs, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	if err == nil || !errors.Is(err, asset.ErrSpentSwap) {
+		t.Fatalf("wrong error. Expected (0, ErrSpentSwap), got (%d, %v)", confs, err)
 	}
 }
 
@@ -2307,10 +2342,10 @@ func TestSyncStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.rawRes[methodGetBlockchainInfo] = mustMarshal(t, &getBlockchainInfoResult{
+	node.getBlockchainInfo = &getBlockchainInfoResult{
 		Headers: 100,
 		Blocks:  99,
-	})
+	}
 
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
@@ -2323,18 +2358,18 @@ func TestSyncStatus(t *testing.T) {
 		t.Fatalf("progress not complete when loading last block")
 	}
 
-	node.rawErr[methodGetBlockchainInfo] = tErr
+	node.getBlockchainInfoErr = tErr
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
-	node.rawErr[methodGetBlockchainInfo] = nil
+	node.getBlockchainInfoErr = nil
 
 	wallet.tipAtConnect = 100
-	node.rawRes[methodGetBlockchainInfo] = mustMarshal(t, &getBlockchainInfoResult{
+	node.getBlockchainInfo = &getBlockchainInfoResult{
 		Headers: 200,
 		Blocks:  150,
-	})
+	}
 	synced, progress, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
@@ -2380,7 +2415,7 @@ func TestPreSwap(t *testing.T) {
 
 	setFunds := func(v uint64) {
 		p2pkhUnspent.Amount = float64(v) / 1e8
-		node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+		node.listUnspent = unspents
 	}
 
 	form := &asset.PreSwapForm{

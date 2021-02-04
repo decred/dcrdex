@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 )
 
@@ -242,8 +243,8 @@ func (w *xcWallet) Disconnect() {
 }
 
 // Confirmations calls (asset.Wallet).Confirmations with a timeout Context.
-func (w *xcWallet) Confirmations(ctx context.Context, coinID []byte) (uint32, bool, error) {
+func (w *xcWallet) SwapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, error) {
 	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
 	defer cancel()
-	return w.Wallet.Confirmations(ctx, coinID)
+	return w.Wallet.SwapConfirmations(ctx, coinID, contract, encode.UnixTimeMilli(int64(matchTime)))
 }

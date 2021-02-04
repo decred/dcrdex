@@ -694,22 +694,22 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 // contract must be provided for the search algorithm to verify the correct data
 // push. Only contracts of length SwapContractSize that can be validated by
 // ExtractSwapDetails are recognized.
-func FindKeyPush(txIn *wire.TxIn, contractHash []byte, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
+func FindKeyPush(witness [][]byte, sigScript, contractHash []byte, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
 	var redeemScript, secret []byte
 	var hasher func([]byte) []byte
 	if segwit {
-		if len(txIn.Witness) != 5 {
-			return nil, fmt.Errorf("sigScript should contain 5 data pushes. Found %d", len(txIn.Witness))
+		if len(witness) != 5 {
+			return nil, fmt.Errorf("witness should contain 5 data pushes. Found %d", len(witness))
 		}
-		secret, redeemScript = txIn.Witness[2], txIn.Witness[4]
+		secret, redeemScript = witness[2], witness[4]
 		hasher = func(b []byte) []byte {
 			h := sha256.Sum256(b)
 			return h[:]
 		}
 	} else {
-		pushes, err := txscript.PushedData(txIn.SignatureScript)
+		pushes, err := txscript.PushedData(sigScript)
 		if err != nil {
-			return nil, fmt.Errorf("sigScript PushedData(%x): %w", txIn.SignatureScript, err)
+			return nil, fmt.Errorf("sigScript PushedData(%x): %w", sigScript, err)
 		}
 		if len(pushes) != 4 {
 			return nil, fmt.Errorf("sigScript should contain 4 data pushes. Found %d", len(pushes))
