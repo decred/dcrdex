@@ -572,7 +572,13 @@ func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed u
 	// Counter-party's swap is the "to" asset.
 	needed = t.wallets.toAsset.SwapConf
 
-	// Check the confirmations on the counter-party's swap.
+	// Check the confirmations on the counter-party's swap. If counterSwap is
+	// not set, we shouldn't be here, but catch this just in case.
+	if match.counterSwap == nil {
+		have = 0
+		t.dc.log.Warnf("counterPartyConfirms: No AuditInfo available to check!")
+		return
+	}
 	coin := match.counterSwap.Coin()
 
 	var err error
@@ -1870,19 +1876,17 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 	return nil
 }
 
-// auditContract audits the contract for the match and relevant MatchProof
-// fields are set. This may block for a long period, and should be run in a
-// goroutine. The trackedTrade mtx must NOT be locked. The match is updated in
-// the DB if the audit succeeds.
-func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte) error {
-	// Get the asset.AuditInfo from the ExchangeWallet. Handle network latency.
-	// The coin waiter will run once every recheckInterval until successful or
-	// until the match is revoked. The client is asked by the server to audit a
-	// contract transaction, and they have until broadcast timeout to do it
-	// before they get penalized and the match revoked. Thus, there is no reason
-	// to give up on the request sooner since the server will not ask again and
-	// the client will not solicit the counterparty contract data again except
-	// on reconnect.
+// searchAuditInfo tries to obtain the asset.AuditInfo from the ExchangeWallet.
+// Handle network latency or other transient node errors. The coin waiter will
+// run once every recheckInterval until successful or until the match is
+// revoked. The client is asked by the server to audit a contract transaction,
+// and they have until broadcast timeout to do it before they get penalized and
+// the match revoked. Thus, there is no reason to give up on the request sooner
+// since the server will not ask again and the client will not solicit the
+// counterparty contract data again except on reconnect. This may block for a
+// long time and should be run in a goroutine. The trackedTrade mtx must NOT be
+// locked.
+func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract []byte) (asset.AuditInfo, error) {
 	errChan := make(chan error, 1)
 	var auditInfo asset.AuditInfo
 	var tries int
@@ -1913,6 +1917,13 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 				tries++
 				return wait.TryAgain
 			}
+			// Even retry for unrecognized errors, at least for a little while.
+			// With a default recheckInterval of 5 seconds, this is 2 minutes.
+			if tries < 24 {
+				t.dc.log.Errorf("Unexpected audit contract %v (%s) error (will try again): %v", contractID, contractSymb, err)
+				tries++
+				return wait.TryAgain
+			}
 			errChan <- err
 			return wait.DontTryAgain
 
@@ -1922,11 +1933,25 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 				"Check your internet and wallet connections!", contractID, contractSymb))
 		},
 	})
+
 	// Wait for the coin waiter to find and audit the contract coin, or timeout.
 	err := <-errChan
 	if err != nil {
+		return nil, err
+	}
+	return auditInfo, nil
+}
+
+// auditContract audits the contract for the match and relevant MatchProof
+// fields are set. This may block for a long period, and should be run in a
+// goroutine. The trackedTrade mtx must NOT be locked. The match is updated in
+// the DB if the audit succeeds.
+func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contract []byte) error {
+	auditInfo, err := t.searchAuditInfo(match, coinID, contract)
+	if err != nil {
 		return err
 	}
+	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
 
 	// Audit the contract.
 	// 1. Recipient Address
