@@ -3556,8 +3556,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if dbMatch.Status < order.MakerSwapCast {
 					needsCoins = true
 				}
-				if dbMatch.Status < order.MakerRedeemed && dbMatch.Status >= order.TakerSwapCast {
-					needsAuditInfo = true
+				if dbMatch.Status == order.TakerSwapCast {
+					needsAuditInfo = true // maker needs AuditInfo for takers contract
 					counterSwap = metaData.Proof.TakerSwap
 				}
 			} else { // Taker
@@ -3565,7 +3565,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					needsCoins = true
 				}
 				if dbMatch.Status < order.MatchComplete && dbMatch.Status >= order.MakerSwapCast {
-					needsAuditInfo = true
+					needsAuditInfo = true // taker needs AuditInfo for maker's contract
 					counterSwap = metaData.Proof.MakerSwap
 				}
 			}
@@ -3582,15 +3582,40 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", dbMatch.Side, tracker.token(), dbMatch.Status)
 					continue
 				}
+				// Obtaining AuditInfo will fail if it's unmined AND gone from
+				// mempool, or the wallet is otherwise not ready. Note that this
+				// does not actually audit the contract's value, recipient,
+				// expiration, or secret hash (if maker), as that was already
+				// done when it was initially stored as CounterScript.
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
 				if err != nil {
-					c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
-						match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked(), err)
-					match.swapErr = fmt.Errorf("audit error, order %s, match %s: %w", tracker.ID(), match.id, err)
-					match.MetaData.Proof.SelfRevoked = true
-					notifyErr(SubjectMatchRecoveryError, "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v",
-						tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
-					continue
+					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
+					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(wallets.toAsset.ID))
+					// Start the audit retry waiter. Set swapErr to block tick
+					// actions like counterSwap.Confirmations checks while it is
+					// searching since matchTracker.counterSwap is not yet set.
+					match.swapErr = fmt.Errorf("audit in progress, please wait") // don't frighten the users
+					go func(tracker *trackedTrade, match *matchTracker) {
+						auditInfo, err := tracker.searchAuditInfo(match, counterSwap, counterContract)
+						tracker.mtx.Lock()
+						defer tracker.mtx.Unlock()
+						if err != nil {
+							match.swapErr = fmt.Errorf("audit error: %w", err)
+							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
+								match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0,
+								match.MetaData.Proof.IsRevoked(), err)
+							notifyErr(SubjectMatchRecoveryError, "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
+								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)
+							// The match may become revoked by server.
+							return
+						}
+						match.counterSwap = auditInfo
+						match.swapErr = nil // unblock tick actions
+						c.log.Infof("Successfully located and re-validated counterparty contract %v (%s)",
+							contractStr, unbip(wallets.toAsset.ID))
+					}(tracker, match)
+
+					continue // leave auditInfo nil
 				}
 				match.counterSwap = auditInfo
 				continue
