@@ -704,7 +704,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
-	atomsPerKB, err := dcrutil.NewAmount(estimateFeeResult.FeeRate) // satPerKB is 0 when err != nil
+	atomsPerKB, err := dcrutil.NewAmount(estimateFeeResult.FeeRate) // atomsPerKB is 0 when err != nil
 	if err != nil {
 		return 0, err
 	}
@@ -1272,7 +1272,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if !notFound[pt] {
 			continue
 		}
-		txOut, err := dcr.getTxOut(txHash, output.Vout, true)
+		txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, output.Vout, output.Tree, true)
 		if err != nil {
 			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), translateRPCCancelErr(err))
 		}
@@ -1541,7 +1541,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		addr = fCoin.addr
 	} else {
 		// Check if we can get the address from gettxout.
-		txOut, err := dcr.getTxOut(op.txHash(), op.vout(), true)
+		txOut, err := dcr.node.GetTxOut(dcr.ctx, op.txHash(), op.vout(), op.tree, true)
 		if err == nil && txOut != nil {
 			addrs := txOut.ScriptPubKey.Addresses
 			if len(addrs) != 1 {
@@ -1589,7 +1589,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, err := dcr.getTxOut(txHash, vout, true)
+	txOut, txTree, err := dcr.getTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
@@ -1623,7 +1623,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 			contractHash, addr.ScriptAddress())
 	}
 	return &asset.AuditInfo{
-		Coin:       newOutput(txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
+		Coin:       newOutput(txHash, vout, toAtoms(txOut.Value), txTree),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
@@ -2035,7 +2035,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := dcr.getTxOut(txHash, vout, true)
+	utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
@@ -2237,15 +2237,12 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
 func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	// Could check with gettransaction first, figure out the tree, and look for a
-	// redeem script with listscripts, but the listunspent entry has all the
-	// necessary fields already.
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err
 	}
 	// Check for an unspent output.
-	txOut, err := dcr.getTxOut(txHash, vout, true)
+	txOut, _, err := dcr.getTxOut(txHash, vout, true)
 	if err == nil && txOut != nil {
 		return uint32(txOut.Confirmations), false, nil
 	}
@@ -2379,13 +2376,16 @@ func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 }
 
 // getTxOut attempts to find the specified txout from the regular tree and if
-// not found in the regular tree, checks the stake tree.
-func (dcr *ExchangeWallet) getTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error) {
-	txout, err := dcr.node.GetTxOut(dcr.ctx, txHash, index, wire.TxTreeRegular, mempool) // check regular tree first
+// not found in the regular tree, checks the stake tree. Also returns the tree
+// where the output is found.
+func (dcr *ExchangeWallet) getTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, int8, error) {
+	tree := wire.TxTreeRegular
+	txout, err := dcr.node.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check regular tree first
 	if err == nil && txout == nil {
-		txout, err = dcr.node.GetTxOut(dcr.ctx, txHash, index, wire.TxTreeStake, mempool) // check stake tree
+		tree = wire.TxTreeStake
+		txout, err = dcr.node.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check stake tree
 	}
-	return txout, err
+	return txout, tree, err
 }
 
 // convertCoin converts the asset.Coin to an unspent output.
@@ -2398,20 +2398,12 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	txOut, err := dcr.getTxOut(txHash, vout, true)
+	txOut, tree, err := dcr.getTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent output %s:%d: %w", txHash, vout, translateRPCCancelErr(err))
 	}
 	if txOut == nil {
-		return nil, asset.CoinNotFoundError
-	}
-	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
-	if err != nil {
-		return nil, err
-	}
-	tree := wire.TxTreeRegular
-	if dexdcr.IsStakePubkeyHashScript(pkScript) || dexdcr.IsStakeScriptHashScript(pkScript) {
-		tree = wire.TxTreeStake
+		return nil, asset.CoinNotFoundError // maybe spent
 	}
 	return newOutput(txHash, vout, coin.Value(), tree), nil
 }
