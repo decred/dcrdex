@@ -466,7 +466,7 @@ func testFindKeyPush(t *testing.T, segwit bool) {
 
 	txIn := wire.NewTxIn(dummyPrevOut, sigScript, witness)
 
-	key, err := FindKeyPush(txIn, contractHash, segwit, tParams)
+	key, err := FindKeyPush(txIn.Witness, txIn.SignatureScript, contractHash, segwit, tParams)
 	if err != nil {
 		t.Fatalf("findKeyPush error: %v", err)
 	}
@@ -476,21 +476,21 @@ func testFindKeyPush(t *testing.T, segwit bool) {
 
 	// Empty script is an error.
 	badTx := wire.NewTxIn(dummyPrevOut, nil, nil)
-	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
+	_, err = FindKeyPush(badTx.Witness, badTx.SignatureScript, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for empty script")
 	}
 
 	// Bad script
 	badTx = wire.NewTxIn(dummyPrevOut, invalidScript, invalidWitness)
-	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
+	_, err = FindKeyPush(badTx.Witness, badTx.SignatureScript, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}
 
 	// Random but valid contract won't work.
 	badTx = wire.NewTxIn(dummyPrevOut, randoSigScript, randoWitness)
-	_, err = FindKeyPush(badTx, contractHash, segwit, tParams)
+	_, err = FindKeyPush(badTx.Witness, badTx.SignatureScript, contractHash, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}
