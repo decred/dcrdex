@@ -922,13 +922,16 @@ func (c *Core) Run(ctx context.Context) {
 	// Lock and disconnect the wallets.
 	c.walletMtx.Lock()
 	for assetID, wallet := range c.wallets {
+		delete(c.wallets, assetID)
+		if !wallet.connected() {
+			continue
+		}
 		symb := strings.ToUpper(unbip(assetID))
 		c.log.Infof("Locking %s wallet", symb)
 		if err := wallet.Lock(); err != nil {
 			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
 		}
 		wallet.Disconnect()
-		delete(c.wallets, assetID)
 	}
 	c.walletMtx.Unlock()
 
@@ -1670,7 +1673,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
 
-	go oldWallet.Disconnect()
+	if oldWallet.connected() {
+		go oldWallet.Disconnect()
+	}
 
 	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
 	details := fmt.Sprintf("Configuration for %s wallet has been updated. Deposit address = %s",
