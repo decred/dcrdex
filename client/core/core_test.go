@@ -160,10 +160,10 @@ func tNewAccount() *dexAccount {
 	}
 }
 
-func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
+func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
 	connMaster := dex.NewConnectionMaster(conn)
-	connMaster.Connect(tCtx)
+	connMaster.Connect(ctx)
 	acct := tNewAccount()
 	return &dexConnection{
 		WsConn:     conn,
@@ -786,13 +786,14 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 }
 
 type testRig struct {
-	core    *Core
-	db      *TDB
-	queue   *wait.TickerQueue
-	ws      *TWebsocket
-	dc      *dexConnection
-	acct    *dexAccount
-	crypter *tCrypter
+	shutdown func()
+	core     *Core
+	db       *TDB
+	queue    *wait.TickerQueue
+	ws       *TWebsocket
+	dc       *dexConnection
+	acct     *dexAccount
+	crypter  *tCrypter
 }
 
 func newTestRig() *testRig {
@@ -813,15 +814,28 @@ func newTestRig() *testRig {
 
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
-	go queue.Run(tCtx)
+	ctx, cancel := context.WithCancel(tCtx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		queue.Run(ctx)
+	}()
 
-	dc, conn, acct := testDexConnection()
+	dc, conn, acct := testDexConnection(ctx)
+
+	shutdown := func() {
+		cancel()
+		wg.Wait()
+		dc.connMaster.Wait()
+	}
 
 	crypter := &tCrypter{}
 
 	rig := &testRig{
+		shutdown: shutdown,
 		core: &Core{
-			ctx:      tCtx,
+			ctx:      ctx,
 			cfg:      &Config{},
 			db:       tdb,
 			log:      tLogger,
@@ -938,6 +952,7 @@ func TestMain(m *testing.M) {
 
 func TestMarkets(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	// The test rig's dexConnection comes with a market. Clear that for this test.
 	rig.dc.cfgMtx.Lock()
 	rig.dc.cfg.Markets = nil
@@ -995,6 +1010,7 @@ func TestMarkets(t *testing.T) {
 
 func TestDexConnectionOrderBook(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
 
@@ -1217,6 +1233,7 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 
 func TestCreateWallet(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	// Create a new asset.
@@ -1310,6 +1327,7 @@ func TestCreateWallet(t *testing.T) {
 
 func TestGetFee(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	cert := []byte{}
 
@@ -1344,6 +1362,7 @@ func TestRegister(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
 	delete(tCore.conns, tDexHost)
@@ -1640,6 +1659,7 @@ func TestRegister(t *testing.T) {
 
 func TestLogin(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
@@ -1672,6 +1692,7 @@ func TestLogin(t *testing.T) {
 
 	// 'connect' route error.
 	rig = newTestRig()
+	defer rig.shutdown()
 	tCore = rig.core
 	rig.acct.unauth()
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -1688,9 +1709,12 @@ func TestLogin(t *testing.T) {
 
 	// Success with some matches in the response.
 	rig = newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	qty := 3 * tDCR.LotSize
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
+	lo.Force = order.StandingTiF
+	dbOrder.MetaData.Status = order.OrderStatusBooked // leave unfunded to have it canceled on auth/'connect'
 	oid := lo.ID()
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	dcrWallet, _ := newTWallet(tDCR.ID)
@@ -1699,7 +1723,7 @@ func TestLogin(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify) // nil means no funding coins
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		id: matchID,
@@ -1758,6 +1782,7 @@ func TestLogin(t *testing.T) {
 	tCore = rig.core
 	rig.acct.markFeePaid()
 	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
+	rig.queueCancel(nil) // for the unfunded order that gets canceled in authDEX
 	// Login>authDEX will do 4 match DB updates for these two matches:
 	// missing -> revoke -> update match
 	// extra -> negotiate -> newTrackers -> update match
@@ -1774,6 +1799,14 @@ func TestLogin(t *testing.T) {
 	rig.db.waitForMatchUpdateOrFail(missingID, t)
 	for i := 0; i < 3; i++ {
 		rig.db.waitForMatchUpdateOrFail(extraID, t)
+	}
+
+	// check t.metaData.LinkedOrder or for db.LinkOrder call, then db.UpdateOrder call
+	if tracker.metaData.LinkedOrder.IsZero() {
+		t.Errorf("cancel order not set")
+	}
+	if rig.db.linkedFromID != oid || rig.db.linkedToID.IsZero() {
+		t.Errorf("automatic cancel order not linked")
 	}
 
 	if !tracker.matches[missingID].MetaData.Proof.SelfRevoked {
@@ -1800,6 +1833,7 @@ func TestLogin(t *testing.T) {
 
 func TestLoginAccountNotFoundError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
@@ -1824,6 +1858,7 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 
 func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	rig.queueConnect(nil, nil, nil)
@@ -1842,6 +1877,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 
 func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	expectedErrorMessage := "test account not found error"
@@ -1867,6 +1903,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 
 func TestConnectDEX(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	ai := &db.AccountInfo{
@@ -1927,6 +1964,7 @@ func TestConnectDEX(t *testing.T) {
 
 func TestInitializeClient(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.db.existValues[keyParamsKey] = false
 
@@ -1959,6 +1997,7 @@ func TestInitializeClient(t *testing.T) {
 
 func TestWithdraw(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
@@ -2013,6 +2052,7 @@ func TestWithdraw(t *testing.T) {
 
 func TestTrade(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
@@ -2312,6 +2352,7 @@ func TestTrade(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	lo.Force = order.StandingTiF
@@ -2373,6 +2414,7 @@ func TestCancel(t *testing.T) {
 
 func TestHandlePreimageRequest(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()
 	preImg := newPreimage()
@@ -2422,6 +2464,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 func TestHandleRevokeOrderMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
@@ -2493,6 +2536,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 
 func TestHandleRevokeMatchMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
@@ -2565,6 +2609,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 
 func TestTradeTracking(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
@@ -3154,6 +3199,7 @@ func TestTradeTracking(t *testing.T) {
 
 func TestReconcileTrades(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 
 	mkt := dc.marketConfig(tDcrBtcMktName)
@@ -3370,10 +3416,11 @@ func makeTradeTracker(rig *testRig, mkt *msgjson.Market, walletSet *walletSet, f
 
 func TestRefunds(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
 		if match.Match.Status != wantStatus {
-			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
+			t.Fatalf("%s: wrong status wanted %v, got %v", tag, wantStatus, match.Match.Status)
 		}
 	}
 	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
@@ -3440,8 +3487,11 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.marketConfig(tDcrBtcMktName)
+	fundCoinsDCR := asset.Coins{&tCoin{id: encode.RandomBytes(36)}}
+	tDcrWallet.fundingCoins = fundCoinsDCR
+	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+		rig.db, rig.queue, walletSet, fundCoinsDCR, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -3501,6 +3551,14 @@ func TestRefunds(t *testing.T) {
 
 	// TAKER REFUND, NO MAKER REDEEM
 	//
+	// Reset funding coins in the trackedTrade, wipe change coin.
+	tracker.mtx.Lock()
+	tracker.coins = mapifyCoins(fundCoinsDCR)
+	tracker.coinsLocked = true
+	tracker.changeLocked = false
+	tracker.change = nil
+	tracker.metaData.ChangeCoin = nil
+	tracker.mtx.Unlock()
 	mid = ordertest.RandomMatchID()
 	msgMatch = &msgjson.Match{
 		OrderID:  loid[:],
@@ -3566,11 +3624,13 @@ func TestRefunds(t *testing.T) {
 }
 
 func TestNotifications(t *testing.T) {
-	tCore := newTestRig().core
+	rig := newTestRig()
+	defer rig.shutdown()
 
 	// Insert a notification into the database.
 	typedNote := newOrderNote("abc", "def", 100, nil)
 
+	tCore := rig.core
 	ch := tCore.NotificationFeed()
 	tCore.notify(typedNote)
 	select {
@@ -3583,6 +3643,7 @@ func TestNotifications(t *testing.T) {
 
 func TestResolveActiveTrades(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
@@ -3609,7 +3670,8 @@ func TestResolveActiveTrades(t *testing.T) {
 			Quantity: qty,
 			Sell:     true,
 		},
-		Rate: rate,
+		Rate:  rate,
+		Force: order.StandingTiF, // we're calling it booked in OrderMetaData
 	}
 
 	oid := lo.ID()
@@ -3650,7 +3712,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		Match: &order.UserMatch{
 			OrderID:  oid,
 			MatchID:  mid,
-			Quantity: qty,
+			Quantity: qty - tDCR.LotSize,
 			Rate:     rate,
 			Address:  addr,
 			Status:   order.MakerSwapCast,
@@ -3746,9 +3808,10 @@ func TestResolveActiveTrades(t *testing.T) {
 	tBtcWallet.unlockErr = nil
 	tBtcWallet.locked = false
 
-	// Funding coin error.
+	// Funding coin error still puts it in the trades map, just with no coins
+	// locked.
 	tDcrWallet.fundingCoinErr = tErr
-	ensureFail("funding coin")
+	ensureGood("funding coin", 0)
 	tDcrWallet.fundingCoinErr = nil
 
 	// No matches
@@ -3830,6 +3893,7 @@ func TestResolveActiveTrades(t *testing.T) {
 
 func TestCompareServerMatches(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	preImg := newPreimage()
 	dc := rig.dc
 
@@ -4092,6 +4156,7 @@ func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint6
 
 func TestHandleEpochOrderMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()
 	payload := &msgjson.EpochOrderNote{
@@ -4144,6 +4209,7 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 
 func TestHandleMatchProofMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	pimg := newPreimage()
 	cmt := pimg.Commit()
 
@@ -4195,6 +4261,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 
 func TestLogout(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
@@ -4257,6 +4324,7 @@ func TestLogout(t *testing.T) {
 
 func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
 
@@ -4304,6 +4372,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Commit:     preImg.Commit(),
 		},
 		T: order.Trade{
+			// Coins needed?
 			Sell:     sell,
 			Quantity: qty,
 			Address:  addr,
@@ -4404,6 +4473,7 @@ func TestAddrHost(t *testing.T) {
 
 func TestAssetBalance(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	wallet, tWallet := newTWallet(tDCR.ID)
@@ -4443,6 +4513,7 @@ func TestAssetCounter(t *testing.T) {
 
 func TestHandleTradeSuspensionMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 
 	tCore := rig.core
 	dc := rig.dc
@@ -4640,6 +4711,7 @@ func verifyRevokeNotification(ch chan *OrderNote, expectedSubject string, t *tes
 
 func TestHandleTradeResumptionMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 
 	tCore := rig.core
 	dcrWallet, _ := newTWallet(tDCR.ID)
@@ -4737,6 +4809,7 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 
 func TestHandleNomatch(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
 	mkt := dc.marketConfig(tDcrBtcMktName)
@@ -4848,6 +4921,7 @@ func TestHandleNomatch(t *testing.T) {
 
 func TestWalletSettings(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.db.wallet = &db.Wallet{
 		Settings: map[string]string{
@@ -4885,6 +4959,7 @@ func TestWalletSettings(t *testing.T) {
 
 func TestReconfigureWallet(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.db.wallet = &db.Wallet{
 		Settings: map[string]string{
@@ -4993,6 +5068,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 func TestSetWalletPassword(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	rig.db.wallet = &db.Wallet{
 		EncryptedPW: []byte("abc"),
@@ -5063,6 +5139,7 @@ func TestSetWalletPassword(t *testing.T) {
 
 func TestHandlePenaltyMsg(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
 	penalty := &msgjson.Penalty{
@@ -5130,6 +5207,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 
 func TestPreimageSync(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
@@ -5222,6 +5300,7 @@ func TestPreimageSync(t *testing.T) {
 
 func TestMatchStatusResolution(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
 	mkt := dc.marketConfig(tDcrBtcMktName)
@@ -5715,6 +5794,7 @@ func TestMatchStatusResolution(t *testing.T) {
 
 func TestSuspectTrades(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	dc := rig.dc
 	tCore := rig.core
 
@@ -5906,6 +5986,7 @@ func TestSuspectTrades(t *testing.T) {
 
 func TestWalletSyncing(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	noteFeed := tCore.NotificationFeed()
