@@ -217,6 +217,12 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 	return corder
 }
 
+// hasFundingCoins indicates if either funding or change coins are locked.
+// This should be called with the mtx at least read locked.
+func (t *trackedTrade) hasFundingCoins() bool {
+	return t.changeLocked || t.coinsLocked
+}
+
 // lockedAmount is the total value of all coins currently locked for this trade.
 // Returns the value sum of the initial funding coins if no swap has been sent,
 // otherwise, the value of the locked change coin is returned.
@@ -408,6 +414,15 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			t.dc.log.Errorf("Match %s would put order %s fill over quantity. Revoking the match.",
 				match.id, t.ID())
 			match.MetaData.Proof.SelfRevoked = true
+		}
+
+		// If this order has no funding coins, block swaps attempts on the new
+		// match. Do not revoke however since the user may be able to resolve
+		// wallet configuration issues and restart to restore funding coins.
+		// Otherwise the server will end up revoking these matches.
+		if !t.hasFundingCoins() {
+			t.dc.log.Errorf("Unable to begin swap negotiation for unfunded order %v", t.ID())
+			match.swapErr = errors.New("no funding coins for swap")
 		}
 
 		err := t.db.UpdateMatch(&match.MetaMatch)
