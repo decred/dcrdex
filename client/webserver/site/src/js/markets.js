@@ -956,41 +956,28 @@ export default class MarketsPage extends BasePage {
   showVerify () {
     const page = this.page
     const order = this.parseOrder()
+    const isSell = order.sell
     const baseAsset = app.assets[order.base]
     const quoteAsset = app.assets[order.quote]
-    const fromAsset = order.sell ? baseAsset : quoteAsset
-    const toAsset = order.sell ? quoteAsset : baseAsset
+    const toAsset = isSell ? quoteAsset : baseAsset
+    const fromAsset = isSell ? baseAsset : quoteAsset
+
+    page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
+    page.vSideHeader.textContent = isSell ? 'Sell' : 'Buy'
+    page.vSideSubmit.textContent = page.vSideHeader.textContent
+    page.vBaseSubmit.textContent = baseAsset.symbol.toUpperCase()
     if (order.isLimit) {
       Doc.show(page.verifyLimit)
       Doc.hide(page.verifyMarket)
       page.vRate.textContent = Doc.formatCoinValue(order.rate / 1e8)
-      page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
-      page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
       page.vTotal.textContent = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
-      const isSell = order.sell
-      page.vSideHeader.textContent = isSell ? 'Sell' : 'Buy'
+      page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vSide.textContent = isSell ? 'sell' : 'buy'
-      page.vSideSubmit.textContent = page.vSideHeader.textContent
-      page.vBaseSubmit.textContent = page.vBase.textContent
-      const buyBtnClass = 'buygreen'
-      const sellBtnClass = 'sellred'
-      if (isSell) {
-        page.vHeader.classList.add(sellBtnClass)
-        page.vHeader.classList.remove(buyBtnClass)
-        page.vSubmit.classList.add(sellBtnClass)
-        page.vSubmit.classList.remove(buyBtnClass)
-      } else {
-        page.vHeader.classList.add(buyBtnClass)
-        page.vHeader.classList.remove(sellBtnClass)
-        page.vSubmit.classList.add(buyBtnClass)
-        page.vSubmit.classList.remove(sellBtnClass)
-      }
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
       page.vSide.textContent = 'trade'
-      page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
       page.vBase.textContent = fromAsset.symbol.toUpperCase()
       const gap = this.midGap()
       if (gap) {
@@ -1004,6 +991,20 @@ export default class MarketsPage extends BasePage {
       } else {
         Doc.hide(page.verifyMarket)
       }
+    }
+    // Visually differentiate between buy/sell orders.
+    const buyBtnClass = 'buygreen'
+    const sellBtnClass = 'sellred'
+    if (isSell) {
+      page.vHeader.classList.add(sellBtnClass)
+      page.vHeader.classList.remove(buyBtnClass)
+      page.vSubmit.classList.add(sellBtnClass)
+      page.vSubmit.classList.remove(buyBtnClass)
+    } else {
+      page.vHeader.classList.add(buyBtnClass)
+      page.vHeader.classList.remove(sellBtnClass)
+      page.vSubmit.classList.add(buyBtnClass)
+      page.vSubmit.classList.remove(sellBtnClass)
     }
     this.showForm(page.verifyForm)
     page.vPass.focus()
