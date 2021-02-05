@@ -1419,13 +1419,15 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	initErr := func(s string, a ...interface{}) error {
+		_ = wallet.Lock() // just try, but don't confuse the user with an error
 		wallet.Disconnect()
 		return fmt.Errorf(s, a...)
 	}
 
 	err = wallet.Unlock(crypter)
 	if err != nil {
-		return initErr("%s wallet authentication error: %w", symbol, err)
+		wallet.Disconnect()
+		return fmt.Errorf("%s wallet authentication error: %w", symbol, err)
 	}
 
 	balances, err := c.walletBalance(wallet)
@@ -1674,6 +1676,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	c.walletMtx.Unlock()
 
 	if oldWallet.connected() {
+		// NOTE: Cannot lock the wallet backend because it may be the same as
+		// the one just connected.
 		go oldWallet.Disconnect()
 	}
 
@@ -1778,12 +1782,15 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		return codedError(dbErr, err)
 	}
 
-	if !wasConnected {
-		wallet.Disconnect()
-	} else if !wasUnlocked {
+	// Re-lock the wallet if it was previously locked.
+	if !wasUnlocked {
 		if err = wallet.Lock(); err != nil {
 			c.log.Warnf("Unable to relock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
+	}
+	// Disconnect if it was not previously connected.
+	if !wasConnected {
+		wallet.Disconnect()
 	}
 
 	details := fmt.Sprintf("Password for %s wallet has been updated.",
@@ -4561,20 +4568,20 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.updateBalances(assets)
 }
 
-// PromptShutdown checks if their are active orders and asks confirmation to
+// PromptShutdown checks if there are active orders and asks confirmation to
 // shutdown if there are. The return value indicates if it is safe to stop Core
 // or if the user has confirmed they want to shutdown with active orders.
 func (c *Core) PromptShutdown() bool {
 	conns := c.dexConnections()
-	var haveActive bool
+	var haveActiveOrders bool
 	for _, dc := range conns {
 		if dc.hasActiveOrders() {
-			haveActive = true
+			haveActiveOrders = true
 			break
 		}
 	}
 
-	if !haveActive {
+	if !haveActiveOrders {
 		return true
 	}
 
