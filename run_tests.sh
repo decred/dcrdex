@@ -24,7 +24,7 @@ do
 
 	# build and run tests
 	if [ "$m" != '.' ]; then go build; fi
-	env GORACE="halt_on_error=1" go test -race -short ./...
+	env GORACE="halt_on_error=1" go test -race -short -count 1 ./...
 done
 
 cd $dir
