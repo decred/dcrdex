@@ -1474,9 +1474,11 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		t.dc.acct.host, t.wallets.fromAsset.Symbol, coinIDString(t.fromAssetID, coinID), match.id)
 
 	// Send the init request asynchronously.
+	c.wg.Add(1) // So Core does not shut down until we're done with this request.
 	go func() {
 		var err error
 		defer func() {
+			c.wg.Done()
 			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
@@ -1518,7 +1520,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			return
 		}
 
-		c.log.Debugf("Received valid ack for 'init' request for match %s)", match.id)
+		c.log.Debugf("Received valid ack for 'init' request for match %s", match.id)
 
 		// Save init ack sig.
 		t.mtx.Lock()
@@ -1662,9 +1664,11 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		t.dc.acct.host, t.wallets.toAsset.Symbol, coinIDString(t.wallets.toAsset.ID, coinID), match.id)
 
 	// Send the redeem request asynchronously.
+	c.wg.Add(1) // So Core does not shut down until we're done with this request.
 	go func() {
 		var err error
 		defer func() {
+			c.wg.Done()
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()

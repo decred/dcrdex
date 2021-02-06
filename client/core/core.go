@@ -4625,6 +4625,8 @@ func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
 
 // sendRequest sends a request via the specified ws connection and unmarshals
 // the response into the provided interface.
+// TODO: Modify to accept a context.Context argument so callers can pass core's
+// context to break out of the reply wait when Core starts shutting down.
 func sendRequest(conn comms.WsConn, route string, request, response interface{}, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
