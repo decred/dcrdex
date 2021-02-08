@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 export SYMBOL="btc"
 export DAEMON="bitcoind"
 export CLI="bitcoin-cli"

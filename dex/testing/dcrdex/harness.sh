@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Tmux script that configures and runs dcrdex.
 
 set -e

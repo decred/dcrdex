@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Tmux script that sets up a simnet harness.
 set -ex
 NODES_ROOT=~/dextest/${SYMBOL}
@@ -73,7 +73,7 @@ EOF
 ################################################################################
 
 tmux rename-window -t $SESSION:0 'alpha'
-tmux send-keys -t $SESSION:0 "set +o history" C-m
+tmux send-keys -t $SESSION:0 "set +o nolog" C-m
 tmux send-keys -t $SESSION:0 "cd ${ALPHA_DIR}" C-m
 echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
@@ -87,7 +87,7 @@ sleep 3
 ################################################################################
 
 tmux new-window -t $SESSION:1 -n 'beta'
-tmux send-keys -t $SESSION:1 "set +o history" C-m
+tmux send-keys -t $SESSION:1 "set +o nolog" C-m
 tmux send-keys -t $SESSION:1 "cd ${BETA_DIR}" C-m
 
 echo "Starting simnet beta node"
@@ -102,7 +102,7 @@ sleep 3
 ################################################################################
 
 tmux new-window -t $SESSION:2 -n 'harness-ctl'
-tmux send-keys -t $SESSION:2 "set +o history" C-m
+tmux send-keys -t $SESSION:2 "set +o nolog" C-m
 tmux send-keys -t $SESSION:2 "cd ${HARNESS_DIR}" C-m
 sleep 1
 
@@ -291,6 +291,6 @@ done
 tmux send-keys -t $SESSION:2 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
 
-# Reenable history and attach to the control session.
-tmux send-keys -t $SESSION:2 "set -o history" C-m
+# Reenable log and attach to the control session.
+tmux send-keys -t $SESSION:2 "set -o nolog" C-m
 tmux attach-session -t $SESSION
