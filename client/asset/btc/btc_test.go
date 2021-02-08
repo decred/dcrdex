@@ -114,8 +114,6 @@ type tRPCClient struct {
 	blockchainMtx sync.RWMutex
 	verboseBlocks map[string]*btcjson.GetBlockVerboseResult
 	mainchain     map[int64]*chainhash.Hash
-	mempoolTxs    []*chainhash.Hash
-	mpErr         error
 	mpVerboseTxs  map[string]*btcjson.TxRawResult
 	rawVerboseErr error
 	lockedCoins   []*RPCOutpoint
@@ -139,27 +137,6 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
-func (c *tRPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
-	return &btcjson.EstimateSmartFeeResult{
-		Blocks:  2,
-		FeeRate: &optimalRate,
-	}, nil
-}
-
-func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, _ bool) (*chainhash.Hash, error) {
-	c.sentRawTx = tx
-	if c.sendErr == nil && c.sendHash == nil {
-		h := tx.TxHash()
-		return &h, nil
-	}
-	return c.sendHash, c.sendErr
-}
-
-func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
-	return c.txOutRes, c.txOutErr
-}
-
 func (c *tRPCClient) getBlock(blockHash string) *btcjson.GetBlockVerboseResult {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
@@ -181,16 +158,6 @@ func (c *tRPCClient) GetBlockVerboseTx(blockHash *chainhash.Hash) (*btcjson.GetB
 	return blk, nil
 }
 
-func (c *tRPCClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	h, found := c.mainchain[blockHeight]
-	if !found {
-		return nil, fmt.Errorf("no test block at height %d", blockHeight)
-	}
-	return h, nil
-}
-
 func (c *tRPCClient) GetBestBlockHeight() int64 {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
@@ -203,32 +170,64 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 	return bestBlkHeight
 }
 
-func (c *tRPCClient) GetBestBlockHash() (*chainhash.Hash, error) {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
-	var bestHash *chainhash.Hash
-	var bestBlkHeight int64
-	for height, hash := range c.mainchain {
-		if height >= bestBlkHeight {
-			bestBlkHeight = height
-			bestHash = hash
-		}
-	}
-	return bestHash, nil
-}
-
-func (c *tRPCClient) GetRawMempool() ([]*chainhash.Hash, error) {
-	return c.mempoolTxs, c.mpErr
-}
-
-func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	return c.mpVerboseTxs[txHash.String()], c.rawVerboseErr
-}
-
-func (c *tRPCClient) Disconnected() bool { return false }
-
-func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
+	// TODO: handle methodGetBlockHash, methodGetRawMempool and add actual tests
+	// to cover them.
+	case methodEstimateSmartFee:
+		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
+		return json.Marshal(&btcjson.EstimateSmartFeeResult{
+			Blocks:  2,
+			FeeRate: &optimalRate,
+		})
+	case methodSendRawTransaction:
+		var txHash string
+		err := json.Unmarshal(params[0], &txHash)
+		if err != nil {
+			return nil, err
+		}
+		tx, err := msgTxFromHex(txHash)
+		if err != nil {
+			return nil, err
+		}
+		c.sentRawTx = tx
+		if c.sendErr == nil && c.sendHash == nil {
+			h := tx.TxHash().String()
+			return json.Marshal(&h)
+		}
+		if c.sendErr != nil {
+			return nil, c.sendErr
+		}
+		return json.Marshal(c.sendHash.String())
+	case methodGetTxOut:
+		if c.txOutErr != nil {
+			return nil, c.txOutErr
+		}
+		return json.Marshal(c.txOutRes)
+	case methodGetBestBlockHash:
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
+		var bestHash *chainhash.Hash
+		var bestBlkHeight int64
+		for height, hash := range c.mainchain {
+			if height >= bestBlkHeight {
+				bestBlkHeight = height
+				bestHash = hash
+			}
+		}
+		return json.Marshal(bestHash.String())
+	case methodGetRawMempool:
+		return json.Marshal(&[]string{})
+	case methodGetRawTransaction:
+		if c.rawVerboseErr != nil {
+			return nil, c.rawVerboseErr
+		}
+		var txHash string
+		err := json.Unmarshal(params[0], &txHash)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c.mpVerboseTxs[txHash])
 	case methodSignTx:
 		if c.rawErr[method] == nil {
 			return c.signFunc(params)
@@ -400,15 +399,20 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(cfg, &dexbtc.Config{}, client)
+	wallet, err := newWallet(client, cfg, &dexbtc.Config{})
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
 	}
 	// Initialize the best block.
-	bestHash, _ := client.GetBestBlockHash() // does not return error
+	bestHash, err := wallet.node.GetBestBlockHash()
+	if err != nil {
+		shutdown()
+		return nil, nil, nil, err
+	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{height: client.GetBestBlockHeight(), hash: bestHash.String()}
+	wallet.currentTip = &block{height: client.GetBestBlockHeight(),
+		hash: bestHash.String()}
 	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
@@ -825,7 +829,7 @@ func TestFundingCoins(t *testing.T) {
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{})
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 	coinIDs := []dex.Bytes{coinID}
 
 	ensureGood := func() {
@@ -910,7 +914,7 @@ func TestFundEdges(t *testing.T) {
 	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tBTC.LotSize
-	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
 
 	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
@@ -1256,6 +1260,7 @@ func testSwap(t *testing.T, segwit bool) {
 
 	node.rawRes[methodNewAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
+	node.rawRes[methodLockUnspent] = []byte(`true`)
 
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	contract := &asset.Contract{
@@ -1700,7 +1705,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
 	}
-	wallet, err := newWallet(cfg, &dexbtc.Config{}, node)
+	wallet, err := newWallet(node, cfg, &dexbtc.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

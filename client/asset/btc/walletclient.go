@@ -5,11 +5,13 @@ package btc
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -17,36 +19,50 @@ import (
 )
 
 const (
-	methodGetBalances       = "getbalances"
-	methodListUnspent       = "listunspent"
-	methodLockUnspent       = "lockunspent"
-	methodListLockUnspent   = "listlockunspent"
-	methodChangeAddress     = "getrawchangeaddress"
-	methodNewAddress        = "getnewaddress"
-	methodSignTx            = "signrawtransactionwithwallet"
-	methodUnlock            = "walletpassphrase"
-	methodLock              = "walletlock"
-	methodPrivKeyForAddress = "dumpprivkey"
-	methodSignMessage       = "signmessagewithprivkey"
-	methodGetTransaction    = "gettransaction"
-	methodSendToAddress     = "sendtoaddress"
-	methodSetTxFee          = "settxfee"
-	methodGetWalletInfo     = "getwalletinfo"
-	methodGetAddressInfo    = "getaddressinfo"
+	methodGetBalances        = "getbalances"
+	methodListUnspent        = "listunspent"
+	methodLockUnspent        = "lockunspent"
+	methodListLockUnspent    = "listlockunspent"
+	methodChangeAddress      = "getrawchangeaddress"
+	methodNewAddress         = "getnewaddress"
+	methodSignTx             = "signrawtransactionwithwallet"
+	methodUnlock             = "walletpassphrase"
+	methodLock               = "walletlock"
+	methodPrivKeyForAddress  = "dumpprivkey"
+	methodSignMessage        = "signmessagewithprivkey"
+	methodGetTransaction     = "gettransaction"
+	methodSendToAddress      = "sendtoaddress"
+	methodSetTxFee           = "settxfee"
+	methodGetWalletInfo      = "getwalletinfo"
+	methodGetAddressInfo     = "getaddressinfo"
+	methodEstimateSmartFee   = "estimatesmartfee"
+	methodSendRawTransaction = "sendrawtransaction"
+	methodGetTxOut           = "gettxout"
+	methodGetBlockHash       = "getblockhash"
+	methodGetBestBlockHash   = "getbestblockhash"
+	methodGetRawMempool      = "getrawmempool"
+	methodGetRawTransaction  = "getrawtransaction"
 )
 
-// walletClient is a bitcoind wallet RPC client that uses rpcclient.Client's
+// RawRequester defines dcred's rpcclient RawRequest func where all RPC
+// requests sent through. For testing, it can be satisfied by a stub.
+type RawRequester interface {
+	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
+}
+
+// rpcClient is a bitcoind wallet RPC client that uses rpcclient.Client's
 // RawRequest for wallet-related calls.
-type walletClient struct {
-	node        rpcClient
+type rpcClient struct {
+	ctx         context.Context
+	requester   RawRequester
 	chainParams *chaincfg.Params
 	segwit      bool
 }
 
-// newWalletClient is the constructor for a walletClient.
-func newWalletClient(node rpcClient, segwit bool, chainParams *chaincfg.Params) *walletClient {
-	return &walletClient{
-		node:        node,
+// newWalletClient is the constructor for a rpcClient.
+func newWalletClient(requester RawRequester, segwit bool, chainParams *chaincfg.Params) *rpcClient {
+	return &rpcClient{
+		requester:   requester,
 		chainParams: chainParams,
 		segwit:      segwit,
 	}
@@ -56,14 +72,90 @@ func newWalletClient(node rpcClient, segwit bool, chainParams *chaincfg.Params) 
 // sent via RawRequest.
 type anylist []interface{}
 
+// EstimateSmartFee requests the server to estimate a fee level based on the
+// given parameters.
+func (wc *rpcClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
+	res := new(btcjson.EstimateSmartFeeResult)
+	return res, wc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
+}
+
+// SendRawTransaction submits the encoded transaction to the server which will
+// then relay it to the network.
+func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	txBytes, err := serializeMsgTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	return wc.callHashGetter(methodSendRawTransaction, anylist{
+		hex.EncodeToString(txBytes), allowHighFees})
+}
+
+// GetTxOut returns the transaction output info if it's unspent and
+// nil, otherwise.
+func (wc *rpcClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
+	// Note that we pass to call pointer to a pointer (&res) so that
+	// json.Unmarshal can nil the pointer if the method returns the JSON null.
+	var res *btcjson.GetTxOutResult
+	return res, wc.call(methodGetTxOut, anylist{txHash.String(), index, mempool},
+		&res)
+}
+
+func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
+	var txid string
+	err := wc.call(method, args, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
+}
+
+// GetBlockHash returns the hash of the block in the best block chain at the
+// given height.
+func (wc *rpcClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+	return wc.callHashGetter(methodGetBlockHash, anylist{blockHeight})
+}
+
+// GetBestBlockHash returns the hash of the best block in the longest block
+// chain.
+func (wc *rpcClient) GetBestBlockHash() (*chainhash.Hash, error) {
+	return wc.callHashGetter(methodGetBestBlockHash, nil)
+}
+
+// GetRawMempool returns the hashes of all transactions in the memory pool.
+func (wc *rpcClient) GetRawMempool() ([]*chainhash.Hash, error) {
+	var mempool []string
+	err := wc.call(methodGetRawMempool, nil, &mempool)
+	if err != nil {
+		return nil, err
+	}
+	// Convert received hex hashes to chainhash.Hash
+	hashes := make([]*chainhash.Hash, 0, len(mempool))
+	for _, h := range mempool {
+		hash, err := chainhash.NewHashFromStr(h)
+		if err != nil {
+			return nil, err
+		}
+		hashes = append(hashes, hash)
+	}
+	return hashes, nil
+}
+
+// GetRawTransactionVerbose retrieves tx's information with verbose flag set
+// to true.
+func (wc *rpcClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
+	res := new(btcjson.TxRawResult)
+	return res, wc.call(methodGetRawTransaction, anylist{txHash.String(),
+		true}, res)
+}
+
 // Balances retrieves a wallet's balance details.
-func (wc *walletClient) Balances() (*GetBalancesResult, error) {
+func (wc *rpcClient) Balances() (*GetBalancesResult, error) {
 	var balances GetBalancesResult
 	return &balances, wc.call(methodGetBalances, nil, &balances)
 }
 
 // ListUnspent retrieves a list of the wallet's UTXOs.
-func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
+func (wc *rpcClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
 	// TODO: listunspent 0 9999999 []string{}, include_unsafe=false
 	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
@@ -72,7 +164,7 @@ func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
 // LockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is  canceled or fails.
-func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
+func (wc *rpcClient) LockUnspent(unlock bool, ops []*output) error {
 	var rpcops []*RPCOutpoint // To clear all, this must be nil, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
@@ -90,7 +182,7 @@ func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
 
 // ListLockUnspent returns a slice of outpoints for all unspent outputs marked
 // as locked by a wallet.
-func (wc *walletClient) ListLockUnspent() ([]*RPCOutpoint, error) {
+func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 	var unspents []*RPCOutpoint
 	err := wc.call(methodListLockUnspent, nil, &unspents)
 	return unspents, err
@@ -98,7 +190,7 @@ func (wc *walletClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 
 // ChangeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (wc *walletClient) ChangeAddress() (btcutil.Address, error) {
+func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	if wc.segwit {
@@ -114,19 +206,19 @@ func (wc *walletClient) ChangeAddress() (btcutil.Address, error) {
 
 // AddressPKH gets a new base58-encoded (P2PKH) external address from the
 // wallet.
-func (wc *walletClient) AddressPKH() (btcutil.Address, error) {
+func (wc *rpcClient) AddressPKH() (btcutil.Address, error) {
 	return wc.address("legacy")
 }
 
 // AddressWPKH gets a new bech32-encoded (P2WPKH) external address from the
 // wallet.
-func (wc *walletClient) AddressWPKH() (btcutil.Address, error) {
+func (wc *rpcClient) AddressWPKH() (btcutil.Address, error) {
 	return wc.address("bech32")
 }
 
 // address is used internally for fetching addresses of various types from the
 // wallet.
-func (wc *walletClient) address(aType string) (btcutil.Address, error) {
+func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	var addrStr string
 	err := wc.call(methodNewAddress, anylist{"", aType}, &addrStr)
 	if err != nil {
@@ -136,7 +228,7 @@ func (wc *walletClient) address(aType string) (btcutil.Address, error) {
 }
 
 // SignTx attempts to have the wallet sign the transaction inputs.
-func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
+func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	txBytes, err := serializeMsgTx(inTx)
 	if err != nil {
 		return nil, fmt.Errorf("tx serialization error: %w", err)
@@ -164,7 +256,7 @@ func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 
 // PrivKeyForAddress retrieves the private key associated with the specified
 // address.
-func (wc *walletClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	var keyHex string
 	err := wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
 	if err != nil {
@@ -178,7 +270,7 @@ func (wc *walletClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error
 }
 
 // GetTransaction retrieves the specified wallet-related transaction.
-func (wc *walletClient) GetTransaction(txid string) (*GetTransactionResult, error) {
+func (wc *rpcClient) GetTransaction(txid string) (*GetTransactionResult, error) {
 	res := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txid}, res)
 	if err != nil {
@@ -187,20 +279,20 @@ func (wc *walletClient) GetTransaction(txid string) (*GetTransactionResult, erro
 	return res, nil
 }
 
-// Unlock unlocks the wallet.
-func (wc *walletClient) Unlock(pass string) error {
+// WalletUnlock unlocks the wallet.
+func (wc *rpcClient) WalletUnlock(pass string) error {
 	// 100000000 comes from bitcoin-cli help walletpassphrase
 	return wc.call(methodUnlock, anylist{pass, 100000000}, nil)
 }
 
-// Lock locks the wallet.
-func (wc *walletClient) Lock() error {
+// WalletLock locks the wallet.
+func (wc *rpcClient) WalletLock() error {
 	return wc.call(methodLock, nil, nil)
 }
 
 // SendToAddress sends the amount to the address. feeRate is in units of
 // atoms/byte.
-func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
+func (wc *rpcClient) SendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	var success bool
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
@@ -221,14 +313,14 @@ func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, sub
 }
 
 // GetWalletInfo gets the getwalletinfo RPC result.
-func (wc *walletClient) GetWalletInfo() (*GetWalletInfoResult, error) {
+func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	wi := new(GetWalletInfoResult)
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
 // GetAddressInfo gets information about the given address by calling
 // getaddressinfo RPC command.
-func (wc *walletClient) GetAddressInfo(address string) (*GetAddressInfoResult, error) {
+func (wc *rpcClient) GetAddressInfo(address string) (*GetAddressInfoResult, error) {
 	ai := new(GetAddressInfoResult)
 	return ai, wc.call(methodGetAddressInfo, anylist{address}, ai)
 }
@@ -236,7 +328,7 @@ func (wc *walletClient) GetAddressInfo(address string) (*GetAddressInfoResult, e
 // call is used internally to marshal parmeters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
-func (wc *walletClient) call(method string, args anylist, thing interface{}) error {
+func (wc *rpcClient) call(method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])
@@ -245,7 +337,7 @@ func (wc *walletClient) call(method string, args anylist, thing interface{}) err
 		}
 		params = append(params, p)
 	}
-	b, err := wc.node.RawRequest(method, params)
+	b, err := wc.requester.RawRequest(wc.ctx, method, params)
 	if err != nil {
 		return fmt.Errorf("rawrequest error: %w", err)
 	}

@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -27,10 +26,10 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/rpcclient/v6"
 )
 
 const (
@@ -41,6 +40,7 @@ const (
 	methodGetBlockVerboseTx = "getblock"
 	methodGetNetworkInfo    = "getnetworkinfo"
 	methodGetBlockchainInfo = "getblockchaininfo"
+	methodSendRawTx         = "sendrawtransaction"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
 
@@ -48,7 +48,7 @@ const (
 	// structure.
 	defaultFee = 100
 	// defaultFeeRateLimit is the default value for the feeratelimit.
-	defaultFeeRateLimit = 600
+	defaultFeeRateLimit = 1400
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -144,20 +144,6 @@ var (
 	}
 )
 
-// rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
-// rpcclient.Client. A stub can be used for testing.
-type rpcClient interface {
-	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
-	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
-	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
-	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	GetBestBlockHash() (*chainhash.Hash, error)
-	GetRawMempool() ([]*chainhash.Hash, error)
-	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
-	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
-	Disconnected() bool
-}
-
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
 	WalletCFG           *asset.WalletConfig
@@ -176,6 +162,9 @@ type BTCCloneCFG struct {
 	// If segwit is false, legacy addresses and contracts will be used. This
 	// setting must match the configuration of the server's asset backend.
 	Segwit bool
+	// LegacyRawFeeLimit can be true if the RPC only supports the boolean
+	// allowHighFees argument to the sendrawtransaction RPC.
+	LegacyRawFeeLimit bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -347,8 +336,7 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect      int64
-	node              rpcClient
-	wallet            *walletClient
+	node              *rpcClient
 	walletInfo        *asset.WalletInfo
 	chainParams       *chaincfg.Params
 	log               dex.Logger
@@ -361,6 +349,7 @@ type ExchangeWallet struct {
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
+	legacyRawFeeLimit bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -457,19 +446,19 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		Pass:         btcCfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
+		return nil, err
 	}
-
-	btc, err := newWallet(cfg, btcCfg, client)
+	btc, err := newWallet(client, cfg, btcCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC ExchangeWallet: %v", err)
+		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
+			err)
 	}
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*ExchangeWallet, error) {
+func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -498,8 +487,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
 	return &ExchangeWallet{
-		node:                node,
-		wallet:              newWalletClient(node, cfg.Segwit, cfg.ChainParams),
+		node:                newWalletClient(requester, cfg.Segwit, cfg.ChainParams),
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
@@ -513,6 +501,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) (*Exchan
 		useSplitTx:          btcCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
+		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
 		walletInfo:          cfg.WalletInfo,
 	}, nil
 }
@@ -527,6 +516,7 @@ func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	btc.node.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := btc.getVersion()
 	if err != nil {
@@ -547,7 +537,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	btc.currentTip, err = btc.blockFromHash(h.String())
 	btc.tipMtx.Unlock()
 	if err != nil {
-		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
+		return nil, fmt.Errorf("error parsing best block for %s: %w", btc.symbol, err)
 	}
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 	var wg sync.WaitGroup
@@ -584,7 +574,7 @@ type getBlockchainInfoResult struct {
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
 func (btc *ExchangeWallet) getBlockchainInfo() (*getBlockchainInfoResult, error) {
 	chainInfo := new(getBlockchainInfoResult)
-	err := btc.wallet.call(methodGetBlockchainInfo, nil, chainInfo)
+	err := btc.node.call(methodGetBlockchainInfo, nil, chainInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -612,7 +602,7 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 
 // OwnsAddress indicates if an address belongs to the wallet.
 func (btc *ExchangeWallet) OwnsAddress(address string) (bool, error) {
-	ai, err := btc.wallet.GetAddressInfo(address)
+	ai, err := btc.node.GetAddressInfo(address)
 	if err != nil {
 		return false, err
 	}
@@ -625,7 +615,7 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if btc.useLegacyBalance {
 		return btc.legacyBalance()
 	}
-	balances, err := btc.wallet.Balances()
+	balances, err := btc.node.Balances()
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +634,7 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 // legacyBalance is used for clones that are < node version 0.18 and so don't
 // have 'getbalances'.
 func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
-	walletInfo, err := btc.wallet.GetWalletInfo()
+	walletInfo, err := btc.node.GetWalletInfo()
 	if err != nil {
 		return nil, fmt.Errorf("(legacy) GetWalletInfo error: %w", err)
 	}
@@ -663,7 +653,8 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
+	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget),
+		&btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -830,7 +821,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	btc.log.Infof("Funding %s %s order with coins %v worth %s",
 		ordValStr, btc.symbol, coins, amount(sum))
 
-	err = btc.wallet.LockUnspent(false, spents)
+	err = btc.node.LockUnspent(false, spents)
 	if err != nil {
 		return nil, nil, fmt.Errorf("LockUnspent error: %w", err)
 	}
@@ -934,7 +925,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 		for pt, fCoin := range fundingCoins {
 			btc.fundingCoins[pt] = fCoin
 		}
-		err = btc.wallet.LockUnspent(false, outputs)
+		err = btc.node.LockUnspent(false, outputs)
 		if err != nil {
 			btc.log.Errorf("error locking unspent outputs: %v", err)
 		}
@@ -963,7 +954,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	}
 
 	// Use an internal address for the sized output.
-	addr, err := btc.wallet.ChangeAddress()
+	addr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -978,7 +969,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
 	// Grab a change address.
-	changeAddr, err := btc.wallet.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -1052,7 +1043,7 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		ops = append(ops, op)
 		delete(btc.fundingCoins, op.pt)
 	}
-	return btc.wallet.LockUnspent(true, ops)
+	return btc.node.LockUnspent(true, ops)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
@@ -1082,7 +1073,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	}
 
 	// Check locked outputs for not found coins.
-	lockedOutpoints, err := btc.wallet.ListLockUnspent()
+	lockedOutpoints, err := btc.node.ListLockUnspent()
 	if err != nil {
 		return nil, err
 	}
@@ -1137,7 +1128,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		delete(notFound, pt)
 	}
 	btc.log.Debugf("Locking funding coins that were unlocked %v", coinsToLock)
-	err = btc.wallet.LockUnspent(false, coinsToLock)
+	err = btc.node.LockUnspent(false, coinsToLock)
 	if err != nil {
 		return nil, err
 	}
@@ -1148,20 +1139,17 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 // Unlock unlocks the ExchangeWallet. The pw supplied should be the same as the
 // password for the underlying bitcoind wallet which will also be unlocked.
 func (btc *ExchangeWallet) Unlock(pw string) error {
-	return btc.wallet.Unlock(pw)
+	return btc.node.WalletUnlock(pw)
 }
 
 // Lock locks the ExchangeWallet and the underlying bitcoind wallet.
 func (btc *ExchangeWallet) Lock() error {
-	if btc.node.Disconnected() {
-		return asset.ErrConnectionDown
-	}
-	return btc.wallet.Lock()
+	return btc.node.WalletLock()
 }
 
 // Locked will be true if the wallet is currently locked.
 func (btc *ExchangeWallet) Locked() bool {
-	walletInfo, err := btc.wallet.GetWalletInfo()
+	walletInfo, err := btc.node.GetWalletInfo()
 	if err != nil {
 		btc.log.Errorf("GetWalletInfo error: %w", err)
 		return false
@@ -1253,7 +1241,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.wallet.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -1286,7 +1274,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	if swaps.LockChange {
 		// Lock the change output
 		btc.log.Debugf("locking change coin %s", change)
-		err = btc.wallet.LockUnspent(false, []*output{change})
+		err = btc.node.LockUnspent(false, []*output{change})
 		if err != nil {
 			// The swap transaction is already broadcasted, so don't fail now.
 			btc.log.Errorf("failed to lock change output: %v", err)
@@ -1361,7 +1349,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
 	}
 	// Send the funds back to the exchange wallet.
-	redeemAddr, err := btc.wallet.ChangeAddress()
+	redeemAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -1402,7 +1390,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 
 	// Send the transaction.
 	checkHash := msgTx.TxHash()
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1432,7 +1420,7 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if utxo == nil {
 		return nil, nil, fmt.Errorf("no utxo found for %s", op)
 	}
-	privKey, err := btc.wallet.PrivKeyForAddress(utxo.address)
+	privKey, err := btc.node.PrivKeyForAddress(utxo.address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1626,7 +1614,7 @@ func (btc *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 		return nil, nil, fmt.Errorf("duplicate find redemption request for %s", contractOutpoint.String())
 	}
 	txHash, vout := contractOutpoint.txHash, contractOutpoint.vout
-	tx, err := btc.wallet.GetTransaction(txHash.String())
+	tx, err := btc.node.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, nil, asset.CoinNotFoundError
@@ -1923,7 +1911,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	if fee > val {
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
-	refundAddr, err := btc.wallet.ChangeAddress()
+	refundAddr, err := btc.node.ChangeAddress()
 	if err != nil {
 		return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -1958,9 +1946,9 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 	// Send it.
 	checkHash := msgTx.TxHash()
-	refundHash, err := btc.node.SendRawTransaction(msgTx, false)
+	refundHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
-		return nil, fmt.Errorf("SendRawTransaction: %w", err)
+		return nil, fmt.Errorf("sendRawTransaction: %w", err)
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
@@ -2010,11 +1998,11 @@ func (btc *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // the fees will be subtracted from the value. If false, the fees are in
 // addition to the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
-	txHash, err := btc.wallet.SendToAddress(address, val, feeRate, subtract)
+	txHash, err := btc.node.SendToAddress(address, val, feeRate, subtract)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("SendToAddress error: %w", err)
 	}
-	tx, err := btc.wallet.GetTransaction(txHash.String())
+	tx, err := btc.node.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, 0, 0, asset.CoinNotFoundError
@@ -2027,6 +2015,22 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 		}
 	}
 	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
+}
+
+func (btc *ExchangeWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+	if btc.legacyRawFeeLimit {
+		return btc.node.SendRawTransaction(tx, false)
+	}
+	b, err := serializeMsgTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	var txid string
+	err = btc.node.call(methodSendRawTx, anylist{hex.EncodeToString(b)}, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
 }
 
 // Confirmations gets the number of confirmations for the specified coin ID by
@@ -2043,7 +2047,7 @@ func (btc *ExchangeWallet) Confirmations(_ context.Context, id dex.Bytes) (confs
 		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
-	tx, err := btc.wallet.GetTransaction(txHash.String())
+	tx, err := btc.node.GetTransaction(txHash.String())
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return 0, false, asset.CoinNotFoundError
@@ -2124,15 +2128,18 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 	prevTipBlock, err := btc.getBlockHeader(prevTip.hash)
 	switch {
 	case err != nil:
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w", prevTip.hash, err)
+		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w",
+			prevTip.hash, err)
 	case prevTipBlock.Confirmations < 0:
 		// There's been a re-org, common ancestor will be height
 		// plus negative confirmation e.g. 155 + (-3) = 152.
 		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
-		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight, newTip.height)
+		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight,
+			newTip.height)
 		reorgHash, err := btc.node.GetBlockHash(reorgHeight)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w", reorgHeight, err)
+			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w",
+				reorgHeight, err)
 		} else {
 			startPoint = &block{hash: reorgHash.String(), height: reorgHeight}
 		}
@@ -2141,7 +2148,8 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		afterPrivTip := prevTipBlock.Height + 1
 		hashAfterPrevTip, err := btc.node.GetBlockHash(afterPrivTip)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w", afterPrivTip, err)
+			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w",
+				afterPrivTip, err)
 		} else {
 			startPoint = &block{hash: hashAfterPrevTip.String(), height: afterPrivTip}
 		}
@@ -2193,7 +2201,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	}
 
 	sigCycles := 1
-	msgTx, err := btc.wallet.SignTx(baseTx)
+	msgTx, err := btc.node.SignTx(baseTx)
 	if err != nil {
 		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
@@ -2237,7 +2245,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		for {
 			// Sign the transaction with the change output and compute new size.
 			sigCycles++
-			msgTx, err = btc.wallet.SignTx(baseTx)
+			msgTx, err = btc.node.SignTx(baseTx)
 			if err != nil {
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
@@ -2282,7 +2290,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
 		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.sendRawTransaction(msgTx)
 	if err != nil {
 		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}
@@ -2301,7 +2309,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
 func (btc *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address) (sig, pubkey []byte, err error) {
-	privKey, err := btc.wallet.PrivKeyForAddress(addr.String())
+	privKey, err := btc.node.PrivKeyForAddress(addr.String())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2317,7 +2325,7 @@ func (btc *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 func (btc *ExchangeWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte,
 	addr btcutil.Address, val uint64, sigHashes *txscript.TxSigHashes) (sig, pubkey []byte, err error) {
 
-	privKey, err := btc.wallet.PrivKeyForAddress(addr.String())
+	privKey, err := btc.node.PrivKeyForAddress(addr.String())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2349,7 +2357,7 @@ type compositeUTXO struct {
 // regards to the DEX's configuration, and considered safe to spend according to
 // confirmations and coin source. The UTXOs will be sorted by ascending value.
 func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[outPoint]*compositeUTXO, uint64, error) {
-	unspents, err := btc.wallet.ListUnspent()
+	unspents, err := btc.node.ListUnspent()
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -2400,7 +2408,7 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.
 func (btc *ExchangeWallet) lockedSats() (uint64, error) {
-	lockedOutpoints, err := btc.wallet.ListLockUnspent()
+	lockedOutpoints, err := btc.node.ListLockUnspent()
 	if err != nil {
 		return 0, err
 	}
@@ -2463,7 +2471,8 @@ type blockHeader struct {
 // getBlockHeader gets the block header for the specified block hash.
 func (btc *ExchangeWallet) getBlockHeader(blockHash string) (*blockHeader, error) {
 	blkHeader := new(blockHeader)
-	err := btc.wallet.call(methodGetBlockHeader, anylist{blockHash, true}, blkHeader)
+	err := btc.node.call(methodGetBlockHeader,
+		anylist{blockHash, true}, blkHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -2486,7 +2495,8 @@ type verboseBlockTxs struct {
 func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs, error) {
 	blk := new(verboseBlockTxs)
 	// verbosity = 2 -> verbose transactions
-	err := btc.wallet.call(methodGetBlockVerboseTx, anylist{blockID, 2}, blk)
+	err := btc.node.call(methodGetBlockVerboseTx, anylist{blockID, 2},
+		blk)
 	if err != nil {
 		return nil, err
 	}
@@ -2499,7 +2509,7 @@ func (btc *ExchangeWallet) getVersion() (uint64, uint64, error) {
 		Version         uint64 `json:"version"`
 		ProtocolVersion uint64 `json:"protocolversion"`
 	}{}
-	err := btc.wallet.call(methodGetNetworkInfo, nil, r)
+	err := btc.node.call(methodGetNetworkInfo, nil, r)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -2509,9 +2519,9 @@ func (btc *ExchangeWallet) getVersion() (uint64, uint64, error) {
 // externalAddress will return a new address for public use.
 func (btc *ExchangeWallet) externalAddress() (btcutil.Address, error) {
 	if btc.segwit {
-		return btc.wallet.AddressWPKH()
+		return btc.node.AddressWPKH()
 	}
-	return btc.wallet.AddressPKH()
+	return btc.node.AddressPKH()
 }
 
 // hashContract hashes the contract for use in a p2sh or p2wsh pubkey script.
