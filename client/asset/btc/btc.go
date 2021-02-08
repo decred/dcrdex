@@ -48,7 +48,7 @@ const (
 	// structure.
 	defaultFee = 100
 	// defaultFeeRateLimit is the default value for the feeratelimit.
-	defaultFeeRateLimit = 600
+	defaultFeeRateLimit = 1400
 	// defaultRedeemConfTarget is the default redeem transaction confirmation
 	// target in blocks used by estimatesmartfee to get the optimal fee for a
 	// redeem transaction.
@@ -2026,8 +2026,7 @@ func (btc *ExchangeWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, 
 		return nil, err
 	}
 	var txid string
-	err = btc.node.call(methodSendRawTx,
-		anylist{hex.EncodeToString(b), float64(btc.feeRateLimit) * 1e-5}, &txid)
+	err = btc.node.call(methodSendRawTx, anylist{hex.EncodeToString(b)}, &txid)
 	if err != nil {
 		return nil, err
 	}
