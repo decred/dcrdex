@@ -169,7 +169,7 @@ EOF
 echo "Starting harness"
 tmux new-session -d -s $SESSION
 tmux rename-window -t $SESSION:0 'harness-ctl'
-tmux send-keys -t $SESSION:0 "set +o nolog" C-m
+tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m
 
 ################################################################################
@@ -177,7 +177,7 @@ tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m
 ################################################################################
 
 tmux new-window -t $SESSION:1 -n 'alpha'
-tmux send-keys -t $SESSION:1 "set +o nolog" C-m
+tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 
 echo "Starting simnet alpha node"
@@ -190,7 +190,7 @@ tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --simnet; tmux wait-for -S alphadcr" C-m
 
 tmux new-window -t $SESSION:2 -n 'beta'
-tmux send-keys -t $SESSION:2 "set +o nolog" C-m
+tmux send-keys -t $SESSION:2 "set +o history" C-m
 tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 
 echo "Starting simnet beta node"
@@ -286,6 +286,6 @@ done
 sleep 0.5
 tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
-# Reenable log and attach to the control session.
-tmux send-keys -t $SESSION:0 "set -o nolog" C-m
+# Reenable history and attach to the control session.
+tmux send-keys -t $SESSION:0 "set -o history" C-m
 tmux attach-session -t $SESSION
