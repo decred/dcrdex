@@ -18,21 +18,22 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-type upgradeValidator struct {
-	upgrade upgradefunc
-	verify  func(*testing.T, *bbolt.DB)
-	expVer  uint32
-}
-
-var validators = []upgradeValidator{
-	{v1Upgrade, verifyV1Upgrade, 1},
-	{v2Upgrade, verifyV2Upgrade, 2},
-}
-
 // The indices of the archives here in outdatedDBs should match the first
 // eligible validator for the database.
 var outdatedDBs = []string{
 	"v0.db.gz", "v1.db.gz",
+}
+
+var dbUpgradeTests = [...]struct {
+	name       string
+	upgrade    upgradefunc
+	verify     func(*testing.T, *bbolt.DB)
+	filename   string // in testdata directory
+	newVersion uint32
+}{
+	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz", 1},
+	{"upgradeFromV1", v2Upgrade, verifyV2Upgrade, "v1.db.gz", 2},
+	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -40,44 +41,49 @@ func TestUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(d)
 
-	for i, archiveName := range outdatedDBs {
-		dbPath, close := unpack(t, archiveName)
-		defer close()
-		db, err := bbolt.Open(dbPath, 0600,
-			&bbolt.Options{Timeout: 1 * time.Second})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-
-		// Do every validator from the db index up.
-		for j := i; j < len(validators); j++ {
-			validator := validators[j]
-			err = db.Update(func(dbtx *bbolt.Tx) error {
-				return doUpgrade(dbtx, validator.upgrade, validator.expVer)
+	t.Run("group", func(t *testing.T) {
+		for _, tc := range dbUpgradeTests {
+			tc := tc // capture range variable
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				testFile, err := os.Open(filepath.Join("testdata", tc.filename))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer testFile.Close()
+				r, err := gzip.NewReader(testFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dbPath := filepath.Join(d, tc.name+".db")
+				fi, err := os.Create(dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = io.Copy(fi, r)
+				fi.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				db, err := bbolt.Open(dbPath, 0600,
+					&bbolt.Options{Timeout: 1 * time.Second})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				err = db.Update(func(dbtx *bbolt.Tx) error {
+					return doUpgrade(dbtx, tc.upgrade, tc.newVersion)
+				})
+				if err != nil {
+					t.Fatalf("Upgrade failed: %v", err)
+				}
+				tc.verify(t, db)
 			})
-			if err != nil {
-				t.Fatalf("Upgrade failed: %v", err)
-			}
-
-			var ver uint32
-			err = db.View(func(tx *bbolt.Tx) error {
-				ver, err = getVersionTx(tx)
-				return err
-			})
-			if err != nil {
-				t.Fatalf("Error retrieving version: %v", err)
-			}
-
-			if ver != validator.expVer {
-				t.Fatalf("Wrong version. Expected %d, got %d", validator.expVer, ver)
-			}
-
-			validator.verify(t, db)
 		}
-	}
+	})
+
+	os.RemoveAll(d)
 }
 
 func TestUpgradeDB(t *testing.T) {
@@ -145,12 +151,13 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 			return nil
 		})
 	})
-
 	if err != nil {
-		t.Fatalf("error upgrading database to v2: %v", err)
+		t.Error(err)
 	}
 }
 
+// Nothing to really check here. Any errors would have come out during the
+// upgrade process itself, since we just added a default nil field.
 func verifyV3Upgrade(t *testing.T, db *bbolt.DB) {
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		return checkVersion(dbtx, 3)
