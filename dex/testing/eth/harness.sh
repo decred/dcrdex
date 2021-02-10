@@ -44,7 +44,7 @@ echo "Writing ctl scripts"
 
 # Write genesis json. ".*Block" fields represent block height where certain
 # protocols take effect. "clique" is our proof of authority scheme. One block
-# can be mined per second with the a signature belonging to the address in
+# can be mined per second with a signature belonging to the address in
 # "extradata". The addresses in the "alloc" field are allocated "balance".
 cat > "${NODES_ROOT}/genesis.json" <<EOF
 {
