@@ -77,13 +77,16 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
 EOF
 
 # Write mining javascript.
-# NOTE: This sometimes mines more than one block. It is a race.
+# NOTE: This sometimes mines more than one block. It is a race. This returns
+# the number of blocks mined within the lifespan of the function, but one more
+# MAY be mined after returning.
 cat > "${MINE_JS}" <<EOF
 function mine() {
+  blkN = eth.blockNumber;
   miner.start();
   miner.stop();
   admin.sleep(1.1);
-  return true;
+  return eth.blockNumber - blkN;
 }
 EOF
 

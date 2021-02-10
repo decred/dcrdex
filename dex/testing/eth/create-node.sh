@@ -16,13 +16,14 @@ ADDRESS_JSON=${10}
 ADDRESS_JSON_FILE_NAME=${11}
 NODE_KEY=${12}
 
-WALLET_DIR="${NODES_ROOT}/${NAME}"
-mkdir -p "${WALLET_DIR}"
+GROUP_DIR="${NODES_ROOT}/${NAME}"
+NODE_DIR="${GROUP_DIR}/node"
+mkdir -p "${NODE_DIR}"
 
 # Write wallet ctl script.
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
 #!/bin/sh
-geth --datadir="${WALLET_DIR}" \$*
+geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
@@ -41,7 +42,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-${NAME}"
 
 
 # Write password file to unlock accounts later.
-cat > "${WALLET_DIR}/password" <<EOF
+cat > "${GROUP_DIR}/password" <<EOF
 $CHAIN_PASSWORD
 $ADDRESS_PASSWORD
 EOF
@@ -49,7 +50,7 @@ EOF
 # Create a tmux window.
 tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}"
 tmux send-keys -t "$TMUX_WIN_ID" "set +o history" C-m
-tmux send-keys -t "$TMUX_WIN_ID" "cd ${WALLET_DIR}" C-m
+tmux send-keys -t "$TMUX_WIN_ID" "cd ${NODE_DIR}" C-m
 
 # Create and wait for a wallet initiated with a predefined genesis json.
 echo "Creating simnet ${NAME} wallet"
@@ -60,16 +61,16 @@ tmux wait-for "${NAME}"
 # Create two accounts. The first is used to mine blocks. The second contains
 # funds.
 echo "Creating account"
-cat > "${WALLET_DIR}/keystore/$CHAIN_ADDRESS_JSON_FILE_NAME" <<EOF
+cat > "${NODE_DIR}/keystore/$CHAIN_ADDRESS_JSON_FILE_NAME" <<EOF
 $CHAIN_ADDRESS_JSON
 EOF
-cat > "${WALLET_DIR}/keystore/$ADDRESS_JSON_FILE_NAME" <<EOF
+cat > "${NODE_DIR}/keystore/$ADDRESS_JSON_FILE_NAME" <<EOF
 $ADDRESS_JSON
 EOF
 
 # The node key lets us control the enode address value.
 echo "Setting node key"
-cat > "${WALLET_DIR}/geth/nodekey" <<EOF
+cat > "${NODE_DIR}/geth/nodekey" <<EOF
 $NODE_KEY
 EOF
 
@@ -78,5 +79,5 @@ EOF
 echo "Starting simnet ${NAME} wallet"
 tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --port " \
 	"${NODE_PORT} --nodiscover --unlock ${CHAIN_ADDRESS},${ADDRESS} " \
-	"--password ${WALLET_DIR}/password --miner.etherbase ${CHAIN_ADDRESS} " \
+	"--password ${GROUP_DIR}/password --miner.etherbase ${CHAIN_ADDRESS} " \
 	"--syncmode full --netrestrict 127.0.0.1/32" C-m
