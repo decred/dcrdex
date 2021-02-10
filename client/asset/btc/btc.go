@@ -145,6 +145,7 @@ var (
 	}
 )
 
+// TxInSigner is a transaction input signer.
 type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, val uint64) ([]byte, error)
 
 // BTCCloneCFG holds clone specific parameters.
