@@ -133,7 +133,10 @@ EOF
 
 # Write dcrdex.conf. The regfeexpub comes from the alpha>server_fees account.
 cat << EOF >> ./dcrdex.conf
+; alpha wallet server_fees account xpub
 regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
+; beta wallet server_fees account xpub
+regfeexpubnew=spubVW3qcqEFFCudsQCCm2PDReXS7ZcQfV7vWYgcXk1vzVVELPFeixrhFW5HFfCZdoGEbih6nnjoYLCUCgm63eDcbKqkAtU4z655tHqy4r9YrFa
 pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273

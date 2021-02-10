@@ -52,6 +52,12 @@ type PreimageResult struct {
 	ID   order.OrderID
 }
 
+type FeeKeyIndexer interface {
+	FeeKeyIndex(pubKey []byte) (uint32, error)
+	SetFeeKeyIndex(idx uint32, pubKey []byte) error
+	CreateFeeKeyEntryFromPubKey(pubKey []byte) (child uint32, err error)
+}
+
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
 type DEXArchivist interface {
@@ -75,6 +81,7 @@ type DEXArchivist interface {
 
 	OrderArchiver
 	AccountArchiver
+	FeeKeyIndexer
 	MatchArchiver
 	SwapArchiver
 }
@@ -203,11 +210,17 @@ type AccountArchiver interface {
 	// Account retrieves the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
 	// will be returned for unknown or closed accounts.
-	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	Account(account.AccountID) (acct *account.Account, paid, confirmed, open bool)
 
 	// CreateAccount stores a new account. The account is considered unpaid until
 	// PayAccount is used to set the payment details.
 	CreateAccount(*account.Account) (string, error)
+
+	// CreateAccountWithTx creates a new account with the given fee address and
+	// the raw bytes of the fee payment transaction. This is used for the new
+	// preregister/payfee request protocol. PayAccount is still be be used once
+	// the broadcasted transaction reaches the required number of confirmations.
+	CreateAccountWithTx(acct *account.Account, regAddr string, rawTx []byte) error
 
 	// AccountRegAddr gets the registration fee address assigned to the account.
 	AccountRegAddr(account.AccountID) (string, error)

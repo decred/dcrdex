@@ -197,7 +197,11 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 					},
 				},
 			},
-			Fee: tFee,
+			Fee:            tFee,
+			RegFeeConfirms: 1,
+			RegFees: map[string]*msgjson.FeeAsset{
+				"dcr": {ID: 42, Amt: tFee, Confs: 1},
+			},
 		},
 		tickInterval: time.Millisecond * 1000 / 3,
 		notify:       func(Notification) {},
@@ -241,7 +245,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 	}
 	return fmt.Errorf("no handler for route %q", msg.Route)
 }
-func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs } // use when Core.listen is running
 func (conn *TWebsocket) IsDown() bool {
 	return false
 }
@@ -250,39 +254,42 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 }
 
 type TDB struct {
-	updateWalletErr       error
-	acct                  *db.AccountInfo
-	acctErr               error
-	getErr                error
-	storeErr              error
-	encKeyErr             error
-	createAccountErr      error
-	accountPaidErr        error
-	accts                 []*db.AccountInfo
-	updateOrderErr        error
-	activeDEXOrders       []*db.MetaOrder
-	matchesForOID         []*db.MetaMatch
-	matchesForOIDErr      error
-	updateMatchMtx        sync.RWMutex
-	updateMatchChans      map[order.MatchID]chan order.MatchStatus
-	activeMatchOIDs       []order.OrderID
-	activeMatchOIDSErr    error
-	lastStatusID          order.OrderID
-	lastStatus            order.OrderStatus
-	wallet                *db.Wallet
-	walletErr             error
-	setWalletPwErr        error
-	orderOrders           map[order.OrderID]*db.MetaOrder
-	orderErr              error
-	linkedFromID          order.OrderID
-	linkedToID            order.OrderID
-	existValues           map[string]bool
-	accountProof          *db.AccountProof
-	accountProofErr       error
-	verifyAccountPaid     bool
-	verifyCreateAccount   bool
-	accountInfoPersisted  *db.AccountInfo
-	accountProofPersisted *db.AccountProof
+	updateWalletErr      error
+	acct                 *db.AccountInfo
+	acctErr              error
+	getErr               error
+	storeErr             error
+	encKeyErr            error
+	createAccountErr     error
+	accountPaidErr       error
+	accts                []*db.AccountInfo
+	updateOrderErr       error
+	activeDEXOrders      []*db.MetaOrder
+	matchesForOID        []*db.MetaMatch
+	matchesForOIDErr     error
+	updateMatchMtx       sync.RWMutex
+	updateMatchChans     map[order.MatchID]chan order.MatchStatus
+	activeMatchOIDs      []order.OrderID
+	activeMatchOIDSErr   error
+	lastStatusID         order.OrderID
+	lastStatus           order.OrderStatus
+	wallet               *db.Wallet
+	walletErr            error
+	setWalletPwErr       error
+	orderOrders          map[order.OrderID]*db.MetaOrder
+	orderErr             error
+	linkedFromID         order.OrderID
+	linkedToID           order.OrderID
+	existValues          map[string]bool
+	accountProof         *db.AccountProof
+	accountProofErr      error
+	verifyAccountPaid    bool
+	verifyCreateAccount  bool
+	accountInfoPersisted *db.AccountInfo
+	// payFeeCoinStored []byte
+	// payFeeSigStored []byte
+	confirmedAccount  string
+	confirmAccountErr error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -430,10 +437,15 @@ func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
 	return tdb.accountProof, tdb.accountProofErr
 }
 
-func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) AccountPaid(host string, sig []byte) error {
 	tdb.verifyAccountPaid = true
-	tdb.accountProofPersisted = proof
+	// todo: save sig
 	return tdb.accountPaidErr
+}
+
+func (tdb *TDB) ConfirmAccount(host string) error {
+	tdb.confirmedAccount = host
+	return tdb.confirmAccountErr
 }
 
 func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
@@ -539,6 +551,11 @@ type TXCWallet struct {
 	confsErr          map[string]error
 	preSwap           *asset.PreSwap
 	preRedeem         *asset.PreRedeem
+	feeTxMade         []byte
+	feeCoin           []byte
+	makeRegFeeTxErr   error
+	feeCoinSent       []byte
+	sendTxnErr        error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -708,6 +725,14 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 
 func (w *TXCWallet) PayFee(address string, fee uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
+}
+
+func (w *TXCWallet) MakeRegFeeTx(address string, regFee uint64, acctID []byte) ([]byte, []byte, error) {
+	return w.feeTxMade, w.feeCoin, w.makeRegFeeTxErr
+}
+
+func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	return w.feeCoinSent, w.sendTxnErr
 }
 
 func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
@@ -1387,6 +1412,7 @@ func TestRegister(t *testing.T) {
 
 	queueResponses := func() {
 		rig.queueConfig()
+		// TODO: update with queuePreRegister and queuePayFee
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
@@ -1413,6 +1439,8 @@ func TestRegister(t *testing.T) {
 
 		tWallet.setConfs(tWallet.payFeeCoin.id, 0, nil)
 		_, err = tCore.Register(form)
+
+		// TODO: then do handleFeePaid
 	}
 
 	getNotification := func(tag string) interface{} {

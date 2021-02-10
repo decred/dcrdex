@@ -510,38 +510,45 @@ type BookUpdate struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	host      string
-	encKey    []byte
-	keyMtx    sync.RWMutex
-	privKey   *secp256k1.PrivateKey
-	id        account.AccountID
+	host string
+	cert []byte
+	// dexPubKey is currently from preregister resp during registration, but
+	// will be from config resp for HD acct generation.
 	dexPubKey *secp256k1.PublicKey
-	feeCoin   []byte
-	cert      []byte
-	isPaid    bool
-	authMtx   sync.RWMutex
-	isAuthed  bool
+
+	// account identify is from setupEncryption presently, will be derived from
+	// an hd seed and dexPubKey.
+	keyMtx  sync.RWMutex
+	encKey  []byte
+	privKey *secp256k1.PrivateKey
+	id      account.AccountID
+
+	// Fields set from preregister and payfee responses. When feeCoin is set,
+	// the account has completed the payfee request.
+	regAssetID  uint32
+	reqFeeConfs uint32
+	feeTx       []byte
+	feeCoin     []byte
+	payFeeSig   []byte
+
+	authMtx  sync.RWMutex
+	isPaid   bool // feeCoin fully confirmed, ready to trade
+	isAuthed bool
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
-		host:      acctInfo.Host,
-		encKey:    acctInfo.EncKey,
-		dexPubKey: acctInfo.DEXPubKey,
-		isPaid:    acctInfo.Paid,
-		feeCoin:   acctInfo.FeeCoin,
-		cert:      acctInfo.Cert,
-	}
-}
-
-func (a *dexAccount) dbInfo() *db.AccountInfo {
-	return &db.AccountInfo{
-		Host:      a.host,
-		Cert:      a.cert,
-		EncKey:    a.encKey,
-		DEXPubKey: a.dexPubKey,
-		FeeCoin:   a.feeCoin,
+		host:        acctInfo.Host,
+		cert:        acctInfo.Cert,
+		dexPubKey:   acctInfo.DEXPubKey,
+		encKey:      acctInfo.EncKey, // privKey and id on decrypt
+		regAssetID:  acctInfo.FeeAssetID,
+		reqFeeConfs: acctInfo.ReqFeeConfs,
+		feeTx:       acctInfo.FeeTx,
+		feeCoin:     acctInfo.FeeCoin,
+		payFeeSig:   acctInfo.PayFeeSig,
+		isPaid:      acctInfo.Confirmed,
 	}
 }
 
@@ -638,11 +645,11 @@ func (a *dexAccount) unauth() {
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the
-// notifyfee request has not been sent/accepted yet.
+// payfee request has not been sent/accepted yet.
 func (a *dexAccount) feePending() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return !a.isPaid && len(a.feeCoin) > 0
+	return !a.isPaid && len(a.feeTx) > 0
 }
 
 // feePaid returns true if the account regisration fee has been accepted by the
@@ -674,6 +681,12 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 
 // checkSig checks the signature against the message and the DEX pubkey.
 func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
+	if msg == nil {
+		return fmt.Errorf("no message to verify")
+	}
+	if sig == nil {
+		return fmt.Errorf("no signature to verify")
+	}
 	_, err := checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
 	return err
 }
@@ -735,7 +748,7 @@ type LoginResult struct {
 // RegisterResult holds data returned from Register.
 type RegisterResult struct {
 	FeeID       string `json:"feeID"`
-	ReqConfirms uint16 `json:"reqConfirms"`
+	ReqConfirms uint16 `json:"reqConfirms"` // maybe change to uint32
 }
 
 // OrderFilter is almost the same as db.OrderFilter, except the Offset order ID
@@ -750,14 +763,14 @@ type OrderFilter struct {
 
 // Account holds data returned from AccountExport.
 type Account struct {
-	Host          string `json:"host"`
-	AccountID     string `json:"accountID"`
-	PrivKey       string `json:"privKey"`
-	DEXPubKey     string `json:"DEXPubKey"`
-	Cert          string `json:"cert"`
-	FeeCoin       string `json:"feeCoin"`
-	FeeProofSig   string `json:"feeProofSig"`
-	FeeProofStamp uint64 `json:"FeeProofStamp"`
+	Host        string `json:"host"`
+	AccountID   string `json:"accountID"`
+	PrivKey     string `json:"privKey"`
+	DEXPubKey   string `json:"DEXPubKey"`
+	Cert        string `json:"cert"`
+	FeeCoin     string `json:"feeCoin"`
+	FeeTx       string `jon:"feeTx"`
+	FeeProofSig string `json:"feeProofSig"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

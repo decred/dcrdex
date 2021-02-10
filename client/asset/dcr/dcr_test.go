@@ -250,6 +250,10 @@ func (c *tRPCClient) GetBlockChainInfo(_ context.Context) (*chainjson.GetBlockCh
 	return c.blockchainInfo, c.blockchainInfoErr
 }
 
+func (c *tRPCClient) FundRawTransaction(ctx context.Context, rawhex string, fundAccount string, options walletjson.FundRawTransactionOptions) (*walletjson.FundRawTransactionResult, error) {
+	return nil, fmt.Errorf("method FundRawTransaction not implemented")
+}
+
 func (c *tRPCClient) SendRawTransaction(_ context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
 	c.sentRawTx = tx
 	if c.sendRawErr == nil && c.sendRawHash == nil {

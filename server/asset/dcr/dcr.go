@@ -19,14 +19,17 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v3"
+	"github.com/decred/dcrd/blockchain/v3"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -77,6 +80,7 @@ type dcrNode interface {
 	GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error)
+	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled
@@ -86,6 +90,97 @@ func translateRPCCancelErr(err error) error {
 		err = asset.ErrRequestTimeout
 	}
 	return err
+}
+
+// ParseFeeTx performs basic validation of a serialized fee payment transaction.
+// The transaction must have two outputs: vout 0 pays to a P2PKH address in the
+// amount indicated by the wantFee input, and vout 1 is a nulldata output that
+// commits to an account ID. The P2PKH address of the first output, and the
+// account ID from the second are returned. Properly formed transactions:
+//
+//  1. The fee output (vout 0) must be a P2PKH pkScript.
+//  2. The amount paid to the fee address must be exactly wantFee.
+//  3. The null data output (vout 1) must have a 32-byte data push (account ID).
+//  4. The transaction must have a zero locktime and expiry.
+//  5. All inputs must have the max sequence num set (finalized).
+//  6. The transaction must pass the checks in the
+//     blockchain.CheckTransactionSanity function.
+//
+// TODO: consider fee rate, which is not important yet for DCR.
+func ParseFeeTx(rawTx []byte, wantFee int64) (feeAddr string, acct account.AccountID, err error) {
+	// While the dcr package uses a package-level chainParams variable, ensure
+	// that a backend has been instantiated (or loadConfig run another way).
+	if chainParams == nil {
+		err = errors.New("dcr asset package config not yet loaded")
+		return
+	}
+	msgTx := wire.NewMsgTx()
+	if err = msgTx.Deserialize(bytes.NewReader(rawTx)); err != nil {
+		return
+	}
+
+	if msgTx.LockTime != 0 {
+		err = errors.New("transaction locktime not zero")
+		return
+	}
+	if msgTx.Expiry != wire.NoExpiryValue {
+		err = errors.New("transaction has an expiration")
+		return
+	}
+
+	if err = blockchain.CheckTransactionSanity(msgTx, chainParams, false); err != nil {
+		return
+	}
+
+	if len(msgTx.TxOut) < 2 {
+		err = errors.New("invalid fee transaction")
+		return
+	}
+
+	for _, txIn := range msgTx.TxIn {
+		if txIn.Sequence != wire.MaxTxInSequenceNum {
+			err = errors.New("input has non-max sequence number")
+			return
+		}
+	}
+
+	feeOut := msgTx.TxOut[0]
+	if feeOut.Value != wantFee {
+		err = errors.New("wrong fee amount")
+		return
+	}
+
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(feeOut.Version, feeOut.PkScript, chainParams, false)
+	if err != nil || class != txscript.PubKeyHashTy || numRequired != 1 || len(addrs) != 1 {
+		err = errors.New("invalid fee transaction")
+		return
+	}
+
+	feeAddr = addrs[0].String() // don't convert address, must match type we specified
+
+	// Ensure output 1 script is OP_RETURN <push data for account id>
+	acctCommitOut := msgTx.TxOut[1]
+	commitScript := acctCommitOut.PkScript
+	wantPushSize := account.HashSize
+	if acctCommitOut.Version != 0 || len(commitScript) != 2+wantPushSize || commitScript[0] != txscript.OP_RETURN {
+		return "", acct, errors.New("invalid fee transaction - no account commitment output")
+	}
+	if commitScript[1] != txscript.OP_DATA_32 {
+		return "", acct, errors.New("invalid fee transaction - invalid account commitment")
+	}
+	pushData := commitScript[2:] // data after OP_RETURN (OP_DATA_32)
+	// tokenizer := txscript.MakeScriptTokenizer(acctCommitOut.Version, commitScript[1:])
+	// if !(tokenizer.Next() && tokenizer.Done()) {
+	// 	return "", acct, errors.New("invalid fee transaction - no account commitment output")
+	// }
+	// // Data push length must be account ID size.
+	// pushData := tokenizer.Data()
+	// if len(pushData) != wantPushSize {
+	// 	return "", acct, errors.New("invalid fee transaction - invalid account commitment")
+	// }
+
+	copy(acct[:], pushData)
+	return
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching output
@@ -268,6 +363,21 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	return c
 }
 
+func (dcr *Backend) SendRawTransaction(rawtx []byte) (coinID []byte, err error) {
+	msgTx := wire.NewMsgTx()
+	if err = msgTx.Deserialize(bytes.NewReader(rawtx)); err != nil {
+		return nil, err
+	}
+
+	var hash *chainhash.Hash
+	hash, err = dcr.node.SendRawTransaction(dcr.ctx, msgTx, false) // or allow high fees?
+	if err != nil {
+		return
+	}
+	coinID = toCoinID(hash, 0)
+	return
+}
+
 // Contract is part of the asset.Backend interface. An asset.Contract is an
 // output that has been validated as a swap contract for the passed redeem
 // script. A spendable output is one that can be spent in the next block. Every
@@ -348,7 +458,7 @@ func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 
 // ValidateXPub validates the base-58 encoded extended key, and ensures that it
 // is an extended public, not private, key.
-func (dcr *Backend) ValidateXPub(xpub string) error {
+func ValidateXPub(xpub string) error {
 	xp, err := hdkeychain.NewKeyFromString(xpub, chainParams)
 	if err != nil {
 		return err
@@ -474,7 +584,7 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	}
 
 	if int(vout) > len(verboseTx.Vout)-1 {
-		err = asset.CoinNotFoundError
+		err = asset.CoinNotFoundError // invalid instead?
 		return
 	}
 
@@ -1020,7 +1130,8 @@ func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 // decodeCoinID decodes the coin ID into a tx hash and a vin/vout index.
 func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
 	if len(coinID) != 36 {
-		return nil, 0, fmt.Errorf("coin ID wrong length. expected 36, got %d", len(coinID))
+		return nil, 0, dex.NewError(asset.ErrCoinDecode,
+			fmt.Sprintf("coin ID wrong length. expected 36, got %d", len(coinID)))
 	}
 	var txHash chainhash.Hash
 	copy(txHash[:], coinID[:32])

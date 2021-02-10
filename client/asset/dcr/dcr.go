@@ -152,6 +152,7 @@ type rpcClient interface {
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
+	FundRawTransaction(ctx context.Context, rawhex string, fundAccount string, options walletjson.FundRawTransactionOptions) (*walletjson.FundRawTransactionResult, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
@@ -2080,6 +2081,103 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
 
+func (dcr *ExchangeWallet) MakeRegFeeTx(address string, regFee uint64, acctID []byte) ([]byte, []byte, error) {
+	addr, err := dcrutil.DecodeAddress(address, dcr.chainParams)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	baseTx := wire.NewMsgTx()
+
+	// Fee output
+	payScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating P2SH script: %w", err)
+	}
+	txOut := wire.NewTxOut(int64(regFee), payScript)
+	baseTx.AddTxOut(txOut)
+
+	// Acct ID commitment output
+	commitPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).
+		AddData(acctID).
+		Script()
+	if err != nil {
+		return nil, nil, fmt.Errorf("script building error in testMsgTxSwapInit: %w", err)
+	}
+	acctOut := wire.NewTxOut(0, commitPkScript)
+	baseTx.AddTxOut(acctOut)
+
+	rawBaseTx, err := baseTx.Bytes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to serialize tx: %w", err)
+	}
+	rawBaseTxStr := hex.EncodeToString(rawBaseTx)
+
+	confTarget := int32(1)
+	frtOpts := walletjson.FundRawTransactionOptions{
+		ConfTarget: &confTarget, // avoid unconf
+	}
+	frtRes, err := dcr.node.FundRawTransaction(dcr.ctx, rawBaseTxStr, dcr.acct, frtOpts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create fee tx: %w", translateRPCCancelErr(err))
+	}
+
+	// Sign it.
+	var srtRes walletjson.SignRawTransactionResult // could use dcr.node SignRawTransaction for wire.MsgTx input and output
+	err = dcr.nodeRawRequest(methodSignRawTransaction, anylist{frtRes.Hex}, &srtRes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("rawrequest error: %w", translateRPCCancelErr(err))
+	}
+
+	for i := range srtRes.Errors {
+		sigErr := &srtRes.Errors[i]
+		dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v (is wallet locked?)",
+			sigErr.TxID, sigErr.Vout, sigErr.Sequence, sigErr.ScriptSig, sigErr.Error)
+		// Will be incomplete below, so log each SignRawTransactionError and move on.
+	}
+
+	if !srtRes.Complete {
+		dcr.log.Errorf("Incomplete raw transaction signatures (input tx: %x / incomplete signed tx: %v): ",
+			rawBaseTxStr, srtRes.Hex)
+		return nil, nil, fmt.Errorf("incomplete raw tx signatures (is wallet locked?)")
+	}
+
+	rawTx, err := hex.DecodeString(srtRes.Hex)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create fee tx: %w", err)
+	}
+
+	// Lock the prevouts.
+	signedMsgTx, err := msgTxFromBytes(rawTx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid fee tx: %w", err)
+	}
+	coinsToLock := make([]*wire.OutPoint, 0, len(signedMsgTx.TxIn))
+	for _, txin := range signedMsgTx.TxIn {
+		coinsToLock = append(coinsToLock, &txin.PreviousOutPoint)
+	}
+	err = dcr.node.LockUnspent(dcr.ctx, false, coinsToLock)
+	if err != nil {
+		return nil, nil, translateRPCCancelErr(err)
+	}
+
+	txid := signedMsgTx.TxHash()
+	return rawTx, toCoinID(&txid, 0), nil
+}
+
+func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	msgTx, err := msgTxFromBytes(rawTx)
+	if err != nil {
+		return nil, err
+	}
+	txHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	return toCoinID(txHash, 0), nil
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
 func (dcr *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
@@ -2337,6 +2435,15 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
 	msgTx := wire.NewMsgTx()
 	if err := msgTx.Deserialize(hex.NewDecoder(strings.NewReader(txHex))); err != nil {
+		return nil, err
+	}
+	return msgTx, nil
+}
+
+// msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
+func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
+	msgTx := wire.NewMsgTx()
+	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
 		return nil, err
 	}
 	return msgTx, nil

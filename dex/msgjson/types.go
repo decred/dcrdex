@@ -72,6 +72,9 @@ const (
 	OrderQuantityTooHigh              // 53
 	HTTPRouteError                    // 54
 	RouteUnavailableError             // 55
+	AccountExistsError                // 56
+	FeeWaiterRunningError             // 57
+	UnconfirmedAccountError           // 58
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -153,6 +156,12 @@ const (
 	// DEX that the fee has been paid and has the requisite number of
 	// confirmations.
 	NotifyFeeRoute = "notifyfee"
+	// PreRegisterRoute, PayFeeRoute, and FeePaidRoute are for the new
+	// registration protocol. PreRegisterRoute is a client-originating
+	// request-type message for requesting a fee payment address and amount, returning
+	PreRegisterRoute = "preregister"
+	PayFeeRoute      = "payfee"
+	FeePaidRoute     = "feepaid"
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
@@ -874,6 +883,9 @@ type ConnectResult struct {
 	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
 	ActiveMatches       []*Match       `json:"activematches"`
 	Score               int32          `json:"score"`
+	Pending             bool           `json:"pending,omitempty"`
+	Suspended           bool           `json:"suspended,omitempty`
+	SuspensionDetails   string         `json:"suspensionDetails,omitempty`
 }
 
 // PenaltyNote is the payload of a Penalty notification.
@@ -901,6 +913,55 @@ func (n *PenaltyNote) Serialize() []byte {
 	b = append(b, uint64Bytes(p.Time)...)
 	b = append(b, uint64Bytes(p.Duration)...)
 	return append(b, []byte(p.Details)...)
+}
+
+type PreRegister struct {
+	AssetID uint32 `json:"assetID,omitempty"`
+}
+
+type PreRegisterResult struct {
+	Signature
+	DEXPubKey Bytes  `json:"pubkey"` // needed?
+	AssetID   uint32 `json:"assetID"`
+	Address   string `json:"address"`
+	Fee       uint64 `json:"fee"`
+}
+
+// Serialize serializes the PreRegisterResult data.
+func (pr *PreRegisterResult) Serialize() []byte {
+	// serialization: DEX pubkey (33) + fee (8) + address (35-ish) = 76
+	b := make([]byte, 0, 76)
+	b = append(b, pr.DEXPubKey...)
+	b = append(b, uint32Bytes(pr.AssetID)...)
+	b = append(b, uint64Bytes(pr.Fee)...)
+	return append(b, []byte(pr.Address)...)
+}
+
+type PayFee struct {
+	Signature
+	AssetID  uint32 `json:"assetID"`
+	RawFeeTx Bytes  `json:"rawfeetx"`
+	PubKey   Bytes  `json:"pubkey"`
+}
+
+// Serialize serializes the PayFee data.
+func (pf *PayFee) Serialize() []byte {
+	// serialization: asset ID (4) + raw tx (variable) + client pubkey (33)
+	sz := 4 + len(pf.RawFeeTx) + len(pf.PubKey)
+	b := make([]byte, 0, sz)
+	b = append(b, uint32Bytes(pf.AssetID)...)
+	b = append(b, pf.RawFeeTx...)
+	return append(b, pf.PubKey...)
+}
+
+type PayFeeResult struct {
+	Signature
+	FeeCoin Bytes `json:"txid"`
+}
+
+// Serialize serializes the PayFeeResult data.
+func (pfr *PayFeeResult) Serialize() []byte {
+	return pfr.FeeCoin
 }
 
 // Register is the payload for the RegisterRoute request.
@@ -969,6 +1030,15 @@ type NotifyFeeResult struct {
 	Signature
 }
 
+type FeePaidNotification struct {
+	Signature
+	AccountID Bytes `json:"accountid"`
+}
+
+func (fp *FeePaidNotification) Serialize() []byte {
+	return fp.AccountID
+}
+
 // MarketStatus describes the status of the market, where StartEpoch is when the
 // market started or will start. FinalEpoch is a when the market will suspend
 // if it is running, or when the market suspended if it is presently stopped.
@@ -1013,15 +1083,23 @@ type Asset struct {
 	SwapConf     uint16 `json:"swapconf"`
 }
 
+type FeeAsset struct {
+	ID    uint32 `json:"id"`
+	Confs uint32 `json:"confs"`
+	Amt   uint64 `json:"amount"`
+}
+
 // ConfigResult is the successful result for the ConfigRoute.
 type ConfigResult struct {
-	CancelMax        float64   `json:"cancelmax"`
-	BroadcastTimeout uint64    `json:"btimeout"`
-	RegFeeConfirms   uint16    `json:"regfeeconfirms"`
-	Assets           []*Asset  `json:"assets"`
-	Markets          []*Market `json:"markets"`
-	Fee              uint64    `json:"fee"`
-	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
+	CancelMax        float64              `json:"cancelmax"`
+	BroadcastTimeout uint64               `json:"btimeout"`
+	RegFeeConfirms   uint16               `json:"regfeeconfirms"`
+	Assets           []*Asset             `json:"assets"`
+	Markets          []*Market            `json:"markets"`
+	Fee              uint64               `json:"fee"`
+	RegFees          map[string]*FeeAsset `json:"regfees"`
+	BinSizes         []string             `json:"binSizes"` // Just apidata.BinSizes for now.
+	// TODO: DEXPubKey (auth.signer.PubKey().SerializeCompressed())? It seems out of place in RegisterResult.
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot

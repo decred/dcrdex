@@ -178,10 +178,11 @@ func (m *TAuthManager) Sign(signables ...msgjson.Signable) {
 		signable.SetSig(sig.Serialize())
 	}
 }
-func (m *TAuthManager) Suspended(user account.AccountID) (found, suspended bool) {
+func (m *TAuthManager) Suspended(user account.AccountID) (found, unconfirmed, suspended bool) {
 	var rule account.Rule
 	rule, found = m.suspensions[user]
 	suspended = rule != account.NoRule
+	unconfirmed = false
 	return // TODO: test suspended account handling (no trades, just cancels)
 }
 func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {

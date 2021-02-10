@@ -50,7 +50,7 @@ type Storage interface {
 	RestoreAccount(account.AccountID) error
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	// Account retrieves account info for the specified account ID.
-	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	Account(account.AccountID) (acct *account.Account, paid, confirmed, open bool)
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
 	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
@@ -60,6 +60,7 @@ type Storage interface {
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
 	CreateAccount(*account.Account) (string, error)
+	CreateAccountWithTx(acct *account.Account, regAddr string, rawTx []byte) error
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
 }
@@ -70,9 +71,16 @@ type Signer interface {
 	PubKey() *secp256k1.PublicKey
 }
 
-// FeeChecker is a function for retrieving the details for a fee payment. It
+// FeeChecker is a function for retrieving the details for a fee payment the. It
 // is satisfied by (dcr.Backend).FeeCoin.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
+
+type FeeTxParser func(rawTx []byte, wantFee int64) (addr string, acct account.AccountID, err error)
+
+// TxSender broadcasts the raw transaction. NOTE that coinid vs txid is awkward
+// since we want a transaction, not an output, but all txns have at least one
+// output.
+type TxSender func(rawTx []byte) (coinid []byte /* token string, */, err error)
 
 type TxDataSource func([]byte) ([]byte, error)
 
@@ -93,6 +101,7 @@ type clientInfo struct {
 	respHandlers map[uint64]*respHandler
 	recentOrders *latestOrders
 	suspended    bool // penalized, disallow new orders
+	unconfirmed  bool // fee tx not yet confirmed
 }
 
 // GraceLimit returns the number of initial orders allowed for a new user before
@@ -126,10 +135,16 @@ func (client *clientInfo) restore() {
 	client.mtx.Unlock()
 }
 
-func (client *clientInfo) isSuspended() bool {
+func (client *clientInfo) confirm() {
+	client.mtx.Lock()
+	client.unconfirmed = false
+	client.mtx.Unlock()
+}
+
+func (client *clientInfo) acctStatus() (unconfirmed, suspended bool) {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
-	return client.suspended
+	return client.unconfirmed, client.suspended
 }
 
 func (client *clientInfo) rmHandler(id uint64) bool {
@@ -181,6 +196,12 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	return handler
 }
 
+type AddressPooler interface {
+	Get() string
+	Owns(address string) bool
+	Used(address string)
+}
+
 // AuthManager handles authentication-related tasks, including validating client
 // signatures, maintaining association between accounts and `comms.Link`s, and
 // signing messages with the DEX's private key. AuthManager manages requests to
@@ -190,6 +211,8 @@ type AuthManager struct {
 	signer         Signer
 	regFee         uint64
 	checkFee       FeeChecker
+	parseFeeTx     FeeTxParser
+	sendFee        TxSender
 	feeConfs       int64
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
@@ -203,6 +226,8 @@ type AuthManager struct {
 
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
+
+	feeAddrPool AddressPooler
 
 	feeWaiterMtx sync.Mutex
 	feeWaiterIdx map[account.AccountID]struct{}
@@ -319,15 +344,33 @@ type Config struct {
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
+
 	// RegistrationFee is the DEX registration fee, in atoms DCR
 	RegistrationFee uint64
+	// FeeTxParser performs rudimentary validation of a raw fee transaction.
+	FeeTxParser FeeTxParser
+	// FeeTxSender is used to broadcast a fee payment transaction. This should
+	// be a fully-validating node that ensures the transaction is valid with
+	// respect to the network's concensus rules and is able to be broadcast
+	// according to its mempool policy. FeeChecker must be used after broadcast
+	// to ensure the transaction is found and reaches the required number of
+	// confirmations.
+	FeeTxSender TxSender
 	// FeeConfs is the number of confirmations required on the registration fee
 	// before registration can be completed with notifyfee.
 	FeeConfs int64
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
+
+	// FeeAddressPooler manages a pool of registration fee addresses. It may
+	// return addresses more than once depending on it's internal size limit.
+	// This address pool MUST derive from a different xpub key that the one used
+	// by the Storage account methods.
+	FeeAddressPooler AddressPooler
+
 	// TxDataSources are sources of tx data for a coin ID.
 	TxDataSources map[uint32]TxDataSource
+
 	// UserUnbooker is a function for unbooking all of a user's orders.
 	UserUnbooker func(account.AccountID)
 	// MiaUserTimeout is how long after a user disconnects until UserUnbooker is
@@ -368,12 +411,16 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	if absTakerLotLimit == 0 {
 		absTakerLotLimit = defaultAbsTakerLotLimit
 	}
+
 	auth := &AuthManager{
 		storage:           cfg.Storage,
 		signer:            cfg.Signer,
 		regFee:            cfg.RegistrationFee,
 		checkFee:          cfg.FeeChecker,
+		parseFeeTx:        cfg.FeeTxParser,
+		sendFee:           cfg.FeeTxSender,
 		feeConfs:          cfg.FeeConfs,
+		feeAddrPool:       cfg.FeeAddressPooler,
 		miaUserTimeout:    cfg.MiaUserTimeout,
 		unbookFun:         cfg.UserUnbooker,
 		anarchy:           cfg.Anarchy,
@@ -395,6 +442,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
+	comms.Route(msgjson.PreRegisterRoute, auth.handlePreRegister)
+	comms.Route(msgjson.PayFeeRoute, auth.handlePayFee)
 	comms.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
 	comms.Route(msgjson.OrderStatusRoute, auth.handleOrderStatus)
 	return auth
@@ -465,7 +514,8 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
 	client.mtx.Unlock()
-	if penalize && !auth.freeCancels && !client.isSuspended() {
+	_, suspended := client.acctStatus()
+	if penalize && !auth.freeCancels && !suspended {
 		details := fmt.Sprintf("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
 		log.Info(details)
@@ -523,13 +573,15 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 
 // Suspended indicates the the user exists (is presently connected) and is
 // suspended. This does not access the persistent storage.
-func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended bool) {
+func (auth *AuthManager) Suspended(user account.AccountID) (found, unconfirmed, suspended bool) {
 	client := auth.user(user)
 	if client == nil {
 		// TODO: consider hitting auth.storage.Account(user)
-		return false, true // suspended for practical purposes
+		return false, true, true // suspended for practical purposes
 	}
-	return true, client.isSuspended()
+	found = true
+	unconfirmed, suspended = client.acctStatus()
+	return
 }
 
 // Sign signs the msgjson.Signables with the DEX private key.
@@ -1048,7 +1100,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
-	acctInfo, paid, open := auth.storage.Account(user)
+	acctInfo, paid, confirmed, open := auth.storage.Account(user)
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AccountNotFoundError,
@@ -1056,16 +1108,19 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 	if !paid {
-		// TODO: Send pending responses (e.g. a 'register` response that
-		// contains the fee address and amount for the user). Use
-		// rmUserConnectMsgs and rmUserConnectReqs to get them by account ID.
+		// This is only possible with the older register/notify_fee registration
+		// protocol since with preregister/payfee the account does not exist
+		// until a fee transaction is provided, thus marking the account paid.
 		return &msgjson.Error{
 			Code:    msgjson.UnpaidAccountError,
 			Message: "unpaid account",
 		}
 	}
-	// Note: suspended accounts may connect to complete swaps, etc. but not
-	// place new orders.
+	// Unconfirmed accounts may connect to receive the feepaid notification, but
+	// may not place orders.
+	//
+	// Suspended accounts may connect to complete swaps, etc. but not place new
+	// orders.
 
 	// Authorize the account.
 	sigMsg := connect.Serialize()
@@ -1102,6 +1157,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		respHandlers: respHandlers,
 		recentOrders: latestFinished,
 		suspended:    !open,
+		unconfirmed:  !confirmed,
 	}
 
 	// Compute the user's cancellation rate.
@@ -1216,6 +1272,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
 		Score:               score,
+		Pending:             client.unconfirmed,
+		Suspended:           client.suspended,
+		// TODO: SuspensionDetails
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
@@ -1232,8 +1291,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		return nil
 	}
 
-	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches",
-		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches))
+	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches, confirmed = %v, suspended = %v",
+		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), !client.unconfirmed, client.suspended)
 	auth.addClient(client)
 	return nil
 }

@@ -78,6 +78,7 @@ type dexConf struct {
 	ShowPGConfig      bool
 	MarketsConfPath   string
 	RegFeeXPub        string
+	RegFeeXPubNEW     string
 	RegFeeConfirms    int64
 	RegFeeAmount      uint64
 	CancelThreshold   float64
@@ -125,6 +126,7 @@ type flagsData struct {
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
+	RegFeeXPubNew    string        `long:"regfeexpubnew" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid (new scheme)."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
 
@@ -587,6 +589,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeAmount:      cfg.RegFeeAmount,
 		RegFeeConfirms:    cfg.RegFeeConfirms,
 		RegFeeXPub:        cfg.RegFeeXPub,
+		RegFeeXPubNEW:     cfg.RegFeeXPubNew,
 		CancelThreshold:   cfg.CancelThreshold,
 		MaxUserCancels:    cfg.MaxUserCancels,
 		Anarchy:           cfg.Anarchy,

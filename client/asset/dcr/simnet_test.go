@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -143,6 +144,23 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestMakeRegFeeTx(t *testing.T) {
+	rig := newTestRig(t, func(name string, err error) {
+		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	})
+	defer rig.close(t)
+
+	acctID := randBytes(32)
+	fee := uint64(1020304050) //  ~10.2 DCR
+
+	wallet := rig.beta()
+	rawFeeTx, coinID, err := wallet.MakeRegFeeTx(alphaAddress, fee, acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("%x: %x\n", decodeCoinID(coinID), rawFeeTx)
 }
 
 func TestWallet(t *testing.T) {

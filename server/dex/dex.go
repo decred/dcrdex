@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/apidata"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/asset/dcr"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
@@ -64,7 +65,8 @@ type DexConf struct {
 	Assets            []*AssetConf
 	Network           dex.Network
 	DBConf            *DBConf
-	RegFeeXPub        string
+	RegFeeXPub        string // for register/notifyfee clients
+	RegFeeXPubNEW     string // for preregister/payfee clients
 	RegFeeConfirms    int64
 	RegFeeAmount      uint64
 	BroadcastTimeout  time.Duration
@@ -138,7 +140,14 @@ func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*m
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
 		Fee:              cfg.RegFeeAmount,
-		BinSizes:         apidata.BinSizes,
+		RegFees: map[string]*msgjson.FeeAsset{
+			"dcr": {
+				ID:    42,
+				Confs: uint32(cfg.RegFeeConfirms),
+				Amt:   cfg.RegFeeAmount,
+			},
+		},
+		BinSizes: apidata.BinSizes,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -375,7 +384,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("no DCR backend configured")
 	}
 	// Validate the registration fee extended public key.
-	if err := dcrBackend.ValidateXPub(cfg.RegFeeXPub); err != nil {
+	if err := dcr.ValidateXPub(cfg.RegFeeXPub); err != nil {
 		return nil, fmt.Errorf("invalid regfeexpub: %w", err)
 	}
 
@@ -393,9 +402,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		ShowPGConfig: cfg.DBConf.ShowPGConfig,
 		QueryTimeout: 20 * time.Minute,
 		MarketCfg:    cfg.Markets,
-		//CheckedStores: true,
-		Net:    cfg.Network,
-		FeeKey: cfg.RegFeeXPub,
+		Net:          cfg.Network,
+		FeeKey:       cfg.RegFeeXPub,
 	}
 	storage, err := db.Open(ctx, "pg", pgCfg)
 	if err != nil {
@@ -413,12 +421,21 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		}
 	}
 
+	addrPooler, err := dcr.NewAddressPool(cfg.RegFeeXPubNEW, 20, &hdKeyIndexer{storage})
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("unable to create address pool: %w", err)
+	}
+
 	authCfg := auth.Config{
 		Storage:           storage,
 		Signer:            signer{cfg.DEXPrivKey},
 		RegistrationFee:   cfg.RegFeeAmount,
 		FeeConfs:          cfg.RegFeeConfirms,
 		FeeChecker:        dcrBackend.FeeCoin,
+		FeeTxSender:       dcrBackend.SendRawTransaction,
+		FeeTxParser:       dcr.ParseFeeTx, // NOTE: backend instantiation sets the package-level network params
+		FeeAddressPooler:  addrPooler,
 		UserUnbooker:      userUnbookFun,
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
@@ -581,6 +598,27 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	startSubSys("Comms Server", server)
 
 	return dexMgr, nil
+}
+
+// hdKeyIndexer translates between db.FeeKeyIndexer and dcr.HDKeyIndexer.
+type hdKeyIndexer struct {
+	db.FeeKeyIndexer
+}
+
+func (ki *hdKeyIndexer) KeyIndex(pubKey []byte) (uint32, error) {
+	idx, err := ki.FeeKeyIndex(pubKey)
+	if err == nil {
+		return idx, nil
+	}
+	if !db.IsErrKeyUnknown(err) {
+		return 0, err
+	}
+	log.Infof("Creating new fee key entry for extended pubkey %x", pubKey)
+	return ki.CreateFeeKeyEntryFromPubKey(pubKey)
+}
+
+func (ki *hdKeyIndexer) SetKeyIndex(idx uint32, pubKey []byte) error {
+	return ki.SetFeeKeyIndex(idx, pubKey)
 }
 
 // Asset retrieves an asset backend by its ID.

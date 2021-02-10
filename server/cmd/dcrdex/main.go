@@ -127,6 +127,7 @@ func mainCore(ctx context.Context) error {
 			ShowPGConfig: cfg.ShowPGConfig,
 		},
 		RegFeeXPub:        cfg.RegFeeXPub,
+		RegFeeXPubNEW:     cfg.RegFeeXPubNEW,
 		RegFeeAmount:      cfg.RegFeeAmount,
 		RegFeeConfirms:    cfg.RegFeeConfirms,
 		BroadcastTimeout:  cfg.BroadcastTimeout,

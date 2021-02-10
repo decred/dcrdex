@@ -20,20 +20,21 @@ type DB interface {
 	ValueExists(k string) (bool, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
-	// URL.
+	// host.
 	ListAccounts() ([]string, error)
 	// Accounts retrieves all accounts.
 	Accounts() ([]*AccountInfo, error)
 	// Account gets the AccountInfo associated with the specified DEX node.
-	Account(url string) (*AccountInfo, error)
+	Account(host string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(ai *AccountInfo) error
 	// AccountProof retrieves the AccountPoof value specified by url.
-	AccountProof(url string) (*AccountProof, error)
-	// AccountPaid marks the account as paid.
-	AccountPaid(proof *AccountProof) error
+	AccountProof(host string) (*AccountProof, error)
+	// AccountPaid marks the account as paid (fee tx sent to server).
+	AccountPaid(host string, sig []byte) error
+	ConfirmAccount(host string) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error

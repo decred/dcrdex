@@ -208,16 +208,19 @@ func TestAccounts(t *testing.T) {
 	// Test account proofs.
 	zerothHost := accts[0].Host
 	zerothAcct, _ := boltdb.Account(zerothHost)
-	if zerothAcct.Paid {
+	if zerothAcct.Confirmed {
 		t.Fatalf("Account marked as paid before account proof set")
 	}
-	boltdb.AccountPaid(&db.AccountProof{
-		Host:  zerothAcct.Host,
-		Stamp: 123456789,
-		Sig:   []byte("some signature here"),
-	})
+	err = boltdb.AccountPaid(zerothAcct.Host, []byte(`feecoinasdf`), []byte("some signature here"))
+	if err != nil {
+		t.Fatalf("AccountPaid error: %v", err)
+	}
+	err = boltdb.ConfirmAccount(zerothAcct.Host)
+	if err != nil {
+		t.Fatalf("ConfirmAccount error: %v", err)
+	}
 	reAcct, _ := boltdb.Account(zerothHost)
-	if !reAcct.Paid {
+	if !reAcct.Confirmed {
 		t.Fatalf("Account not marked as paid after account proof set")
 	}
 }
@@ -254,31 +257,6 @@ func TestDisableAccount(t *testing.T) {
 	}
 	if actualDisabledAccount == nil {
 		t.Fatalf("Expected to retrieve a disabledAccount.")
-	}
-}
-
-func TestAccountProof(t *testing.T) {
-	boltdb := newTestDB(t)
-	acct := dbtest.RandomAccountInfo()
-	host := acct.Host
-
-	err := boltdb.CreateAccount(acct)
-	if err != nil {
-		t.Fatalf("Unexpected CreateAccount error: %v", err)
-	}
-
-	boltdb.AccountPaid(&db.AccountProof{
-		Host:  acct.Host,
-		Stamp: 123456789,
-		Sig:   []byte("some signature here"),
-	})
-
-	accountProof, err := boltdb.AccountProof(host)
-	if err != nil {
-		t.Fatalf("Unexpected AccountProof error: %v", err)
-	}
-	if accountProof == nil {
-		t.Fatal("AccountProof not found")
 	}
 }
 

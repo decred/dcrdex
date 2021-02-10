@@ -2153,6 +2153,22 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 	return newOutput(txHash, vout, sent), nil
 }
 
+func (btc *ExchangeWallet) MakeRegFeeTx(address string, regFee uint64, acctID []byte) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not implemented")
+}
+
+func (btc *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	msgTx, err := msgTxFromBytes(rawTx)
+	if err != nil {
+		return nil, err
+	}
+	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	if err != nil {
+		return nil, err
+	}
+	return toCoinID(txHash, 0), nil
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {

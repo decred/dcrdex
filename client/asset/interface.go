@@ -161,6 +161,8 @@ type Wallet interface {
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)
+	MakeRegFeeTx(address string, regFee uint64, acctID []byte) (RawTx []byte, FeeCoin []byte, err error)
+	SendTransaction(rawTx []byte) ([]byte, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// If the coin is not unspent, and is not known to this wallet,
 	// Confirmations may return an error. The value of spent should be ignored

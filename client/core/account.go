@@ -35,27 +35,25 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
 	dc.acct.keyMtx.RUnlock()
 
+	// TODO: toast AccountProof
 	feeProofSig := ""
-	var feeProofStamp uint64
 	if dc.acct.isPaid {
 		accountProof, err := c.db.AccountProof(host)
 		if err != nil {
 			return nil, codedError(accountProofErr, err)
 		}
 		feeProofSig = hex.EncodeToString(accountProof.Sig)
-		feeProofStamp = accountProof.Stamp
 	}
 
 	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
-		Host:          host,
-		AccountID:     accountID,
-		PrivKey:       privKey,
-		DEXPubKey:     hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
-		Cert:          hex.EncodeToString(dc.acct.cert),
-		FeeCoin:       hex.EncodeToString(dc.acct.feeCoin),
-		FeeProofSig:   feeProofSig,
-		FeeProofStamp: feeProofStamp,
+		Host:        host,
+		AccountID:   accountID,
+		PrivKey:     privKey,
+		DEXPubKey:   hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
+		Cert:        hex.EncodeToString(dc.acct.cert),
+		FeeCoin:     hex.EncodeToString(dc.acct.feeCoin),
+		FeeProofSig: feeProofSig,
 	}
 	return acct, nil
 }
@@ -101,7 +99,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(encryptionErr, err)
 	}
 
-	accountInfo.Paid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
+	// accountInfo.Paid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
 
 	// verifyAccount makes a connection to the DEX.
 	if !c.verifyAccount(&accountInfo) {
@@ -113,21 +111,21 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(dbErr, err)
 	}
 
-	if accountInfo.Paid {
-		sig, err := hex.DecodeString(acct.FeeProofSig)
-		if err != nil {
-			return codedError(decodeErr, err)
-		}
-		accountProof := db.AccountProof{
-			Host:  host,
-			Stamp: acct.FeeProofStamp,
-			Sig:   sig,
-		}
-		err = c.db.AccountPaid(&accountProof)
-		if err != nil {
-			return codedError(dbErr, err)
-		}
-	}
+	// if accountInfo.Paid {
+	// 	sig, err := hex.DecodeString(acct.FeeProofSig)
+	// 	if err != nil {
+	// 		return codedError(decodeErr, err)
+	// 	}
+	// 	accountProof := db.AccountProof{
+	// 		Host:  host,
+	// 		Stamp: acct.FeeProofStamp,
+	// 		Sig:   sig,
+	// 	}
+	// 	err = c.db.AccountPaid(&accountProof)
+	// 	if err != nil {
+	// 		return codedError(dbErr, err)
+	// 	}
+	// }
 
 	return nil
 }

@@ -17,6 +17,7 @@ import (
 const (
 	CoinNotFoundError = dex.ErrorKind("coin not found")
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
+	ErrCoinDecode     = dex.ErrorKind("invalid coin id")
 )
 
 // The Backend interface is an interface for a blockchain backend.

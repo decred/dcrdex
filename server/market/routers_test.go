@@ -133,9 +133,10 @@ type TAuth struct {
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 	log.Infof("Route for %s", route)
 }
-func (a *TAuth) Suspended(user account.AccountID) (found, suspended bool) {
+func (a *TAuth) Suspended(user account.AccountID) (found, unconfirmed, suspended bool) {
 	suspended, found = a.suspensions[user]
-	return // TODO: test suspended account handling (no trades, just cancels)
+	unconfirmed = false // TODO: test!
+	return              // TODO: test suspended account handling (no trades, just cancels)
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)

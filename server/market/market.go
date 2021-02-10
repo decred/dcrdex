@@ -50,6 +50,7 @@ const (
 	ErrTargetNotActive        = Error("target order not active on this market")
 	ErrTargetNotCancelable    = Error("targeted order is not a limit order with standing time-in-force")
 	ErrSuspendedAccount       = Error("suspended account")
+	ErrUnconfirmedAccount     = Error("unconfirmed account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
 )
@@ -1207,9 +1208,13 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Disallow trade orders from suspended accounts. Cancel orders are allowed.
 	if rec.order.Type() != order.CancelOrderType {
 		// Do not bother the auth manager for cancel orders.
-		if _, suspended := m.auth.Suspended(rec.order.User()); suspended {
-			log.Debugf("Account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
+		if _, unconfirmed, suspended := m.auth.Suspended(rec.order.User()); suspended {
+			log.Debugf("Suspended account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
 			errChan <- ErrSuspendedAccount
+			return nil
+		} else if unconfirmed {
+			log.Debugf("Unconfirmed account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
+			errChan <- ErrUnconfirmedAccount
 			return nil
 		}
 	}

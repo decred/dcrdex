@@ -42,19 +42,20 @@ func (a *Archiver) setAccountRule(aid account.AccountID, rule account.Rule) erro
 	return nil
 }
 
-// Account retrieves the account pubkey, whether the account is paid, and
-// whether the account is open, in that order.
-func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
-	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)
+// Account retrieves the account pubkey, and whether: the account is has a fee
+// transaction recorded (paid), the transaction is confirmed, and the account is
+// open / not suspended.
+func (a *Archiver) Account(aid account.AccountID) (acct *account.Account, paid, confirmed, open bool) {
+	acct, paid, confirmed, open, err := getAccount(a.db, a.tables.accounts, aid)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return nil, false, false
+		return nil, false, false, false
 	case err == nil:
 	default:
 		log.Errorf("getAccount error: %v", err)
-		return nil, false, false
+		return nil, false, false, false
 	}
-	return acct, isPaid, isOpen
+	return acct, paid, confirmed, open
 }
 
 // Accounts returns data for all accounts.
@@ -109,10 +110,12 @@ func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
 	return regAddr, nil
 }
 
-// CreateKeyEntry creates an entry for the pubkey (hash) if one doesn't already
-// exist.
-func (a *Archiver) CreateKeyEntry(keyHash []byte) error {
-	return createKeyEntry(a.db, a.tables.feeKeys, keyHash)
+// CreateAccountWithTx creates a new account with the given fee address and
+// the raw bytes of the fee payment transaction. This is used for the new
+// preregister/payfee request protocol. PayAccount is still be be used once the
+// broadcasted transaction reaches the required number of confirmations.
+func (a *Archiver) CreateAccountWithTx(acct *account.Account, regAddr string, rawTx []byte) error {
+	return createAccountWithTx(a.db, a.tables.accounts, acct, regAddr, rawTx)
 }
 
 // AccountRegAddr retrieves the registration fee address created for the
@@ -136,6 +139,55 @@ func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
 	}
 	if !ok {
 		return fmt.Errorf("no accounts updated")
+	}
+	return nil
+}
+
+// createKeyEntry creates an entry for the pubkey hash if one doesn't already
+// exist.
+func (a *Archiver) createKeyEntry(keyHash []byte) error {
+	_, err := createKeyEntry(a.db, a.tables.feeKeys, keyHash)
+	return err
+}
+
+// CreateFeeKeyEntryFromPubKey an entry for the pubkey, which should be of
+// length secp256k1.PubKeyBytesLenCompressed. HASH160 will be applied
+// internally. The current child index is returned.
+func (a *Archiver) CreateFeeKeyEntryFromPubKey(pubKey []byte) (child uint32, err error) {
+	keyHash := dcrutil.Hash160(pubKey)
+	log.Debugf("Inserting key entry for pubkey %x, hash160(pubkey) = %x", pubKey, keyHash)
+	return createKeyEntry(a.db, a.tables.feeKeys, keyHash)
+}
+
+func (a *Archiver) FeeKeyIndex(pubKey []byte) (uint32, error) {
+	keyHash := dcrutil.Hash160(pubKey)
+	stmt := fmt.Sprintf(internal.CurrentKeyIndex, feeKeysTableName)
+	var child uint32
+	err := a.db.QueryRow(stmt, keyHash).Scan(&child)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, db.ArchiveError{Code: db.ErrUnknownKey}
+	case err == nil:
+	default:
+		return 0, err
+	}
+	return child, nil
+}
+
+func (a *Archiver) SetFeeKeyIndex(idx uint32, pubKey []byte) error {
+	keyHash := dcrutil.Hash160(pubKey)
+	log.Debugf("Recording new index %d for key %x (%x)", idx, pubKey, keyHash)
+	stmt := fmt.Sprintf(internal.SetKeyIndex, feeKeysTableName)
+	res, err := a.db.Exec(stmt, idx, keyHash)
+	if err != nil {
+		return err
+	}
+	N, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("updated %d rows, expected 1", N)
 	}
 	return nil
 }
@@ -184,7 +236,12 @@ func createAccountTables(db *sql.DB) error {
 			log.Tracef("Table %s created", c.name)
 		}
 	}
-	return nil
+	// TODO: replace with versioned upgrade
+	N, err := sqlExec(db, fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS fee_tx_raw BYTEA;", accountsTableName))
+	if N != 0 {
+		log.Infof("Added fee_tx_raw column to the accounts table.")
+	}
+	return err
 }
 
 // setRule sets the rule column value.
@@ -206,22 +263,36 @@ func setRule(dbe sqlExecutor, tableName string, aid account.AccountID, rule acco
 
 // getAccount gets the account pubkey, whether the account has been
 // registered, and whether the account is still open, in that order.
-func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.Account, bool, bool, error) {
-	var coinID, pubkey []byte
+func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (acct *account.Account, paid, confirmed, open bool, err error) {
+	var feeTxRaw, coinID, pubkey []byte
 	var rule uint8
 	stmt := fmt.Sprintf(internal.SelectAccount, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &coinID, &rule)
+	err = dbe.QueryRow(stmt, aid).Scan(&pubkey, &feeTxRaw, &coinID, &rule)
 	if err != nil {
-		return nil, false, false, err
+		return
 	}
-	acct, err := account.NewAccountFromPubKey(pubkey)
-	return acct, len(coinID) > 1, rule == 0, err
+	acct, err = account.NewAccountFromPubKey(pubkey)
+	if err != nil {
+		return
+	}
+	confirmed = len(coinID) > 1
+	paid = confirmed || len(feeTxRaw) > 1 // feeTxRaw may be empty while confirmed for old notify_fee registrants
+	open = rule == 0
+	return
 }
 
 // createAccount creates an entry for the account in the accounts table.
 func createAccount(dbe sqlExecutor, tableName string, acct *account.Account, regAddr string) error {
 	stmt := fmt.Sprintf(internal.CreateAccount, tableName)
 	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), regAddr)
+	return err
+}
+
+// createAccountWithTx creates an entry for the account in the accounts table
+// with a fee address and the bytes of the fee payment transaction.
+func createAccountWithTx(dbe sqlExecutor, tableName string, acct *account.Account, regAddr string, rawTx []byte) error {
+	stmt := fmt.Sprintf(internal.CreateAccountWithTx, tableName)
+	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), regAddr, rawTx)
 	return err
 }
 
@@ -249,9 +320,13 @@ func payAccount(dbe *sql.DB, tableName string, aid account.AccountID, coinID []b
 }
 
 // createKeyEntry creates an entry for the pubkey (hash) if it doesn't already
-// exist.
-func createKeyEntry(db *sql.DB, tableName string, keyHash []byte) error {
+// exist, and returns the child index.
+func createKeyEntry(db *sql.DB, tableName string, keyHash []byte) (uint32, error) {
 	stmt := fmt.Sprintf(internal.InsertKeyIfMissing, tableName)
-	_, err := db.Exec(stmt, keyHash)
-	return err
+	var child uint32
+	err := db.QueryRow(stmt, keyHash).Scan(&child)
+	if err != nil {
+		return 0, err
+	}
+	return child, nil
 }

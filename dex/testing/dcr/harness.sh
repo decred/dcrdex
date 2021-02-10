@@ -241,6 +241,10 @@ sleep 15
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
 tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
 
+# Create fee account on beta wallet for use by dcrdex simnet instances.
+tmux send-keys -t $SESSION:0 "./beta createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./beta getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
+
 ################################################################################
 # Prepare the wallets
 ################################################################################

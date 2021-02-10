@@ -62,26 +62,35 @@ func (s Severity) String() string {
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
-	Host string
-	Cert []byte
+	// Host, Cert, and DEXPubKey identify the DEX server.
+	Host      string
+	Cert      []byte
+	DEXPubKey *secp256k1.PublicKey
+
 	// EncKey should be an encrypted private key. The database itself does not
 	// handle encryption (yet?).
-	EncKey    []byte
-	DEXPubKey *secp256k1.PublicKey
-	FeeCoin   []byte
-	// Paid will be set on retrieval based on whether there is an AccountProof
-	// set.
-	Paid bool
+	EncKey      []byte
+	ReqFeeConfs uint32
+	FeeAssetID  uint32
+	FeeTx       []byte
+	FeeCoin     []byte
+
+	// The following fields are not in the serialization:
+	PayFeeSig []byte // set when FeeTx is accepted by the server
+	Confirmed bool   // set when FeeTx reaches required confs
 }
 
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
-	return dbBytes{0}.
+	return dbBytes{1}.
 		AddData([]byte(ai.Host)).
-		AddData(ai.EncKey).
+		AddData(ai.Cert).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
-		AddData(ai.FeeCoin).
-		AddData(ai.Cert)
+		AddData(ai.EncKey).
+		AddData(encode.Uint32Bytes(ai.ReqFeeConfs)).
+		AddData(encode.Uint32Bytes(ai.FeeAssetID)).
+		AddData(ai.FeeTx).
+		AddData(ai.FeeCoin)
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo. The byte
@@ -93,7 +102,9 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 	}
 	switch ver {
 	case 0:
-		return decodeAccountInfo_v0(pushes)
+		return decodeAccountInfo_v0(pushes) // caller must decode account proof
+	case 1:
+		return decodeAccountInfo_v1(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
@@ -110,11 +121,68 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 	}
 	return &AccountInfo{
 		Host:      string(hostB),
-		EncKey:    keyB,
-		DEXPubKey: pk,
-		FeeCoin:   coinB,
 		Cert:      certB,
+		DEXPubKey: pk,
+		EncKey:    keyB,
+		// FeeTx and PayFeeSig are not recorded for this version.
+		FeeCoin: coinB, // NOTE: no longer in current serialization.
+		// Confirmed must come from account proof.
 	}, nil
+}
+
+func decodeAccountInfo_v1(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 8 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 7 data pushes, got %d", len(pushes))
+	}
+	hostB, certB, dexPkB, keyB := pushes[0], pushes[1], pushes[2], pushes[3]
+	reqConfB, assetIDB, feeTxB, feeCoinB := pushes[4], pushes[5], pushes[6], pushes[7]
+
+	pk, err := secp256k1.ParsePubKey(dexPkB)
+	if err != nil {
+		return nil, err
+	}
+	if len(reqConfB) != 4 {
+		return nil, fmt.Errorf("ReqFeeConfs push is using %d bytes, expected 4", len(reqConfB))
+	}
+	if len(assetIDB) != 4 {
+		return nil, fmt.Errorf("FeeAssetID push is using %d bytes, expected 4", len(assetIDB))
+	}
+
+	return &AccountInfo{
+		Host:        string(hostB),
+		Cert:        certB,
+		DEXPubKey:   pk,
+		EncKey:      keyB,
+		ReqFeeConfs: intCoder.Uint32(reqConfB),
+		FeeAssetID:  intCoder.Uint32(assetIDB),
+		FeeTx:       feeTxB,
+		FeeCoin:     feeCoinB,
+		// PayFeeSig is in the payFeeKey bucket for this version.
+		// Confirmed in the confirmedKey bucket.
+	}, nil
+}
+
+func EncodePayFeeProof(payFeeSig []byte) []byte {
+	return dbBytes{0}.AddData(payFeeSig)
+}
+
+func DecodePayFeeProof(b []byte) (payFeeSig []byte, err error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodePayFeeProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown payfee proof version %d", ver)
+}
+
+func decodePayFeeProof_v0(pushes [][]byte) (payFeeSig []byte, err error) {
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("decodePayFeeProof_v0: expected 1 data push, got %d", len(pushes))
+	}
+	return pushes[0], nil
 }
 
 // Account proof is information necessary to prove that the DEX server accepted

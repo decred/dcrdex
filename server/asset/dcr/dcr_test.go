@@ -20,6 +20,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -201,6 +202,11 @@ func (*testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint3
 	out := testChain.txOuts[outID]
 	// Unfound is not an error for GetTxOut.
 	return out, nil
+}
+
+func (*testNode) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	hash := tx.TxHash()
+	return &hash, nil
 }
 
 // Part of the dcrNode interface.
@@ -1490,23 +1496,21 @@ func TestValidateXPub(t *testing.T) {
 		t.Fatalf("failed to generate master extended key: %v", err)
 	}
 
-	be := &Backend{}
-
 	// fail for private key
 	xprivStr := master.String()
-	if err = be.ValidateXPub(xprivStr); err == nil {
+	if err = ValidateXPub(xprivStr); err == nil {
 		t.Errorf("no error for extended private key")
 	}
 
 	// succeed for public key
 	xpub := master.Neuter()
 	xpubStr := xpub.String()
-	if err = be.ValidateXPub(xpubStr); err != nil {
+	if err = ValidateXPub(xpubStr); err != nil {
 		t.Error(err)
 	}
 
 	// fail for invalid key of wrong length
-	if err = be.ValidateXPub(xpubStr[2:]); err == nil {
+	if err = ValidateXPub(xpubStr[2:]); err == nil {
 		t.Errorf("no error for invalid key")
 	}
 
@@ -1516,7 +1520,7 @@ func TestValidateXPub(t *testing.T) {
 		t.Fatalf("failed to generate master extended key: %v", err)
 	}
 	xpubTestnet := masterTestnet.Neuter()
-	if err = be.ValidateXPub(xpubTestnet.String()); err == nil {
+	if err = ValidateXPub(xpubTestnet.String()); err == nil {
 		t.Errorf("no error for invalid wrong network")
 	}
 }
@@ -1617,4 +1621,94 @@ func TestSynced(t *testing.T) {
 		t.Fatalf("getblockchaininfo error not propagated")
 	}
 	tNode.blockchainInfoErr = nil
+}
+
+func TestParseFeeTx(t *testing.T) {
+	var feeAmt int64 = 1e8
+	txOK := wire.NewMsgTx()
+	txIn := wire.NewTxIn(&wire.OutPoint{}, 1, []byte{2, 2, 3}) // junk input
+	txOK.AddTxIn(txIn)
+
+	pkh := randomBytes(20)
+	addr, err := dcrutil.NewAddressPubKeyHash(pkh, chainParams, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewAddressPubKeyHash error: %v\n", err)
+	}
+	feePkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		t.Fatalf("PayToAddrScript error: %v\n", err)
+	}
+	feeOut := wire.NewTxOut(feeAmt, feePkScript)
+	txOK.AddTxOut(feeOut)
+
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		fmt.Printf("s256Auth error: %v\n", err)
+	}
+	pubkey := priv.PubKey().SerializeCompressed()
+	acct, err := account.NewAccountFromPubKey(pubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commitPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).
+		AddData(acct.ID[:]).
+		Script()
+	if err != nil {
+		fmt.Printf("script building error in testMsgTxSwapInit: %v", err)
+	}
+	acctOut := wire.NewTxOut(0, commitPkScript)
+	txOK.AddTxOut(acctOut)
+
+	txRaw, err := txOK.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%x", txRaw)
+
+	gotFeeAddr, gotAcct, err := ParseFeeTx(txRaw, feeAmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantFeeAddr := addr.Address()
+	if wantFeeAddr != gotFeeAddr {
+		t.Errorf("wrong fee address, wanted %v, got %v", wantFeeAddr, gotFeeAddr)
+	}
+
+	if gotAcct != acct.ID {
+		t.Errorf("wrong account, wanted %v, got %v", acct.ID, gotAcct)
+	}
+
+	// TODO: restructure test and check all expected errors
+
+	// type args struct {
+	// 	rawTx   []byte
+	// 	wantFee int64
+	// }
+	// tests := []struct {
+	// 	name        string
+	// 	args        args
+	// 	wantFeeAddr string
+	// 	wantAcct    account.AccountID
+	// 	wantErr     bool
+	// }{
+	// 	// TODO: Add test cases.
+	// }
+	// for _, tt := range tests {
+	// 	t.Run(tt.name, func(t *testing.T) {
+	// 		gotFeeAddr, gotAcct, err := ParseFeeTx(tt.args.rawTx, tt.args.wantFee)
+	// 		if (err != nil) != tt.wantErr {
+	// 			t.Errorf("ParseFeeTx() error = %v, wantErr %v", err, tt.wantErr)
+	// 			return
+	// 		}
+	// 		if gotFeeAddr != tt.wantFeeAddr {
+	// 			t.Errorf("ParseFeeTx() gotFeeAddr = %v, want %v", gotFeeAddr, tt.wantFeeAddr)
+	// 		}
+	// 		if !reflect.DeepEqual(gotAcct, tt.wantAcct) {
+	// 			t.Errorf("ParseFeeTx() gotAcct = %v, want %v", gotAcct, tt.wantAcct)
+	// 		}
+	// 	})
+	// }
 }

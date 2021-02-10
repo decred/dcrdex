@@ -68,6 +68,8 @@ var (
 	matchIDKey             = []byte("matchID")
 	proofKey               = []byte("proof")
 	activeKey              = []byte("active")
+	confirmedKey           = []byte("confirmed")
+	payFeeProofKey         = []byte("payFeeProof")
 	dexKey                 = []byte("dex")
 	updateTimeKey          = []byte("utime")
 	accountKey             = []byte("account")
@@ -215,7 +217,6 @@ func (db *BoltDB) ListAccounts() ([]string, error) {
 	var urls []string
 	return urls, db.acctsView(func(accts *bbolt.Bucket) error {
 		c := accts.Cursor()
-		// key, _ := c.First()
 		for acct, _ := c.First(); acct != nil; acct, _ = c.Next() {
 			acctBkt := accts.Bucket(acct)
 			if acctBkt == nil {
@@ -229,27 +230,58 @@ func (db *BoltDB) ListAccounts() ([]string, error) {
 	})
 }
 
+func loadAccountInfo(acct *bbolt.Bucket) (*db.AccountInfo, error) {
+	acctB := getCopy(acct, accountKey)
+	if acctB == nil {
+		return nil, fmt.Errorf("empty account")
+	}
+	acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+	if err != nil {
+		return nil, err
+	}
+
+	// We infer encoding version by presence of raw fee tx bytes. TODO: version
+	// an upgrade?
+	if len(acctInfo.FeeTx) == 0 {
+		// Retrieved old AccountInfo format with no raw fee tx. FeeCoin is set,
+		// but no FeeTx or PayFeeSig. Confirmed comes from feeProofKey bucket.
+		acctInfo.Confirmed = len(acct.Get(feeProofKey)) > 0
+		return acctInfo, nil
+	}
+
+	// FeeCoin and PayFeeSig come from payFeeProofKey bucket.
+	payFeeProofB := getCopy(acct, payFeeProofKey)
+	if payFeeProofB == nil {
+		// Allow this so Core can retry payfee with FeeTx.
+		return acctInfo, nil
+	}
+	payFeeSig, err := dexdb.DecodePayFeeProof(payFeeProofB)
+	if err != nil {
+		return nil, err
+	}
+	acctInfo.PayFeeSig = payFeeSig
+
+	// Confirmed comes from confirmedKey bucket.
+	acctInfo.Confirmed = bEqual(acct.Get(confirmedKey), byteTrue)
+
+	return acctInfo, nil
+}
+
 // Accounts returns a list of DEX Accounts. The DB is designed to have a single
 // account per DEX, so the account itself is identified by the DEX URL.
 func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 	var accounts []*dexdb.AccountInfo
 	return accounts, db.acctsView(func(accts *bbolt.Bucket) error {
 		c := accts.Cursor()
-		// key, _ := c.First()
 		for acctKey, _ := c.First(); acctKey != nil; acctKey, _ = c.Next() {
 			acct := accts.Bucket(acctKey)
 			if acct == nil {
 				return fmt.Errorf("account bucket %s value not a nested bucket", string(acctKey))
 			}
-			acctB := getCopy(acct, accountKey)
-			if acctB == nil {
-				return fmt.Errorf("empty account found for %s", string(acctKey))
-			}
-			acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+			acctInfo, err := loadAccountInfo(acct)
 			if err != nil {
 				return err
 			}
-			acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
 			accounts = append(accounts, acctInfo)
 		}
 		return nil
@@ -260,27 +292,19 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 func (db *BoltDB) Account(url string) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	acctKey := []byte(url)
-	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) error {
+	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) (err error) {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", url)
 		}
-		acctB := getCopy(acct, accountKey)
-		if acctB == nil {
-			return fmt.Errorf("empty account found for %s", url)
-		}
-		var err error
-		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
-		if err != nil {
-			return err
-		}
-		acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
-		return nil
+		acctInfo, err = loadAccountInfo(acct)
+		return
 	})
 }
 
 // CreateAccount saves the AccountInfo. If an account already exists for this
-// DEX, it will return an error.
+// DEX, it will return an error. To store FeeCoin and PayFeeSig, use
+// AccountPaid. To store Confirmed, use ConfirmAccount.
 func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if ai.Host == "" {
 		return fmt.Errorf("empty host not allowed")
@@ -300,10 +324,28 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		if err != nil {
 			return fmt.Errorf("accountKey put error: %w", err)
 		}
-		err = acct.Put(activeKey, byteTrue)
+		err = acct.Put(activeKey, byteTrue) // huh?
 		if err != nil {
 			return fmt.Errorf("activeKey put error: %w", err)
 		}
+		// If PayFeeSig is set, this is likely an account import since this should
+		// be done via AccountPaid normally. Similarly for Confirmed.
+		if len(ai.PayFeeSig) > 0 {
+			payFeeProofB := dexdb.EncodePayFeeProof(ai.PayFeeSig)
+			err = acct.Put(payFeeProofKey, payFeeProofB)
+			if err != nil {
+				return fmt.Errorf("payFeeProofKey put error: %w", err)
+			}
+		}
+		conf := byteFalse
+		if ai.Confirmed {
+			conf = byteTrue // normally set via ConfirmAccount
+		}
+		err = acct.Put(confirmedKey, conf)
+		if err != nil {
+			return fmt.Errorf("confirmedKey put error: %w", err)
+		}
+
 		return nil
 	})
 }
@@ -360,6 +402,28 @@ func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
 	})
 }
 
+func (db *BoltDB) AccountPaid(host string, sig []byte) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", host)
+		}
+		return acct.Put(payFeeProofKey, dexdb.EncodePayFeeProof(sig))
+	})
+}
+
+func (db *BoltDB) ConfirmAccount(host string) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", host)
+		}
+		return acct.Put(confirmedKey, byteTrue)
+	})
+}
+
 func (db *BoltDB) AccountProof(url string) (*dexdb.AccountProof, error) {
 	var acctProof *dexdb.AccountProof
 	acctKey := []byte(url)
@@ -374,18 +438,6 @@ func (db *BoltDB) AccountProof(url string) (*dexdb.AccountProof, error) {
 			return err
 		}
 		return nil
-	})
-}
-
-// AccountPaid marks the account as paid by setting the "fee proof".
-func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
-	acctKey := []byte(proof.Host)
-	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket(acctKey)
-		if acct == nil {
-			return fmt.Errorf("account not found for %s", proof.Host)
-		}
-		return acct.Put(feeProofKey, proof.Encode())
 	})
 }
 

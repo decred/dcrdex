@@ -54,6 +54,7 @@ const (
 	ErrReusedCommit
 	ErrOrderNotExecuted
 	ErrUpdateCount
+	ErrUnknownKey
 )
 
 func (ae ArchiveError) Error() string {
@@ -75,6 +76,8 @@ func (ae ArchiveError) Error() string {
 		desc = "order not in executed status"
 	case ErrUpdateCount:
 		desc = "unexpected number of rows updated"
+	case ErrUnknownKey:
+		desc = "unknown key"
 	}
 
 	if ae.Detail == "" {
@@ -148,4 +151,11 @@ func IsErrOrderNotExecuted(err error) bool {
 func IsErrUpdateCount(err error) bool {
 	var errA ArchiveError
 	return errors.As(err, &errA) && errA.Code == ErrUpdateCount
+}
+
+// IsErrKeyUnknown returns true if the error is of type ArchiveError and has
+// code ErrUnknownKey.
+func IsErrKeyUnknown(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrUnknownKey
 }

@@ -32,11 +32,14 @@ func randString(maxLen int) string {
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		Host:      ordertest.RandomAddress(),
-		EncKey:    randBytes(32),
-		DEXPubKey: randomPubKey(),
-		FeeCoin:   randBytes(32),
-		Cert:      randBytes(100),
+		Host:        ordertest.RandomAddress(),
+		Cert:        randBytes(100),
+		DEXPubKey:   randomPubKey(),
+		EncKey:      randBytes(32),
+		ReqFeeConfs: rand.Uint32(),
+		FeeAssetID:  rand.Uint32(),
+		FeeTx:       randBytes(123),
+		// FeeCoin:     randBytes(32),
 	}
 }
 
@@ -147,6 +150,7 @@ func RandomNotification(maxTime uint64) *db.Notification {
 }
 
 type testKiller interface {
+	Helper()
 	Fatalf(string, ...interface{})
 }
 
@@ -239,6 +243,7 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 // MustCompareAccountInfo ensures the two AccountInfo are identical, calling the
 // Fatalf method of the testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
+	t.Helper()
 	if a1.Host != a2.Host {
 		t.Fatalf("Host mismatch. %s != %s", a1.Host, a2.Host)
 	}
@@ -249,8 +254,20 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 		t.Fatalf("EncKey mismatch. %x != %x",
 			a1.DEXPubKey.SerializeCompressed(), a2.DEXPubKey.SerializeCompressed())
 	}
-	if !bytes.Equal(a1.FeeCoin, a2.FeeCoin) {
-		t.Fatalf("EncKey mismatch. %x != %x", a1.FeeCoin, a2.FeeCoin)
+	// if !bytes.Equal(a1.FeeCoin, a2.FeeCoin) {
+	// 	t.Fatalf("EncKey mismatch. %x != %x", a1.FeeCoin, a2.FeeCoin)
+	// }
+
+	// TODO: FeeCoin is not part of encoding anymore, but now ReqFeeConfs,
+	// FeeAssetID, and FeeTx are, so test with those.
+	if a1.FeeAssetID != a2.FeeAssetID {
+		t.Fatalf("FeeAssetID mismatch. %s != %s", a1.FeeAssetID, a2.FeeAssetID)
+	}
+	if a1.ReqFeeConfs != a2.ReqFeeConfs {
+		t.Fatalf("ReqFeeConfs mismatch. %s != %s", a1.ReqFeeConfs, a2.ReqFeeConfs)
+	}
+	if !bytes.Equal(a1.FeeTx, a2.FeeTx) {
+		t.Fatalf("FeeTx mismatch. %x != %x", a1.FeeTx, a2.FeeTx)
 	}
 }
 

@@ -29,7 +29,7 @@ import (
 type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
-	Suspended(user account.AccountID) (found, suspended bool)
+	Suspended(user account.AccountID) (found, unconfirmed, suspended bool)
 	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message) error
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
@@ -190,8 +190,10 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return rpcErr
 	}
 
-	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
+	if _, unconfirmed, suspended := r.auth.Suspended(user); suspended {
+		return msgjson.NewError(msgjson.AccountClosedError, "suspended account %v may not submit trade orders", user)
+	} else if unconfirmed {
+		return msgjson.NewError(msgjson.UnconfirmedAccountError, "unconfirmed account %v may not submit trade orders", user)
 	}
 
 	tunnel, coins, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
@@ -408,8 +410,10 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
+	if _, unconfirmed, suspended := r.auth.Suspended(user); suspended {
+		return msgjson.NewError(msgjson.AccountClosedError, "suspended account %v may not submit trade orders", user)
+	} else if unconfirmed {
+		return msgjson.NewError(msgjson.UnconfirmedAccountError, "unconfirmed account %v may not submit trade orders", user)
 	}
 
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
