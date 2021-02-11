@@ -561,7 +561,6 @@ type TXCWallet struct {
 	locked            bool
 	changeCoin        *tCoin
 	syncStatus        func() (bool, float32, error)
-	connectWG         *sync.WaitGroup
 	confsMtx          sync.RWMutex
 	confs             map[string]uint32
 	confsErr          map[string]error
@@ -571,7 +570,6 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
 		changeCoin: &tCoin{id: encode.RandomBytes(36)},
 		syncStatus: func() (synced bool, progress float32, err error) { return true, 1, nil },
-		connectWG:  &sync.WaitGroup{},
 		confs:      make(map[string]uint32),
 		confsErr:   make(map[string]error),
 	}
@@ -597,10 +595,14 @@ func (w *TXCWallet) OwnsAddress(address string) (bool, error) {
 }
 
 func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	return w.connectWG, w.connectErr
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		wg.Done()
+	}()
+	return &wg, w.connectErr
 }
-
-func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
 func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	if w.balErr != nil {
@@ -4915,7 +4917,10 @@ func TestReconfigureWallet(t *testing.T) {
 			return xyzWallet.Wallet, nil
 		},
 	})
-	xyzWallet.Connect(tCtx)
+	if err = xyzWallet.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer xyzWallet.Disconnect()
 
 	// Connect error
 	tXyzWallet.connectErr = tErr
@@ -5905,11 +5910,10 @@ func TestWalletSyncing(t *testing.T) {
 
 	noteFeed := tCore.NotificationFeed()
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
-	tDcrWallet.connectWG.Add(1)
-	defer tDcrWallet.connectWG.Done()
 	dcrWallet.synced = false
 	dcrWallet.syncProgress = 0
-	dcrWallet.Connect(tCtx)
+	_ = dcrWallet.Connect()
+	defer dcrWallet.Disconnect()
 
 	tStart := time.Now()
 	testDuration := 100 * time.Millisecond
@@ -5928,7 +5932,8 @@ func TestWalletSyncing(t *testing.T) {
 		t.Fatalf("connectWallet error: %v", err)
 	}
 
-	timeout := time.NewTimer(time.Second).C
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
 	var progressNotes int
 out:
 	for {
@@ -5942,15 +5947,16 @@ out:
 				break out
 			}
 			progressNotes++
-		case <-timeout:
+		case <-timeout.C:
 			t.Fatalf("timed out waiting for synced wallet note. Received %d progress notes", progressNotes)
 		}
 	}
 	// Should get 9 notes, but just make sure we get at least half of them to
 	// avoid github vm false positives.
-	if progressNotes < 5 {
-		t.Fatalf("expected 23 progress notes, got %d", progressNotes)
+	if progressNotes < 5 /* 9? */ {
+		t.Fatalf("expected 9 progress notes, got %d", progressNotes)
 	}
+	// t.Logf("got %d progress notes", progressNotes)
 }
 
 func TestParseCert(t *testing.T) {
