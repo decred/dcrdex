@@ -27,7 +27,6 @@ PASSWORD="abc"
 
 export NODES_ROOT=~/dextest/eth
 export GENESIS_JSON_FILE_LOCATION="${NODES_ROOT}/genesis.json"
-export MINE_JS="${NODES_ROOT}/mine.js"
 
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
@@ -67,30 +66,16 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
   "extradata": "0x00000000000000000000000000000000000000000000000000000000000000009ebba10a6136607688ca4f27fab70e23938cd0270000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
   "alloc": {
     "18d65fb8d60c1199bb1ad381be47aa692b482605": {
-        "balance": "1000000000000"
+        "balance": "1000000000000000"
     },
     "4f8ef3892b65ed7fc356ff473a2ef2ae5ec27a06": {
-        "balance": "1000000000000"
+        "balance": "1000000000000000"
     }
   }
 }
 EOF
 
-# Write mining javascript.
-# NOTE: This sometimes mines more than one block. It is a race. This returns
-# the number of blocks mined within the lifespan of the function, but one more
-# MAY be mined after returning.
-cat > "${MINE_JS}" <<EOF
-function mine() {
-  blkN = eth.blockNumber;
-  miner.start();
-  miner.stop();
-  admin.sleep(1.1);
-  return eth.blockNumber - blkN;
-}
-EOF
-
-# Add wallet script.
+# Add node script.
 HARNESS_DIR=$(dirname "$0")
 cp "${HARNESS_DIR}/create-node.sh" "${NODES_ROOT}/harness-ctl/create-node"
 

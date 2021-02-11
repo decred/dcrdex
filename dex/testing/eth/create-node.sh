@@ -17,10 +17,11 @@ ADDRESS_JSON_FILE_NAME=${11}
 NODE_KEY=${12}
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
+MINE_JS="${GROUP_DIR}/mine.js"
 NODE_DIR="${GROUP_DIR}/node"
 mkdir -p "${NODE_DIR}"
 
-# Write wallet ctl script.
+# Write node ctl script.
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
 #!/bin/sh
 geth --datadir="${NODE_DIR}" \$*
@@ -40,6 +41,19 @@ cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/mine-${NAME}"
 
+# Write mining javascript.
+# NOTE: This sometimes mines more than one block. It is a race. This returns
+# the number of blocks mined within the lifespan of the function, but one more
+# MAY be mined after returning.
+cat > "${MINE_JS}" <<EOF
+function mine() {
+  blkN = eth.blockNumber;
+  miner.start();
+  miner.stop();
+  admin.sleep(1.1);
+  return eth.blockNumber - blkN;
+}
+EOF
 
 # Write password file to unlock accounts later.
 cat > "${GROUP_DIR}/password" <<EOF
@@ -52,8 +66,8 @@ tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}"
 tmux send-keys -t "$TMUX_WIN_ID" "set +o history" C-m
 tmux send-keys -t "$TMUX_WIN_ID" "cd ${NODE_DIR}" C-m
 
-# Create and wait for a wallet initiated with a predefined genesis json.
-echo "Creating simnet ${NAME} wallet"
+# Create and wait for a node initiated with a predefined genesis json.
+echo "Creating simnet ${NAME} node"
 tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} init "\
 	"$GENESIS_JSON_FILE_LOCATION; tmux wait-for -S ${NAME}" C-m
 tmux wait-for "${NAME}"
@@ -76,7 +90,7 @@ EOF
 
 # Start the eth node with both accounts unlocked, listening restricted to
 # localhost, and syncmode set to full.
-echo "Starting simnet ${NAME} wallet"
+echo "Starting simnet ${NAME} node"
 tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --port " \
 	"${NODE_PORT} --nodiscover --unlock ${CHAIN_ADDRESS},${ADDRESS} " \
 	"--password ${GROUP_DIR}/password --miner.etherbase ${CHAIN_ADDRESS} " \
