@@ -898,11 +898,11 @@ func New(cfg *Config) (*Core, error) {
 
 // Run runs the core. Satisfies the runner.Runner interface.
 func (c *Core) Run(ctx context.Context) {
-	c.log.Infof("started DEX client core")
+	c.log.Infof("Starting DEX client core")
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
-	c.initialize()
+	c.initialize() // connectDEX gets ctx for the wsConn
 	close(c.ready)
 
 	// The DB starts first and stops last.
@@ -919,11 +919,39 @@ func (c *Core) Run(ctx context.Context) {
 		defer c.wg.Done()
 		c.latencyQ.Run(ctx)
 	}()
-	c.wg.Wait()
+
+	c.wg.Wait() // block here until all goroutines except DB complete
 
 	// Stop the DB after dexConnections and other goroutines are done.
 	stopDB()
 	dbWG.Wait()
+
+	// Lock and disconnect the wallets.
+	c.walletMtx.Lock()
+	for assetID, wallet := range c.wallets {
+		delete(c.wallets, assetID)
+		if !wallet.connected() {
+			continue
+		}
+		symb := strings.ToUpper(unbip(assetID))
+		c.log.Infof("Locking %s wallet", symb)
+		if err := wallet.Lock(); err != nil {
+			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
+		}
+		wallet.Disconnect()
+	}
+	c.walletMtx.Unlock()
+
+	// Clear account private keys and wait for the DEX ws connections that began
+	// shutting down on context cancellation.
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	for _, dc := range c.conns {
+		// context should be canceled allowing just a Wait(), but just in case
+		// use Disconnect otherwise this could hang forever.
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+	}
 
 	c.log.Infof("DEX client core off")
 }
@@ -982,13 +1010,22 @@ func (c *Core) Network() dex.Network {
 	return c.net
 }
 
+// dexConnections creates a slice of the *dexConnection in c.conns.
+func (c *Core) dexConnections() []*dexConnection {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	conns := make([]*dexConnection, 0, len(c.conns))
+	for _, conn := range c.conns {
+		conns = append(conns, conn)
+	}
+	return conns
+}
+
 // Exchanges returns a map of Exchange keyed by host, including a list of markets
 // and their orders.
 func (c *Core) Exchanges() map[string]*Exchange {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	infos := make(map[string]*Exchange, len(c.conns))
-	for host, dc := range c.conns {
+	infos := make(map[string]*Exchange)
+	for _, dc := range c.dexConnections() {
 		dc.cfgMtx.RLock()
 		dc.assetsMtx.RLock()
 		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
@@ -998,6 +1035,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 		if dc.acct.ID() == emptyAcctID {
 			acctID = ""
 		}
+		host := dc.acct.host
 		infos[host] = &Exchange{
 			Host:          host,
 			AcctID:        acctID,
@@ -1096,7 +1134,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 // synching, this also starts a goroutine to monitor sync status, emitting
 // WalletStateNotes on each progress update.
 func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
-	err = w.Connect(c.ctx) // ensures valid deposit address
+	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", codedError(connectWalletErr, err)
 	}
@@ -1214,9 +1252,7 @@ func (c *Core) updateWalletBalance(wallet *xcWallet) (*WalletBalance, error) {
 // swaps (orderLocked). Only applies to trades where the specified assetID is
 // the fromAssetID.
 func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64) {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
 			tracker.mtx.RLock()
@@ -1392,13 +1428,15 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	initErr := func(s string, a ...interface{}) error {
+		_ = wallet.Lock() // just try, but don't confuse the user with an error
 		wallet.Disconnect()
 		return fmt.Errorf(s, a...)
 	}
 
 	err = wallet.Unlock(crypter)
 	if err != nil {
-		return initErr("%s wallet authentication error: %w", symbol, err)
+		wallet.Disconnect()
+		return fmt.Errorf("%s wallet authentication error: %w", symbol, err)
 	}
 
 	balances, err := c.walletBalance(wallet)
@@ -1619,8 +1657,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	}
 
 	// Update all relevant trackedTrades' toWallet and fromWallet.
-	c.connMtx.RLock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, tracker := range dc.trades {
 			tracker.mtx.Lock()
@@ -1633,11 +1670,12 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		}
 		dc.tradeMtx.RUnlock()
 	}
-	c.connMtx.RUnlock()
 
 	c.wallets[assetID] = wallet
 
 	if oldWallet.connected() {
+		// NOTE: Cannot lock the wallet backend because it may be the same as
+		// the one just connected.
 		go oldWallet.Disconnect()
 	}
 
@@ -1646,9 +1684,7 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	c.notify(newWalletConfigNote("Wallet Configuration Updated", details, db.Success, wallet.state()))
 
 	// Clear any existing tickGovernors for suspect matches.
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, t := range dc.trades {
 			if t.Base() != assetID && t.Quote() != assetID {
@@ -1708,12 +1744,15 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		}
 	}
 
-	if !wasConnected {
-		wallet.Disconnect()
-	} else if !wasUnlocked {
+	// Re-lock the wallet if it was previously locked.
+	if !wasUnlocked {
 		if err = wallet.Lock(); err != nil {
 			c.log.Warnf("Unable to relock %s wallet: %v", unbip(assetID), err)
 		}
+	}
+	// Disconnect if it was not previously connected.
+	if !wasConnected {
+		wallet.Disconnect()
 	}
 
 	// Encrypt the password.
@@ -2840,9 +2879,7 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	var oid order.OrderID
 	copy(oid[:], oidB)
 
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		found, err := c.tryCancel(dc, oid)
 		if err != nil {
 			return err
@@ -4418,80 +4455,56 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		}(id, waiter)
 	}
 	c.waiterMtx.Unlock()
-	c.connMtx.RLock()
+
 	assets := make(assetMap)
-	for _, dc := range c.conns {
+	for _, dc := range c.dexConnections() {
 		newUpdates := c.tickAsset(dc, assetID)
 		if len(newUpdates) > 0 {
 			dc.refreshMarkets()
 			assets.merge(newUpdates)
 		}
 	}
-	c.connMtx.RUnlock()
+
 	// Ensure we always at least update this asset's balance regardless of trade
 	// status changes.
 	assets.count(assetID)
 	c.updateBalances(assets)
 }
 
-// PromptShutdown asks confirmation to shutdown the dexc when has active orders.
-// If the user answers in the affirmative, the wallets are locked and true is
-// returned. The provided channel is used to allow an OS signal to break the
-// prompt and force the shutdown with out answering the prompt in the
-// affirmative.
+// PromptShutdown checks if there are active orders and asks confirmation to
+// shutdown if there are. The return value indicates if it is safe to stop Core
+// or if the user has confirmed they want to shutdown with active orders.
 func (c *Core) PromptShutdown() bool {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-
-	lockWallets := func() {
-		// Lock wallets
-		for assetID := range c.User().Assets {
-			wallet, found := c.wallet(assetID)
-			if found && wallet.connected() {
-				if err := wallet.Lock(); err != nil {
-					c.log.Errorf("error locking wallet: %v", err)
-				}
-			}
-		}
-		// If all wallets locked, lock each dex account.
-		for _, dc := range c.conns {
-			dc.acct.lock()
-		}
-	}
-
-	ok := true
-	for _, dc := range c.conns {
+	var haveActiveOrders bool
+	for _, dc := range c.dexConnections() {
 		if dc.hasActiveOrders() {
-			ok = false
+			haveActiveOrders = true
 			break
 		}
 	}
 
-	if !ok {
-		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
-			"Do you want to quit anyway? ('y' to quit, 'n' or enter to abort shutdown):")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Input error: %v", err)
-			return false
-		}
-
-		switch strings.ToLower(scanner.Text()) {
-		case "y", "yes":
-			ok = true
-		case "n", "no":
-			fallthrough
-		default:
-			fmt.Println("Shutdown aborted.")
-		}
+	if !haveActiveOrders {
+		return true
 	}
 
-	if ok {
-		lockWallets()
+	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
+		"Do you want to quit anyway? ('yes' to quit, or enter to abort shutdown): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan() // waiting for user input
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Input error: %v", err)
+		return false
 	}
 
-	return ok
+	switch resp := strings.ToLower(scanner.Text()); resp {
+	case "y", "yes":
+		return true
+	case "n", "no", "":
+	default: // anything else aborts, but warn about it
+		fmt.Printf("Unrecognized response %q. ", resp)
+	}
+	fmt.Println("Shutdown aborted.")
+	return false
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

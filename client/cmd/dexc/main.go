@@ -72,6 +72,7 @@ func main() {
 	go func() {
 		for range killChan {
 			if clientCore.PromptShutdown() {
+				log.Infof("Shutting down...")
 				cancel()
 				return
 			}
