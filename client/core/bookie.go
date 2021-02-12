@@ -587,7 +587,6 @@ func (dc *dexConnection) refreshServerConfig() error {
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
-		dc.connMaster.Disconnect()
 		return fmt.Errorf("unable to fetch server config: %w", err)
 	}
 
