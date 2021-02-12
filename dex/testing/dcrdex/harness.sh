@@ -133,7 +133,7 @@ EOF
 
 # DEX admin script
 cat > "${DCRDEX_DATA_DIR}/dexadm" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 if [[ "\$#" -eq "2" ]]; then
     curl --cacert ${DCRDEX_DATA_DIR}/rpc.cert --basic -u u:adminpass --header "Content-Type: text/plain" --data-binary "\$2" https://127.0.0.1:16542/api/\$1
 else
@@ -144,9 +144,11 @@ chmod +x "${DCRDEX_DATA_DIR}/dexadm"
 
 SESSION="dcrdex-harness"
 
+export SHELL=$(which bash)
+
 # Shutdown script
 cat > "${DCRDEX_DATA_DIR}/quit" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 tmux send-keys -t $SESSION:0 C-c
 tmux wait-for donedex
 tmux kill-session -t $SESSION
@@ -154,7 +156,7 @@ EOF
 chmod +x "${DCRDEX_DATA_DIR}/quit"
 
 echo "Starting dcrdex"
-tmux new-session -d -s $SESSION
+tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'dcrdex'
 tmux send-keys -t $SESSION:0 "dcrdex --appdata=$(pwd) $*; tmux wait-for -S donedex" C-m
 tmux attach-session -t $SESSION

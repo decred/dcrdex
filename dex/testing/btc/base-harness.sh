@@ -26,6 +26,8 @@ WAIT="wait-for ${SYMBOL}"
 
 SESSION="${SYMBOL}-harness"
 
+export SHELL=$(which bash)
+
 ################################################################################
 # Load prepared wallet if the files exist.
 ################################################################################
@@ -39,7 +41,7 @@ else
   mkdir -p "${BETA_DIR}"
 fi
 
-cd ${NODES_ROOT} && tmux new-session -d -s $SESSION
+cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 
 ################################################################################
 # Write config files.
@@ -86,7 +88,7 @@ sleep 3
 # Setup the beta node.
 ################################################################################
 
-tmux new-window -t $SESSION:1 -n 'beta'
+tmux new-window -t $SESSION:1 -n 'beta' $SHELL
 tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${BETA_DIR}" C-m
 
@@ -101,7 +103,7 @@ sleep 3
 # Setup the harness-ctl directory
 ################################################################################
 
-tmux new-window -t $SESSION:2 -n 'harness-ctl'
+tmux new-window -t $SESSION:2 -n 'harness-ctl' $SHELL
 tmux send-keys -t $SESSION:2 "set +o history" C-m
 tmux send-keys -t $SESSION:2 "cd ${HARNESS_DIR}" C-m
 sleep 1
@@ -109,43 +111,43 @@ sleep 1
 cd ${HARNESS_DIR}
 
 cat > "./alpha" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} ${ALPHA_CLI_CFG} "\$@"
 EOF
 chmod +x "./alpha"
 
 cat > "./mine-alpha" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} ${ALPHA_CLI_CFG} generatetoaddress \$1 ${ALPHA_MINING_ADDR}
 EOF
 chmod +x "./mine-alpha"
 
 cat > "./gamma" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} ${GAMMA_CLI_CFG} "\$@"
 EOF
 chmod +x "./gamma"
 
 cat > "./delta" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} -rpcwallet=delta -rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass "\$@"
 EOF
 chmod +x "./delta"
 
 cat > "./beta" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} ${BETA_CLI_CFG} "\$@"
 EOF
 chmod +x "./beta"
 
 cat > "./mine-beta" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ${CLI} ${BETA_CLI_CFG} generatetoaddress \$1 ${BETA_MINING_ADDR}
 EOF
 chmod +x "./mine-beta"
 
 cat > "./reorg" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 set -x
 echo "Disconnecting beta from alpha"
 sleep 1
@@ -163,13 +165,13 @@ EOF
 chmod +x "./reorg"
 
 cat > "./new-wallet" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ./\$1 createwallet \$2
 EOF
 chmod +x "./new-wallet"
 
 cat > "${HARNESS_DIR}/quit" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux wait-for alpha${SYMBOL}
