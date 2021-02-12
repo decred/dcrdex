@@ -166,6 +166,13 @@ func (b *bookie) book() *OrderBook {
 	}
 }
 
+// bookie gets the bookie for the market, if it exists, else nil.
+func (dc *dexConnection) bookie(marketID string) *bookie {
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+	return dc.books[marketID]
+}
+
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
@@ -379,11 +386,8 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return fmt.Errorf("book order note unmarshal error: %w", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
@@ -483,11 +487,8 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 
 	// Clear the book and unbook/revoke own orders.
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[sp.MarketID]
-	if !ok {
+	book := dc.bookie(sp.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%s'", sp.MarketID)
 	}
 
@@ -622,11 +623,8 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("unbook order note unmarshal error: %w", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}
@@ -653,11 +651,8 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		return fmt.Errorf("book order note unmarshal error: %w", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
@@ -684,10 +679,8 @@ func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if err != nil {
 		return fmt.Errorf("epoch report note unmarshal error: %w", err)
 	}
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
@@ -707,11 +700,8 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("epoch order note unmarshal error: %w", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}

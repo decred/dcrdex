@@ -560,7 +560,9 @@ func (ob *OrderBook) MidGap() (uint64, error) {
 }
 
 // BestFill is the best (rate, quantity) fill for an order of the type and
-// quantity specified.
+// quantity specified. BestFill should be used when the exact quantity of base asset
+// is known, i.e. limit orders and market sell orders. For market buy orders,
+// use BestFillMarketBuy.
 func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 	if sell {
 		return ob.buys.BestFill(qty)
@@ -569,7 +571,7 @@ func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 }
 
 // BestFillMarketBuy is the best (rate, quantity) fill for a market buy order.
-// The qty given will be in units of quote asset
+// The qty given will be in units of quote asset.
 func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 	return ob.sells.bestFill(qty, true, lotSize)
 }

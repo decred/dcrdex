@@ -89,9 +89,9 @@ type Wallet interface {
 	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
 	// will be an estimate based on current market conditions.
 	MaxOrder(lotSize uint64, nfo *dex.Asset) (*SwapEstimate, error)
-	// PreSwap gets an OrderEstimate for the specified order size(s).
+	// PreSwap gets a pre-swap estimate for the specified order size.
 	PreSwap(*PreSwapForm) (*PreSwap, error)
-	// PreRedeem gets an OrderEstimate for the specified order size(s).
+	// PreRedeem gets a pre-redeem estimate for the specified order size.
 	PreRedeem(*PreRedeemForm) (*PreRedeem, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
@@ -333,8 +333,8 @@ type RedeemEstimate struct {
 // PreSwapForm can be used to get a swap fees estimate.
 type PreSwapForm struct {
 	// LotSize is the lot size for the calculation. For quote assets, LotSize
-	// will can be based on either the user's limit order rate, or some measure
-	// of the current market conditions.
+	// should be based on either the user's limit order rate, or some measure
+	// of the current market rate.
 	LotSize uint64
 	// Lots is the number of lots in the order.
 	Lots uint64
@@ -363,8 +363,8 @@ type PreSwap struct {
 // PreRedeemForm can be used to get a redemption estimate.
 type PreRedeemForm struct {
 	// LotSize is the lot size for the calculation. For quote assets, LotSize
-	// will can be based on either the user's limit order rate, or some measure
-	// of the current market conditions.
+	// should be based on either the user's limit order rate, or some measure
+	// of the current market rate.
 	LotSize uint64
 	// Lots is the number of lots in the order.
 	Lots uint64

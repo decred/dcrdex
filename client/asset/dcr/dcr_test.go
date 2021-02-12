@@ -2159,14 +2159,14 @@ func TestPreSwap(t *testing.T) {
 	node.unspent[0].Amount = float64(minReq-1) / 1e8
 	_, err = wallet.PreSwap(form)
 	if err == nil {
-		t.Fatalf("no PreSwap error for not enough funds: %v", err)
+		t.Fatalf("no PreSwap error for not enough funds")
 	}
 	node.unspent[0].Amount = float64(minReq) / 1e8
 
 	node.estFeeErr = tErr
 	_, err = wallet.PreSwap(form)
 	if err == nil {
-		t.Fatalf("no PreSwap error for not enough funds: %v", err)
+		t.Fatalf("no PreSwap error for estimatesmartfee error")
 	}
 	node.estFeeErr = nil
 

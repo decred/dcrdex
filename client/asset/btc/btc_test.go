@@ -947,10 +947,10 @@ func TestFundEdges(t *testing.T) {
 	// lot_size: 1e6
 	// swap_value: 1e7
 	// lots = swap_value / lot_size = 10
+	//   total_bytes = first_swap_size + chained_swap_sizes
 	//   chained_swap_sizes = (lots - 1) * swap_size
 	//   first_swap_size = swap_size_base + backing_bytes
-	//   total_bytes = first_swap_size + chained_swap_sizes
-	//   total_bytes  = swap_size_base + backing_bytes + (lots - 1) * swap_size
+	//   total_bytes = swap_size_base + backing_bytes + (lots - 1) * swap_size
 	//   base_tx_bytes = total_bytes - backing_bytes
 	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 225 + 76 = 2101
 	// base_fees = base_tx_bytes * fee_rate = 2101 * 34 = 71434
@@ -2378,14 +2378,14 @@ func TestPreSwap(t *testing.T) {
 	setFunds(minReq - 1)
 	_, err = wallet.PreSwap(form)
 	if err == nil {
-		t.Fatalf("no PreSwap error for not enough funds: %v", err)
+		t.Fatalf("no PreSwap error for not enough funds")
 	}
 	setFunds(minReq)
 
 	node.estFeeErr = tErr
 	_, err = wallet.PreSwap(form)
 	if err == nil {
-		t.Fatalf("no PreSwap error for not enough funds: %v", err)
+		t.Fatalf("no PreSwap error for estimatesmartfee error")
 	}
 	node.estFeeErr = nil
 

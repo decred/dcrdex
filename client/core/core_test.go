@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,7 +203,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		notify:       func(Notification) {},
 		trades:       make(map[order.OrderID]*trackedTrade),
 		epoch:        map[string]uint64{tDcrBtcMktName: 0},
-		connected:    true,
+		connected:    1,
 	}, conn, acct
 }
 
@@ -2166,12 +2167,12 @@ func TestTrade(t *testing.T) {
 	rig.dc.acct.unlock(rig.crypter)
 
 	// DEX not connected
-	rig.dc.connected = false
+	atomic.StoreUint32(&rig.dc.connected, 0)
 	_, err = tCore.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("no error for disconnected dex")
 	}
-	rig.dc.connected = true
+	atomic.StoreUint32(&rig.dc.connected, 1)
 
 	// No base asset
 	form.Base = 12345

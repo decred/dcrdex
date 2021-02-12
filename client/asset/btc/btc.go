@@ -713,7 +713,7 @@ func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	btc.fundingMtx.RUnlock()
 	if err != nil {
-		return nil, 0, networkFeeRate, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	// Start by attempting max lots with no fees.
 	lots = avail / lotSize
@@ -734,7 +734,13 @@ func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 // PreSwap get order estimates based on the available funds and the wallet
 // configuration.
 func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
-	// Start with the maxOrder at the default configuration.
+	// Start with the maxOrder at the default configuration. This gets us the
+	// utxo set, the network fee rate, and the wallet's maximum order size.
+	// The utxo set can then be used repeatedly in estimateSwap at virtually
+	// zero cost since there are no more RPC calls.
+	// The utxo set is only used once right now, but when order-time options are
+	// implemented, the utxos will be used to calculate option availability and
+	// fees.
 	utxos, maxLots, feeRate, _, err := btc.maxOrder(req.LotSize, req.AssetConfig)
 	if err != nil {
 		return nil, err
@@ -743,7 +749,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxLots, req.Lots)
 	}
 
-	// Get the estimate at using the current configuration
+	// Get the estimate for the requested number of lots.
 	est, _, err := btc.estimateSwap(req.Lots, req.LotSize, feeRate, utxos, req.AssetConfig, btc.useSplitTx)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
@@ -917,7 +923,6 @@ func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *d
 
 	isEnoughWith := func(unspent *compositeUTXO) bool {
 		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
-		// reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
 		return sum+unspent.amount >= reqFunds
 	}
 
