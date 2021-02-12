@@ -1418,14 +1418,31 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// Add any errors encountered to `errs` and proceed to next match
 	// to ensure that swap details are saved for all matches.
 	for i, receipt := range receipts {
+		// Save the contract script swap coin ID to the DB before attempting the
+		// init request, which can be slow.
 		match := matches[i]
 		coin := receipt.Coin()
+		coinID, contract := coin.ID(), receipt.Contract()
+		proof := &match.MetaData.Proof
+		proof.Script = contract
+		if match.Match.Side == order.Taker {
+			proof.TakerSwap = []byte(coinID)
+			match.SetStatus(order.TakerSwapCast)
+		} else {
+			proof.MakerSwap = []byte(coinID)
+			match.SetStatus(order.MakerSwapCast)
+		}
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			errs.add("error storing swap details in database for match %s, coin %s: %v",
+				match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
+		}
+
 		c.log.Infof("Contract coin %v (%s), value = %d, refundable at %v (script = %v)",
-			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.Contract())
+			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), contract)
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			c.log.Tracef("Contract coin %v secret = %x", coin, secret)
 		}
-		err := c.finalizeSwapAction(t, match, coin.ID(), receipt.Contract())
+		err := c.finalizeSwapAction(t, match, coinID, contract)
 		if err != nil {
 			errs.addErr(err)
 		}
@@ -1443,11 +1460,14 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, contract []byte) error {
-	_, _, proof, auth := match.parts()
+	auth := &match.MetaData.Proof.Auth
 	if len(auth.InitSig) != 0 {
 		return fmt.Errorf("'init' already sent for match %v", match.id)
 	}
 	errs := newErrorSet("")
+
+	c.log.Infof("Notifying DEX %s of our %s swap contract %v for match %v",
+		t.dc.acct.host, t.wallets.fromAsset.Symbol, coinIDString(t.fromAssetID, coinID), match.id)
 
 	// attempt to send `init` request and validate server ack.
 	ack := new(msgjson.Acknowledgement)
@@ -1473,15 +1493,7 @@ func (c *Core) finalizeSwapAction(t *trackedTrade, match *matchTracker, coinID, 
 		errs.add("'init' ack signature error for match %s: %v", match.id, err)
 	}
 
-	// Update the match db data with the swap details.
-	proof.Script = contract
-	if match.Match.Side == order.Taker {
-		proof.TakerSwap = coinID
-		match.SetStatus(order.TakerSwapCast)
-	} else {
-		proof.MakerSwap = coinID
-		match.SetStatus(order.MakerSwapCast)
-	}
+	// Update the match db data with the init response signature.
 	if len(ack.Sig) != 0 {
 		auth.InitSig = ack.Sig
 		auth.InitStamp = encode.UnixMilliU(time.Now())
@@ -1601,7 +1613,23 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 
 	// Send the redemption information to the DEX.
 	for i, match := range matches {
-		err := c.finalizeRedeemAction(t, match, coinIDs[i])
+		// Save the redeem coin ID to the DB before attempting the redeem
+		// request, which can be slow.
+		coinID := coinIDs[i]
+		proof := &match.MetaData.Proof
+		if match.Match.Side == order.Taker {
+			match.SetStatus(order.MatchComplete)
+			proof.TakerRedeem = []byte(coinID)
+		} else {
+			match.SetStatus(order.MakerRedeemed) // MatchComplete after redeem response
+			proof.MakerRedeem = []byte(coinID)
+		}
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			errs.add("error storing redeem details in database for match %s, coin %s: %v",
+				match.id, coinIDString(t.wallets.toAsset.ID, coinID), err)
+		}
+
+		err := c.finalizeRedeemAction(t, match, coinID)
 		if err != nil {
 			errs.addErr(err)
 		}
@@ -1628,6 +1656,8 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 	// Not necessary for revoked matches.
 	var needsResolution bool
 	if !proof.IsRevoked() {
+		c.log.Infof("Notifying DEX %s of our %s swap redemption %v for match %v",
+			t.dc.acct.host, t.wallets.toAsset.Symbol, coinIDString(t.wallets.toAsset.ID, coinID), match.id)
 		msgRedeem := &msgjson.Redeem{
 			OrderID: t.ID().Bytes(),
 			MatchID: match.id.Bytes(),
@@ -1654,18 +1684,10 @@ func (c *Core) finalizeRedeemAction(t *trackedTrade, match *matchTracker, coinID
 		}
 	}
 
-	if match.Match.Side == order.Taker {
+	if len(auth.RedeemSig) > 0 {
+		// As maker, this is the end. However, this diverges from server, which
+		// is still needs taker's redeem. Taker has already set MatchComplete.
 		match.SetStatus(order.MatchComplete)
-		proof.TakerRedeem = coinID
-	} else {
-		if len(auth.RedeemSig) > 0 {
-			// As maker, this is the end. However, this diverges from server,
-			// which is still needs taker's redeem.
-			match.SetStatus(order.MatchComplete)
-		} else {
-			match.SetStatus(order.MakerRedeemed)
-		}
-		proof.MakerRedeem = coinID
 	}
 	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 		errs.add("error storing redeem details in database for match %s, coin %s: %v",

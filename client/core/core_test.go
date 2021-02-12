@@ -2728,7 +2728,7 @@ func TestTradeTracking(t *testing.T) {
 	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker)
 
 	// success, full handleAuditRoute>processAuditMsg>auditContract
-	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 2)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
@@ -2762,7 +2762,12 @@ func TestTradeTracking(t *testing.T) {
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	tCore.tickAsset(dc, tBTC.ID)
-	// TakerSwapCast -> MatchComplete (MakerRedeem skipped when redeem ack is received with valid sig)
+	status = <-rig.db.updateMatchChan
+	// TakerSwapCast -> MakerRedeemed after broadcast, before redeem request
+	if status != order.MakerRedeemed {
+		t.Fatalf("wrong match status wanted %v, got %v", order.MatchComplete, status)
+	}
+	// TakerSwapCast -> MatchComplete after redeem request
 	status = <-rig.db.updateMatchChan
 	if status != order.MatchComplete {
 		t.Fatalf("wrong match status wanted %v, got %v", order.MatchComplete, status)
@@ -2848,7 +2853,7 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.MakerSwap, audit.CoinID) {
 		t.Fatalf("maker redeem coin not set")
 	}
-	<-rig.db.updateMatchChan
+	<-rig.db.updateMatchChan // counterparty audit
 	if !bytes.Equal(auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set for taker")
 	}
@@ -2873,6 +2878,7 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
 	}
+	<-rig.db.updateMatchChan // initsig update after init response
 
 	// Receive the maker's redemption.
 	redemptionCoin := encode.RandomBytes(36)
@@ -2909,7 +2915,7 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("should have worked, got: %v", err)
 	}
-	// For taker there's one status update to MakerRedeemed on bcast...
+	// For taker there's one status update to MakerRedeemed prior to bcast...
 	status = <-rig.db.updateMatchChan
 	if status != order.MakerRedeemed {
 		t.Fatalf("wrong match status wanted %v, got %v", order.MakerRedeemed, status)
@@ -2926,6 +2932,11 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.TakerRedeem) == 0 {
 		t.Fatalf("taker redemption not sent")
 	}
+	<-rig.db.updateMatchChan // RedeemSig after 'redeem' request response
+	if len(auth.RedeemSig) == 0 {
+		t.Fatalf("redeem sig not recorded for valid redeem ack")
+	}
+
 	rig.db.updateMatchChan = nil
 	tBtcWallet.redeemErrChan = nil
 
@@ -3405,7 +3416,7 @@ func TestRefunds(t *testing.T) {
 	}
 	checkStatus("taker matched", match, order.NewlyMatched)
 	// Send through the audit request for the maker's init.
-	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 2)
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
@@ -3434,6 +3445,17 @@ func TestRefunds(t *testing.T) {
 	}
 	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
 		t.Fatalf("invalid contract recorded for Taker swap")
+	}
+	// still takerswapcast, but with initsig
+	status = <-rig.db.updateMatchChan
+	if status != order.TakerSwapCast {
+		t.Fatalf("wrong match status wanted %v, got %v", order.TakerSwapCast, status)
+	}
+	// , metaData := match.Match, match.MetaData
+	auth := &match.MetaData.Proof.Auth
+	// proof := &metaData.Proof
+	if len(auth.InitSig) == 0 {
+		t.Fatalf("init sig not recorded for valid init ack")
 	}
 
 	// Attempt refund.
@@ -4096,17 +4118,16 @@ func TestLogout(t *testing.T) {
 	}
 	rig.dc.trades[ord.ID()] = tracker
 
-	dc, _, _ := testDexConnection(rig.core.ctx)
 	initUserAssets := func() {
 		tCore.user = new(User)
-		dc.assetsMtx.Lock()
-		tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
-		for assetsID := range dc.assets {
+		rig.dc.assetsMtx.Lock()
+		tCore.user.Assets = make(map[uint32]*SupportedAsset, len(rig.dc.assets))
+		for assetsID := range rig.dc.assets {
 			tCore.user.Assets[assetsID] = &SupportedAsset{
 				ID: assetsID,
 			}
 		}
-		dc.assetsMtx.Unlock()
+		rig.dc.assetsMtx.Unlock()
 	}
 
 	ensureErr := func(tag string) {
