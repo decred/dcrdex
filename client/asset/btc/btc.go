@@ -697,26 +697,26 @@ func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 func (btc *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	_, _, _, maxEst, err := btc.maxOrder(lotSize, nfo)
+	_, _, maxEst, err := btc.maxOrder(lotSize, nfo)
 	return maxEst, err
 }
 
 // maxOrder gets the estimate for MaxOrder, and also returns the
 // []*compositeUTXO to be used for further order estimation without additional
 // calls to listunspent.
-func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, lots, feeRate uint64, est *asset.SwapEstimate, err error) {
+func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, feeRate uint64, est *asset.SwapEstimate, err error) {
 	networkFeeRate, err := btc.feeRate(1)
 	if err != nil {
-		return nil, 0, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
+		return nil, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
 	}
 	btc.fundingMtx.RLock()
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	btc.fundingMtx.RUnlock()
 	if err != nil {
-		return nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	// Start by attempting max lots with no fees.
-	lots = avail / lotSize
+	lots := avail / lotSize
 	for lots > 0 {
 		est, _, err := btc.estimateSwap(lots, lotSize, networkFeeRate, utxos, nfo, btc.useSplitTx)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
@@ -726,9 +726,9 @@ func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 			lots--
 			continue
 		}
-		return utxos, lots, networkFeeRate, est, nil
+		return utxos, networkFeeRate, est, nil
 	}
-	return utxos, 0, networkFeeRate, &asset.SwapEstimate{}, nil
+	return utxos, networkFeeRate, &asset.SwapEstimate{}, nil
 }
 
 // PreSwap get order estimates based on the available funds and the wallet
@@ -741,12 +741,12 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	// The utxo set is only used once right now, but when order-time options are
 	// implemented, the utxos will be used to calculate option availability and
 	// fees.
-	utxos, maxLots, feeRate, _, err := btc.maxOrder(req.LotSize, req.AssetConfig)
+	utxos, feeRate, maxEst, err := btc.maxOrder(req.LotSize, req.AssetConfig)
 	if err != nil {
 		return nil, err
 	}
-	if maxLots < req.Lots {
-		return nil, fmt.Errorf("%d lots available for %d-lot order", maxLots, req.Lots)
+	if maxEst.Lots < req.Lots {
+		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
 	// Get the estimate for the requested number of lots.

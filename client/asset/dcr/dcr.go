@@ -688,22 +688,22 @@ func (a amount) String() string {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	_, _, _, est, err := dcr.maxOrder(lotSize, nfo)
+	_, _, est, err := dcr.maxOrder(lotSize, nfo)
 	return est, err
 }
 
 // maxOrder gets the estimate for MaxOrder, and also returns the
-// []*compositeUTXO to be used for further order estimation without additional
-// calls to listunspent.
-func (dcr *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, lots, feeRate uint64, est *asset.SwapEstimate, err error) {
+// []*compositeUTXO and network fee rate to be used for further order estimation
+// without additional calls to listunspent.
+func (dcr *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, feeRate uint64, est *asset.SwapEstimate, err error) {
 	networkFeeRate, err := dcr.feeRate(1)
 	if err != nil {
-		return nil, 0, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
+		return nil, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
 	}
 
 	utxos, err = dcr.spendableUTXOs()
 	if err != nil {
-		return nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	var avail uint64
 	for _, utxo := range utxos {
@@ -711,7 +711,7 @@ func (dcr *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 	}
 
 	// Start by attempting max lots with no fees.
-	lots = avail / lotSize
+	lots := avail / lotSize
 	for lots > 0 {
 		est, _, err := dcr.estimateSwap(lots, lotSize, networkFeeRate, utxos, nfo, dcr.useSplitTx)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is
@@ -721,10 +721,10 @@ func (dcr *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 			lots--
 			continue
 		}
-		return utxos, lots, networkFeeRate, est, nil
+		return utxos, networkFeeRate, est, nil
 	}
 
-	return nil, 0, 0, &asset.SwapEstimate{}, nil
+	return nil, 0, &asset.SwapEstimate{}, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
@@ -788,12 +788,12 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	// The utxo set is only used once right now, but when order-time options are
 	// implemented, the utxos will be used to calculate option availability and
 	// fees.
-	utxos, maxLots, feeRate, _, err := dcr.maxOrder(req.LotSize, req.AssetConfig)
+	utxos, feeRate, maxEst, err := dcr.maxOrder(req.LotSize, req.AssetConfig)
 	if err != nil {
 		return nil, err
 	}
-	if maxLots < req.Lots {
-		return nil, fmt.Errorf("%d lots available for %d-lot order", maxLots, req.Lots)
+	if maxEst.Lots < req.Lots {
+		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
 	// Get the estimate for the requested number of lots.

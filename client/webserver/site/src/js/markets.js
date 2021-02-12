@@ -169,7 +169,7 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
     })
     bind(page.maxOrd, 'click', () => {
-      if (this.isSell()) page.lotField.value = this.market.maxSell.lots
+      if (this.isSell()) page.lotField.value = this.market.maxSell.swap.lots
       else page.lotField.value = this.market.maxBuys[this.adjustedRate()].swap.lots
       this.lotChanged()
     })
