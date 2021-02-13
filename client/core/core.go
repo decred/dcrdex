@@ -2404,6 +2404,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			disabledAccountHosts = append(disabledAccountHosts, disabledAccountHost)
 		}
 		if len(disabledAccountHosts) > 0 {
+			c.connMtx.Lock()
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
@@ -2411,6 +2412,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 					"It is disconnected and has been removed from core connections.",
 					disabledAccountHost)
 			}
+			c.connMtx.Unlock()
 		}
 	}()
 
