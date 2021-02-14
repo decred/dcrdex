@@ -1,0 +1,127 @@
+package btc
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+)
+
+const (
+	methodGetBestBlockHash  = "getbestblockhash"
+	methodGetBlockchainInfo = "getblockchaininfo"
+	methodEstimateSmartFee  = "estimatesmartfee"
+	methodGetTxOut          = "gettxout"
+	methodGetRawTransaction = "getrawtransaction"
+	methodGetBlock          = "getblock"
+)
+
+// RawRequester defines dcrd's rpcclient RawRequest func where all RPC
+// requests sent through. For testing, it can be satisfied by a stub.
+type RawRequester interface {
+	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
+	Shutdown()
+	WaitForShutdown()
+}
+
+// rpcClient is a bitcoind wallet RPC client that uses rpcclient.Client's
+// RawRequest for wallet-related calls.
+type rpcClient struct {
+	ctx       context.Context
+	requester RawRequester
+}
+
+func (rc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
+	var txid string
+	err := rc.call(method, args, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
+}
+
+// GetBestBlockHash returns the hash of the best block in the longest block
+// chain.
+func (rc *rpcClient) GetBestBlockHash() (*chainhash.Hash, error) {
+	return rc.callHashGetter(methodGetBestBlockHash, nil)
+}
+
+// GetBlockchainInfoResult models the data returned from the getblockchaininfo
+// command.
+type GetBlockchainInfoResult struct {
+	Blocks               int64  `json:"blocks"`
+	Headers              int64  `json:"headers"`
+	BestBlockHash        string `json:"bestblockhash"`
+	InitialBlockDownload bool   `json:"initialblockdownload"`
+}
+
+// GetBlockChainInfo returns information related to the processing state of
+// various chain-specific details.
+func (rc *rpcClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
+	chainInfo := new(GetBlockchainInfoResult)
+	err := rc.call(methodGetBlockchainInfo, nil, chainInfo)
+	if err != nil {
+		return nil, err
+	}
+	return chainInfo, nil
+}
+
+// EstimateSmartFee requests the server to estimate a fee level based on the
+// given parameters.
+func (rc *rpcClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
+	res := new(btcjson.EstimateSmartFeeResult)
+	return res, rc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
+}
+
+// GetTxOut returns the transaction output info if it's unspent and
+// nil, otherwise.
+func (rc *rpcClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
+	// Note that we pass to call pointer to a pointer (&res) so that
+	// json.Unmarshal can nil the pointer if the method returns the JSON null.
+	var res *btcjson.GetTxOutResult
+	return res, rc.call(methodGetTxOut, anylist{txHash.String(), index, mempool},
+		&res)
+}
+
+// GetRawTransactionVerbose retrieves tx's information with verbose flag set
+// to true.
+func (rc *rpcClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
+	res := new(btcjson.TxRawResult)
+	return res, rc.call(methodGetRawTransaction, anylist{txHash.String(),
+		true}, res)
+}
+
+// GetBlockVerbose returns a data structure from the server with information
+// about a block given its hash.
+func (rc *rpcClient) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+	res := new(btcjson.GetBlockVerboseResult)
+	return res, rc.call(methodGetBlock, anylist{blockHash.String(), true}, res)
+}
+
+// anylist is a list of RPC parameters to be converted to []json.RawMessage and
+// sent via RawRequest.
+type anylist []interface{}
+
+// call is used internally to  marshal parmeters and send requests to  the RPC
+// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
+// will be marshaled into `thing`.
+func (rc *rpcClient) call(method string, args anylist, thing interface{}) error {
+	params := make([]json.RawMessage, 0, len(args))
+	for i := range args {
+		p, err := json.Marshal(args[i])
+		if err != nil {
+			return err
+		}
+		params = append(params, p)
+	}
+	b, err := rc.requester.RawRequest(rc.ctx, method, params)
+	if err != nil {
+		return fmt.Errorf("rawrequest error: %w", err)
+	}
+	if thing != nil {
+		return json.Unmarshal(b, thing)
+	}
+	return nil
+}
