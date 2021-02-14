@@ -27,10 +27,10 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/schnorr"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/txscript/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/wire"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -187,14 +187,14 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 
 const optimalFeeRate uint64 = 22
 
-func (*testNode) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
-	optimalRate := float64(optimalFeeRate) * 1e-5
+func (*testNode) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error) {
+	optimalRate := float64(optimalFeeRate) * 1e-5 // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
-	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
+	return &chainjson.EstimateSmartFeeResult{FeeRate: optimalRate}, nil
 }
 
 // Part of the dcrNode interface.
-func (*testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
+func (*testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint32, tree int8, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()

@@ -13,7 +13,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
