@@ -303,73 +303,77 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 	return txHash.String() + ":" + strconv.Itoa(int(index))
 }
 
-const optimalFeeRate uint64 = 24
+func (t *testNode) Shutdown() {}
 
-func (*testNode) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	optimalRate := float64(optimalFeeRate) * 1e-5
-	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00024)
-	return &btcjson.EstimateSmartFeeResult{
-		Blocks:  2,
-		FeeRate: &optimalRate,
-	}, nil
-}
+func (t *testNode) WaitForShutdown() {}
 
-// Part of the btcNode interface.
-func (t *testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*btcjson.GetTxOutResult, error) {
-	testChainMtx.RLock()
-	defer testChainMtx.RUnlock()
-	outID := txOutID(txHash, index)
-	out := testChain.txOuts[outID]
-	// Unfound is not an error for GetTxOut.
-	return out, nil
-}
-
-// Part of the btcNode interface.
-func (t *testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	testChainMtx.RLock()
-	defer testChainMtx.RUnlock()
-	tx, found := testChain.txRaws[*txHash]
-	if !found {
-		return nil, fmt.Errorf("test transaction not found\n")
+func (t *testNode) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
+	switch method {
+	case methodGetBestBlockHash:
+		testChainMtx.RLock()
+		defer testChainMtx.RUnlock()
+		bbHash := testBestBlock.hash
+		return json.Marshal(bbHash.String())
+	case methodGetBlock:
+		testChainMtx.RLock()
+		defer testChainMtx.RUnlock()
+		var blkHash string
+		_ = json.Unmarshal(params[0], &blkHash)
+		blockHash, err := chainhash.NewHashFromStr(blkHash)
+		if err != nil {
+			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
+				method, err)
+		}
+		block, found := testChain.blocks[*blockHash]
+		if !found {
+			return nil, fmt.Errorf("test block not found")
+		}
+		return json.Marshal(block)
+	case methodGetRawTransaction:
+		testChainMtx.RLock()
+		defer testChainMtx.RUnlock()
+		var hash string
+		_ = json.Unmarshal(params[0], &hash)
+		txHash, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
+				method, err)
+		}
+		tx, found := testChain.txRaws[*txHash]
+		if !found {
+			return nil, fmt.Errorf("test transaction not found")
+		}
+		return json.Marshal(tx)
+	case methodGetTxOut:
+		testChainMtx.RLock()
+		defer testChainMtx.RUnlock()
+		var hash string
+		_ = json.Unmarshal(params[0], &hash)
+		txHash, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
+				method, err)
+		}
+		var index uint32
+		_ = json.Unmarshal(params[1], &index)
+		outID := txOutID(txHash, index)
+		out := testChain.txOuts[outID]
+		// Unfound is not an error for GetTxOut.
+		return json.Marshal(out)
+	case methodEstimateSmartFee:
+		const optimalFeeRate uint64 = 24
+		optimalRate := float64(optimalFeeRate) * 1e-5
+		return json.Marshal(&btcjson.EstimateSmartFeeResult{
+			Blocks:  2,
+			FeeRate: &optimalRate,
+		})
+	case methodGetBlockchainInfo:
+		if t.rawErr != nil {
+			return nil, t.rawErr
+		}
+		return t.rawResult, nil
 	}
-	return tx, nil
-}
-
-// Part of the btcNode interface.
-func (t *testNode) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
-	testChainMtx.RLock()
-	defer testChainMtx.RUnlock()
-	block, found := testChain.blocks[*blockHash]
-	if !found {
-		return nil, fmt.Errorf("test block not found")
-	}
-	return block, nil
-}
-
-// Part of the btcNode interface.
-func (t *testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
-	testChainMtx.RLock()
-	defer testChainMtx.RUnlock()
-	hash, found := testChain.hashes[blockHeight]
-	if !found {
-		return nil, fmt.Errorf("test hash not found")
-	}
-	return hash, nil
-}
-
-// Part of the btcNode interface.
-func (t *testNode) GetBestBlockHash() (*chainhash.Hash, error) {
-	testChainMtx.RLock()
-	defer testChainMtx.RUnlock()
-	bbHash := testBestBlock.hash
-	return &bbHash, nil
-}
-
-func (t *testNode) RawRequest(string, []json.RawMessage) (json.RawMessage, error) {
-	if t.rawErr != nil {
-		return nil, t.rawErr
-	}
-	return t.rawResult, nil
+	return nil, nil
 }
 
 func (t testNode) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) { return nil, nil }
@@ -406,7 +410,6 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 		BlockHash:     hash,
 		Confirmations: uint64(confirmations),
 	}
-
 }
 
 // Add a transaction output and it's getrawtransaction data.
@@ -750,7 +753,9 @@ func testBackend(segwit bool) (*Backend, func()) {
 		Logger:         logger,
 		ChainParams:    testParams,
 	}, nil)
-	btc.node = &testNode{}
+	btc.node = &rpcClient{
+		requester: &testNode{},
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -1451,7 +1456,7 @@ func TestDriver_DecodeCoinID(t *testing.T) {
 func TestSynced(t *testing.T) {
 	btc, shutdown := testBackend(true)
 	defer shutdown()
-	tNode := btc.node.(*testNode)
+	tNode := btc.node.requester.(*testNode)
 	tNode.rawResult, _ = json.Marshal(&btcjson.GetBlockChainInfoResult{
 		Headers: 100,
 		Blocks:  99,
