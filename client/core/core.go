@@ -3212,10 +3212,16 @@ func (c *Core) initialize() {
 	// for authentication when Login is triggered.
 	wg.Wait()
 	c.log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
-	for dexName, dc := range c.dexConnections() {
+	pluralize := func(n int) string {
+		if n == 1 {
+			return ""
+		}
+		return "s"
+	}
+	for _, dc := range c.dexConnections() {
 		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
 		if n := len(activeOrders); n > 0 {
-			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active orders on %s. LOGIN immediately!  **** \n", n, dexName)
+			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active order%s on %s. LOGIN immediately!  **** \n", n, pluralize(n), dc.acct.host)
 		}
 	}
 }
