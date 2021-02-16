@@ -40,6 +40,7 @@ func RandomAccountInfo() *db.AccountInfo {
 	}
 }
 
+// RandomBalance creates a random balance.
 func RandomBalance() *asset.Balance {
 	return &asset.Balance{
 		Available: rand.Uint64(),

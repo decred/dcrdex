@@ -5,6 +5,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -282,6 +283,7 @@ type TDB struct {
 	accountProofErr       error
 	verifyAccountPaid     bool
 	verifyCreateAccount   bool
+	verifyUpdateAccount   bool
 	accountInfoPersisted  *db.AccountInfo
 	accountProofPersisted *db.AccountProof
 	disabledAcct          *db.AccountInfo
@@ -312,6 +314,13 @@ func (tdb *TDB) DisableAccount(url string) error {
 	acct, _ := tdb.Account(url)
 	tdb.disabledAcct = acct
 	return tdb.disableAccountErr
+}
+
+func (tdb *TDB) UpdateAccount(ai *db.AccountInfo) error {
+	tdb.verifyUpdateAccount = true
+	tdb.acct = ai
+	tdb.accountInfoPersisted = ai
+	return nil
 }
 
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
@@ -523,17 +532,19 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		confs:      make(map[string]uint32),
 		confsErr:   make(map[string]error),
 	}
-	return &xcWallet{
+	xcWallet := &xcWallet{
 		Wallet:       w,
 		connector:    dex.NewConnectionMaster(w),
 		AssetID:      assetID,
 		hookedUp:     true,
 		dbID:         encode.Uint32Bytes(assetID),
-		encPW:        []byte{0x01},
+		encPass:      []byte{0x01},
 		synced:       true,
 		syncProgress: 1,
 		pw:           string(tPW),
-	}, w
+	}
+
+	return xcWallet, w
 }
 
 func (w *TXCWallet) Info() *asset.WalletInfo {
@@ -712,15 +723,42 @@ func (w *TXCWallet) Confirmations(ctx context.Context, coinID dex.Bytes) (uint32
 	return w.confs[id], false, w.confsErr[id]
 }
 
+type tCrypterSmart struct {
+	encryptErr error
+	decryptErr error
+	recryptErr error
+}
+
+// Encrypt appends 8 random bytes to given []byte to mock.
+func (c *tCrypterSmart) Encrypt(b []byte) ([]byte, error) {
+	randSuffix := make([]byte, 8)
+	rand.Read(randSuffix)
+	b = append(b, randSuffix...)
+	return b, c.encryptErr
+}
+
+// Decrypt deletes the last 8 bytes from given []byte.
+func (c *tCrypterSmart) Decrypt(b []byte) ([]byte, error) {
+	return b[:len(b)-8], c.decryptErr
+}
+
+func (c *tCrypterSmart) Serialize() []byte { return nil }
+
+func (c *tCrypterSmart) Close() {}
+
 type tCrypter struct {
 	encryptErr error
 	decryptErr error
 	recryptErr error
 }
 
-func (c *tCrypter) Encrypt(b []byte) ([]byte, error) { return b, c.encryptErr }
+func (c *tCrypter) Encrypt(b []byte) ([]byte, error) {
+	return b, c.encryptErr
+}
 
-func (c *tCrypter) Decrypt(b []byte) ([]byte, error) { return b, c.decryptErr }
+func (c *tCrypter) Decrypt(b []byte) ([]byte, error) {
+	return b, c.decryptErr
+}
 
 func (c *tCrypter) Serialize() []byte { return nil }
 
@@ -748,7 +786,7 @@ type testRig struct {
 	ws       *TWebsocket
 	dc       *dexConnection
 	acct     *dexAccount
-	crypter  *tCrypter
+	crypter  encrypt.Crypter
 }
 
 func newTestRig() *testRig {
@@ -1232,9 +1270,9 @@ func TestCreateWallet(t *testing.T) {
 	rig.db.encKeyErr = nil
 
 	// Crypter error.
-	rig.crypter.encryptErr = tErr
+	rig.crypter.(*tCrypter).encryptErr = tErr
 	ensureErr("Encrypt")
-	rig.crypter.encryptErr = nil
+	rig.crypter.(*tCrypter).encryptErr = nil
 
 	// Try an unknown wallet (not yet asset.Register'ed).
 	ensureErr("unregistered asset")
@@ -1442,12 +1480,12 @@ func TestRegister(t *testing.T) {
 	}
 
 	// password error
-	rig.crypter.recryptErr = tErr
+	rig.crypter.(*tCrypter).recryptErr = tErr
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("wrong password error: %v", err)
 	}
-	rig.crypter.recryptErr = nil
+	rig.crypter.(*tCrypter).recryptErr = nil
 
 	// no host error
 	form.Addr = ""
@@ -1506,13 +1544,13 @@ func TestRegister(t *testing.T) {
 	dc.cfg.Markets = mkts
 
 	// error creating signing key
-	rig.crypter.encryptErr = tErr
+	rig.crypter.(*tCrypter).encryptErr = tErr
 	rig.queueConfig()
 	run()
 	if !errorHasCode(err, acctKeyErr) {
 		t.Fatalf("wrong account key error: %v", err)
 	}
-	rig.crypter.encryptErr = nil
+	rig.crypter.(*tCrypter).encryptErr = nil
 
 	// register request error
 	rig.queueConfig()
@@ -4922,6 +4960,57 @@ func TestWalletSettings(t *testing.T) {
 	}
 }
 
+func TestChangeAppPass(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	// Use the smarter crypter.
+	smartCrypter := &tCrypterSmart{}
+	rig.crypter = smartCrypter
+	rig.core.newCrypter = func([]byte) encrypt.Crypter { return smartCrypter }
+	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return smartCrypter, smartCrypter.recryptErr }
+
+	tCore := rig.core
+	var assetID uint32 = 54322
+	newTPW := []byte("apppass")
+
+	// App Password error
+	rig.crypter.(*tCrypterSmart).recryptErr = tErr
+	err := tCore.ChangeAppPass(tPW, newTPW)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for password error: %v", err)
+	}
+	rig.crypter.(*tCrypterSmart).recryptErr = nil
+
+	wallet, _ := newTWallet(assetID)
+	encPW, _ := rig.crypter.Encrypt([]byte{0x01})
+	wallet.setEncPW(encPW)
+	tCore.wallets[assetID] = wallet
+
+	acctEncKey := make([]byte, len(tCore.conns[tDexHost].acct.encKey))
+	copy(acctEncKey, tCore.conns[tDexHost].acct.encKey)
+	origPass := make([]byte, len(wallet.encPW()))
+	copy(origPass, wallet.encPW())
+	err = tCore.ChangeAppPass(tPW, newTPW)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Ensure db's UpdateAccount func was called.
+	if !rig.db.verifyUpdateAccount {
+		t.Fatal("expected execution of db.UpdateAccount")
+	}
+	// Ensure db's account encrypted key changed.
+	if bytes.Equal(rig.db.accountInfoPersisted.EncKey, acctEncKey) {
+		t.Fatalf("expected db account EncKey to change, old: %x new: %x",
+			acctEncKey, rig.db.accountInfoPersisted.EncKey)
+	}
+	// Ensure xcWallet encrypted password updated.
+	if bytes.Equal(origPass, wallet.encPW()) {
+		t.Fatalf("expected xcwallet encPW to change: old %x new %x",
+			origPass, wallet.encPW())
+	}
+}
+
 func TestReconfigureWallet(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
@@ -4937,12 +5026,12 @@ func TestReconfigureWallet(t *testing.T) {
 	var assetID uint32 = 54321
 
 	// App Password error
-	rig.crypter.recryptErr = tErr
+	rig.crypter.(*tCrypter).recryptErr = tErr
 	err := tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, authErr) {
 		t.Fatalf("wrong error for password error: %v", err)
 	}
-	rig.crypter.recryptErr = nil
+	rig.crypter.(*tCrypter).recryptErr = nil
 
 	// Missing wallet error
 	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
@@ -5026,8 +5115,10 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// Check that the xcWallet was updated.
 	xyzWallet = tCore.wallets[assetID]
-	if !bytes.Equal(xyzWallet.encPW, newWalletPW) {
-		t.Fatalf("xcWallet encPW field not updated want: %x got: %x", newWalletPW, xyzWallet.encPW)
+	decNewPW, _ := rig.crypter.Decrypt(xyzWallet.encPW())
+	if !bytes.Equal(decNewPW, newWalletPW) {
+		t.Fatalf("xcWallet encPW field not updated want: %x got: %x",
+			newWalletPW, decNewPW)
 	}
 }
 
@@ -5048,12 +5139,12 @@ func TestSetWalletPassword(t *testing.T) {
 	}
 
 	// Auth error
-	rig.crypter.recryptErr = tErr
+	rig.crypter.(*tCrypter).recryptErr = tErr
 	err = tCore.SetWalletPassword(tPW, assetID, newPW)
 	if !errorHasCode(err, authErr) {
 		t.Fatalf("wrong error for auth error: %v", err)
 	}
-	rig.crypter.recryptErr = nil
+	rig.crypter.(*tCrypter).recryptErr = nil
 
 	// Missing wallet error
 	err = tCore.SetWalletPassword(tPW, assetID, newPW)
@@ -5097,7 +5188,8 @@ func TestSetWalletPassword(t *testing.T) {
 	}
 
 	// Check that the xcWallet was updated.
-	if !bytes.Equal(xyzWallet.encPW, newPW) {
+	decNewPW, _ := rig.crypter.Decrypt(xyzWallet.encPW())
+	if !bytes.Equal(decNewPW, newPW) {
 		t.Fatalf("xcWallet encPW field not updated")
 	}
 }

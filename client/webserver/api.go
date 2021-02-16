@@ -478,6 +478,28 @@ func (s *WebServer) apiOrder(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+// apiChangeAppPass updates the application password.
+func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AppPW    encode.PassBytes `json:"appPW"`
+		NewAppPW encode.PassBytes `json:"newAppPW"`
+	}{}
+	defer form.AppPW.Clear()
+	defer form.NewAppPW.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+
+	// Update application password.
+	err := s.core.ChangeAppPass(form.AppPW, form.NewAppPW)
+	if err != nil {
+		s.writeAPIError(w, "change app pass error: %v", err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
