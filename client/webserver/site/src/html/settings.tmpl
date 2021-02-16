@@ -44,8 +44,11 @@
         servers.
         </p>
         <button id="addADex" class="bg2 selected">Add a DEX</button>
-        <button id="importAccount" class="bg2 selected">Import Account</button>
+        <button id="importAccount" class="bg2 selected ml-2">Import Account</button>
       </div>
+    </div>
+    <div>
+        <button id="changeAppPW" class="bg2 selected">Change App Password</button>
     </div>
     <div>Build ID: <span id="commitHash" class="mono"></span></div>
   </div>
@@ -77,7 +80,11 @@
     <form class="card bg1 d-hide" id="disableAccountForm">
       {{template "disableAccountForm"}}
     </form>
-
+	
+	{{- /* CHANGE APP PASSWORD */ -}}
+    <form class="card bg1 d-hide" id="changeAppPWForm">
+      {{template "changeAppPWForm"}}
+    </form>
   </div>
 
 </div>

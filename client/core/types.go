@@ -552,6 +552,28 @@ func (a *dexAccount) ID() account.AccountID {
 	return a.id
 }
 
+// updateKeysEncryption decrypts account's EncKey with given oldCrypter,
+// re-encrypts it with the given newCrypter, then stores the new EncKey on
+// the dexaccount struct.
+func (a *dexAccount) updateKeysEncryption(oldCrypter, newCrypter encrypt.Crypter) error {
+	a.keyMtx.Lock()
+	defer a.keyMtx.Unlock()
+	// Decrypt the encrpyted key with old crypter.
+	key, err := oldCrypter.Decrypt(a.encKey)
+	if err != nil {
+		return fmt.Errorf("error decrypting acct enc key: %w", err)
+	}
+	// Encrypt the private key with new crypter.
+	newEncKey, err := newCrypter.Encrypt(key)
+	if err != nil {
+		return fmt.Errorf("error encrypting acct private key: %w", err)
+	}
+
+	a.encKey = newEncKey
+
+	return nil
+}
+
 // setupEncryption creates and returns a new privkey for the account.
 // Returns existing privkey if previously set up.
 func (a *dexAccount) setupEncryption(crypter encrypt.Crypter) (*secp256k1.PrivateKey, error) {

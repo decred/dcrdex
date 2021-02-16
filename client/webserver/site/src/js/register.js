@@ -34,7 +34,7 @@ export default class RegistrationPage extends BasePage {
     body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))
 
     // SET APP PASSWORD
-    bindForm(page.appPWForm, page.appPWSubmit, () => { this.setAppPass() })
+    bindForm(page.appPWForm, page.appPWSubmit, () => this.setAppPass())
 
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
@@ -55,14 +55,14 @@ export default class RegistrationPage extends BasePage {
     Doc.bind(page.certFile, 'change', () => this.readCert())
     Doc.bind(page.removeCert, 'click', () => this.resetCert())
     Doc.bind(page.addCert, 'click', () => page.certFile.click())
-    bindForm(page.dexAddrForm, page.submitDEXAddr, () => { this.checkDEX() })
+    bindForm(page.dexAddrForm, page.submitDEXAddr, () => this.checkDEX())
     Doc.bind(page.dexShowMore, 'click', () => {
       Doc.hide(page.dexShowMore)
       Doc.show(page.dexCertBox)
     })
 
     // SUBMIT DEX REGISTRATION
-    bindForm(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+    bindForm(page.confirmRegForm, page.submitConfirm, () => this.registerDEX())
 
     // Attempt to load the dcrwallet configuration from the default location.
     if (app.user.authed) this.auth()
@@ -83,14 +83,14 @@ export default class RegistrationPage extends BasePage {
       form1.style.right = `${progress * shift}px`
     }, 'easeInHard')
     Doc.hide(form1)
-    form1.style.right = '0px'
+    form1.style.right = '0'
     form2.style.right = -shift
     Doc.show(form2)
     form2.querySelector('input').focus()
     await Doc.animate(animationLength, progress => {
       form2.style.right = `${-shift + progress * shift}px`
     }, 'easeOutHard')
-    form2.style.right = '0px'
+    form2.style.right = '0'
   }
 
   /* Set the application password. Attached to form submission. */

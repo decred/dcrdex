@@ -92,7 +92,7 @@ func setupRigAccountProof(host string, rig *testRig) {
 
 func TestAccountDisable(t *testing.T) {
 	activeTrades := map[order.OrderID]*trackedTrade{
-		order.OrderID{}: &trackedTrade{metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
+		{}: {metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
 	}
 
 	tests := []struct {
@@ -141,7 +141,7 @@ func TestAccountDisable(t *testing.T) {
 		rig := newTestRig()
 		defer rig.shutdown()
 		tCore := rig.core
-		rig.crypter.recryptErr = test.recryptErr
+		rig.crypter.(*tCrypter).recryptErr = test.recryptErr
 		rig.db.disableAccountErr = test.disableAcctErr
 		tCore.connMtx.Lock()
 		tCore.conns[tDexHost].trades = test.activeTrades
@@ -181,7 +181,7 @@ func TestAccountExportPasswordError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	rig.crypter.recryptErr = tErr
+	rig.crypter.(*tCrypter).recryptErr = tErr
 	_, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("expected password error, actual error: '%v'", err)
@@ -216,7 +216,7 @@ func TestAccountExportAccountKeyError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	rig.crypter.decryptErr = tErr
+	rig.crypter.(*tCrypter).decryptErr = tErr
 	_, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, acctKeyErr) {
 		t.Fatalf("expected account key error, actual error: '%v'", err)
@@ -338,7 +338,7 @@ func TestAccountImportPasswordError(t *testing.T) {
 	host := tCore.conns[tDexHost].acct.host
 	account := buildTestAccount(host)
 	rig.queueConfig()
-	rig.crypter.recryptErr = tErr
+	rig.crypter.(*tCrypter).recryptErr = tErr
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("expected password error, actual error: '%v'", err)
@@ -441,7 +441,7 @@ func TestAccountImportEncryptPrivKeyError(t *testing.T) {
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	account := buildTestAccount(host)
-	rig.crypter.encryptErr = tErr
+	rig.crypter.(*tCrypter).encryptErr = tErr
 	rig.queueConfig()
 	err := tCore.AccountImport(tPW, account)
 	if !errorHasCode(err, encryptionErr) {

@@ -1568,7 +1568,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			OrderLocked:    orderLockedAmt,
 			ContractLocked: contractLockedAmt,
 		},
-		encPW:   dbWallet.EncryptedPW,
+		encPass: dbWallet.EncryptedPW,
 		address: dbWallet.Address,
 		dbID:    dbWallet.ID(),
 	}, nil
@@ -1664,6 +1664,96 @@ func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
 	return dbWallet.Settings, nil
 }
 
+func (c *Core) setAppPass(pw []byte) (encrypt.Crypter, error) {
+	if len(pw) == 0 {
+		return nil, fmt.Errorf("empty password not allowed")
+	}
+
+	crypter := c.newCrypter(pw)
+	err := c.db.Store(keyParamsKey, crypter.Serialize())
+	if err != nil {
+		return nil, fmt.Errorf("error storing key parameters: %w", err)
+	}
+
+	return crypter, nil
+}
+
+func (c *Core) updateWalletsEncPW(oldCrypter, newCrypter encrypt.Crypter) error {
+	updateWalletPW := func(w *xcWallet) error {
+		// If encrypted password set, decrypt using old app pw then encrypt again
+		// using new app pw.
+		oldEncPW := w.encPW()
+		if len(oldEncPW) == 0 {
+			return nil
+		}
+
+		// Decrypt with old app pw.
+		pwB, err := oldCrypter.Decrypt(oldEncPW)
+		if err != nil {
+			return err
+		}
+		// Re-encrypt with new app pw.
+		encPW, err := newCrypter.Encrypt(pwB)
+		if err != nil {
+			return err
+		}
+		// Store encrypted pw.
+		w.setEncPW(encPW)
+		err = c.db.SetWalletPassword(w.dbID, encPW)
+		if err != nil {
+			return codedError(dbErr, err)
+		}
+		return nil
+	}
+
+	for _, w := range c.xcWallets() {
+		err := updateWalletPW(w)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ChangeAppPass updates the application password to the provided new password
+// after validating the current password.
+func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
+	// Validate current password.
+	oldCrypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return newError(authErr, "ChangeAppPass password error: %v", err)
+	}
+	// Set new password.
+	newCrypter, err := c.setAppPass(newAppPW)
+	if err != nil {
+		return err
+	}
+	// Update xcWallets' encrypted passwords.
+	err = c.updateWalletsEncPW(oldCrypter, newCrypter)
+	if err != nil {
+		return fmt.Errorf("failed to update encrypted wallet password: %w", err)
+	}
+	// Update dexConnections' dexAccount key encryption.
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+	for _, dc := range c.conns {
+		// Re-encrypt private keys.
+		err = dc.acct.updateKeysEncryption(oldCrypter, newCrypter)
+		if err != nil {
+			return fmt.Errorf("ChangeAppPass error updating account's keys"+
+				" encryption: %v", err)
+		}
+		// Update account's db entry.
+		err = c.db.UpdateAccount(dc.acct.dbInfo())
+		if err != nil {
+			return codedError(dbErr, err)
+		}
+	}
+
+	return nil
+}
+
 // ReconfigureWallet updates the wallet configuration settings, it also updates
 // the password if newWalletPW is non-nil. Do not make concurrent calls to
 // ReconfigureWallet for the same asset.
@@ -1681,7 +1771,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
-		EncryptedPW: oldWallet.encPW,
+		EncryptedPW: oldWallet.encPW(),
 		Address:     oldWallet.currentDepositAddress(),
 	}
 	// Reload the wallet with the new settings.
@@ -1840,7 +1930,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 	// otherwise does not require a password. Perhaps an
 	// asset.Wallet.RequiresPassword wallet method?
 	if newPasswordSet {
-		// Encrypt password if it's not an empty string
+		// Encrypt password if it's not an empty string.
 		encNewPW, err := crypter.Encrypt(newPW)
 		if err != nil {
 			return newError(encryptionErr, "encryption error: %v", err)
@@ -1850,12 +1940,12 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 			return newError(authErr,
 				"setWalletPassword unlocking wallet error, is the new password correct?: %v", err)
 		}
-		wallet.encPW = encNewPW
+		wallet.setEncPW(encNewPW)
 	} else {
-		wallet.encPW = nil
+		wallet.setEncPW(nil)
 	}
 
-	err := c.db.SetWalletPassword(wallet.dbID, wallet.encPW)
+	err := c.db.SetWalletPassword(wallet.dbID, wallet.encPW())
 	if err != nil {
 		return codedError(dbErr, err)
 	}
@@ -2192,16 +2282,9 @@ func (c *Core) InitializeClient(pw []byte) error {
 		return fmt.Errorf("already initialized, login instead")
 	}
 
-	if len(pw) == 0 {
-		return fmt.Errorf("empty password not allowed")
-	}
-
-	crypter := c.newCrypter(pw)
-	err := c.db.Store(keyParamsKey, crypter.Serialize())
-	if err != nil {
-		return fmt.Errorf("error storing key parameters: %w", err)
-	}
-	return nil
+	// Set app password.
+	_, err := c.setAppPass(pw)
+	return err
 }
 
 // Login logs the user in, decrypting the account keys for all known DEXes.

@@ -30,6 +30,9 @@ export default class SettingsPage extends BasePage {
       // Disable Account
       'disableAccount', 'disableAccountForm', 'disableAccountConfirm', 'disableAccountAppPW',
       'disableAccountHost', 'disableAccountErr',
+      // Change App Password
+      'changeAppPW', 'changeAppPWForm', 'appPW', 'newAppPW', 'confirmNewPW',
+      'submitNewPW', 'changePWErrMsg',
       // Others
       'showPokes'
     ])
@@ -54,9 +57,9 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
     Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
-    forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
-    forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
-    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
+    forms.bind(page.dexAddrForm, page.submitDEXAddr, () => this.verifyDEX())
+    forms.bind(page.confirmRegForm, page.submitConfirm, () => this.registerDEX())
+    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
     const exchangesDiv = page.exchanges
@@ -72,7 +75,10 @@ export default class SettingsPage extends BasePage {
     }
 
     Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
-    forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => { this.importAccount() })
+    forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => this.importAccount())
+
+    Doc.bind(page.changeAppPW, 'click', () => this.showForm(page.changeAppPWForm))
+    forms.bind(page.changeAppPWForm, page.submitNewPW, () => this.changeAppPW())
 
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
@@ -180,10 +186,6 @@ export default class SettingsPage extends BasePage {
     Doc.show(page.addAccount)
   }
 
-  testAccountFile () {
-    console.log('testAccountFile')
-  }
-
   async prepareAccountImport (authorizeAccountImportForm) {
     const page = this.page
     page.importAccountErr.textContent = ''
@@ -242,14 +244,14 @@ export default class SettingsPage extends BasePage {
     this.currentForm = form
     Doc.hide(page.dexAddrForm, page.confirmRegForm,
       page.authorizeAccountExportForm, page.authorizeAccountImportForm,
-      page.disableAccountForm)
+      page.disableAccountForm, page.changeAppPWForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
     await Doc.animate(animationLength, progress => {
       form.style.right = `${(1 - progress) * shift}px`
     }, 'easeOutHard')
-    form.style.right = '0px'
+    form.style.right = '0'
   }
 
   /**
@@ -337,6 +339,46 @@ export default class SettingsPage extends BasePage {
     loaded()
     // Initial method of displaying added dex.
     window.location.reload()
+  }
+
+  /* Change application password  */
+  async changeAppPW () {
+    const page = this.page
+    Doc.hide(page.changePWErrMsg)
+
+    const clearValues = () => {
+      page.appPW.value = ''
+      page.newAppPW.value = ''
+      page.confirmNewPW.value = ''
+    }
+    // Ensure password fields are nonempty.
+    if (!page.appPW.value || !page.newAppPW.value || !page.confirmNewPW.value) {
+      page.changePWErrMsg.textContent = 'app password cannot be empty'
+      Doc.show(page.changePWErrMsg)
+      clearValues()
+      return
+    }
+    // Ensure password confirmation matches.
+    if (page.newAppPW.value !== page.confirmNewPW.value) {
+      page.changePWErrMsg.textContent = 'password confirmation doesn\'t match'
+      Doc.show(page.changePWErrMsg)
+      clearValues()
+      return
+    }
+    const loaded = app.loading(page.changeAppPW)
+    const req = {
+      appPW: page.appPW.value,
+      newAppPW: page.newAppPW.value
+    }
+    clearValues()
+    const res = await postJSON('/api/changeapppass', req)
+    loaded()
+    if (!app.checkResponse(res, true)) {
+      page.changePWErrMsg.textContent = res.msg
+      Doc.show(page.changePWErrMsg)
+      return
+    }
+    Doc.hide(page.forms)
   }
 
   /*

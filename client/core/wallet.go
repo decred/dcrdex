@@ -19,9 +19,9 @@ type xcWallet struct {
 	connector *dex.ConnectionMaster
 	AssetID   uint32
 	dbID      []byte
-	encPW     []byte // empty means wallet not password protected
 
 	mtx          sync.RWMutex
+	encPass      []byte // empty means wallet not password protected
 	balance      *WalletBalance
 	pw           string
 	address      string
@@ -30,16 +30,30 @@ type xcWallet struct {
 	syncProgress float32
 }
 
+// encPW returns xcWallet's encPW.
+func (w *xcWallet) encPW() []byte {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.encPass
+}
+
+// setEncPW sets xcWallet's encPW.
+func (w *xcWallet) setEncPW(encPW []byte) {
+	w.mtx.Lock()
+	w.encPass = encPW
+	w.mtx.Unlock()
+}
+
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so
 // the wallet may be unlocked without user interaction using refreshUnlock.
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
-	if len(w.encPW) == 0 {
+	if len(w.encPW()) == 0 {
 		if w.Locked() {
 			return fmt.Errorf("wallet reporting as locked, but no password has been set")
 		}
 		return nil
 	}
-	pwB, err := crypter.Decrypt(w.encPW)
+	pwB, err := crypter.Decrypt(w.encPW())
 	if err != nil {
 		return fmt.Errorf("unlockWallet decryption error: %w", err)
 	}
@@ -70,13 +84,15 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 		return false, nil // unlocked
 	}
 	// Locked backend requires both encrypted and decrypted passwords.
-	if len(w.encPW) == 0 {
-		return false, fmt.Errorf("%s wallet reporting as locked but no password has been set", unbip(w.AssetID))
-	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
+	if len(w.encPass) == 0 {
+		return false, fmt.Errorf("%s wallet reporting as locked but no password"+
+			" has been set", unbip(w.AssetID))
+	}
 	if len(w.pw) == 0 {
-		return false, fmt.Errorf("cannot refresh unlock on a locked %s wallet", unbip(w.AssetID))
+		return false, fmt.Errorf("cannot refresh unlock on a locked %s wallet",
+			unbip(w.AssetID))
 	}
 	return true, w.Wallet.Unlock(w.pw)
 }
@@ -84,12 +100,12 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 // Lock the wallet. For encrypted wallets (encPW set), this clears the cached
 // decrypted password and attempts to lock the wallet backend.
 func (w *xcWallet) Lock() error {
-	if len(w.encPW) == 0 {
+	w.mtx.Lock()
+	defer w.mtx.Unlock()
+	if len(w.encPass) == 0 {
 		return nil
 	}
-	w.mtx.Lock()
 	w.pw = ""
-	w.mtx.Unlock()
 	return w.Wallet.Lock()
 }
 
@@ -106,12 +122,11 @@ func (w *xcWallet) unlocked() bool {
 // this is true only if the decrypted password is cached. Use this to determine
 // if the wallet may be unlocked without user interaction (via refreshUnlock).
 func (w *xcWallet) locallyUnlocked() bool {
-	// return len(w.encPW) == 0 || len(w.pw) > 0
-	if len(w.encPW) == 0 {
-		return true // unencrypted wallet
-	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
+	if len(w.encPass) == 0 {
+		return true // unencrypted wallet
+	}
 	return len(w.pw) > 0 // cached password for encrypted wallet
 }
 
@@ -123,12 +138,12 @@ func (w *xcWallet) state() *WalletState {
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
-		Open:         len(w.encPW) == 0 || len(w.pw) > 0,
+		Open:         len(w.encPass) == 0 || len(w.pw) > 0,
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,
 		Units:        winfo.Units,
-		Encrypted:    len(w.encPW) > 0,
+		Encrypted:    len(w.encPass) > 0,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
 	}

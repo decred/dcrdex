@@ -1492,8 +1492,7 @@ func (client *tClient) disableWallets() {
 	// walletPasses[cid] = make(map[uint32]passes, len(client.core.wallets))
 	for _, wallet := range client.core.wallets {
 		wallet.mtx.Lock()
-		// walletPasses[cid][wid] = passes{wallet.encPW, wallet.pw}
-		wallet.encPW = []byte{0}
+		wallet.encPass = []byte{0}
 		wallet.pw = ""
 		wallet.mtx.Unlock()
 	}
