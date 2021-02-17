@@ -1213,17 +1213,17 @@ func TestReorg(t *testing.T) {
 	}
 
 	setSidechainConfs := func(hashes []*chainhash.Hash) {
+		btc.blockCache.mtx.Lock() // read from (*blockCache).add in cache.go
+		testChainMtx.Lock()       // field of testChain
+		defer testChainMtx.Unlock()
+		defer btc.blockCache.mtx.Unlock()
 		for _, hash := range hashes {
-			blk, err := btc.node.GetBlockVerbose(hash)
-			if err != nil {
-				t.Fatalf("error retrieving sidechain block to set confirmations: %v", err)
+			block, found := testChain.blocks[*hash]
+			if !found {
+				t.Fatalf("test block not found")
 			}
 			// Set Confirmations
-			btc.blockCache.mtx.Lock() // read from (*blockCache).add in cache.go
-			testChainMtx.Lock()       // field of testChain
-			blk.Confirmations = -1
-			testChainMtx.Unlock()
-			btc.blockCache.mtx.Unlock()
+			block.Confirmations = -1
 		}
 	}
 
