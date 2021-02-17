@@ -119,7 +119,6 @@ echo "Starting simnet beta node"
 
 # NOTE: This will cause beta to connect automatically to alpha.
 echo "Connecting nodes"
-
 "${NODES_ROOT}/harness-ctl/alpha" "attach --exec admin.addPeer('enode://${BETA_ENODE}@127.0.0.1:$BETA_NODE_PORT')"
 
 # Reenable history and attach to the control session.
