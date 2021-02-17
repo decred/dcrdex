@@ -61,6 +61,28 @@ $CHAIN_PASSWORD
 $ADDRESS_PASSWORD
 EOF
 
+cat > "${NODE_DIR}/eth.conf" <<EOF
+[Eth]
+NetworkId = 42
+SyncMode = "full"
+
+[Eth.Miner]
+Etherbase = "0x${CHAIN_ADDRESS}"
+
+[Eth.Ethash]
+DatasetDir = "${NODE_DIR}/.ethash"
+
+[Node]
+DataDir = "${NODE_DIR}"
+
+[Node.P2P]
+NoDiscovery = true
+BootstrapNodes = []
+BootstrapNodesV5 = []
+ListenAddr = ":${NODE_PORT}"
+NetRestrict = [ "127.0.0.1/32" ]
+EOF
+
 # Create a tmux window.
 tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}"
 tmux send-keys -t "$TMUX_WIN_ID" "set +o history" C-m
@@ -91,7 +113,6 @@ EOF
 # Start the eth node with both accounts unlocked, listening restricted to
 # localhost, and syncmode set to full.
 echo "Starting simnet ${NAME} node"
-tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --port " \
-	"${NODE_PORT} --nodiscover --unlock ${CHAIN_ADDRESS},${ADDRESS} " \
-	"--password ${GROUP_DIR}/password --miner.etherbase ${CHAIN_ADDRESS} " \
-	"--syncmode full --netrestrict 127.0.0.1/32" C-m
+tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
+	"--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS},${ADDRESS} " \
+	"--password ${GROUP_DIR}/password" C-m
