@@ -303,6 +303,12 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 	return txHash.String() + ":" + strconv.Itoa(int(index))
 }
 
+func mustUnmarshal(data []byte, thing interface{}) {
+	if err := json.Unmarshal(data, thing); err != nil {
+		panic(err.Error())
+	}
+}
+
 func (t *testNode) Shutdown() {}
 
 func (t *testNode) WaitForShutdown() {}
@@ -318,7 +324,7 @@ func (t *testNode) RawRequest(_ context.Context, method string, params []json.Ra
 		testChainMtx.RLock()
 		defer testChainMtx.RUnlock()
 		var blkHash string
-		_ = json.Unmarshal(params[0], &blkHash)
+		mustUnmarshal(params[0], &blkHash)
 		blockHash, err := chainhash.NewHashFromStr(blkHash)
 		if err != nil {
 			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
@@ -333,7 +339,7 @@ func (t *testNode) RawRequest(_ context.Context, method string, params []json.Ra
 		testChainMtx.RLock()
 		defer testChainMtx.RUnlock()
 		var hash string
-		_ = json.Unmarshal(params[0], &hash)
+		mustUnmarshal(params[0], &hash)
 		txHash, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
 			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
@@ -348,14 +354,14 @@ func (t *testNode) RawRequest(_ context.Context, method string, params []json.Ra
 		testChainMtx.RLock()
 		defer testChainMtx.RUnlock()
 		var hash string
-		_ = json.Unmarshal(params[0], &hash)
+		mustUnmarshal(params[0], &hash)
 		txHash, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
 			return nil, fmt.Errorf("rawrequest: %v method param unmarshal error: %v",
 				method, err)
 		}
 		var index uint32
-		_ = json.Unmarshal(params[1], &index)
+		mustUnmarshal(params[1], &index)
 		outID := txOutID(txHash, index)
 		out := testChain.txOuts[outID]
 		// Unfound is not an error for GetTxOut.
