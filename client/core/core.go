@@ -4361,7 +4361,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	// matches in the 'match' request for the server to accept it, although the
 	// server doesn't require match acks. See (*Swapper).processMatchAcks.
 	for oid, srvMatch := range matches {
-		if srvMatch.tracker.hasFundingCoins() {
+		if !srvMatch.tracker.hasFundingCoins() {
 			c.log.Warnf("Received new match for unfunded order %v!", oid)
 			// In runMatches>tracker.negotiate we generate the matchTracker and
 			// set swapErr after updating order status and filled amount, and
