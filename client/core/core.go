@@ -259,10 +259,6 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	tracker.mtx.Lock()
 	defer tracker.mtx.Unlock()
 
-	if status := tracker.metaData.Status; status != order.OrderStatusEpoch && status != order.OrderStatusBooked {
-		return fmt.Errorf("order %v not cancellable in status %v", oid, status)
-	}
-
 	if tracker.cancel != nil {
 		// Existing cancel might be stale. Deleting it now allows this
 		// cancel attempt to proceed.
