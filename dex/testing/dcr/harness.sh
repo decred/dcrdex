@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Tmux script that sets up a simnet harness.
 set -ex
 SESSION="dcr-harness"
@@ -29,6 +29,8 @@ WAIT="; tmux wait-for -S donedcr"
 
 NODES_ROOT=~/dextest/dcr
 export NODES_ROOT
+
+export SHELL=$(which bash)
 
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
@@ -63,7 +65,7 @@ cp "${HARNESS_DIR}/create-wallet.sh" "${NODES_ROOT}/harness-ctl/create-wallet"
 
 # Script to send funds from alpha to address
 cat > "${NODES_ROOT}/harness-ctl/fund" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ./alpha sendtoaddress \$@
 sleep 0.5
 ./mine-alpha 1
@@ -72,7 +74,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/fund"
 
 # Alpha mine script
 cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
   case \$1 in
       ''|*[!0-9]*)  ;;
       *) NUM=\$1 ;;
@@ -90,7 +92,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-alpha"
 
 # Beta mine script
 cat > "${NODES_ROOT}/harness-ctl/mine-beta" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 NUM=1
   case \$1 in
       ''|*[!0-9]*)  ;;
@@ -109,7 +111,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
 
 # Reorg script
 cat > "${NODES_ROOT}/harness-ctl/reorg" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 echo "Disconnecting beta from alpha"
 sleep 1
 ./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
@@ -128,7 +130,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 tmux send-keys -t $SESSION:3 C-c
 tmux send-keys -t $SESSION:4 C-c
 tmux send-keys -t $SESSION:5 C-c
@@ -143,7 +145,7 @@ EOF
 chmod +x "${NODES_ROOT}/harness-ctl/quit"
 
 cat > "${NODES_ROOT}/harness-ctl/new-wallet" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 ./\$1 createnewaccount \$2
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/new-wallet"
@@ -167,7 +169,7 @@ EOF
 ################################################################################
 
 echo "Starting harness"
-tmux new-session -d -s $SESSION
+tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness-ctl'
 tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m
@@ -176,7 +178,7 @@ tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m
 # dcrd Nodes
 ################################################################################
 
-tmux new-window -t $SESSION:1 -n 'alpha'
+tmux new-window -t $SESSION:1 -n 'alpha' $SHELL
 tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 
@@ -189,7 +191,7 @@ tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S alphadcr" C-m
 
-tmux new-window -t $SESSION:2 -n 'beta'
+tmux new-window -t $SESSION:2 -n 'beta' $SHELL
 tmux send-keys -t $SESSION:2 "set +o history" C-m
 tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 

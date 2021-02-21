@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 export SYMBOL="ltc"
 export DAEMON="litecoind"
 export CLI="litecoin-cli"

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Set up DCR and BTC wallets and register with the DEX.
 # dcrdex, dexc, and the wallet simnet harnesses should all be running before
 # calling this script.

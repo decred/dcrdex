@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Script for creating dcr wallets, dcr harness should be running before executing.
 set -e
 
@@ -11,6 +11,8 @@ ENABLE_VOTING=$5
 
 WALLET_DIR="${NODES_ROOT}/${NAME}"
 mkdir -p ${WALLET_DIR}
+
+export SHELL=$(which bash)
 
 # Connect to alpha or beta node
 DCRD_RPC_PORT="19570"
@@ -55,7 +57,7 @@ EOF
 
 # wallet ctl script
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 dcrctl -C "${WALLET_DIR}/${NAME}-ctl.conf" --wallet \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
@@ -69,7 +71,7 @@ ${SEED}
 EOF
 
 # create and unlock the wallet
-tmux new-window -t $TMUX_WIN_ID -n w-"${NAME}"
+tmux new-window -t $TMUX_WIN_ID -n w-"${NAME}" $SHELL
 tmux send-keys -t $TMUX_WIN_ID "set +o history" C-m
 tmux send-keys -t $TMUX_WIN_ID "cd ${WALLET_DIR}" C-m
 
