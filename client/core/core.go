@@ -87,7 +87,7 @@ type dexConnection struct {
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
 	// connected is a best guess on the ws connection status.
-	connected bool
+	connected uint32
 
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
@@ -1044,7 +1044,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 			Markets:       dc.markets(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
-			Connected:     dc.connected,
+			Connected:     atomic.LoadUint32(&dc.connected) == 1,
 			ConfsRequired: requiredConfs,
 			RegConfirms:   dc.getRegConfirms(),
 		}
@@ -2539,7 +2539,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	// Get the dexConnection and the dex.Asset for each asset.
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
-	connected := found && dc.connected
+	connected := found && atomic.LoadUint32(&dc.connected) == 1
 	c.connMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", form.Host)
@@ -3852,7 +3852,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		trades:       make(map[order.OrderID]*trackedTrade),
 		notify:       c.notify,
 		epoch:        epochMap,
-		connected:    true,
+		connected:    1,
 	}
 
 	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
@@ -3945,7 +3945,11 @@ func (c *Core) handleReconnect(host string) {
 func (c *Core) handleConnectEvent(host string, connected bool) {
 	c.connMtx.Lock()
 	if dc, found := c.conns[host]; found {
-		dc.connected = connected
+		var v uint32
+		if connected {
+			v = 1
+		}
+		atomic.StoreUint32(&dc.connected, v)
 	}
 	c.connMtx.Unlock()
 	statusStr := "connected"
