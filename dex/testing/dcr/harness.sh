@@ -75,6 +75,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/fund"
 # Alpha mine script
 cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
 #!/usr/bin/env bash
+NUM=1
   case \$1 in
       ''|*[!0-9]*)  ;;
       *) NUM=\$1 ;;
