@@ -41,7 +41,7 @@ export default class MarketsPage extends BasePage {
       // Registration status
       'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
       'regStatusDex', 'confReq',
-      // Order form.
+      // Order form
       'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'limitBttn', 'marketBttn',
       'tifBox', 'submitBttn', 'qtyField', 'rateField', 'orderErr',
       'baseWalletIcons', 'quoteWalletIcons', 'lotSize', 'rateStep', 'lotField',

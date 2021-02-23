@@ -2,10 +2,58 @@ package core
 
 import (
 	"encoding/hex"
+	"fmt"
 
 	"decred.org/dcrdex/client/db"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
+
+// AccountDisable is used to disable an account by given host and application
+// password.
+func (c *Core) AccountDisable(pw []byte, host string) error {
+	// Validate password.
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return codedError(passwordErr, err)
+	}
+
+	// Parse address.
+	addr, err := addrHost(host)
+	if err != nil {
+		return newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	// Get the dexConnection.
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	dc, found := c.conns[addr]
+	if !found {
+		return newError(unknownDEXErr, "DEX: %s", addr)
+	}
+
+	// Check active orders.
+	if dc.hasActiveOrders() {
+		return fmt.Errorf("cannot disable account with active orders")
+	}
+
+	acctInfo, err := c.db.Account(dc.acct.host)
+	if err != nil {
+		return newError(accountRetrieveErr, "Error retrieving account: %v", err)
+	}
+	err = c.db.DisableAccount(acctInfo)
+	if err != nil {
+		return newError(accountDisableErr, "Error disabling account: %v", err)
+	}
+	// Stop dexConnection books.
+	for _, market := range dc.marketMap() {
+		dc.stopBook(market.BaseID, market.QuoteID)
+	}
+	// Disconnect and delete connection from map.
+	dc.connMaster.Disconnect()
+	delete(c.conns, addr)
+
+	return nil
+}
 
 // AccountExport is used to retrieve account by host for export.
 func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {

@@ -283,6 +283,7 @@ type TDB struct {
 	verifyCreateAccount   bool
 	accountInfoPersisted  *db.AccountInfo
 	accountProofPersisted *db.AccountProof
+	disableAccountErr     error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -307,7 +308,7 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 
 func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
 	tdb.accts = nil
-	return nil
+	return tdb.disableAccountErr
 }
 
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {

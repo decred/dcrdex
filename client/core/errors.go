@@ -38,6 +38,8 @@ const (
 	addrErr
 	fileReadErr
 	unknownDEXErr
+	accountRetrieveErr
+	accountDisableErr
 )
 
 // Error is an error message and an error code.

@@ -27,6 +27,9 @@ export default class SettingsPage extends BasePage {
       // Import Account
       'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
       'accountFile', 'selectedAccount', 'removeAccount', 'addAccount', 'importAccountErr',
+      // Disable Account
+      'disableAccount', 'disableAccountForm', 'disableAccountConfirm', 'disableAccountAppPW',
+      'disableAccountHost', 'disableAccountErr',
       // Others
       'showPokes'
     ])
@@ -54,12 +57,17 @@ export default class SettingsPage extends BasePage {
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => { this.exportAccount() })
+    forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
     const exchangesDiv = page.exchanges
     if (typeof app.user.exchanges !== 'undefined') {
       for (const host of Object.keys(app.user.exchanges)) {
-        const exportAccountButton = Doc.tmplElement(exchangesDiv, 'exportAccount-' + host)
+        // Bind export account button click event.
+        const exportAccountButton = Doc.tmplElement(exchangesDiv, `exportAccount-${host}`)
         Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
+        // Bind disable account button click event.
+        const disableAccountButton = Doc.tmplElement(exchangesDiv, `disableAccount-${host}`)
+        Doc.bind(disableAccountButton, 'click', () => this.prepareAccountDisable(host, page.disableAccountForm))
       }
     }
 
@@ -98,15 +106,22 @@ export default class SettingsPage extends BasePage {
     this.showForm(authorizeAccountExportForm)
   }
 
-  // exportAccount exports and downloads the account info
+  async prepareAccountDisable (host, disableAccountForm) {
+    const page = this.page
+    page.disableAccountHost.textContent = host
+    page.disableAccountErr.textContent = ''
+    this.showForm(disableAccountForm)
+  }
+
+  // exportAccount exports and downloads the account info.
   async exportAccount () {
     const page = this.page
     const pw = page.exportAccountAppPass.value
     const host = page.exportAccountHost.textContent
     page.exportAccountAppPass.value = ''
     const req = {
-      pw: pw,
-      host: host
+      pw,
+      host
     }
     const loaded = app.loading(this.body)
     const res = await postJSON('/api/exportaccount', req)
@@ -122,6 +137,28 @@ export default class SettingsPage extends BasePage {
     a.setAttribute('href', 'data:text/json,' + JSON.stringify(accountForExport, null, 2))
     a.click()
     Doc.hide(page.forms)
+  }
+
+  // disableAccount disables the associated with the provided host.
+  async disableAccount () {
+    const page = this.page
+    const pw = page.disableAccountAppPW.value
+    const host = page.disableAccountHost.textContent
+    page.disableAccountAppPW.value = ''
+    const req = {
+      pw,
+      host
+    }
+    const loaded = app.loading(this.body)
+    const res = await postJSON('/api/disableaccount', req)
+    loaded()
+    if (!app.checkResponse(res)) {
+      page.disableAccountErr.textContet = res.msg
+      Doc.show(page.disableAccountErr)
+    }
+    Doc.hide(page.forms)
+    // Initial method of removing disabled account.
+    window.location.reload()
   }
 
   async onAccountFileChange () {

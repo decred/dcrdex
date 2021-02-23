@@ -32,7 +32,8 @@
               {{$xc.AcctID}}
               <br>
             {{end}}</span>
-            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}" >Export Account</button>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Export Account</button>
+            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Disable Account</button>
           </div>
         {{end}}
       </div>
@@ -70,6 +71,11 @@
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
     <form class="card bg1" id="authorizeAccountImportForm">
       {{template "authorizeAccountImportForm"}}
+    </form>
+
+    {{- /* DISABLE ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="disableAccountForm">
+      {{template "disableAccountForm"}}
     </form>
 
   </div>

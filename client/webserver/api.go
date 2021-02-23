@@ -17,7 +17,7 @@ import (
 
 // apiGetFee is the handler for the '/getfee' API request.
 func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
-	form := new(registration)
+	form := new(registrationForm)
 	if !readPost(w, r, form) {
 		return
 	}
@@ -39,7 +39,7 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 
 // apiRegister is the handler for the '/register' API request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
-	reg := new(registration)
+	reg := new(registrationForm)
 	defer reg.Password.Clear()
 	if !readPost(w, r, reg) {
 		return
@@ -172,7 +172,6 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	// log.Tracef("apiTrade: (%d-%d) sell = %v, quantity = %d", form.Order.Base, form.Order.Quote, form.Order.Sell, form.Order.Qty)
 	ord, err := s.core.Trade(form.Pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
@@ -189,9 +188,10 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiAccountExport is the handler for the '/account' API request.
+// apiAccountExport is the handler for the '/exportaccount' API request.
 func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
-	form := new(accountExportAuthForm)
+	form := new(accountExportForm)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -212,9 +212,10 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res, s.indent)
 }
 
-// apiAccountImport is the handler for the '/account' API request.
+// apiAccountImport is the handler for the '/importaccount' API request.
 func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
-	form := new(accountImportAuthForm)
+	form := new(accountImportForm)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -222,6 +223,24 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, "error importing account: %v", err)
+		return
+	}
+	w.Header().Set("Connection", "close")
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiAccountDisable is the handler for the '/disableaccount' API request.
+func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
+	form := new(accountDisableForm)
+	defer form.Pass.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+
+	// Disable account.
+	err := s.core.AccountDisable(form.Pass, form.Host)
+	if err != nil {
+		s.writeAPIError(w, "error disabling account: %v", err)
 		return
 	}
 	w.Header().Set("Connection", "close")
