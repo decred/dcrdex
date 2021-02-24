@@ -40,7 +40,6 @@ privileges and forfeiture of registration fee.
 - [Server Installation](#server-installation)
 - [Contribute](#contribute)
 
-
 ## Client Quick Start Installation
 
 - It is recommended to have at least 2 GB of available system memory and 25 GB of free disk space to run the DEX client. For the most secure setup, you can also install in a fresh virtual machine.
@@ -60,6 +59,8 @@ directory. Instructions are for Linux. For Windows, you will drop the
 
 **WARNING**: If instead of using **dcrinstall* you decide to build from source and
 you plan to trade on mainnet, use the `release-0.1` branch instead of `master`.
+Furthermore, if you build dcrd and dcrwallet from source, you must use their
+`release-v1.6` branches, not `master`.
 
 ### Sync Blockchains
 
@@ -131,7 +132,6 @@ DCR, you should deposit that too.
 Alternatively, you can get a deposit address during registration right after
 creating your wallet, from the wallets view link at the top right of the screen.
 
-
 #### Creating a trading wallet for Bitcoin
 
 For Bitcoin, you can create a trading wallet using the bitcoin-cli utility.
@@ -201,7 +201,7 @@ A loss of internet connectivity for more than 20 hours during trade settlement h
 Simply losing your connection to the DEX server does not put funds at risk.
 You would have to lose connection to an entire blockchain network.
 
-**There are initially limits on the amount of ordering you can do**. 
+**There are initially limits on the amount of ordering you can do**.
 We'll get these limits displayed somewhere soon, but in the meantime,
 start with some smaller orders to build up your reputation. As you complete
 orders, your limit will go up.
@@ -217,11 +217,11 @@ to appeal.
 
 ### Dependencies
 
-1. [Go >= 1.14](https://golang.org/doc/install)
-2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
-3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
+1. [Go >= 1.15](https://golang.org/doc/install)
+2. [Node 14+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
+3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV), installed from the [v1.6.x release binaries](https://github.com/decred/decred-release/releases/tag/v1.6.1), or built from the `release-v1.6` branch.
 4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
-4. At least 2 GB of available system memory.
+5. At least 2 GB of available system memory.
 
 See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
 
