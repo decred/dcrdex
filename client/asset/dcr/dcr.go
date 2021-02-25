@@ -687,14 +687,23 @@ func (a amount) String() string {
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
-func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+	_, _, est, err := dcr.maxOrder(lotSize, nfo)
+	return est, err
+}
+
+// maxOrder gets the estimate for MaxOrder, and also returns the
+// []*compositeUTXO and network fee rate to be used for further order estimation
+// without additional calls to listunspent.
+func (dcr *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, feeRate uint64, est *asset.SwapEstimate, err error) {
 	networkFeeRate, err := dcr.feeRate(1)
 	if err != nil {
-		return nil, fmt.Errorf("error getting network fee estimate: %w", err)
+		return nil, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
 	}
-	utxos, err := dcr.spendableUTXOs()
+
+	utxos, err = dcr.spendableUTXOs()
 	if err != nil {
-		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	var avail uint64
 	for _, utxo := range utxos {
@@ -704,51 +713,119 @@ func (dcr *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.Orde
 	// Start by attempting max lots with no fees.
 	lots := avail / lotSize
 	for lots > 0 {
-		val := lots * lotSize
-		sum, size, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo))
-		// The only failure mode of dcr.tryFund is when there is not enough funds,
-		// so if an error is encountered, count down the lots and repeat until
-		// we have enough.
+		est, _, err := dcr.estimateSwap(lots, lotSize, networkFeeRate, utxos, nfo, dcr.useSplitTx)
+		// The only failure mode of estimateSwap -> dcr.fund is when there is
+		// not enough funds, so if an error is encountered, count down the lots
+		// and repeat until we have enough.
 		if err != nil {
 			lots--
 			continue
 		}
-		reqFunds := calc.RequiredOrderFunds(val, uint64(size), lots, nfo)
-		maxFees := reqFunds - val
-		estFunds := calc.RequiredOrderFundsAlt(val, uint64(size), lots, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
-		estFees := estFunds - val
-		// Math for split transactions is a little different.
-		if dcr.useSplitTx {
-			extraFees := splitTxBaggage * nfo.MaxFeeRate
-			if avail >= reqFunds+extraFees {
-				return &asset.OrderEstimate{
-					Lots:          lots,
-					Value:         val,
-					MaxFees:       maxFees + extraFees,
-					EstimatedFees: estFees + (splitTxBaggage * networkFeeRate),
-					Locked:        val + maxFees + extraFees,
-				}, nil
-			}
-		}
-
-		// No split transaction.
-		return &asset.OrderEstimate{
-			Lots:          lots,
-			Value:         val,
-			MaxFees:       maxFees,
-			EstimatedFees: estFees,
-			Locked:        sum,
-		}, nil
+		return utxos, networkFeeRate, est, nil
 	}
-	return &asset.OrderEstimate{}, nil
+
+	return nil, 0, &asset.SwapEstimate{}, nil
 }
 
-// RedemptionFees is an estimate of the redemption fees for a 1-swap redemption.
-func (dcr *ExchangeWallet) RedemptionFees() (uint64, error) {
+// estimateSwap prepares an *asset.SwapEstimate.
+func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, utxos []*compositeUTXO,
+	nfo *dex.Asset, trySplit bool) (*asset.SwapEstimate, bool /*split used*/, error) {
+
+	var avail uint64
+	for _, utxo := range utxos {
+		avail += toAtoms(utxo.rpc.Amount)
+	}
+
+	val := lots * lotSize
+	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo))
+	if err != nil {
+		return nil, false, err
+	}
+	reqFunds := calc.RequiredOrderFunds(val, uint64(inputsSize), lots, nfo)
+	maxFees := reqFunds - val
+
+	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+	estHighFees := estHighFunds - val
+
+	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+	estLowFunds += dexdcr.P2SHOutputSize * (lots - 1) * networkFeeRate
+	estLowFees := estLowFunds - val
+
+	// Math for split transactions is a little different.
+	if dcr.useSplitTx {
+		extraFees := splitTxBaggage * nfo.MaxFeeRate
+		splitFees := splitTxBaggage * networkFeeRate
+		if avail >= reqFunds+extraFees {
+			return &asset.SwapEstimate{
+				Lots:               lots,
+				Value:              val,
+				MaxFees:            maxFees + extraFees,
+				RealisticBestCase:  estLowFees + splitFees,
+				RealisticWorstCase: estHighFees + splitFees,
+				Locked:             val + maxFees + extraFees,
+			}, true, nil
+		}
+	}
+
+	// No split transaction.
+	return &asset.SwapEstimate{
+		Lots:               lots,
+		Value:              val,
+		MaxFees:            maxFees,
+		RealisticBestCase:  estLowFees,
+		RealisticWorstCase: estHighFees,
+		Locked:             sum,
+	}, false, nil
+}
+
+// PreSwap get order estimates based on the available funds and the wallet
+// configuration.
+func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
+	// Start with the maxOrder at the default configuration. This gets us the
+	// utxo set, the network fee rate, and the wallet's maximum order size.
+	// The utxo set can then be used repeatedly in estimateSwap at virtually
+	// zero cost since there are no more RPC calls.
+	// The utxo set is only used once right now, but when order-time options are
+	// implemented, the utxos will be used to calculate option availability and
+	// fees.
+	utxos, feeRate, maxEst, err := dcr.maxOrder(req.LotSize, req.AssetConfig)
+	if err != nil {
+		return nil, err
+	}
+	if maxEst.Lots < req.Lots {
+		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
+	}
+
+	// Get the estimate for the requested number of lots.
+	est, _, err := dcr.estimateSwap(req.Lots, req.LotSize, feeRate, utxos, req.AssetConfig, dcr.useSplitTx)
+	if err != nil {
+		return nil, fmt.Errorf("estimation failed: %v", err)
+	}
+
+	return &asset.PreSwap{
+		Estimate: est,
+	}, nil
+}
+
+// PreRedeem generates an estimate of the range of redemption fees that could
+// be assessed.
+func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget)
-	var size uint64 = dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + dexdcr.TxOutOverhead +
-		dexdcr.RedeemSwapSigScriptSize + dexdcr.P2PKHOutputSize
-	return size * feeRate, nil
+	// Best is one transaction with req.Lots inputs and 1 output.
+	var best uint64 = dexdcr.MsgTxOverhead
+	// Worst is req.Lots transactions, each with one input and one output.
+	var worst uint64 = dexdcr.MsgTxOverhead * req.Lots
+	var inputSize uint64 = dexdcr.TxInOverhead + dexdcr.RedeemSwapSigScriptSize
+	var outputSize uint64 = dexdcr.P2PKHOutputSize
+	best += inputSize*req.Lots + outputSize
+	worst += (inputSize + outputSize) * req.Lots
+
+	return &asset.PreRedeem{
+		Estimate: &asset.RedeemEstimate{
+			RealisticWorstCase: worst * feeRate,
+			RealisticBestCase:  best * feeRate,
+		},
+	}, nil
 }
 
 // orderEnough generates a function that can be used as the enough argument to
@@ -1289,13 +1366,13 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
-func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
 	var totalIn uint64
 	var contracts [][]byte
 	var addresses []dcrutil.Address
-	for _, r := range redemptions {
+	for _, r := range form.Redemptions {
 		cinfo, ok := r.Spends.(*auditInfo)
 		if !ok {
 			return nil, nil, 0, fmt.Errorf("Redemption contract info of wrong type")
@@ -1325,7 +1402,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	}
 
 	// Calculate the size and the fees.
-	size := msgTx.SerializeSize() + dexdcr.RedeemSwapSigScriptSize*len(redemptions) + dexdcr.P2PKHOutputSize
+	size := msgTx.SerializeSize() + dexdcr.RedeemSwapSigScriptSize*len(form.Redemptions) + dexdcr.P2PKHOutputSize
 	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget)
 	fee := feeRate * uint64(size)
 	if fee > totalIn {
@@ -1342,7 +1419,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign the inputs.
-	for i, r := range redemptions {
+	for i, r := range form.Redemptions {
 		contract := contracts[i]
 		redeemSig, redeemPubKey, err := dcr.createSig(msgTx, i, contract, addresses[i])
 		if err != nil {
@@ -1364,8 +1441,8 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		return nil, nil, 0, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *txHash, checkHash)
 	}
-	coinIDs := make([]dex.Bytes, 0, len(redemptions))
-	for i := range redemptions {
+	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
+	for i := range form.Redemptions {
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
 

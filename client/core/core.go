@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -85,7 +86,7 @@ type dexConnection struct {
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
 	// connected is a best guess on the ws connection status.
-	connected bool
+	connected uint32
 
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
@@ -750,6 +751,42 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 	return updated
 }
 
+// Get the *dexConnection and connection status for the the host.
+func (c *Core) dex(addr string) (*dexConnection, bool, error) {
+	host, err := addrHost(addr)
+	if err != nil {
+		return nil, false, newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	// Get the dexConnection and the dex.Asset for each asset.
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	connected := found && atomic.LoadUint32(&dc.connected) == 1
+	if !found {
+		return nil, false, fmt.Errorf("unknown DEX %s", addr)
+	}
+	return dc, connected, nil
+}
+
+// Get the *dexConnection for the the host. Return an error if the DEX is not
+// connected.
+func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
+	dc, connected, err := c.dex(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	if dc.acct.locked() {
+		return nil, fmt.Errorf("cannot place order on a locked %s account. Are you logged in?", dc.acct.host)
+	}
+
+	if !connected {
+		return nil, fmt.Errorf("currently disconnected from %s. Cannot place order", dc.acct.host)
+	}
+	return dc, nil
+}
+
 // setEpoch sets the epoch. If the passed epoch is greater than the highest
 // previously passed epoch, an epoch notification is sent to all subscribers and
 // true is returned.
@@ -1049,7 +1086,7 @@ func (c *Core) exchangeMap() map[string]*Exchange {
 			Markets:       dc.marketMap(),
 			Assets:        assets,
 			FeePending:    dc.acct.feePending(),
-			Connected:     dc.connected,
+			Connected:     atomic.LoadUint32(&dc.connected) == 1,
 			ConfsRequired: requiredConfs,
 			RegConfirms:   dc.getRegConfirms(),
 		}
@@ -2329,7 +2366,7 @@ func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset
 // market. An order rate must be provided, since the number of lots available
 // for trading will vary based on the rate for a buy order (unlike a sell
 // order).
-func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*OrderEstimate, error) {
+func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
 	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
@@ -2340,24 +2377,24 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*OrderEstim
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
 	}
-	buyRedemptionPer, err := baseWallet.RedemptionFees()
+
+	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
+		LotSize: baseAsset.LotSize,
+		Lots:    maxBuy.Lots,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(base), err)
+		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
 	}
 
-	return &OrderEstimate{
-		Lots:           maxBuy.Lots,
-		Value:          maxBuy.Value,
-		MaxFees:        maxBuy.MaxFees,
-		EstimatedFees:  maxBuy.EstimatedFees,
-		Locked:         maxBuy.Locked,
-		RedemptionFees: maxBuy.Lots * buyRedemptionPer,
+	return &MaxOrderEstimate{
+		Swap:   maxBuy,
+		Redeem: preRedeem.Estimate,
 	}, nil
 }
 
 // MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
 // market.
-func (c *Core) MaxSell(host string, base, quote uint32) (*OrderEstimate, error) {
+func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error) {
 	baseAsset, _, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
@@ -2367,18 +2404,35 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*OrderEstimate, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
-	sellRedemptionPer, err := quoteWallet.RedemptionFees()
+
+	dc, _, err := c.dex(host)
 	if err != nil {
-		return nil, fmt.Errorf("%s RedemptionFees error: %v", unbip(quote), err)
+		return nil, err
 	}
 
-	return &OrderEstimate{
-		Lots:           maxSell.Lots,
-		Value:          maxSell.Value,
-		MaxFees:        maxSell.MaxFees,
-		EstimatedFees:  maxSell.EstimatedFees,
-		Locked:         maxSell.Locked,
-		RedemptionFees: maxSell.Lots * sellRedemptionPer,
+	// Estimate a quote-converted lot size.
+	mktID := marketName(base, quote)
+	book := dc.bookie(mktID)
+	if book == nil {
+		return nil, fmt.Errorf("no book synced for %s at %s", mktID, host)
+	}
+	midGap, err := book.MidGap()
+	if err != nil {
+		return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
+	}
+	lotSize := calc.BaseToQuote(midGap, baseAsset.LotSize)
+
+	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
+		LotSize: lotSize,
+		Lots:    maxSell.Lots,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(quote), err)
+	}
+
+	return &MaxOrderEstimate{
+		Swap:   maxSell,
+		Redeem: preRedeem.Estimate,
 	}, nil
 }
 
@@ -2630,6 +2684,104 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	return coin, nil
 }
 
+func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
+	dc, err := c.connectedDEX(form.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	if err != nil {
+		return nil, err
+	}
+
+	// So here's the thing. Our assets thus far don't require the wallet to be
+	// unlocked to get order estimation (listunspent works on locked wallet),
+	// but if we run into an asset that breaks that assumption, we may need
+	// to require a password here before estimation.
+
+	// We need the wallets to be connected.
+	if !wallets.fromWallet.connected() {
+		err := c.connectAndUpdateWallet(wallets.fromWallet)
+		if err != nil {
+			c.log.Errorf("Error connecting to %s wallet: %v", wallets.fromAsset.Symbol, err)
+			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.fromAsset.Symbol)
+		}
+	}
+
+	if !wallets.toWallet.connected() {
+		err := c.connectAndUpdateWallet(wallets.toWallet)
+		if err != nil {
+			c.log.Errorf("Error connecting to %s wallet: %v", wallets.toAsset.Symbol, err)
+			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.toAsset.Symbol)
+		}
+	}
+
+	// Fund the order and prepare the coins.
+	lotSize := wallets.baseAsset.LotSize
+	lots := form.Qty / lotSize
+	rate := form.Rate
+
+	if !form.IsLimit {
+		// If this is a market order, we'll predict the fill price.
+		book := dc.bookie(marketName(form.Base, form.Quote))
+		if book == nil {
+			return nil, fmt.Errorf("Cannot estimate market order without a synced book")
+		}
+
+		var fills []*orderbook.Fill
+		var filled bool
+		if form.Sell {
+			fills, filled = book.BestFill(form.Sell, form.Qty)
+		} else {
+			fills, filled = book.BestFillMarketBuy(form.Qty, lotSize)
+		}
+
+		if !filled {
+			return nil, fmt.Errorf("Market is too thin to estimate market order")
+		}
+
+		// Get an average rate.
+		var qtySum, product uint64
+		for _, fill := range fills {
+			product += fill.Quantity * fill.Rate
+			qtySum += fill.Quantity
+		}
+		rate = product / qtySum
+		if !form.Sell {
+			lots = qtySum / lotSize
+		}
+	}
+
+	fromLotSize, toLotSize := lotSize, calc.BaseToQuote(rate, lotSize)
+	if !form.Sell {
+		fromLotSize, toLotSize = toLotSize, fromLotSize
+	}
+
+	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
+		LotSize:     fromLotSize,
+		Lots:        lots,
+		AssetConfig: wallets.fromAsset,
+		Immediate:   (form.IsLimit && form.TifNow),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error getting swap estimate: %v", err)
+	}
+
+	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
+		LotSize: toLotSize,
+		Lots:    lots,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error getting redemption estimate: %v", err)
+	}
+
+	return &OrderEstimate{
+		Swap:   swapEstimate,
+		Redeem: redeemEstimate,
+	}, nil
+}
+
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	// Check the user password.
@@ -2637,26 +2789,10 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Trade password error: %w", err)
 	}
-	host, err := addrHost(form.Host)
+
+	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
-	}
-
-	// Get the dexConnection and the dex.Asset for each asset.
-	c.connMtx.RLock()
-	dc, found := c.conns[host]
-	connected := found && dc.connected
-	c.connMtx.RUnlock()
-	if !found {
-		return nil, fmt.Errorf("unknown DEX %s", form.Host)
-	}
-
-	if dc.acct.locked() {
-		return nil, fmt.Errorf("cannot place order on a locked %s account. Are you logged in?", dc.acct.host)
-	}
-
-	if !connected {
-		return nil, fmt.Errorf("currently disconnected from %s. Cannot place order", dc.acct.host)
+		return nil, err
 	}
 
 	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
@@ -2746,8 +2882,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		// the knowledge that such an estimate means that the specified amount
 		// might not all be available for matching once fees are considered.
 		lots = 1
-		book, found := dc.books[mktID]
-		if found {
+		book := dc.bookie(mktID)
+		if book != nil {
 			midGap, err := book.MidGap()
 			// An error is only returned when there are no orders on the book.
 			// In that case, fall back to the 1 lot estimate for now.
@@ -3884,7 +4020,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		trades:       make(map[order.OrderID]*trackedTrade),
 		notify:       c.notify,
 		epoch:        epochMap,
-		connected:    true,
+		connected:    1,
 	}
 
 	c.log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
@@ -3929,9 +4065,7 @@ func (c *Core) handleReconnect(host string) {
 
 	resubMkt := func(mkt *market) {
 		// Locate any bookie for this market.
-		dc.booksMtx.Lock()
-		defer dc.booksMtx.Unlock()
-		booky := dc.books[mkt.name]
+		booky := dc.bookie(mkt.name)
 		if booky == nil {
 			// Was not previously subscribed with the server for this market.
 			return
@@ -3989,7 +4123,11 @@ func (c *Core) handleReconnect(host string) {
 func (c *Core) handleConnectEvent(host string, connected bool) {
 	c.connMtx.Lock()
 	if dc, found := c.conns[host]; found {
-		dc.connected = connected
+		var v uint32
+		if connected {
+			v = 1
+		}
+		atomic.StoreUint32(&dc.connected, v)
 	}
 	c.connMtx.Unlock()
 	statusStr := "connected"
@@ -4011,11 +4149,8 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	// Expire the epoch
 	dc.setEpoch(note.MarketID, note.Epoch+1)
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}

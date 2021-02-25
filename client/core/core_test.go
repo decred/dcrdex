@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,7 +203,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		notify:       func(Notification) {},
 		trades:       make(map[order.OrderID]*trackedTrade),
 		epoch:        map[string]uint64{tDcrBtcMktName: 0},
-		connected:    true,
+		connected:    1,
 	}, conn, acct
 }
 
@@ -564,6 +565,8 @@ type TXCWallet struct {
 	confsMtx          sync.RWMutex
 	confs             map[string]uint32
 	confsErr          map[string]error
+	preSwap           *asset.PreSwap
+	preRedeem         *asset.PreRedeem
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -624,8 +627,13 @@ func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
-func (w *TXCWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.OrderEstimate, error) {
+func (w *TXCWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
 	return nil, nil
+}
+
+func (w *TXCWallet) PreSwap(*asset.PreSwapForm) (*asset.PreSwap, error) { return w.preSwap, nil }
+func (w *TXCWallet) PreRedeem(*asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	return w.preRedeem, nil
 }
 func (w *TXCWallet) RedemptionFees() (uint64, error) { return 0, nil }
 
@@ -662,7 +670,7 @@ func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
-func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *TXCWallet) Redeem(*asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	defer func() {
 		if w.redeemErrChan != nil {
 			w.redeemErrChan <- w.redeemErr
@@ -2159,12 +2167,12 @@ func TestTrade(t *testing.T) {
 	rig.dc.acct.unlock(rig.crypter)
 
 	// DEX not connected
-	rig.dc.connected = false
+	atomic.StoreUint32(&rig.dc.connected, 0)
 	_, err = tCore.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("no error for disconnected dex")
 	}
-	rig.dc.connected = true
+	atomic.StoreUint32(&rig.dc.connected, 1)
 
 	// No base asset
 	form.Base = 12345
@@ -5987,4 +5995,173 @@ func TestParseCert(t *testing.T) {
 	if len(cert) == 0 {
 		t.Fatalf("no cert returned from cert store")
 	}
+}
+
+func TestPreOrder(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	var rate uint64 = 1e8
+	quoteConvertedLotSize := calc.BaseToQuote(rate, tDCR.LotSize)
+
+	book := newBookie(tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = book
+
+	sellNote := &msgjson.BookOrderNote{
+		OrderNote: msgjson.OrderNote{
+			OrderID: encode.RandomBytes(32),
+		},
+		TradeNote: msgjson.TradeNote{
+			Side:     msgjson.SellOrderNum,
+			Quantity: quoteConvertedLotSize * 10,
+			Time:     uint64(time.Now().Unix()),
+			Rate:     rate,
+		},
+	}
+
+	buyNote := *sellNote
+	buyNote.TradeNote.Quantity = tDCR.LotSize * 10
+	buyNote.TradeNote.Side = msgjson.BuyOrderNum
+
+	err := book.Sync(&msgjson.OrderBook{
+		MarketID: tDcrBtcMktName,
+		Seq:      1,
+		Epoch:    1,
+		Orders:   []*msgjson.BookOrderNote{sellNote, &buyNote},
+	})
+	if err != nil {
+		t.Fatalf("Sync error: %v", err)
+	}
+
+	preSwap := &asset.PreSwap{
+		Estimate: &asset.SwapEstimate{
+			MaxFees:            1001,
+			Lots:               5,
+			RealisticBestCase:  15,
+			RealisticWorstCase: 20,
+			Locked:             25,
+		},
+	}
+
+	tBtcWallet.preSwap = preSwap
+
+	preRedeem := &asset.PreRedeem{
+		Estimate: &asset.RedeemEstimate{
+			RealisticBestCase:  15,
+			RealisticWorstCase: 20,
+		},
+	}
+
+	tDcrWallet.preRedeem = preRedeem
+
+	form := &TradeForm{
+		Host: tDexHost,
+		Sell: false,
+		// IsLimit: true,
+		Base:  tDCR.ID,
+		Quote: tBTC.ID,
+		Qty:   quoteConvertedLotSize * 5,
+		Rate:  rate,
+	}
+	preOrder, err := tCore.PreOrder(form)
+	if err != nil {
+		t.Fatalf("PreOrder market buy error: %v", err)
+	}
+
+	compUint64 := func(tag string, a, b uint64) {
+		t.Helper()
+		if a != b {
+			t.Fatalf("%s: %d != %d", tag, a, b)
+		}
+	}
+
+	est1, est2 := preSwap.Estimate, preOrder.Swap.Estimate
+	compUint64("MaxFees", est1.MaxFees, est2.MaxFees)
+	compUint64("RealisticWorstCase", est1.RealisticWorstCase, est2.RealisticWorstCase)
+	compUint64("RealisticBestCase", est1.RealisticBestCase, est2.RealisticBestCase)
+	compUint64("Locked", est1.Locked, est2.Locked)
+
+	// Missing book is an error
+	delete(rig.dc.books, tDcrBtcMktName)
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for market order with missing book")
+	}
+	rig.dc.books[tDcrBtcMktName] = book
+
+	// Exercise the market sell path too.
+	form.Sell = true
+	_, err = tCore.PreOrder(form)
+	if err != nil {
+		t.Fatalf("PreOrder market sell error: %v", err)
+	}
+
+	// Market orders have to have a market to make estimates.
+	book.Unbook(&msgjson.UnbookOrderNote{
+		MarketID: tDcrBtcMktName,
+		OrderID:  sellNote.OrderID,
+	})
+	book.Unbook(&msgjson.UnbookOrderNote{
+		MarketID: tDcrBtcMktName,
+		OrderID:  buyNote.OrderID,
+	})
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for market order with empty market")
+	}
+
+	// Limit orders have no such restriction.
+	form.IsLimit = true
+	_, err = tCore.PreOrder(form)
+	if err != nil {
+		t.Fatalf("PreOrder limit sell error: %v", err)
+	}
+
+	// no DEX
+	delete(tCore.conns, rig.dc.acct.host)
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for unknown DEX")
+	}
+	tCore.conns[rig.dc.acct.host] = rig.dc
+
+	// no wallet
+	delete(tCore.wallets, tDCR.ID)
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for missing wallet")
+	}
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	// base wallet not connected
+	dcrWallet.hookedUp = false
+	tDcrWallet.connectErr = tErr
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for unconnected base wallet")
+	}
+	dcrWallet.hookedUp = true
+	tDcrWallet.connectErr = nil
+
+	// quote wallet not connected
+	btcWallet.hookedUp = false
+	tBtcWallet.connectErr = tErr
+	_, err = tCore.PreOrder(form)
+	if err == nil {
+		t.Fatalf("no error for unconnected quote wallet")
+	}
+	btcWallet.hookedUp = true
+	tBtcWallet.connectErr = nil
+
+	// sucess again
+	_, err = tCore.PreOrder(form)
+	if err != nil {
+		t.Fatalf("PreOrder error after fixing everything: %v", err)
+	}
+
 }

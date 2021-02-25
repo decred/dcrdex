@@ -515,8 +515,8 @@ func (s *WebServer) apiMaxBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := struct {
-		OK     bool                `json:"ok"`
-		MaxBuy *core.OrderEstimate `json:"maxBuy"`
+		OK     bool                   `json:"ok"`
+		MaxBuy *core.MaxOrderEstimate `json:"maxBuy"`
 	}{
 		OK:     true,
 		MaxBuy: maxBuy,
@@ -540,8 +540,8 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := struct {
-		OK      bool                `json:"ok"`
-		MaxSell *core.OrderEstimate `json:"maxSell"`
+		OK      bool                   `json:"ok"`
+		MaxSell *core.MaxOrderEstimate `json:"maxSell"`
 	}{
 		OK:      true,
 		MaxSell: maxSell,
