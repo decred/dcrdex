@@ -198,7 +198,11 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error creating %q RPC client: %w", btc.name, err)
 	}
 
-	btc.node = New(ctx, client)
+	// Requester must be set otherwise there can be a panic on shutdown.
+	btc.node = &rpcClient{
+		ctx:       ctx,
+		requester: client,
+	}
 
 	// Prime the cache
 	bestHash, err := btc.node.GetBestBlockHash()

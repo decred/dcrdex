@@ -36,14 +36,6 @@ type rpcClient struct {
 	requester RawRequester
 }
 
-// New creates new rpcClient and returns it's pointer.
-func New(ctx context.Context, client RawRequester) *rpcClient {
-	return &rpcClient{
-		ctx:       ctx,
-		requester: client,
-	}
-}
-
 func (rc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
 	var txid string
 	err := rc.call(method, args, &txid)
