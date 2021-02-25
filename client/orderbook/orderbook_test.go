@@ -3,7 +3,6 @@ package orderbook
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -801,8 +800,7 @@ func TestOrderBookBestFill(t *testing.T) {
 		orderBook *OrderBook
 		qty       uint64
 		side      uint8
-		expected  []*fill
-		wantErr   bool
+		expected  []*Fill
 	}{
 		{
 			label: "Fetch best fill from buy side",
@@ -820,25 +818,24 @@ func TestOrderBookBestFill(t *testing.T) {
 			),
 			qty:  24,
 			side: msgjson.BuyOrderNum,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'e'}, msgjson.BuyOrderNum, 8, 4, 12),
-					quantity: 8,
+					Rate:     4,
+					Quantity: 8,
 				},
 				{
-					match:    makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 3, 10),
-					quantity: 5,
+					Rate:     3,
+					Quantity: 5,
 				},
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
-					quantity: 10,
+					Rate:     2,
+					Quantity: 10,
 				},
 				{
-					match:    makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
-					quantity: 1,
+					Rate:     1,
+					Quantity: 1,
 				},
 			},
-			wantErr: false,
 		},
 		{
 			label: "Fetch best fill from empty buy side",
@@ -856,8 +853,7 @@ func TestOrderBookBestFill(t *testing.T) {
 			),
 			qty:      24,
 			side:     msgjson.BuyOrderNum,
-			expected: []*fill{},
-			wantErr:  false,
+			expected: []*Fill{},
 		},
 		{
 			label: "Fetch best fill (order book total less than fill quantity) from buy side",
@@ -873,84 +869,49 @@ func TestOrderBookBestFill(t *testing.T) {
 			),
 			qty:  40,
 			side: msgjson.BuyOrderNum,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
-					quantity: 10,
+					Rate:     2,
+					Quantity: 10,
 				},
 				{
-					match:    makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
-					quantity: 10,
+					Rate:     1,
+					Quantity: 10,
 				},
 			},
-			wantErr: false,
-		},
-		{
-			label: "Fetch best fill from unsynced order book",
-			orderBook: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				false,
-			),
-			qty:      10,
-			side:     msgjson.SellOrderNum,
-			expected: nil,
-			wantErr:  true,
 		},
 	}
 
 	// bestFill returns the best fill for a quantity from the provided side.
-	bestFill := func(ob *OrderBook, qty uint64, side uint8) ([]*fill, error) {
-		if !ob.isSynced() {
-			return nil, fmt.Errorf("order book is not synced")
-		}
-
+	bestFill := func(ob *OrderBook, qty uint64, side uint8) ([]*Fill, bool) {
 		switch side {
 		case msgjson.BuyOrderNum:
 			return ob.buys.BestFill(qty)
 		case msgjson.SellOrderNum:
 			return ob.sells.BestFill(qty)
-		default:
-			return nil, fmt.Errorf("unknown side: %d", side)
 		}
+		return nil, false
 	}
 
 	for idx, tc := range tests {
-		best, err := bestFill(tc.orderBook, tc.qty, tc.side)
-		if (err != nil) != tc.wantErr {
-			t.Fatalf("[OrderBook.BestFill] #%d: error: %v, wantErr: %v",
-				idx+1, err, tc.wantErr)
+		best, _ := bestFill(tc.orderBook, tc.qty, tc.side)
+
+		if len(best) != len(tc.expected) {
+			t.Fatalf("[OrderBook.BestFill] #%d: expected best fill "+
+				"size of %d, got %d", idx+1, len(tc.expected), len(best))
 		}
 
-		if !tc.wantErr {
-			if len(best) != len(tc.expected) {
-				t.Fatalf("[OrderBook.BestFill] #%d: expected best fill "+
-					"size of %d, got %d", idx+1, len(tc.expected), len(best))
+		for i := 0; i < len(best); i++ {
+			if best[i].Rate != tc.expected[i].Rate {
+				t.Fatalf("[OrderBook.BestFill] #%d: expected fill at "+
+					"index %d to have rate %d, got %d", idx+1, i,
+					tc.expected[i].Rate, best[i].Rate)
 			}
 
-			for i := 0; i < len(best); i++ {
-				if !bytes.Equal(best[i].match.OrderID[:], tc.expected[i].match.OrderID[:]) {
-					t.Fatalf("[OrderBook.BestFill] #%d: expected fill at "+
-						"index %d to be %x, got %x", idx+1, i,
-						tc.expected[i].match.OrderID[:], best[i].match.OrderID[:])
-				}
-
-				if best[i].quantity != tc.expected[i].quantity {
-					t.Fatalf("[OrderBook.BestFill] #%d: expected fill at "+
-						"index %d to have quantity %d, got %d", idx+1, i,
-						tc.expected[i].quantity, best[i].quantity)
-				}
-
-				if best[i].match.Time != tc.expected[i].match.Time {
-					t.Fatalf("[OrderBook.BestFill] #%d: expected fill at "+
-						"index %d to have match timestamp %d, got %d", idx+1, i,
-						tc.expected[i].match.Time, best[i].match.Time)
-				}
+			if best[i].Quantity != tc.expected[i].Quantity {
+				t.Fatalf("[OrderBook.BestFill] #%d: expected fill at "+
+					"index %d to have quantity %d, got %d", idx+1, i,
+					tc.expected[i].Quantity, best[i].Quantity)
 			}
 		}
 	}

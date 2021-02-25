@@ -166,6 +166,13 @@ func (b *bookie) book() *OrderBook {
 	}
 }
 
+// bookie gets the bookie for the market, if it exists, else nil.
+func (dc *dexConnection) bookie(marketID string) *bookie {
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+	return dc.books[marketID]
+}
+
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
@@ -382,11 +389,8 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return fmt.Errorf("book order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
@@ -403,9 +407,9 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	return nil
 }
 
-// marketConfig searches the stored ConfigResponse for the named market. This
-// must be called with cfgMtx at least read locked.
-func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
+// findMarketConfig searches the stored ConfigResponse for the named market.
+// This must be called with cfgMtx at least read locked.
+func (dc *dexConnection) findMarketConfig(name string) *msgjson.Market {
 	for _, mktConf := range dc.cfg.Markets {
 		if mktConf.Name == name {
 			return mktConf
@@ -420,7 +424,7 @@ func (dc *dexConnection) marketConfig(name string) *msgjson.Market {
 func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, clearFinal bool) {
 	dc.cfgMtx.Lock()
 	defer dc.cfgMtx.Unlock()
-	mkt := dc.marketConfig(name)
+	mkt := dc.findMarketConfig(name)
 	if mkt == nil {
 		return
 	}
@@ -437,7 +441,7 @@ func (dc *dexConnection) setMarketStartEpoch(name string, startEpoch uint64, cle
 func (dc *dexConnection) setMarketFinalEpoch(name string, finalEpoch uint64, persist bool) {
 	dc.cfgMtx.Lock()
 	defer dc.cfgMtx.Unlock()
-	mkt := dc.marketConfig(name)
+	mkt := dc.findMarketConfig(name)
 	if mkt == nil {
 		return
 	}
@@ -486,11 +490,8 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 
 	// Clear the book and unbook/revoke own orders.
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[sp.MarketID]
-	if !ok {
+	book := dc.bookie(sp.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%s'", sp.MarketID)
 	}
 
@@ -630,11 +631,8 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("unbook order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}
@@ -661,11 +659,8 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		return fmt.Errorf("book order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
@@ -698,11 +693,8 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		c.refreshUser() // maybe remove if this was pre-nomatch
 	}
 
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	book, ok := dc.books[note.MarketID]
-	if !ok {
+	book := dc.bookie(note.MarketID)
+	if book == nil {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}

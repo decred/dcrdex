@@ -1559,7 +1559,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 
 	// Send the transaction.
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
-	coinIDs, outCoin, fees, err := redeemWallet.Redeem(redemptions)
+	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
+		Redemptions: redemptions,
+	})
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {

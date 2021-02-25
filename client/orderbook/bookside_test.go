@@ -605,8 +605,9 @@ func TestBookSideBestFill(t *testing.T) {
 		side      *bookSide
 		quantity  uint64
 		orderPref orderPreference
-		expected  []*fill
-		wantErr   bool
+		expected  []*Fill
+		filled    bool
+		marketBuy bool
 	}{
 		{
 			label: "Fetch best fill from buy book side sorted in ascending order",
@@ -625,21 +626,21 @@ func TestBookSideBestFill(t *testing.T) {
 				ascending,
 			),
 			quantity: 9,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'a'}, msgjson.BuyOrderNum, 5, 1, 2),
-					quantity: 5,
+					Rate:     1,
+					Quantity: 5,
 				},
 				{
-					match:    makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 3, 1, 5),
-					quantity: 3,
+					Rate:     1,
+					Quantity: 3,
 				},
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 1, 2, 2),
-					quantity: 1,
+					Rate:     2,
+					Quantity: 1,
 				},
 			},
-			wantErr: false,
+			filled: true,
 		},
 		{
 			label: "Fetch best fill from buy book side sorted in descending order",
@@ -658,21 +659,21 @@ func TestBookSideBestFill(t *testing.T) {
 				descending,
 			),
 			quantity: 7,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 1, 2, 2),
-					quantity: 1,
+					Rate:     2,
+					Quantity: 1,
 				},
 				{
-					match:    makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 2, 5),
-					quantity: 5,
+					Rate:     2,
+					Quantity: 5,
 				},
 				{
-					match:    makeOrder([32]byte{'a'}, msgjson.BuyOrderNum, 5, 1, 2),
-					quantity: 1,
+					Rate:     1,
+					Quantity: 1,
 				},
 			},
-			wantErr: false,
+			filled: true,
 		},
 		{
 			label: "Fetch best fill from sell book side sorted in ascending order",
@@ -691,41 +692,40 @@ func TestBookSideBestFill(t *testing.T) {
 				ascending,
 			),
 			quantity: 0,
-			expected: []*fill{},
-			wantErr:  false,
+			expected: []*Fill{},
+			filled:   true,
 		},
 		{
 			label: "Fetch best fill from sell book side sorted in ascending order",
 			side: makeBookSide(
 				map[uint64][]*Order{
 					1: {
-						makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 1, 2),
+						makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 4, 1, 2),
 						makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
 					},
 					2: {
 						makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 2, 2),
-						makeOrder([32]byte{'d'}, msgjson.SellOrderNum, 5, 2, 5),
 					},
 				},
 				makeRateIndex([]uint64{1, 2}),
 				ascending,
 			),
 			quantity: 9,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 1, 2),
-					quantity: 5,
+					Rate:     1,
+					Quantity: 4,
 				},
 				{
-					match:    makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
-					quantity: 3,
+					Rate:     1,
+					Quantity: 3,
 				},
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 2, 2),
-					quantity: 1,
+					Rate:     2,
+					Quantity: 1,
 				},
 			},
-			wantErr: false,
+			filled: false,
 		},
 		{
 			label: "Fetch best fill from sell book side sorted in descending order",
@@ -744,81 +744,95 @@ func TestBookSideBestFill(t *testing.T) {
 				descending,
 			),
 			quantity: 50,
-			expected: []*fill{
+			expected: []*Fill{
 				{
-					match:    makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 2, 2),
-					quantity: 1,
+					Rate:     2,
+					Quantity: 1,
 				},
 				{
-					match:    makeOrder([32]byte{'d'}, msgjson.SellOrderNum, 5, 2, 5),
-					quantity: 5,
+					Rate:     2,
+					Quantity: 5,
 				},
 				{
-					match:    makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 1, 2),
-					quantity: 5,
+					Rate:     1,
+					Quantity: 5,
 				},
 				{
-					match:    makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
-					quantity: 3,
+					Rate:     1,
+					Quantity: 3,
 				},
 			},
-			wantErr: false,
+			filled: false,
 		},
 		{
-			label: "Fetch best fill from sell book side sorted in unknown order",
+			label: "Fetch market buy fill",
 			side: makeBookSide(
 				map[uint64][]*Order{
-					1: {
-						makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 1, 2),
-						makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
+					2e8: {
+						makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 2e8, 2), // 10 Quote asset
+						makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 2e8, 5), // 6
 					},
-					2: {
-						makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 2, 2),
-						makeOrder([32]byte{'d'}, msgjson.SellOrderNum, 5, 2, 5),
+					3e8: {
+						makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 3e8, 2), // 3
+						makeOrder([32]byte{'d'}, msgjson.SellOrderNum, 5, 3e8, 5), // 15
 					},
 				},
-				makeRateIndex([]uint64{1, 2}),
-				50,
+				makeRateIndex([]uint64{2e8, 3e8}),
+				ascending,
 			),
-			quantity: 3,
-			expected: nil,
-			wantErr:  true,
+			quantity: 30, // 16 @ 2e8, 14 @ 3e8
+			expected: []*Fill{
+				{
+					Rate:     2e8,
+					Quantity: 5,
+				},
+				{
+					Rate:     2e8,
+					Quantity: 3,
+				},
+				{
+					Rate:     3e8,
+					Quantity: 1,
+				},
+				{
+					Rate:     3e8,
+					Quantity: 3, // 11 remaining only covers 3 units at rate = 3.
+				},
+			},
+			marketBuy: true,
+			filled:    true,
 		},
 	}
 
-	for idx, tc := range tests {
-		best, err := tc.side.BestFill(tc.quantity)
-		if (err != nil) != tc.wantErr {
-			t.Fatalf("[BookSide.BestFill] #%d: error: %v, "+
-				"wantErr: %v", idx+1, err, tc.wantErr)
+	for _, tc := range tests {
+		var best []*Fill
+		var filled bool
+		if tc.marketBuy {
+			best, filled = tc.side.bestFill(tc.quantity, true, 1)
+		} else {
+			best, filled = tc.side.BestFill(tc.quantity)
 		}
 
-		if !tc.wantErr {
-			if len(best) != len(tc.expected) {
-				t.Fatalf("[BookSide.BestFill] #%d: expected best "+
-					"order size of %d, got %d", idx+1, len(tc.expected),
-					len(best))
+		if filled != tc.filled {
+			t.Fatalf("[BookSide.BestFill] %q: wrong fill. wanted %v, got %v", tc.label, tc.filled, filled)
+		}
+
+		if len(best) != len(tc.expected) {
+			t.Fatalf("[BookSide.BestFill] %q: expected best "+
+				"order size of %d, got %d", tc.label, len(tc.expected),
+				len(best))
+		}
+
+		for i := 0; i < len(best); i++ {
+			if best[i].Rate != tc.expected[i].Rate {
+				t.Fatalf("[BookSide.BestFill] %q: expected fill at "+
+					"index %d to have rate %d, got %d", tc.label, i,
+					tc.expected[i].Rate, best[i].Rate)
 			}
-
-			for i := 0; i < len(best); i++ {
-				if best[i].match.OrderID != tc.expected[i].match.OrderID {
-					t.Fatalf("[BookSide.BestFill] #%d: expected "+
-						"order id %x at index of %d, got %x", idx+1,
-						tc.expected[i].match.OrderID[:], idx,
-						best[i].match.OrderID[:])
-				}
-
-				if best[i].quantity != tc.expected[i].quantity {
-					t.Fatalf("[BookSide.BestFill] #%d: expected fill at "+
-						"index %d to have quantity %d, got %d", idx+1, i,
-						tc.expected[i].quantity, best[i].quantity)
-				}
-
-				if best[i].match.Time != tc.expected[i].match.Time {
-					t.Fatalf("[BookSide.BestFill] #%d: expected "+
-						"timestamp %d at index of %d, got %d", idx+1,
-						tc.expected[i].match.Time, idx, best[i].match.Time)
-				}
+			if best[i].Quantity != tc.expected[i].Quantity {
+				t.Fatalf("[BookSide.BestFill] %q: expected fill at "+
+					"index %d to have quantity %d, got %d", tc.label, i,
+					tc.expected[i].Quantity, best[i].Quantity)
 			}
 		}
 	}

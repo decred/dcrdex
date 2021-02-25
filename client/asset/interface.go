@@ -85,10 +85,11 @@ type Wallet interface {
 	// fees are an estimate based on current network conditions, and will be <=
 	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
 	// will be an estimate based on current market conditions.
-	MaxOrder(lotSize uint64, nfo *dex.Asset) (*OrderEstimate, error)
-	// RedemptionFees is an estimate of the redemption fees for a 1-swap
-	// redemption.
-	RedemptionFees() (uint64, error)
+	MaxOrder(lotSize uint64, nfo *dex.Asset) (*SwapEstimate, error)
+	// PreSwap gets a pre-swap estimate for the specified order size.
+	PreSwap(*PreSwapForm) (*PreSwap, error)
+	// PreRedeem gets a pre-redeem estimate for the specified order size.
+	PreRedeem(*PreRedeemForm) (*PreRedeem, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -105,7 +106,7 @@ type Wallet interface {
 	Swap(*Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
-	Redeem(redeems []*Redemption) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
+	Redeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
@@ -263,6 +264,12 @@ type Redemption struct {
 	Secret dex.Bytes
 }
 
+// RedeemForm is a group of Redemptions. The struct will be
+// expanded in in-progress work to accomondate order-time options.
+type RedeemForm struct {
+	Redemptions []*Redemption
+}
+
 // Order is order details needed for FundOrder.
 type Order struct {
 	// Value is the amount required to satisfy the order. The Value does not
@@ -287,20 +294,81 @@ type Order struct {
 	Immediate bool
 }
 
-// OrderEstimate is an estimate of the fees and locked amounts associated with
+// SwapEstimate is an estimate of the fees and locked amounts associated with
 // an order.
-type OrderEstimate struct {
+type SwapEstimate struct {
 	// Lots is the number of lots in the order.
-	Lots uint64
+	Lots uint64 `json:"lots"`
 	// Value is the total value of the order.
-	Value uint64
+	Value uint64 `json:"value"`
 	// MaxFees is the maximum possible fees that can be assessed for the order's
 	// swaps.
-	MaxFees uint64
-	// EstimatedFees is an estimation of the fees that might be assessed for the
-	// order's swaps.
-	EstimatedFees uint64
+	MaxFees uint64 `json:"maxFees"`
+	// RealisticWorstCase is an estimation of the fees that might be assessed in
+	// a worst-case scenario of 1 tx per 1 lot match, but at the prevailing fee
+	// rate estimate.
+	RealisticWorstCase uint64 `json:"realisticWorstCase"`
+	// RealisticBestCase is an estimation of the fees that might be assessed in
+	// a best-case scenario of 1 tx and 1 output for the entire order.
+	RealisticBestCase uint64 `json:"realisticBestCase"`
 	// Locked is the amount that will be locked if this order is
 	// subsequently placed.
-	Locked uint64
+	Locked uint64 `json:"locked"`
+}
+
+// RedeemEstimate is an estimate of the range of fees that might realistically
+// be assessed to the redemption transaction.
+type RedeemEstimate struct {
+	// RealisticBestCase is the best-case scenario fees of a single transaction
+	// with a match covering the entire order, at the prevailing fee rate.
+	RealisticBestCase uint64 `json:"realisticBestCase"`
+	// RealisticWorstCase is the worst-case scenario fees of all 1-lot matches,
+	// each with their own call to Redeem.
+	RealisticWorstCase uint64 `json:"realisticWorstCase"`
+}
+
+// PreSwapForm can be used to get a swap fees estimate.
+type PreSwapForm struct {
+	// LotSize is the lot size for the calculation. For quote assets, LotSize
+	// should be based on either the user's limit order rate, or some measure
+	// of the current market rate.
+	LotSize uint64
+	// Lots is the number of lots in the order.
+	Lots uint64
+	// AssetConfig is the dex's asset configuration info.
+	AssetConfig *dex.Asset
+	// Immediate should be set to true if this is for an order that is not a
+	// standing order, likely a market order or a limit order with immediate
+	// time-in-force.
+	Immediate bool
+}
+
+// SwapOption is an OrderEstimate and it's associated ConfigOption.
+type SwapOption struct {
+	ConfigOption
+	// Estimate is the OrderEstimate for an order with the specified
+	// option values.
+	Estimate *SwapEstimate
+}
+
+// PreSwap is a SwapEstimate returned from Wallet.PreSwap. The struct will be
+// expanded in in-progress work to accomondate order-time options.
+type PreSwap struct {
+	Estimate *SwapEstimate `json:"estimate"`
+}
+
+// PreRedeemForm can be used to get a redemption estimate.
+type PreRedeemForm struct {
+	// LotSize is the lot size for the calculation. For quote assets, LotSize
+	// should be based on either the user's limit order rate, or some measure
+	// of the current market rate.
+	LotSize uint64
+	// Lots is the number of lots in the order.
+	Lots uint64
+}
+
+// PreRedeem is an estimate of the fees for redemption. The struct will be
+// expanded in in-progress work to accomondate order-time options.
+type PreRedeem struct {
+	Estimate *RedeemEstimate `json:"estimate"`
 }

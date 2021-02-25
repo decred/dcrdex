@@ -329,7 +329,9 @@ func runTest(t *testing.T, splitTx bool) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, _, err = rig.alpha().Redeem(redemptions)
+	_, _, _, err = rig.alpha().Redeem(&asset.RedeemForm{
+		Redemptions: redemptions,
+	})
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}

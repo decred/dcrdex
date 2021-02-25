@@ -380,30 +380,45 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	return cords, nil
 }
 
-func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.OrderEstimate, error) {
+func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error) {
 	ord := randomOrder(rand.Float32() > 0.5, c.maxQty, c.midGap, gapWidthFactor*c.midGap, false)
 	qty := toAtoms(ord.Qty)
 	quoteQty := calc.BaseToQuote(rate, qty)
-	return &core.OrderEstimate{
-		Lots:           qty / tExchanges[host].Assets[base].LotSize,
-		Value:          quoteQty,
-		MaxFees:        quoteQty / 100,
-		EstimatedFees:  quoteQty / 200,
-		Locked:         quoteQty,
-		RedemptionFees: qty / 300,
+	return &core.MaxOrderEstimate{
+		Swap: &asset.SwapEstimate{
+			Lots:               qty / tExchanges[host].Assets[base].LotSize,
+			Value:              quoteQty,
+			MaxFees:            quoteQty / 100,
+			RealisticWorstCase: quoteQty / 200,
+			RealisticBestCase:  quoteQty / 300,
+			Locked:             quoteQty,
+		},
+		Redeem: &asset.RedeemEstimate{
+			RealisticWorstCase: qty / 300,
+			RealisticBestCase:  qty / 400,
+		},
 	}, nil
 }
 
-func (c *TCore) MaxSell(host string, base, quote uint32) (*core.OrderEstimate, error) {
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error) {
 	ord := randomOrder(rand.Float32() > 0.5, c.maxQty, c.midGap, gapWidthFactor*c.midGap, false)
 	qty := toAtoms(ord.Qty)
-	return &core.OrderEstimate{
-		Lots:           qty / tExchanges[host].Assets[base].LotSize,
-		Value:          qty,
-		MaxFees:        qty / 100,
-		EstimatedFees:  qty / 200,
-		Locked:         qty,
-		RedemptionFees: 1,
+
+	quoteQty := calc.BaseToQuote(toAtoms(c.midGap), qty)
+
+	return &core.MaxOrderEstimate{
+		Swap: &asset.SwapEstimate{
+			Lots:               qty / tExchanges[host].Assets[base].LotSize,
+			Value:              qty,
+			MaxFees:            qty / 100,
+			RealisticWorstCase: qty / 200,
+			RealisticBestCase:  qty / 300,
+			Locked:             qty,
+		},
+		Redeem: &asset.RedeemEstimate{
+			RealisticWorstCase: quoteQty / 300,
+			RealisticBestCase:  quoteQty / 400,
+		},
 	}, nil
 }
 
@@ -1032,7 +1047,7 @@ func TestServer(t *testing.T) {
 	numSells = 50
 	feedPeriod = 500 * time.Millisecond
 	initialize := false
-	register := false
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true

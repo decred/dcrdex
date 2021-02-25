@@ -119,6 +119,7 @@ type tRPCClient struct {
 	mpVerboseTxs  map[string]*btcjson.TxRawResult
 	rawVerboseErr error
 	lockedCoins   []*RPCOutpoint
+	estFeeErr     error
 }
 
 func newTRPCClient() *tRPCClient {
@@ -140,6 +141,9 @@ func newTRPCClient() *tRPCClient {
 }
 
 func (c *tRPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
+	if c.estFeeErr != nil {
+		return nil, c.estFeeErr
+	}
 	optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
 	//fmt.Println((float64(optimalFeeRate) * 1e-5) - optimalRate)
 	//fmt.Println(uint64(math.Round(feefloat * 1e5)))
@@ -581,7 +585,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 	node.rawRes[methodLockUnspent] = []byte(`true`)
 
-	// Fund a little bit, with unsafe littleOrder.
+	// Fund a little bit, with unsafe littleUTXO.
 	littleUTXO.Safe = false
 	littleUTXO.Confirmations = 0
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -844,26 +848,34 @@ func TestFundingCoins(t *testing.T) {
 	ensureGood()
 }
 
-func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estFees, locked uint64) {
+func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
 	maxOrder, err := wallet.MaxOrder(tBTC.LotSize, tBTC)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
-	if maxOrder.Lots != lots {
-		t.Fatalf("MaxOrder has wrong Lots. wanted %d, got %d", lots, maxOrder.Lots)
+	checkSwapEstimate(t, maxOrder, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
+}
+
+func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+	t.Helper()
+	if est.Lots != lots {
+		t.Fatalf("Estimate has wrong Lots. wanted %d, got %d", lots, est.Lots)
 	}
-	if maxOrder.Value != swapVal {
-		t.Fatalf("MaxOrder has wrong Value. wanted %d, got %d", swapVal, maxOrder.Value)
+	if est.Value != swapVal {
+		t.Fatalf("Estimate has wrong Value. wanted %d, got %d", swapVal, est.Value)
 	}
-	if maxOrder.MaxFees != maxFees {
-		t.Fatalf("MaxOrder has wrong MaxFees. wanted %d, got %d", maxFees, maxOrder.MaxFees)
+	if est.MaxFees != maxFees {
+		t.Fatalf("Estimate has wrong MaxFees. wanted %d, got %d", maxFees, est.MaxFees)
 	}
-	if maxOrder.EstimatedFees != estFees {
-		t.Fatalf("MaxOrder has wrong EstimatedFees. wanted %d, got %d", estFees, maxOrder.EstimatedFees)
+	if est.RealisticWorstCase != estWorstCase {
+		t.Fatalf("Estimate has wrong RealisticWorstCase. wanted %d, got %d", estWorstCase, est.RealisticWorstCase)
 	}
-	if maxOrder.Locked != locked {
-		t.Fatalf("MaxOrder has wrong Locked. wanted %d, got %d", locked, maxOrder.Locked)
+	if est.RealisticBestCase != estBestCase {
+		t.Fatalf("Estimate has wrong RealisticBestCase. wanted %d, got %d", estBestCase, est.RealisticBestCase)
+	}
+	if est.Locked != locked {
+		t.Fatalf("Estimate has wrong Locked. wanted %d, got %d", locked, est.Locked)
 	}
 }
 
@@ -875,8 +887,9 @@ func TestFundEdges(t *testing.T) {
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
 
-	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
-		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)
+	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+		t.Helper()
+		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
 	}
 
 	// Base Fees
@@ -889,11 +902,11 @@ func TestFundEdges(t *testing.T) {
 	// swap_size_base: 76 bytes (225 - 149 p2pkh input) (InitTxSizeBase)
 	// lot_size: 1e6
 	// swap_value: 1e7
-	// lots = swap_size / lot_size = 10
+	// lots = swap_value / lot_size = 10
 	//   total_bytes = first_swap_size + chained_swap_sizes
 	//   chained_swap_sizes = (lots - 1) * swap_size
 	//   first_swap_size = swap_size_base + backing_bytes
-	//   total_bytes  = swap_size_base + backing_bytes + (lots - 1) * swap_size
+	//   total_bytes = swap_size_base + backing_bytes + (lots - 1) * swap_size
 	//   base_tx_bytes = total_bytes - backing_bytes
 	// base_tx_bytes = (lots - 1) * swap_size + swap_size_base = 9 * 225 + 76 = 2101
 	// base_fees = base_tx_bytes * fee_rate = 2101 * 34 = 71434
@@ -901,9 +914,13 @@ func TestFundEdges(t *testing.T) {
 	// backing_fees: 149 * fee_rate(34 atoms/byte) = 5066 atoms
 	// total_bytes  = base_tx_bytes + backing_bytes = 2101 + 149 = 2250
 	// total_fees: base_fees + backing_fees = 71434 + 5066 = 76500 atoms
-	//          OR total_bytes * fee_rate = 2510 * 34 = 76500
+	//          OR total_bytes * fee_rate = 2250 * 34 = 76500
+	// base_best_case_bytes = swap_size_base + (lots - 1) * swap_output_size (P2SHOutputSize) + backing_bytes
+	//                      = 76 + 9*32 + 149 = 513
 	const swapSize = 225
 	const totalBytes = 2250
+	const bestCaseBytes = 513
+	const swapOutputSize = 32                           // (P2SHOutputSize)
 	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2pkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
@@ -925,7 +942,8 @@ func TestFundEdges(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * estFeeRate
-	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
+	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction,
+		(bestCaseBytes-swapOutputSize)*estFeeRate, swapVal+backingFees-1)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -935,7 +953,7 @@ func TestFundEdges(t *testing.T) {
 	p2pkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, swapVal+backingFees)
+	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, bestCaseBytes*estFeeRate, swapVal+backingFees)
 
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -967,7 +985,7 @@ func TestFundEdges(t *testing.T) {
 	p2pkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggage)*estFeeRate, v)
+	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggage)*estFeeRate, (bestCaseBytes+splitTxBaggage)*estFeeRate, v)
 
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1087,8 +1105,9 @@ func TestFundEdgesSegwit(t *testing.T) {
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRateWithFallback
 
-	checkMax := func(lots, swapVal, maxFees, estFees, locked uint64) {
-		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estFees, locked)
+	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+		t.Helper()
+		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
 	}
 
 	// Base Fees
@@ -1113,8 +1132,12 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// total_bytes  = base_tx_bytes + backing_bytes = 1461 + 69 = 1530
 	// total_fees: base_fees + backing_fees = 49674 + 2346 = 52020 atoms
 	//          OR total_bytes * fee_rate = 1530 * 34 = 52020
+	// base_best_case_bytes = swap_size_base + (lots - 1) * swap_output_size (P2SHOutputSize) + backing_bytes
+	//                      = 84 + 9*43 + 69 = 540
 	const swapSize = 153
 	const totalBytes = 1530
+	const bestCaseBytes = 540
+	const swapOutputSize = 43                           // (P2WSHOutputSize)
 	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2wpkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
@@ -1136,7 +1159,8 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * estFeeRate
-	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction, swapVal+backingFees-1)
+	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*estFeeRate-estFeeReduction,
+		(bestCaseBytes-swapOutputSize)*estFeeRate, swapVal+backingFees-1)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -1146,7 +1170,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, swapVal+backingFees)
+	checkMax(lots, swapVal, backingFees, totalBytes*estFeeRate, bestCaseBytes*estFeeRate, swapVal+backingFees)
 
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1176,7 +1200,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	p2wpkhUnspent.Amount = float64(v) / 1e8
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggageSegwit)*estFeeRate, v)
+	checkMax(lots, swapVal, backingFees, (totalBytes+splitTxBaggageSegwit)*estFeeRate, (bestCaseBytes+splitTxBaggageSegwit)*estFeeRate, v)
 
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1366,7 +1390,11 @@ func testRedeem(t *testing.T, segwit bool) {
 	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
-	_, _, feesPaid, err := wallet.Redeem([]*asset.Redemption{redemption})
+	redemptions := &asset.RedeemForm{
+		Redemptions: []*asset.Redemption{redemption},
+	}
+
+	_, _, feesPaid, err := wallet.Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
@@ -1379,7 +1407,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// No audit info
 	redemption.Spends = nil
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for nil AuditInfo")
 	}
@@ -1387,7 +1415,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// Spoofing AuditInfo is not allowed.
 	redemption.Spends = &TAuditInfo{}
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
@@ -1395,7 +1423,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
@@ -1403,7 +1431,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// too low of value
 	ci.output.value = 200
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
@@ -1411,7 +1439,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// Change address error
 	node.rawErr[methodChangeAddress] = tErr
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for change address error")
 	}
@@ -1419,7 +1447,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// Missing priv key error
 	node.rawErr[methodPrivKeyForAddress] = tErr
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
@@ -1427,7 +1455,7 @@ func testRedeem(t *testing.T, segwit bool) {
 
 	// Send error
 	node.sendErr = tErr
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for send error")
 	}
@@ -1437,7 +1465,7 @@ func testRedeem(t *testing.T, segwit bool) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.sendHash = &h
-	_, _, _, err = wallet.Redeem([]*asset.Redemption{redemption})
+	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
@@ -2205,4 +2233,113 @@ func TestSyncStatus(t *testing.T) {
 	if progress > 0.500001 || progress < 0.4999999 {
 		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
 	}
+}
+
+func TestPreSwap(t *testing.T) {
+	wallet, node, shutdown := tNewWallet(false)
+	defer shutdown()
+	// See math from TestFundEdges. 10 lots with max fee rate of 34 sats/vbyte.
+
+	swapVal := uint64(1e7)
+	lots := swapVal / tBTC.LotSize // 10 lots
+
+	const swapSize = 225
+	const totalBytes = 2250
+	const bestCaseBytes = 513
+	var estFeeRate = optimalFeeRate + 1 // +1 added in feeRate
+
+	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
+
+	minReq := swapVal + backingFees
+
+	p2pkhUnspent := &ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tP2PKHAddr,
+		Confirmations: 5,
+		ScriptPubKey:  tP2PKH,
+		Spendable:     true,
+		Solvable:      true,
+		Safe:          true,
+	}
+	unspents := []*ListUnspentResult{p2pkhUnspent}
+
+	setFunds := func(v uint64) {
+		p2pkhUnspent.Amount = float64(v) / 1e8
+		node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	}
+
+	form := &asset.PreSwapForm{
+		LotSize:     tBTC.LotSize,
+		Lots:        lots,
+		AssetConfig: tBTC,
+		Immediate:   false,
+	}
+
+	setFunds(minReq)
+
+	// Initial success.
+	preSwap, err := wallet.PreSwap(form)
+	if err != nil {
+		t.Fatalf("PreSwap error: %v", err)
+	}
+
+	maxFees := totalBytes * tBTC.MaxFeeRate
+	estHighFees := totalBytes * estFeeRate
+	estLowFees := bestCaseBytes * estFeeRate
+	checkSwapEstimate(t, preSwap.Estimate, lots, swapVal, maxFees, estHighFees, estLowFees, minReq)
+
+	// Too little funding is an error.
+	setFunds(minReq - 1)
+	_, err = wallet.PreSwap(form)
+	if err == nil {
+		t.Fatalf("no PreSwap error for not enough funds")
+	}
+	setFunds(minReq)
+
+	node.estFeeErr = tErr
+	_, err = wallet.PreSwap(form)
+	if err == nil {
+		t.Fatalf("no PreSwap error for estimatesmartfee error")
+	}
+	node.estFeeErr = nil
+
+	// Success again.
+	_, err = wallet.PreSwap(form)
+	if err != nil {
+		t.Fatalf("PreSwap error: %v", err)
+	}
+}
+
+func TestPreRedeem(t *testing.T) {
+	wallet, _, shutdown := tNewWallet(false)
+	defer shutdown()
+
+	nonSegRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
+		LotSize: 123456, // Doesn't actually matter
+		Lots:    5,
+	})
+	// Shouldn't actually be any path to error.
+	if err != nil {
+		t.Fatalf("PreRedeem non-segwit error: %v", err)
+	}
+
+	wallet.segwit = true
+
+	segwitRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
+		LotSize: 123456,
+		Lots:    5,
+	})
+	if err != nil {
+		t.Fatalf("PreRedeem segwit error: %v", err)
+	}
+
+	// Just a couple of sanity checks.
+	if nonSegRedeem.Estimate.RealisticBestCase >= nonSegRedeem.Estimate.RealisticWorstCase {
+		t.Fatalf("best case > worst case")
+	}
+
+	if segwitRedeem.Estimate.RealisticWorstCase >= nonSegRedeem.Estimate.RealisticWorstCase {
+		t.Fatalf("segwit > non-segwit")
+	}
+
 }
