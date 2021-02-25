@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package btc
 
 import (
@@ -31,6 +34,14 @@ type RawRequester interface {
 type rpcClient struct {
 	ctx       context.Context
 	requester RawRequester
+}
+
+// New creates new rpcClient and returns it's pointer.
+func New(ctx context.Context, client RawRequester) *rpcClient {
+	return &rpcClient{
+		ctx:       ctx,
+		requester: client,
+	}
 }
 
 func (rc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {

@@ -72,7 +72,7 @@ type Backend struct {
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
 	segwit bool
-	// node is used throughout for RPC call. For testing, it can be set to a stub.
+	// node is used throughout for RPC calls. For testing, it can be set to a stub.
 	node *rpcClient
 	// The block cache stores just enough info about the blocks to shortcut future
 	// calls to GetBlockVerbose.
@@ -198,10 +198,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error creating %q RPC client: %w", btc.name, err)
 	}
 
-	btc.node = &rpcClient{
-		ctx:       ctx,
-		requester: client,
-	}
+	btc.node = New(ctx, client)
 
 	// Prime the cache
 	bestHash, err := btc.node.GetBestBlockHash()
