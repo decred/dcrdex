@@ -175,6 +175,9 @@ export class DepthChart {
   // 6. Epoch line legend.
   // 7. Hover legend.
   draw () {
+    // if connection fails it is not possible to get book.
+    if (!this.book) return
+
     this.clear()
     // if (!this.book || this.book.empty()) return
 

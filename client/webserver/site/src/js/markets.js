@@ -62,7 +62,7 @@ export default class MarketsPage extends BasePage {
       // Chart and legend
       'marketChart', 'chartResizer', 'sellBookedBase', 'sellBookedQuote',
       'buyBookedBase', 'buyBookedQuote', 'hoverData', 'hoverPrice',
-      'hoverVolume', 'chartLegend',
+      'hoverVolume', 'chartLegend', 'chartErrMsg',
       // Max order section
       'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
       'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
@@ -349,6 +349,7 @@ export default class MarketsPage extends BasePage {
 
     // set the initial state for the registration status
     this.setRegistrationStatusVisibility()
+    this.setBalanceVisibility()
   }
 
   /* isSell is true if the user has selected sell in the order options. */
@@ -476,6 +477,10 @@ export default class MarketsPage extends BasePage {
     const { confs, confsrequired } = dex
     const feePending = this.hasFeePending()
 
+    // If dex is not connected to server, is not possible to know fee
+    // registration status.
+    if (!dex.connected) return
+
     this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
 
     if (feePending) {
@@ -504,6 +509,17 @@ export default class MarketsPage extends BasePage {
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
+    if (!dex.connected) {
+      this.market = { dex: dex }
+      this.page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
+        'You can close dexc and try again later or wait for it to reconnect.'
+      Doc.show(this.page.chartErrMsg)
+      this.loaded()
+      this.main.style.opacity = 1
+      Doc.hide(this.page.marketLoader)
+      return
+    }
+
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
     Doc.hide(this.page.maxOrd)
@@ -1226,8 +1242,22 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  setBalanceVisibility () {
+    if (this.market.dex.connected) {
+      Doc.show(this.page.balanceTable)
+      Doc.show(this.page.orderForm)
+    } else {
+      Doc.hide(this.page.balanceTable)
+      Doc.hide(this.page.orderForm)
+    }
+  }
+
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
+    this.setBalanceVisibility()
+    // if connection to dex server fails, it is not possible to retrieve
+    // markets.
+    if (!this.market.dex.connected) return
     this.balanceWgt.updateAsset(note.assetID)
     // If there's a balance update, refresh the max order section.
     const mkt = this.market
@@ -1612,6 +1642,8 @@ class MarketList {
   first () {
     const firstXC = this.sortedSections()[0]
     const firstMkt = firstXC.first()
+    // Cannot find markets if server connection failed.
+    if (!firstMkt) return makeMarket(firstXC.host)
     return makeMarket(firstXC.host, firstMkt.baseID, firstMkt.quoteID)
   }
 
@@ -1657,10 +1689,12 @@ class ExchangeSection {
     this.rows = Doc.tmplElement(box, 'mkts')
     const rowTmpl = Doc.tmplElement(this.rows, 'mktrow')
     this.rows.removeChild(rowTmpl)
+    // If disconnected is not possible to get the markets from the server.
+    if (!dex.markets) return
+
     for (const mkt of Object.values(dex.markets)) {
       this.marketRows.push(new MarketRow(rowTmpl, mkt))
     }
-
     for (const market of this.sortedMarkets()) {
       this.rows.appendChild(market.row)
     }

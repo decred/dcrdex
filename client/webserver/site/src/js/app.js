@@ -496,6 +496,8 @@ export default class Application {
         break
       case 'walletstate':
       case 'walletconfig': {
+        // assets can be null if failed to connect to dex server.
+        if (!this.assets) return
         const wallet = note.wallet
         this.assets[wallet.assetID].wallet = wallet
         this.walletMap[wallet.assetID] = wallet
@@ -508,6 +510,8 @@ export default class Application {
         if (ord) updateMatch(ord, note.match)
         break
       }
+      case 'conn':
+        this.reconnected()
     }
 
     // Inform the page.
