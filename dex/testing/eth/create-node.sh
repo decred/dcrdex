@@ -31,6 +31,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 # Write mine script.
 cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
 #!/bin/sh
+  NUM=1
   case \$1 in
       ''|*[!0-9]*)  ;;
       *) NUM=\$1 ;;
