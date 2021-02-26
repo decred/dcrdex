@@ -1,25 +1,20 @@
 const { merge } = require('webpack-merge')
 const common = require('./common.js')
-const TerserPlugin = require('terser-webpack-plugin')
-const OptimizeCSSAssetsPlugin = require('optimize-css-assets-webpack-plugin')
+const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
+const ESLintPlugin = require('eslint-webpack-plugin')
 
 module.exports = merge(common, {
   mode: 'production',
   devtool: 'source-map',
+  plugins: [new ESLintPlugin({
+    formatter: 'stylish'
+  })],
   optimization: {
     usedExports: true,
     minimize: true,
     minimizer: [
-      new TerserPlugin({
-        terserOptions: {
-          cache: true,
-          keep_fnames: true,
-          output: {comments: false},
-          parallel: true,
-          sourceMap: true,
-        },
-      }),
-      new OptimizeCSSAssetsPlugin({})
+      `...`, // extend webpack 5's TerserPlugin
+      new CssMinimizerPlugin({})
     ]
   },
   module: {
@@ -39,14 +34,6 @@ module.exports = merge(common, {
               ]
             ]
           }
-        }
-      },
-      {
-        test: /\.js$/,
-        exclude: /node_modules/,
-        loader: 'eslint-loader',
-        options: {
-          formatter: 'stylish'
         }
       }
     ]

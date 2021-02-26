@@ -6,6 +6,7 @@ export async function requestJSON (method, addr, reqBody) {
     const response = await window.fetch(addr, {
       method: method,
       headers: new window.Headers({ 'content-type': 'application/json' }),
+      // credentials: "same-origin",
       body: reqBody
     })
     if (response.status !== 200) { throw response }

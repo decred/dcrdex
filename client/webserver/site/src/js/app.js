@@ -8,7 +8,6 @@ import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
 import { getJSON, postJSON } from './http'
-import commitHash from 'commitHash'
 import * as ntfn from './notifications'
 import ws from './ws'
 
@@ -47,7 +46,7 @@ export default class Application {
       accounts: {},
       wallets: {}
     }
-    this.commitHash = commitHash
+    this.commitHash = process.env.COMMITHASH
     this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 

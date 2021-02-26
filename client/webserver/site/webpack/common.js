@@ -1,18 +1,16 @@
 const path = require('path')
+const webpack = require('webpack')
 const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
-const GitRevisionPlugin = require('git-revision-webpack-plugin')
+
+const child_process = require('child_process')
+function git(command) {
+  return child_process.execSync(`git ${command}`, { encoding: 'utf8' }).trim();
+}
 
 module.exports = {
-  entry: {
-    app: './src/index.js'
-  },
-  optimization: {
-    splitChunks: {
-      chunks: 'all'
-    }
-  },
+  target: "web",
   module: {
     rules: [
       {
@@ -30,6 +28,7 @@ module.exports = {
           {
             loader: 'sass-loader',
             options: {
+              implementation: require("sass"), // dart-sass
               sourceMap: true
             }
           }
@@ -38,6 +37,9 @@ module.exports = {
     ]
   },
   plugins: [
+    new webpack.EnvironmentPlugin({
+      COMMITHASH: git('rev-parse HEAD'),
+    }),
     new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'
@@ -53,8 +55,5 @@ module.exports = {
   // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324
   watchOptions: {
     poll: true
-  },
-  externals: {
-    commitHash: JSON.stringify(new GitRevisionPlugin().commithash())
   }
 }
