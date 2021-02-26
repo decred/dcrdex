@@ -23,14 +23,14 @@ mkdir -p "${NODE_DIR}"
 
 # Write node ctl script.
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
 # Write mine script.
 cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
   NUM=1
   case \$1 in
       ''|*[!0-9]*)  ;;

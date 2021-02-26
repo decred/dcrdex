@@ -84,7 +84,7 @@ cp "${HARNESS_DIR}/create-node.sh" "${NODES_ROOT}/harness-ctl/create-node"
 
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux kill-session
