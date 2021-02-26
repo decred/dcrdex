@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Tmux script that sets up a simnet harness.
 set -ex
 
@@ -96,7 +96,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/quit"
 ################################################################################
 
 echo "Starting harness"
-tmux new-session -d -s $SESSION
+tmux new-session -d -s $SESSION "${SHELL}"
 tmux rename-window -t $SESSION:0 'harness-ctl'
 tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m

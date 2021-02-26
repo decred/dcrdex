@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Script for creating eth nodes.
 set -e
 
@@ -80,11 +80,11 @@ NoDiscovery = true
 BootstrapNodes = []
 BootstrapNodesV5 = []
 ListenAddr = ":${NODE_PORT}"
-NetRestrict = [ "127.0.0.1/32" ]
+NetRestrict = [ "127.0.0.1/8", "::1/128" ]
 EOF
 
 # Create a tmux window.
-tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}"
+tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}" "${SHELL}"
 tmux send-keys -t "$TMUX_WIN_ID" "set +o history" C-m
 tmux send-keys -t "$TMUX_WIN_ID" "cd ${NODE_DIR}" C-m
 
