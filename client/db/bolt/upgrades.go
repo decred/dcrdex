@@ -26,6 +26,10 @@ var upgrades = [...]upgradefunc{
 	v2Upgrade,
 	// v2 => v3 adds a tx data field to the match proof.
 	v3Upgrade,
+	// v3 => v4 saves the retirement status for all existing matches, providing
+	// a more straightforward way of determining if a match is retired without
+	// performing extensive checks on the match.
+	v4Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -244,6 +248,45 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 			return fmt.Errorf("error re-storing match proof: %w", err)
 		}
 		return nil
+	})
+}
+
+// v4Upgrade saves the retirement status for all existing matches, providing
+// a more straightforward way of determining if a match is retired without
+// performing extensive checks on the match.
+func v4Upgrade(tx *bbolt.Tx) error {
+	const oldVersion = 3
+	if err := ensureVersion(tx, oldVersion); err != nil {
+		return err
+	}
+
+	matches := tx.Bucket(matchesBucket)
+	return matches.ForEach(func(k, _ []byte) error {
+		mBkt := matches.Bucket(k)
+		if mBkt == nil {
+			return fmt.Errorf("match %x bucket is not a bucket", k)
+		}
+		matchB := getCopy(mBkt, matchKey)
+		if matchB == nil {
+			return fmt.Errorf("nil match bytes for %x", k)
+		}
+		match, err := order.DecodeMatch(matchB)
+		if err != nil {
+			return fmt.Errorf("error decoding match %x: %w", k, err)
+		}
+		proofB := getCopy(mBkt, proofKey)
+		if len(proofB) == 0 {
+			return fmt.Errorf("empty proof")
+		}
+		proof, _, err := dexdb.DecodeMatchProof(proofB)
+		if err != nil {
+			return fmt.Errorf("error decoding proof: %w", err)
+		}
+		retired := encode.ByteFalse
+		if isRetiredMatch(match, proof) {
+			retired = encode.ByteTrue
+		}
+		return mBkt.Put(retiredKey, retired)
 	})
 }
 
