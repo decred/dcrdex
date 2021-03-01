@@ -435,7 +435,8 @@ table.balance-table button:hover {
     }
 
     .ico-arrowdown {
-      display: none;
+      display: inline-block;
+      visibility: hidden;
       vertical-align: middle;
       font-size: 10px;
       margin-left: 5px;
@@ -443,13 +444,13 @@ table.balance-table button:hover {
 
     &.sorted-dsc {
       .ico-arrowdown {
-        display: inline-block;
+        visibility: visible;
       }
     }
 
     &.sorted-asc {
       .ico-arrowdown {
-        display: inline-block;
+        visibility: visible;
         transform: rotate(180deg);
       }
     }
