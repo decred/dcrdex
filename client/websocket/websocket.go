@@ -253,7 +253,7 @@ out:
 			}
 			err = m.cl.Send(note)
 			if err != nil {
-				m.log.Debug("send error. ending market feed: %v", err)
+				m.log.Debugf("send error. ending market feed: %v", err)
 				break out
 			}
 		case <-ctx.Done():

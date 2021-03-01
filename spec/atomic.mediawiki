@@ -66,7 +66,7 @@ within a specified amount of time.
 
 Before Alice can '''prepare her initialization transaction''', she must generate
 a key known only to herself.
-From the key, Alice generates a &#x201C;lock&#x201D; and constructs an swap contract
+From the key, Alice generates a &#x201C;lock&#x201D; and constructs a swap contract
 such that if someone can provide both Alice&#x2019;s key and the pubkey for Bob&#x2019;s
 specified address, they can spend the output.
 In practice, the key is simply a random 32-byte sequence, and the lock is its
