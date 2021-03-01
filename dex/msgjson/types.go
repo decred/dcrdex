@@ -470,7 +470,10 @@ type MatchStatusResult struct {
 	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
 	Secret        Bytes `json:"secret,omitempty"`
 	Active        bool  `json:"active"`
-	TxData        Bytes `json:"txdata,omitempty"`
+	// MakerTxData and TakerTxData will only be populated by the server when the
+	// match status is MakerSwapCast and TakerSwapCast, respectively.
+	MakerTxData Bytes `json:"makertx,omitempty"`
+	TakerTxData Bytes `json:"takertx,omitempty"`
 }
 
 // OrderStatusRequest details an order for the OrderStatusRoute request. The

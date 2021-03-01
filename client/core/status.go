@@ -191,13 +191,15 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		err = fmt.Errorf("Server is reporting a match with status MakerSwapCast, but didn't include the contract data. %s", logID)
 		return
 	}
-	if len(srvData.TxData) == 0 {
-		err = fmt.Errorf("Server is reporting a match in MakerSwapCast with no tx data. %s", logID)
-		return
-	}
+	// Will need careful handling of missing TxData when we have SPV wallets.
+	// See also TODO in resumeTrades.
+	// if len(srvData.MakerTxData) == 0 {
+	// 	err = fmt.Errorf("Server is reporting a match in MakerSwapCast with no tx data. %s", logID)
+	// 	return
+	// }
 
 	go func() {
-		err := trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract, srvData.TxData)
+		err := trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract, srvData.MakerTxData)
 		if err != nil {
 			dc.log.Errorf("auditContract error during match status resolution (revoking match). %s: %v", logID, err)
 			trade.mtx.Lock()
@@ -239,13 +241,15 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 		return
 	}
 
-	// len(srvData.TxData) == 0 {
+	// Will need careful handling of missing TxData when we have SPV wallets.
+	// See also TODO in resumeTrades.
+	// len(srvData.TakerTxData) == 0 {
 	// 	err = fmt.Errorf("Server is reporting a match in TakerSwapCast with no tx data. %s", logID)
 	// 	return
 	// }
 
 	go func() {
-		err := trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract, srvData.TxData)
+		err := trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract, srvData.TakerTxData)
 		if err != nil {
 			dc.log.Errorf("auditContract error during match status resolution (revoking match). %s: %v", logID, err)
 			trade.mtx.Lock()

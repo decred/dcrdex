@@ -3820,6 +3820,19 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				counterTxData := metaData.Proof.CounterTxData
 
+				// TODO: We will need careful handling here. To be clear, the
+				// client should reject orders at the funding stage when the
+				// server doesn't signal compatibility with the requisite
+				// protocols. e.g spv-compatibility. So if we version the api to
+				// version 1 to finalize spv-compatibility, all wallets'
+				// FundOrder methods should check the API version to determine
+				// compatiblity. The wallets should also signal API
+				// compatibility to Core somehow to determine which markets to
+				// display, but ultimate responsibility for enforcement should
+				// fall on the wallet.
+				//
+				// Regardless, deferring on this to https://github.com/decred/dcrdex/pull/788.
+				//
 				// if len(counterTxData) == 0 {
 				// 	match.swapErr = fmt.Errorf("missing counter-tx-data, order %s, match %s", tracker.ID(), match.id)
 				// 	notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap tx data.", dbMatch.Side, tracker.token(), dbMatch.Status)

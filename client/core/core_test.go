@@ -1750,7 +1750,7 @@ func TestLogin(t *testing.T) {
 			MakerContract: missedContract,
 			MakerSwap:     encode.RandomBytes(36),
 			Active:        true,
-			TxData:        []byte{0x01},
+			MakerTxData:   []byte{0x01},
 		}}, nil)
 		f(resp)
 		return nil
@@ -5431,7 +5431,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			tMatchResults.MakerSwap = tCoinID
 		}
 		if status == order.MakerSwapCast || status == order.TakerSwapCast {
-			tMatchResults.TxData = tTxData
+			tMatchResults.TakerTxData = tTxData
 		}
 		if status >= order.TakerSwapCast {
 			tMatchResults.TakerContract = tBytes

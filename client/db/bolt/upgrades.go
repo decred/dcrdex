@@ -120,7 +120,6 @@ func getVersionTx(tx *bbolt.Tx) (uint32, error) {
 
 func v1Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 0
-	const newVersion = 1
 
 	if err := ensureVersion(dbtx, oldVersion); err != nil {
 		return err
@@ -168,7 +167,6 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 
 func v3Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 2
-	const newVersion = 3
 
 	if err := ensureVersion(dbtx, oldVersion); err != nil {
 		return err

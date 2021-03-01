@@ -1570,21 +1570,21 @@ func TestMatchStatus(t *testing.T) {
 
 	// As taker in MakerSwapCast, we expect tx data.
 	status := getStatus()
-	if !bytes.Equal(status.TxData, tTxData) {
-		t.Fatalf("wrong maker tx data. exected %x, got %s", tTxData, status.TxData)
+	if !bytes.Equal(status.MakerTxData, tTxData) {
+		t.Fatalf("wrong maker tx data. exected %x, got %s", tTxData, status.MakerTxData)
 	}
 
 	// As maker, we don't expect any tx data.
 	rig.storage.matchStatuses[0].IsTaker = false
 	rig.storage.matchStatuses[0].IsMaker = true
-	if len(getStatus().TxData) != 0 {
+	if len(getStatus().TakerTxData) != 0 {
 		t.Fatalf("got tx data as maker in MakerSwapCast")
 	}
 
 	// As maker in TakerSwapCast, we do expect tx data.
 	rig.storage.matchStatuses[0].Status = order.TakerSwapCast
 	rig.storage.matchStatuses[0].TakerSwap = []byte{0x01}
-	txData := getStatus().TxData
+	txData := getStatus().TakerTxData
 	if !bytes.Equal(txData, tTxData) {
 		t.Fatalf("wrong taker tx data. exected %x, got %s", tTxData, txData)
 	}
