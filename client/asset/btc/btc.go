@@ -30,6 +30,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/rpcclient/v6"
 )
 
@@ -576,6 +577,13 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
 	}
+	// Check for method unkown error for feeRate method.
+	_, err = btc.estimateFee(ctx, btc.node.requester, 1)
+	var rpcErr *dcrjson.RPCError
+	if errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCMethodNotFound.Code {
+		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
+	}
+
 	btc.tipMtx.Lock()
 	btc.currentTip, err = btc.blockFromHash(h.String())
 	btc.tipMtx.Unlock()

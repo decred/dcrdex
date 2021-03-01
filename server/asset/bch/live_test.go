@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"decred.org/dcrdex/dex"
@@ -41,11 +40,7 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		wg := new(sync.WaitGroup)
-		defer func() {
-			cancel()
-			wg.Wait()
-		}()
+		defer cancel()
 
 		logger := dex.StdOutLogger("BCHTEST", dex.LevelTrace)
 
@@ -63,15 +58,16 @@ func TestMain(m *testing.M) {
 		var ok bool
 		bch, ok = dexAsset.(*BCHBackend)
 		if !ok {
-			fmt.Printf("Could not cast asset.Backend to *Backend")
+			fmt.Printf("Could not cast asset.Backend to *BCHBackend")
 			return 1
 		}
 
-		wg, err = dexAsset.Connect(ctx)
+		wg, err := dexAsset.Connect(ctx)
 		if err != nil {
 			fmt.Printf("Connect failed: %v", err)
 			return 1
 		}
+		defer wg.Wait()
 
 		return m.Run()
 	}
