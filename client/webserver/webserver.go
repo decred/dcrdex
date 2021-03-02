@@ -92,6 +92,7 @@ type clientCore interface {
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AccountExport(pw []byte, host string) (*core.Account, error)
 	AccountImport(pw []byte, account core.Account) error
+	IsInitialized() (bool, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -235,6 +236,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/init", s.apiInit)
+		r.Get("/isinitialized", s.apiIsInitialized)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
