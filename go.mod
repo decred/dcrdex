@@ -24,6 +24,7 @@ require (
 	github.com/decred/dcrd/wire v1.4.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
+	github.com/ethereum/go-ethereum v1.9.25
 	github.com/gcash/bchd v0.17.2-0.20201218180520-5708823e0e99
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
 	github.com/go-chi/chi/v5 v5.0.1
