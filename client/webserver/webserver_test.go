@@ -60,6 +60,8 @@ type TCore struct {
 	loginErr        error
 	logoutErr       error
 	initErr         error
+	isInited        bool
+	isInitedErr     error
 	getFeeErr       error
 	createWalletErr error
 	openWalletErr   error
@@ -76,6 +78,7 @@ func (c *TCore) GetFee(string, interface{}) (uint64, error)                  { r
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) InitializeClient(pw []byte) error                            { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }
+func (c *TCore) IsInitialized() (bool, error)                                { return c.isInited, c.isInitedErr }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
 	return c.syncFeed, c.syncErr
 }
@@ -422,19 +425,34 @@ func TestAPIInit(t *testing.T) {
 	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
-	ensure := func(want string) {
-		ensureResponse(t, s.apiInit, want, reader, writer, body)
+	ensure := func(f func(http.ResponseWriter, *http.Request), want string) {
+		t.Helper()
+		ensureResponse(t, f, want, reader, writer, body)
 	}
+
+	body = struct{}{}
+
+	// IsInitialized error
+	tCore.isInitedErr = tErr
+	ensure(s.apiIsInitialized, fmt.Sprintf(`{"ok":false,"msg":"isinitialized error: %s"}`, tErr))
+	tCore.isInitedErr = nil
+
+	// Success but uninitialized
+	ensure(s.apiIsInitialized, `{"ok":true,"initialized":false}`)
+
+	// Now initialized
+	tCore.isInited = true
+	ensure(s.apiIsInitialized, `{"ok":true,"initialized":true}`)
 
 	goodBody := &loginForm{
 		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
-	ensure(`{"ok":true,"notes":null}`)
+	ensure(s.apiInit, `{"ok":true,"notes":null}`)
 
 	// Initialization error
 	tCore.initErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"initialization error: %s"}`, tErr))
+	ensure(s.apiInit, fmt.Sprintf(`{"ok":false,"msg":"initialization error: %s"}`, tErr))
 	tCore.initErr = nil
 }
 

@@ -275,6 +275,22 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
+// apiIsInitialized is the handler for the '/isinitialized' request.
+func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
+	inited, err := s.core.IsInitialized()
+	if err != nil {
+		s.writeAPIError(w, "isinitialized error: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK          bool `json:"ok"`
+		Initialized bool `json:"initialized"`
+	}{
+		OK:          true,
+		Initialized: inited,
+	}, s.indent)
+}
+
 // apiLogin handles the 'login' API request.
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)

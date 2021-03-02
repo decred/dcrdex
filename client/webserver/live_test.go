@@ -388,6 +388,7 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	return nil, nil
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
+func (c *TCore) IsInitialized() (bool, error)            { return true, nil }
 func (c *TCore) Logout() error                           { return nil }
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc"}
