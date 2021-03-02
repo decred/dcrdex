@@ -65,6 +65,8 @@ func loadConfig(configPath string, network dex.Network) (*config, error) {
 	// If no path provided, use default dcrd path.
 	if configPath == "" {
 		configPath = defaultConfigPath
+	} else {
+		defaultRPCCert = filepath.Join(filepath.Dir(configPath), "rpc.cert")
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
