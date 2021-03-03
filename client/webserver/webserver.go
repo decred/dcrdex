@@ -63,7 +63,7 @@ var (
 type clientCore interface {
 	websocket.Core
 	Network() dex.Network
-	Exchanges() map[string]*core.Exchange
+	// Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error

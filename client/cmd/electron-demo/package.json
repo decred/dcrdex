@@ -1,0 +1,18 @@
+{
+  "name": "electron-demo",
+  "version": "1.0.0",
+  "description": "Demo of Electron App using with DEX Core Library",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "Brian Stafford",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^12.0.0",
+    "electron-rebuild": "^2.3.5",
+    "node-gyp": "^7.1.2"
+  }
+}
