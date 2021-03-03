@@ -44,9 +44,9 @@ func (c *Core) AccountDisable(pw []byte, host string) error {
 	if err != nil {
 		return newError(accountDisableErr, "Error disabling account: %v", err)
 	}
-	// Stop dexConnection books.
-	for _, market := range dc.marketMap() {
-		dc.stopBook(market.BaseID, market.QuoteID)
+	// Close dexConnection books.
+	for _, book := range dc.books {
+		book.close()
 	}
 	// Disconnect and delete connection from map.
 	dc.connMaster.Disconnect()

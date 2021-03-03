@@ -194,7 +194,11 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(dc.log.SubLogger(mktID), func() { dc.stopBook(base, quote) })
+		booky = newBookie(dc.log.SubLogger(mktID), func() {
+			if _, found := dc.books[mktID]; found {
+				dc.stopBook(base, quote)
+			}
+		})
 		err = booky.Sync(obRes)
 		if err != nil {
 			return nil, err
