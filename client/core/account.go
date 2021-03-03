@@ -44,10 +44,20 @@ func (c *Core) AccountDisable(pw []byte, host string) error {
 	if err != nil {
 		return newError(accountDisableErr, "Error disabling account: %v", err)
 	}
-	// Close dexConnection books.
-	for _, book := range dc.books {
-		book.close()
+	// Stop dexConnection books.
+	dc.cfgMtx.RLock()
+	for _, m := range dc.cfg.Markets {
+		// Emptry bookie's feeds map & stop close timers.
+		dc.booksMtx.Lock()
+		if b, found := dc.books[m.Name]; found {
+			b.feeds = make(map[uint32]*BookFeed, 1)
+			b.closeTimer.Stop()
+		}
+		dc.booksMtx.Unlock()
+
+		dc.stopBook(m.Base, m.Quote)
 	}
+	dc.cfgMtx.RUnlock()
 	// Disconnect and delete connection from map.
 	dc.connMaster.Disconnect()
 	delete(c.conns, addr)
