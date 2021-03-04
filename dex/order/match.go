@@ -194,13 +194,15 @@ func (m *UserMatch) String() string {
 
 // A constructor for a Match with Status = NewlyMatched. This is the preferred
 // method of making a Match, since it pre-calculates and caches the match ID.
-func newMatch(taker Order, maker *LimitOrder, qty, rate uint64, epochID EpochID) *Match {
+func newMatch(taker Order, maker *LimitOrder, qty, rate, feeRateBase, feeRateQuote uint64, epochID EpochID) *Match {
 	m := &Match{
-		Taker:    taker,
-		Maker:    maker,
-		Quantity: qty,
-		Rate:     rate,
-		Epoch:    epochID,
+		Taker:        taker,
+		Maker:        maker,
+		Quantity:     qty,
+		Rate:         rate,
+		Epoch:        epochID,
+		FeeRateBase:  feeRateBase,
+		FeeRateQuote: feeRateQuote,
 	}
 	// Pre-cache the ID.
 	m.ID()
@@ -230,19 +232,21 @@ func (match *Match) ID() MatchID {
 // corresponding Maker order, indicating a partial fill of the Maker. The sum
 // of the amounts, Total, is provided for convenience.
 type MatchSet struct {
-	Epoch   EpochID
-	Taker   Order
-	Makers  []*LimitOrder
-	Amounts []uint64
-	Rates   []uint64
-	Total   uint64
+	Epoch        EpochID
+	Taker        Order
+	Makers       []*LimitOrder
+	Amounts      []uint64
+	Rates        []uint64
+	Total        uint64
+	FeeRateBase  uint64
+	FeeRateQuote uint64
 }
 
 // Matches converts the MatchSet to a []*Match.
 func (set *MatchSet) Matches() []*Match {
 	matches := make([]*Match, 0, len(set.Makers))
 	for i, maker := range set.Makers {
-		match := newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i], set.Epoch)
+		match := newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i], set.FeeRateBase, set.FeeRateQuote, set.Epoch)
 		matches = append(matches, match)
 	}
 	return matches

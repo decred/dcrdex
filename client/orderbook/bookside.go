@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/order"
 )
 
 // orderPreference represents ordering preference for a sort.
@@ -110,21 +109,20 @@ func (d *bookSide) Remove(order *Order) error {
 	return fmt.Errorf("order %s not found", order.OrderID)
 }
 
-// UpdateRemaining updates the remaining quantity for an order. If the order is
-// found it will be returned, else nil.
-func (d *bookSide) UpdateRemaining(oid order.OrderID, remaining uint64) *Order {
+// ReplaceOrder replaces the order with the matching ID with a new version.
+func (d *bookSide) ReplaceOrder(ord *Order) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
+	oid := ord.OrderID
 	for _, bin := range d.bins {
-		for _, ord := range bin {
-			if ord.OrderID == oid {
-				ord.Quantity = remaining
-				return ord
+		for i := range bin {
+			if bin[i].OrderID == oid {
+				bin[i] = ord
+				return
 			}
 		}
 	}
-	return nil
 }
 
 // orders is all orders for the side, sorted.

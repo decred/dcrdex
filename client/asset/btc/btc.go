@@ -733,14 +733,20 @@ func (a amount) String() string {
 
 // feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
-func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
+func (btc *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, confTarget)
-	if err != nil {
-		feeRate = btc.fallbackFeeRate
-		btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
-			btc.fallbackFeeRate, err)
+	if err == nil {
+		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		return feeRate
 	}
-	return feeRate
+	if feeSuggestion > 0 && feeSuggestion < btc.fallbackFeeRate && feeSuggestion < btc.feeRateLimit {
+		btc.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
+			confTarget, feeSuggestion, err)
+		return feeSuggestion
+	}
+	btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
+		btc.fallbackFeeRate, err)
+	return btc.fallbackFeeRate
 }
 
 // MaxOrder generates information about the maximum order size and associated
@@ -748,29 +754,25 @@ func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
-func (btc *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	_, _, maxEst, err := btc.maxOrder(lotSize, nfo)
+func (btc *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+	_, maxEst, err := btc.maxOrder(lotSize, feeSuggestion, nfo)
 	return maxEst, err
 }
 
 // maxOrder gets the estimate for MaxOrder, and also returns the
 // []*compositeUTXO to be used for further order estimation without additional
 // calls to listunspent.
-func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, feeRate uint64, est *asset.SwapEstimate, err error) {
-	networkFeeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, 1)
-	if err != nil {
-		return nil, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
-	}
+func (btc *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
 	btc.fundingMtx.RLock()
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	btc.fundingMtx.RUnlock()
 	if err != nil {
-		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
+		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
 	// Start by attempting max lots with no fees.
 	lots := avail / lotSize
 	for lots > 0 {
-		est, _, err := btc.estimateSwap(lots, lotSize, networkFeeRate, utxos, nfo, btc.useSplitTx)
+		est, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, btc.useSplitTx)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -778,9 +780,9 @@ func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*co
 			lots--
 			continue
 		}
-		return utxos, networkFeeRate, est, nil
+		return utxos, est, nil
 	}
-	return utxos, networkFeeRate, &asset.SwapEstimate{}, nil
+	return utxos, &asset.SwapEstimate{}, nil
 }
 
 // PreSwap get order estimates based on the available funds and the wallet
@@ -793,7 +795,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	// The utxo set is only used once right now, but when order-time options are
 	// implemented, the utxos will be used to calculate option availability and
 	// fees.
-	utxos, feeRate, maxEst, err := btc.maxOrder(req.LotSize, req.AssetConfig)
+	utxos, maxEst, err := btc.maxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -802,7 +804,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	// Get the estimate for the requested number of lots.
-	est, _, err := btc.estimateSwap(req.Lots, req.LotSize, feeRate, utxos, req.AssetConfig, btc.useSplitTx)
+	est, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, btc.useSplitTx)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
 	}
@@ -813,7 +815,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
-func (btc *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, utxos []*compositeUTXO,
+func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos []*compositeUTXO,
 	nfo *dex.Asset, trySplit bool) (*asset.SwapEstimate, bool /*split used*/, error) {
 
 	var avail uint64
@@ -831,14 +833,14 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, ut
 	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
 	maxFees := reqFunds - val
 
-	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, feeSuggestion)
 	estHighFees := estHighFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, networkFeeRate)
+	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, feeSuggestion)
 	if btc.segwit {
-		estLowFunds += dexbtc.P2WSHOutputSize * (lots - 1) * networkFeeRate
+		estLowFunds += dexbtc.P2WSHOutputSize * (lots - 1) * feeSuggestion
 	} else {
-		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * networkFeeRate
+		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * feeSuggestion
 	}
 
 	estLowFees := estLowFunds - val
@@ -846,7 +848,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, ut
 	// Math for split transactions is a little different.
 	if trySplit {
 		_, extraMaxFees := btc.splitBaggageFees(nfo.MaxFeeRate)
-		_, splitFees := btc.splitBaggageFees(networkFeeRate)
+		_, splitFees := btc.splitBaggageFees(feeSuggestion)
 
 		if avail >= reqFunds+extraMaxFees {
 			return &asset.SwapEstimate{
@@ -873,7 +875,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, networkFeeRate uint64, ut
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget)
+	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget, req.FeeSuggestion)
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexbtc.MinimumTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -944,7 +946,8 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 
 	if btc.useSplitTx && !ord.Immediate {
-		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents, uint64(size), fundingCoins, ord.DEXConfig)
+		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents,
+			uint64(size), fundingCoins, ord.FeeSuggestion, ord.DEXConfig)
 		if err != nil {
 			return nil, nil, err
 		} else if split {
@@ -1052,7 +1055,7 @@ func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *d
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
-	inputsSize uint64, fundingCoins map[outPoint]*utxo, nfo *dex.Asset) (asset.Coins, bool, error) {
+	inputsSize uint64, fundingCoins map[outPoint]*utxo, suggestedFeeRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
 
 	var err error
 	defer func() {
@@ -1111,20 +1114,21 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 		return nil, false, fmt.Errorf("error creating change address: %w", err)
 	}
 
-	// This must fund swaps, so don't under-pay. TODO: get and use a fee rate
-	// from server, and have server check fee rate on unconf funding coins.
-	estFeeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, 1)
-	if err != nil {
-		// Fallback fee rate is NO GOOD here.
-		return nil, false, fmt.Errorf("unable to get optimal fee rate for pre-split transaction "+
-			"(disable the pre-size option or wait until your wallet is ready): %w", err)
+	if suggestedFeeRate > nfo.MaxFeeRate {
+		return nil, false, fmt.Errorf("suggested fee is > the max fee rate")
 	}
-	if estFeeRate > nfo.MaxFeeRate {
-		estFeeRate = nfo.MaxFeeRate
+	if suggestedFeeRate > btc.feeRateLimit {
+		return nil, false, fmt.Errorf("suggested fee is > our internal limit")
+	}
+	if suggestedFeeRate == 0 {
+		suggestedFeeRate = btc.feeRateWithFallback(1, 0)
+		// TODO
+		// 1.0: Error when no suggestion.
+		// return nil, false, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, estFeeRate)
+	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1492,7 +1496,7 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		size += dexbtc.RedeemSwapSigScriptSize*uint64(len(form.Redemptions)) + dexbtc.P2PKHOutputSize
 	}
 
-	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget)
+	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
 	fee := feeRate * size
 	if fee > totalIn {
 		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
@@ -2064,7 +2068,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := btc.feeRateWithFallback(2) // meh level urgency
+	feeRate := btc.feeRateWithFallback(2, 0) // meh level urgency
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
@@ -2145,7 +2149,7 @@ func (btc *ExchangeWallet) Address() (string, error) {
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
 func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1), false)
+	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1, 0), false)
 	if err != nil {
 		btc.log.Errorf("PayFee error - address = '%s', fee = %s: %v", address, amount(regFee), err)
 		return nil, err
@@ -2156,7 +2160,7 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2), true)
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2, 0), true)
 	if err != nil {
 		btc.log.Errorf("Withdraw error - address = '%s', amount = %s: %v", address, amount(value), err)
 		return nil, err

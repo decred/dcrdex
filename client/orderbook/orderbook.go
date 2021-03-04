@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -22,6 +23,15 @@ type Order struct {
 	Time     uint64
 	// Epoch is only used in the epoch queue, otherwise it is ignored.
 	Epoch uint64
+}
+
+// copy creates a copy. Note that the OrderID is not a deep copy.
+func (o *Order) copy() *Order {
+	return &(*o)
+}
+
+func (o *Order) sell() bool {
+	return o.Side == msgjson.SellOrderNum
 }
 
 // RemoteOrderBook defines the functions a client tracked order book
@@ -44,23 +54,34 @@ type cachedOrderNote struct {
 
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
-	log          dex.Logger
-	seqMtx       sync.Mutex
-	seq          uint64
-	marketID     string
-	noteQueue    []*cachedOrderNote
+	log      dex.Logger
+	seqMtx   sync.Mutex
+	seq      uint64
+	marketID string
+
 	noteQueueMtx sync.Mutex
-	orders       map[order.OrderID]*Order
-	ordersMtx    sync.Mutex
-	buys         *bookSide
-	sells        *bookSide
-	syncedMtx    sync.Mutex
-	synced       bool
+	noteQueue    []*cachedOrderNote
+
+	ordersMtx sync.Mutex
+	orders    map[order.OrderID]*Order
+
+	buys  *bookSide
+	sells *bookSide
+
+	syncedMtx sync.Mutex
+	synced    bool
 
 	epochMtx     sync.Mutex
 	currentEpoch uint64
 	proofedEpoch uint64
 	epochQueues  map[uint64]*EpochQueue
+
+	// feeRates is a separate struct to account for atomic field alignment in
+	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
+	feeRates struct {
+		base  uint64
+		quote uint64
+	}
 }
 
 // NewOrderBook creates a new order book.
@@ -74,6 +95,16 @@ func NewOrderBook(logger dex.Logger) *OrderBook {
 		epochQueues: make(map[uint64]*EpochQueue),
 	}
 	return ob
+}
+
+// BaseFeeRate is the last reported base asset fee rate.
+func (ob *OrderBook) BaseFeeRate() uint64 {
+	return atomic.LoadUint64(&ob.feeRates.base)
+}
+
+// QuoteFeeRate is the last reported quote asset fee rate.
+func (ob *OrderBook) QuoteFeeRate() uint64 {
+	return atomic.LoadUint64(&ob.feeRates.quote)
 }
 
 // setSynced sets the synced state of the order book.
@@ -196,48 +227,55 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 	ob.seq = snapshot.Seq
 	ob.seqMtx.Unlock()
 
+	atomic.StoreUint64(&ob.feeRates.base, snapshot.BaseFeeRate)
+	atomic.StoreUint64(&ob.feeRates.quote, snapshot.QuoteFeeRate)
+
 	ob.marketID = snapshot.MarketID
 
-	// Clear all orders, if any.
-	ob.orders = make(map[order.OrderID]*Order)
-	ob.buys = newBookSide(descending)
-	ob.sells = newBookSide(ascending)
-
-	for _, o := range snapshot.Orders {
-		if len(o.OrderID) != order.OrderIDSize {
-			return fmt.Errorf("expected order id length of %d, got %d",
-				order.OrderIDSize, len(o.OrderID))
-		}
-
-		var oid order.OrderID
-		copy(oid[:], o.OrderID)
-		order := &Order{
-			OrderID:  oid,
-			Side:     o.Side,
-			Quantity: o.Quantity,
-			Rate:     o.Rate,
-			Time:     o.Time,
-		}
-
+	err := func() error { // Using a function for mutex management with defer.
 		ob.ordersMtx.Lock()
-		ob.orders[order.OrderID] = order
-		ob.ordersMtx.Unlock()
+		defer ob.ordersMtx.Unlock()
 
-		// Append the order to the order book.
-		switch o.Side {
-		case msgjson.BuyOrderNum:
-			ob.buys.Add(order)
+		ob.orders = make(map[order.OrderID]*Order)
+		ob.buys = newBookSide(descending)
+		ob.sells = newBookSide(ascending)
+		for _, o := range snapshot.Orders {
+			if len(o.OrderID) != order.OrderIDSize {
+				return fmt.Errorf("expected order id length of %d, got %d", order.OrderIDSize, len(o.OrderID))
+			}
 
-		case msgjson.SellOrderNum:
-			ob.sells.Add(order)
+			var oid order.OrderID
+			copy(oid[:], o.OrderID)
+			order := &Order{
+				OrderID:  oid,
+				Side:     o.Side,
+				Quantity: o.Quantity,
+				Rate:     o.Rate,
+				Time:     o.Time,
+			}
 
-		default:
-			return fmt.Errorf("unknown order side provided: %d", o.Side)
+			ob.orders[order.OrderID] = order
+
+			// Append the order to the order book.
+			switch o.Side {
+			case msgjson.BuyOrderNum:
+				ob.buys.Add(order)
+
+			case msgjson.SellOrderNum:
+				ob.sells.Add(order)
+
+			default:
+				ob.log.Errorf("unknown order side provided: %d", o.Side)
+			}
 		}
+		return nil
+	}()
+	if err != nil {
+		return err
 	}
 
 	// Process cached order notes.
-	err := ob.processCachedNotes()
+	err = ob.processCachedNotes()
 	if err != nil {
 		return err
 	}
@@ -326,17 +364,25 @@ func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached b
 	var oid order.OrderID
 	copy(oid[:], note.OrderID)
 
-	ord := ob.sells.UpdateRemaining(oid, note.Remaining)
-	if ord != nil {
-		return nil
+	ob.ordersMtx.Lock()
+	ord, found := ob.orders[oid]
+	var newOrder *Order
+	if found {
+		newOrder = ord.copy()
+		newOrder.Quantity = note.Remaining
+		ob.orders[oid] = newOrder
+	}
+	ob.ordersMtx.Unlock()
+	if !found {
+		return fmt.Errorf("update_remaining order %s not found", oid)
 	}
 
-	ord = ob.buys.UpdateRemaining(oid, note.Remaining)
-	if ord != nil {
-		return nil
+	if ord.sell() {
+		ob.sells.ReplaceOrder(newOrder)
+	} else {
+		ob.buys.ReplaceOrder(newOrder)
 	}
-
-	return fmt.Errorf("update_remaining order %s not found", oid)
+	return nil
 }
 
 // UpdateRemaining updates the remaining quantity of a booked order.
@@ -347,6 +393,8 @@ func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 // LogEpochReport just checks the notification sequence.
 func (ob *OrderBook) LogEpochReport(note *msgjson.EpochReportNote) error {
 	ob.setSeq(note.Seq)
+	atomic.StoreUint64(&ob.feeRates.base, note.BaseFeeRate)
+	atomic.StoreUint64(&ob.feeRates.quote, note.QuoteFeeRate)
 	return nil
 }
 
@@ -374,7 +422,9 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 	var oid order.OrderID
 	copy(oid[:], note.OrderID)
 
+	ob.ordersMtx.Lock()
 	order, ok := ob.orders[oid]
+	ob.ordersMtx.Unlock()
 	if !ok {
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}

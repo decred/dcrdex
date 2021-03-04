@@ -40,6 +40,8 @@ const (
 	initLotLimit = 2
 	btcID        = 0
 	dcrID        = 42
+	ltcID        = 2
+	dogeID       = 3
 	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
 	dcrAddr      = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
 	mktName1     = "btc_ltc"
@@ -322,11 +324,13 @@ func (m *TMarketTunnel) CheckUnfilled(assetID uint32, user account.AccountID) (u
 }
 
 type TBackend struct {
-	utxoErr    error
-	utxos      map[string]uint64
-	addrChecks bool
-	synced     uint32
-	syncedErr  error
+	utxoErr        error
+	utxos          map[string]uint64
+	addrChecks     bool
+	synced         uint32
+	syncedErr      error
+	confsMinus2    int64
+	feeRateMinus10 int64
 }
 
 func tNewBackend() *TBackend {
@@ -343,7 +347,12 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	if v == 0 && b.utxoErr == nil {
 		return nil, asset.CoinNotFoundError // try again for waiters
 	}
-	return &tUTXO{val: v, decoded: str}, b.utxoErr
+	return &tUTXO{
+		val:     v,
+		decoded: str,
+		confs:   b.confsMinus2 + 2,
+		feeRate: uint64(b.feeRateMinus10 + 10),
+	}, b.utxoErr
 }
 func (b *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
 	c, err := b.utxo(coinID)
@@ -394,13 +403,13 @@ func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
 type tUTXO struct {
 	val     uint64
 	decoded string
+	feeRate uint64
+	confs   int64
 }
 
 var utxoAuthErr error
-var utxoConfsErr error
-var utxoConfs int64 = 2
 
-func (u *tUTXO) Confirmations(context.Context) (int64, error) { return utxoConfs, utxoConfsErr }
+func (u *tUTXO) Confirmations(context.Context) (int64, error) { return u.confs, nil }
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
@@ -410,7 +419,7 @@ func (u *tUTXO) TxID() string                    { return "" }
 func (u *tUTXO) String() string                  { return u.decoded }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
-func (u *tUTXO) FeeRate() uint64                 { return 0 }
+func (u *tUTXO) FeeRate() uint64                 { return u.feeRate }
 
 type tUser struct {
 	acct    account.AccountID
@@ -506,6 +515,14 @@ func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code in
 	}
 }
 
+type tFeeSource struct {
+	feeMinus10 int64
+}
+
+func (s *tFeeSource) LastRate(assetID uint32) (feeRate uint64) {
+	return uint64(s.feeMinus10 + 10)
+}
+
 func TestMain(m *testing.M) {
 	logger := slog.NewBackend(os.Stdout).Logger("MARKETTEST")
 	logger.SetLevel(slog.LevelDebug)
@@ -546,7 +563,8 @@ func TestMain(m *testing.M) {
 			0:  assetBTC,
 			42: assetDCR,
 		},
-		Markets: map[string]MarketTunnel{"dcr_btc": oRig.market},
+		Markets:   map[string]MarketTunnel{"dcr_btc": oRig.market},
+		FeeSource: &tFeeSource{},
 	})
 	rig = newTestRig()
 	src1 := rig.source1
@@ -572,7 +590,7 @@ func TestMain(m *testing.M) {
 		// Not counted as coverage, must test Archiver constructor explicitly.
 		var shutdown context.CancelFunc
 		testCtx, shutdown = context.WithCancel(context.Background())
-		rig.router = NewBookRouter(rig.sources())
+		rig.router = NewBookRouter(rig.sources(), &tFeeSource{})
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
@@ -664,7 +682,7 @@ func TestLimit(t *testing.T) {
 
 	// Now check with immediate TiF.
 	limit.TiF = msgjson.ImmediateOrderNum
-	ensureErr("valid order", sendLimit(), -1)
+	ensureErr("valid immediate order", sendLimit(), -1)
 	select {
 	case <-oRig.market.added:
 	case <-time.After(time.Second):
@@ -693,6 +711,26 @@ func TestLimit(t *testing.T) {
 	testPrefixTrade(&limit.Prefix, &limit.Trade, oRig.dcr, oRig.btc,
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendLimit(), code) },
 	)
+
+	// Zero confs is ok, because fees are > 90% of last known fee rate.
+	oRig.dcr.confsMinus2 = -2
+	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
+	ensureErr("valid zero-conf order", sendLimit(), -1)
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("valid zero-conf order not submitted to epoch")
+	}
+	oRecord = oRig.market.pop()
+	if oRecord == nil {
+		t.Fatalf("valid zero-conf order not submitted to epoch")
+	}
+	// But any lower fees on the funding coin, and the order will fail.
+	oRig.dcr.feeRateMinus10--
+	ensureErr("low-fee zero-conf order", sendLimit(), msgjson.FundingError)
+	// reset
+	oRig.dcr.confsMinus2 = 0
+	oRig.dcr.feeRateMinus10 = 0
 
 	// Rate = 0
 	limit.Rate = 0
@@ -857,6 +895,26 @@ func TestMarketStartProcessStop(t *testing.T) {
 	testPrefixTrade(&mkt.Prefix, &mkt.Trade, oRig.dcr, oRig.btc,
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendMarket(), code) },
 	)
+
+	// Zero confs is ok, because fees are > 90% of last known fee rate.
+	oRig.dcr.confsMinus2 = -2
+	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
+	ensureErr("valid zero-conf order", sendMarket(), -1)
+	select {
+	case <-oRig.market.added:
+	case <-time.After(time.Second):
+		t.Fatalf("valid zero-conf order not submitted to epoch")
+	}
+	o = oRig.market.pop()
+	if o == nil {
+		t.Fatalf("valid zero-conf order not submitted to epoch")
+	}
+	// But any lower fees on the funding coin, and the order will fail.
+	oRig.dcr.feeRateMinus10--
+	ensureErr("low-fee zero-conf order", sendMarket(), msgjson.FundingError)
+	// reset
+	oRig.dcr.confsMinus2 = 0
+	oRig.dcr.feeRateMinus10 = 0
 
 	// Now switch it to a buy order, and ensure it passes
 	// Clear the sends cache first.
@@ -1193,11 +1251,23 @@ type TBookSource struct {
 	buys  []*order.LimitOrder
 	sells []*order.LimitOrder
 	feed  chan *updateSignal
+	base  uint32
+	quote uint32
 }
 
-func tNewBookSource() *TBookSource {
+func (s *TBookSource) Base() uint32 {
+	return s.base
+}
+
+func (s *TBookSource) Quote() uint32 {
+	return s.quote
+}
+
+func tNewBookSource(base, quote uint32) *TBookSource {
 	return &TBookSource{
-		feed: make(chan *updateSignal, 16),
+		feed:  make(chan *updateSignal, 16),
+		base:  base,
+		quote: quote,
 	}
 }
 
@@ -1300,9 +1370,9 @@ type testRig struct {
 }
 
 func newTestRig() *testRig {
-	src1 := tNewBookSource()
-	src2 := tNewBookSource()
-	src3 := tNewBookSource()
+	src1 := tNewBookSource(btcID, ltcID)
+	src2 := tNewBookSource(dcrID, dogeID)
+	src3 := tNewBookSource(dcrID, btcID)
 	return &testRig{
 		source1: src1,
 		source2: src2,
@@ -1719,6 +1789,46 @@ func TestRouter(t *testing.T) {
 		t.Fatalf("client not removed from subscription list")
 	}
 }
+
+// func TestFeeRateRequest(t *testing.T) {
+// 	router := rig.router
+// 	cl := tNewLink()
+// 	// Request for an unkown asset.
+// 	msg, _ := msgjson.NewRequest(1, msgjson.FeeRateRoute, 555)
+// 	msgErr := router.handleFeeRate(cl, msg)
+// 	if msgErr == nil {
+// 		t.Fatalf("no error for unknown asset")
+// 	}
+
+// 	checkFeeRate := func(expRate uint64) {
+// 		t.Helper()
+// 		msg, _ = msgjson.NewRequest(1, msgjson.FeeRateRoute, dcrID)
+// 		msgErr = router.handleFeeRate(cl, msg)
+// 		if msgErr != nil {
+// 			t.Fatalf("no error for unknown asset")
+// 		}
+// 		resp := cl.getSend()
+// 		if resp == nil {
+// 			t.Fatalf("no response")
+// 		}
+// 		var feeRate uint64
+// 		err := resp.UnmarshalResult(&feeRate)
+// 		if err != nil {
+// 			t.Fatalf("error unmarshaling result: %v", err)
+// 		}
+// 		if feeRate != expRate {
+// 			t.Fatalf("unexpected fee rate. wanted %d, got %d", expRate, feeRate)
+// 		}
+// 	}
+
+// 	// Request for known asset that hasn't been primed should be no error but
+// 	// value zero.
+// 	checkFeeRate(0)
+
+// 	// Prime the cache and ask again.
+// 	atomic.StoreUint64(router.feeRateCache[dcrID], 8)
+// 	checkFeeRate(8)
+// }
 
 func TestBadMessages(t *testing.T) {
 	router := rig.router

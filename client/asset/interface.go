@@ -90,7 +90,7 @@ type Wallet interface {
 	// fees are an estimate based on current network conditions, and will be <=
 	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
 	// will be an estimate based on current market conditions.
-	MaxOrder(lotSize uint64, nfo *dex.Asset) (*SwapEstimate, error)
+	MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*SwapEstimate, error)
 	// PreSwap gets a pre-swap estimate for the specified order size.
 	PreSwap(*PreSwapForm) (*PreSwap, error)
 	// PreRedeem gets a pre-redeem estimate for the specified order size.
@@ -273,6 +273,13 @@ type Redemption struct {
 // expanded in in-progress work to accommodate order-time options.
 type RedeemForm struct {
 	Redemptions []*Redemption
+	// FeeSuggestion is a suggested fee from the server. For redemptions, the
+	// suggestion is provided as a convenience for wallets without full
+	// chain backing which cannot get an estimate otherwise. Since this is the
+	// redemption, there is no obligation on the client to use the fee
+	// suggestion in any way, but obviously fees that are too low may result in
+	// the redemption getting stuck in mempool.
+	FeeSuggestion uint64
 }
 
 // Order is order details needed for FundOrder.
@@ -297,6 +304,10 @@ type Order struct {
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
 	Immediate bool
+	// FeeSuggestion is a suggested fee from the server. If a split transaction
+	// is used, the fee rate used should be at least the suggested fee, else
+	// zero-conf coins might be rejected.
+	FeeSuggestion uint64
 }
 
 // SwapEstimate is an estimate of the fees and locked amounts associated with
@@ -346,6 +357,10 @@ type PreSwapForm struct {
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
 	Immediate bool
+	// FeeSuggestion is a suggested fee from the server. If a split transaction
+	// is used, the fee rate used should be at least the suggested fee, else
+	// zero-conf coins might be rejected.
+	FeeSuggestion uint64
 }
 
 // SwapOption is an OrderEstimate and it's associated ConfigOption.
@@ -370,6 +385,8 @@ type PreRedeemForm struct {
 	LotSize uint64
 	// Lots is the number of lots in the order.
 	Lots uint64
+	// FeeSuggestion is a suggested fee from the server.
+	FeeSuggestion uint64
 }
 
 // PreRedeem is an estimate of the fees for redemption. The struct will be
