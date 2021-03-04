@@ -26,7 +26,7 @@ type Backend interface {
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
 	Contract(coinID []byte, redeemScript []byte) (*Contract, error)
-	// TxData fetches the same data returned by a Contract's TxData method.
+	// TxData fetches the raw transaction data for the specified coin.
 	TxData(coinID []byte) ([]byte, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool

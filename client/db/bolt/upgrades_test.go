@@ -18,12 +18,6 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-// The indices of the archives here in outdatedDBs should match the first
-// eligible validator for the database.
-var outdatedDBs = []string{
-	"v0.db.gz", "v1.db.gz",
-}
-
 var dbUpgradeTests = [...]struct {
 	name       string
 	upgrade    upgradefunc
@@ -109,10 +103,10 @@ func TestUpgradeDB(t *testing.T) {
 		return nil
 	}
 
-	for v, archiveName := range outdatedDBs {
-		err := runUpgrade(archiveName)
+	for _, tt := range dbUpgradeTests {
+		err := runUpgrade(tt.filename)
 		if err != nil {
-			t.Fatalf("upgrade error for version %d database: %v", v, err)
+			t.Fatalf("upgrade error for version %d database: %v", tt.newVersion-1, err)
 		}
 	}
 
