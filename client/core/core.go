@@ -869,6 +869,45 @@ func (dc *dexConnection) marketEpoch(mktID string, stamp time.Time) uint64 {
 	return encode.UnixMilliU(stamp) / epochLen
 }
 
+// fetchFeeRate gets an asset's fee rate estimate from the server.
+func (dc *dexConnection) fetchFeeRate(assetID uint32) (rate uint64) {
+	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.FeeRateRoute, assetID)
+	if err != nil {
+		dc.log.Errorf("Error fetching fee rate for %s: %v", unbip(assetID), err)
+		return
+	}
+	errChan := make(chan error, 1)
+	err = dc.RequestWithTimeout(msg, func(msg *msgjson.Message) {
+		errChan <- msg.UnmarshalResult(&rate)
+	}, DefaultResponseTimeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for fee_rate response")
+	})
+	if err == nil {
+		err = <-errChan
+	}
+	if err != nil {
+		dc.log.Errorf("Error fetching fee rate for %s: %v", unbip(assetID), err)
+		return
+	}
+	return
+}
+
+// bestBookFeeSuggestion attempts to find a fee rate for the specified asset in
+// any synced book.
+func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+	for _, book := range dc.books {
+		switch assetID {
+		case book.base:
+			return book.BaseFeeRate()
+		case book.quote:
+			return book.QuoteFeeRate()
+		}
+	}
+	return 0
+}
+
 // blockWaiter is a message waiting to be stamped, signed, and sent once a
 // specified coin has the requisite confirmations. The blockWaiter is similar to
 // dcrdex/server/blockWaiter.Waiter, but is different enough to warrant a
@@ -2509,15 +2548,31 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, err
 	}
 
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return nil, err
+	}
+
+	swapFeeSuggestion := c.feeSuggestion(dc, quote, false)
+	if swapFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quote), host)
+	}
+
+	redeemFeeSuggestion := c.feeSuggestion(dc, base, false)
+	if redeemFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
+	}
+
 	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
-	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, quoteAsset)
+	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, swapFeeSuggestion, quoteAsset)
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize: baseAsset.LotSize,
-		Lots:    maxBuy.Lots,
+		LotSize:       baseAsset.LotSize,
+		Lots:          maxBuy.Lots,
+		FeeSuggestion: redeemFeeSuggestion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
@@ -2537,11 +2592,6 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, err
 	}
 
-	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, baseAsset)
-	if err != nil {
-		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
-	}
-
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
@@ -2553,6 +2603,22 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	if book == nil {
 		return nil, fmt.Errorf("no book synced for %s at %s", mktID, host)
 	}
+
+	swapFeeSuggestion := c.feeSuggestion(dc, base, true)
+	if swapFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(base), host)
+	}
+
+	redeemFeeSuggestion := c.feeSuggestion(dc, quote, false)
+	if redeemFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
+	}
+
+	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, swapFeeSuggestion, baseAsset)
+	if err != nil {
+		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
+	}
+
 	midGap, err := book.MidGap()
 	if err != nil {
 		return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
@@ -2560,8 +2626,9 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	lotSize := calc.BaseToQuote(midGap, baseAsset.LotSize)
 
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize: lotSize,
-		Lots:    maxSell.Lots,
+		LotSize:       lotSize,
+		Lots:          maxSell.Lots,
+		FeeSuggestion: redeemFeeSuggestion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(quote), err)
@@ -2784,6 +2851,18 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	return <-errChan
 }
 
+// feeSuggestion gets the best fee suggestion, first from a synced order book,
+// and if not synced, directly from the server.
+func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32, isBase bool) (feeSuggestion uint64) {
+	// Prepare a fee suggestion based on the last reported fee rate in the
+	// order book feed.
+	feeSuggestion = dc.bestBookFeeSuggestion(assetID)
+	if feeSuggestion > 0 {
+		return
+	}
+	return dc.fetchFeeRate(assetID)
+}
+
 // Withdraw initiates a withdraw from an exchange wallet. The client password
 // must be provided as an additional verification.
 func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
@@ -2885,24 +2964,36 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		}
 	}
 
+	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell)
+	if swapFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(wallets.fromAsset.ID), form.Host)
+	}
+
+	redeemFeeSuggestion := c.feeSuggestion(dc, wallets.toAsset.ID, !form.Sell)
+	if redeemFeeSuggestion == 0 {
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
+	}
+
 	fromLotSize, toLotSize := lotSize, calc.BaseToQuote(rate, lotSize)
 	if !form.Sell {
 		fromLotSize, toLotSize = toLotSize, fromLotSize
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
-		LotSize:     fromLotSize,
-		Lots:        lots,
-		AssetConfig: wallets.fromAsset,
-		Immediate:   (form.IsLimit && form.TifNow),
+		LotSize:       fromLotSize,
+		Lots:          lots,
+		AssetConfig:   wallets.fromAsset,
+		Immediate:     (form.IsLimit && form.TifNow),
+		FeeSuggestion: swapFeeSuggestion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting swap estimate: %v", err)
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize: toLotSize,
-		Lots:    lots,
+		LotSize:       toLotSize,
+		Lots:          lots,
+		FeeSuggestion: redeemFeeSuggestion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting redemption estimate: %v", err)
@@ -3040,10 +3131,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
-		Value:        fundQty,
-		MaxSwapCount: lots,
-		DEXConfig:    wallets.fromAsset,
-		Immediate:    isImmediate,
+		Value:         fundQty,
+		MaxSwapCount:  lots,
+		DEXConfig:     wallets.fromAsset,
+		Immediate:     isImmediate,
+		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell),
 	})
 	if err != nil {
 		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
@@ -5051,6 +5143,33 @@ func (c *Core) PromptShutdown() bool {
 	}
 	fmt.Println("Shutdown aborted.")
 	return false
+}
+
+// cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the
+// trackedTrade. If a request for the fee suggestion must be made, the request
+// will be run in a goroutine, i.e. the field is not necessarily set when this
+// method returns. If there is a synced book, the estimate will always be
+// updated. If there is no synced book, but a non-zero fee suggestion is already
+// cached, no new requests will be made.
+func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
+	// Try to find any book that might have the fee.
+	redeemAsset := t.wallets.toAsset.ID
+	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
+	if feeSuggestion > 0 {
+		atomic.StoreUint64(&t.redeemFeeSuggestion, feeSuggestion)
+		return
+	}
+	// Don't request it if we already have one.
+	if atomic.LoadUint64(&t.redeemFeeSuggestion) != 0 {
+		return
+	}
+	// Fetch it from the server.
+	go func() {
+		feeSuggestion = t.dc.fetchFeeRate(redeemAsset)
+		if feeSuggestion > 0 {
+			atomic.StoreUint64(&t.redeemFeeSuggestion, feeSuggestion)
+		}
+	}()
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

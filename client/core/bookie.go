@@ -54,22 +54,25 @@ func (f *BookFeed) Close() {
 // supplied close() callback.
 type bookie struct {
 	orderbook.OrderBook
-	log        dex.Logger
-	mtx        sync.Mutex
-	feeds      map[uint32]*BookFeed
-	close      func() // e.g. dexConnection.StopBook
-	closeTimer *time.Timer
+	log         dex.Logger
+	mtx         sync.Mutex
+	feeds       map[uint32]*BookFeed
+	close       func() // e.g. dexConnection.StopBook
+	closeTimer  *time.Timer
+	base, quote uint32
 }
 
 // newBookie is a constructor for a bookie. The caller should provide a callback
 // function to be called when there are no subscribers and the close timer has
 // expired.
-func newBookie(logger dex.Logger, close func()) *bookie {
+func newBookie(base, quote uint32, logger dex.Logger, close func()) *bookie {
 	return &bookie{
 		OrderBook: *orderbook.NewOrderBook(logger.SubLogger("book")),
 		log:       logger,
 		feeds:     make(map[uint32]*BookFeed, 1),
 		close:     close,
+		base:      base,
+		quote:     quote,
 	}
 }
 
@@ -194,7 +197,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(dc.log.SubLogger(mktID), func() {
+		booky = newBookie(base, quote, dc.log.SubLogger(mktID), func() {
 			dc.stopBook(base, quote)
 		})
 		err = booky.Sync(obRes)

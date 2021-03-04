@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -169,9 +168,7 @@ type LockableAsset struct {
 type Swapper struct {
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins        map[uint32]*LockableAsset
-	feeScalesMtx sync.RWMutex
-	feeScales    map[uint32]float64
+	coins map[uint32]*LockableAsset
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
@@ -241,7 +238,6 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
 		coins:         cfg.Assets,
-		feeScales:     make(map[uint32]float64, len(cfg.Assets)),
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
 		swapDone:      cfg.SwapDone,
@@ -2010,13 +2006,13 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 
 // readMatches translates a slice of raw matches from the market manager into
 // a slice of matchTrackers.
-func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*matchTracker {
+func readMatches(matchSets []*order.MatchSet) []*matchTracker {
 	// The initial capacity guess here is a minimum, but will avoid a few
 	// reallocs.
 	nowMs := unixMsNow()
 	matches := make([]*matchTracker, 0, len(matchSets))
 	for _, matchSet := range matchSets {
-		for _, match := range matchSet.Matches( /* consider taking feeRates */ ) {
+		for _, match := range matchSet.Matches() {
 			maker := match.Maker
 			base, quote := maker.BaseAsset, maker.QuoteAsset
 			var makerSwapAsset, takerSwapAsset uint32
@@ -2027,9 +2023,6 @@ func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*mat
 				makerSwapAsset = quote
 				takerSwapAsset = base
 			}
-
-			match.FeeRateBase = feeRates[base]
-			match.FeeRateQuote = feeRates[quote]
 
 			matches = append(matches, &matchTracker{
 				Match:     match,
@@ -2047,32 +2040,6 @@ func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*mat
 		}
 	}
 	return matches
-}
-
-// SetFeeRateScale sets a swap fee scale factor for the given asset.
-func (s *Swapper) SetFeeRateScale(assetID uint32, scale float64) {
-	s.feeScalesMtx.Lock()
-	s.feeScales[assetID] = scale
-	s.feeScalesMtx.Unlock()
-}
-
-// ScaleFeeRate scales the provided fee rate with the given asset's swap fee
-// rate scale factor, which is 1.0 by default.
-func (s *Swapper) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
-	if feeRate == 0 {
-		return feeRate // no idea if this is sensible for any asset, but ok
-	}
-	s.feeScalesMtx.RLock()
-	feeScale, found := s.feeScales[assetID]
-	s.feeScalesMtx.RUnlock()
-	if !found {
-		return feeRate
-	}
-	if feeScale < 1 {
-		log.Warnf("Using fee rate scale of %f < 1.0 for asset %d", feeScale, assetID)
-	}
-	// It started non-zero, so don't allow it to go to zero.
-	return uint64(math.Max(1.0, math.Round(float64(feeRate)*feeScale)))
 }
 
 // Negotiate takes ownership of the matches and begins swap negotiation. For
@@ -2095,51 +2062,12 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		return
 	}
 
-	feeRates := make(map[uint32]uint64, 2) // should only be 2, but Negotiate might be called with matches with more than two assets in the future
-
-	getFeeRate := func(assetID uint32) (unsupported bool) {
-		if _, found := feeRates[assetID]; found {
-			return
-		}
-		asset := s.coins[assetID]
-		if asset == nil {
-			return true
-		}
-		maxFeeRate := asset.Asset.MaxFeeRate
-		feeRate, err := asset.Backend.FeeRate()
-		if err != nil {
-			feeRate = maxFeeRate
-			log.Warnf("Unable to determining optimal fee rate for %q, using fallback of %d. Err: %v",
-				asset.Symbol, feeRate, err)
-		} else {
-			feeRate = s.ScaleFeeRate(assetID, feeRate)
-			log.Debugf("Optimal fee rate for %q: %d", asset.Symbol, feeRate)
-			if feeRate > maxFeeRate {
-				log.Warnf("Optimal fee rate %d > max fee rate %d, using max fee rate.",
-					feeRate, maxFeeRate)
-				feeRate = maxFeeRate
-			}
-		}
-		feeRates[assetID] = feeRate
-		return
-	}
-
 	// Lock trade order coins, and get current optimal fee rates. Also filter
 	// out matches with unsupported assets, which should not happen if the
 	// Market is behaving, but be defensive.
 	supportedMatchSets := matchSets[:0]                    // same buffer, start empty
 	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
 	for _, match := range matchSets {
-		// Do the fee rate requests first to verify asset support.
-		if base := match.Taker.Base(); getFeeRate(base) {
-			log.Errorf("Unsupported asset %d for order %v", base, match.Taker)
-			continue
-		}
-		if quote := match.Taker.Quote(); getFeeRate(quote) {
-			log.Errorf("Unsupported asset %d for order %v", quote, match.Taker)
-			continue
-		}
-
 		supportedMatchSets = append(supportedMatchSets, match)
 
 		if match.Taker.Type() == order.CancelOrderType {
@@ -2156,7 +2084,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	s.LockOrdersCoins(swapOrders)
 
 	// Set up the matchTrackers, which includes a slice of Matches.
-	matches := readMatches(matchSets, feeRates)
+	matches := readMatches(matchSets)
 
 	// Record the matches. If any DB updates fail, no swaps proceed. We could
 	// let the others proceed, but that could seem selective trickery to the

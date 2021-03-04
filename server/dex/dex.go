@@ -305,6 +305,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
 	assetLogger := cfg.LogBackend.Logger("ASSET")
 	txDataSources := make(map[uint32]auth.TxDataSource)
+	feeMgr := NewFeeManager()
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 		assetID := assetIDs[i]
@@ -355,6 +356,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			BackedAsset: ba,
 			CoinLocker:  dexCoinLocker.AssetLocker(assetID).Swap(),
 		}
+		feeMgr.AddFetcher(ba)
 
 		// Prepare assets portion of config response.
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
@@ -499,7 +501,17 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	for _, mktInf := range cfg.Markets {
 		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
-		mkt, err := market.NewMarket(mktInf, storage, swapper, authMgr, baseCoinLocker, quoteCoinLocker, dataAPI)
+		mkt, err := market.NewMarket(&market.Config{
+			MarketInfo:      mktInf,
+			Storage:         storage,
+			Swapper:         swapper,
+			AuthManager:     authMgr,
+			FeeFetcherBase:  feeMgr.FeeFetcher(mktInf.Base),
+			CoinLockerBase:  baseCoinLocker,
+			FeeFetcherQuote: feeMgr.FeeFetcher(mktInf.Quote),
+			CoinLockerQuote: quoteCoinLocker,
+			DataCollector:   dataAPI,
+		})
 		if err != nil {
 			abort()
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
@@ -556,7 +568,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	// Book router
-	bookRouter := market.NewBookRouter(bookSources)
+	bookRouter := market.NewBookRouter(bookSources, feeMgr)
 	startSubSys("BookRouter", bookRouter)
 
 	// The data API gets the order book from the book router.
@@ -572,6 +584,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		Assets:      backedAssets,
 		AuthManager: authMgr,
 		Markets:     marketTunnels,
+		FeeSource:   feeMgr,
 	})
 	startSubSys("OrderRouter", orderRouter)
 
@@ -627,13 +640,23 @@ func (dm *DEX) Asset(id uint32) (*asset.BackedAsset, error) {
 // the optimal fee rates for new swaps for for the specified asset. That is,
 // values above 1 increase the fee rate, while values below 1 decrease it.
 func (dm *DEX) SetFeeRateScale(assetID uint32, scale float64) {
-	dm.swapper.SetFeeRateScale(assetID, scale)
+	for _, mkt := range dm.markets {
+		if mkt.Base() == assetID || mkt.Quote() == assetID {
+			mkt.SetFeeRateScale(assetID, scale)
+		}
+	}
 }
 
 // ScaleFeeRate scales the provided fee rate with the given asset's swap fee
 // rate scale factor, which is 1.0 by default.
 func (dm *DEX) ScaleFeeRate(assetID uint32, rate uint64) uint64 {
-	return dm.swapper.ScaleFeeRate(assetID, rate)
+	// Any market will have the rate. Just find the first one.
+	for _, mkt := range dm.markets {
+		if mkt.Base() == assetID || mkt.Quote() == assetID {
+			return mkt.ScaleFeeRate(assetID, rate)
+		}
+	}
+	return rate
 }
 
 // Config returns the current dex configuration.

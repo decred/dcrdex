@@ -202,8 +202,28 @@ func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*db.CandleCache) error { 
 
 type TCollector struct{}
 
+var collectorSpot = &msgjson.Spot{
+	Stamp: rand.Uint64(),
+}
+
 func (tc *TCollector) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error) {
-	return nil, nil
+	return collectorSpot, nil
+}
+
+type tFeeFetcher struct {
+	maxFeeRate uint64
+}
+
+func (*tFeeFetcher) FeeRate() uint64 {
+	return 10
+}
+
+func (f *tFeeFetcher) MaxFeeRate() uint64 {
+	return f.maxFeeRate
+}
+
+func (f *tFeeFetcher) LastRate() uint64 {
+	return 10
 }
 
 func randomOrderID() order.OrderID {
@@ -265,8 +285,17 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		return nil, nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %w", err)
 	}
 
-	mkt, err := NewMarket(mktInfo, storage, swapper, authMgr,
-		bookLockerBase, bookLockerQuote, new(TCollector))
+	mkt, err := NewMarket(&Config{
+		MarketInfo:      mktInfo,
+		Storage:         storage,
+		Swapper:         swapper,
+		AuthManager:     authMgr,
+		FeeFetcherBase:  &tFeeFetcher{assetDCR.MaxFeeRate},
+		CoinLockerBase:  bookLockerBase,
+		FeeFetcherQuote: &tFeeFetcher{assetBTC.MaxFeeRate},
+		CoinLockerQuote: bookLockerQuote,
+		DataCollector:   new(TCollector),
+	})
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
 	}
@@ -1263,7 +1292,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 				{bookAction, sigDataBookedOrder{lo, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestBuy, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestSell, epochIdx}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
 			},
 		},
 		{
@@ -1271,7 +1300,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 			eq2,
 			[]*updateSignal{
 				{matchProofAction, sigDataMatchProof{mp2}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
 			},
 		},
 		{
@@ -1279,7 +1308,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 			NewEpoch(epochIdx, epochDur),
 			[]*updateSignal{
 				{matchProofAction, sigDataMatchProof{mp0}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
 			},
 		},
 	}

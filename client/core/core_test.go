@@ -521,7 +521,9 @@ type TXCWallet struct {
 	confsMtx          sync.RWMutex
 	confs             map[string]uint32
 	confsErr          map[string]error
+	preSwapForm       *asset.PreSwapForm
 	preSwap           *asset.PreSwap
+	preRedeemForm     *asset.PreRedeemForm
 	preRedeem         *asset.PreRedeem
 }
 
@@ -585,12 +587,17 @@ func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
-func (w *TXCWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+func (w *TXCWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
 	return nil, nil
 }
 
-func (w *TXCWallet) PreSwap(*asset.PreSwapForm) (*asset.PreSwap, error) { return w.preSwap, nil }
-func (w *TXCWallet) PreRedeem(*asset.PreRedeemForm) (*asset.PreRedeem, error) {
+func (w *TXCWallet) PreSwap(form *asset.PreSwapForm) (*asset.PreSwap, error) {
+	w.preSwapForm = form
+	return w.preSwap, nil
+}
+
+func (w *TXCWallet) PreRedeem(form *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	w.preRedeemForm = form
 	return w.preRedeem, nil
 }
 func (w *TXCWallet) RedemptionFees() (uint64, error) { return 0, nil }
@@ -2104,7 +2111,7 @@ func TestTrade(t *testing.T) {
 	tBtcWallet.fundingCoins = asset.Coins{btcCoin}
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
-	book := newBookie(tLogger, func() {})
+	book := newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 	rig.dc.books[tDcrBtcMktName] = book
 
 	msgOrderNote := &msgjson.BookOrderNote{
@@ -4250,7 +4257,7 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 
 	err = handleEpochOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
@@ -4313,7 +4320,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 
 	err = rig.dc.books[tDcrBtcMktName].Enqueue(eo)
 	if err != nil {
@@ -4391,7 +4398,7 @@ func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	dc := rig.dc
-	dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
+	dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 
 	mktEpoch := func() uint64 {
 		dc.epochMtx.RLock()
@@ -4593,7 +4600,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 
 	addTracker := func(coins asset.Coins) *trackedTrade {
 		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
@@ -6189,6 +6196,7 @@ func TestPreOrder(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
+	dc := rig.dc
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
@@ -6198,8 +6206,8 @@ func TestPreOrder(t *testing.T) {
 	var rate uint64 = 1e8
 	quoteConvertedLotSize := calc.BaseToQuote(rate, tDCR.LotSize)
 
-	book := newBookie(tLogger, func() {})
-	rig.dc.books[tDcrBtcMktName] = book
+	book := newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	dc.books[tDcrBtcMktName] = book
 
 	sellNote := &msgjson.BookOrderNote{
 		OrderNote: msgjson.OrderNote{
@@ -6217,11 +6225,16 @@ func TestPreOrder(t *testing.T) {
 	buyNote.TradeNote.Quantity = tDCR.LotSize * 10
 	buyNote.TradeNote.Side = msgjson.BuyOrderNum
 
+	var baseFeeRate uint64 = 5
+	var quoteFeeRate uint64 = 10
+
 	err := book.Sync(&msgjson.OrderBook{
-		MarketID: tDcrBtcMktName,
-		Seq:      1,
-		Epoch:    1,
-		Orders:   []*msgjson.BookOrderNote{sellNote, &buyNote},
+		MarketID:     tDcrBtcMktName,
+		Seq:          1,
+		Epoch:        1,
+		Orders:       []*msgjson.BookOrderNote{sellNote, &buyNote},
+		BaseFeeRate:  baseFeeRate,
+		QuoteFeeRate: quoteFeeRate,
 	})
 	if err != nil {
 		t.Fatalf("Sync error: %v", err)
@@ -6274,14 +6287,17 @@ func TestPreOrder(t *testing.T) {
 	compUint64("RealisticWorstCase", est1.RealisticWorstCase, est2.RealisticWorstCase)
 	compUint64("RealisticBestCase", est1.RealisticBestCase, est2.RealisticBestCase)
 	compUint64("Locked", est1.Locked, est2.Locked)
+	// This is a buy order, so the from asset is the quote asset.
+	compUint64("PreOrder.FeeSuggestion.quote", quoteFeeRate, tBtcWallet.preSwapForm.FeeSuggestion)
+	compUint64("PreOrder.FeeSuggestion.base", baseFeeRate, tDcrWallet.preRedeemForm.FeeSuggestion)
 
 	// Missing book is an error
-	delete(rig.dc.books, tDcrBtcMktName)
+	delete(dc.books, tDcrBtcMktName)
 	_, err = tCore.PreOrder(form)
 	if err == nil {
 		t.Fatalf("no error for market order with missing book")
 	}
-	rig.dc.books[tDcrBtcMktName] = book
+	dc.books[tDcrBtcMktName] = book
 
 	// Exercise the market sell path too.
 	form.Sell = true
@@ -6311,13 +6327,40 @@ func TestPreOrder(t *testing.T) {
 		t.Fatalf("PreOrder limit sell error: %v", err)
 	}
 
+	var newBaseFeeRate uint64 = 55
+	var newQuoteFeeRate uint64 = 65
+	feeRateSource := func(msg *msgjson.Message, f msgFunc) error {
+		var resp *msgjson.Message
+		if string(msg.Payload) == "42" {
+			resp, _ = msgjson.NewResponse(msg.ID, newBaseFeeRate, nil)
+		} else {
+			resp, _ = msgjson.NewResponse(msg.ID, newQuoteFeeRate, nil)
+		}
+		f(resp)
+		return nil
+	}
+
+	// Removing the book should cause us to
+	delete(dc.books, tDcrBtcMktName)
+	rig.ws.queueResponse(msgjson.FeeRateRoute, feeRateSource)
+	rig.ws.queueResponse(msgjson.FeeRateRoute, feeRateSource)
+
+	_, err = tCore.PreOrder(form)
+	if err != nil {
+		t.Fatalf("PreOrder limit sell error #2: %v", err)
+	}
+	// sell order now, so from asset is base asset
+	compUint64("PreOrder.FeeSuggestion quote asset from server", newQuoteFeeRate, tBtcWallet.preRedeemForm.FeeSuggestion)
+	compUint64("PreOrder.FeeSuggestion base asset from server", newBaseFeeRate, tDcrWallet.preSwapForm.FeeSuggestion)
+	dc.books[tDcrBtcMktName] = book
+
 	// no DEX
-	delete(tCore.conns, rig.dc.acct.host)
+	delete(tCore.conns, dc.acct.host)
 	_, err = tCore.PreOrder(form)
 	if err == nil {
 		t.Fatalf("no error for unknown DEX")
 	}
-	tCore.conns[rig.dc.acct.host] = rig.dc
+	tCore.conns[dc.acct.host] = dc
 
 	// no wallet
 	delete(tCore.wallets, tDCR.ID)
@@ -6352,5 +6395,4 @@ func TestPreOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreOrder error after fixing everything: %v", err)
 	}
-
 }

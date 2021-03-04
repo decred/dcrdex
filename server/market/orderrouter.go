@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -43,6 +44,10 @@ type AuthManager interface {
 const (
 	maxClockOffset = 600_000 // milliseconds => 600 sec => 10 minutes
 	fundingTxWait  = time.Minute
+	// ZeroConfFeeRateThreshold is multiplied by the last known fee rate for an
+	// asset to attain a minimum fee rate acceptable for zero-conf funding
+	// coins.
+	ZeroConfFeeRateThreshold = 0.9
 )
 
 // MarketTunnel is a connection to a market.
@@ -121,13 +126,19 @@ func newAssetSet(base, quote *asset.BackedAsset, sell bool) *assetSet {
 	return coins
 }
 
+// FeeSource is a source of the last reported tx fee rate estimate for an asset.
+type FeeSource interface {
+	LastRate(assetID uint32) (feeRate uint64)
+}
+
 // OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These
 // are authenticated routes used for placing and canceling orders.
 type OrderRouter struct {
-	auth     AuthManager
-	assets   map[uint32]*asset.BackedAsset
-	tunnels  map[string]MarketTunnel
-	latencyQ *wait.TickerQueue
+	auth      AuthManager
+	assets    map[uint32]*asset.BackedAsset
+	tunnels   map[string]MarketTunnel
+	latencyQ  *wait.TickerQueue
+	feeSource FeeSource
 }
 
 // OrderRouterConfig is the configuration settings for an OrderRouter.
@@ -135,15 +146,17 @@ type OrderRouterConfig struct {
 	AuthManager AuthManager
 	Assets      map[uint32]*asset.BackedAsset
 	Markets     map[string]MarketTunnel
+	FeeSource   FeeSource
 }
 
 // NewOrderRouter is a constructor for an OrderRouter.
 func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 	router := &OrderRouter{
-		auth:     cfg.AuthManager,
-		assets:   cfg.Assets,
-		tunnels:  cfg.Markets,
-		latencyQ: wait.NewTickerQueue(2 * time.Second),
+		auth:      cfg.AuthManager,
+		assets:    cfg.Assets,
+		tunnels:   cfg.Markets,
+		latencyQ:  wait.NewTickerQueue(2 * time.Second),
+		feeSource: cfg.FeeSource,
 	}
 	cfg.AuthManager.Route(msgjson.LimitRoute, router.handleLimit)
 	cfg.AuthManager.Route(msgjson.MarketRoute, router.handleMarket)
@@ -172,6 +185,12 @@ func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (ass
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	return backend.FundingCoin(ctx, coinID, redeemScript)
+}
+
+func coinConfirmations(coin asset.Coin) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return coin.Confirmations(ctx)
 }
 
 // handleLimit is the handler for the 'limit' route. This route accepts a
@@ -325,6 +344,11 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			if err != nil {
 				log.Debugf("Auth error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
 				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
+			}
+
+			msgErr := r.checkZeroConfs(dexCoin, fundingAsset)
+			if msgErr != nil {
+				return false, msgErr
 			}
 
 			delete(neededCoins, key) // don't check this coin again
@@ -515,6 +539,11 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 				return false, msgjson.NewError(msgjson.CoinAuthError, fmt.Sprintf("failed to authorize coin %v", dexCoin))
 			}
 
+			msgErr := r.checkZeroConfs(dexCoin, fundingAsset)
+			if msgErr != nil {
+				return false, msgErr
+			}
+
 			delete(neededCoins, key) // don't check this coin again
 			valSum += dexCoin.Value()
 			// SEE NOTE above in handleLimit regarding underestimation for BTC.
@@ -589,6 +618,30 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		},
 	})
 
+	return nil
+}
+
+// Check the FundingCoin confirmations, and if zero, ensure the tx fee rate
+// is sufficient, > 90% of our last recorded estimate for the asset.
+func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *asset.BackedAsset) *msgjson.Error {
+	// Verify that zero-conf coins are within 10% of the last known fee
+	// rate.
+	confs, err := coinConfirmations(dexCoin)
+	if err != nil {
+		log.Debugf("Confirmations error for %s coin %s: %v", fundingAsset.Symbol, dexCoin, err)
+		return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("failed to verify coin %v", dexCoin))
+	}
+	if confs > 0 {
+		return nil
+	}
+	lastKnownFeeRate := r.feeSource.LastRate(fundingAsset.ID)
+	feeMinimum := uint64(math.Round(float64(lastKnownFeeRate) * ZeroConfFeeRateThreshold))
+	feeRate := dexCoin.FeeRate()
+	if lastKnownFeeRate > 0 && feeRate < feeMinimum {
+		log.Debugf("Fee rate too low %s coin %s: %d < %d", fundingAsset.Symbol, dexCoin, feeRate, feeMinimum)
+		return msgjson.NewError(msgjson.FundingError,
+			fmt.Sprintf("fee rate for %s is too low. %d < %d", dexCoin, feeRate, feeMinimum))
+	}
 	return nil
 }
 

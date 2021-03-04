@@ -104,9 +104,11 @@ type sigDataEpochOrder sigDataOrder
 type sigDataUpdateRemaining sigDataOrder
 
 type sigDataEpochReport struct {
-	epochIdx int64
-	epochDur int64
-	stats    *matcher.MatchCycleStats
+	epochIdx     int64
+	epochDur     int64
+	stats        *matcher.MatchCycleStats
+	baseFeeRate  uint64
+	quoteFeeRate uint64
 }
 
 type sigDataNewEpoch struct {
@@ -132,6 +134,8 @@ type sigDataMatchProof struct {
 type BookSource interface {
 	Book() (epoch int64, buys []*order.LimitOrder, sells []*order.LimitOrder)
 	OrderFeed() <-chan *updateSignal
+	Base() uint32
+	Quote() uint32
 }
 
 // subscribers is a manager for a map of subscribers and a sequence counter.
@@ -185,6 +189,8 @@ type msgBook struct {
 	epochIdx int64
 	subs     *subscribers
 	source   BookSource
+	baseID   uint32
+	quoteID  uint32
 }
 
 func (book *msgBook) setEpoch(idx int64) {
@@ -255,31 +261,37 @@ func (book *msgBook) addBulkOrders(epoch int64, orderSets ...[]*order.LimitOrder
 // of subscribers, and maintaining an intermediate copy of the orderbook in
 // message payload format for quick, full-book syncing.
 type BookRouter struct {
-	books map[string]*msgBook
+	books     map[string]*msgBook
+	feeSource FeeSource
 }
 
 // NewBookRouter is a constructor for a BookRouter. Routes are registered with
 // comms and a monitoring goroutine is started for each BookSource specified.
 // The input sources is a mapping of market names to sources for order and epoch
 // queue information.
-func NewBookRouter(sources map[string]BookSource) *BookRouter {
+func NewBookRouter(sources map[string]BookSource, feeSource FeeSource) *BookRouter {
 	router := &BookRouter{
-		books: make(map[string]*msgBook),
+		books:     make(map[string]*msgBook),
+		feeSource: feeSource,
 	}
 	for mkt, src := range sources {
 		subs := &subscribers{
 			conns: make(map[uint64]comms.Link),
 		}
 		book := &msgBook{
-			name:   mkt,
-			orders: make(map[order.OrderID]*msgjson.BookOrderNote),
-			subs:   subs,
-			source: src,
+			name:    mkt,
+			orders:  make(map[order.OrderID]*msgjson.BookOrderNote),
+			subs:    subs,
+			source:  src,
+			baseID:  src.Base(),
+			quoteID: src.Quote(),
 		}
 		router.books[mkt] = book
 	}
 	comms.Route(msgjson.OrderBookRoute, router.handleOrderBook)
 	comms.Route(msgjson.UnsubOrderBookRoute, router.handleUnsubOrderBook)
+	comms.Route(msgjson.FeeRateRoute, router.handleFeeRate)
+
 	return router
 }
 
@@ -382,9 +394,11 @@ out:
 				stats := sigData.stats
 
 				note = &msgjson.EpochReportNote{
-					Seq:      subs.nextSeq(),
-					MarketID: book.name,
-					Epoch:    uint64(sigData.epochIdx),
+					Seq:          subs.nextSeq(),
+					MarketID:     book.name,
+					Epoch:        uint64(sigData.epochIdx),
+					BaseFeeRate:  sigData.baseFeeRate,
+					QuoteFeeRate: sigData.quoteFeeRate,
 					Candle: msgjson.Candle{
 						StartStamp:  uint64(startStamp),
 						EndStamp:    uint64(endStamp),
@@ -533,10 +547,12 @@ func (r *BookRouter) msgOrderBook(book *msgBook) *msgjson.OrderBook {
 	book.mtx.RUnlock()
 
 	return &msgjson.OrderBook{
-		Seq:      book.subs.lastSeq(),
-		MarketID: book.name,
-		Epoch:    uint64(epochIdx),
-		Orders:   ords,
+		Seq:          book.subs.lastSeq(),
+		MarketID:     book.name,
+		Epoch:        uint64(epochIdx),
+		Orders:       ords,
+		BaseFeeRate:  r.feeSource.LastRate(book.baseID),
+		QuoteFeeRate: r.feeSource.LastRate(book.quoteID),
 	}
 }
 
@@ -609,6 +625,28 @@ func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message)
 		log.Debugf("error sending unsub_orderbook response: %v", err)
 	}
 
+	return nil
+}
+
+// handleFeeRate handles a fee_rate request.
+func (r *BookRouter) handleFeeRate(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	var assetID uint32
+	err := msg.Unmarshal(&assetID)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCParseError,
+			Message: "error parsing fee_rate request",
+		}
+	}
+
+	resp, err := msgjson.NewResponse(msg.ID, r.feeSource.LastRate(assetID), nil)
+	if err != nil {
+		log.Errorf("failed to encode fee_rate response: %v", err)
+	}
+	err = conn.Send(resp)
+	if err != nil {
+		log.Debugf("error sending fee_rate response: %v", err)
+	}
 	return nil
 }
 

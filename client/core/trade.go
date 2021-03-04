@@ -118,6 +118,14 @@ type trackedCancel struct {
 // The trackedTrade has methods for handling requests from the DEX to progress
 // match negotiation.
 type trackedTrade struct {
+	// redeemFeeSuggestion is cached fee suggestion for redemption. We can't
+	// request a fee suggestion at redeem time because it would require making
+	// the full redemption routine async (TODO?). This fee suggestion is
+	// intentionally not stored as part of the db.OrderMetaData, and should
+	// be repopulated if the client is restarted.
+	// Used with atomic. Leave redeemFeeSuggestion as the first field in
+	// trackedTrade.
+	redeemFeeSuggestion uint64
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
 	// matchTrackers in the matches map.
@@ -1037,6 +1045,9 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Check all matches for and resend pending requests as necessary.
 	c.resendPendingRequests(t)
 
+	// Make sure we have a redemption fee suggestion cached.
+	c.cacheRedemptionFeeSuggestion(t)
+
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
@@ -1594,10 +1605,18 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		})
 	}
 
+	// Don't use (*Core).feeSuggestion here, since can incur an RPC request.
+	// If we don't have a synced book, use t.redemption
+	feeSuggestion := t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
+	if feeSuggestion == 0 {
+		feeSuggestion = atomic.LoadUint64(&t.redeemFeeSuggestion)
+	}
+
 	// Send the transaction.
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
-		Redemptions: redemptions,
+		Redemptions:   redemptions,
+		FeeSuggestion: feeSuggestion,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.

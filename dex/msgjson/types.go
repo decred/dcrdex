@@ -179,6 +179,9 @@ const (
 	// SpotsRoute is the HTTP or WebSocket request to get the spot price and
 	// volume for the DEX's markets.
 	SpotsRoute = "spots"
+	// FeeRateRoute is the client-originating request asking for the most
+	// recently recorded transaction fee estimate for an asset.
+	FeeRateRoute = "fee_rate"
 	// CandlesRoute is the HTTP request to get the set of candlesticks
 	// representing market activity history.
 	CandlesRoute = "candles"
@@ -816,7 +819,9 @@ type OrderBook struct {
 	// DRAFT NOTE: We might want to use a different structure for bulk updates.
 	// Sending a struct of arrays rather than an array of structs could
 	// potentially cut the encoding effort and encoded size substantially.
-	Orders []*BookOrderNote `json:"orders"`
+	Orders       []*BookOrderNote `json:"orders"`
+	BaseFeeRate  uint64           `json:"baseFeeRate"`
+	QuoteFeeRate uint64           `json:"quoteFeeRate"`
 }
 
 // MatchProofNote is the match_proof notification payload.
@@ -1116,9 +1121,11 @@ func (wc *WireCandles) Candles() []*Candle {
 // EpochReportNote is a report about an epoch sent after all of the epoch's
 // book updates.
 type EpochReportNote struct {
-	Seq      uint64 `json:"seq"`
-	MarketID string `json:"marketid"`
-	Epoch    uint64 `json:"epoch"`
+	Seq          uint64 `json:"seq"`
+	MarketID     string `json:"marketid"`
+	Epoch        uint64 `json:"epoch"`
+	BaseFeeRate  uint64 `json:"baseFeeRate"`
+	QuoteFeeRate uint64 `json:"quoteFeeRate"`
 	Candle
 }
 

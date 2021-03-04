@@ -66,6 +66,26 @@ type DataCollector interface {
 	ReportEpoch(base, quote uint32, epochIdx uint64, stats *matcher.MatchCycleStats) (*msgjson.Spot, error)
 }
 
+// FeeFetcher is a fee fetcher for fetching fees. Fees are fickle, so fetch fees
+// with FeeFetcher fairly frequently.
+type FeeFetcher interface {
+	FeeRate() uint64
+	MaxFeeRate() uint64
+}
+
+// Config is the Market configuration.
+type Config struct {
+	MarketInfo      *dex.MarketInfo
+	Storage         Storage
+	Swapper         Swapper
+	AuthManager     AuthManager
+	FeeFetcherBase  FeeFetcher
+	CoinLockerBase  coinlock.CoinLocker
+	FeeFetcherQuote FeeFetcher
+	CoinLockerQuote coinlock.CoinLocker
+	DataCollector   DataCollector
+}
+
 // Market is the market manager. It should not be overly involved with details
 // of accounts and authentication. Via the account package it should request
 // account status with new orders, verification of order signatures. The Market
@@ -118,8 +138,17 @@ type Market struct {
 	swapper Swapper
 	auth    AuthManager
 
+	feeScalesMtx sync.RWMutex
+	feeScales    struct {
+		base  float64
+		quote float64
+	}
+
 	coinLockerBase  coinlock.CoinLocker
 	coinLockerQuote coinlock.CoinLocker
+
+	baseFeeFetcher  FeeFetcher
+	quoteFeeFetcher FeeFetcher
 
 	// Persistent data storage
 	storage Storage
@@ -140,9 +169,9 @@ type Storage interface {
 
 // NewMarket creates a new Market for the provided base and quote assets, with
 // an epoch cycling at given duration in milliseconds.
-func NewMarket(mktInfo *dex.MarketInfo, storage Storage, swapper Swapper, authMgr AuthManager,
-	coinLockerBase, coinLockerQuote coinlock.CoinLocker, dataCollector DataCollector) (*Market, error) {
+func NewMarket(cfg *Config) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
+	storage, mktInfo, swapper := cfg.Storage, cfg.MarketInfo, cfg.Swapper
 	if err := storage.LastErr(); err != nil {
 		return nil, err
 	}
@@ -242,9 +271,9 @@ ordersLoop:
 
 	// Lock the coins, catching and removing orders where coins were already
 	// locked by another market.
-	failedOrderCoins := coinLockerBase.LockCoins(baseCoins)
+	failedOrderCoins := cfg.CoinLockerBase.LockCoins(baseCoins)
 	// Merge base and quote asset coins.
-	for id, coins := range coinLockerQuote.LockCoins(quoteCoins) {
+	for id, coins := range cfg.CoinLockerQuote.LockCoins(quoteCoins) {
 		failedOrderCoins[id] = coins
 	}
 
@@ -311,11 +340,13 @@ ordersLoop:
 		epochCommitments: make(map[order.Commitment]order.OrderID),
 		epochOrders:      make(map[order.OrderID]order.Order),
 		swapper:          swapper,
-		auth:             authMgr,
+		auth:             cfg.AuthManager,
 		storage:          storage,
-		coinLockerBase:   coinLockerBase,
-		coinLockerQuote:  coinLockerQuote,
-		dataCollector:    dataCollector,
+		coinLockerBase:   cfg.CoinLockerBase,
+		coinLockerQuote:  cfg.CoinLockerQuote,
+		baseFeeFetcher:   cfg.FeeFetcherBase,
+		quoteFeeFetcher:  cfg.FeeFetcherQuote,
+		dataCollector:    cfg.DataCollector,
 	}, nil
 }
 
@@ -1818,6 +1849,26 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		return
 	}
 
+	// Get the base and quote fee rates.
+	// NOTE: We might consider moving this before the match cycle and abandoning
+	// the match cycle when no fee rate can be found (on mainnet). The only
+	// hesitation there is that it makes certain maintenance tasks longer but
+	// that's not unexpected in the world of cryptocurrency exchanges. It also
+	// makes it harder to fire up a private DEX server to conduct a private
+	// trade, but even in that case, I wouldn't want to be matching at the
+	// fallback MaxFeeRate when the justifiable network rate is much lower. I do
+	// remember some minor discussion of this at some point in the past, but I'd
+	// like to bring it back.
+	getFeeRate := func(assetID uint32, f FeeFetcher) uint64 {
+		rate := m.ScaleFeeRate(assetID, f.FeeRate())
+		if rate > f.MaxFeeRate() || rate == 0 {
+			rate = f.MaxFeeRate()
+		}
+		return rate
+	}
+	feeRateBase := getFeeRate(m.Base(), m.baseFeeFetcher)
+	feeRateQuote := getFeeRate(m.Quote(), m.quoteFeeFetcher)
+
 	// Data from preimage collection
 	ordersRevealed := epoch.ordersRevealed
 	cSum := epoch.cSum
@@ -1833,6 +1884,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		// Set the epoch ID.
 		ms.Epoch.Idx = uint64(epoch.Epoch)
 		ms.Epoch.Dur = uint64(epoch.Duration)
+		ms.FeeRateBase = feeRateBase
+		ms.FeeRateQuote = feeRateQuote
 
 		// Update order settling amounts.
 		for _, match := range ms.Matches() {
@@ -2058,9 +2111,11 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	notifyChan <- &updateSignal{
 		action: epochReportAction,
 		data: sigDataEpochReport{
-			epochIdx: epoch.Epoch,
-			epochDur: epoch.Duration,
-			stats:    stats,
+			epochIdx:     epoch.Epoch,
+			epochDur:     epoch.Duration,
+			stats:        stats,
+			baseFeeRate:  feeRateBase,
+			quoteFeeRate: feeRateQuote,
 		},
 	}
 
@@ -2114,4 +2169,46 @@ func (m *Market) orderResponse(oRecord *orderRecord) (*msgjson.Message, error) {
 
 	// Encode the order response as a message for the client.
 	return msgjson.NewResponse(oRecord.msgID, res, nil)
+}
+
+// SetFeeRateScale sets a swap fee scale factor for the given asset.
+// SetFeeRateScale should be called regardless of whether the Market is
+// suspended.
+func (m *Market) SetFeeRateScale(assetID uint32, scale float64) {
+	m.feeScalesMtx.Lock()
+	switch assetID {
+	case m.marketInfo.Base:
+		m.feeScales.base = scale
+	case m.marketInfo.Quote:
+		m.feeScales.quote = scale
+	default:
+		log.Errorf("Unknown asset ID %d for market %d-%d",
+			assetID, m.marketInfo.Base, m.marketInfo.Quote)
+	}
+	m.feeScalesMtx.Unlock()
+}
+
+// ScaleFeeRate scales the provided fee rate with the given asset's swap fee
+// rate scale factor, which is 1.0 by default.
+func (m *Market) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
+	if feeRate == 0 {
+		return feeRate // no idea if this is sensible for any asset, but ok
+	}
+	var feeScale float64
+	m.feeScalesMtx.RLock()
+	switch assetID {
+	case m.marketInfo.Base:
+		feeScale = m.feeScales.base
+	default:
+		feeScale = m.feeScales.quote
+	}
+	m.feeScalesMtx.RUnlock()
+	if feeScale == 0 {
+		return feeRate
+	}
+	if feeScale < 1 {
+		log.Warnf("Using fee rate scale of %f < 1.0 for asset %d", feeScale, assetID)
+	}
+	// It started non-zero, so don't allow it to go to zero.
+	return uint64(math.Max(1.0, math.Round(float64(feeRate)*feeScale)))
 }
