@@ -38,10 +38,6 @@ var (
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(context.Background())
-		defer cancel()
-
 		logger := dex.StdOutLogger("BCHTEST", dex.LevelTrace)
 
 		// Since Bitcoin Cash's data dir is the same as Bitcoin, for dev, we'll
@@ -62,12 +58,19 @@ func TestMain(m *testing.M) {
 			return 1
 		}
 
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+
 		wg, err := dexAsset.Connect(ctx)
 		if err != nil {
+			cancel()
 			fmt.Printf("Connect failed: %v", err)
 			return 1
 		}
-		defer wg.Wait()
+		defer func() {
+			cancel()
+			wg.Wait()
+		}()
 
 		return m.Run()
 	}

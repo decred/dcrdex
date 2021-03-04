@@ -30,7 +30,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/rpcclient/v6"
 )
 
@@ -579,8 +578,10 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 	// Check for method unkown error for feeRate method.
 	_, err = btc.estimateFee(ctx, btc.node.requester, 1)
-	var rpcErr *dcrjson.RPCError
-	if errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCMethodNotFound.Code {
+	var rpcErr *btcjson.RPCError
+	if errors.As(err, &rpcErr) &&
+		(rpcErr.Code == btcjson.ErrRPCMethodNotFound.Code || rpcErr.Message == "Method not found") {
+
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
 
