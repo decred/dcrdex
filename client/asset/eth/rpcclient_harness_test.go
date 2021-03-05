@@ -16,6 +16,7 @@ package eth
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,6 +30,8 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -41,19 +44,20 @@ const (
 )
 
 var (
-	gasPrice        = big.NewInt(82e9)
-	homeDir         = os.Getenv("HOME")
-	genesisFile     = filepath.Join(homeDir, "dextest", "eth", "genesis.json")
-	alphaNodeDir    = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	ethClient       = new(rpcclient)
-	ctx             context.Context
-	tLogger         = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
-	simnetAddr      = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
-	simnetAcct      = &accounts.Account{Address: simnetAddr}
-	participantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
-	participantAcct = &accounts.Account{Address: participantAddr}
-	simnetID        = int64(42)
-	newTXOpts       = func(ctx context.Context, from common.Address, value *big.Int) *bind.TransactOpts {
+	gasPrice         = big.NewInt(82e9)
+	homeDir          = os.Getenv("HOME")
+	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	genesisFile      = filepath.Join(homeDir, "dextest", "eth", "genesis.json")
+	alphaNodeDir     = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
+	ethClient        = new(rpcclient)
+	ctx              context.Context
+	tLogger          = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+	simnetAddr       = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
+	simnetAcct       = &accounts.Account{Address: simnetAddr}
+	participantAddr  = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	participantAcct  = &accounts.Account{Address: participantAddr}
+	simnetID         = int64(42)
+	newTXOpts        = func(ctx context.Context, from common.Address, value *big.Int) *bind.TransactOpts {
 		return &bind.TransactOpts{
 			GasPrice: gasPrice,
 			GasLimit: 1e6,
@@ -108,6 +112,18 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(tmpDir)
+	addrBytes, err := ioutil.ReadFile(contractAddrFile)
+	if err != nil {
+		fmt.Printf("error reading contract address: %v\n", err)
+		os.Exit(1)
+	}
+	addrLen := len(addrBytes)
+	if addrLen == 0 {
+		fmt.Printf("no contract address found at %v\n", contractAddrFile)
+		os.Exit(1)
+	}
+	addrBytes = addrBytes[:addrLen-1]
+	fmt.Printf("Contract address is %v\n", string(addrBytes))
 	genBytes, err := ioutil.ReadFile(genesisFile)
 	if err != nil {
 		fmt.Printf("error reading genesis file: %v\n", err)
@@ -135,7 +151,7 @@ func TestMain(m *testing.M) {
 		wallet.internalNode.Close()
 		wallet.internalNode.Wait()
 	}()
-	if err := ethClient.connect(ctx, wallet.internalNode, common.Address{}); err != nil {
+	if err := ethClient.connect(ctx, wallet.internalNode, common.HexToAddress(string(addrBytes))); err != nil {
 		fmt.Printf("connect error: %v\n", err)
 		os.Exit(1)
 	}
@@ -316,10 +332,358 @@ func TestPendingTransactions(t *testing.T) {
 	spew.Dump(txs)
 }
 
+func TestSwap(t *testing.T) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should be empty.
+	spew.Dump(swap)
+}
+
 func TestSyncProgress(t *testing.T) {
 	progress, err := ethClient.syncProgress(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	spew.Dump(progress)
+}
+
+func TestInitiate(t *testing.T) {
+	now := time.Now().Unix()
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	err := ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	amt := big.NewInt(1e18)
+	txOpts := newTXOpts(ctx, simnetAddr, amt)
+	swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
+	if err != nil {
+		t.Fatal("unable to get swap state")
+	}
+	spew.Dump(swap)
+	state := eth.SwapState(swap.State)
+	if state != eth.None {
+		t.Fatalf("unexpeted swap state: want %s got %s", eth.None, state)
+	}
+
+	tests := []struct {
+		name       string
+		subAmt     bool
+		finalState eth.SwapState
+	}{{
+		name:       "ok",
+		finalState: eth.Initiated,
+		subAmt:     true,
+	}, {
+		// If the hash already exists, the contract should subtract only
+		// the tx fee from the account.
+		name:       "secret hash already exists",
+		finalState: eth.Initiated,
+	}}
+
+	for _, test := range tests {
+		originalBal, err := ethClient.balance(ctx, simnetAcct)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		tx, err := ethClient.initiate(txOpts, simnetID, now, secretHash, participantAddr)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(tx)
+
+		if err := waitForMined(t, time.Second*10, false); err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		// It appears the receipt is only accessable after the tx is mined.
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(receipt)
+
+		// Balance should be reduced by a certain amount depending on
+		// whether initiate completed successfully on-chain. If
+		// unsuccessful the fee is subtracted. If successful, amt is
+		// also subtracted.
+		bal, err := ethClient.balance(ctx, simnetAcct)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
+		wantBal := big.NewInt(0).Sub(originalBal, txFee)
+		if test.subAmt {
+			wantBal.Sub(wantBal, amt)
+		}
+		if bal.Cmp(wantBal) != 0 {
+			t.Fatalf("unexpeted balance change for test %v: want %v got %v", test.name, wantBal, bal)
+		}
+
+		swap, err = ethClient.swap(ctx, simnetAcct, secretHash)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		state := eth.SwapState(swap.State)
+		if state != test.finalState {
+			t.Fatalf("unexpeted swap state for test %v: want %s got %s", test.name, test.finalState, state)
+		}
+	}
+}
+
+func TestRedeem(t *testing.T) {
+	amt := big.NewInt(1e18)
+	locktime := time.Second * 12
+	tests := []struct {
+		name              string
+		sleep             time.Duration
+		redeemer          *accounts.Account
+		finalState        eth.SwapState
+		addAmt, badSecret bool
+	}{{
+		name:       "ok before locktime",
+		sleep:      time.Second * 8,
+		redeemer:   participantAcct,
+		finalState: eth.Redeemed,
+		addAmt:     true,
+	}, {
+		name:       "ok after locktime",
+		sleep:      time.Second * 16,
+		redeemer:   participantAcct,
+		finalState: eth.Redeemed,
+		addAmt:     true,
+	}, {
+		name:       "bad secret",
+		sleep:      time.Second * 8,
+		redeemer:   participantAcct,
+		finalState: eth.Initiated,
+		badSecret:  true,
+	}, {
+		name:       "wrong redeemer",
+		sleep:      time.Second * 8,
+		finalState: eth.Initiated,
+		redeemer:   simnetAcct,
+	}}
+
+	for _, test := range tests {
+		err := ethClient.unlock(ctx, pw, simnetAcct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ethClient.unlock(ctx, pw, participantAcct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		txOpts := newTXOpts(ctx, simnetAddr, amt)
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+
+		swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
+		if err != nil {
+			t.Fatal("unable to get swap state")
+		}
+		state := eth.SwapState(swap.State)
+		if state != eth.None {
+			t.Fatalf("unexpeted swap state for test %v: want %s got %s", test.name, eth.None, state)
+		}
+
+		// Create a secret that doesn't has to secredHash.
+		if test.badSecret {
+			copy(secret[:], encode.RandomBytes(32))
+		}
+
+		inLocktime := time.Now().Add(locktime).Unix()
+		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, participantAcct.Address)
+		if err != nil {
+			t.Fatalf("unable to initiate swap for test %v: %v ", test.name, err)
+		}
+
+		// This waitForMined will always take test.sleep to complete.
+		if err := waitForMined(t, test.sleep, true); err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		originalBal, err := ethClient.balance(ctx, test.redeemer)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		txOpts = newTXOpts(ctx, test.redeemer.Address, nil)
+		tx, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(tx)
+
+		if err := waitForMined(t, time.Second*10, false); err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		// It appears the receipt is only accessable after the tx is mined.
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(receipt)
+
+		// Balance should increase or decrease by a certain amount
+		// depending on whether redeem completed successfully on-chain.
+		// If unsuccessful the fee is subtracted. If successful, amt is
+		// added.
+		bal, err := ethClient.balance(ctx, test.redeemer)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
+		wantBal := big.NewInt(0).Sub(originalBal, txFee)
+		if test.addAmt {
+			wantBal.Add(wantBal, amt)
+		}
+		if bal.Cmp(wantBal) != 0 {
+			t.Fatalf("unexpeted balance change for test %v: want %v got %v", test.name, wantBal, bal)
+		}
+
+		swap, err = ethClient.swap(ctx, simnetAcct, secretHash)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		state = eth.SwapState(swap.State)
+		if state != test.finalState {
+			t.Fatalf("unexpeted swap state for test %v: want %s got %s", test.name, test.finalState, state)
+		}
+	}
+}
+
+func TestRefund(t *testing.T) {
+	amt := big.NewInt(1e18)
+	locktime := time.Second * 12
+	tests := []struct {
+		name           string
+		sleep          time.Duration
+		refunder       *accounts.Account
+		finalState     eth.SwapState
+		addAmt, redeem bool
+	}{{
+		name:       "ok",
+		sleep:      time.Second * 16,
+		refunder:   simnetAcct,
+		addAmt:     true,
+		finalState: eth.Refunded,
+	}, {
+		name:       "before locktime",
+		sleep:      time.Second * 8,
+		refunder:   simnetAcct,
+		finalState: eth.Initiated,
+	}, {
+		name:       "wrong refunder",
+		sleep:      time.Second * 16,
+		refunder:   participantAcct,
+		finalState: eth.Initiated,
+	}, {
+		name:       "already redeemed",
+		sleep:      time.Second * 16,
+		refunder:   simnetAcct,
+		redeem:     true,
+		finalState: eth.Redeemed,
+	}}
+
+	for _, test := range tests {
+		err := ethClient.unlock(ctx, pw, simnetAcct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ethClient.unlock(ctx, pw, participantAcct)
+		if err != nil {
+			t.Fatal(err)
+		}
+		txOpts := newTXOpts(ctx, simnetAddr, amt)
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+
+		swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
+		if err != nil {
+			t.Fatal("unable to get swap state")
+		}
+		state := eth.SwapState(swap.State)
+		if state != eth.None {
+			t.Fatalf("unexpeted swap state for test %v: want %s got %s", test.name, eth.None, state)
+		}
+
+		inLocktime := time.Now().Add(locktime).Unix()
+		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, participantAcct.Address)
+		if err != nil {
+			t.Fatalf("unable to initiate swap for test %v: %v ", test.name, err)
+		}
+
+		if test.redeem {
+			if err := waitForMined(t, time.Second*8, false); err != nil {
+				t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+			}
+			txOpts = newTXOpts(ctx, participantAddr, nil)
+			_, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
+			if err != nil {
+				t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+			}
+		}
+
+		// This waitForMined will always take test.sleep to complete.
+		if err := waitForMined(t, test.sleep, true); err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		originalBal, err := ethClient.balance(ctx, test.refunder)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		txOpts = newTXOpts(ctx, test.refunder.Address, nil)
+		tx, err := ethClient.refund(txOpts, simnetID, secretHash)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(tx)
+
+		if err := waitForMined(t, time.Second*10, false); err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+
+		// It appears the receipt is only accessable after the tx is mined.
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		spew.Dump(receipt)
+
+		// Balance should increase or decrease by a certain amount
+		// depending on whether redeem completed successfully on-chain.
+		// If unsuccessful the fee is subtracted. If successful, amt is
+		// added.
+		bal, err := ethClient.balance(ctx, test.refunder)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
+		wantBal := big.NewInt(0).Sub(originalBal, txFee)
+		if test.addAmt {
+			wantBal.Add(wantBal, amt)
+		}
+		if bal.Cmp(wantBal) != 0 {
+			t.Fatalf("unexpeted balance change for test %v: want %v got %v", test.name, wantBal, bal)
+		}
+
+		swap, err = ethClient.swap(ctx, simnetAcct, secretHash)
+		if err != nil {
+			t.Fatalf("unexpeted error for test %v: %v", test.name, err)
+		}
+		state = eth.SwapState(swap.State)
+		if state != test.finalState {
+			t.Fatalf("unexpeted swap state for test %v: want %s got %s", test.name, test.finalState, state)
+		}
+	}
 }

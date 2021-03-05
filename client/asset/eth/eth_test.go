@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/node"
@@ -85,6 +87,18 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 	return n.syncProg, n.syncProgErr
 }
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
+	return nil, nil
+}
+func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error) {
+	return nil, nil
+}
+func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
+	return nil, nil
+}
+func (n *testNode) refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error) {
+	return nil, nil
+}
+func (n *testNode) swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*eth.ETHSwapSwap, error) {
 	return nil, nil
 }
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
