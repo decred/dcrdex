@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"decred.org/dcrdex/server/asset"
+	_ "decred.org/dcrdex/server/asset/bch"
 	_ "decred.org/dcrdex/server/asset/btc"
 	_ "decred.org/dcrdex/server/asset/dcr"
 	_ "decred.org/dcrdex/server/asset/ltc"

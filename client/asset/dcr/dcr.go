@@ -291,6 +291,32 @@ func (ci *auditInfo) SecretHash() dex.Bytes {
 	return ci.secretHash
 }
 
+// convertAuditInfo converts from the common *asset.AuditInfo type to our
+// internal *auditInfo type.
+func convertAuditInfo(ai *asset.AuditInfo, chainParams *chaincfg.Params) (*auditInfo, error) {
+	if ai.Coin == nil {
+		return nil, fmt.Errorf("no coin")
+	}
+
+	op, ok := ai.Coin.(*output)
+	if !ok {
+		return nil, fmt.Errorf("unknown coin type %T", ai.Coin)
+	}
+
+	recip, err := dcrutil.DecodeAddress(ai.Recipient, chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return &auditInfo{
+		output:     op,            //     *output
+		recipient:  recip,         //  btcutil.Address
+		contract:   ai.Contract,   //   []byte
+		secretHash: ai.SecretHash, // []byte
+		expiration: ai.Expiration, // time.Time
+	}, nil
+}
+
 // swapReceipt is information about a swap contract that was broadcast by this
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
@@ -1373,13 +1399,18 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	var contracts [][]byte
 	var addresses []dcrutil.Address
 	for _, r := range form.Redemptions {
-		cinfo, ok := r.Spends.(*auditInfo)
-		if !ok {
-			return nil, nil, 0, fmt.Errorf("Redemption contract info of wrong type")
+		if r.Spends == nil {
+			return nil, nil, 0, fmt.Errorf("no audit info")
 		}
+
+		cinfo, err := convertAuditInfo(r.Spends, dcr.chainParams)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
-		contract := r.Spends.Contract()
+		contract := cinfo.contract
 		_, receiver, _, secretHash, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -1505,7 +1536,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
-func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, error) {
+func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -1549,12 +1580,12 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
 	}
-	return &auditInfo{
-		output:     newOutput(txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
-		contract:   contract,
-		secretHash: secretHash,
-		recipient:  receiver,
-		expiration: time.Unix(int64(stamp), 0).UTC(),
+	return &asset.AuditInfo{
+		Coin:       newOutput(txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
+		Contract:   contract,
+		SecretHash: secretHash,
+		Recipient:  receiver.String(),
+		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
 }
 

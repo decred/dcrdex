@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -57,14 +58,24 @@ type rpcClient struct {
 	requester   RawRequester
 	chainParams *chaincfg.Params
 	segwit      bool
+	decodeAddr  dexbtc.AddressDecoder
+	// arglessChangeAddrRPC true will pass no arguments to the
+	// getrawchangeaddress RPC.
+	arglessChangeAddrRPC bool
 }
 
-// newWalletClient is the constructor for a rpcClient.
-func newWalletClient(requester RawRequester, segwit bool, chainParams *chaincfg.Params) *rpcClient {
+// newWalletClient is the constructor for a walletClient.
+func newWalletClient(requester RawRequester, segwit bool, addrDecoder dexbtc.AddressDecoder, arglessChangeAddrRPC bool, chainParams *chaincfg.Params) *rpcClient {
+	if addrDecoder == nil {
+		addrDecoder = btcutil.DecodeAddress
+	}
+
 	return &rpcClient{
-		requester:   requester,
-		chainParams: chainParams,
-		segwit:      segwit,
+		requester:            requester,
+		chainParams:          chainParams,
+		segwit:               segwit,
+		decodeAddr:           addrDecoder,
+		arglessChangeAddrRPC: arglessChangeAddrRPC,
 	}
 }
 
@@ -193,15 +204,18 @@ func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
-	if wc.segwit {
+	switch {
+	case wc.arglessChangeAddrRPC:
+		err = wc.call(methodChangeAddress, nil, &addrStr)
+	case wc.segwit:
 		err = wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
-	} else {
+	default:
 		err = wc.call(methodChangeAddress, anylist{"legacy"}, &addrStr)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return btcutil.DecodeAddress(addrStr, wc.chainParams)
+	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
 // AddressPKH gets a new base58-encoded (P2PKH) external address from the
@@ -224,7 +238,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	if err != nil {
 		return nil, err
 	}
-	return btcutil.DecodeAddress(addrStr, wc.chainParams)
+	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
 // SignTx attempts to have the wallet sign the transaction inputs.

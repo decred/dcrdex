@@ -190,16 +190,6 @@ type Output struct {
 	spendSize uint32
 }
 
-// Contract is a transaction output containing a swap contract.
-type Contract struct {
-	*Output
-	swapAddress   string
-	refundAddress string
-	lockTime      time.Time
-}
-
-var _ asset.Contract = (*Contract)(nil)
-
 // Confirmations returns the number of confirmations for a transaction output.
 // Because it is possible for an output that was once considered valid to later
 // be considered invalid, this method can return an error to indicate the output
@@ -378,48 +368,29 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 	return matches, nil
 }
 
-// AuditContract checks that the Contract is a swap contract and extracts the
+// auditContract checks that the Contract is a swap contract and extracts the
 // receiving address and contract value on success.
-func (contract *Contract) auditContract() error {
-	tx := contract.tx
-	if len(tx.outs) <= int(contract.vout) {
-		return fmt.Errorf("invalid index %d for transaction %s", contract.vout, tx.hash)
+func auditContract(op *Output) (*asset.Contract, error) {
+	tx := op.tx
+	if len(tx.outs) <= int(op.vout) {
+		return nil, fmt.Errorf("invalid index %d for transaction %s", op.vout, tx.hash)
 	}
-	output := tx.outs[int(contract.vout)]
+	output := tx.outs[int(op.vout)]
 	scriptHash := dexdcr.ExtractScriptHash(output.pkScript)
 	if scriptHash == nil {
-		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
+		return nil, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, op.vout)
 	}
-	if !bytes.Equal(dcrutil.Hash160(contract.redeemScript), scriptHash) {
-		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
+	if !bytes.Equal(dcrutil.Hash160(op.redeemScript), scriptHash) {
+		return nil, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, op.vout)
 	}
-	refund, receiver, lockTime, _, err := dexdcr.ExtractSwapDetails(contract.redeemScript, chainParams)
+	_, receiver, lockTime, _, err := dexdcr.ExtractSwapDetails(op.redeemScript, chainParams)
 	if err != nil {
-		return fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
+		return nil, fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, op.vout, err)
 	}
-	contract.refundAddress = refund.String()
-	contract.swapAddress = receiver.String()
-	contract.lockTime = time.Unix(int64(lockTime), 0)
-	return nil
-}
-
-// RefundAddress is the refund address of this swap contract.
-func (contract *Contract) RefundAddress() string {
-	return contract.refundAddress
-}
-
-// SwapAddress is the receiving address of this swap contract.
-func (contract *Contract) SwapAddress() string {
-	return contract.swapAddress
-}
-
-// RedeemScript returns the Contract's redeem script.
-func (contract *Contract) RedeemScript() []byte {
-	return contract.redeemScript
-}
-
-// LockTime is a method on the asset.Contract interface for reading the locktime
-// in the contract script.
-func (contract *Contract) LockTime() time.Time {
-	return contract.lockTime
+	return &asset.Contract{
+		Coin:         op,
+		SwapAddress:  receiver.String(),
+		RedeemScript: op.redeemScript,
+		LockTime:     time.Unix(int64(lockTime), 0),
+	}, nil
 }

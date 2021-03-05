@@ -275,22 +275,18 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 // confirmations. Pubkey scripts can be P2PKH or P2SH in either regular- or
 // stake-tree flavor. P2PKH supports two alternative signatures, Schnorr and
 // Edwards. Multi-sig P2SH redeem scripts are supported as well.
-func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (*asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	output, err := dcr.output(txHash, vout, redeemScript)
+
+	op, err := dcr.output(txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
-	contract := &Contract{Output: output}
-	// Verify contract and set refundAddress and swapAddress.
-	err = contract.auditContract()
-	if err != nil {
-		return nil, err
-	}
-	return contract, nil
+
+	return auditContract(op)
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -382,6 +378,10 @@ func (dcr *Backend) ValidateContract(contract []byte) error {
 // CheckAddress checks that the given address is parseable.
 func (dcr *Backend) CheckAddress(addr string) bool {
 	_, err := dcrutil.DecodeAddress(addr, chainParams)
+	if err != nil {
+		dcr.log.Errorf("DecodeAddress error for %s: %v", addr, err)
+	}
+
 	return err == nil
 }
 

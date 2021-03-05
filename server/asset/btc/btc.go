@@ -63,10 +63,10 @@ const (
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
-// btcNode represents a blockchain information fetcher. In practice, it is
+// BTCNode represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
-type btcNode interface {
+type BTCNode interface {
 	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
@@ -92,7 +92,7 @@ type Backend struct {
 	client *rpcclient.Client
 	// node is used throughout for RPC calls, and in typical use will be the same
 	// as client. For testing, it can be set to a stub.
-	node btcNode
+	node BTCNode
 	// The block cache stores just enough info about the blocks to shortcut future
 	// calls to GetBlockVerbose.
 	blockCache *blockCache
@@ -103,7 +103,9 @@ type Backend struct {
 	chainParams *chaincfg.Params
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
-	log dex.Logger
+	log         dex.Logger
+	decodeAddr  dexbtc.AddressDecoder
+	estimateFee func(BTCNode) (uint64, error)
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -129,35 +131,70 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(assetName, true, configPath, logger, network, params, dexbtc.RPCPorts)
+	return NewBTCClone(&BackendCloneConfig{
+		Name:        assetName,
+		Segwit:      true,
+		ConfigPath:  configPath,
+		Logger:      logger,
+		Net:         network,
+		ChainParams: params,
+		Ports:       dexbtc.RPCPorts,
+	})
 }
 
-func newBTC(name string, segwit bool, chainParams *chaincfg.Params, logger dex.Logger, cfg *dexbtc.Config) *Backend {
+func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.Config) *Backend {
+
+	feeEstimator := feeRate
+	if cloneCfg.FeeEstimator != nil {
+		feeEstimator = cloneCfg.FeeEstimator
+	}
+
+	addrDecoder := btcutil.DecodeAddress
+	if cloneCfg.AddressDecoder != nil {
+		addrDecoder = cloneCfg.AddressDecoder
+	}
+
 	return &Backend{
 		cfg:         cfg,
-		name:        name,
+		name:        cloneCfg.Name,
 		blockCache:  newBlockCache(),
 		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
-		chainParams: chainParams,
-		log:         logger,
-		segwit:      segwit,
+		chainParams: cloneCfg.ChainParams,
+		log:         cloneCfg.Logger,
+		segwit:      cloneCfg.Segwit,
+		decodeAddr:  addrDecoder,
+		estimateFee: feeEstimator,
 	}
+}
+
+// BackendCloneConfig captures the arguments necessary to configure a BTC clone
+// backend.
+type BackendCloneConfig struct {
+	Name           string
+	Segwit         bool
+	ConfigPath     string
+	AddressDecoder dexbtc.AddressDecoder
+	Logger         dex.Logger
+	Net            dex.Network
+	ChainParams    *chaincfg.Params
+	Ports          dexbtc.NetPorts
+	// FeeEstimator provides a way to get fees given an RawRequest-enabled
+	// client and a confirmation target.
+	FeeEstimator func(BTCNode) (uint64, error)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
 // ReadCloneParams, to create a Backend for other assets with minimal coding.
 // See ReadCloneParams and CompatibilityCheck for more info.
-func NewBTCClone(name string, segwit bool, configPath string, logger dex.Logger, network dex.Network,
-	params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
-
+func NewBTCClone(cloneCfg *BackendCloneConfig) (*Backend, error) {
 	// Read the configuration parameters
-	cfg, err := dexbtc.LoadConfigFromPath(configPath, name, network, ports)
+	cfg, err := dexbtc.LoadConfigFromPath(cloneCfg.ConfigPath, cloneCfg.Name, cloneCfg.Net, cloneCfg.Ports)
 	if err != nil {
 		return nil, err
 	}
 
-	return newBTC(name, segwit, params, logger, cfg), nil
+	return newBTC(cloneCfg, cfg), nil
 }
 
 func (btc *Backend) shutdown() {
@@ -197,7 +234,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	if _, err = btc.FeeRate(); err != nil {
+	if _, err = btc.estimateFee(btc.node); err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
 
@@ -210,13 +247,19 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
+// Net returns the *chaincfg.Params. This is not part of the asset.Backend
+// interface, and is exported as a convenience for embedding types.
+func (btc *Backend) Net() *chaincfg.Params {
+	return btc.chainParams
+}
+
 // Contract is part of the asset.Backend interface. An asset.Contract is an
 // output that has been validated as a swap contract for the passed redeem
 // script. A spendable output is one that can be spent in the next block. Every
 // output from a non-coinbase transaction is spendable immediately. Coinbase
 // outputs are only spendable after CoinbaseMaturity confirmations. Pubkey
 // scripts can be P2PKH or P2SH. Multi-sig P2SH redeem scripts are supported.
-func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (*asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
@@ -225,13 +268,8 @@ func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 	if err != nil {
 		return nil, err
 	}
-	contract := &Contract{Output: output}
 	// Verify contract and set refundAddress and swapAddress.
-	err = btc.auditContract(contract)
-	if err != nil {
-		return nil, err
-	}
-	return contract, nil
+	return btc.auditContract(output)
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -356,30 +394,15 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *Backend) FeeRate() (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
-	if err != nil {
-		return 0, err
-	}
-	if len(feeResult.Errors) > 0 {
-		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
-	}
-	if feeResult.FeeRate == nil {
-		return 0, fmt.Errorf("no fee rate available")
-	}
-	satPerKB, err := btcutil.NewAmount(*feeResult.FeeRate)
-	if err != nil {
-		return 0, err
-	}
-	satPerB := uint64(math.Round(float64(satPerKB) / 1000))
-	if satPerB == 0 {
-		satPerB = 1
-	}
-	return satPerB, nil
+	return btc.estimateFee(btc.node)
 }
 
 // CheckAddress checks that the given address is parseable.
 func (btc *Backend) CheckAddress(addr string) bool {
-	_, err := btcutil.DecodeAddress(addr, btc.chainParams)
+	_, err := btc.decodeAddr(addr, btc.chainParams)
+	if err != nil {
+		btc.log.Errorf("CheckAddress error for %s %s: %v", btc.name, addr, err)
+	}
 	return err == nil
 }
 
@@ -714,10 +737,19 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 			pkScript: pkScript,
 		})
 	}
+
 	var feeRate uint64
-	if verboseTx.Vsize > 0 {
-		feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
+	if btc.segwit {
+		if verboseTx.Vsize > 0 {
+			feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
+		}
+	} else if verboseTx.Size > 0 {
+		// For non-segwit transactions, Size = Vsize anyway, so use Size to
+		// cover assets that won't set Vsize in their RPC response.
+		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
+
 	}
+
 	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate), nil
 }
 
@@ -772,10 +804,10 @@ func (btc *Backend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error)
 
 // auditContract checks that output is a swap contract and extracts the
 // receiving address and contract value on success.
-func (btc *Backend) auditContract(contract *Contract) error {
+func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 	tx := contract.tx
 	if len(tx.outs) <= int(contract.vout) {
-		return fmt.Errorf("invalid index %d for transaction %s", contract.vout, tx.hash)
+		return nil, fmt.Errorf("invalid index %d for transaction %s", contract.vout, tx.hash)
 	}
 	output := tx.outs[int(contract.vout)]
 
@@ -783,38 +815,40 @@ func (btc *Backend) auditContract(contract *Contract) error {
 	// the hash of the user-supplied redeem script.
 	scriptType := dexbtc.ParseScriptType(output.pkScript, contract.redeemScript)
 	if scriptType == dexbtc.ScriptUnsupported {
-		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
+		return nil, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
 	}
 	var scriptHash, hashed []byte
 	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
 		scriptHash = dexbtc.ExtractScriptHash(output.pkScript)
 		if scriptType.IsSegwit() {
 			if !btc.segwit {
-				return fmt.Errorf("segwit contract, but %s is not configured for segwit", btc.name)
+				return nil, fmt.Errorf("segwit contract, but %s is not configured for segwit", btc.name)
 			}
 			shash := sha256.Sum256(contract.redeemScript)
 			hashed = shash[:]
 		} else {
 			if btc.segwit {
-				return fmt.Errorf("non-segwit contract, but %s is configured for segwit", btc.name)
+				return nil, fmt.Errorf("non-segwit contract, but %s is configured for segwit", btc.name)
 			}
 			hashed = btcutil.Hash160(contract.redeemScript)
 		}
 	}
 	if scriptHash == nil {
-		return fmt.Errorf("specified output %s:%d is not P2SH or P2WSH", tx.hash, contract.vout)
+		return nil, fmt.Errorf("specified output %s:%d is not P2SH or P2WSH", tx.hash, contract.vout)
 	}
 	if !bytes.Equal(hashed, scriptHash) {
-		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
+		return nil, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
 	}
-	refund, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
+	_, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
 	if err != nil {
-		return fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
+		return nil, fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
 	}
-	contract.refundAddress = refund.String()
-	contract.swapAddress = receiver.String()
-	contract.lockTime = time.Unix(int64(lockTime), 0)
-	return nil
+	return &asset.Contract{
+		Coin:         contract,
+		SwapAddress:  receiver.String(),
+		RedeemScript: contract.redeemScript,
+		LockTime:     time.Unix(int64(lockTime), 0),
+	}, nil
 }
 
 // run is responsible for best block polling and checking the application
@@ -979,4 +1013,28 @@ func toSat(v float64) uint64 {
 func isTxNotFoundErr(err error) bool {
 	var rpcErr *btcjson.RPCError
 	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
+}
+
+// feeRate returns the current optimal fee rate in sat / byte using the
+// estimatesmartfee RPC.
+func feeRate(node BTCNode) (uint64, error) {
+	feeResult, err := node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
+	if err != nil {
+		return 0, err
+	}
+	if len(feeResult.Errors) > 0 {
+		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
+	}
+	if feeResult.FeeRate == nil {
+		return 0, fmt.Errorf("no fee rate available")
+	}
+	satPerKB, err := btcutil.NewAmount(*feeResult.FeeRate)
+	if err != nil {
+		return 0, err
+	}
+	satPerB := uint64(math.Round(float64(satPerKB) / 1000))
+	if satPerB == 0 {
+		satPerB = 1
+	}
+	return satPerB, nil
 }

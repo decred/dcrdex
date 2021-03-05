@@ -301,32 +301,24 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 // MakeContract creates a segwit atomic swap contract. The secretHash MUST
 // be computed from a secret of length SecretKeySize bytes or the resulting
 // contract will be invalid.
-func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
-	rAddr, err := btcutil.DecodeAddress(recipient, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding recipient address %s: %w", recipient, err)
-	}
-	sAddr, err := btcutil.DecodeAddress(sender, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding sender address %s: %w", sender, err)
-	}
+func MakeContract(rAddr, sAddr btcutil.Address, secretHash []byte, lockTime int64, segwit bool, chainParams *chaincfg.Params) ([]byte, error) {
 	if segwit {
 		_, ok := rAddr.(*btcutil.AddressWitnessPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", recipient)
+			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", rAddr.String())
 		}
 		_, ok = sAddr.(*btcutil.AddressWitnessPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", recipient)
+			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", sAddr.String())
 		}
 	} else {
 		_, ok := rAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", recipient)
+			return nil, fmt.Errorf("recipient address %s is not a witness-pubkey-hash address", rAddr.String())
 		}
 		_, ok = sAddr.(*btcutil.AddressPubKeyHash)
 		if !ok {
-			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", recipient)
+			return nil, fmt.Errorf("sender address %s is not a witness-pubkey-hash address", sAddr.String())
 		}
 	}
 	if len(secretHash) != SecretHashSize {

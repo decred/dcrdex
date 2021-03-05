@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 )
@@ -40,7 +39,7 @@ func toSatoshi(v float64) uint64 {
 }
 
 func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, node, name string,
-	logger dex.Logger, blkFunc func(string, error), splitTx bool) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
+	logger dex.Logger, blkFunc func(string, error), splitTx bool) (asset.Wallet, *dex.ConnectionMaster) {
 
 	user, err := user.Current()
 	if err != nil {
@@ -64,8 +63,7 @@ func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, sy
 			blkFunc(reportName, err)
 		},
 	}
-	var backend asset.Wallet
-	backend, err = newWallet(walletCfg, logger, dex.Regtest)
+	backend, err := newWallet(walletCfg, logger, dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
@@ -74,23 +72,23 @@ func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, sy
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
-	return backend.(*btc.ExchangeWallet), cm
+	return backend, cm
 }
 
 type testRig struct {
 	t                 *testing.T
 	symbol            string
-	backends          map[string]*btc.ExchangeWallet
+	backends          map[string]asset.Wallet
 	connectionMasters map[string]*dex.ConnectionMaster
 }
 
-func (rig *testRig) alpha() *btc.ExchangeWallet {
+func (rig *testRig) alpha() asset.Wallet {
 	return rig.backends["alpha"]
 }
-func (rig *testRig) beta() *btc.ExchangeWallet {
+func (rig *testRig) beta() asset.Wallet {
 	return rig.backends["beta"]
 }
-func (rig *testRig) gamma() *btc.ExchangeWallet {
+func (rig *testRig) gamma() asset.Wallet {
 	return rig.backends["gamma"]
 }
 func (rig *testRig) close() {
@@ -136,7 +134,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	rig := &testRig{
 		t:                 t,
 		symbol:            dexAsset.Symbol,
-		backends:          make(map[string]*btc.ExchangeWallet),
+		backends:          make(map[string]asset.Wallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
 	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc, splitTx)
@@ -274,9 +272,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
-		auditCoin := ci.Coin()
-		if ci.Recipient() != address {
-			t.Fatalf("wrong address. %s != %s", ci.Recipient(), address)
+		auditCoin := ci.Coin
+		if ci.Recipient != address {
+			t.Fatalf("wrong address. %s != %s", ci.Recipient, address)
 		}
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
@@ -291,8 +289,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		if spent {
 			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
-		if ci.Expiration().Equal(lockTime) {
-			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
+		if ci.Expiration.Equal(lockTime) {
+			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)
 		}
 		return &asset.Redemption{
 			Spends: ci,

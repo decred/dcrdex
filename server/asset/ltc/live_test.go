@@ -76,7 +76,7 @@ func TestUTXOStats(t *testing.T) {
 }
 
 func TestP2SHStats(t *testing.T) {
-	btc.LiveP2SHStats(ltc, t)
+	btc.LiveP2SHStats(ltc, t, 1000)
 }
 
 func TestLiveFees(t *testing.T) {

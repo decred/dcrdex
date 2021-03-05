@@ -29,6 +29,16 @@ fi
 
 echo "Writing markets.json and dcrdex.conf"
 
+set +e
+
+~/dextest/bch/harness-ctl/alpha getblockchaininfo > /dev/null
+BCH_ON=$?
+
+~/dextest/ltc/harness-ctl/alpha getblockchaininfo > /dev/null
+LTC_ON=$?
+
+set -e
+
 # Write markets.json.
 # The dcr and btc harnesses should be running. The assets config paths
 # used here are created by the respective harnesses.
@@ -40,13 +50,32 @@ cat > "./markets.json" <<EOF
             "quote": "BTC_simnet",
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
+EOF
+
+if [ $LTC_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
         },
         {
             "base": "DCR_simnet",
             "quote": "LTC_simnet",
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
-        }
+EOF
+fi
+
+if [ $BCH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "BCH_simnet",
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+fi
+
+cat << EOF >> "./markets.json"
+    }
     ],
     "assets": {
         "DCR_simnet": {
@@ -66,7 +95,11 @@ cat > "./markets.json" <<EOF
             "maxFeeRate": 100,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf"
-        },
+EOF
+
+if [ $LTC_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
         "LTC_simnet": {
             "bip44symbol": "ltc",
             "network": "simnet",
@@ -75,13 +108,31 @@ cat > "./markets.json" <<EOF
             "maxFeeRate": 20,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf"
+EOF
+fi
+
+if [ $BCH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "BCH_simnet": {
+            "bip44symbol": "bch",
+            "network": "simnet",
+            "lotSize": 1000000,
+            "rateStep": 1000000,
+            "maxFeeRate": 20,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf"
+EOF
+fi
+
+cat << EOF >> "./markets.json"
         }
     }
 }
 EOF
 
 # Write dcrdex.conf. The regfeexpub comes from the alpha>server_fees account.
-cat > "./dcrdex.conf" <<EOF
+cat << EOF >> ./dcrdex.conf
 regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
 pgdbname=${TEST_DB}
 simnet=1

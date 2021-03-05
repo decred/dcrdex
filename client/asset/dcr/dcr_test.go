@@ -1259,11 +1259,13 @@ func TestRedeem(t *testing.T) {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 
-	ci := &auditInfo{
-		output:     newOutput(tTxHash, 0, swapVal, wire.TxTreeRegular),
-		contract:   contract,
-		recipient:  tPKHAddr,
-		expiration: lockTime,
+	coin := newOutput(tTxHash, 0, swapVal, wire.TxTreeRegular)
+
+	ci := &asset.AuditInfo{
+		Coin:       coin,
+		Contract:   contract,
+		Recipient:  tPKHAddr.String(),
+		Expiration: lockTime,
 	}
 
 	redemption := &asset.Redemption{
@@ -1303,7 +1305,7 @@ func TestRedeem(t *testing.T) {
 	redemption.Spends = ci
 
 	// Spoofing AuditInfo is not allowed.
-	redemption.Spends = &TAuditInfo{}
+	redemption.Spends = &asset.AuditInfo{}
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
@@ -1319,12 +1321,12 @@ func TestRedeem(t *testing.T) {
 	redemption.Secret = secret
 
 	// too low of value
-	ci.output.value = 200
+	coin.value = 200
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
-	ci.output.value = swapVal
+	coin.value = swapVal
 
 	// Change address error
 	node.changeAddrErr = tErr
@@ -1481,14 +1483,14 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
-	if audit.Recipient() != addrStr {
-		t.Fatalf("wrong recipient. wanted '%s', got '%s'", addrStr, audit.Recipient())
+	if audit.Recipient != addrStr {
+		t.Fatalf("wrong recipient. wanted '%s', got '%s'", addrStr, audit.Recipient)
 	}
-	if !bytes.Equal(audit.Contract(), contract) {
+	if !bytes.Equal(audit.Contract, contract) {
 		t.Fatalf("contract not set to coin redeem script")
 	}
-	if audit.Expiration().Equal(lockTime) {
-		t.Fatalf("wrong lock time. wanted %d, got %d", lockTime.Unix(), audit.Expiration().Unix())
+	if audit.Expiration.Equal(lockTime) {
+		t.Fatalf("wrong lock time. wanted %d, got %d", lockTime.Unix(), audit.Expiration.Unix())
 	}
 
 	// Invalid txid

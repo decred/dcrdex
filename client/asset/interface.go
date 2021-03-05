@@ -119,7 +119,7 @@ type Wallet interface {
 	// during a swap. If the coin cannot be found for the coin ID, the
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
 	// to properly handle network latency.
-	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
+	AuditContract(coinID, contract dex.Bytes) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
 	// is also returned, but reaching this time does not necessarily mean the
@@ -216,17 +216,17 @@ type Receipt interface {
 
 // AuditInfo is audit information about a swap contract needed to audit the
 // contract.
-type AuditInfo interface {
+type AuditInfo struct {
 	// Recipient is the string-encoded recipient address.
-	Recipient() string
+	Recipient string
 	// Expiration is the unix timestamp of the contract time lock expiration.
-	Expiration() time.Time
+	Expiration time.Time
 	// Coin is the coin that contains the contract.
-	Coin() Coin
+	Coin Coin
 	// Contract is the contract script.
-	Contract() dex.Bytes
+	Contract dex.Bytes
 	// SecretHash is the contract's secret hash.
-	SecretHash() dex.Bytes
+	SecretHash dex.Bytes
 }
 
 // INPUT TYPES
@@ -262,7 +262,7 @@ type Contract struct {
 // contract.
 type Redemption struct {
 	// Spends is the AuditInfo for the swap output being spent.
-	Spends AuditInfo
+	Spends *AuditInfo
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
 }

@@ -154,6 +154,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		LegacyBalance:       true,
+		LegacyRawFeeLimit:   true,
 		Segwit:              false,
 	}
 

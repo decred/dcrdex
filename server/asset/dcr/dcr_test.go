@@ -1090,18 +1090,13 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 13 - received error for utxo: %v", err)
 	}
 
-	contract := &Contract{Output: utxo.Output}
-
 	// Now try again with the correct vout.
-	err = contract.auditContract() // sets refund and swap addresses
+	contract, err := auditContract(utxo.Output) // sets refund and swap addresses
 	if err != nil {
 		t.Fatalf("case 13 - unexpected error auditing contract: %v", err)
 	}
-	if contract.SwapAddress() != swap.recipient.String() {
-		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", contract.SwapAddress(), swap.recipient.String())
-	}
-	if contract.RefundAddress() != swap.refund.String() {
-		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", contract.RefundAddress(), swap.refund.String())
+	if contract.SwapAddress != swap.recipient.String() {
+		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", contract.SwapAddress, swap.recipient.String())
 	}
 	if contract.Value() != val {
 		t.Fatalf("case 13 - unexpected output value. wanted 5, got %d", contract.Value())
@@ -1458,7 +1453,9 @@ func TestAuxiliary(t *testing.T) {
 // TestCheckAddress checks that addresses are parsing or not parsing as
 // expected.
 func TestCheckAddress(t *testing.T) {
-	dcr := &Backend{}
+	dcr, shutdown := testBackend()
+	defer shutdown()
+
 	type test struct {
 		addr    string
 		wantErr bool

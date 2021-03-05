@@ -298,9 +298,9 @@ func runTest(t *testing.T, splitTx bool) {
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
-		swapOutput = ci.Coin()
-		if ci.Recipient() != alphaAddress {
-			t.Fatalf("wrong address. %s != %s", ci.Recipient(), alphaAddress)
+		swapOutput = ci.Coin
+		if ci.Recipient != alphaAddress {
+			t.Fatalf("wrong address. %s != %s", ci.Recipient, alphaAddress)
 		}
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
@@ -312,8 +312,8 @@ func runTest(t *testing.T, splitTx bool) {
 		if confs != 0 {
 			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
 		}
-		if ci.Expiration().Equal(lockTime) {
-			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
+		if ci.Expiration.Equal(lockTime) {
+			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)
 		}
 		if spent {
 			t.Fatalf("makeRedemption: expected unspent, got spent")
