@@ -10,7 +10,7 @@ import (
 	"os"
 
 	"decred.org/dcrdex/dex/encode"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 type passwordReadResponse struct {
@@ -22,7 +22,7 @@ type passwordReadResponse struct {
 // empty string.
 func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 	// Get the initial state of the terminal.
-	initialTermState, err := terminal.GetState(int(os.Stdin.Fd()))
+	initialTermState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 
 	go func() {
 		fmt.Print(prompt)
-		pass, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		pass, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Println()
 		passwordReadChan <- passwordReadResponse{
 			password: pass,
@@ -41,7 +41,7 @@ func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 
 	select {
 	case <-ctx.Done():
-		_ = terminal.Restore(int(os.Stdin.Fd()), initialTermState)
+		_ = term.Restore(int(os.Stdin.Fd()), initialTermState)
 		return nil, ctx.Err()
 
 	case res := <-passwordReadChan:

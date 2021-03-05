@@ -1,6 +1,6 @@
 module decred.org/dcrdex
 
-go 1.14
+go 1.15
 
 require (
 	decred.org/dcrwallet v1.6.0-rc4
@@ -35,6 +35,7 @@ require (
 	go.etcd.io/bbolt v1.3.5
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
+	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	gopkg.in/ini.v1 v1.55.0
 )
