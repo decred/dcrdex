@@ -131,7 +131,7 @@ if [ "${SYNC_MODE}" = "snap" ]; then
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
 	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
-	  "${NODE_DIR}/geth-ancient" C-m
+	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug" C-m
 
 else
   # Start the eth node listening restricted to localhost and our custom
