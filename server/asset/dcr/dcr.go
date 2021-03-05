@@ -517,7 +517,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %w", txHash, err)
 	}
-	isStake := stake.DetermineTxType(msgTx, true) != stake.TxTypeRegular
+	isStake := determineTxTree(msgTx) == wire.TxTreeStake
 
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
@@ -970,18 +970,19 @@ func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vo
 }
 
 func determineTxTree(msgTx *wire.MsgTx) int8 {
-	// Try with treasury disabled first.
-	txType := stake.DetermineTxType(msgTx, false)
-	if txType != stake.TxTypeRegular {
+	// stake.DetermineTxType will produce correct results if we pass true for
+	// isTreasuryEnabled regardless of whether the treasury vote has activated
+	// or not.
+	// The only possiblity for wrong results is passing isTreasuryEnabled=false
+	// _after_ the treasury vote activates - some stake tree votes may identify
+	// as regular tree transactions.
+	// Could try with isTreasuryEnabled false, then true and if neither comes up
+	// as a stake transaction, then we infer regular, but that isn't necessary
+	// as explained above.
+	isTreasuryEnabled := true
+	if stake.DetermineTxType(msgTx, isTreasuryEnabled) != stake.TxTypeRegular {
 		return wire.TxTreeStake
 	}
-
-	// Try with treasury enabled.
-	txType = stake.DetermineTxType(msgTx, true)
-	if txType != stake.TxTypeRegular {
-		return wire.TxTreeStake
-	}
-
 	return wire.TxTreeRegular
 }
 
