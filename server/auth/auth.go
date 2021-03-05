@@ -833,12 +833,7 @@ func (auth *AuthManager) Unban(user account.AccountID) error {
 		// If client is connected, mark the user as not suspend.
 		client.restore()
 	}
-
-	if err := auth.storage.RestoreAccount(user); err != nil {
-		return err
-	}
-
-	return nil
+	return auth.storage.RestoreAccount(user)
 }
 
 // ForgiveMatchFail forgives a user for a specific match failure, potentially

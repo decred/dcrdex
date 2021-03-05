@@ -6217,7 +6217,7 @@ func TestPreOrder(t *testing.T) {
 	btcWallet.hookedUp = true
 	tBtcWallet.connectErr = nil
 
-	// sucess again
+	// success again
 	_, err = tCore.PreOrder(form)
 	if err != nil {
 		t.Fatalf("PreOrder error after fixing everything: %v", err)

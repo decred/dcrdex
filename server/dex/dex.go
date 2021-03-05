@@ -459,6 +459,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 		SwapDone:         swapDone,
 		NoResume:         cfg.NoResumeSwaps,
+		// TODO: set the AllowPartialRestore bool to allow startup with a
+		// missing asset backend if necessary in an emergency.
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)

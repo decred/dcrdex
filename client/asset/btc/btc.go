@@ -576,7 +576,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
 	}
-	// Check for method unkown error for feeRate method.
+	// Check for method unknown error for feeRate method.
 	_, err = btc.estimateFee(ctx, btc.node.requester, 1)
 	var rpcErr *btcjson.RPCError
 	if errors.As(err, &rpcErr) &&

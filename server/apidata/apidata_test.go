@@ -61,7 +61,7 @@ func newTestRig() *testRig {
 func TestAddMarketSource(t *testing.T) {
 	rig := newTestRig()
 	defer rig.cancel()
-	// initial sucess
+	// initial success
 	err := rig.api.AddMarketSource(&TMarketSource{42, 0})
 	if err != nil {
 		t.Fatalf("AddMarketSource error: %v", err)

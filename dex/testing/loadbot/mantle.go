@@ -290,7 +290,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	}
 	coreWallet := m.WalletState(w.assetID)
 	if coreWallet == nil {
-		m.fatalError("Failed to retreive WalletState for newly created %s wallet, node %s", symbol, node)
+		m.fatalError("Failed to retrieve WalletState for newly created %s wallet, node %s", symbol, node)
 		return
 	}
 	w.address = coreWallet.Address

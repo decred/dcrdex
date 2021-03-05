@@ -345,7 +345,7 @@ func TestWallets(t *testing.T) {
 	boltdb.SetWalletPassword(w.ID(), newPW)
 	reW, err = boltdb.Wallet(w.ID())
 	if err != nil {
-		t.Fatalf("failed to retreive wallet for new password check")
+		t.Fatalf("failed to retrieve wallet for new password check")
 	}
 	if !bytes.Equal(newPW, reW.EncryptedPW) {
 		t.Fatalf("failed to set password. wanted %x, got %x", newPW, reW.EncryptedPW)
