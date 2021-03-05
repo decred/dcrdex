@@ -129,7 +129,7 @@ func TestDecodeCoinID(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		flags, addr, secretHash, err := decodeCoinID(test.coinID)
+		flags, addr, secretHash, err := DecodeCoinID(test.coinID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -191,7 +191,7 @@ func TestCoinIDToString(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		coinID, err := coinIDToString(test.coinID)
+		coinID, err := CoinIDToString(test.coinID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
