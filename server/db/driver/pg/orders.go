@@ -925,10 +925,9 @@ func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 		if tableChange {
 			return fmt.Errorf("Moving an order from an archived to active status: "+
 				"Order %s (%s -> %s)", oid, initStatus, status)
-		} else {
-			log.Infof("Archived order is changing status: "+
-				"Order %s (%s -> %s)", oid, initStatus, status)
 		}
+		log.Infof("Archived order is changing status: Order %s (%s -> %s)",
+			oid, initStatus, status)
 	}
 
 	switch orderType {

@@ -268,7 +268,7 @@ type Redemption struct {
 }
 
 // RedeemForm is a group of Redemptions. The struct will be
-// expanded in in-progress work to accomondate order-time options.
+// expanded in in-progress work to accommodate order-time options.
 type RedeemForm struct {
 	Redemptions []*Redemption
 }
@@ -355,7 +355,7 @@ type SwapOption struct {
 }
 
 // PreSwap is a SwapEstimate returned from Wallet.PreSwap. The struct will be
-// expanded in in-progress work to accomondate order-time options.
+// expanded in in-progress work to accommodate order-time options.
 type PreSwap struct {
 	Estimate *SwapEstimate `json:"estimate"`
 }
@@ -371,7 +371,7 @@ type PreRedeemForm struct {
 }
 
 // PreRedeem is an estimate of the fees for redemption. The struct will be
-// expanded in in-progress work to accomondate order-time options.
+// expanded in in-progress work to accommodate order-time options.
 type PreRedeem struct {
 	Estimate *RedeemEstimate `json:"estimate"`
 }

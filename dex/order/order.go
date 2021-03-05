@@ -552,12 +552,6 @@ func (o *MarketOrder) String() string {
 
 // serializeSize returns the length of the serialized MarketOrder.
 func (o *MarketOrder) serializeSize() int {
-	// Compute the size of the serialized Coin IDs.
-	var coinSz int
-	for _, coinID := range o.Coins {
-		coinSz += len(coinID)
-		// TODO: ensure all Coin IDs have the same size, indicating the same asset?
-	}
 	// The serialized order includes a byte for coin count, but this is implicit
 	// in coin slice length.
 	return o.P.serializeSize() + o.T.serializeSize()

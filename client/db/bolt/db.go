@@ -329,6 +329,7 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	if err != nil {
 		return err
 	}
+	// WARNING/TODO: account proof (fee paid info) not saved!
 	err = db.deleteAccount(ai.Host)
 	if err != nil {
 		if errors.Is(err, bbolt.ErrBucketNotFound) {

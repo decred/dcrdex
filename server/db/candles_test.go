@@ -77,7 +77,7 @@ func TestCandleCache(t *testing.T) {
 	}
 	lastCandle := cache.last()
 	if lastCandle == nil {
-		t.Fatalf("failed to retreive last candle")
+		t.Fatalf("failed to retrieve last candle")
 	}
 	checkCandleStamps(lastCandle, 11, 12)
 	checkCandleVolumes(lastCandle, 100, 101, 100)

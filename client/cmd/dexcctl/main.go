@@ -33,7 +33,7 @@ type semver struct {
 	major, minor, patch uint32
 }
 
-// String satifies fmt.Stringer
+// String satisfies fmt.Stringer.
 func (s semver) String() string {
 	return fmt.Sprintf("%d.%d.%d", s.major, s.minor, s.patch)
 }

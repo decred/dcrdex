@@ -19,7 +19,7 @@ const (
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
 	// CreateEpochReportTable creates an epoch_reports table that holds
-	// epoch-end reports that can be used to contruct market history data sets.
+	// epoch-end reports that can be used to construct market history data sets.
 	CreateEpochReportTable = `CREATE TABLE IF NOT EXISTS %s (
 		epoch_end INT8 PRIMARY KEY, -- using timestamp instead of index to facilitate sorting and filtering with less math
 		epoch_dur INT4,             -- epoch duration in milliseconds

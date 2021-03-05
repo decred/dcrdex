@@ -13,7 +13,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
-	_, err = addrHost(host)
+	host, err = addrHost(host)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
@@ -31,26 +31,25 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		return nil, codedError(acctKeyErr, err)
 	}
 	dc.acct.keyMtx.RLock()
-	accountId := dc.acct.id.String()
+	accountID := dc.acct.id.String()
 	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
 	dc.acct.keyMtx.RUnlock()
 
 	feeProofSig := ""
-	var feeProofStamp uint64 = 0
+	var feeProofStamp uint64
 	if dc.acct.isPaid {
 		accountProof, err := c.db.AccountProof(host)
 		if err != nil {
 			return nil, codedError(accountProofErr, err)
-		} else {
-			feeProofSig = hex.EncodeToString(accountProof.Sig)
-			feeProofStamp = accountProof.Stamp
 		}
+		feeProofSig = hex.EncodeToString(accountProof.Sig)
+		feeProofStamp = accountProof.Stamp
 	}
 
 	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
 		Host:          host,
-		AccountID:     accountId,
+		AccountID:     accountID,
 		PrivKey:       privKey,
 		DEXPubKey:     hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
 		Cert:          hex.EncodeToString(dc.acct.cert),
@@ -68,13 +67,11 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(passwordErr, err)
 	}
 
-	_, err = addrHost(acct.Host)
+	host, err := addrHost(acct.Host)
 	if err != nil {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
-
-	var accountInfo db.AccountInfo
-	accountInfo.Host = acct.Host
+	accountInfo := db.AccountInfo{Host: host}
 
 	DEXpubKey, err := hex.DecodeString(acct.DEXPubKey)
 	if err != nil {
@@ -108,7 +105,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 
 	// verifyAccount makes a connection to the DEX.
 	if !c.verifyAccount(&accountInfo) {
-		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", acct.Host, err)
+		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", host, err)
 	}
 
 	err = c.db.CreateAccount(&accountInfo)
@@ -116,15 +113,16 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(dbErr, err)
 	}
 
-	var accountProof db.AccountProof
 	if accountInfo.Paid {
-		accountProof.Sig, err = hex.DecodeString(acct.FeeProofSig)
+		sig, err := hex.DecodeString(acct.FeeProofSig)
 		if err != nil {
 			return codedError(decodeErr, err)
 		}
-		accountProof.Stamp = acct.FeeProofStamp
-		accountProof.Host = acct.Host
-
+		accountProof := db.AccountProof{
+			Host:  host,
+			Stamp: acct.FeeProofStamp,
+			Sig:   sig,
+		}
 		err = c.db.AccountPaid(&accountProof)
 		if err != nil {
 			return codedError(dbErr, err)

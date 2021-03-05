@@ -23,8 +23,8 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*dex.MarketInfo, error)
 	for rows.Next() {
 		var name string
 		var base, quote uint32
-		var lot_size uint64
-		err = rows.Scan(&name, &base, &quote, &lot_size)
+		var lotSize uint64
+		err = rows.Scan(&name, &base, &quote, &lotSize)
 		if err != nil {
 			return nil, err
 		}
@@ -32,7 +32,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*dex.MarketInfo, error)
 			Name:    name,
 			Base:    base,
 			Quote:   quote,
-			LotSize: lot_size,
+			LotSize: lotSize,
 		})
 	}
 

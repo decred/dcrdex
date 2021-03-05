@@ -17,7 +17,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"math"
 	"math/rand"
 	"os/exec"
 	"os/user"
@@ -33,14 +32,9 @@ import (
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-// Convert the BTC value to satoshi.
-func toSatoshi(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
-}
-
-func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, node, name string,
+func tBackend(ctx context.Context, t *testing.T, newWallet WalletConstructor, symbol, node, name string,
 	logger dex.Logger, blkFunc func(string, error), splitTx bool) (asset.Wallet, *dex.ConnectionMaster) {
-
+	t.Helper()
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -137,9 +131,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		backends:          make(map[string]asset.Wallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
-	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc, splitTx)
-	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "beta", "", tLogger, blkFunc, splitTx)
-	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc, splitTx)
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc, splitTx)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "beta", "", tLogger, blkFunc, splitTx)
+	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc, splitTx)
 	defer rig.close()
 	var lots uint64 = 2
 	contractValue := lots * dexAsset.LotSize

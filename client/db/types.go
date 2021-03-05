@@ -491,7 +491,8 @@ func (w *Wallet) Encode() []byte {
 		AddData([]byte(w.Address))
 }
 
-// DecodeWallet decodes the versioned blob to a *Wallet.
+// DecodeWallet decodes the versioned blob to a *Wallet. The Balance is NOT set;
+// the caller must retrieve it. See for example makeWallet and DecodeBalance.
 func DecodeWallet(b []byte) (*Wallet, error) {
 	ver, pushes, err := encode.DecodeBlob(b)
 	if err != nil {
@@ -726,7 +727,7 @@ func (n *Notification) String() string {
 	return fmt.Sprintf(format.String(), severity, n.NoteType, n.SubjectText, n.DetailText)
 }
 
-// DecodeWallet decodes the versioned blob to a *Wallet.
+// DecodeNotification decodes the versioned blob to a *Notification.
 func DecodeNotification(b []byte) (*Notification, error) {
 	ver, pushes, err := encode.DecodeBlob(b)
 	if err != nil {
