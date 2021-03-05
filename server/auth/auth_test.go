@@ -932,6 +932,7 @@ func TestAccountErrors(t *testing.T) {
 
 func TestRoute(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 
 	var translated account.AccountID
@@ -966,6 +967,7 @@ func TestRoute(t *testing.T) {
 
 func TestAuth(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 
 	msgBytes := randBytes(50)
@@ -1008,6 +1010,7 @@ func TestSign(t *testing.T) {
 
 func TestSend(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 	foreigner := tNewUser(t)
 
@@ -1072,6 +1075,7 @@ func TestSend(t *testing.T) {
 
 func TestPenalize(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 	foreigner := tNewUser(t)
 
@@ -1180,6 +1184,7 @@ func TestConnectErrors(t *testing.T) {
 
 func TestHandleResponse(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 	foreigner := tNewUser(t)
 	unknownResponse, err := msgjson.NewResponse(comms.NextID(), 10, nil)
@@ -1414,9 +1419,9 @@ func TestHandleNotifyFee(t *testing.T) {
 	ensureErr(do(goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
 	rig.storage.regErr = nil
 
-	tCheckFeeVal -= 1
+	tCheckFeeVal--
 	ensureErr(doWaiter(goodMsg), "low fee", msgjson.FeeError)
-	tCheckFeeVal += 1
+	tCheckFeeVal++
 
 	ogAddr := tCheckFeeAddr
 	tCheckFeeAddr = "dummy address"
@@ -1438,6 +1443,7 @@ func TestHandleNotifyFee(t *testing.T) {
 func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	resetStorage()
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 
 	client := rig.mgr.user(user.acctID)
@@ -1529,6 +1535,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 func TestMatchStatus(t *testing.T) {
 	resetStorage()
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 
 	rig.storage.matchStatuses = []*db.MatchStatus{{
@@ -1591,8 +1598,8 @@ func TestMatchStatus(t *testing.T) {
 
 	reqPayload[0].MatchID = []byte{}
 	req, _ = msgjson.NewRequest(1, msgjson.MatchStatusRoute, reqPayload)
-	err := rig.mgr.handleMatchStatus(user.conn, req)
-	if err == nil {
+	msgErr := rig.mgr.handleMatchStatus(user.conn, req)
+	if msgErr == nil {
 		t.Fatalf("no error for bad match ID")
 	}
 }
@@ -1600,6 +1607,7 @@ func TestMatchStatus(t *testing.T) {
 func TestOrderStatus(t *testing.T) {
 	resetStorage()
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connectUser(t, user)
 
 	rig.storage.orderStatuses = []*db.OrderStatus{{}}
@@ -1632,8 +1640,9 @@ func TestOrderStatus(t *testing.T) {
 	}
 
 	reqPayload[0].OrderID = []byte{}
-	err = rig.mgr.handleOrderStatus(user.conn, req)
-	if err == nil {
+	req, _ = msgjson.NewRequest(1, msgjson.OrderStatusRoute, reqPayload)
+	msgErr = rig.mgr.handleOrderStatus(user.conn, req)
+	if msgErr == nil {
 		t.Fatalf("no error for bad order ID")
 	}
 }
