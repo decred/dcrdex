@@ -130,7 +130,7 @@ if [ "${SYNC_MODE}" = "fast" ]; then
   # localhost, and our custom configuration file.
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
-	  "--password ${GROUP_DIR}/password --light.serve 25" C-m
+	  "--password ${GROUP_DIR}/password --light.serve 25 --verbosity 5 --vmdebug" C-m
 
 else
   # Start the eth node listening restricted to localhost and our custom
