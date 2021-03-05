@@ -86,6 +86,12 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     },
     "4f8ef3892b65ed7fc356ff473a2ef2ae5ec27a06": {
         "balance": "11000000000000000000000"
+    },
+    "2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27": {
+        "balance": "11000000000000000000000"
+    },
+    "345853e21b1d475582E71cC269124eD5e2dD3422": {
+        "balance": "11000000000000000000000"
     }
   }
 }
@@ -93,7 +99,7 @@ EOF
 
 cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
 function send(from, to, amt) {
-  personal.sendTransaction({from:"0x"+from,to:"0x"+to,value:amt,gasPrice:81000000000}, "${PASSWORD}")
+  personal.sendTransaction({from:"0x"+from,to:"0x"+to,value:amt,gasPrice:82000000000}, "${PASSWORD}")
   return true;
 }
 EOF
@@ -182,7 +188,21 @@ do
     break
   fi
   echo "Waiting for light nodes to sync."
-  sleep 5
+  # Although not necessary here, mine while waiting so that transactions are
+  # mined if not mined yet.
+  "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
+done
+
+# Transactions can take an eternity to be mined...
+# TODO: Determine why this is.
+while true
+do
+  TXS=$("${NODES_ROOT}/harness-ctl/alpha" "attach --exec eth.pendingTransactions")
+  if [ "$TXS" = "[]" ]; then
+    break
+  fi
+  echo "Waiting for transactions to be mined."
+  "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
 done
 
 # Reenable history and attach to the control session.
