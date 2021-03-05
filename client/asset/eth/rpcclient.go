@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"math/big"
 
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -31,11 +33,12 @@ type rpcclient struct {
 	// ec wraps the client with some useful calls.
 	ec *ethclient.Client
 	n  *node.Node
+	es *swap.ETHSwap
 }
 
 // connect connects to a node. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
-func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr common.Address) error { // contractAddr will be used soonTM
+func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr common.Address) error {
 	client, err := node.Attach()
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
@@ -43,6 +46,10 @@ func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr c
 	c.c = client
 	c.ec = ethclient.NewClient(client)
 	c.n = node
+	c.es, err = swap.NewETHSwap(contractAddr, c.ec)
+	if err != nil {
+		return fmt.Errorf("unable to find swap contract: %v", err)
+	}
 	return nil
 }
 
@@ -202,4 +209,69 @@ func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 		return nil, err
 	}
 	return peers, nil
+}
+
+// swap gets a swap keyed by secretHash in the contract.
+func (c *rpcclient) swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
+	callOpts := &bind.CallOpts{
+		Pending: true,
+		From:    from.Address,
+		Context: ctx,
+	}
+	swap, err := c.es.Swap(callOpts, secretHash)
+	if err != nil {
+		return nil, err
+	}
+	return &swap, nil
+}
+
+// wallet returns a wallet that owns acct from an ethereum wallet.
+func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
+	wallet, err := c.n.AccountManager().Find(acct)
+	if err != nil {
+		return nil, fmt.Errorf("error finding wallet for account %s: %v \n", acct.Address, err)
+	}
+	return wallet, nil
+}
+
+// initiate creates a swap contract. The initiator will be the account at
+// txOpts.From. Any on-chain failure, such as this secret hash already existing
+// in the swaps map, will not cause this to error.
+func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error) {
+	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	if err != nil {
+		return nil, err
+	}
+	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
+	}
+	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, participant)
+}
+
+// redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
+// Any on-chain failure, such as this secret not matching the hash, will not cause
+// this to error.
+func (c *rpcclient) redeem(txOpts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
+	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	if err != nil {
+		return nil, err
+	}
+	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
+	}
+	return c.es.Redeem(txOpts, secret, secretHash)
+}
+
+// refund refunds a swap contract. The refunder will be the account at txOpts.From.
+// Any on-chain failure, such as the locktime not being past, will not cause
+// this to error.
+func (c *rpcclient) refund(txOpts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error) {
+	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	if err != nil {
+		return nil, err
+	}
+	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
+	}
+	return c.es.Refund(txOpts, secretHash)
 }

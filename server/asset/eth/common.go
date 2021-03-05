@@ -11,7 +11,15 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+type SwapState uint8
+
 const (
+	// Swap states represent the status of a swap.
+	None SwapState = iota
+	Initiated
+	Redeemed
+	Refunded
+
 	// coinIdSize = flags (2) + smart contract address where funds are
 	// locked (20) + secret hash map key (32)
 	coinIDSize = 54
@@ -32,6 +40,21 @@ func ToGwei(wei *big.Int) (uint64, error) {
 		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
 	}
 	return wei.Uint64(), nil
+}
+
+// String satisfies the Stringer interface.
+func (ss SwapState) String() string {
+	switch ss {
+	case None:
+		return "none"
+	case Initiated:
+		return "initiated"
+	case Redeemed:
+		return "redeemed"
+	case Refunded:
+		return "refunded"
+	}
+	return "unknown"
 }
 
 // DecodeCoinID decodes the coin ID into flags, a contract address, and secret hash.

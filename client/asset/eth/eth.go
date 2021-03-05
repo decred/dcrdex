@@ -16,10 +16,12 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/node"
@@ -112,6 +114,7 @@ type ethFetcher interface {
 	connect(ctx context.Context, node *node.Node, contractAddr common.Address) error
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
+	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -120,6 +123,9 @@ type ethFetcher interface {
 	sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error)
 	shutdown()
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
+	redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error)
+	refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error)
+	swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*swap.ETHSwapSwap, error)
 	unlock(ctx context.Context, pw string, acct *accounts.Account) error
 }
 
