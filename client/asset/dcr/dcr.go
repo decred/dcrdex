@@ -412,7 +412,7 @@ type ExchangeWallet struct {
 
 	// The blockCache stores just enough info about blocks to prevent repeated
 	// calls to GetBlockVerbose for the same block.
-	blockCache *blockCache
+	blockCache *dexdcr.BlockCache
 
 	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
@@ -531,7 +531,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
-		blockCache:          newBlockCache(logger),
+		blockCache:          dexdcr.NewBlockCache(logger),
 	}, nil
 }
 
@@ -1744,7 +1744,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	if contractBlock == nil {
 		dcr.findRedemptionsInMempool([]outPoint{contractOutpoint})
 	} else {
-		bestHash, bestHeight := dcr.blockCache.tip()
+		bestHash, bestHeight := dcr.blockCache.Tip()
 		bestBlock := &block{bestHeight, bestHash}
 		dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOutpoint})
 	}
@@ -2776,7 +2776,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 		return
 	}
 
-	cachedBestHash, cachedBestHeight := dcr.blockCache.tip()
+	cachedBestHash, cachedBestHeight := dcr.blockCache.Tip()
 	if newTip.hash.IsEqual(cachedBestHash) {
 		return
 	}
@@ -2825,7 +2825,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 				return fmt.Errorf("getblockhash error for reorg height %d: %w", reorgHeight, translateRPCCancelErr(err))
 			}
 			dcr.log.Debugf("Tip change (reorg) from %s (%d) => %d (%s)", reorgHash, reorgHeight, newTip.height, newTip.hash)
-			dcr.blockCache.purgeMainchainBlocks(reorgHeight)
+			dcr.blockCache.PurgeMainchainBlocks(reorgHeight)
 			redemptionSearchStartBlock = &block{reorgHeight, reorgHash}
 			return nil
 		}
@@ -2849,7 +2849,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	}
 
 	// Add the new best block to the cache. Also updates the cached tip.
-	_, err = dcr.blockCache.add(newBestBlock)
+	_, err = dcr.blockCache.Add(newBestBlock)
 	if err != nil {
 		dcr.log.Errorf("error adding new best block to cache: %v", err)
 	}
@@ -2879,8 +2879,9 @@ func (dcr *ExchangeWallet) getBestBlock() (*block, error) {
 	return &block{hash: hash, height: height}, nil
 }
 
+// Get the block hash, checking the cache first.
 func (dcr *ExchangeWallet) getBlockHash(height int64) (*chainhash.Hash, error) {
-	if hash, cached := dcr.blockCache.mainchainHash(height); cached {
+	if hash, cached := dcr.blockCache.MainchainHash(height); cached {
 		return hash, nil
 	}
 	hash, err := dcr.node.GetBlockHash(dcr.ctx, height)
@@ -2891,8 +2892,8 @@ func (dcr *ExchangeWallet) getBlockHash(height int64) (*chainhash.Hash, error) {
 }
 
 // Get the block information, checking the cache first.
-func (dcr *ExchangeWallet) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, error) {
-	cachedBlock, found := dcr.blockCache.block(blockHash)
+func (dcr *ExchangeWallet) getDcrBlock(blockHash *chainhash.Hash) (*dexdcr.Block, error) {
+	cachedBlock, found := dcr.blockCache.Block(blockHash)
 	if found {
 		return cachedBlock, nil
 	}
@@ -2900,7 +2901,7 @@ func (dcr *ExchangeWallet) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, er
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
 	}
-	return dcr.blockCache.add(blockVerbose)
+	return dcr.blockCache.Add(blockVerbose)
 }
 
 // wireBytes dumps the serialized transaction bytes.

@@ -27,7 +27,7 @@ type TXIO struct {
 	dcr *Backend
 	tx  *Tx
 	// The height and hash of the transaction's best known block.
-	height    uint32
+	height    int64
 	blockHash chainhash.Hash
 	// The number of confirmations needed for maturity. For outputs of coinbase
 	// transactions and stake-related transactions, this will be set to
@@ -48,12 +48,12 @@ type TXIO struct {
 // confirmation. The value -1 will be returned with any error. This function is
 // NOT thread-safe.
 func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64, error) {
-	tipHash := txio.dcr.blockCache.tipHash()
+	tipHash, _ := txio.dcr.blockCache.Tip()
 	// If the tx was in a mempool transaction, check if it has been confirmed.
 	if txio.height == 0 {
 		// If the tip hasn't changed, don't do anything here.
-		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
-			txio.lastLookup = &tipHash
+		if txio.lastLookup == nil || *txio.lastLookup != *tipHash {
+			txio.lastLookup = tipHash
 			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(ctx, &txio.tx.hash)
 			if err != nil {
 				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, translateRPCCancelErr(err))
@@ -65,16 +65,16 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 				if err != nil {
 					return -1, err
 				}
-				txio.height = blk.height
-				txio.blockHash = blk.hash
+				txio.height = blk.Height
+				txio.blockHash = *blk.Hash
 			}
 			return verboseTx.Confirmations, nil
 		}
 	} else {
 		// The tx was included in a block, but make sure that the tx's block has
 		// not been orphaned or voted as invalid.
-		mainchainBlock, found := txio.dcr.blockCache.atHeight(txio.height)
-		if !found || mainchainBlock.hash != txio.blockHash {
+		mainchainBlock, found := txio.dcr.blockCache.BlockAt(txio.height)
+		if !found || *mainchainBlock.Hash != txio.blockHash {
 			return -1, ErrReorgDetected
 		}
 		if mainchainBlock != nil && checkApproval {
@@ -82,8 +82,8 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 			if err != nil {
 				return -1, fmt.Errorf("error retrieving approving block tx %s: %w", txio.tx.hash, err)
 			}
-			if nextBlock != nil && !nextBlock.vote {
-				return -1, fmt.Errorf("transaction %s block %s has been voted as invalid", txio.tx.hash, nextBlock.hash)
+			if nextBlock != nil && !nextBlock.Vote {
+				return -1, fmt.Errorf("transaction %s block %s has been voted as invalid", txio.tx.hash, nextBlock.Hash)
 			}
 		}
 	}
@@ -93,7 +93,8 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 	}
 	// Otherwise just check that there hasn't been a reorg which would render the
 	// output immature. This would be exceedingly rare (impossible?).
-	confs := int32(txio.dcr.blockCache.tipHeight()) - int32(txio.height) + 1
+	_, tipHeight := txio.dcr.blockCache.Tip()
+	confs := int32(tipHeight - txio.height + 1)
 	if confs < txio.maturity {
 		return -1, fmt.Errorf("transaction %s became immature", txio.tx.hash)
 	}

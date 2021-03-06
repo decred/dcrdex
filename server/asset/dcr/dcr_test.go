@@ -317,19 +317,19 @@ func testAddTxVerbose(msgTx *wire.MsgTx, txHash, blockHash *chainhash.Hash, bloc
 }
 
 // Add a GetBlockVerboseResult to the blockchain.
-func testAddBlockVerbose(blockHash *chainhash.Hash, confirmations int64, height uint32, voteBits uint16) *chainhash.Hash {
+func testAddBlockVerbose(blockHash *chainhash.Hash, confirmations, height int64, voteBits uint16) *chainhash.Hash {
 	if blockHash == nil {
 		blockHash = randomHash()
 	}
 	testChainMtx.Lock()
 	defer testChainMtx.Unlock()
 	if voteBits&1 != 0 {
-		testChain.hashes[int64(height)] = blockHash
+		testChain.hashes[height] = blockHash
 	}
 	testChain.blocks[*blockHash] = &chainjson.GetBlockVerboseResult{
 		Hash:          blockHash.String(),
 		Confirmations: confirmations,
-		Height:        int64(height),
+		Height:        height,
 		VoteBits:      voteBits,
 	}
 	return blockHash
@@ -745,17 +745,12 @@ func TestUTXOs(t *testing.T) {
 	ctx := dcr.ctx // for the functions then take a context, canceled on shutdown()
 
 	// The vout will be randomized during reset.
-	txHeight := uint32(32)
+	txHeight := int64(32)
 
 	// A general reset function that clears the testBlockchain and the blockCache.
 	reset := func() {
 		cleanTestChain()
-		blockCache := newBlockCache(dcr.log)
-		dcr.blockCache.mtx.Lock()
-		dcr.blockCache.blocks = blockCache.blocks
-		dcr.blockCache.mainchain = blockCache.mainchain
-		dcr.blockCache.best = blockCache.best
-		dcr.blockCache.mtx.Unlock()
+		dcr.blockCache.Reset()
 	}
 
 	// CASE 1: A valid UTXO in a mempool transaction. This UTXO will have zero
@@ -788,7 +783,7 @@ func TestUTXOs(t *testing.T) {
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
 	// Overwrite the test blockchain transaction details.
-	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, 0, txHash, blockHash, txHeight, 1)
 	confs, err := utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
@@ -811,7 +806,7 @@ func TestUTXOs(t *testing.T) {
 		blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 		txHash = randomHash()
 		msg = testMsgTxRegular(sigType)
-		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, 1)
 		utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 		if err != nil {
 			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
@@ -836,7 +831,7 @@ func TestUTXOs(t *testing.T) {
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, 1)
 	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
@@ -849,7 +844,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	txHash = randomHash()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 5 - unexpected error: %v", err)
@@ -858,7 +853,7 @@ func TestUTXOs(t *testing.T) {
 	testAddBlockVerbose(blockHash, 2, txHeight, 1)
 	rejectingHash := testAddBlockVerbose(nil, 1, txHeight+1, 0)
 	rejectingBlock := testChain.blocks[*rejectingHash]
-	_, err = dcr.blockCache.add(rejectingBlock)
+	_, err = dcr.blockCache.Add(rejectingBlock)
 	if err != nil {
 		t.Fatalf("case 5 - error adding to block cache: %v", err)
 	}
@@ -874,7 +869,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	immatureHash := testAddBlockVerbose(nil, 2, txHeight, 1)
 	msg = testMsgTxVote()
-	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, txHeight, 1)
 	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 6 - no error for immature transaction")
@@ -883,20 +878,20 @@ func TestUTXOs(t *testing.T) {
 	// accepted since it is a stake tree transaction.
 	rejectingHash = testAddBlockVerbose(nil, 1, txHeight+1, 0)
 	rejectingBlock = testChain.blocks[*rejectingHash]
-	_, err = dcr.blockCache.add(rejectingBlock)
+	_, err = dcr.blockCache.Add(rejectingBlock)
 	if err != nil {
 		t.Fatalf("case 6 - error adding to rejecting block cache: %v", err)
 	}
 	maturity := int64(chainParams.CoinbaseMaturity)
 	testAddBlockVerbose(blockHash, maturity, txHeight, 1)
 	testAddBlockVerbose(rejectingHash, maturity-1, txHeight, 1)
-	maturingHash := testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
+	maturingHash := testAddBlockVerbose(nil, 1, txHeight+maturity-1, 1)
 	maturingBlock := testChain.blocks[*maturingHash]
-	_, err = dcr.blockCache.add(maturingBlock)
+	_, err = dcr.blockCache.Add(maturingBlock)
 	if err != nil {
 		t.Fatalf("case 6 - error adding to maturing block cache: %v", err)
 	}
-	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), int64(txHeight)+maturity-1)
+	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, txHeight, txHeight+maturity-1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
@@ -912,7 +907,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
@@ -922,8 +917,8 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 7 - received error before reorg")
 	}
 	betterHash := testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.blockCache.add(testChain.blocks[*betterHash])
-	dcr.blockCache.reorg(int64(txHeight))
+	dcr.blockCache.Add(testChain.blocks[*betterHash])
+	dcr.blockCache.PurgeMainchainBlocks(txHeight)
 	// Remove the txout from the blockchain, since dcrd would no longer return it.
 	testChainMtx.Lock()
 	delete(testChain.txOuts, txOutID(txHash, msg.vout))
@@ -939,16 +934,16 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, txHeight, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 8 - received error for utxo")
 	}
 	// Now orphan the block, by doing a reorg.
 	betterHash = testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.blockCache.reorg(int64(txHeight))
-	dcr.blockCache.add(testChain.blocks[*betterHash])
-	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, int64(txHeight), 1)
+	dcr.blockCache.PurgeMainchainBlocks(txHeight)
+	dcr.blockCache.Add(testChain.blocks[*betterHash])
+	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, txHeight, 1)
 	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error after reorg: %v", err)
@@ -958,8 +953,8 @@ func TestUTXOs(t *testing.T) {
 	}
 	// Do it again, but this time, put the utxo into mempool.
 	evenBetter := testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.blockCache.reorg(int64(txHeight))
-	dcr.blockCache.add(testChain.blocks[*evenBetter])
+	dcr.blockCache.PurgeMainchainBlocks(txHeight)
+	dcr.blockCache.Add(testChain.blocks[*evenBetter])
 	testAddTxOut(msg.tx, msg.vout, txHash, evenBetter, 0, 0)
 	_, err = utxo.Confirmations(ctx)
 	if err != nil {
@@ -975,7 +970,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig := testMsgTxP2SHMofN(1, 2)
-	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, txHeight, 1)
 	// First try to get the UTXO without providing the raw script.
 	_, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, nil)
 	if err == nil {
@@ -1004,7 +999,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2)
-	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, txHeight, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
@@ -1032,9 +1027,9 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, maturity, txHeight, 1)
 	msg = testMsgTxP2SHVote()
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, maturity)
 	// mature the vote
-	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
+	testAddBlockVerbose(nil, 1, txHeight+maturity-1, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
@@ -1059,9 +1054,9 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, maturity, txHeight, 1)
 	msg = testMsgTxRevocation()
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, maturity)
 	// mature the revocation
-	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
+	testAddBlockVerbose(nil, 1, txHeight+maturity-1, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 12 - received error for utxo: %v", err)
@@ -1083,7 +1078,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = randomHash()
 	swap := testMsgTxSwapInit(int64(val))
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
-	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = float64(val) / 1e8
+	testAddTxOut(swap.tx, 0, txHash, blockHash, txHeight, 1).Value = float64(val) / 1e8
 	verboseTx := testChain.txRaws[*txHash]
 	spentTx := randomHash()
 	spentVout := rand.Uint32()
@@ -1115,7 +1110,7 @@ func TestRedemption(t *testing.T) {
 	ctx := dcr.ctx // for the functions then take a context, canceled on shutdown()
 
 	// The vout will be randomized during reset.
-	txHeight := uint32(32)
+	txHeight := int64(32)
 	cleanTestChain()
 	txHash := randomHash()
 	redemptionID := toCoinID(txHash, 0)
@@ -1166,7 +1161,7 @@ func TestRedemption(t *testing.T) {
 	// Mined transaction.
 	blockHash := randomHash()
 	blockHeight := txHeight - 1
-	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
+	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, blockHeight, 1)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
 	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
 	redemption, err = dcr.Redemption(redemptionID, spentID)
@@ -1190,14 +1185,23 @@ func TestReorg(t *testing.T) {
 	defer shutdown()
 	ctx := dcr.ctx // for the functions then take a context, canceled on shutdown()
 
+	// block is orphaned if it's hash is not in the mainchain.
+	blockIsOrphaned := func(block *dexdcr.Block) bool {
+		validHash, found := dcr.blockCache.MainchainHash(block.Height)
+		if !found {
+			return true
+		}
+		return *block.Hash != *validHash
+	}
+
 	// A general reset function that clears the testBlockchain and the blockCache.
-	var tipHeight uint32 = 10
+	var tipHeight int64 = 10
 	var tipHash *chainhash.Hash
 	reset := func() {
 		cleanTestChain()
-		dcr.blockCache = newBlockCache(dcr.log)
-		for h := uint32(0); h <= tipHeight; h++ {
-			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), h, 1)
+		dcr.blockCache = dexdcr.NewBlockCache(dcr.log)
+		for h := int64(0); h <= tipHeight; h++ {
+			blockHash := testAddBlockVerbose(nil, tipHeight-h+1, h, 1)
 			// force dcr to get and cache the block
 			_, err := dcr.getDcrBlock(ctx, blockHash)
 			if err != nil {
@@ -1205,27 +1209,27 @@ func TestReorg(t *testing.T) {
 			}
 		}
 		// Check that the tip is at the expected height and the block is mainchain.
-		block, found := dcr.blockCache.atHeight(tipHeight)
+		block, found := dcr.blockCache.BlockAt(tipHeight)
 		if !found {
 			t.Fatalf("tip block not found in cache mainchain")
 		}
-		if block.orphaned {
+		if blockIsOrphaned(block) {
 			t.Fatalf("block unexpectedly orphaned before reorg")
 		}
-		_, found = dcr.blockCache.block(&block.hash)
+		_, found = dcr.blockCache.Block(block.Hash)
 		if !found {
 			t.Fatalf("block not found with block method before reorg")
 		}
-		tipHash = &block.hash
+		tipHash = block.Hash
 	}
 
-	ensureOrphaned := func(hash *chainhash.Hash, height uint32) {
+	ensureOrphaned := func(hash *chainhash.Hash, height int64) {
 		// Make sure mainchain is empty at the tip height.
-		block, found := dcr.blockCache.block(hash)
+		block, found := dcr.blockCache.Block(hash)
 		if !found {
 			t.Fatalf("orphaned block from height %d not found after reorg", height)
 		}
-		if !block.orphaned {
+		if !blockIsOrphaned(block) {
 			t.Fatalf("reorged block from height %d (%s) not marked as orphaned", height, hash)
 		}
 	}
@@ -1235,40 +1239,40 @@ func TestReorg(t *testing.T) {
 	// Add a replacement blocks
 	newHash := testAddBlockVerbose(nil, 1, tipHeight, 1)
 	// Passing the hash to anyQ triggers the reorganization.
-	dcr.blockCache.reorg(int64(tipHeight))
-	dcr.blockCache.add(testChain.blocks[*newHash])
+	dcr.blockCache.PurgeMainchainBlocks(tipHeight)
+	dcr.blockCache.Add(testChain.blocks[*newHash])
 	ensureOrphaned(tipHash, tipHeight)
-	newTip, found := dcr.blockCache.atHeight(tipHeight)
+	newTip, found := dcr.blockCache.BlockAt(tipHeight)
 	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
-	if newTip.hash != *newHash {
+	if *newTip.Hash != *newHash {
 		t.Fatalf("tip hash mismatch after 1-block reorg")
 	}
 
 	// A 3-block reorg
 	reset()
-	tip, found1 := dcr.blockCache.atHeight(tipHeight)
-	oneDeep, found2 := dcr.blockCache.atHeight(tipHeight - 1)
-	twoDeep, found3 := dcr.blockCache.atHeight(tipHeight - 2)
+	tip, found1 := dcr.blockCache.BlockAt(tipHeight)
+	oneDeep, found2 := dcr.blockCache.BlockAt(tipHeight - 1)
+	twoDeep, found3 := dcr.blockCache.BlockAt(tipHeight - 2)
 	if !found1 || !found2 || !found3 {
 		t.Fatalf("not all block found for 3-block reorg (%t, %t, %t)", found1, found2, found3)
 	}
 	newHash = testAddBlockVerbose(nil, 1, tipHeight-2, 1)
-	dcr.blockCache.reorg(int64(tipHeight - 2))
-	dcr.blockCache.add(testChain.blocks[*newHash])
-	ensureOrphaned(&tip.hash, tip.height)
-	ensureOrphaned(&oneDeep.hash, tip.height)
-	ensureOrphaned(&twoDeep.hash, tip.height)
-	newHeight := int64(dcr.blockCache.tipHeight())
-	if newHeight != int64(twoDeep.height) {
-		t.Fatalf("from tip height after 3-block reorg. expected %d, saw %d", twoDeep.height-1, newHeight)
+	dcr.blockCache.PurgeMainchainBlocks(tipHeight - 2)
+	dcr.blockCache.Add(testChain.blocks[*newHash])
+	ensureOrphaned(tip.Hash, tip.Height)
+	ensureOrphaned(oneDeep.Hash, tip.Height)
+	ensureOrphaned(twoDeep.Hash, tip.Height)
+	_, newHeight := dcr.blockCache.Tip()
+	if newHeight != twoDeep.Height {
+		t.Fatalf("from tip height after 3-block reorg. expected %d, saw %d", twoDeep.Height-1, newHeight)
 	}
-	newTip, found = dcr.blockCache.atHeight(uint32(newHeight))
+	newTip, found = dcr.blockCache.BlockAt(newHeight)
 	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
-	if newTip.hash != *newHash {
+	if *newTip.Hash != *newHash {
 		t.Fatalf("tip hash mismatch after 3-block reorg")
 	}
 
@@ -1276,10 +1280,10 @@ func TestReorg(t *testing.T) {
 	// transaction to mempool.
 	reset()
 	txHash := randomHash()
-	tip, _ = dcr.blockCache.atHeight(tipHeight)
+	tip, _ = dcr.blockCache.BlockAt(tipHeight)
 	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 
-	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	testAddTxOut(msg.tx, 0, txHash, tip.Hash, tipHeight, 1)
 
 	utxo, err := dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
@@ -1294,7 +1298,7 @@ func TestReorg(t *testing.T) {
 	}
 
 	// Orphan the block and move the transaction to mempool.
-	dcr.blockCache.reorg(int64(tipHeight - 2))
+	dcr.blockCache.PurgeMainchainBlocks(tipHeight - 2)
 	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
 	confs, err = utxo.Confirmations(ctx)
 	if err != nil {
@@ -1306,19 +1310,19 @@ func TestReorg(t *testing.T) {
 
 	// Start over, but put it in a lower block instead.
 	reset()
-	tip, _ = dcr.blockCache.atHeight(tipHeight)
-	testAddBlockVerbose(&tip.hash, 1, tipHeight, 1)
-	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	tip, _ = dcr.blockCache.BlockAt(tipHeight)
+	testAddBlockVerbose(tip.Hash, 1, tipHeight, 1)
+	testAddTxOut(msg.tx, 0, txHash, tip.Hash, tipHeight, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("utxo error 2: %v", err)
 	}
 
 	// Reorg and add a single block with the transaction.
-	var reorgHeight uint32 = 5
-	dcr.blockCache.reorg(int64(reorgHeight))
+	var reorgHeight int64 = 5
+	dcr.blockCache.PurgeMainchainBlocks(reorgHeight)
 	newBlockHash := randomHash()
-	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(reorgHeight+1), 1)
+	testAddTxOut(msg.tx, 0, txHash, newBlockHash, reorgHeight+1, 1)
 	testAddBlockVerbose(newBlockHash, 1, reorgHeight+1, 1)
 	dcr.getDcrBlock(ctx, newBlockHash) // Force blockCache update
 	confs, err = utxo.Confirmations(ctx)
@@ -1344,9 +1348,9 @@ func TestAuxiliary(t *testing.T) {
 	msg := testMsgTxVote()
 	txid := hex.EncodeToString(randomBytes(32))
 	txHash, _ := chainhash.NewHashFromStr(txid)
-	txHeight := rand.Uint32()
+	txHeight := rand.Int63()
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, txHeight, maturity)
 	coinID := toCoinID(txHash, msg.vout)
 	utxo, err := dcr.FundingCoin(ctx, coinID, nil)
 	if err != nil {
@@ -1376,7 +1380,7 @@ func TestAuxiliary(t *testing.T) {
 	msgHash := msg.tx.TxHash()
 	txHash = &msgHash
 	confs := int64(3)
-	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), confs)
+	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, txHeight, confs)
 	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
 		N:       0,
 		Value:   8,
@@ -1437,7 +1441,7 @@ func TestAuxiliary(t *testing.T) {
 	msgHash = msgP2SH.tx.TxHash()
 	txHash = &msgHash
 	confs = int64(3)
-	verboseTx = testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
+	verboseTx = testAddTxVerbose(msgP2SH.tx, txHash, blockHash, txHeight, confs)
 	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
 		N:       0,
 		Value:   8,

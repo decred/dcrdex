@@ -386,7 +386,7 @@ func TestBlockMonitor(t *testing.T) {
 	fmt.Printf("Starting BlockMonitor test. Test will last for %d minutes\n", int(testDuration.Minutes()))
 	blockChan := dcr.BlockChannel(5)
 	expire := time.NewTimer(testDuration).C
-	lastHeight := dcr.blockCache.tipHeight()
+	_, lastHeight := dcr.blockCache.Tip()
 out:
 	for {
 		select {
@@ -394,7 +394,7 @@ out:
 			if update.Err != nil {
 				t.Fatalf("error encountered while monitoring blocks: %v", update.Err)
 			}
-			tipHeight := dcr.blockCache.tipHeight()
+			_, tipHeight := dcr.blockCache.Tip()
 			if update.Reorg {
 				fmt.Printf("block received at height %d causes a %d block reorg\n", tipHeight, lastHeight-tipHeight+1)
 			} else {
