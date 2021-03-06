@@ -410,8 +410,9 @@ type ExchangeWallet struct {
 	redeemConfTarget uint64
 	useSplitTx       bool
 
-	tipMtx     sync.RWMutex
-	currentTip *block
+	// The blockCache stores just enough info about blocks to prevent repeated
+	// calls to GetBlockVerbose for the same block.
+	blockCache *blockCache
 
 	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
@@ -530,6 +531,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
+		blockCache:          newBlockCache(logger),
 	}, nil
 }
 
@@ -588,6 +590,16 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("Decred Wallet connect error: %w", err)
 	}
 
+	var connectSuccess bool
+	defer func() {
+		if !connectSuccess {
+			// TODO: Should shutdown the wallet if post-connection setup
+			// fails but this currently stalls at dcrd/rpcclient/v6.(*Client).WaitForShutdown(...)
+			// ref: github.com/decred/dcrd/rpcclient/v6@v6.0.2/infrastructure.go:1116
+			// dcr.shutdown()
+		}
+	}()
+
 	// Check the required API versions.
 	versions, err := dcr.client.Version(ctx)
 	if err != nil {
@@ -618,15 +630,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
 	}
 
-	// Initialize the best block.
-	dcr.tipMtx.Lock()
-	dcr.currentTip, err = dcr.getBestBlock(ctx)
-	dcr.tipMtx.Unlock()
-	if err != nil {
-		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
+	if err = dcr.initBestBlock(); err != nil {
+		return nil, err
 	}
-	atomic.StoreInt64(&dcr.tipAtConnect, dcr.currentTip.height)
 
+	connectSuccess = true
 	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 		walletSemver, nodeSemver, curnet)
 
@@ -638,6 +646,24 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.shutdown()
 	}()
 	return &wg, nil
+}
+
+// initBestBlock gets the current best block, primes the blockCache with it and
+// sets the tipAtConnect value.
+func (dcr *ExchangeWallet) initBestBlock() error {
+	if atomic.LoadInt64(&dcr.tipAtConnect) != 0 {
+		return fmt.Errorf("duplicate best block initialization")
+	}
+	bestBlock, err := dcr.getBestBlock()
+	if err != nil {
+		return fmt.Errorf("error getting best block: %w", err)
+	}
+	_, err = dcr.getDcrBlock(bestBlock.hash)
+	if err != nil {
+		return fmt.Errorf("error priming the block cache: %w", err)
+	}
+	atomic.StoreInt64(&dcr.tipAtConnect, bestBlock.height)
+	return nil
 }
 
 // OwnsAddress indicates if an address belongs to the wallet.
@@ -1718,9 +1744,8 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	if contractBlock == nil {
 		dcr.findRedemptionsInMempool([]outPoint{contractOutpoint})
 	} else {
-		dcr.tipMtx.RLock()
-		bestBlock := dcr.currentTip
-		dcr.tipMtx.RUnlock()
+		bestHash, bestHeight := dcr.blockCache.tip()
+		bestBlock := &block{bestHeight, bestHash}
 		dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOutpoint})
 	}
 
@@ -1792,7 +1817,7 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid blockhash %s for contract %s: %w", tx.BlockHash, contractOutpoint.String(), err)
 		}
-		txBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, false)
+		txBlock, err := dcr.getDcrBlock(blockHash)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error fetching verbose block %s for contract %s: %w",
 				tx.BlockHash, contractOutpoint.String(), translateRPCCancelErr(err))
@@ -1877,6 +1902,7 @@ func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlock, endBlock *blo
 
 rangeBlocks:
 	for nextBlockHash != nil && lastScannedBlockHeight < endBlock.height {
+		// TODO: Use blockCache.
 		blk, err := dcr.node.GetBlockVerbose(dcr.ctx, nextBlockHash, true)
 		if err != nil {
 			// Redemption search for this set of contracts is compromised. Notify
@@ -2744,33 +2770,93 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (dcr *ExchangeWallet) checkForNewBlocks() {
-	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
-	defer cancel()
-	newTip, err := dcr.getBestBlock(ctx)
+	newTip, err := dcr.getBestBlock()
 	if err != nil {
 		go dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
-	// This method is called frequently. Don't hold write lock
-	// unless tip has changed.
-	dcr.tipMtx.RLock()
-	sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
-	dcr.tipMtx.RUnlock()
-	if sameTip {
+	cachedBestHash, cachedBestHeight := dcr.blockCache.tip()
+	if newTip.hash.IsEqual(cachedBestHash) {
 		return
 	}
 
-	dcr.tipMtx.Lock()
-	defer dcr.tipMtx.Unlock()
+	newBestBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, newTip.hash, false)
+	if err != nil {
+		go dcr.tipChange(fmt.Errorf("error retrieving block %s: %w", newTip.hash, translateRPCCancelErr(err)))
+		return
+	}
 
-	prevTip := dcr.currentTip
-	dcr.currentTip = newTip
-	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
+	// Purge mainchain blocks if there was a reorg or this new block is NOT the
+	// successor of the currently cached best block. This MUST be done before
+	// adding the new best block to the cache and notifying consumers of the tip
+	// change.
+	var redemptionSearchStartBlock *block
+	err = (func() error {
+		// If the new best block builds on the cached best block or the cache is empty,
+		// it's good to add.
+		if cachedBestHash == nil {
+			return nil // cache is empty
+		}
+		prevHash, err := chainhash.NewHashFromStr(newBestBlock.PreviousHash)
+		if err != nil {
+			return fmt.Errorf("error parsing previous hash %s: %w", newBestBlock.PreviousHash, err)
+		}
+		if prevHash.IsEqual(cachedBestHash) {
+			dcr.log.Debugf("New block %s (%d)", newBestBlock.Hash, newBestBlock.Height)
+			redemptionSearchStartBlock = newTip // Just 1 new block since the cached tip, search the lone block.
+			return nil
+		}
+
+		// New best block doesn't build on the cached best block. Reorg maybe?
+		cachedBestBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, cachedBestHash, false)
+		if err != nil {
+			return fmt.Errorf("error retrieving block %s: %w", cachedBestHash, translateRPCCancelErr(err))
+		}
+		if cachedBestBlock.Confirmations < 0 {
+			// Cached best block was re-orged out of the mainchain; determine the
+			// height of the mainchain ancestor of the cached best block and purge
+			// cached mainchain blocks from that height upwards.
+			// ancestorHeight = reorgedBlockHeight + negative confirmation
+			// e.g. 155 + (-3) = 152.
+			reorgHeight := cachedBestBlock.Height + cachedBestBlock.Confirmations
+			reorgHash, err := dcr.getBlockHash(reorgHeight)
+			if err != nil {
+				return fmt.Errorf("getblockhash error for reorg height %d: %w", reorgHeight, translateRPCCancelErr(err))
+			}
+			dcr.log.Debugf("Tip change (reorg) from %s (%d) => %d (%s)", reorgHash, reorgHeight, newTip.height, newTip.hash)
+			dcr.blockCache.purgeMainchainBlocks(reorgHeight)
+			redemptionSearchStartBlock = &block{reorgHeight, reorgHash}
+			return nil
+		}
+
+		// Cached best block is still a valid mainchain block but some other intermediate
+		// blocks that were previously cached may have been reorged out. Purge the cached
+		// mainchain blocks in the uncertain range.
+		afterPrivTip := cachedBestBlock.Height + 1
+		hashAfterPrevTip, err := dcr.getBlockHash(afterPrivTip)
+		if err != nil {
+			return fmt.Errorf("getblockhash error for height %d: %w", afterPrivTip, translateRPCCancelErr(err))
+		}
+		dcr.log.Debugf("Tip change (fast blocks) from %s (%d) => %d (%s)", cachedBestHeight, cachedBestHash,
+			newTip.height, newTip.hash)
+		redemptionSearchStartBlock = &block{hash: hashAfterPrevTip, height: afterPrivTip}
+		return nil
+	})()
+	if err != nil {
+		go dcr.tipChange(err)
+		return
+	}
+
+	// Add the new best block to the cache. Also updates the cached tip.
+	_, err = dcr.blockCache.add(newBestBlock)
+	if err != nil {
+		dcr.log.Errorf("error adding new best block to cache: %v", err)
+	}
 	go dcr.tipChange(nil)
 
-	// Search for contract redemption in new blocks if there
-	// are contracts pending redemption.
+	// Search for contract redemption in the new blocks if there are contracts
+	// pending redemption.
 	dcr.findRedemptionMtx.RLock()
 	pendingContractsCount := len(dcr.findRedemptionQueue)
 	contractOutpoints := make([]outPoint, 0, pendingContractsCount)
@@ -2778,63 +2864,43 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 		contractOutpoints = append(contractOutpoints, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.RUnlock()
-	if pendingContractsCount == 0 {
-		return
-	}
-
-	// Use the previous tip hash to determine the starting point for
-	// the redemption search. If there was a re-org, the starting point
-	// would be the common ancestor of the previous tip and the new tip.
-	// Otherwise, the starting point would be the block at previous tip
-	// height + 1.
-	var startPoint *block
-	var startPointErr error
-	prevTipBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, prevTip.hash, false)
-	switch {
-	case err != nil:
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w", prevTip.hash, translateRPCCancelErr(err))
-	case prevTipBlock.Confirmations < 0:
-		// There's been a re-org, common ancestor will be height
-		// plus negative confirmation e.g. 155 + (-3) = 152.
-		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
-		dcr.log.Debugf("reorg detected from height %d to %d", reorgHeight, newTip.height)
-		reorgHash, err := dcr.node.GetBlockHash(dcr.ctx, reorgHeight)
-		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w", reorgHeight, translateRPCCancelErr(err))
-		} else {
-			startPoint = &block{hash: reorgHash, height: reorgHeight}
-		}
-	case newTip.height-prevTipBlock.Height > 1:
-		// 2 or more blocks mined since last tip, start at prevTip height + 1.
-		afterPrivTip := prevTipBlock.Height + 1
-		hashAfterPrevTip, err := dcr.node.GetBlockHash(dcr.ctx, afterPrivTip)
-		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w", afterPrivTip, translateRPCCancelErr(err))
-		} else {
-			startPoint = &block{hash: hashAfterPrevTip, height: afterPrivTip}
-		}
-	default:
-		// Just 1 new block since last tip report, search the lone block.
-		startPoint = newTip
-	}
-
-	// Redemption search would be compromised if the starting point cannot
-	// be determined, as searching just the new tip might result in blocks
-	// being omitted from the search operation. If that happens, cancel all
-	// find redemption requests in queue.
-	if startPointErr != nil {
-		dcr.fatalFindRedemptionsError(fmt.Errorf("new blocks handler error: %w", startPointErr), contractOutpoints)
-	} else {
-		go dcr.findRedemptionsInBlockRange(startPoint, newTip, contractOutpoints)
+	if pendingContractsCount > 0 {
+		go dcr.findRedemptionsInBlockRange(redemptionSearchStartBlock, newTip, contractOutpoints)
 	}
 }
 
-func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
+func (dcr *ExchangeWallet) getBestBlock() (*block, error) {
+	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+	defer cancel()
 	hash, height, err := dcr.node.GetBestBlock(ctx)
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
 	return &block{hash: hash, height: height}, nil
+}
+
+func (dcr *ExchangeWallet) getBlockHash(height int64) (*chainhash.Hash, error) {
+	if hash, cached := dcr.blockCache.mainchainHash(height); cached {
+		return hash, nil
+	}
+	hash, err := dcr.node.GetBlockHash(dcr.ctx, height)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	return hash, nil
+}
+
+// Get the block information, checking the cache first.
+func (dcr *ExchangeWallet) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, error) {
+	cachedBlock, found := dcr.blockCache.block(blockHash)
+	if found {
+		return cachedBlock, nil
+	}
+	blockVerbose, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, false)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
+	}
+	return dcr.blockCache.add(blockVerbose)
 }
 
 // wireBytes dumps the serialized transaction bytes.

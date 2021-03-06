@@ -162,11 +162,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	wallet.node = client
 	wallet.ctx = walletCtx
 
-	// Initialize the best block.
-	wallet.tipMtx.Lock()
-	wallet.currentTip, _ = wallet.getBestBlock(walletCtx)
-	wallet.tipMtx.Unlock()
-
+	wallet.initBestBlock()
 	go wallet.monitorBlocks(walletCtx)
 
 	return wallet, client, shutdown, nil
