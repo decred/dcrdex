@@ -5,6 +5,7 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -27,7 +28,10 @@ const (
 	blockPollInterval = time.Second
 )
 
-var zeroHash = common.Hash{}
+var (
+	zeroHash          = common.Hash{}
+	notImplementedErr = errors.New("not implemented")
+)
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -144,7 +148,7 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (eth *Backend) FeeRate() (uint64, error) {
-	return 0, nil
+	return 0, notImplementedErr
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -160,7 +164,7 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 
 // Contract is part of the asset.Backend interface.
 func (eth *Backend) Contract(coinID []byte, redeemScript []byte) (*asset.Contract, error) {
-	return nil, nil
+	return nil, notImplementedErr
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -170,17 +174,17 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (eth *Backend) Synced() (bool, error) {
-	return false, nil
+	return false, notImplementedErr
 }
 
 // Redemption is an input that redeems a swap contract.
 func (eth *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
-	return nil, nil
+	return nil, notImplementedErr
 }
 
 // FundingCoin is an unspent output.
 func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
-	return nil, nil
+	return nil, notImplementedErr
 }
 
 // ValidateCoinID attempts to decode the coinID.
@@ -191,7 +195,7 @@ func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 // ValidateContract ensures that the swap contract is constructed properly, and
 // contains valid sender and receiver addresses.
 func (eth *Backend) ValidateContract(contract []byte) error {
-	return nil
+	return notImplementedErr
 }
 
 // CheckAddress checks that the given address is parseable.
@@ -201,7 +205,7 @@ func (eth *Backend) CheckAddress(addr string) bool {
 
 // VerifyUnspentCoin attempts to verify a coin ID is unspent.
 func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error {
-	return nil
+	return notImplementedErr
 }
 
 // run processes the queue and monitors the application context.

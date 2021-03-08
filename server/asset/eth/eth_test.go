@@ -53,7 +53,7 @@ func TestLoad(t *testing.T) {
 		wantIPC: "/home/john/bleh.ipc",
 		network: dex.Simnet,
 	}, {
-		name:    "ok ipc supplied",
+		name:    "ok ipc not supplied",
 		IPC:     "",
 		wantIPC: defaultIPC,
 		network: dex.Simnet,
