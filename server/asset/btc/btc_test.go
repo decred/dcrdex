@@ -759,8 +759,8 @@ func testBackend(segwit bool) (*Backend, func()) {
 		Logger:         logger,
 		ChainParams:    testParams,
 	}, nil)
-	btc.node = &rpcClient{
-		requester: &testNode{},
+	btc.node = &RPCClient{
+		Requester: &testNode{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1462,7 +1462,7 @@ func TestDriver_DecodeCoinID(t *testing.T) {
 func TestSynced(t *testing.T) {
 	btc, shutdown := testBackend(true)
 	defer shutdown()
-	tNode := btc.node.requester.(*testNode)
+	tNode := btc.node.Requester.(*testNode)
 	tNode.rawResult, _ = json.Marshal(&btcjson.GetBlockChainInfoResult{
 		Headers: 100,
 		Blocks:  99,

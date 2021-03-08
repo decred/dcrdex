@@ -73,7 +73,7 @@ type Backend struct {
 	// witness.
 	segwit bool
 	// node is used throughout for RPC calls. For testing, it can be set to a stub.
-	node *rpcClient
+	node *RPCClient
 	// The block cache stores just enough info about the blocks to shortcut future
 	// calls to GetBlockVerbose.
 	blockCache *blockCache
@@ -86,7 +86,7 @@ type Backend struct {
 	// use the provided logger.
 	log         dex.Logger
 	decodeAddr  dexbtc.AddressDecoder
-	estimateFee func(BTCNode) (uint64, error)
+	estimateFee func(RPCClient) (uint64, error)
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -124,7 +124,6 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 }
 
 func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.Config) *Backend {
-
 	feeEstimator := feeRate
 	if cloneCfg.FeeEstimator != nil {
 		feeEstimator = cloneCfg.FeeEstimator
@@ -161,7 +160,7 @@ type BackendCloneConfig struct {
 	Ports          dexbtc.NetPorts
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
-	FeeEstimator func(BTCNode) (uint64, error)
+	FeeEstimator func(RPCClient) (uint64, error)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
@@ -180,8 +179,8 @@ func NewBTCClone(cloneCfg *BackendCloneConfig) (*Backend, error) {
 
 func (btc *Backend) shutdown() {
 	if btc.node != nil {
-		btc.node.requester.Shutdown()
-		btc.node.requester.WaitForShutdown()
+		btc.node.Requester.Shutdown()
+		btc.node.Requester.WaitForShutdown()
 	}
 }
 
@@ -199,9 +198,9 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 
 	// Requester must be set otherwise there can be a panic on shutdown.
-	btc.node = &rpcClient{
+	btc.node = &RPCClient{
 		ctx:       ctx,
-		requester: client,
+		Requester: client,
 	}
 
 	// Prime the cache
@@ -217,7 +216,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	if _, err = btc.estimateFee(btc.node); err != nil {
+	if _, err = btc.estimateFee(*btc.node); err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
 
@@ -377,7 +376,7 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *Backend) FeeRate() (uint64, error) {
-	return btc.estimateFee(btc.node)
+	return btc.estimateFee(*btc.node)
 }
 
 // CheckAddress checks that the given address is parseable.
@@ -976,7 +975,7 @@ func isTxNotFoundErr(err error) bool {
 
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC.
-func feeRate(node BTCNode) (uint64, error) {
+func feeRate(node RPCClient) (uint64, error) {
 	feeResult, err := node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
