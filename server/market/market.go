@@ -1561,6 +1561,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		piReqParams := &msgjson.PreimageRequest{
 			OrderID:        idToBytes(ord.ID()),
 			CommitChecksum: cSum,
+			// TODO: include this order's commitment so client can recognize it prior to submission response
 		}
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.PreimageRoute, piReqParams)
 		if err != nil {
