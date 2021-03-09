@@ -322,7 +322,11 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	var result = new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
-		return err
+		// At this point there is a possibility that the server got the request
+		// and created the cancel order, but we lost the connection before
+		// receiving the response with the cancel's order ID. Any preimage
+		// request will be unrecognized. This order is ABANDONED.
+		return fmt.Errorf("failed to submit cancel order targeting trade %v: %w", oid, err)
 	}
 	err = validateOrderResponse(dc, result, co, msgOrder)
 	if err != nil {
@@ -375,8 +379,9 @@ func (c *Core) syncOrderPlaced(oid order.OrderID) {
 		close(syncChan)
 		delete(c.piSyncers, oid)
 	} else {
-		// If there is no channel, the preimage request hasn't come yet. Add the
-		// channel to signal readiness.
+		// If there is no channel, the preimage request hasn't come yet. Add a
+		// channel to signal readiness. Could insert nil unless syncOrderPlaced
+		// is erroneously called twice for the same order ID.
 		c.piSyncers[oid] = make(chan struct{})
 	}
 	c.piSyncMtx.Unlock()
@@ -3112,23 +3117,23 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
 		unlockCoins()
+		// At this point there is a possibility that the server got the request
+		// and created the trade order, but we lost the connection before
+		// receiving the response with the trade's order ID. Any preimage
+		// request will be unrecognized. This order is ABANDONED.
 		return nil, 0, fmt.Errorf("new order request with DEX server %v market %v failed: %w", dc.acct.host, mktID, err)
 	}
 
 	// If we encounter an error, perform some basic logging.
-	//
-	// TODO: Notify the client somehow.
 	logAbandon := func(err interface{}) {
-		c.log.Errorf("Abandoning order. "+
-			"preimage: %x, server time: %d: %v",
+		c.log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
 	}
 
-	err = validateOrderResponse(dc, result, ord, msgOrder)
+	err = validateOrderResponse(dc, result, ord, msgOrder) // stamps the order, giving it a valid ID
 	if err != nil {
 		unlockCoins()
-		c.log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
-			preImg[:], result.ServerTime, err)
+		logAbandon(fmt.Sprintf("order response validation failure: %v", err))
 		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
 
@@ -4497,7 +4502,8 @@ func (c *Core) listen(dc *dexConnection) {
 	lastTick := time.Now()
 
 	// Messages must be run in the order in which they are received, but they
-	// should not be blocking or run concurrently.
+	// should not be blocking or run concurrently. TODO: figure out which if any
+	// can run asynchronously, maybe all.
 	type msgJob struct {
 		hander routeHandler
 		msg    *msgjson.Message
@@ -4652,7 +4658,8 @@ out:
 }
 
 // handlePreimageRequest handles a DEX-originating request for an order
-// preimage.
+// preimage. If the order id in the request is not known, it may launch a
+// goroutine to wait for a market/limit/cancel request to finish processing.
 func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	req := new(msgjson.PreimageRequest)
 	err := msg.Unmarshal(req)
@@ -4660,56 +4667,62 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		return fmt.Errorf("preimage request parsing error: %w", err)
 	}
 
+	if len(req.OrderID) != order.OrderIDSize {
+		return fmt.Errorf("invalid order ID in preimage request")
+	}
+
 	var oid order.OrderID
 	copy(oid[:], req.OrderID)
 
-	// Sync with order placement.
+	// Sync with order placement, the response from which provides the order ID.
 	c.piSyncMtx.Lock()
-	syncChan, found := c.piSyncers[oid]
-	if found {
-		// If we found the channel, the tracker is already in the map, and we
-		// can go ahead.
+	if _, found := c.piSyncers[oid]; found {
+		// If we found a map entry, the tracker is already in the trades map,
+		// and we can go ahead.
 		delete(c.piSyncers, oid)
-	} else {
-		// If we didn't find the channel, Trade is still running. Add the chan
-		// and wait for Trade to close it.
-		syncChan = make(chan struct{})
-		c.piSyncers[oid] = syncChan
+		c.piSyncMtx.Unlock()
+		return processPreimageRequest(c, dc, msg.ID, oid)
 	}
+
+	// If we didn't find an entry, Trade is still running. Add a chan and wait
+	// for Trade to close it.
+	syncChan := make(chan struct{})
+	c.piSyncers[oid] = syncChan
 	c.piSyncMtx.Unlock()
 
-	deletePiSyncer := func() {
+	// The order submission could be timing out waiting for a response, or this
+	// could be a bogus preimage request, so we do not want to block the caller,
+	// (*Core).listen if this hangs. Preimage requests are ok to handle
+	// asynchronously since there can be no matches until we respond to this.
+	c.log.Warnf("Got preimage request for %v before we got an order submission response!", oid)
+	go func() {
+		select {
+		case <-syncChan:
+			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
+				c.log.Errorf("processPreimageRequest for %v failed: %v", oid, err)
+			} else {
+				c.log.Debugf("processPreimageRequest for %v succeeded", oid)
+			}
+			// The channel is deleted from the piSyncers map by syncOrderPlaced.
+			return
+		case <-time.After(DefaultResponseTimeout):
+			c.log.Errorf("timed out syncing preimage request for %s, order %s", dc.acct.host, oid)
+		case <-c.ctx.Done():
+		}
 		c.piSyncMtx.Lock()
 		delete(c.piSyncers, oid)
 		c.piSyncMtx.Unlock()
-	}
+	}()
 
-	if !found {
-		select {
-		case <-syncChan:
-		case <-time.After(time.Minute):
-			deletePiSyncer()
-			return fmt.Errorf("timed out syncing preimage request for %s, order %s", dc.acct.host, oid)
-		case <-c.ctx.Done():
-			deletePiSyncer()
-			return nil
-		}
-	}
+	return nil
+}
 
+func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID) error {
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
-		// Hack around the race in prepareTrackedTrade from submitting the
-		// order, receiving the order result, and registering the tracked trade.
-		// It's possible that the dc.trades map won't have the oid yet after
-		// submitting the order, so if (1) we didn't find this oid, AND (2)
-		// we're in that window, that order result is about to be stored, so
-		// wait for it and check again.
-		tracker, preImg, isCancel = dc.findOrder(oid)
-		if tracker == nil {
-			return fmt.Errorf("no active order found for preimage request for %s", oid)
-		}
+		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
-	resp, err := msgjson.NewResponse(msg.ID, &msgjson.PreimageResponse{
+	resp, err := msgjson.NewResponse(reqID, &msgjson.PreimageResponse{
 		Preimage: preImg[:],
 	}, nil)
 	if err != nil {
@@ -5143,7 +5156,7 @@ func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stamp
 }
 
 // validateOrderResponse validates the response against the order and the order
-// message.
+// message, and stamps the order with the ServerTime, giving it a valid OrderID.
 func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord order.Order, msgOrder msgjson.Stampable) error {
 	if result.ServerTime == 0 {
 		return fmt.Errorf("OrderResult cannot have servertime = 0")

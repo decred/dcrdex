@@ -2440,6 +2440,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		metaData: &db.OrderMetaData{},
 	}
 
+	// Simulate an order submission request having completed.
 	loadSyncer := func() {
 		rig.core.piSyncMtx.Lock()
 		rig.core.piSyncers[oid] = make(chan struct{})
