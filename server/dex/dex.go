@@ -149,6 +149,7 @@ func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*m
 		Fee:              cfg.RegFeeAmount,
 		APIVersion:       uint16(APIVersion),
 		BinSizes:         apidata.BinSizes,
+		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need

@@ -111,6 +111,22 @@ type Notification interface {
 	String() string
 }
 
+// SecurityNote is a note regarding application security, credentials, or
+// authentication.
+type SecurityNote struct {
+	db.Notification
+}
+
+const (
+	SubjectSeedNeedsSaving = "Don't forget to back up your application seed"
+)
+
+func newSecurityNote(subject, details string, severity db.Severity) *SecurityNote {
+	return &SecurityNote{
+		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
+	}
+}
+
 // FeePaymentNote is a notification regarding registration fee payment.
 type FeePaymentNote struct {
 	db.Notification

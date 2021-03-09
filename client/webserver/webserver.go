@@ -66,7 +66,7 @@ type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
-	InitializeClient(pw []byte) error
+	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -96,6 +96,7 @@ type clientCore interface {
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() (bool, error)
+	ExportSeed(pw []byte) ([]byte, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -295,6 +296,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
 			apiAuth.Post("/exportaccount", s.apiAccountExport)
+			apiAuth.Post("/exportseed", s.apiExportSeed)
 			apiAuth.Post("/importaccount", s.apiAccountImport)
 			apiAuth.Post("/disableaccount", s.apiAccountDisable)
 		})

@@ -18,6 +18,7 @@ export default class RegistrationPage extends BasePage {
     const page = this.page = Doc.parsePage(body, [
       // Form 1: Set the application password
       'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
+      'showSeedRestore', 'seedRestore', 'seedInput',
       // Form 2: Create Decred wallet
       'newWalletForm',
       // Form 3: Unlock Decred wallet
@@ -36,6 +37,10 @@ export default class RegistrationPage extends BasePage {
 
     // SET APP PASSWORD
     bindForm(page.appPWForm, page.appPWSubmit, () => this.setAppPass())
+    Doc.bind(page.showSeedRestore, 'click', () => {
+      Doc.show(page.seedRestore)
+      Doc.hide(page.showSeedRestore)
+    })
 
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
@@ -112,6 +117,7 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appPWErrMsg)
       return
     }
+
     // Clear the notification cache. Useful for development purposes, since
     // the Application will only clear them on login, which would leave old
     // browser-cached notifications in place after registering even if the
@@ -120,7 +126,10 @@ export default class RegistrationPage extends BasePage {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app.loading(page.appPWForm)
-    const res = await postJSON('/api/init', { pass: pw })
+    const res = await postJSON('/api/init', {
+      pass: pw,
+      seed: page.seedInput.value
+    })
     loaded()
     if (!app.checkResponse(res)) {
       page.appErrMsg.textContent = res.msg

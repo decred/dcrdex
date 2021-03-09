@@ -98,6 +98,11 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 // CreateAccount creates an entry for a new account in the accounts table. A
 // DCR registration fee address is created and returned.
 func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
+	_, err := a.AccountInfo(acct.ID)
+	if err == nil {
+		return "", &db.ArchiveError{Code: db.ErrAccountExists}
+	}
+
 	regAddr, err := a.getNextAddress()
 	if err != nil {
 		return "", fmt.Errorf("error creating registration address: %w", err)

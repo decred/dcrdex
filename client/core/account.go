@@ -84,7 +84,6 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 		return nil, codedError(acctKeyErr, err)
 	}
 	dc.acct.keyMtx.RLock()
-	accountID := dc.acct.id.String()
 	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
 	dc.acct.keyMtx.RUnlock()
 
@@ -101,8 +100,11 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 
 	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
-		Host:          host,
-		AccountID:     accountID,
+		Host:      host,
+		AccountID: dc.acct.id.String(),
+		// PrivKey: Note that we don't differentiate between legacy and
+		// hierarchical private keys here. On import, all keys are treated as
+		// legacy keys.
 		PrivKey:       privKey,
 		DEXPubKey:     hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
 		Cert:          hex.EncodeToString(dc.acct.cert),
@@ -149,7 +151,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-	accountInfo.EncKey, err = crypter.Encrypt(privKey)
+	accountInfo.LegacyEncKey, err = crypter.Encrypt(privKey)
 	if err != nil {
 		return codedError(encryptionErr, err)
 	}

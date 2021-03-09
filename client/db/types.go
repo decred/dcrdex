@@ -59,16 +59,37 @@ func (s Severity) String() string {
 	return "unknown severity"
 }
 
+// PrimaryCredentials should be created during app initialization. Both the seed
+// and the inner key (and technically the other two fields) should be generated
+// with a cryptographically-secure prng.
+type PrimaryCredentials struct {
+	// EncSeed is the root seed used to create a hierarchical deterministic
+	// key chain (see also dcrd/hdkeychain.NewMaster/ExtendedKey).
+	EncSeed []byte
+	// EncInnerKey is an encrypted encryption key. The inner key will never
+	// change. The inner key is encrypted with the outer key, which itself is
+	// based on the user's password.
+	EncInnerKey []byte
+	// InnerKeyParams are the key parameters for the inner key.
+	InnerKeyParams []byte
+	// OuterKeyParams are the key parameters for the outer key.
+	OuterKeyParams []byte
+}
+
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
 	Host string
 	Cert []byte
-	// EncKey should be an encrypted private key. The database itself does not
-	// handle encryption (yet?).
-	EncKey    []byte
-	DEXPubKey *secp256k1.PublicKey
-	FeeCoin   []byte
+	// EncKeyV2 is an encrypted private key generated deterministacally from the
+	// app seed.
+	EncKeyV2 []byte
+	// LegacyEncKey is an old-style non-hierarchical key that must be included
+	// when exporting the client credentials, since it cannot be regenerated
+	// automatically.
+	LegacyEncKey []byte
+	DEXPubKey    *secp256k1.PublicKey
+	FeeCoin      []byte
 	// Paid will be set on retrieval based on whether there is an AccountProof
 	// set.
 	Paid bool
@@ -76,12 +97,21 @@ type AccountInfo struct {
 
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
-	return dbBytes{0}.
+	return dbBytes{1}.
 		AddData([]byte(ai.Host)).
-		AddData(ai.EncKey).
+		AddData(ai.LegacyEncKey).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
 		AddData(ai.FeeCoin).
-		AddData(ai.Cert)
+		AddData(ai.Cert).
+		AddData(ai.EncKeyV2)
+}
+
+// EncKey is the encrypted account private key.
+func (ai *AccountInfo) EncKey() []byte {
+	if len(ai.EncKeyV2) > 0 {
+		return ai.EncKeyV2
+	}
+	return ai.LegacyEncKey
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo. The byte
@@ -94,26 +124,33 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 	switch ver {
 	case 0:
 		return decodeAccountInfo_v0(pushes)
+	case 1:
+		return decodeAccountInfo_v1(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
-	if len(pushes) != 5 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
+	return decodeAccountInfo_v1(append(pushes, nil))
+}
+
+func decodeAccountInfo_v1(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 6 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 6 data pushes, got %d", len(pushes))
 	}
-	hostB, keyB, dexB := pushes[0], pushes[1], pushes[2]
-	coinB, certB := pushes[3], pushes[4]
+	hostB, legacyKeyB, dexB := pushes[0], pushes[1], pushes[2]
+	coinB, certB, v2Key := pushes[3], pushes[4], pushes[5]
 	pk, err := secp256k1.ParsePubKey(dexB)
 	if err != nil {
 		return nil, err
 	}
 	return &AccountInfo{
-		Host:      string(hostB),
-		EncKey:    keyB,
-		DEXPubKey: pk,
-		FeeCoin:   coinB,
-		Cert:      certB,
+		Host:         string(hostB),
+		LegacyEncKey: legacyKeyB,
+		DEXPubKey:    pk,
+		FeeCoin:      coinB,
+		Cert:         certB,
+		EncKeyV2:     v2Key,
 	}, nil
 }
 
@@ -548,10 +585,11 @@ type AccountBackup struct {
 
 // encodeDEXAccount serializes the details needed to backup a dex account.
 func encodeDEXAccount(acct *AccountInfo) []byte {
-	return dbBytes{0}.
+	return dbBytes{1}.
 		AddData([]byte(acct.Host)).
-		AddData(acct.EncKey).
-		AddData(acct.DEXPubKey.SerializeCompressed())
+		AddData(acct.LegacyEncKey).
+		AddData(acct.DEXPubKey.SerializeCompressed()).
+		AddData(acct.EncKeyV2)
 }
 
 // decodeDEXAccount decodes the versioned blob into an AccountInfo.
@@ -563,20 +601,25 @@ func decodeDEXAccount(acctB []byte) (*AccountInfo, error) {
 
 	switch ver {
 	case 0:
-		if len(pushes) != 3 {
-			return nil, fmt.Errorf("expected 3 pushes, got %d", len(pushes))
+		pushes = append(pushes, nil)
+		fallthrough
+	case 1:
+		if len(pushes) != 4 {
+			return nil, fmt.Errorf("expected 4 pushes, got %d", len(pushes))
 		}
 
 		var ai AccountInfo
 		ai.Host = string(pushes[0])
-		ai.EncKey = pushes[1]
+		ai.LegacyEncKey = pushes[1]
 		ai.DEXPubKey, err = secp256k1.ParsePubKey(pushes[2])
+		ai.EncKeyV2 = pushes[3]
 		if err != nil {
 			return nil, err
 		}
 		return &ai, nil
+
 	}
-	return nil, fmt.Errorf("unknown DEX account backup version %d", ver)
+	return nil, fmt.Errorf("unknown DEX account version %d", ver)
 }
 
 // Serialize encodes an account backup as bytes.
@@ -595,7 +638,7 @@ func decodeAccountBackup(b []byte) (*AccountBackup, error) {
 		return nil, err
 	}
 	switch ver {
-	case 0:
+	case 0, 1:
 		keyParams := pushes[0]
 		accts := make([]*AccountInfo, 0, len(pushes[1:]))
 		for _, push := range pushes[1:] {

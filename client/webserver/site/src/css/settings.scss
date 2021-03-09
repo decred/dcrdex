@@ -1,5 +1,7 @@
 div.settings {
+  display: inline-block;
   width: 500px;
+  text-align: left;
 
   & > div {
     position: relative;
@@ -13,6 +15,14 @@ div.settings {
 
   & > div.form-check {
     padding-left: 35px;
+  }
+
+  button {
+    opacity: 0.9;
+  }
+
+  button:hover {
+    opacity: 1;
   }
 }
 
@@ -33,4 +43,8 @@ div.settings-exchange {
   .red {
     color: #f55a;
   }
+}
+
+#seedDiv {
+  word-break: break-all;
 }

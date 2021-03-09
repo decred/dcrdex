@@ -236,7 +236,29 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res, s.indent)
 }
 
-// apiAccountImport is the handler for the '/importaccount' API request.
+func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Pass encode.PassBytes `json:"pass"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	r.Close = true
+	seed, err := s.core.ExportSeed(form.Pass)
+	if err != nil {
+		s.writeAPIError(w, "error exporting seed: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK   bool      `json:"ok"`
+		Seed dex.Bytes `json:"seed"`
+	}{
+		OK:   true,
+		Seed: seed,
+	}, s.indent)
+}
+
+// apiAccountImport is the handler for the '/account' API request.
 func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	form := new(accountImportForm)
 	defer form.Pass.Clear()
@@ -305,17 +327,17 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
-	login := new(loginForm)
-	defer login.Pass.Clear()
-	if !readPost(w, r, login) {
+	init := new(initForm)
+	defer init.Pass.Clear()
+	if !readPost(w, r, init) {
 		return
 	}
-	err := s.core.InitializeClient(login.Pass)
+	err := s.core.InitializeClient(init.Pass, init.Seed)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
-	s.actuallyLogin(w, r, login)
+	s.actuallyLogin(w, r, &loginForm{Pass: init.Pass})
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.

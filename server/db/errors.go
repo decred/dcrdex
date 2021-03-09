@@ -54,6 +54,7 @@ const (
 	ErrReusedCommit
 	ErrOrderNotExecuted
 	ErrUpdateCount
+	ErrAccountExists
 )
 
 func (ae ArchiveError) Error() string {
@@ -75,6 +76,8 @@ func (ae ArchiveError) Error() string {
 		desc = "order not in executed status"
 	case ErrUpdateCount:
 		desc = "unexpected number of rows updated"
+	case ErrAccountExists:
+		desc = "account already exists"
 	}
 
 	if ae.Detail == "" {
