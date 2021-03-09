@@ -97,7 +97,7 @@ type dexConnection struct {
 // successfully sent.
 const (
 	DefaultResponseTimeout = comms.DefaultResponseTimeout
-	fundingTxWait          = 2 * time.Minute
+	fundingTxWait          = time.Minute // TODO: share var with server/market or put in config
 )
 
 // running returns the status of the provided market.
@@ -4289,6 +4289,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// and we can go ahead.
 		delete(c.piSyncers, oid)
 		c.piSyncMtx.Unlock()
+		dc.log.Debugf("Received preimage request for known order %v", oid)
 		return processPreimageRequest(c, dc, msg.ID, oid)
 	}
 
@@ -4302,14 +4303,14 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	// could be a bogus preimage request, so we do not want to block the caller,
 	// (*Core).listen if this hangs. Preimage requests are ok to handle
 	// asynchronously since there can be no matches until we respond to this.
-	c.log.Warnf("Got preimage request for %v before we got an order submission response!", oid)
+	c.log.Warnf("Received preimage request for %v before we got an order submission response!", oid)
 	go func() {
 		select {
 		case <-syncChan:
 			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
-				c.log.Errorf("processPreimageRequest for %v failed: %v", oid, err)
+				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
 			} else {
-				c.log.Debugf("processPreimageRequest for %v succeeded", oid)
+				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
 			}
 			// The channel is deleted from the piSyncers map by syncOrderPlaced.
 			return
