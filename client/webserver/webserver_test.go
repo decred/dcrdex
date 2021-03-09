@@ -79,7 +79,7 @@ func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange,
 	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
 }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
-func (c *TCore) InitializeClient(pw []byte) error                            { return c.initErr }
+func (c *TCore) InitializeClient(pw, seed []byte) error                      { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }
 func (c *TCore) IsInitialized() (bool, error)                                { return c.isInited, c.isInitedErr }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
@@ -162,6 +162,10 @@ func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
+
+func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
+	return []byte("ab"), nil
+}
 
 type TWriter struct {
 	b []byte

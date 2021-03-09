@@ -33,9 +33,14 @@ export default class SettingsPage extends BasePage {
       // Change App Password
       'changeAppPW', 'changeAppPWForm', 'appPW', 'newAppPW', 'confirmNewPW',
       'submitNewPW', 'changePWErrMsg',
+      // Application seed
+      'exportSeedAuth', 'exportSeedPW', 'exportSeedSubmit', 'exportSeedErr',
+      'exportSeed', 'authorizeSeedDisplay', 'seedDiv',
       // Others
       'showPokes'
     ])
+
+    this.forms = page.forms.querySelectorAll(':scope > form')
 
     Doc.bind(page.darkMode, 'click', () => {
       State.dark(page.darkMode.checked)
@@ -84,9 +89,14 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
     Doc.bind(page.addAccount, 'click', () => this.page.accountFile.click())
 
+    Doc.bind(page.exportSeed, 'click', () => this.showForm(this.page.exportSeedAuth))
+    Doc.bind(page.exportSeedSubmit, 'click', () => this.submitExportSeedReq())
+
     const closePopups = () => {
       Doc.hide(page.forms)
       page.appPass.value = ''
+      page.exportSeedPW.value = ''
+      page.seedDiv.textContent = ''
     }
 
     Doc.bind(page.forms, 'mousedown', e => {
@@ -238,20 +248,33 @@ export default class SettingsPage extends BasePage {
     window.location.reload()
   }
 
+  async submitExportSeedReq () {
+    const page = this.page
+    const pw = page.exportSeedPW.value
+    const loaded = app.loading(this.body)
+    const res = await postJSON('/api/exportseed', { pass: pw })
+    loaded()
+    if (!app.checkResponse(res)) {
+      page.exportAccountErr.textContent = res.msg
+      Doc.show(page.exportSeedE)
+      return
+    }
+    page.exportSeedPW.value = ''
+    page.seedDiv.textContent = res.seed
+    this.showForm(page.authorizeSeedDisplay)
+  }
+
   /* showForm shows a modal form with a little animation. */
   async showForm (form) {
     const page = this.page
     this.currentForm = form
-    Doc.hide(page.dexAddrForm, page.confirmRegForm,
-      page.authorizeAccountExportForm, page.authorizeAccountImportForm,
-      page.disableAccountForm, page.changeAppPWForm)
+    this.forms.forEach(form => Doc.hide(form))
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
     await Doc.animate(animationLength, progress => {
       form.style.right = `${(1 - progress) * shift}px`
     }, 'easeOutHard')
-    form.style.right = '0'
   }
 
   /**

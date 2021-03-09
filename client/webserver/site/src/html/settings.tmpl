@@ -1,8 +1,8 @@
 {{define "settings"}}
 {{template "top" .}}
-<div id="main" data-handler="settings" class="main align-items-center justify-content-center flex-column">
+<div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
 
-  <span class="settings-gear ico-settings"></span>
+  <span class="settings-gear ico-settings"></span><br>
 
   <div class="settings">
     <div class="form-check">
@@ -50,6 +50,14 @@
     <div>
         <button id="changeAppPW" class="bg2 selected">Change App Password</button>
     </div>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      You should carefully write down your application seed and save a copy.
+      Should you lose access to this machine or the critical application files,
+      the seed can be used to restore your DEX accounts and native wallets.
+      Some older accounts cannot be restored from seed, and whether old or new,
+      it's good practice to backup the account keys separately from the seed.<br>
+      <button id="exportSeed" class="fs15 bg2 selected">View Application Seed</button>
+    </div>
     <div>Build ID: <span id="commitHash" class="mono"></span></div>
   </div>
 
@@ -72,7 +80,7 @@
     </form>
 
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
-    <form class="card bg1" id="authorizeAccountImportForm">
+    <form class="card bg1 d-hide" id="authorizeAccountImportForm">
       {{template "authorizeAccountImportForm"}}
     </form>
 
@@ -85,6 +93,31 @@
     <form class="card bg1 d-hide" id="changeAppPWForm">
       {{template "changeAppPWForm"}}
     </form>
+    {{- /* EXPORT SEED AUTHORIZATION */ -}}
+    <form class="card bg1 p-4 d-hide position-relative" id="exportSeedAuth">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="fs16">
+        Enter your app password to show your seed. Make sure nobody else can
+        see your screen.
+      </div>
+      <hr class="dashed my-4">
+      <div>
+        <label for="exportSeedPW" class="pl-1 mb-1">Password</label>
+        <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="exportSeedSubmit" type="button" class="col-8 justify-content-center fs15 bg2 selected">Show Me</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="exportSeedErr"></div>
+    </form>
+
+    {{- /* SEED DISPLAY */ -}}
+    <form class="card bg1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      Don't share it. Don't lose it.
+      <div id="seedDiv"></div>
+    </form>
+
   </div>
 
 </div>

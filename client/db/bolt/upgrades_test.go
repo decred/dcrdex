@@ -17,6 +17,7 @@ import (
 
 	"decred.org/dcrdex/dex/order"
 
+	dexdb "decred.org/dcrdex/client/db"
 	"go.etcd.io/bbolt"
 )
 
@@ -32,6 +33,7 @@ var dbUpgradeTests = [...]struct {
 	{"upgradeFromV1", v2Upgrade, verifyV2Upgrade, "v1.db.gz", 2},
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
 	{"upgradeFromV3", v4Upgrade, verifyV4Upgrade, "v3.db.gz", 4},
+	{"upgradeFromV4", v5Upgrade, verifyV5Upgrade, "v4.db.gz", 5},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -230,6 +232,40 @@ func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
 		return nil
 	})
 	if err != nil {
+		t.Error(err)
+	}
+}
+
+// Ensure that the LegacyEncKey field is populated for the accounts in the DB.
+func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
+	if err := db.View(func(tx *bbolt.Tx) error {
+		return checkVersion(tx, 4)
+	}); err != nil {
+		t.Error(err)
+	}
+
+	if err := db.View(func(tx *bbolt.Tx) error {
+		accts := tx.Bucket(accountsBucket)
+		c := accts.Cursor()
+		for acctKey, _ := c.First(); acctKey != nil; acctKey, _ = c.Next() {
+			acct := accts.Bucket(acctKey)
+			if acct == nil {
+				return fmt.Errorf("account bucket %s value not a nested bucket", string(acctKey))
+			}
+			acctB := getCopy(acct, accountKey)
+			if acctB == nil {
+				return fmt.Errorf("empty account found for %s", string(acctKey))
+			}
+			acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+			if err != nil {
+				return err
+			}
+			if len(acctInfo.LegacyEncKey) == 0 {
+				return fmt.Errorf("LegacyEncKey not sets")
+			}
+		}
+		return nil
+	}); err != nil {
 		t.Error(err)
 	}
 }

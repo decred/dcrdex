@@ -218,8 +218,8 @@ func TestAccountExportAccountKeyError(t *testing.T) {
 	host := tCore.conns[tDexHost].acct.host
 	rig.crypter.(*tCrypter).decryptErr = tErr
 	_, err := tCore.AccountExport(tPW, host)
-	if !errorHasCode(err, acctKeyErr) {
-		t.Fatalf("expected account key error, actual error: '%v'", err)
+	if !errorHasCode(err, passwordErr) {
+		t.Fatalf("expected password error, actual error: '%v'", err)
 	}
 }
 
@@ -264,22 +264,22 @@ func TestAccountImport(t *testing.T) {
 	if !rig.db.verifyCreateAccount {
 		t.Fatalf("expected execution of db.CreateAccount")
 	}
-	if rig.db.accountInfoPersisted.Host != host {
+	if rig.db.acct.Host != host {
 		t.Fatalf("unexprected accountInfo Host")
 	}
 	DEXpubKey, _ := hex.DecodeString(account.DEXPubKey)
-	if !bytes.Equal(rig.db.accountInfoPersisted.DEXPubKey.SerializeCompressed(), DEXpubKey) {
+	if !bytes.Equal(rig.db.acct.DEXPubKey.SerializeCompressed(), DEXpubKey) {
 		t.Fatal("unexpected DEXPubKey")
 	}
 	feeCoin, _ := hex.DecodeString(account.FeeCoin)
-	if !bytes.Equal(rig.db.accountInfoPersisted.FeeCoin, feeCoin) {
+	if !bytes.Equal(rig.db.acct.FeeCoin, feeCoin) {
 		t.Fatal("unexpected FeeCoin")
 	}
 	cert, _ := hex.DecodeString(account.Cert)
-	if !bytes.Equal(rig.db.accountInfoPersisted.Cert, cert) {
+	if !bytes.Equal(rig.db.acct.Cert, cert) {
 		t.Fatal("unexpected Cert")
 	}
-	if !rig.db.accountInfoPersisted.Paid {
+	if !rig.db.acct.Paid {
 		t.Fatal("unexpected Paid value")
 	}
 	if rig.db.accountProofPersisted.Host != host {

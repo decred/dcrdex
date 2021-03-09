@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 )
 
 var (
@@ -57,6 +59,13 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	feeAddr, err := auth.storage.CreateAccount(acct)
 	if err != nil {
 		log.Debugf("CreateAccount(%v) failed: %v", acct, err)
+		var archiveErr *db.ArchiveError
+		if errors.As(err, &archiveErr) && archiveErr.Code == db.ErrAccountExists {
+			return &msgjson.Error{
+				Code:    msgjson.AccountExistsError,
+				Message: "account already exists",
+			}
+		}
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "failed to create new account (already registered?)",

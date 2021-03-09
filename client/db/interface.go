@@ -5,6 +5,7 @@ package db
 
 import (
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -12,12 +13,23 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// Store allows the storage of arbitrary data.
-	Store(string, []byte) error
-	// Get retrieves values stored with Store.
-	Get(string) ([]byte, error)
-	// ValueExists checks if a value was previously stored.
-	ValueExists(k string) (bool, error)
+	// SetPrimaryCredentials sets the initial *PrimaryCredentials and core
+	// version for the client.
+	SetPrimaryCredentials(creds *PrimaryCredentials, coreVersion uint8) error
+	// UpdatePrimaryCredentials updates the *PrimaryCredentials.
+	UpdatePrimaryCredentials(creds *PrimaryCredentials) error
+	// PrimaryCredentials fetches the *PrimaryCredentials.
+	PrimaryCredentials() (*PrimaryCredentials, error)
+	// LegacyKeyParams get the app key parameters stored using the deprecated
+	// Store method.
+	LegacyKeyParams() ([]byte, error)
+	// UpgradeLegacyCredentials updates the stored credentials to the new
+	// *PrimaryCredential format and updates the stored core version.
+	UpgradeLegacyCredentials(creds *PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter,
+		coreVersion uint8) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error)
+	// CoreVersion is the core version set with SetCoreVersion. If no core
+	// version has been set, the value 0 is returned without an error.
+	CoreVersion() (ver uint8, err error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.
@@ -30,11 +42,11 @@ type DB interface {
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
-	// UpdateAccount updates account's info blob.
-	//
-	// It is almost certainly incorrect to change any of the keys since changing
-	// the key pair itself effectively creates a new account.
-	UpdateAccount(ai *AccountInfo) error
+	// // UpdateAccount updates account's info blob.
+	// //
+	// // It is almost certainly incorrect to change any of the keys since changing
+	// // the key pair itself effectively creates a new account.
+	// UpdateAccount(ai *AccountInfo) error
 	// AccountProof retrieves the AccountPoof value specified by url.
 	AccountProof(host string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.
