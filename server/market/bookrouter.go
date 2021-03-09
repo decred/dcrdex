@@ -311,11 +311,12 @@ func (r *BookRouter) runBook(ctx context.Context, book *msgBook) {
 		log.Infof("Book router terminating for market %q", book.name)
 	}()
 
+	book.mtx.Lock()
+	book.running = true
+	book.mtx.Unlock()
+
 out:
 	for {
-		book.mtx.Lock()
-		book.running = true
-		book.mtx.Unlock()
 		select {
 		case u, ok := <-feed:
 			if !ok {
@@ -454,6 +455,10 @@ out:
 				// Only set Seq if there is a book update.
 				if !sigData.persistBook {
 					susp.Seq = subs.nextSeq() // book purge
+					book.mtx.Lock()
+					book.orders = make(map[order.OrderID]*msgjson.BookOrderNote)
+					book.mtx.Unlock()
+					// The router is "running" although the market is suspended.
 				}
 				note = susp
 
