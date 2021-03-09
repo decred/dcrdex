@@ -500,10 +500,12 @@ export default class Application {
         // assets can be null if failed to connect to dex server.
         if (!this.assets) return
         const wallet = note.wallet
+        this.user.assets[wallet.assetID].wallet = wallet
         this.assets[wallet.assetID].wallet = wallet
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
         balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
+        console.log(JSON.stringify(this.user, 2, null))
         break
       }
       case 'match': {

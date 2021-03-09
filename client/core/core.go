@@ -3153,10 +3153,13 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if err != nil {
 		return nil, 0, err
 	}
+	c.notify(newWalletStateNote(fromWallet.state()))
+
 	err = prepareWallet(toWallet)
 	if err != nil {
 		return nil, 0, err
 	}
+	c.notify(newWalletStateNote(toWallet.state()))
 
 	// Get an address for the swap contract.
 	addr, err := toWallet.Address()

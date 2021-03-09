@@ -1309,7 +1309,6 @@ export default class MarketsPage extends BasePage {
     // ordering. Grab updated info.
     const baseWallet = app.walletMap[market.base.id]
     const quoteWallet = app.walletMap[market.quote.id]
-    await app.fetchUser()
     if (!baseWallet.open || !quoteWallet.open) {
       this.balanceWgt.updateAsset(market.base.id)
       this.balanceWgt.updateAsset(market.quote.id)
@@ -1338,7 +1337,6 @@ export default class MarketsPage extends BasePage {
    */
   async walletUnlocked () {
     Doc.hide(this.page.forms)
-    await app.fetchUser()
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
