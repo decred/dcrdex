@@ -199,7 +199,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	// Requester must be set otherwise there can be a panic on shutdown.
 	btc.node = &RPCClient{
-		ctx:       ctx,
+		Ctx:       ctx,
 		Requester: client,
 	}
 

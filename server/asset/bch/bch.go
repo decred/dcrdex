@@ -108,7 +108,7 @@ func (bch *BCHBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Cont
 // estimateFee estimates the network transaction fee rate using the estimatefee
 // RPC.
 func estimateFee(node btc.RPCClient) (uint64, error) {
-	resp, err := node.Requester.RawRequest(nil, "estimatefee", nil)
+	resp, err := node.Requester.RawRequest(node.Ctx, "estimatefee", nil)
 	if err != nil {
 		return 0, err
 	}
