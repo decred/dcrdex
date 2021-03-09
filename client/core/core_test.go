@@ -839,6 +839,7 @@ func newTestRig() *testRig {
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[string]*blockWaiter),
 			piSyncers:     make(map[order.OrderID]chan struct{}),
+			sentCommits:   make(map[order.Commitment]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				// This is not very realistic since it doesn't start a fresh
@@ -2429,12 +2430,14 @@ func TestHandlePreimageRequest(t *testing.T) {
 	preImg := newPreimage()
 	payload := &msgjson.PreimageRequest{
 		OrderID: oid[:],
+		// No commitment in this request.
 	}
-	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+	reqNoCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
 	tracker := &trackedTrade{
 		Order:    ord,
 		preImg:   preImg,
+		mktID:    tDcrBtcMktName,
 		db:       rig.db,
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
@@ -2443,33 +2446,88 @@ func TestHandlePreimageRequest(t *testing.T) {
 	// Simulate an order submission request having completed.
 	loadSyncer := func() {
 		rig.core.piSyncMtx.Lock()
-		rig.core.piSyncers[oid] = make(chan struct{})
+		rig.core.piSyncers[oid] = nil // set nil to ensure it's just a map entry
 		rig.core.piSyncMtx.Unlock()
 	}
 
 	rig.dc.trades[oid] = tracker
 	loadSyncer()
-	err := handlePreimageRequest(rig.core, rig.dc, req)
+	err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
 	if err != nil {
 		t.Fatalf("handlePreimageRequest error: %v", err)
 	}
 
-	ensureErr := func(tag string) {
+	// Test the new path with rig.core.sentCommits.
+	readyCommitment := func(commit order.Commitment) chan struct{} {
+		commitSig := make(chan struct{}) // close after fake order submission is "done"
+		rig.core.sentCommitsMtx.Lock()
+		rig.core.sentCommits[commit] = commitSig
+		rig.core.sentCommitsMtx.Unlock()
+		return commitSig
+	}
+
+	commit := preImg.Commit()
+	commitSig := readyCommitment(commit)
+	payload = &msgjson.PreimageRequest{
+		OrderID:    oid[:],
+		Commitment: commit[:],
+	}
+	reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+	notes := rig.core.NotificationFeed()
+
+	rig.dc.trades[oid] = tracker
+	err = handlePreimageRequest(rig.core, rig.dc, reqCommit)
+	if err != nil {
+		t.Fatalf("handlePreimageRequest error: %v", err)
+	}
+	// It has gone async now, waiting for commitSig.
+	// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+	close(commitSig) // pretend like the order submission just finished
+
+	select {
+	case note := <-notes:
+		if note.Subject() != SubjectPreimageSent {
+			t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no order note from preimage request handling")
+	}
+
+	// negative paths
+	ensureErr := func(tag string, req *msgjson.Message, errPrefix string) {
 		t.Helper()
 		loadSyncer()
+		commitSig := readyCommitment(commit)
+		close(commitSig) // ready before preimage request
 		err := handlePreimageRequest(rig.core, rig.dc, req)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
+		if !strings.HasPrefix(err.Error(), errPrefix) {
+			t.Fatalf("expected error starting with %q, got %q", errPrefix, err)
+		}
 	}
 
-	delete(rig.dc.trades, oid)
-	ensureErr("no tracker")
-	rig.dc.trades[oid] = tracker
+	// unknown commitment in request
+	payloadBad := &msgjson.PreimageRequest{
+		OrderID:    oid[:],
+		Commitment: encode.RandomBytes(order.CommitmentSize), // junk, but correct length
+	}
+	reqCommitBad, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payloadBad)
+	ensureErr("unknown commitment", reqCommitBad, "received preimage request for unknown commitment")
+	// all other errors for
 
+	// Trade-not-found error only returned on synchronous non-commitment request
+	// handling, so use reqNoCommit to test that part of processPreimageRequest.
+	delete(rig.dc.trades, oid)
+	ensureErr("no tracker", reqNoCommit, "no active order found for preimage request")
+	rig.dc.trades[oid] = tracker // reset
+
+	// Response send error also only returned on synchronous request handling.
 	rig.ws.sendErr = tErr
-	ensureErr("send error")
-	rig.ws.sendErr = nil
+	ensureErr("send error", reqNoCommit, "preimage send error")
+	rig.ws.sendErr = nil // reset
 }
 
 func TestHandleRevokeOrderMsg(t *testing.T) {

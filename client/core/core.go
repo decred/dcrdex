@@ -122,7 +122,7 @@ type dexConnection struct {
 // successfully sent.
 const (
 	DefaultResponseTimeout = comms.DefaultResponseTimeout
-	fundingTxWait          = 2 * time.Minute
+	fundingTxWait          = time.Minute // TODO: share var with server/market or put in config
 )
 
 // running returns the status of the provided market.
@@ -316,6 +316,12 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	if err != nil {
 		return err
 	}
+
+	commitSig := make(chan struct{})
+	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
+	c.sentCommitsMtx.Lock()
+	c.sentCommits[co.Commit] = commitSig
+	c.sentCommitsMtx.Unlock()
 
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
@@ -924,6 +930,9 @@ type Core struct {
 
 	piSyncMtx sync.Mutex
 	piSyncers map[order.OrderID]chan struct{}
+
+	sentCommitsMtx sync.Mutex
+	sentCommits    map[order.Commitment]chan struct{}
 }
 
 // New is the constructor for a new Core.
@@ -953,6 +962,7 @@ func New(cfg *Config) (*Core, error) {
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[string]*blockWaiter),
 		piSyncers:     make(map[order.OrderID]chan struct{}),
+		sentCommits:   make(map[order.Commitment]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
@@ -3109,6 +3119,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
+	commitSig := make(chan struct{})
+	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
+	c.sentCommitsMtx.Lock()
+	c.sentCommits[prefix.Commit] = commitSig
+	c.sentCommitsMtx.Unlock()
+
 	// Everything is ready. Send the order.
 	route, msgOrder := messageOrder(ord, msgCoins)
 
@@ -4674,6 +4690,46 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	var oid order.OrderID
 	copy(oid[:], req.OrderID)
 
+	// NEW protocol with commitment specified.
+	if len(req.Commitment) == order.CommitmentSize {
+		// See if we recognize that commitment, and if we do, just wait for the
+		// order ID, and process the request.
+		var commit order.Commitment
+		copy(commit[:], req.Commitment)
+
+		c.sentCommitsMtx.Lock()
+		defer c.sentCommitsMtx.Unlock()
+		commitSig, found := c.sentCommits[commit]
+		if !found { // this is the main benefit of a commitment index
+			return fmt.Errorf("received preimage request for unknown commitment %v, order %v",
+				req.Commitment, oid)
+		}
+		delete(c.sentCommits, commit)
+
+		dc.log.Debugf("Received preimage request for order %v with known commitment %v", oid, commit)
+
+		// Go async while waiting.
+		go func() {
+			// Order request success OR fail closes the channel.
+			<-commitSig
+			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
+				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
+			} else {
+				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
+			}
+
+			// There or not, delete this oid entry from the deprecated map.
+			c.piSyncMtx.Lock()
+			delete(c.piSyncers, oid)
+			c.piSyncMtx.Unlock()
+		}()
+
+		return nil
+	} // else no or invalid commitment, eventually error (v0 DEPRECATION)
+
+	// OLD protocol below without the commitment is DEPRECATED. Remove when
+	// protocol version reaches 1.
+
 	// Sync with order placement, the response from which provides the order ID.
 	c.piSyncMtx.Lock()
 	if _, found := c.piSyncers[oid]; found {
@@ -4681,11 +4737,12 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// and we can go ahead.
 		delete(c.piSyncers, oid)
 		c.piSyncMtx.Unlock()
+		dc.log.Debugf("Received preimage request for known order %v", oid)
 		return processPreimageRequest(c, dc, msg.ID, oid)
 	}
 
-	// If we didn't find an entry, Trade is still running. Add a chan and wait
-	// for Trade to close it.
+	// If we didn't find an entry, Trade or Cancel is still running. Add a chan
+	// and wait for Trade to close it.
 	syncChan := make(chan struct{})
 	c.piSyncers[oid] = syncChan
 	c.piSyncMtx.Unlock()
@@ -4694,19 +4751,19 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	// could be a bogus preimage request, so we do not want to block the caller,
 	// (*Core).listen if this hangs. Preimage requests are ok to handle
 	// asynchronously since there can be no matches until we respond to this.
-	c.log.Warnf("Got preimage request for %v before we got an order submission response!", oid)
+	c.log.Warnf("Received preimage request for %v with no corresponding order submission response! Waiting...", oid)
 	go func() {
 		select {
 		case <-syncChan:
 			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
-				c.log.Errorf("processPreimageRequest for %v failed: %v", oid, err)
+				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
 			} else {
-				c.log.Debugf("processPreimageRequest for %v succeeded", oid)
+				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
 			}
 			// The channel is deleted from the piSyncers map by syncOrderPlaced.
 			return
 		case <-time.After(DefaultResponseTimeout):
-			c.log.Errorf("timed out syncing preimage request for %s, order %s", dc.acct.host, oid)
+			c.log.Errorf("Timed out syncing preimage request from %s, order %s", dc.acct.host, oid)
 		case <-c.ctx.Done():
 		}
 		c.piSyncMtx.Lock()
@@ -4722,6 +4779,14 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	if tracker == nil {
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
+	// Clean up the sentCommits now that we loaded the commitment. This can be
+	// removed when the old piSyncers method is removed.
+	defer func() {
+		// Note the commitment is not tracker.Commitment() for cancel orders.
+		c.sentCommitsMtx.Lock()
+		delete(c.sentCommits, preImg.Commit()) // redundant if the commitment was in request
+		c.sentCommitsMtx.Unlock()
+	}()
 	resp, err := msgjson.NewResponse(reqID, &msgjson.PreimageResponse{
 		Preimage: preImg[:],
 	}, nil)
