@@ -1558,10 +1558,11 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 	preimages := make(map[order.Order]chan *order.Preimage, len(orders))
 	for _, ord := range orders {
 		// Make the 'preimage' request.
+		commit := ord.Commitment()
 		piReqParams := &msgjson.PreimageRequest{
 			OrderID:        idToBytes(ord.ID()),
+			Commitment:     commit[:],
 			CommitChecksum: cSum,
-			// TODO: include this order's commitment so client can recognize it prior to submission response
 		}
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.PreimageRoute, piReqParams)
 		if err != nil {

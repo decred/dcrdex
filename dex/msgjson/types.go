@@ -841,6 +841,7 @@ type TradeResumption struct {
 // PreimageRequest is the server-originating preimage request payload.
 type PreimageRequest struct {
 	OrderID        Bytes `json:"orderid"`
+	Commitment     Bytes `json:"commit"`
 	CommitChecksum Bytes `json:"csum"`
 }
 
