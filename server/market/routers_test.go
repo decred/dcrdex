@@ -404,7 +404,6 @@ func (u *tUTXO) Confirmations(context.Context) (int64, error) { return utxoConfs
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
-func (u *tUTXO) SwapAddress() string             { return "" }
 func (u *tUTXO) SpendSize() uint32               { return dummySize }
 func (u *tUTXO) ID() []byte                      { return nil }
 func (u *tUTXO) TxID() string                    { return "" }
@@ -412,9 +411,6 @@ func (u *tUTXO) String() string                  { return u.decoded }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
-func (u *tUTXO) RedeemScript() []byte            { return nil }
-func (u *tUTXO) LockTime() time.Time             { return time.Time{} }
-func (u *tUTXO) TxData() []byte                  { return nil }
 
 type tUser struct {
 	acct    account.AccountID
