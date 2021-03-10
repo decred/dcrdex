@@ -179,8 +179,8 @@ func NewBTCClone(cloneCfg *BackendCloneConfig) (*Backend, error) {
 
 func (btc *Backend) shutdown() {
 	if btc.node != nil {
-		btc.node.Requester.Shutdown()
-		btc.node.Requester.WaitForShutdown()
+		btc.node.requester.Shutdown()
+		btc.node.requester.WaitForShutdown()
 	}
 }
 
@@ -199,8 +199,8 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	// Requester must be set otherwise there can be a panic on shutdown.
 	btc.node = &RPCClient{
-		Ctx:       ctx,
-		Requester: client,
+		ctx:       ctx,
+		requester: client,
 	}
 
 	// Prime the cache

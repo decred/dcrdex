@@ -32,8 +32,8 @@ type RawRequester interface {
 // RPCClient is a bitcoind wallet RPC client that uses rpcclient.Client's
 // RawRequest for wallet-related calls.
 type RPCClient struct {
-	Ctx       context.Context
-	Requester RawRequester
+	ctx       context.Context
+	requester RawRequester
 }
 
 func (rc *RPCClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
@@ -103,6 +103,11 @@ func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlo
 	return res, rc.call(methodGetBlock, anylist{blockHash.String(), true}, res)
 }
 
+// RawRequest is a wrapper func for callers that are not context-enabled.
+func (rc *RPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+	return rc.requester.RawRequest(rc.ctx, method, params)
+}
+
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via RawRequest.
 type anylist []interface{}
@@ -119,7 +124,7 @@ func (rc *RPCClient) call(method string, args anylist, thing interface{}) error 
 		}
 		params = append(params, p)
 	}
-	b, err := rc.Requester.RawRequest(rc.Ctx, method, params)
+	b, err := rc.requester.RawRequest(rc.ctx, method, params)
 	if err != nil {
 		return fmt.Errorf("rawrequest error: %w", err)
 	}
