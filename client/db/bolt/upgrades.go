@@ -23,6 +23,8 @@ var upgrades = [...]upgradefunc{
 	// v1 => v2 adds a MaxFeeRate field to the OrderMetaData, used for match
 	// validation.
 	v2Upgrade,
+	// v2 => v3 adds a tx data field to the match proof.
+	v3Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -119,13 +121,8 @@ func getVersionTx(tx *bbolt.Tx) (uint32, error) {
 func v1Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 0
 
-	dbVersion, err := fetchDBVersion(dbtx)
-	if err != nil {
-		return fmt.Errorf("error fetching database version: %w", err)
-	}
-
-	if dbVersion != oldVersion {
-		return fmt.Errorf("v1Upgrade inappropriately called")
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
 	}
 
 	bkt := dbtx.Bucket(appBucket)
@@ -133,29 +130,7 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 		return fmt.Errorf("appBucket not found")
 	}
 
-	// Upgrade the match proof. We just have to retrieve and re-store the
-	// buckets. The decoder will recognize the the old version and add the new
-	// field.
-	matches := dbtx.Bucket(matchesBucket)
-	return matches.ForEach(func(k, _ []byte) error {
-		mBkt := matches.Bucket(k)
-		if mBkt == nil {
-			return fmt.Errorf("match %x bucket is not a bucket", k)
-		}
-		proofB := getCopy(mBkt, proofKey)
-		if len(proofB) == 0 {
-			return fmt.Errorf("empty match proof")
-		}
-		proof, err := dexdb.DecodeMatchProof(proofB)
-		if err != nil {
-			return fmt.Errorf("error decoding proof: %w", err)
-		}
-		err = mBkt.Put(proofKey, proof.Encode())
-		if err != nil {
-			return fmt.Errorf("error re-storing match proof: %w", err)
-		}
-		return nil
-	})
+	return reloadMatchProofs(dbtx)
 }
 
 // v2Upgrade adds a MaxFeeRate field to the OrderMetaData. The upgrade sets the
@@ -187,6 +162,54 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 			return fmt.Errorf("order %x bucket is not a bucket", oid)
 		}
 		return oBkt.Put(maxFeeRateKey, maxFeeB)
+	})
+}
+
+func v3Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 2
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	// Upgrade the match proof. We just have to retrieve and re-store the
+	// buckets. The decoder will recognize the the old version and add the new
+	// field.
+	return reloadMatchProofs(dbtx)
+}
+
+func ensureVersion(tx *bbolt.Tx, ver uint32) error {
+	dbVersion, err := fetchDBVersion(tx)
+	if err != nil {
+		return fmt.Errorf("error fetching database version: %w", err)
+	}
+
+	if dbVersion != ver {
+		return fmt.Errorf("wrong version for upgrade. expected %d, got %d", ver, dbVersion)
+	}
+	return nil
+}
+
+func reloadMatchProofs(tx *bbolt.Tx) error {
+	matches := tx.Bucket(matchesBucket)
+	return matches.ForEach(func(k, _ []byte) error {
+		mBkt := matches.Bucket(k)
+		if mBkt == nil {
+			return fmt.Errorf("match %x bucket is not a bucket", k)
+		}
+		proofB := getCopy(mBkt, proofKey)
+		if len(proofB) == 0 {
+			return fmt.Errorf("empty match proof")
+		}
+		proof, err := dexdb.DecodeMatchProof(proofB)
+		if err != nil {
+			return fmt.Errorf("error decoding proof: %w", err)
+		}
+		err = mBkt.Put(proofKey, proof.Encode())
+		if err != nil {
+			return fmt.Errorf("error re-storing match proof: %w", err)
+		}
+		return nil
 	})
 }
 

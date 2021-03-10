@@ -5,6 +5,7 @@ package auth
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -17,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
@@ -71,6 +73,8 @@ type Signer interface {
 // FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).FeeCoin.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
+
+type TxDataSource func([]byte) ([]byte, error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
 // respHandler has a time associated with it so that old unused handlers can be
@@ -211,6 +215,8 @@ type AuthManager struct {
 	violationMtx   sync.Mutex
 	matchOutcomes  map[account.AccountID]*latestMatchOutcomes
 	preimgOutcomes map[account.AccountID]*latestPreimageOutcomes
+
+	txDataSources map[uint32]TxDataSource
 }
 
 // violation badness
@@ -320,6 +326,8 @@ type Config struct {
 	FeeConfs int64
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
+	// TxDataSources are sources of tx data for a coin ID.
+	TxDataSources map[uint32]TxDataSource
 	// UserUnbooker is a function for unbooking all of a user's orders.
 	UserUnbooker func(account.AccountID)
 	// MiaUserTimeout is how long after a user disconnects until UserUnbooker is
@@ -381,6 +389,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		feeWaiterIdx:      make(map[account.AccountID]struct{}),
 		matchOutcomes:     make(map[account.AccountID]*latestMatchOutcomes),
 		preimgOutcomes:    make(map[account.AccountID]*latestPreimageOutcomes),
+		txDataSources:     cfg.TxDataSources,
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -1180,6 +1189,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		default:
 			return
 		}
+
 		msgMatches = append(msgMatches, &msgjson.Match{
 			OrderID:      oid,
 			MatchID:      match.ID[:],
@@ -1321,6 +1331,15 @@ func (mm *marketMatches) idList() []order.MatchID {
 	return ids
 }
 
+// getTxData gets the tx data for the coin ID.
+func (auth *AuthManager) getTxData(assetID uint32, coinID []byte) ([]byte, error) {
+	txDataSrc, found := auth.txDataSources[assetID]
+	if !found {
+		return nil, fmt.Errorf("no tx data source for asset ID %d", assetID)
+	}
+	return txDataSrc(coinID)
+}
+
 // handleMatchStatus handles requests to the 'match_status' route.
 func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	client := auth.conn(conn)
@@ -1370,6 +1389,31 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 			return msgjson.NewError(msgjson.RPCInternalError, "DB error")
 		}
 		for _, status := range statuses {
+			var makerTxData, takerTxData []byte
+			var assetID uint32
+			switch {
+			case status.IsTaker && status.Status == order.MakerSwapCast:
+				assetID = mm.base
+				if status.TakerSell {
+					assetID = mm.quote
+				}
+				makerTxData, err = auth.getTxData(assetID, status.MakerSwap)
+				if err != nil {
+					log.Errorf("failed to get maker tx data for %s %s: %v", dex.BipIDSymbol(assetID), coinIDString(assetID, status.MakerSwap))
+					return msgjson.NewError(msgjson.RPCInternalError, "blockchain retrieval error")
+				}
+			case status.IsMaker && status.Status == order.TakerSwapCast:
+				assetID = mm.quote
+				if status.TakerSell {
+					assetID = mm.base
+				}
+				takerTxData, err = auth.getTxData(assetID, status.TakerSwap)
+				if err != nil {
+					log.Errorf("failed to get taker tx data for %s %s: %v", dex.BipIDSymbol(assetID), coinIDString(assetID, status.TakerSwap))
+					return msgjson.NewError(msgjson.RPCInternalError, "blockchain retrieval error")
+				}
+			}
+
 			results = append(results, &msgjson.MatchStatusResult{
 				MatchID:       status.ID.Bytes(),
 				Status:        uint8(status.Status),
@@ -1381,6 +1425,8 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 				TakerRedeem:   status.TakerRedeem,
 				Secret:        status.Secret,
 				Active:        status.Active,
+				MakerTxData:   makerTxData,
+				TakerTxData:   takerTxData,
 			})
 		}
 	}
@@ -1515,4 +1561,12 @@ func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
 		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
+}
+
+func coinIDString(assetID uint32, coinID []byte) string {
+	s, err := asset.DecodeCoinID(dex.BipIDSymbol(assetID), coinID)
+	if err != nil {
+		return "unparsed:" + hex.EncodeToString(coinID)
+	}
+	return s
 }

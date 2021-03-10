@@ -119,7 +119,7 @@ type Wallet interface {
 	// during a swap. If the coin cannot be found for the coin ID, the
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
 	// to properly handle network latency.
-	AuditContract(coinID, contract dex.Bytes) (*AuditInfo, error)
+	AuditContract(coinID, contract, txData dex.Bytes) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
 	// is also returned, but reaching this time does not necessarily mean the

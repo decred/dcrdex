@@ -1357,6 +1357,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		Time:     uint64(swapTimeMs),
 		CoinID:   params.CoinID,
 		Contract: params.Contract,
+		TxData:   contract.TxData,
 	}
 	s.authMgr.Sign(auditParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)

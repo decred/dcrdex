@@ -79,7 +79,10 @@ func RandomMatchProof(sparsity float64) *db.MatchProof {
 	proof := new(db.MatchProof)
 	doZero := func() bool { return rand.Intn(1000) < int(sparsity*1000) }
 	if !doZero() {
-		proof.CounterScript = randBytes(75)
+		proof.CounterContract = randBytes(75)
+	}
+	if !doZero() {
+		proof.CounterTxData = randBytes(20)
 	}
 	if !doZero() {
 		proof.SecretHash = randBytes(32)
@@ -206,8 +209,11 @@ func MustCompareMatchMetaData(t testKiller, m1, m2 *db.MatchMetaData) {
 // MustCompareMatchProof ensures the two MatchProof are identical, calling the
 // Fatalf method of the testKiller if not.
 func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
-	if !bytes.Equal(m1.CounterScript, m2.CounterScript) {
-		t.Fatalf("CounterScript mismatch. %x != %x", m1.CounterScript, m2.CounterScript)
+	if !bytes.Equal(m1.CounterContract, m2.CounterContract) {
+		t.Fatalf("CounterContract mismatch. %x != %x", m1.CounterContract, m2.CounterContract)
+	}
+	if !bytes.Equal(m1.CounterTxData, m2.CounterTxData) {
+		t.Fatalf("CounterTxData mismatch. %x != %x", m1.CounterTxData, m2.CounterTxData)
 	}
 	if !bytes.Equal(m1.SecretHash, m2.SecretHash) {
 		t.Fatalf("SecretHash mismatch. %x != %x", m1.SecretHash, m2.SecretHash)

@@ -470,6 +470,10 @@ type MatchStatusResult struct {
 	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
 	Secret        Bytes `json:"secret,omitempty"`
 	Active        bool  `json:"active"`
+	// MakerTxData and TakerTxData will only be populated by the server when the
+	// match status is MakerSwapCast and TakerSwapCast, respectively.
+	MakerTxData Bytes `json:"makertx,omitempty"`
+	TakerTxData Bytes `json:"takertx,omitempty"`
 }
 
 // OrderStatusRequest details an order for the OrderStatusRoute request. The
@@ -516,6 +520,7 @@ type Audit struct {
 	Time     uint64 `json:"timestamp"`
 	CoinID   Bytes  `json:"coinid"`
 	Contract Bytes  `json:"contract"`
+	TxData   Bytes  `json:"txdata"`
 }
 
 var _ Signable = (*Audit)(nil)

@@ -366,6 +366,7 @@ func TestMain(m *testing.M) {
 			UserUnbooker:    func(account.AccountID) {},
 			MiaUserTimeout:  90 * time.Second, // TODO: test
 			CancelThreshold: 0.9,
+			TxDataSources:   make(map[uint32]TxDataSource),
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -1530,37 +1531,67 @@ func TestMatchStatus(t *testing.T) {
 	user := tNewUser(t)
 	connectUser(t, user)
 
-	rig.storage.matchStatuses = []*db.MatchStatus{{}}
+	rig.storage.matchStatuses = []*db.MatchStatus{{
+		Status:    order.MakerSwapCast,
+		IsTaker:   true,
+		MakerSwap: []byte{0x01},
+	}}
 
-	reqPayload := []msgjson.MatchRequest{
-		{
-			MatchID: encode.RandomBytes(32),
-		},
+	tTxData := encode.RandomBytes(5)
+	rig.mgr.txDataSources[0] = func([]byte) ([]byte, error) {
+		return tTxData, nil
 	}
+
+	reqPayload := []msgjson.MatchRequest{{MatchID: encode.RandomBytes(32)}}
 
 	req, _ := msgjson.NewRequest(1, msgjson.MatchStatusRoute, reqPayload)
 
-	msgErr := rig.mgr.handleMatchStatus(user.conn, req)
-	if msgErr != nil {
-		t.Fatalf("handleMatchStatus error: %v", msgErr)
+	getStatus := func() *msgjson.MatchStatusResult {
+		msgErr := rig.mgr.handleMatchStatus(user.conn, req)
+		if msgErr != nil {
+			t.Fatalf("handleMatchStatus error: %v", msgErr)
+		}
+
+		resp := user.conn.getSend()
+		if resp == nil {
+			t.Fatalf("no matches sent")
+		}
+
+		statuses := []msgjson.MatchStatusResult{}
+		err := resp.UnmarshalResult(&statuses)
+		if err != nil {
+			t.Fatalf("UnmarshalResult error: %v", err)
+		}
+		if len(statuses) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(statuses))
+		}
+		return &statuses[0]
 	}
 
-	resp := user.conn.getSend()
-	if resp == nil {
-		t.Fatalf("no matches sent")
+	// As taker in MakerSwapCast, we expect tx data.
+	status := getStatus()
+	if !bytes.Equal(status.MakerTxData, tTxData) {
+		t.Fatalf("wrong maker tx data. exected %x, got %s", tTxData, status.MakerTxData)
 	}
 
-	statuses := []msgjson.MatchStatusResult{}
-	err := resp.UnmarshalResult(&statuses)
-	if err != nil {
-		t.Fatalf("UnmarshalResult error: %v", err)
+	// As maker, we don't expect any tx data.
+	rig.storage.matchStatuses[0].IsTaker = false
+	rig.storage.matchStatuses[0].IsMaker = true
+	if len(getStatus().TakerTxData) != 0 {
+		t.Fatalf("got tx data as maker in MakerSwapCast")
 	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 match, got %d", len(statuses))
+
+	// As maker in TakerSwapCast, we do expect tx data.
+	rig.storage.matchStatuses[0].Status = order.TakerSwapCast
+	rig.storage.matchStatuses[0].TakerSwap = []byte{0x01}
+	txData := getStatus().TakerTxData
+	if !bytes.Equal(txData, tTxData) {
+		t.Fatalf("wrong taker tx data. exected %x, got %s", tTxData, txData)
 	}
 
 	reqPayload[0].MatchID = []byte{}
-	err = rig.mgr.handleMatchStatus(user.conn, req)
+	req, _ = msgjson.NewRequest(1, msgjson.MatchStatusRoute, reqPayload)
+	err := rig.mgr.handleMatchStatus(user.conn, req)
 	if err == nil {
 		t.Fatalf("no error for bad match ID")
 	}

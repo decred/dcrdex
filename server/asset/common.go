@@ -26,6 +26,8 @@ type Backend interface {
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
 	Contract(coinID []byte, redeemScript []byte) (*Contract, error)
+	// TxData fetches the raw transaction data for the specified coin.
+	TxData(coinID []byte) ([]byte, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns a Coin for redemptionID, a transaction input, that
@@ -108,6 +110,9 @@ type Contract struct {
 	RedeemScript []byte
 	// LockTime is the refund locktime.
 	LockTime time.Time
+	// TxData is raw transaction data. This data is provided for some assets
+	// to aid in SPV compatiblity.
+	TxData []byte
 }
 
 // BlockUpdate is sent over the update channel when a tip change is detected.

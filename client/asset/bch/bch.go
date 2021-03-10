@@ -195,8 +195,8 @@ func (bch *BCHWallet) Address() (string, error) {
 // AuditContract modifies the *asset.Contract returned by the ExchangeWallet
 // AuditContract method by converting the Recipient to the Cash Address
 // encoding.
-func (bch *BCHWallet) AuditContract(coinID, contract dex.Bytes) (*asset.AuditInfo, error) { // AuditInfo has address
-	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract)
+func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) { // AuditInfo has address
+	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData)
 	if err != nil {
 		return nil, err
 	}

@@ -193,7 +193,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	}
 
 	go func() {
-		err := trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract)
+		err := trade.auditContract(match, srvData.MakerSwap, srvData.MakerContract, srvData.MakerTxData)
 		if err != nil {
 			dc.log.Errorf("auditContract error during match status resolution (revoking match). %s: %v", logID, err)
 			trade.mtx.Lock()
@@ -236,7 +236,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 	}
 
 	go func() {
-		err := trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract)
+		err := trade.auditContract(match, srvData.TakerSwap, srvData.TakerContract, srvData.TakerTxData)
 		if err != nil {
 			dc.log.Errorf("auditContract error during match status resolution (revoking match). %s: %v", logID, err)
 			trade.mtx.Lock()

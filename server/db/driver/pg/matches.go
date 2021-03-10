@@ -466,9 +466,9 @@ func matchStatusesByID(ctx context.Context, dbe *sql.DB, aid account.AccountID, 
 	statuses := make([]*db.MatchStatus, 0, len(matchIDs))
 	for rows.Next() {
 		status := new(db.MatchStatus)
-		err := rows.Scan(&status.ID, &status.Status, &status.MakerContract,
-			&status.TakerContract, &status.MakerSwap, &status.TakerSwap,
-			&status.MakerRedeem, &status.TakerRedeem, &status.Secret, &status.Active)
+		err := rows.Scan(&status.TakerSell, &status.IsTaker, &status.IsMaker, &status.ID,
+			&status.Status, &status.MakerContract, &status.TakerContract, &status.MakerSwap,
+			&status.TakerSwap, &status.MakerRedeem, &status.TakerRedeem, &status.Secret, &status.Active)
 		if err != nil {
 			return nil, err
 		}
