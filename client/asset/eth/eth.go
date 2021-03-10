@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/les"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
@@ -22,14 +23,19 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+type ethereumI interface {
+	APIs() []rpc.API
+	Stop() error
+}
+
 type ETH struct {
 	ctx       context.Context
-	ethClient *ethclient.Client
+	client    *ethclient.Client
 	rpcClient *rpc.Client
 	shutdown  context.CancelFunc
 	nodeCfg   *node.Config
 	node      *node.Node
-	eth       *eth.Ethereum
+	ethereum  ethereumI
 }
 
 func NewETH(appDir string, goerli bool) (*ETH, error) {
@@ -82,10 +88,20 @@ func NewETH(appDir string, goerli bool) (*ETH, error) {
 
 	// ethCfg.Genesis = core.DefaultGenesisBlock() // eth will do this anyway when Genesis == nil is encountered, and the messaging it better that way.
 	// ethCfg.SyncMode = downloader.SnapSync // Supposed to be enabled with Berlin on April 14th 2021
-	ethCfg.SyncMode = downloader.FastSync // Actually the default, be good for doc'ing.
-	ethBackend, err := eth.New(stack, &ethCfg)
-	if err != nil {
-		return nil, err
+	// ethCfg.SyncMode = downloader.FastSync  // The default
+	ethCfg.SyncMode = downloader.LightSync
+
+	var ethereum ethereumI
+	if ethCfg.SyncMode == downloader.LightSync {
+		ethereum, err = les.New(stack, &ethCfg)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ethereum, err = eth.New(stack, &ethCfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := stack.Start(); err != nil {
@@ -97,17 +113,17 @@ func NewETH(appDir string, goerli bool) (*ETH, error) {
 	if err != nil {
 		utils.Fatalf("Failed to attach to self: %v", err)
 	}
-	ethClient := ethclient.NewClient(rpcClient)
+	client := ethclient.NewClient(rpcClient)
 
 	ctx, shutdown := context.WithCancel(context.Background())
 	return &ETH{
 		ctx:       ctx,
-		ethClient: ethClient,
+		client:    client,
 		rpcClient: rpcClient,
 		shutdown:  shutdown,
 		nodeCfg:   stackConf,
 		node:      stack,
-		eth:       ethBackend,
+		ethereum:  ethereum,
 	}, nil
 }
 
@@ -122,7 +138,7 @@ func (eth *ETH) importAccount(pw string, privKeyB []byte) (accounts.Account, err
 }
 
 func (eth *ETH) accountBalance(acct accounts.Account) (*big.Int, error) {
-	return eth.ethClient.BalanceAt(eth.ctx, acct.Address, nil)
+	return eth.client.BalanceAt(eth.ctx, acct.Address, nil)
 }
 
 //

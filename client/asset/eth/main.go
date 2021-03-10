@@ -21,12 +21,12 @@ func main() {
 		fmt.Println("Qutting")
 		eth.shutdown()
 		eth.node.Close()
-		eth.eth.Stop()
+		eth.ethereum.Stop()
 		eth.node.Wait()
 	}()
 
-	for _, rpc := range eth.eth.APIs() {
-		fmt.Printf("--API namespace:%s: %T \n", rpc.Namespace, rpc.Service)
+	for _, rpc := range eth.ethereum.APIs() {
+		fmt.Printf("API namespace = %s: type = %T \n", rpc.Namespace, rpc.Service)
 	}
 
 	pw := "pass"
@@ -51,7 +51,7 @@ func main() {
 	for time.Since(tStart) < time.Minute*360 { // 6 hours
 		shortCtx, cancel := context.WithTimeout(eth.ctx, time.Second*3)
 		defer cancel()
-		block, err := eth.ethClient.BlockByNumber(shortCtx, nil)
+		block, err := eth.client.BlockByNumber(shortCtx, nil)
 		if err != nil {
 			fmt.Println("GetBlock error:", err)
 		} else {
@@ -60,7 +60,7 @@ func main() {
 
 		syncCtx, stop := context.WithTimeout(eth.ctx, time.Second*3)
 		defer stop()
-		syncProgress, err := eth.ethClient.SyncProgress(syncCtx)
+		syncProgress, err := eth.client.SyncProgress(syncCtx)
 		if err != nil {
 			fmt.Println("SyncProgress error:", err)
 		} else {
