@@ -2070,13 +2070,13 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	requiredConfs := dc.cfg.RegFeeConfirms
 	dc.cfgMtx.RUnlock()
 
+	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", requiredConfs, dc.acct.host)
+	c.notify(newFeePaymentNote(SubjectFeePaymentInProgress, details, db.Success, dc.acct.host))
+
 	// Set up the coin waiter, which waits for the required number of
 	// confirmations to notify the DEX and establish an authenticated
 	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
-
-	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", requiredConfs, dc.acct.host)
-	c.notify(newFeePaymentNote(SubjectFeePaymentInProgress, details, db.Success, dc.acct.host))
 
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
 	return res, nil

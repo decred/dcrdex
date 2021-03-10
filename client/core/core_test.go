@@ -6057,6 +6057,7 @@ func TestParseCert(t *testing.T) {
 
 func TestPreOrder(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
