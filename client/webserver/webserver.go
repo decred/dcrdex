@@ -102,16 +102,16 @@ var _ clientCore = (*core.Core)(nil)
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	wsServer       *websocket.Server
-	mux            *chi.Mux
-	core           clientCore
-	addr           string
-	csp            string
-	srv            *http.Server
-	html           *templates
-	indent         bool
-	mtx            sync.RWMutex
-	validAuthToken string
+	wsServer   *websocket.Server
+	mux        *chi.Mux
+	core       clientCore
+	addr       string
+	csp        string
+	srv        *http.Server
+	html       *templates
+	indent     bool
+	mtx        sync.RWMutex
+	authTokens map[string]bool
 }
 
 // New is the constructor for a new WebServer.
@@ -183,12 +183,13 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:     core,
-		mux:      mux,
-		srv:      httpServer,
-		addr:     addr,
-		html:     tmpl,
-		wsServer: websocket.New(core, log.SubLogger("WS")),
+		core:       core,
+		mux:        mux,
+		srv:        httpServer,
+		addr:       addr,
+		html:       tmpl,
+		wsServer:   websocket.New(core, log.SubLogger("WS")),
+		authTokens: make(map[string]bool),
 	}
 
 	// Middleware
@@ -339,18 +340,24 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-// authorize creates, stores, and returns a new auth token to identify the
-// user. Only one token can be active at a time = only 1 authorized device
-// at a time. `WebServer.validAuthToken` is set to the newly created token,
-// effectively deauthorizing previously authenticated devices.
+// authorize creates, stores, and returns a new auth token to identify the user.
+// deauth should be used to invalidate tokens on logout.
 func (s *WebServer) authorize() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
 	s.mtx.Lock()
-	s.validAuthToken = token
+	s.authTokens[token] = true
 	s.mtx.Unlock()
 	return token
+}
+
+// deauth invalidates all current auth tokens. All existing sessions will need
+// to login again.
+func (s *WebServer) deauth() {
+	s.mtx.Lock()
+	s.authTokens = make(map[string]bool)
+	s.mtx.Unlock()
 }
 
 // isAuthed checks if the incoming request is from an authorized user/device.
@@ -369,7 +376,7 @@ func (s *WebServer) isAuthed(r *http.Request) bool {
 
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
-	return authToken != "" && authToken == s.validAuthToken
+	return s.authTokens[authToken]
 }
 
 // readNotifications reads from the Core notification channel and relays to
@@ -414,7 +421,8 @@ type userInfo struct {
 	ShowPopups bool
 }
 
-// Extract the userInfo from the request context.
+// Extract the userInfo from the request context. This should be used with
+// authMiddleware.
 func extractUserInfo(r *http.Request) *userInfo {
 	user, ok := r.Context().Value(ctxKeyUserInfo).(*userInfo)
 	if !ok {

@@ -328,6 +328,10 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// With Core locked up, invalidate all known auth tokens to force any other
+	// sessions to login again.
+	s.deauth()
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCK,
 		Path:     "/",
