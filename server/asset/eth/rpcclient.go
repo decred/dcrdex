@@ -21,7 +21,7 @@ type rpcclient struct {
 	ec *ethclient.Client
 }
 
-// Connect connects to an ipc socket. It then wraps ethclient's client and
+// connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easil use.
 func (c *rpcclient) connect(ctx context.Context, IPC string) error {
 	client, err := rpc.DialIPC(ctx, IPC)
@@ -33,14 +33,14 @@ func (c *rpcclient) connect(ctx context.Context, IPC string) error {
 	return nil
 }
 
-// Shutdown shuts down the client.
+// shutdown shuts down the client.
 func (c *rpcclient) shutdown() {
 	if c.ec != nil {
 		c.ec.Close()
 	}
 }
 
-// BestBlockHash gets the best blocks hash at the time of calling. Due to the
+// bestBlockHash gets the best blocks hash at the time of calling. Due to the
 // speed of Ethereum blocks, this changes often.
 func (c *rpcclient) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	header, err := c.bestHeader(ctx)
@@ -63,7 +63,7 @@ func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return header, nil
 }
 
-// Block gets the block identified by hash.
+// block gets the block identified by hash.
 func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	block, err := c.ec.BlockByHash(ctx, hash)
 	if err != nil {
