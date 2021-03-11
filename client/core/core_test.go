@@ -306,7 +306,7 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	return tdb.createAccountErr
 }
 
-func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
+func (tdb *TDB) DisableAccount(url string) error {
 	tdb.accts = nil
 	return tdb.disableAccountErr
 }

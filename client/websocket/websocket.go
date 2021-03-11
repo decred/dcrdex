@@ -236,7 +236,7 @@ func newMarketSyncer(cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.Sta
 // Run starts the marketSyncer listening for BookUpdates, which it relays to the
 // websocket client as notifications.
 func (m *marketSyncer) Run(ctx context.Context) {
-	defer m.feed.Close()
+	m.feed.Close()
 out:
 	for {
 		select {

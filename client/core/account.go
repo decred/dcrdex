@@ -10,7 +10,7 @@ import (
 
 // AccountDisable is used to disable an account by given host and application
 // password.
-func (c *Core) AccountDisable(pw []byte, host string) error {
+func (c *Core) AccountDisable(pw []byte, addr string) error {
 	// Validate password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
@@ -18,7 +18,7 @@ func (c *Core) AccountDisable(pw []byte, host string) error {
 	}
 
 	// Parse address.
-	addr, err := addrHost(host)
+	host, err := addrHost(addr)
 	if err != nil {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
@@ -26,9 +26,9 @@ func (c *Core) AccountDisable(pw []byte, host string) error {
 	// Get the dexConnection.
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	dc, found := c.conns[addr]
+	dc, found := c.conns[host]
 	if !found {
-		return newError(unknownDEXErr, "DEX: %s", addr)
+		return newError(unknownDEXErr, "DEX: %s", host)
 	}
 
 	// Check active orders.
@@ -36,22 +36,23 @@ func (c *Core) AccountDisable(pw []byte, host string) error {
 		return fmt.Errorf("cannot disable account with active orders")
 	}
 
-	acctInfo, err := c.db.Account(dc.acct.host)
-	if err != nil {
-		return newError(accountRetrieveErr, "Error retrieving account: %v", err)
-	}
-	err = c.db.DisableAccount(acctInfo)
+	err = c.db.DisableAccount(host)
 	if err != nil {
 		return newError(accountDisableErr, "Error disabling account: %v", err)
 	}
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
 	for _, m := range dc.cfg.Markets {
-		// Emptry bookie's feeds map & stop close timers.
+		// Empty bookie's feeds map, close feeds' channels & stop close timers.
 		dc.booksMtx.Lock()
 		if b, found := dc.books[m.Name]; found {
+			b.mtx.Lock()
+			for _, f := range b.feeds {
+				close(f.C)
+			}
 			b.feeds = make(map[uint32]*BookFeed, 1)
 			b.closeTimer.Stop()
+			b.mtx.Unlock()
 		}
 		dc.booksMtx.Unlock()
 

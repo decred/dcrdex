@@ -129,13 +129,6 @@ func TestAccountDisable(t *testing.T) {
 		activeTrades: activeTrades,
 		wantErr:      true,
 	}, {
-		name:        "retrieve account error",
-		host:        tDexHost,
-		acctErr:     errors.New(""),
-		wantErr:     true,
-		wantErrCode: true,
-		errCode:     accountRetrieveErr,
-	}, {
 		name:           "disable account error",
 		host:           tDexHost,
 		disableAcctErr: errors.New(""),
@@ -146,9 +139,9 @@ func TestAccountDisable(t *testing.T) {
 
 	for _, test := range tests {
 		rig := newTestRig()
+		defer rig.shutdown()
 		tCore := rig.core
 		rig.crypter.recryptErr = test.recryptErr
-		rig.db.acctErr = test.acctErr
 		rig.db.disableAccountErr = test.disableAcctErr
 		tCore.connMtx.Lock()
 		tCore.conns[tDexHost].trades = test.activeTrades

@@ -29,7 +29,7 @@ type DB interface {
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
-	DisableAccount(ai *AccountInfo) error
+	DisableAccount(url string) error
 	// AccountProof retrieves the AccountPoof value specified by url.
 	AccountProof(url string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.

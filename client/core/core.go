@@ -2549,12 +2549,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				var mErr *msgjson.Error
 				if errors.As(err, &mErr) &&
 					mErr.Code == msgjson.AccountNotFoundError {
-					acctInfo, err := c.db.Account(dc.acct.host)
-					if err != nil {
-						c.log.Errorf("Error retrieving account: %v", err)
-						return
-					}
-					err = c.db.DisableAccount(acctInfo)
+					err = c.db.DisableAccount(dc.acct.host)
 					if err != nil {
 						c.log.Errorf("Error disabling account: %v", err)
 						return

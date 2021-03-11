@@ -223,7 +223,6 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestDisableAccount(t *testing.T) {
-
 	boltdb := newTestDB(t)
 	acct := dbtest.RandomAccountInfo()
 	host := acct.Host
@@ -239,7 +238,7 @@ func TestDisableAccount(t *testing.T) {
 		t.Fatalf("Expected not to retrieve a disabledAccount.")
 	}
 
-	err = boltdb.DisableAccount(acct)
+	err = boltdb.DisableAccount(host)
 
 	if err != nil {
 		t.Fatalf("Unexpected DisableAccount error: %v", err)
