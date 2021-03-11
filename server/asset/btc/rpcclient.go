@@ -10,6 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcutil"
 )
 
 const (
@@ -86,6 +87,12 @@ func (rc *RPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool
 	var res *btcjson.GetTxOutResult
 	return res, rc.call(methodGetTxOut, anylist{txHash.String(), index, mempool},
 		&res)
+}
+
+// GetRawTransaction retrieves tx's information.
+func (rc *RPCClient) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) {
+	res := new(btcutil.Tx)
+	return res, rc.call(methodGetRawTransaction, anylist{txHash.String()}, res)
 }
 
 // GetRawTransactionVerbose retrieves tx's information with verbose flag set
