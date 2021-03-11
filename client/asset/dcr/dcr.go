@@ -64,6 +64,7 @@ const (
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
 	// RawRequest RPC methods
+	methodGetCFilterV2       = "getcfilterv2"
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
@@ -76,6 +77,8 @@ var (
 )
 
 var (
+	zeroHash chainhash.Hash
+
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
 	configOpts  = []*asset.ConfigOption{
@@ -422,6 +425,9 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+
+	externalTxMtx sync.RWMutex
+	externalTxs   map[chainhash.Hash]*externalTx
 }
 
 type block struct {
@@ -529,6 +535,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
+		externalTxs:         make(map[chainhash.Hash]*externalTx),
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
@@ -1659,6 +1666,10 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 			"expected %s, got %s", txHash, finalTxHash)
 	}
 
+	// Record this audit coin txout to easily get confirmations later
+	// using cfilters.
+	dcr.trackExternalTxOut(txHash, vout, contractTxOut.PkScript)
+
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), determineTxTree(contractTx)),
 		Contract:   contract,
@@ -2309,14 +2320,20 @@ func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (con
 		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
+	// The only reason a wallet output will not be found by gettxout
+	// is if it is spent.
 	tx, err := dcr.node.GetTransaction(ctx, txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return 0, false, asset.CoinNotFoundError
-		}
+	if err == nil {
+		return uint32(tx.Confirmations), true, nil
+	}
+	if !isTxNotFoundErr(err) {
 		return 0, false, translateRPCCancelErr(err)
 	}
-	return uint32(tx.Confirmations), true, nil
+
+	// Attempt to find this tx's block if it is an external tx.
+	// Will return asset.CoinNotFoundError if the coin was not previously tracked.
+	// TODO: Don't do this for non-spv wallets.
+	return dcr.externalTxOutConfirmations(txHash, vout)
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
@@ -2890,6 +2907,56 @@ func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
 		return nil, translateRPCCancelErr(err)
 	}
 	return &block{hash: hash, height: height}, nil
+}
+
+func (dcr *ExchangeWallet) getBlock(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+	blockVerbose, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
+	}
+	return blockVerbose, nil
+}
+
+func (dcr *ExchangeWallet) isMainchainBlock(blockHash *chainhash.Hash) (*chainjson.GetBlockVerboseResult, bool, error) {
+	block, err := dcr.getBlock(blockHash, false)
+	if err != nil {
+		return nil, false, err
+	}
+	return block, block.Confirmations >= 0, nil
+}
+
+// mainChainAncestor crawls blocks backwards starting at the provided hash
+// until finding a mainchain block. Returns the first mainchain block found.
+func (dcr *ExchangeWallet) mainChainAncestor(blockHash *chainhash.Hash) (*chainhash.Hash, *chainjson.GetBlockVerboseResult, error) {
+	if *blockHash == zeroHash {
+		return nil, nil, fmt.Errorf("invalid block hash %s", blockHash.String())
+	}
+
+	checkHash := blockHash
+	for {
+		checkBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, checkHash, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error retrieving block %s: %w", checkHash, translateRPCCancelErr(err))
+		}
+		if checkBlock.Confirmations > -1 {
+			// This is a mainchain block, return the hash.
+			return checkHash, checkBlock, nil
+		}
+		if checkBlock.Height == 0 {
+			return nil, nil, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
+		}
+		checkHash, err = chainhash.NewHashFromStr(checkBlock.PreviousHash)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error decoding previous hash %s for block %s: %w",
+				checkBlock.PreviousHash, checkHash.String(), translateRPCCancelErr(err))
+		}
+	}
+}
+
+func (dcr *ExchangeWallet) cachedBestBlock() block {
+	dcr.tipMtx.RLock()
+	defer dcr.tipMtx.RLock()
+	return *dcr.currentTip
 }
 
 // wireBytes dumps the serialized transaction bytes.

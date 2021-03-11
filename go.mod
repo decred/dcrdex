@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.15
 
 require (
-	decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa
+	decred.org/dcrwallet/v2 v2.0.0-20210528125704-fae3a09815d6
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
@@ -18,10 +18,11 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0
 	github.com/decred/dcrd/dcrjson/v3 v3.1.0
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210330065944-a2366e6e0b3b
+	github.com/decred/dcrd/gcs/v3 v3.0.0-20210129195202-a4265d63b619
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.0
 	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b
-	github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b
+	github.com/decred/dcrd/txscript/v4 v4.0.0-20210129190127-4ebd135a82f1
 	github.com/decred/dcrd/wire v1.4.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
@@ -41,5 +42,3 @@ require (
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	gopkg.in/ini.v1 v1.55.0
 )
-
-replace decred.org/dcrwallet/v2 => github.com/itswisdomagain/dcrwallet/v2 v2.0.0-20210203133250-b3f470a90b70
