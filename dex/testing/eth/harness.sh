@@ -169,10 +169,6 @@ echo "Sending 5000 eth to beta and gamma."
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${GAMMA_ADDRESS}\",${SEND_AMT})"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${DELTA_ADDRESS}\",${SEND_AMT})"
 
-# TODO: After we start mining blocks on alpha, it seems that we can never mine
-# blocks on beta. Doing so sends alpha into some sort of error mode. Find out
-# why that is and correct it if a settings miss.
-#
 # Our transactions will PROBABLY appear in one of these blocks.
 echo "Mining some blocks"
 "${NODES_ROOT}/harness-ctl/mine-alpha" "15"

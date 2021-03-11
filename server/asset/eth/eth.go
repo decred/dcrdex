@@ -47,7 +47,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
-// satisfied by client. For testing, it can be satisfied by a stub.
+// satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
 	Shutdown()
 	Connect(ctx context.Context, IPC string) error
@@ -104,7 +104,7 @@ func (eth *Backend) shutdown() {
 
 // Connect connects to the node RPC server. A dex.Connector.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	c := client{}
+	c := rpcclient{}
 	if err := c.Connect(ctx, eth.cfg.IPC); err != nil {
 		return nil, err
 	}
@@ -133,6 +133,11 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		wg.Done()
 	}()
 	return &wg, nil
+}
+
+// TxData fetches the raw transaction data.
+func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
+	return nil, notImplementedErr
 }
 
 // InitTxSize is an asset.Backend method that must produce the max size of a

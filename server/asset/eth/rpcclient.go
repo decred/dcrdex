@@ -14,16 +14,16 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-// Check that client satisfies the ethFetcher interface.
-var _ ethFetcher = (*client)(nil)
+// Check that rpcclient satisfies the ethFetcher interface.
+var _ ethFetcher = (*rpcclient)(nil)
 
-type client struct {
+type rpcclient struct {
 	ec *ethclient.Client
 }
 
 // Connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easil use.
-func (c *client) Connect(ctx context.Context, IPC string) error {
+func (c *rpcclient) Connect(ctx context.Context, IPC string) error {
 	client, err := rpc.DialIPC(ctx, IPC)
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
@@ -34,7 +34,7 @@ func (c *client) Connect(ctx context.Context, IPC string) error {
 }
 
 // Shutdown shuts down the client.
-func (c *client) Shutdown() {
+func (c *rpcclient) Shutdown() {
 	if c.ec != nil {
 		c.ec.Close()
 	}
@@ -42,7 +42,7 @@ func (c *client) Shutdown() {
 
 // BestBlockHash gets the best blocks hash at the time of calling. Due to the
 // speed of Ethereum blocks, this changes often.
-func (c *client) BestBlockHash(ctx context.Context) (common.Hash, error) {
+func (c *rpcclient) BestBlockHash(ctx context.Context) (common.Hash, error) {
 	header, err := c.bestHeader(ctx)
 	if err != nil {
 		return common.Hash{}, err
@@ -50,7 +50,7 @@ func (c *client) BestBlockHash(ctx context.Context) (common.Hash, error) {
 	return header.Hash(), nil
 }
 
-func (c *client) bestHeader(ctx context.Context) (*types.Header, error) {
+func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	bn, err := c.ec.BlockNumber(ctx)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (c *client) bestHeader(ctx context.Context) (*types.Header, error) {
 }
 
 // Block gets the block identified by hash.
-func (c *client) Block(ctx context.Context, hash common.Hash) (*types.Block, error) {
+func (c *rpcclient) Block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	block, err := c.ec.BlockByHash(ctx, hash)
 	if err != nil {
 		return nil, err

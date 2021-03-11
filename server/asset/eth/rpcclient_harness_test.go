@@ -17,7 +17,7 @@ import (
 var (
 	homeDir   = os.Getenv("HOME")
 	ipc       = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
-	ethClient = new(client)
+	ethClient = new(rpcclient)
 	ctx       context.Context
 )
 

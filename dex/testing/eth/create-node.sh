@@ -19,6 +19,8 @@ GROUP_DIR="${NODES_ROOT}/${NAME}"
 MINE_JS="${GROUP_DIR}/mine.js"
 NODE_DIR="${GROUP_DIR}/node"
 mkdir -p "${NODE_DIR}"
+mkdir -p "${NODE_DIR}/keystore"
+mkdir -p "${NODE_DIR}/geth"
 
 # Write node ctl script.
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
@@ -124,14 +126,15 @@ EOF
 
 echo "Starting simnet ${NAME} node"
 if [ "${SYNC_MODE}" = "fast" ]; then
-  # Start the eth node with both accounts unlocked, listening restricted to
-  # localhost, and syncmode set to fast.
+  # Start the eth node with the chain account unlocked, listening restricted to
+  # localhost, and our custom configuration file.
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
 	  "--password ${GROUP_DIR}/password --light.serve 25" C-m
 
 else
-  # Start the eth node listening restricted to localhost, and syncmode set to light.
+  # Start the eth node listening restricted to localhost and our custom
+  # configuration file.
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf" C-m
 fi
