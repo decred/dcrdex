@@ -23,7 +23,7 @@ func init() {
 const (
 	assetName  = "eth"
 	coinIDSize = 52
-	// The blockPollInterval is the delay between calls to BestBlockHash to
+	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
 )
@@ -49,10 +49,10 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
-	Shutdown()
-	Connect(ctx context.Context, IPC string) error
-	BestBlockHash(ctx context.Context) (common.Hash, error)
-	Block(ctx context.Context, hash common.Hash) (*types.Block, error)
+	shutdown()
+	connect(ctx context.Context, IPC string) error
+	bestBlockHash(ctx context.Context) (common.Hash, error)
+	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -99,24 +99,24 @@ func NewBackend(ipc string, logger dex.Logger, network dex.Network) (*Backend, e
 }
 
 func (eth *Backend) shutdown() {
-	eth.node.Shutdown()
+	eth.node.shutdown()
 }
 
 // Connect connects to the node RPC server. A dex.Connector.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	if err := c.Connect(ctx, eth.cfg.IPC); err != nil {
+	if err := c.connect(ctx, eth.cfg.IPC); err != nil {
 		return nil, err
 	}
 	eth.node = &c
 
 	// Prime the cache with the best block.
-	bestHash, err := eth.node.BestBlockHash(ctx)
+	bestHash, err := eth.node.bestBlockHash(ctx)
 	if err != nil {
 		eth.shutdown()
 		return nil, fmt.Errorf("error getting best block hash from geth: %w", err)
 	}
-	block, err := eth.node.Block(ctx, bestHash)
+	block, err := eth.node.block(ctx, bestHash)
 	if err != nil {
 		eth.shutdown()
 		return nil, fmt.Errorf("error getting best block from geth: %w", err)
@@ -279,7 +279,7 @@ out:
 		select {
 		case <-blockPoll.C:
 			tip := eth.blockCache.tip()
-			bestHash, err := eth.node.BestBlockHash(ctx)
+			bestHash, err := eth.node.bestBlockHash(ctx)
 			if err != nil {
 				sendErr(asset.NewConnectionError("error retrieving best block: %w", err))
 				continue
@@ -288,7 +288,7 @@ out:
 				continue
 			}
 
-			block, err := eth.node.Block(ctx, bestHash)
+			block, err := eth.node.block(ctx, bestHash)
 			if err != nil {
 				sendErrFmt("error retrieving block %x: %w", bestHash, err)
 				continue
@@ -313,7 +313,7 @@ out:
 				if iHash == zeroHash {
 					break
 				}
-				iBlock, err := eth.node.Block(ctx, iHash)
+				iBlock, err := eth.node.block(ctx, iHash)
 				if err != nil {
 					sendErrFmt("error retrieving block %s: %w", iHash, err)
 					break

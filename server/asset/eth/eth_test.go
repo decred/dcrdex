@@ -21,25 +21,25 @@ var (
 )
 
 type testNode struct {
-	connectErr       error
-	bestBlockHash    common.Hash
-	bestBlockHashErr error
-	block            *types.Block
-	blockErr         error
+	connectErr     error
+	bestBlkHash    common.Hash
+	bestBlkHashErr error
+	blk            *types.Block
+	blkErr         error
 }
 
-func (n *testNode) Connect(ctx context.Context, IPC string) error {
+func (n *testNode) connect(ctx context.Context, IPC string) error {
 	return n.connectErr
 }
 
-func (n *testNode) Shutdown() {}
+func (n *testNode) shutdown() {}
 
-func (n *testNode) BestBlockHash(ctx context.Context) (common.Hash, error) {
-	return n.bestBlockHash, n.bestBlockHashErr
+func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
+	return n.bestBlkHash, n.bestBlkHashErr
 }
 
-func (n *testNode) Block(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	return n.block, n.blockErr
+func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
+	return n.blk, n.blkErr
 }
 
 func TestLoad(t *testing.T) {
@@ -204,8 +204,8 @@ func TestRun(t *testing.T) {
 	block1 := types.NewBlockWithHeader(header1)
 	blockHash1 := block1.Hash()
 	node := &testNode{}
-	node.bestBlockHash = blockHash1
-	node.block = block1
+	node.bestBlkHash = blockHash1
+	node.blk = block1
 	backend := unconnectedETH(tLogger, nil)
 	ch := backend.BlockChannel(1)
 	blocker := make(chan struct{})

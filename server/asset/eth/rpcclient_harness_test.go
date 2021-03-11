@@ -26,9 +26,9 @@ func TestMain(m *testing.M) {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer func() {
 		cancel()
-		ethClient.Shutdown()
+		ethClient.shutdown()
 	}()
-	if err := ethClient.Connect(ctx, ipc); err != nil {
+	if err := ethClient.connect(ctx, ipc); err != nil {
 		fmt.Printf("Connect error: %v\n", err)
 		os.Exit(1)
 	}
@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestBestBlockHash(t *testing.T) {
-	_, err := ethClient.BestBlockHash(ctx)
+	_, err := ethClient.bestBlockHash(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,11 +50,11 @@ func TestBestHeader(t *testing.T) {
 }
 
 func TestBlock(t *testing.T) {
-	h, err := ethClient.BestBlockHash(ctx)
+	h, err := ethClient.bestBlockHash(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ethClient.Block(ctx, h)
+	_, err = ethClient.block(ctx, h)
 	if err != nil {
 		t.Fatal(err)
 	}
