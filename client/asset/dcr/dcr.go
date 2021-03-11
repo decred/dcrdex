@@ -32,8 +32,6 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
@@ -66,6 +64,8 @@ const (
 )
 
 var (
+	zeroHash chainhash.Hash
+
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
@@ -384,6 +384,9 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+
+	externalTxMtx sync.RWMutex
+	externalTxs   map[chainhash.Hash]*externalTx
 }
 
 type block struct {
@@ -484,6 +487,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
+		externalTxs:         make(map[chainhash.Hash]*externalTx),
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
@@ -1575,6 +1579,12 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 			"expected %s, got %s", txHash, finalTxHash)
 	}
 
+	if dcr.wallet.SpvMode() {
+		// Record this contract tx to easily get confirmations later
+		// using cfilters.
+		dcr.trackExternalTx(txHash, contractTxOut.PkScript)
+	}
+
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), determineTxTree(contractTx)),
 		Contract:   contract,
@@ -1585,18 +1595,25 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 }
 
 func determineTxTree(msgTx *wire.MsgTx) int8 {
-	// Try with treasury disabled first.
-	txType := stake.DetermineTxType(msgTx, false, false)
-	if txType != stake.TxTypeRegular {
+	// stake.DetermineTxType will produce correct results if we pass true for
+	// isTreasuryEnabled regardless of whether the treasury vote has activated
+	// or not.
+	// The only possibility for wrong results is passing isTreasuryEnabled=false
+	// _after_ the treasury vote activates - some stake tree votes may identify
+	// as regular tree transactions.
+	// Could try with isTreasuryEnabled false, then true and if neither comes up
+	// as a stake transaction, then we infer regular, but that isn't necessary
+	// as explained above.
+	isTreasuryEnabled := true
+	// Consider the automatic ticket revocations agenda NOT active. Specifying
+	// true just adds the constraints that revocations must have an empty
+	// signature script for its input and must have zero fee. Thus, false will
+	// correctly identify consensus-validated transactions before OR after
+	// activation of this agenda.
+	isAutoRevocationsEnabled := false
+	if stake.DetermineTxType(msgTx, isTreasuryEnabled, isAutoRevocationsEnabled) != stake.TxTypeRegular {
 		return wire.TxTreeStake
 	}
-
-	// Try with treasury enabled.
-	txType = stake.DetermineTxType(msgTx, true, false)
-	if txType != stake.TxTypeRegular {
-		return wire.TxTreeStake
-	}
-
 	return wire.TxTreeRegular
 }
 
@@ -1855,15 +1872,16 @@ rangeBlocks:
 		}
 		dcr.findRedemptionMtx.RUnlock()
 
-		// Check if any of the above p2sh scripts is possibly included in this block.
-		hit, err := dcr.blockMaybeContainsScripts(blockHash, contractP2SHScripts)
-		if err != nil { // error checking a block's cfilters is a fatal error
-			err = fmt.Errorf("error checking cfilters for block %d (%s) for likely contract inclusion: %w",
-				blockHeight, blockHash, err)
+		// Get the cfilters for this block to check if any of the above p2sh scripts is
+		// possibly included in this block.
+		blkCFilter, err := dcr.getBlockFilterV2(blockHash)
+		if err != nil { // error retrieving a block's cfilters is a fatal error
+			err = fmt.Errorf("get cfilters error for block %d (%s): %w", blockHeight, blockHash,
+				translateRPCCancelErr(err))
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
-		if !hit {
+		if !blkCFilter.MatchAny(contractP2SHScripts) {
 			lastScannedBlockHeight = blockHeight
 			continue // block does not reference any of these contracts, continue to next block
 		}
@@ -2002,32 +2020,6 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 		delete(dcr.findRedemptionQueue, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.Unlock()
-}
-
-// blockMaybeContainsScripts uses the cfilters of the specified block to
-// determine if the block likely includes any of the passed scripts.
-func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
-	bf, key, err := dcr.wallet.BlockCFilter(dcr.ctx, blockHash)
-	if err != nil {
-		return false, err
-	}
-
-	filterB, err := hex.DecodeString(bf)
-	if err != nil {
-		return false, err
-	}
-	keyB, err := hex.DecodeString(key)
-	if err != nil {
-		return false, err
-	}
-
-	filter, err := gcs.FromBytesV2(blockcf2.B, blockcf2.M, filterB)
-	if err != nil {
-		return false, err
-	}
-	var bcf2Key [gcs.KeySize]byte
-	copy(bcf2Key[:], keyB)
-	return filter.MatchAny(bcf2Key, scripts), nil
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -2242,22 +2234,56 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return bytes.Equal(h[:], secretHash)
 }
 
+// coinConfirmations gets the number of confirmations for the specified coin by
+// first checking for a unspent output, and if not found, searching transactions
+// indexed by the node (if connected) or the wallet.
 func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err
 	}
+
 	// Check for an unspent output.
 	txOut, _, err := dcr.getTxOut(txHash, vout, true)
-	if err == nil && txOut != nil {
+	if err != nil {
+		return 0, false, fmt.Errorf("gettxout error for %s:%d: %w", txHash, vout, translateRPCCancelErr(err))
+	}
+	if txOut != nil {
 		return uint32(txOut.Confirmations), false, nil
 	}
-	// Check wallet transactions.
-	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
-	if err != nil {
-		return 0, false, err
+
+	// Unspent output not found. Check if the transaction exists.
+	// If it exists, then the output must either be spent or we
+	// are dealing with an invalid vout. Regardless, assume spent.
+	if dcr.wallet.SpvMode() {
+		// SPV wallets can only look up wallet transactions. Check
+		// if this tx is indexed by the wallet.
+		tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+		if err == nil {
+			return uint32(tx.Confirmations), true, nil
+		}
+		if !isTxNotFoundErr(err) {
+			return 0, false, translateRPCCancelErr(err)
+		}
+		// Tx not found by wallet. Attempt using cfilters to find
+		// the tx in a block and determine if the requested output
+		// is spent. This tx must have been previously associated
+		// with a script using dcr.trackExternalTx otherwise, the
+		// tx cannot be located in a mined block using cfitler and
+		// an asset.CoinNotFoundError will be returned.
+		return dcr.externalTxOutConfirmations(txHash, vout)
 	}
-	return uint32(tx.Confirmations), true, nil
+
+	// Node-backed wallets can look up any transaction. Check if this
+	// tx exists on the blockchain.
+	tx, err := dcr.wallet.GetRawTransactionVerbose(ctx, txHash)
+	if err == nil {
+		return uint32(tx.Confirmations), true, nil
+	}
+	if !isTxNotFoundErr(err) {
+		return 0, false, translateRPCCancelErr(err)
+	}
+	return 0, false, asset.CoinNotFoundError
 }
 
 // SwapConfirmations gets the number of confirmations for the specified coin ID
@@ -2878,6 +2904,56 @@ func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
 		return nil, err
 	}
 	return &block{hash: hash, height: height}, nil
+}
+
+func (dcr *ExchangeWallet) getBlock(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+	blockVerbose, err := dcr.wallet.GetBlockVerbose(dcr.ctx, blockHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
+	}
+	return blockVerbose, nil
+}
+
+func (dcr *ExchangeWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+	blockHash, err := dcr.wallet.GetBlockHash(dcr.ctx, blockHeight)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	return blockHash, nil
+}
+
+// mainChainAncestor crawls blocks backwards starting at the provided hash
+// until finding a mainchain block. Returns the first mainchain block found.
+func (dcr *ExchangeWallet) mainChainAncestor(blockHash *chainhash.Hash) (*chainhash.Hash, *chainjson.GetBlockVerboseResult, error) {
+	if *blockHash == zeroHash {
+		return nil, nil, fmt.Errorf("invalid block hash %s", blockHash.String())
+	}
+
+	checkHash := blockHash
+	for {
+		checkBlock, err := dcr.wallet.GetBlockVerbose(dcr.ctx, checkHash, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error retrieving block %s: %w", checkHash, translateRPCCancelErr(err))
+		}
+		if checkBlock.Confirmations > -1 {
+			// This is a mainchain block, return the hash.
+			return checkHash, checkBlock, nil
+		}
+		if checkBlock.Height == 0 {
+			return nil, nil, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
+		}
+		checkHash, err = chainhash.NewHashFromStr(checkBlock.PreviousHash)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error decoding previous hash %s for block %s: %w",
+				checkBlock.PreviousHash, checkHash.String(), translateRPCCancelErr(err))
+		}
+	}
+}
+
+func (dcr *ExchangeWallet) cachedBestBlock() block {
+	dcr.tipMtx.RLock()
+	defer dcr.tipMtx.RUnlock()
+	return *dcr.currentTip
 }
 
 // wireBytes dumps the serialized transaction bytes.

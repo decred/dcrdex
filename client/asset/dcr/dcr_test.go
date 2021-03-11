@@ -27,6 +27,7 @@ import (
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/gcs/v3"
 	"github.com/decred/dcrd/gcs/v3/blockcf2"
@@ -441,7 +442,7 @@ func (c *tRPCClient) GetRawTransactionVerbose(_ context.Context, txHash *chainha
 	}
 	tx, found := c.blockchain.rawTxs[txHash.String()]
 	if !found {
-		return nil, fmt.Errorf("no text transaction %s", txHash)
+		return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test raw tx "+txHash.String())
 	}
 	if tx.BlockHeight < 0 {
 		tx.Confirmations = -1
@@ -2204,19 +2205,31 @@ func TestCoinConfirmations(t *testing.T) {
 		t.Fatalf("expected spent = false for gettxout path, got true")
 	}
 
-	// gettransaction error
-	node.walletTxErr = tErr
+	// gettransaction or getrawtransaction error
 	delete(node.txOutRes, op)
+	if wallet.wallet.SpvMode() {
+		node.walletTxErr = tErr
+	} else {
+		node.rawTxErr = tErr
+	}
 	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	if spent {
-		t.Fatalf("spent is non-zero with gettransaction error")
+		t.Fatalf("spent is true with gettransaction error")
 	}
-	node.walletTxErr = nil
+	if wallet.wallet.SpvMode() {
+		node.walletTxErr = nil
+	} else {
+		node.rawTxErr = nil
+	}
 
-	node.walletTx = &walletjson.GetTransactionResult{}
+	if wallet.wallet.SpvMode() {
+		node.walletTx = &walletjson.GetTransactionResult{}
+	} else {
+		node.blockchain.addRawTx(&chainjson.TxRawResult{Txid: tTxHash.String()})
+	}
 	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)

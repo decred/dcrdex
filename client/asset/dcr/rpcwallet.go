@@ -252,6 +252,14 @@ func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 	return net, translateRPCCancelErr(err)
 }
 
+// SpvMode returns through if the wallet is connected to
+// Part of the Wallet interface.
+func (w *rpcWallet) SpvMode() bool {
+	// TODO: Should probably re-check walletinfo to be sure
+	// the network backend has not been changed to dcrd.
+	return w.spvMode
+}
+
 // NotifyOnTipChange registers a callback function that should be invoked when
 // the wallet sees new mainchain blocks. The return value indicates if this
 // notification can be provided.
