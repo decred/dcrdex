@@ -139,7 +139,7 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.forms)
   }
 
-  // disableAccount disables the associated with the provided host.
+  // disableAccount disables the account associated with the provided host.
   async disableAccount () {
     const page = this.page
     const pw = page.disableAccountAppPW.value

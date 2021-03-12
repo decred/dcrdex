@@ -167,6 +167,13 @@ func TestAccountDisable(t *testing.T) {
 		if _, found := tCore.conns[test.host]; found {
 			t.Fatal("found disabled account dex connection")
 		}
+		if rig.db.disabledAcct == nil {
+			t.Fatal("expected execution of db.DisableAccount")
+		}
+		if rig.db.disabledAcct.Host == test.host {
+			t.Fatalf("expected db disabled account to match test host, want: %v"+
+				" got: %v", test.host, rig.db.disabledAcct.Host)
+		}
 	}
 }
 
