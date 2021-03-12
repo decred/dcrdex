@@ -184,6 +184,8 @@ const (
 	CandlesRoute = "candles"
 )
 
+const errNullRespPayload = dex.ErrorKind("null response payload")
+
 type Bytes = dex.Bytes
 
 // Signable allows for serialization and signing.
@@ -299,7 +301,9 @@ type Message struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// DecodeMessage decodes a *Message from JSON-formatted bytes.
+// DecodeMessage decodes a *Message from JSON-formatted bytes. Note that
+// *Message may be nil even if error is nil, when the message is JSON null,
+// []byte("null").
 func DecodeMessage(b []byte) (*Message, error) {
 	msg := new(Message)
 	err := json.Unmarshal(b, &msg)
@@ -354,7 +358,8 @@ func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error)
 }
 
 // Response attempts to decode the payload to a *ResponsePayload. Response will
-// return an error if the Type is not Response.
+// return an error if the Type is not Response. It is an error if the Message's
+// Payload is []byte("null").
 func (msg *Message) Response() (*ResponsePayload, error) {
 	if msg.Type != Response {
 		return nil, fmt.Errorf("invalid type %d for ResponsePayload", msg.Type)
@@ -363,6 +368,9 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 	err := json.Unmarshal(msg.Payload, &resp)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil /* null JSON */ {
+		return nil, errNullRespPayload
 	}
 	return resp, nil
 }
@@ -383,7 +391,9 @@ func NewNotification(route string, payload interface{}) (*Message, error) {
 	}, nil
 }
 
-// Unmarshal unmarshals the Payload field into the provided interface.
+// Unmarshal unmarshals the Payload field into the provided interface. Note that
+// the payload interface must contain a pointer. If it is a pointer to a
+// pointer, it may become nil for a Message.Payload of []byte("null").
 func (msg *Message) Unmarshal(payload interface{}) error {
 	return json.Unmarshal(msg.Payload, payload)
 }

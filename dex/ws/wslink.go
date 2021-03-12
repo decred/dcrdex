@@ -262,7 +262,7 @@ out:
 			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "failed to parse message"))
 			continue
 		}
-		if msg.ID == 0 {
+		if msg.ID == 0 { // also covers msgBytes []byte("null")
 			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero"))
 			continue
 		}

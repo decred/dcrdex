@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -180,8 +179,8 @@ func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (ass
 // order.LimitOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	limit := new(msgjson.LimitOrder)
-	err := json.Unmarshal(msg.Payload, limit)
-	if err != nil {
+	err := msg.Unmarshal(&limit)
+	if err != nil || limit == nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'limit' payload")
 	}
 
@@ -398,8 +397,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 // order.MarketOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	market := new(msgjson.MarketOrder)
-	err := json.Unmarshal(msg.Payload, market)
-	if err != nil {
+	err := msg.Unmarshal(&market)
+	if err != nil || market == nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'market' payload")
 	}
 
@@ -598,8 +597,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 // order.CancelOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	cancel := new(msgjson.CancelOrder)
-	err := json.Unmarshal(msg.Payload, cancel)
-	if err != nil {
+	err := msg.Unmarshal(&cancel)
+	if err != nil || cancel == nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'cancel' payload")
 	}
 

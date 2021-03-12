@@ -4,7 +4,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -27,8 +26,8 @@ var (
 func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	register := new(msgjson.Register)
-	err := json.Unmarshal(msg.Payload, &register)
-	if err != nil {
+	err := msg.Unmarshal(&register)
+	if err != nil || register == nil /* null payload */ {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "error parsing register request",
@@ -97,8 +96,8 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	notifyFee := new(msgjson.NotifyFee)
-	err := json.Unmarshal(msg.Payload, &notifyFee)
-	if err != nil {
+	err := msg.Unmarshal(&notifyFee)
+	if err != nil || notifyFee == nil /* null payload */ {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "error parsing notifyfee request",

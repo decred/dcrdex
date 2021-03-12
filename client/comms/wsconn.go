@@ -446,6 +446,12 @@ func (conn *wsConn) Stop() {
 	conn.cancel()
 }
 
+func (conn *wsConn) SendRaw(b []byte) error {
+	conn.wsMtx.Lock()
+	defer conn.wsMtx.Unlock()
+	return conn.ws.WriteMessage(websocket.TextMessage, b)
+}
+
 // Send pushes outgoing messages over the websocket connection. Sending of the
 // message is synchronous, so a nil error guarantees that the message was
 // successfully sent. A non-nil error may indicate that the connection is known
