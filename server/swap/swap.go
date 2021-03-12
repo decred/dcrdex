@@ -6,7 +6,6 @@ package swap
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -998,8 +997,8 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s error response (code = %d, msg = %s) to disconnected user %v: %q",
-			msg.Route, code, errMsg, user, err)
+		log.Infof("Unable to send error response (code = %d, msg = %s) to disconnected user %v: %q",
+			code, errMsg, user, err)
 	}
 }
 
@@ -1011,7 +1010,7 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 		return // this should not be possible, but don't pass nil msg to Send
 	}
 	if err := s.authMgr.Send(user, msg); err != nil {
-		log.Infof("Unable to send %s success response to disconnected user %v: %v", msg.Route, user, err)
+		log.Infof("Unable to send success response to disconnected user %v: %v", user, err)
 	}
 }
 
@@ -1579,8 +1578,8 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 
 	params := new(msgjson.Init)
-	err := json.Unmarshal(msg.Payload, &params)
-	if err != nil {
+	err := msg.Unmarshal(&params)
+	if err != nil || params == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "Error decoding 'init' method params",
@@ -1696,9 +1695,8 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	}
 
 	params := new(msgjson.Redeem)
-
-	err := json.Unmarshal(msg.Payload, &params)
-	if err != nil {
+	err := msg.Unmarshal(&params)
+	if err != nil || params == nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
 			Message: "Error decoding 'redeem' request payload",

@@ -299,7 +299,7 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	}
 
 	params := new(RawParams)
-	err := req.Unmarshal(params)
+	err := req.Unmarshal(params) // NOT &params to prevent setting it to nil for []byte("null") Payload
 	if err != nil {
 		log.Debugf("cannot unmarshal params for route %s", req.Route)
 		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")

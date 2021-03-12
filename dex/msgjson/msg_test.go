@@ -4,11 +4,67 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"decred.org/dcrdex/server/account"
 )
+
+func TestMessageUnmarshal(t *testing.T) {
+	// Test null payload handling. NO error.
+	msg := Message{
+		Payload: []byte(`null`),
+	}
+
+	type Payload struct{}
+
+	payload := new(Payload)
+	err := msg.Unmarshal(payload) // *Payload
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if payload == nil {
+		t.Errorf("expected payload to not be nil")
+	}
+
+	payload = new(Payload)
+	err = msg.Unmarshal(&payload) // **Payload
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if payload != nil {
+		t.Errorf("expected payload to be nil")
+	}
+}
+
+func TestMessageResponse(t *testing.T) {
+	// Test null payload, expecting errNullRespPayload.
+	msg := Message{
+		Type:    Response,
+		Payload: []byte(`null`),
+	}
+
+	respPayload, err := msg.Response()
+	if !errors.Is(err, errNullRespPayload) {
+		t.Fatalf("expected a errNullRespPayload, got %v", err)
+	}
+	if respPayload != nil {
+		t.Errorf("response payload should have been nil")
+	}
+
+	// Test bad/empty json, expecting "unexpected end of JSON input".
+	msg.Payload = []byte(``)
+	respPayload, err = msg.Response()
+	const wantErrStr = "unexpected end of JSON input"
+	if err == nil || !strings.Contains(err.Error(), wantErrStr) {
+		t.Fatalf("expected error with %q, got %q", wantErrStr, err)
+	}
+	if respPayload != nil {
+		t.Errorf("response payload should have been nil")
+	}
+}
 
 func TestMatch(t *testing.T) {
 	// serialization: orderid (32) + matchid (8) + qty (8) + rate (8)
