@@ -1,5 +1,4 @@
 div.marketlist {
-  width: 175px;
   border-right: 1px solid #626262;
   z-index: 99;
   background-color: #dbdbdb;
@@ -288,6 +287,15 @@ table.balance-table button:hover {
   }
 }
 
+#rightSide {
+  height: 85vh;
+  overflow-y: auto;
+
+  @media (min-width: map-get($grid-breakpoints, md)) {
+    height: 100vh;
+  }
+}
+
 #marketLoader {
   z-index: 50;
   background-color: rgba(0, 0, 0, 0.5);
@@ -346,6 +354,18 @@ table.balance-table button:hover {
   .ico-unlocked {
     color: #1e7d11;
   }
+
+  .userorders {
+    min-height: 200px;
+  }
+}
+
+.orders-left {
+  min-height: 350px;
+}
+
+.order-panel {
+  min-height: 500px;
 }
 
 #loaderMsg {
