@@ -5,6 +5,7 @@ package eth
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -21,8 +22,10 @@ func init() {
 }
 
 const (
-	assetName  = "eth"
-	coinIDSize = 52
+	assetName = "eth"
+	// coinIdSize = flags (2) + smart contract address where funds are locked (20) + secret
+	// hash map key (32)
+	coinIDSize = 54
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
@@ -351,29 +354,31 @@ out:
 	wg.Wait()
 }
 
-// decodeCoinID decodes the coin ID into a contract address and secret hash.
-func decodeCoinID(coinID []byte) (common.Address, []byte, error) {
+// decodeCoinID decodes the coin ID into flags, a contract address, and secret hash.
+func decodeCoinID(coinID []byte) (uint16, common.Address, []byte, error) {
 	if len(coinID) != coinIDSize {
-		return common.Address{}, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
+		return 0, common.Address{}, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
 			coinIDSize, len(coinID))
 	}
 	secretHash := make([]byte, 32)
-	copy(secretHash, coinID[20:])
-	return common.BytesToAddress(coinID[:20]), secretHash, nil
+	copy(secretHash, coinID[22:])
+	return binary.BigEndian.Uint16(coinID[:2]), common.BytesToAddress(coinID[2:22]), secretHash, nil
 }
 
 func coinIDToString(coinID []byte) (string, error) {
-	addr, secretHash, err := decodeCoinID(coinID)
+	flags, addr, secretHash, err := decodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x:%x", addr, secretHash), err
+	return fmt.Sprintf("%x:%x:%x", flags, addr, secretHash), nil
 }
 
 // toCoinID converts the address and secret hash to a coin ID.
-func toCoinID(addr *common.Address, secretHash []byte) []byte {
+func toCoinID(flags uint16, addr *common.Address, secretHash []byte) []byte {
 	b := make([]byte, coinIDSize)
-	copy(b[:], addr[:])
-	copy(b[20:], secretHash[:])
+	b[0] = byte(flags)
+	b[1] = byte(flags >> 8)
+	copy(b[2:], addr[:])
+	copy(b[22:], secretHash[:])
 	return b
 }

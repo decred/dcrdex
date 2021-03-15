@@ -85,12 +85,14 @@ func TestLoad(t *testing.T) {
 func TestDecodeCoinID(t *testing.T) {
 	tests := []struct {
 		name                   string
+		wantFlags              uint16
 		wantAddr               common.Address
 		coinID, wantSecretHash []byte
 		wantErr                bool
 	}{{
 		name: "ok",
 		coinID: []byte{
+			0xFF, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -99,6 +101,7 @@ func TestDecodeCoinID(t *testing.T) {
 			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
+		wantFlags: 65281,
 		wantAddr: common.Address{
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
@@ -113,6 +116,7 @@ func TestDecodeCoinID(t *testing.T) {
 	}, {
 		name: "wrong length",
 		coinID: []byte{
+			0xFF, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -125,7 +129,7 @@ func TestDecodeCoinID(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		addr, secretHash, err := decodeCoinID(test.coinID)
+		flags, addr, secretHash, err := decodeCoinID(test.coinID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -134,6 +138,10 @@ func TestDecodeCoinID(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		if flags != test.wantFlags {
+			t.Fatalf("want flags value of %v but got %v for test %v",
+				test.wantFlags, flags, test.name)
 		}
 		if addr != test.wantAddr {
 			t.Fatalf("want addr value of %v but got %v for test %v",
@@ -147,6 +155,7 @@ func TestDecodeCoinID(t *testing.T) {
 }
 
 func TestCoinIDToString(t *testing.T) {
+	flags := "ff01"
 	addr := "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	secretHash := "71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
 	tests := []struct {
@@ -156,6 +165,7 @@ func TestCoinIDToString(t *testing.T) {
 	}{{
 		name: "ok",
 		coinID: []byte{
+			0xFF, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -164,10 +174,11 @@ func TestCoinIDToString(t *testing.T) {
 			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
-		wantCoinID: addr + ":" + secretHash,
+		wantCoinID: flags + ":" + addr + ":" + secretHash,
 	}, {
 		name: "wrong length",
 		coinID: []byte{
+			0xFF, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
