@@ -604,15 +604,15 @@ const (
 	// this number to get the limit in units of the base asset. This is
 	// potentially a per-market setting instead of an auth constant.
 	InitUserTakerLotLimit = 6
-	AbsTakerLotLimit      = 150
+	AbsTakerLotLimit      = 375
 	BookedLotLimit        = 1200
 
 	// These coefficients are used to compute a user's swap limit adjustment via
 	// UserOrderLimitAdjustment based on the cumulative amounts in the different
 	// match outcomes.
-	successWeight    int64 = 2
-	stuckLongWeight  int64 = -4
-	stuckShortWeight int64 = -2
+	successWeight    int64 = 3
+	stuckLongWeight  int64 = -5
+	stuckShortWeight int64 = -3
 	spoofedWeight    int64 = -1
 )
 

@@ -39,7 +39,7 @@ const (
 	defaultLogLevel            = "debug"
 	defaultLogDirname          = "logs"
 	defaultMarketsConfFilename = "markets.json"
-	defaultMaxLogZips          = 16
+	defaultMaxLogZips          = 128
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
 	defaultPGDBName            = "dcrdex_{netname}"
@@ -53,7 +53,7 @@ const (
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
-	defaultBroadcastTimeout = 5 * time.Minute
+	defaultBroadcastTimeout = 12 * time.Minute // accommodate certain known long block download timeouts
 )
 
 var (
