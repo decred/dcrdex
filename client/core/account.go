@@ -51,7 +51,9 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 				close(f.C)
 			}
 			b.feeds = make(map[uint32]*BookFeed, 1)
-			b.closeTimer.Stop()
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
 			b.mtx.Unlock()
 		}
 		dc.booksMtx.Unlock()
@@ -61,7 +63,7 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 	dc.cfgMtx.RUnlock()
 	// Disconnect and delete connection from map.
 	dc.connMaster.Disconnect()
-	delete(c.conns, addr)
+	delete(c.conns, host)
 
 	return nil
 }
