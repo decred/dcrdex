@@ -170,6 +170,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		WsConn:     conn,
 		log:        tLogger,
 		connMaster: connMaster,
+		ticker:     newDexTicker(time.Millisecond * 1000 / 3),
 		acct:       acct,
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
@@ -199,11 +200,10 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 			},
 			Fee: tFee,
 		},
-		tickInterval: time.Millisecond * 1000 / 3,
-		notify:       func(Notification) {},
-		trades:       make(map[order.OrderID]*trackedTrade),
-		epoch:        map[string]uint64{tDcrBtcMktName: 0},
-		connected:    1,
+		notify:    func(Notification) {},
+		trades:    make(map[order.OrderID]*trackedTrade),
+		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		connected: 1,
 	}, conn, acct
 }
 
@@ -246,6 +246,9 @@ func (conn *TWebsocket) IsDown() bool {
 	return false
 }
 func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
+	// NOTE: tCore's wsConstructor just returns a reused conn, so we can't close
+	// conn.msgs on ctx cancel. See the wsConstructor definition in newTestRig.
+	// Consider reworking the tests (TODO).
 	return &sync.WaitGroup{}, conn.connectErr
 }
 
@@ -799,6 +802,9 @@ func newTestRig() *testRig {
 			piSyncers:     make(map[order.OrderID]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
+				// This is not very realistic since it doesn't start a fresh
+				// one, and (*Core).connectDEX always gets the same TWebsocket,
+				// which may have been previously "disconnected".
 				return conn, nil
 			},
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
@@ -1863,7 +1869,7 @@ func TestConnectDEX(t *testing.T) {
 	}
 
 	// Bad URL.
-	ai.Host = tUnparseableHost // Illegal ASCIII control character
+	ai.Host = tUnparseableHost // Illegal ASCII control character
 	_, err = tCore.connectDEX(ai)
 	if err == nil {
 		t.Fatalf("no error for bad URL")
@@ -1883,9 +1889,17 @@ func TestConnectDEX(t *testing.T) {
 
 	// WsConn.Connect error.
 	rig.ws.connectErr = tErr
-	_, err = tCore.connectDEX(ai)
+	dc, err := tCore.connectDEX(ai)
 	if err == nil {
+		if dc != nil {
+			dc.connMaster.Disconnect()
+		}
 		t.Fatalf("no error for WsConn.Connect error")
+	}
+	if dc == nil {
+		t.Error("Expected a non-nil dexConnection that is still trying to connect.")
+	} else {
+		dc.connMaster.Disconnect()
 	}
 	rig.ws.connectErr = nil
 
@@ -1895,9 +1909,17 @@ func TestConnectDEX(t *testing.T) {
 		f(resp)
 		return nil
 	})
-	_, err = tCore.connectDEX(ai)
+	dc, err = tCore.connectDEX(ai)
 	if err == nil {
+		if dc != nil {
+			dc.connMaster.Disconnect()
+		}
 		t.Fatalf("no error for 'config' route error")
+	}
+	if dc == nil {
+		t.Error("Expected a non-nil dexConnection that is still trying to connect.")
+	} else {
+		dc.connMaster.Disconnect()
 	}
 
 	// Success again.
