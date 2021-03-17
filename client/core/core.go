@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -4412,6 +4413,19 @@ func (c *Core) listen(dc *dexConnection) {
 		hander routeHandler
 		msg    *msgjson.Message
 	}
+	runJob := func(job *msgJob) {
+		defer func() {
+			if pv := recover(); pv != nil {
+				c.log.Criticalf("Uh-oh! Panic while handling message from %v.\n\n"+
+					"Message:\n\n%#v\n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n",
+					dc.acct.host, job.msg, pv, string(debug.Stack()))
+			}
+		}()
+		if err := job.hander(c, dc, job.msg); err != nil {
+			c.log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
+				job.msg.Type, dc.acct.host, err)
+		}
+	}
 	// Start a single runner goroutine to run jobs one at a time in the order
 	// that they were received. Include the handler goroutine in the WaitGroup
 	// to allow it to complete if the connection master desires.
@@ -4421,10 +4435,7 @@ func (c *Core) listen(dc *dexConnection) {
 	go func() {
 		defer c.wg.Done()
 		for job := range nextJob {
-			if err := job.hander(c, dc, job.msg); err != nil {
-				c.log.Errorf("Route '%v' %v handler error (DEX %s): %v", job.msg.Route,
-					job.msg.Type, dc.acct.host, err)
-			}
+			runJob(job)
 		}
 	}()
 
