@@ -182,10 +182,15 @@ func (t *trackedTrade) rate() uint64 {
 	return 0
 }
 
-// broadcastTimeout gets associated DEX's configured broadcast timeout.
+// broadcastTimeout gets associated DEX's configured broadcast timeout. If the
+// trade's dexConnection was unable to be established, 0 is returned.
 func (t *trackedTrade) broadcastTimeout() time.Duration {
 	t.dc.cfgMtx.RLock()
 	defer t.dc.cfgMtx.RUnlock()
+	// If the dexConnection was never established, we have no config.
+	if t.dc.cfg == nil {
+		return 0
+	}
 	return time.Millisecond * time.Duration(t.dc.cfg.BroadcastTimeout)
 }
 
@@ -1382,6 +1387,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
+		bTimeout, tickInterval := t.broadcastTimeout(), t.dc.ticker.Dur() // bTimeout / tickCheckInterval
 		for _, match := range matches {
 			// Mark the matches as suspect to prevent them being grouped again.
 			match.suspectSwap = true
@@ -1396,10 +1402,9 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 				// case, allow three retries before giving up.
 				lastActionTime = encode.UnixTimeMilli(int64(auditStamp))
 			}
-			if time.Since(lastActionTime) < t.broadcastTimeout() ||
+			if time.Since(lastActionTime) < bTimeout ||
 				(auditStamp == 0 && match.swapErrCount < tickCheckDivisions) {
-
-				t.delayTicks(match, t.dc.tickInterval*3/4)
+				t.delayTicks(match, tickInterval*3/4)
 			} else {
 				// If we can't get a swap out before the broadcast timeout, just
 				// quit. We could also self-revoke here, but we're also
@@ -1505,6 +1510,11 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
 		timeout := t.broadcastTimeout() / 4
+		if timeout == 0 { // if we lack server config for any reason
+			// Send would fail right away anyway if the server is really down,
+			// but at least attempt it with a non-zero timeout.
+			timeout = time.Minute
+		}
 		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error
@@ -1592,6 +1602,14 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
+		// Retry delays are based in part on this server's broadcast timeout.
+		bTimeout, tickInterval := t.broadcastTimeout(), t.dc.ticker.Dur() // bTimeout / tickCheckInterval
+		// If we lack bTimeout or tickInterval, we likely have no server config
+		// on account of server down, so fallback to reasonable delay values.
+		if bTimeout == 0 || tickInterval == 0 {
+			tickInterval = defaultTickInterval
+			bTimeout = 30 * time.Minute // don't declare missed too soon
+		}
 		// The caller will notify the user that there is a problem. We really
 		// have no way of knowing whether this is recoverable (so we can't set
 		// swapErr), but we do want to prevent redemptions every tick.
@@ -1610,8 +1628,8 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			}
 			lastActionTime := encode.UnixTimeMilli(int64(lastActionStamp))
 			// Try to wait until about the next auto-tick to try again.
-			waitTime := t.dc.tickInterval * 3 / 4
-			if time.Since(lastActionTime) > t.broadcastTimeout() ||
+			waitTime := tickInterval * 3 / 4
+			if time.Since(lastActionTime) > bTimeout ||
 				(lastActionStamp == 0 && match.redeemErrCount >= tickCheckDivisions) {
 				// If we already missed the broadcast timeout, we're not in as
 				// much of a hurry. but keep trying and sending errors, because
@@ -1697,6 +1715,11 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
 		timeout := t.broadcastTimeout() / 4
+		if timeout == 0 { // if we lack server config for any reason
+			// Send would fail right away anyway if the server is really down,
+			// but at least attempt it with a non-zero timeout.
+			timeout = time.Minute
+		}
 		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error

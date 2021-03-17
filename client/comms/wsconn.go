@@ -400,9 +400,8 @@ func (conn *wsConn) NextID() uint64 {
 }
 
 // Connect connects the client. Any error encountered during the initial
-// connection will be returned. If the connection is successful, an
-// auto-reconnect goroutine will be started. To shutdown auto-reconnect, use
-// Stop() or cancel the context.
+// connection will be returned. An auto-(re)connect goroutine will be started,
+// even on error. To terminate it, use Stop() or cancel the context.
 func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var ctxInternal context.Context
 	ctxInternal, conn.cancel = context.WithCancel(ctx)
@@ -424,10 +423,21 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			conn.close()
 		}
 		conn.wsMtx.Unlock()
-		close(conn.readCh) // signal to receivers that the wsConn is dead
+
+		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
 
-	return &conn.wg, conn.connect(ctxInternal)
+	err := conn.connect(ctxInternal)
+	if err != nil {
+		// The read loop would normally trigger keepAlive, but it wasn't started
+		// on account of a connect error.
+		conn.log.Errorf("Initial connection failed, starting reconnect loop.")
+		time.AfterFunc(5*time.Second, func() {
+			conn.reconnectCh <- struct{}{}
+		})
+	}
+
+	return &conn.wg, err
 }
 
 // Stop can be used to close the connection and all of the goroutines started by

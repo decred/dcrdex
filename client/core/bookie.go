@@ -407,6 +407,9 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 // findMarketConfig searches the stored ConfigResponse for the named market.
 // This must be called with cfgMtx at least read locked.
 func (dc *dexConnection) findMarketConfig(name string) *msgjson.Market {
+	if dc.cfg == nil {
+		return nil
+	}
 	for _, mktConf := range dc.cfg.Markets {
 		if mktConf.Name == name {
 			return mktConf
@@ -590,6 +593,11 @@ func (dc *dexConnection) refreshServerConfig() error {
 	if err != nil {
 		return fmt.Errorf("unable to fetch server config: %w", err)
 	}
+
+	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)
+	tickInterval := bTimeout / tickCheckDivisions
+	dc.log.Debugf("Server %v broadcast timeout %v. Tick interval %v", dc.acct.host, bTimeout, tickInterval)
+	dc.ticker.Reset(tickInterval)
 
 	// Update the dex connection with the new config details, including
 	// StartEpoch and FinalEpoch, and rebuild the market data maps.

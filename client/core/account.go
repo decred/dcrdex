@@ -103,8 +103,14 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 
 	accountInfo.Paid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
 
-	// verifyAccount makes a connection to the DEX.
-	if !c.verifyAccount(&accountInfo) {
+	// Make a connection to the DEX.
+	if dc, connected := c.connectAccount(&accountInfo); !connected {
+		if dc != nil {
+			dc.connMaster.Disconnect() // stop reconnect loop
+			c.connMtx.Lock()
+			delete(c.conns, dc.acct.host)
+			c.connMtx.Unlock()
+		}
 		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", host, err)
 	}
 
