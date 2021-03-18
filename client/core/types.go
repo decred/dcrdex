@@ -189,7 +189,7 @@ func matchFromMetaMatch(ord order.Order, metaMatch *db.MetaMatch) *Match {
 // and sets the confirmations for swaps-in-waiting.
 func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapConfs, swapReq, counterSwapConfs, counterReq int64) *Match {
 	if _, isCancel := ord.(*order.CancelOrder); isCancel {
-		fmt.Println("matchFromMetaMatchWithConfs got a cancel order for match", metaMatch.MatchID)
+		fmt.Println("matchFromMetaMatchWithConfs got a cancel order for match", metaMatch)
 		return &Match{}
 	}
 	side := metaMatch.Side

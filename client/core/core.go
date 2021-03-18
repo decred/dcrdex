@@ -3213,7 +3213,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
 			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
-				dc.acct.host, match.MatchID, oid)
+				dc.acct.host, match, oid)
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
 			match.MetaData.Proof.SelfRevoked = true
@@ -3806,13 +3806,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			if needsAuditInfo {
 				// Check for unresolvable states.
 				if len(counterSwap) == 0 {
-					match.swapErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match.MatchID)
+					match.swapErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match)
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap coin.", match.Side, tracker.token(), match.Status)
 					continue
 				}
 				counterContract := match.MetaData.Proof.CounterContract
 				if len(counterContract) == 0 {
-					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match.MatchID)
+					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match)
 					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", match.Side, tracker.token(), match.Status)
 					continue
 				}
@@ -3838,7 +3838,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						if err != nil {
 							match.swapErr = fmt.Errorf("audit error: %w", err)
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
-								match.MatchID, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
+								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)
 							notifyErr(SubjectMatchRecoveryError, "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
 								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)

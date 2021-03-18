@@ -187,6 +187,11 @@ type UserMatch struct {
 	// TODO: include Sell bool?
 }
 
+// String is the match ID string, implements fmt.Stringer.
+func (m *UserMatch) String() string {
+	return m.MatchID.String()
+}
+
 // A constructor for a Match with Status = NewlyMatched. This is the preferred
 // method of making a Match, since it pre-calculates and caches the match ID.
 func newMatch(taker Order, maker *LimitOrder, qty, rate uint64, epochID EpochID) *Match {

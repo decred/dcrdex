@@ -34,6 +34,9 @@ type ExpirationErr string
 // Error satisfies the error interface for ExpirationErr.
 func (err ExpirationErr) Error() string { return string(err) }
 
+// Ensure matchTracker satisfies the Stringer interface.
+var _ (fmt.Stringer) = (*matchTracker)(nil)
+
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
@@ -416,7 +419,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 
 		if trade.Filled()+newFill > trade.Quantity {
 			t.dc.log.Errorf("Match %s would put order %s fill over quantity. Revoking the match.",
-				match.MatchID, t.ID())
+				match, t.ID())
 			match.MetaData.Proof.SelfRevoked = true
 		}
 
@@ -433,7 +436,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		if err != nil {
 			// Don't abandon other matches because of this error, attempt
 			// to negotiate the other matches.
-			t.dc.log.Errorf("failed to update match %s in db: %v", match.MatchID, err)
+			t.dc.log.Errorf("failed to update match %s in db: %v", match, err)
 			continue
 		}
 
@@ -444,8 +447,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// TODO: Maybe allow? This match can be restored from the DEX's
 		// connect response on restart IF it is not revoked.
 		t.matches[match.MatchID] = match
-		t.dc.log.Infof("Starting negotiation for match %v for order %v with swap fee rate = %v, quantity = %v",
-			match.MatchID, t.ID(), match.FeeRateSwap, qty)
+		t.dc.log.Infof("Starting negotiation for match %s for order %v with swap fee rate = %v, quantity = %v",
+			match, t.ID(), match.FeeRateSwap, qty)
 	}
 
 	// Calculate and set the new filled value for the order.
@@ -610,8 +613,8 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	var err error
 	have, spent, err = t.wallets.toWallet.Confirmations(ctx, coin.ID())
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %v, order %v: %v",
-			coin, t.wallets.toAsset.Symbol, match.MatchID, t.UID(), err)
+		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
+			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
 		spent = false // backends should do this for non-nil error, but we'll do it anyway
 		have = 0      // should already be
 		return
@@ -709,8 +712,8 @@ func (t *trackedTrade) isActive() bool {
 	// Status of all matches for the order.
 	for _, match := range t.matches {
 		proof := &match.MetaData.Proof
-		t.dc.log.Tracef("Checking match %v (%v) in status %v. "+
-			"Order: %v, Refund coin: %v, Script: %x, Revoked: %v", match.MatchID,
+		t.dc.log.Tracef("Checking match %s (%v) in status %v. "+
+			"Order: %v, Refund coin: %v, Script: %x, Revoked: %v", match,
 			match.Side, match.Status, t.ID(),
 			proof.RefundCoin, proof.Script, proof.IsRevoked())
 		if t.matchIsActive(match) {
@@ -755,8 +758,8 @@ func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 		if status == order.NewlyMatched || status == order.MatchComplete ||
 			(status == order.MakerSwapCast && side == order.Taker) ||
 			(status == order.MakerRedeemed && side == order.Maker) {
-			t.dc.log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
-				match.MatchID, side, status)
+			t.dc.log.Tracef("Revoked match %s (%v) in status %v considered inactive.",
+				match, side, status)
 			return false
 		}
 	}
@@ -809,8 +812,8 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // mutex lock held for writes.
 func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) bool {
 	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil {
-		t.dc.log.Tracef("Match %v not swappable: swapErr = %v, revoked = %v, metered = %t",
-			match.MatchID, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil)
+		t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t",
+			match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil)
 		return false
 	}
 
@@ -819,7 +822,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	// actually swappables.
 	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
-			t.ID(), match.MatchID, unbip(wallet.AssetID))
+			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
 
@@ -831,8 +834,8 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			confs, req, changed, spent := t.counterPartyConfirms(ctx, match)
 			ready := confs >= req
 			if changed && !ready {
-				t.dc.log.Debugf("Match %v not yet swappable: current confs = %d, required confs = %d",
-					match.MatchID, confs, req)
+				t.dc.log.Debugf("Match %s not yet swappable: current confs = %d, required confs = %d",
+					match, confs, req)
 			}
 			if spent {
 				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own")
@@ -863,8 +866,8 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 // mutex lock held for reads.
 func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bool {
 	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 || match.tickGovernor != nil {
-		t.dc.log.Tracef("Match %v not redeemable: swapErr = %v, RefundCoin = %v, metered = %t",
-			match.MatchID, match.swapErr, match.MetaData.Proof.RefundCoin, match.tickGovernor != nil)
+		t.dc.log.Tracef("Match %s not redeemable: swapErr = %v, RefundCoin = %v, metered = %t",
+			match, match.swapErr, match.MetaData.Proof.RefundCoin, match.tickGovernor != nil)
 		return false
 	}
 
@@ -873,7 +876,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 	// actually redeemables.
 	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
-			t.ID(), match.MatchID, unbip(wallet.AssetID))
+			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
 
@@ -883,11 +886,11 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 			confs, req, changed, spent := t.counterPartyConfirms(ctx, match)
 			ready := confs >= req
 			if changed && !ready {
-				t.dc.log.Debugf("Match %v not yet redeemable: current confs = %d, required confs = %d",
-					match.MatchID, confs, req)
+				t.dc.log.Debugf("Match %s not yet redeemable: current confs = %d, required confs = %d",
+					match, confs, req)
 			}
 			if spent {
-				t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match.MatchID)
+				t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
@@ -922,8 +925,8 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 // mutex lock held for writes.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	if match.refundErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
-		t.dc.log.Tracef("Match %v not refundable: refundErr = %v, RefundCoin = %v",
-			match.MatchID, match.refundErr, match.MetaData.Proof.RefundCoin)
+		t.dc.log.Tracef("Match %s not refundable: refundErr = %v, RefundCoin = %v",
+			match, match.refundErr, match.MetaData.Proof.RefundCoin)
 		return false
 	}
 
@@ -932,7 +935,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	// actually refundables.
 	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
-			t.ID(), match.MatchID, unbip(wallet.AssetID))
+			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
 
@@ -946,7 +949,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(match.MetaData.Proof.Script)
 	if err != nil {
 		t.dc.log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
-			match.Side, t.ID(), match.MatchID, err)
+			match.Side, t.ID(), match, err)
 		return false
 	}
 	if swapLocktimeExpired {
@@ -976,8 +979,8 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 		// lock time with BTC), include a "but" in the message.
 		but = "but "
 	}
-	t.dc.log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), %snot yet expired.",
-		match.MatchID, coinIDString(from.ID, swapCoinID), from.Symbol,
+	t.dc.log.Infof("Contract for match %s with swap coin %v (%s) has an expiry time of %v (%v), %snot yet expired.",
+		match, coinIDString(from.ID, swapCoinID), from.Symbol,
 		contractExpiry, remainingTime, but)
 
 	return false
@@ -998,8 +1001,8 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 	swapCoinID := proof.TakerSwap
 	if match.Side != order.Taker || len(swapCoinID) == 0 || len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
 		t.dc.log.Tracef(
-			"Not finding redemption for match %v: side = %s, swapErr = %v, TakerSwap = %v RefundCoin = %v",
-			match.MatchID, match.Side, match.swapErr, proof.TakerSwap, proof.RefundCoin)
+			"Not finding redemption for match %s: side = %s, swapErr = %v, TakerSwap = %v RefundCoin = %v",
+			match, match.Side, match.swapErr, proof.TakerSwap, proof.RefundCoin)
 		return false
 	}
 	if match.cancelRedemptionSearch != nil { // already finding redemption
@@ -1008,12 +1011,12 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 
 	confs, spent, err := t.wallets.fromWallet.Confirmations(ctx, swapCoinID)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %v, order %v: %v",
-			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match.MatchID, t.UID(), err)
+		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
+			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
 		return false
 	}
 	if spent {
-		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", t.ID(), match.MatchID)
+		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
 	}
 	return confs >= t.wallets.fromAsset.SwapConf || spent
 }
@@ -1045,13 +1048,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 		switch {
 		case t.isSwappable(c.ctx, match):
-			t.dc.log.Debugf("Swappable match %v for order %v (%v)", match.MatchID, t.ID(), side)
+			t.dc.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
 			swaps = append(swaps, match)
 			sent += match.Quantity
 			quoteSent += calc.BaseToQuote(match.Rate, match.Quantity)
 
 		case t.isRedeemable(c.ctx, match):
-			t.dc.log.Debugf("Redeemable match %v for order %v (%v)", match.MatchID, t.ID(), side)
+			t.dc.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
 			redeems = append(redeems, match)
 			received += match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Rate, match.Quantity)
@@ -1061,11 +1064,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		// If we've already started redemption search for this match, the search
 		// will be aborted if/when auto-refund succeeds.
 		case t.isRefundable(match):
-			t.dc.log.Debugf("Refundable match %v for order %v (%v)", match.MatchID, t.ID(), side)
+			t.dc.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
 			refunds = append(refunds, match)
 
 		case t.shouldBeginFindRedemption(c.ctx, match):
-			t.dc.log.Debugf("Ready to find counter-party redemption for match %v, order %v (%v)", match.MatchID, t.ID(), side)
+			t.dc.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
 			t.findMakersRedemption(match)
 		}
 	}
@@ -1460,7 +1463,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		}
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
-				match.MatchID, coinIDString(t.wallets.fromAsset.ID, coinID), err)
+				match, coinIDString(t.wallets.fromAsset.ID, coinID), err)
 		}
 
 		c.sendInitAsync(t, match, coin.ID(), contract)
@@ -1475,8 +1478,8 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		return
 	}
 
-	c.log.Infof("Notifying DEX %s of our %s swap contract %v for match %v",
-		t.dc.acct.host, t.wallets.fromAsset.Symbol, coinIDString(t.fromAssetID, coinID), match.MatchID)
+	c.log.Infof("Notifying DEX %s of our %s swap contract %v for match %s",
+		t.dc.acct.host, t.wallets.fromAsset.Symbol, coinIDString(t.fromAssetID, coinID), match)
 
 	// Send the init request asynchronously.
 	c.wg.Add(1) // So Core does not shut down until we're done with this request.
@@ -1487,7 +1490,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
-				details := fmt.Sprintf("Error notifying DEX of swap for match %s: %v", match.MatchID, err)
+				details := fmt.Sprintf("Error notifying DEX of swap for match %s: %v", match, err)
 				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
 			}
 		}()
@@ -1525,7 +1528,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			return
 		}
 
-		c.log.Debugf("Received valid ack for 'init' request for match %s", match.MatchID)
+		c.log.Debugf("Received valid ack for 'init' request for match %s", match)
 
 		// Save init ack sig.
 		t.mtx.Lock()
@@ -1632,8 +1635,8 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	}
 
 	for _, match := range matches {
-		c.log.Infof("Match %s complete: %s %d %s", match.MatchID,
-			sellString(t.Trade().Sell), match.Quantity, unbip(t.Prefix().BaseAsset),
+		c.log.Infof("Match %s complete: %s %d %s", match, sellString(t.Trade().Sell),
+			match.Quantity, unbip(t.Prefix().BaseAsset),
 		)
 	}
 
@@ -1652,7 +1655,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		}
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
-				match.MatchID, coinIDString(t.wallets.fromAsset.ID, coinID), err)
+				match, coinIDString(t.wallets.fromAsset.ID, coinID), err)
 		}
 
 		c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
@@ -1667,8 +1670,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		return
 	}
 
-	c.log.Infof("Notifying DEX %s of our %s swap redemption %v for match %v",
-		t.dc.acct.host, t.wallets.toAsset.Symbol, coinIDString(t.wallets.toAsset.ID, coinID), match.MatchID)
+	c.log.Infof("Notifying DEX %s of our %s swap redemption %v for match %s",
+		t.dc.acct.host, t.wallets.toAsset.Symbol, coinIDString(t.wallets.toAsset.ID, coinID), match)
 
 	// Send the redeem request asynchronously.
 	c.wg.Add(1) // So Core does not shut down until we're done with this request.
@@ -1679,7 +1682,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
-				details := fmt.Sprintf("Error notifying DEX of redemption for match %s: %v", match.MatchID, err)
+				details := fmt.Sprintf("Error notifying DEX of redemption for match %s: %v", match, err)
 				t.notify(newOrderNote(SubjectSwapError, details, db.ErrorLevel, corder))
 			}
 		}()
@@ -1717,7 +1720,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			return
 		}
 
-		c.log.Debugf("Received valid ack for 'redeem' request for match %s)", match.MatchID)
+		c.log.Debugf("Received valid ack for 'redeem' request for match %s)", match)
 
 		// Save redeem ack sig.
 		t.mtx.Lock()
@@ -1771,21 +1774,21 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 			// refund before the search could be canceled).
 			if ctx.Err() != nil || len(match.MetaData.Proof.RefundCoin) == 0 {
 				t.dc.log.Errorf("Error finding redemption of taker's %s contract %s for order %s, match %s: %v.",
-					fromAsset.Symbol, coinIDString(fromAsset.ID, swapCoinID), t.ID(), match.MatchID, err)
+					fromAsset.Symbol, coinIDString(fromAsset.ID, swapCoinID), t.ID(), match, err)
 			}
 			return
 		}
 
 		if match.Status != order.TakerSwapCast {
 			t.dc.log.Errorf("Received find redemption result at wrong step, order %s, match %s, status %s.",
-				t.ID(), match.MatchID, match.Status)
+				t.ID(), match, match.Status)
 			return
 		}
 
 		proof := &match.MetaData.Proof
 		if !t.wallets.toWallet.ValidateSecret(secret, proof.SecretHash) {
 			t.dc.log.Errorf("Found invalid redemption of taker's %s contract %s for order %s, match %s: invalid secret %s, hash %s.",
-				fromAsset.Symbol, coinIDString(fromAsset.ID, swapCoinID), t.ID(), match.MatchID, secret, proof.SecretHash)
+				fromAsset.Symbol, coinIDString(fromAsset.ID, swapCoinID), t.ID(), match, secret, proof.SecretHash)
 			return
 		}
 
@@ -1801,7 +1804,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 		}
 
 		details := fmt.Sprintf("Found maker's redemption (%s: %v) and validated secret for match %s",
-			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match.MatchID)
+			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match)
 		t.notify(newOrderNote(SubjectMatchRecovered, details, db.Poke, t.coreOrderInternal()))
 	}()
 }
@@ -1819,7 +1822,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 	for _, match := range matches {
 		if len(match.MetaData.Proof.RefundCoin) != 0 {
 			t.dc.log.Errorf("attempted to execute duplicate refund for match %s, side %s, status %s",
-				match.MatchID, match.Side, match.Status)
+				match, match.Side, match.Status)
 			continue
 		}
 		contractToRefund := match.MetaData.Proof.Script
@@ -1837,13 +1840,13 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			matchFailureReason = "no valid redemption received from Maker"
 		default:
 			t.dc.log.Errorf("attempted to execute invalid refund for match %s, side %s, status %s",
-				match.MatchID, match.Side, match.Status)
+				match, match.Side, match.Status)
 			continue
 		}
 
 		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
-		t.dc.log.Infof("Refunding %s contract %s for match %v (%s)",
-			refundAsset.Symbol, swapCoinString, match.MatchID, matchFailureReason)
+		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
+			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
 		if err != nil {
@@ -1858,7 +1861,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			} else {
 				t.delayTicks(match, time.Minute*5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
-					match.MatchID, swapCoinString, err)
+					match, swapCoinString, err)
 			}
 			continue
 		}
@@ -1912,8 +1915,8 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
-			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %v: %v",
-				contractID, t.wallets.toAsset.Symbol, match.MatchID, err)
+			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %s: %v",
+				contractID, t.wallets.toAsset.Symbol, match, err)
 			// Don't revoke in case server sends a revised audit request before
 			// the match is revoked.
 			return
@@ -1927,7 +1930,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		t.mtx.Unlock()
 		if err != nil {
-			t.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
+			t.dc.log.Errorf("Error updating database for match %s: %v", match, err)
 		}
 
 		// Respond to DEX, but this is not consequential.
@@ -1970,15 +1973,15 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 			}
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// Didn't find it that time.
-				t.dc.log.Tracef("Still searching for counterparty's contract coin %v (%s) for match %v.", contractID, contractSymb, match.MatchID)
+				t.dc.log.Tracef("Still searching for counterparty's contract coin %v (%s) for match %s.", contractID, contractSymb, match)
 				if t.matchIsRevoked(match) {
 					errChan <- ExpirationErr(fmt.Sprintf("match revoked while waiting to find counterparty contract coin %v (%s). "+
 						"Check your internet and wallet connections!", contractID, contractSymb))
 					return wait.DontTryAgain
 				}
 				if tries > 0 && tries%12 == 0 {
-					detail := fmt.Sprintf("Still searching for counterparty's contract coin %v (%s) for match %v. "+
-						"Are your internet and wallet connections good?", contractID, contractSymb, match.MatchID)
+					detail := fmt.Sprintf("Still searching for counterparty's contract coin %v (%s) for match %s. "+
+						"Are your internet and wallet connections good?", contractID, contractSymb, match)
 					t.notify(newOrderNote(SubjectAuditTrouble, detail, db.WarningLevel, t.coreOrder()))
 				}
 				tries++
@@ -2079,11 +2082,11 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
-		t.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
+		t.dc.log.Errorf("Error updating database for match %v: %s", match, err)
 	}
 
 	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
-		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match.MatchID, len(txData) > 0)
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
 
 	return nil
 }
@@ -2157,7 +2160,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 
 func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secret []byte) error {
 	if match.Side == order.Maker {
-		return fmt.Errorf("processMakersRedemption called when we are the maker, which is nonsense. order = %s, match = %s", t.ID(), match.MatchID)
+		return fmt.Errorf("processMakersRedemption called when we are the maker, which is nonsense. order = %s, match = %s", t.ID(), match)
 	}
 
 	proof := &match.MetaData.Proof

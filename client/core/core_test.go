@@ -1773,7 +1773,7 @@ func TestLogin(t *testing.T) {
 	defer tracker.mtx.Unlock()
 	match = tracker.matches[extraID]
 	if !bytes.Equal(match.MetaData.Proof.CounterContract, missedContract) {
-		t.Errorf("Missed maker contract not retrieved, %s, %s", match.MatchID, hex.EncodeToString(match.MetaData.Proof.CounterContract))
+		t.Errorf("Missed maker contract not retrieved, %s, %s", match, hex.EncodeToString(match.MetaData.Proof.CounterContract))
 	}
 }
 

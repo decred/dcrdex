@@ -15,7 +15,7 @@ import (
 // statusResolutionID is just a string with the basic information about a match.
 // This is used often while logging during status resolution.
 func statusResolutionID(dc *dexConnection, trade *trackedTrade, match *matchTracker) string {
-	return fmt.Sprintf("host = %s, order = %s, match = %s", dc.acct.host, trade.ID(), match.MatchID)
+	return fmt.Sprintf("host = %s, order = %s, match = %s", dc.acct.host, trade.ID(), match)
 }
 
 // resolveMatchConflicts attempts to resolve conflicts between the server's
@@ -201,7 +201,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
+				trade.dc.log.Errorf("Error updating database for match %s: %v", match, err)
 			}
 		}
 	}()
@@ -244,7 +244,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %v: %v", match.MatchID, err)
+				trade.dc.log.Errorf("Error updating database for match %s: %v", match, err)
 			}
 		}
 	}()
