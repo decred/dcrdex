@@ -239,7 +239,9 @@ export default class SettingsPage extends BasePage {
   async showForm (form) {
     const page = this.page
     this.currentForm = form
-    Doc.hide(page.dexAddrForm, page.confirmRegForm, page.authorizeAccountExportForm, page.authorizeAccountImportForm)
+    Doc.hide(page.dexAddrForm, page.confirmRegForm,
+      page.authorizeAccountExportForm, page.authorizeAccountImportForm,
+      page.disableAccountForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
