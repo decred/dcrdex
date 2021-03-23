@@ -1967,6 +1967,8 @@ func TestConnectDEX(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final connectDEX error: %v", err)
 	}
+
+	// TODO: test temporary, ensure listen isn't running, somehow
 }
 
 func TestInitializeClient(t *testing.T) {

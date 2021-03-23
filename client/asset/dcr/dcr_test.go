@@ -361,6 +361,13 @@ func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (
 	return c.walletTx, c.walletTxErr
 }
 
+func (c *tRPCClient) AccountUnlocked(_ context.Context, acct string) (*walletjson.AccountUnlockedResult, error) {
+	return &walletjson.AccountUnlockedResult{}, nil // go the walletlock/walletpassphrase route
+}
+
+func (c *tRPCClient) LockAccount(_ context.Context, acct string) error       { return nil }
+func (c *tRPCClient) UnlockAccount(_ context.Context, acct, pw string) error { return nil }
+
 func (c *tRPCClient) WalletLock(_ context.Context) error {
 	return c.lockErr
 }
