@@ -2037,7 +2037,7 @@ func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: cert,
-	})
+	}, true)
 	if dc != nil {
 		// Stop (re)connect loop, which may be running even if err != nil.
 		defer dc.connMaster.Disconnect()
@@ -4149,8 +4149,12 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
-// route.
-func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
+// route. If temporary is provided and true, no connect and reconnect handlers
+// are registered, and the c.listen(dc) goroutine is not started so that
+// associated trades are not processed and no incoming requests are
+// notifications are handled. A temporary dexConnection may be used to inspect
+// the config response.
+func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
 	if err != nil {
@@ -4172,15 +4176,13 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
+	listen := len(temporary) == 0 || !temporary[0]
+
 	wsCfg := comms.WsCfg{
 		URL:      wsURL.String(),
 		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
 		Cert:     acctInfo.Cert,
-		ReconnectSync: func() {
-			go c.handleReconnect(host)
-		},
-		ConnectEventFunc: dc.handleConnectEvent,
-		Logger:           c.log.SubLogger(wsURL.String()),
+		Logger:   c.log.SubLogger(wsURL.String()),
 	}
 	if c.cfg.TorProxy != "" {
 		proxy := &socks.Proxy{
@@ -4188,6 +4190,13 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			TorIsolation: c.cfg.TorIsolation,
 		}
 		wsCfg.NetDialContext = proxy.DialContext
+	}
+
+	if listen {
+		wsCfg.ReconnectSync = func() {
+			go c.handleReconnect(host)
+		}
+		wsCfg.ConnectEventFunc = dc.handleConnectEvent
 	}
 
 	// Create a websocket connection to the server.
@@ -4203,8 +4212,10 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
 	// be started as long as the reconnect loop is running. It only returns when
 	// the wsConn is stopped.
-	c.wg.Add(1)
-	go c.listen(dc)
+	if listen {
+		c.wg.Add(1)
+		go c.listen(dc)
+	}
 
 	err = dc.connMaster.Connect(c.ctx)
 	if err != nil {

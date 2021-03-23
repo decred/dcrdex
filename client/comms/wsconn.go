@@ -431,7 +431,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		// The read loop would normally trigger keepAlive, but it wasn't started
 		// on account of a connect error.
-		conn.log.Errorf("Initial connection failed, starting reconnect loop.")
+		conn.log.Errorf("Initial connection failed, starting reconnect loop: %v", err)
 		time.AfterFunc(5*time.Second, func() {
 			conn.reconnectCh <- struct{}{}
 		})

@@ -212,12 +212,11 @@ sleep 3
 # dcrwallets
 ################################################################################
 
-# Re-using $MINE to signal whether the wallets need to be created
-# from scratch, or if they were loaded from file.
 echo "Creating simnet alpha wallet"
 ENABLE_TICKET_BUYER="1"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
 ${ALPHA_WALLET_PORT} ${ENABLE_TICKET_BUYER}
+# alpha uses walletpassphrase/walletlock.
 
 echo "Creating simnet beta wallet"
 ENABLE_TICKET_BUYER="0"
@@ -236,6 +235,13 @@ ENABLE_TICKET_BUYER="0"
 ${TRADING_WALLET2_PORT} ${ENABLE_TICKET_BUYER}
 
 sleep 15
+
+# Give beta's "default" account a password, so it uses unlockaccount/lockaccount.
+tmux send-keys -t $SESSION:0 "./beta setaccountpassphrase default ${WALLET_PASS}${WAIT}" C-m\; wait-for donedcr
+# Lock the wallet so we know we can function with just account unlocking. There
+# is also a bug in dcrwallet that breaks validateaddress if the wallet is
+# unlocked but not the account, so keep the wallet locked.
+tmux send-keys -t $SESSION:0 "./beta walletlock${WAIT}" C-m\; wait-for donedcr
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
