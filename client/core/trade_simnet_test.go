@@ -307,8 +307,8 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 		finalStatus := order.MatchComplete
 		tracker.mtx.Lock()
 		for _, match := range tracker.matches {
-			side, status := match.Match.Side, match.Match.Status
-			client.log("trade %s paused at %s", token(match.ID()), status)
+			side, status := match.Side, match.Status
+			client.log("trade %s paused at %s", token(match.MatchID[:]), status)
 			if side == order.Maker {
 				client.log("%s: disconnecting DEX before redeeming Taker's swap", side)
 				client.dc().connMaster.Disconnect()
@@ -564,7 +564,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		var isTaker bool
 		for _, match := range tracker.matches {
 			match.swapErr = fmt.Errorf("ditch match")
-			isTaker = match.Match.Side == order.Taker
+			isTaker = match.Side == order.Taker
 			break // only interested in first match
 		}
 		tracker.mtx.RUnlock()
@@ -728,9 +728,9 @@ func TestResendPendingRequests(t *testing.T) {
 		tracker.mtx.Lock()
 		invalidatedMatchIDs := make(map[*matchTracker]order.MatchID, len(tracker.matches))
 		for _, match := range tracker.matches {
-			if match.Match.Side == side {
-				invalidatedMatchIDs[match] = match.id
-				match.id = invalidMid
+			if match.Side == side {
+				invalidatedMatchIDs[match] = match.MatchID
+				match.MatchID = invalidMid
 			}
 			match.swapErr = nil
 		}
@@ -757,7 +757,7 @@ func TestResendPendingRequests(t *testing.T) {
 
 		tracker.mtx.Lock()
 		for match, mid := range invalidatedMatchIDs {
-			match.id = mid
+			match.MatchID = mid
 		}
 		tracker.mtx.Unlock()
 		return nil
@@ -941,8 +941,8 @@ func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, order
 	tracker.mtx.RLock()
 	client.log("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
-			token(match.id.Bytes()), fmtAmt(match.Match.Quantity), unbip(tracker.Base()))
+		client.log("%s on match %s, amount %.8f %s", match.Side.String(),
+			token(match.MatchID.Bytes()), fmtAmt(match.Quantity), unbip(tracker.Base()))
 	}
 	tracker.mtx.RUnlock()
 
@@ -970,7 +970,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 	tracker.mtx.RLock()
 	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
 	for _, match := range tracker.matches {
-		lastProcessedStatus[match.id] = initialStatus
+		lastProcessedStatus[match.MatchID] = initialStatus
 	}
 	tracker.mtx.RUnlock()
 
@@ -981,16 +981,16 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 		tracker.mtx.Lock()
 		defer tracker.mtx.Unlock()
 		for _, match := range tracker.matches {
-			side, status := match.Match.Side, match.Match.Status
+			side, status := match.Side, match.Status
 			if status >= finalStatus {
 				// Prevent further action by blocking the match with a swapErr.
 				match.swapErr = fmt.Errorf("take no further action")
 				completedTrades++
 			}
-			if status == lastProcessedStatus[match.id] || status > finalStatus {
+			if status == lastProcessedStatus[match.MatchID] || status > finalStatus {
 				continue
 			}
-			lastProcessedStatus[match.id] = status
+			lastProcessedStatus[match.MatchID] = status
 			client.log("NOW =====> %s", status)
 
 			var assetToMine *dex.Asset
@@ -1001,7 +1001,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				side == order.Taker && status == order.TakerSwapCast:
 				// Record expected balance changes if we've just sent a swap.
 				// Do NOT mine blocks until counter-party captures status change.
-				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Match.Quantity, match.Match.Rate)
+				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Quantity, match.Rate)
 
 			case side == order.Maker && status == order.TakerSwapCast,
 				side == order.Taker && status == order.MakerSwapCast:
@@ -1012,7 +1012,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 
 			case status == order.MatchComplete, // maker normally jumps MakerRedeemed if 'redeem' succeeds
 				side == order.Maker && status == order.MakerRedeemed:
-				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Match.Quantity, match.Match.Rate)
+				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Quantity, match.Rate)
 				// Mine blocks for redemption since counter-party does not wait
 				// for redeem tx confirmations before performing follow-up action.
 				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
@@ -1030,7 +1030,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 					} else {
 						actor = order.Maker
 					}
-					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.id.Bytes()))
+					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.MatchID.Bytes()))
 				} else {
 					client.log("%s mine error %v", unbip(assetID), err) // return err???
 				}
@@ -1045,13 +1045,13 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 	var incompleteTrades int
 	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
-		if match.Match.Status < finalStatus {
+		if match.Status < finalStatus {
 			incompleteTrades++
 			client.log("incomplete trade: order %s, match %s, status %s, side %s", tracker.token(),
-				token(match.ID()), match.Match.Status, match.Match.Side)
+				token(match.MatchID[:]), match.Status, match.Side)
 		} else {
 			client.log("trade for order %s, match %s monitored successfully till %s, side %s", tracker.token(),
-				token(match.ID()), match.Match.Status, match.Match.Side)
+				token(match.MatchID[:]), match.Status, match.Side)
 		}
 	}
 	tracker.mtx.RUnlock()
@@ -1071,7 +1071,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 
 	hasRefundableSwap := func(match *matchTracker) bool {
 		sentSwap := match.MetaData.Proof.Script != nil
-		noRedeems := match.Match.Status < order.MakerRedeemed
+		noRedeems := match.Status < order.MakerRedeemed
 		return sentSwap && noRedeems
 	}
 
@@ -1086,16 +1086,15 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			continue
 		}
 
-		dbMatch, _, _, auth := match.parts()
-		swapAmt := dbMatch.Quantity
+		swapAmt := match.Quantity
 		if !client.isSeller {
-			swapAmt = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
+			swapAmt = calc.BaseToQuote(match.Rate, match.Quantity)
 		}
 		refundAmts[tracker.wallets.fromAsset.ID] += int64(swapAmt)
 
-		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+		matchTime := match.matchTime()
 		swapLockTime := matchTime.Add(tracker.lockTimeTaker)
-		if dbMatch.Side == order.Maker {
+		if match.Side == order.Maker {
 			swapLockTime = matchTime.Add(tracker.lockTimeMaker)
 		}
 		if swapLockTime.After(furthestLockTime) {

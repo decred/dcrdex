@@ -263,8 +263,7 @@ type TDB struct {
 	activeDEXOrders       []*db.MetaOrder
 	matchesForOID         []*db.MetaMatch
 	matchesForOIDErr      error
-	updateMatchMtx        sync.RWMutex
-	updateMatchChans      map[order.MatchID]chan order.MatchStatus
+	updateMatchChan       chan order.MatchStatus
 	activeMatchOIDs       []order.OrderID
 	activeMatchOIDSErr    error
 	lastStatusID          order.OrderID
@@ -357,38 +356,9 @@ func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
 	return nil
 }
 
-func (tdb *TDB) setUpdateMatchHook(mid order.MatchID, ch chan order.MatchStatus) {
-	tdb.updateMatchMtx.Lock()
-	defer tdb.updateMatchMtx.Unlock()
-	tdb.updateMatchChans[mid] = ch
-}
-
-func (tdb *TDB) waitForMatchUpdateOrFail(mid order.MatchID, t *testing.T) order.MatchStatus {
-	t.Helper()
-	tdb.updateMatchMtx.RLock()
-	updateCh := tdb.updateMatchChans[mid]
-	tdb.updateMatchMtx.RUnlock()
-
-	var latestStatus order.MatchStatus
-	if updateCh == nil {
-		t.Fatalf("tdb is not configured to track db updates for match %v", mid)
-	}
-	select {
-	case latestStatus = <-updateCh:
-	case <-time.After(1 * time.Second):
-		t.Fatalf("no db update for match %v in 1 second", mid)
-	}
-	return latestStatus
-}
-
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
-	// Use RLock as another process might be waiting for this update in
-	// tdb.waitForMatchUpdate, to prevent a deadlock.
-	tdb.updateMatchMtx.RLock()
-	updateCh := tdb.updateMatchChans[m.Match.MatchID]
-	tdb.updateMatchMtx.RUnlock()
-	if updateCh != nil {
-		updateCh <- m.Match.Status
+	if tdb.updateMatchChan != nil {
+		tdb.updateMatchChan <- m.Status
 	}
 	return nil
 }
@@ -783,7 +753,6 @@ func newTestRig() *testRig {
 		existValues: map[string]bool{
 			keyParamsKey: true,
 		},
-		updateMatchChans: map[order.MatchID]chan order.MatchStatus{},
 	}
 
 	ai := &db.AccountInfo{
@@ -1706,10 +1675,9 @@ func TestLogin(t *testing.T) {
 		rig.db, rig.queue, walletSet, nil, rig.core.notify) // nil means no funding coins
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
-		id: matchID,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: matchID},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: matchID},
+			MetaData:  &db.MatchMetaData{},
 		},
 	}
 	tracker.matches[matchID] = match
@@ -1718,10 +1686,9 @@ func TestLogin(t *testing.T) {
 	// Known trade, but missing match
 	missingID := ordertest.RandomMatchID()
 	missingMatch := &matchTracker{
-		id: missingID,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: missingID},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: missingID},
+			MetaData:  &db.MatchMetaData{},
 		},
 	}
 	tracker.matches[missingID] = missingMatch
@@ -1770,16 +1737,14 @@ func TestLogin(t *testing.T) {
 	// matchConflicts (from extras) -> resolveMatchConflicts -> resolveConflictWithServerData
 	// 	-> update match after spawning auditContract
 	// 	-> update match in auditContract (second because of lock) ** the ASYNC one we have to wait for **
-	rig.db.setUpdateMatchHook(missingID, make(chan order.MatchStatus, 1))
-	rig.db.setUpdateMatchHook(extraID, make(chan order.MatchStatus, 3))
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
 	_, err = tCore.Login(tPW) // authDEX -> async contract audit for the extra match
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
 	}
 	// Wait for expected db updates.
-	rig.db.waitForMatchUpdateOrFail(missingID, t)
-	for i := 0; i < 3; i++ {
-		rig.db.waitForMatchUpdateOrFail(extraID, t)
+	for i := 0; i < 4; i++ {
+		<-rig.db.updateMatchChan
 	}
 
 	// check t.metaData.LinkedOrder or for db.LinkOrder call, then db.UpdateOrder call
@@ -1808,7 +1773,7 @@ func TestLogin(t *testing.T) {
 	defer tracker.mtx.Unlock()
 	match = tracker.matches[extraID]
 	if !bytes.Equal(match.MetaData.Proof.CounterContract, missedContract) {
-		t.Errorf("Missed maker contract not retrieved, %s, %s", match.id, hex.EncodeToString(match.MetaData.Proof.CounterContract))
+		t.Errorf("Missed maker contract not retrieved, %s, %s", match, hex.EncodeToString(match.MetaData.Proof.CounterContract))
 	}
 }
 
@@ -2559,10 +2524,9 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify)
 
 	match := &matchTracker{
-		id: mid,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: mid},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: mid},
+			MetaData:  &db.MatchMetaData{},
 		},
 	}
 	tracker.matches[mid] = match
@@ -2630,9 +2594,9 @@ func TestTradeTracking(t *testing.T) {
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
 		t.Helper()
-		if match.Match.Status != wantStatus {
+		if match.Status != wantStatus {
 			t.Fatalf("%s: wrong status wanted %v, got %v", tag,
-				wantStatus, match.Match.Status)
+				wantStatus, match.Status)
 		}
 	}
 
@@ -2665,16 +2629,14 @@ func TestTradeTracking(t *testing.T) {
 		name                 string
 		fn                   func() error
 		expectError          bool
-		expectMatchDBUpdates map[order.MatchID]int
+		expectMatchDBUpdates int
 		expectSwapErrorNote  bool
 	}
 	testSwapRelatedAction := func(action swapRelatedAction) {
 		t.Helper()
 		drainNotes() // clear previous (swap error) notes before exec'ing swap-related action
-		for mid, nMatchDBUpdate := range action.expectMatchDBUpdates {
-			if nMatchDBUpdate > 0 {
-				rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, nMatchDBUpdate))
-			}
+		if action.expectMatchDBUpdates > 0 {
+			rig.db.updateMatchChan = make(chan order.MatchStatus, action.expectMatchDBUpdates)
 		}
 		// Try the action and confirm the behaviour is as expected.
 		err := action.fn()
@@ -2684,12 +2646,10 @@ func TestTradeTracking(t *testing.T) {
 			t.Fatalf("%s: unexpected error: %v", action.name, err)
 		}
 		// Check that we received the expected number of match db updates.
-		for mid, nMatchDBUpdate := range action.expectMatchDBUpdates {
-			for i := 0; i < nMatchDBUpdate; i++ {
-				rig.db.waitForMatchUpdateOrFail(mid, t)
-			}
-			rig.db.setUpdateMatchHook(mid, nil)
+		for i := 0; i < action.expectMatchDBUpdates; i++ {
+			<-rig.db.updateMatchChan
 		}
+		rig.db.updateMatchChan = nil
 		// Check that we received a swap error note (if expected), and that
 		// no error note was received, if not expected.
 		time.Sleep(100 * time.Millisecond) // wait briefly as swap error notes may be sent from a goroutine
@@ -2741,7 +2701,7 @@ func TestTradeTracking(t *testing.T) {
 			return handleMatchRoute(tCore, rig.dc, msg)
 		},
 		expectError:          false,
-		expectMatchDBUpdates: map[order.MatchID]int{mid: 2},
+		expectMatchDBUpdates: 2,
 		expectSwapErrorNote:  true,
 	})
 
@@ -2753,8 +2713,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// We're the maker, so the init transaction should be broadcast.
 	checkStatus("maker swapped", order.MakerSwapCast)
-	_, metaData := match.Match, match.MetaData
-	proof, auth := &metaData.Proof, &metaData.Proof.Auth
+	proof, auth := &match.MetaData.Proof, &match.MetaData.Proof.Auth
 	if len(auth.MatchSig) == 0 {
 		t.Fatalf("no match sig recorded")
 	}
@@ -2782,7 +2741,7 @@ func TestTradeTracking(t *testing.T) {
 			return nil
 		},
 		expectError:          false,
-		expectMatchDBUpdates: nil,  // no db update for invalid init ack
+		expectMatchDBUpdates: 0,    // no db update for invalid init ack
 		expectSwapErrorNote:  true, // expect swap error note for invalid init ack
 	})
 	// auth.InitSig should remain unset because our resent init request
@@ -2801,8 +2760,8 @@ func TestTradeTracking(t *testing.T) {
 			return nil
 		},
 		expectError:          false,
-		expectMatchDBUpdates: map[order.MatchID]int{mid: 1}, // expect db update for valid init ack
-		expectSwapErrorNote:  false,                         // no swap error note for valid init ack
+		expectMatchDBUpdates: 1,     // expect db update for valid init ack
+		expectSwapErrorNote:  false, // no swap error note for valid init ack
 	})
 	// auth.InitSig should now be set because our init request received
 	// a valid ack
@@ -2867,13 +2826,13 @@ func TestTradeTracking(t *testing.T) {
 	auditInfo.Expiration = matchTime.Add(tracker.lockTimeTaker)
 
 	// success, full handleAuditRoute>processAuditMsg>auditContract
-	rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, 1))
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
 	// let the async auditContract run
-	newMatchStatus := rig.db.waitForMatchUpdateOrFail(mid, t)
+	newMatchStatus := <-rig.db.updateMatchChan
 	if newMatchStatus != order.TakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
@@ -2886,7 +2845,7 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.TakerSwap, audit.CoinID) {
 		t.Fatalf("taker contract ID not set")
 	}
-	rig.db.waitForMatchUpdateOrFail(mid, t) // AuditSig is set in a second match data update
+	<-rig.db.updateMatchChan // AuditSig is set in a second match data update
 	if !bytes.Equal(auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set")
 	}
@@ -2901,13 +2860,13 @@ func TestTradeTracking(t *testing.T) {
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 	tCore.tickAsset(dc, tBTC.ID)
-	// TakerSwapCast -> MakerRedeem update (after bcasting redeem)
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	// TakerSwapCast -> MakerRedeemed after broadcast, before redeem request
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MakerRedeemed {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MakerRedeemed, newMatchStatus)
 	}
-	// MakerRedeem -> MatchComplete update (after maker's redeem ack is received with valid sig)
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	// MakerRedeem -> MatchComplete after redeem request
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MatchComplete {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MatchComplete, newMatchStatus)
 	}
@@ -2925,7 +2884,7 @@ func TestTradeTracking(t *testing.T) {
 	if tracker.metaData.RedemptionFeesPaid != tRedemptionFeesPaid {
 		t.Fatalf("wrong fees recorded for redemption. expected %d, got %d", tRedemptionFeesPaid, tracker.metaData.SwapFeesPaid)
 	}
-	rig.db.setUpdateMatchHook(mid, nil)
+	rig.db.updateMatchChan = nil
 
 	// TAKER MATCH
 	//
@@ -2941,7 +2900,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
-	rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, 1))
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
@@ -2950,12 +2909,11 @@ func TestTradeTracking(t *testing.T) {
 	if !found {
 		t.Fatalf("match not found")
 	}
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.NewlyMatched {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.NewlyMatched, newMatchStatus)
 	}
-	_, metaData = match.Match, match.MetaData
-	proof, auth = &metaData.Proof, &metaData.Proof.Auth
+	proof, auth = &match.MetaData.Proof, &match.MetaData.Proof.Auth
 	if len(auth.MatchSig) == 0 {
 		t.Fatalf("no match sig recorded")
 	}
@@ -2985,7 +2943,7 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 	// let the async auditContract run, updating match status
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MakerSwapCast, newMatchStatus)
 	}
@@ -2995,7 +2953,7 @@ func TestTradeTracking(t *testing.T) {
 	if !bytes.Equal(proof.MakerSwap, audit.CoinID) {
 		t.Fatalf("maker redeem coin not set")
 	}
-	rig.db.waitForMatchUpdateOrFail(mid, t) // AuditSig is set in a second match data update
+	<-rig.db.updateMatchChan // AuditSig is set in a second match data update
 	if !bytes.Equal(auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set for taker")
 	}
@@ -3013,14 +2971,14 @@ func TestTradeTracking(t *testing.T) {
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	tCore.tickAsset(dc, tBTC.ID)
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t) // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
+	newMatchStatus = <-rig.db.updateMatchChan // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
 	if newMatchStatus != order.TakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
 	}
-	rig.db.waitForMatchUpdateOrFail(mid, t) // init ack sig is set in a second match data update
+	<-rig.db.updateMatchChan // init ack sig is set in a second match data update
 	if len(auth.InitSig) == 0 {
 		t.Fatalf("init ack sig not set for taker")
 	}
@@ -3044,8 +3002,8 @@ func TestTradeTracking(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t) // wrong secret still updates match
-	if newMatchStatus != order.TakerSwapCast {               // but status is same
+	newMatchStatus = <-rig.db.updateMatchChan  // wrong secret still updates match
+	if newMatchStatus != order.TakerSwapCast { // but status is same
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
 	tBtcWallet.badSecret = false
@@ -3060,13 +3018,13 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("should have worked, got: %v", err)
 	}
-	// For taker, there's one status update to MakerRedeemed on processRedemption
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	// For taker, there's one status update to MakerRedeemed prior to bcasting taker's redemption
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MakerRedeemed {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MakerRedeemed, newMatchStatus)
 	}
 	// and another status update to MatchComplete when taker's redemption is bcast
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t)
+	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MatchComplete {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MatchComplete, newMatchStatus)
 	}
@@ -3078,11 +3036,11 @@ func TestTradeTracking(t *testing.T) {
 	}
 	// Then a match update to set the redeem ack sig when the 'redeem' request back
 	// to the server succeeds.
-	rig.db.waitForMatchUpdateOrFail(mid, t)
+	<-rig.db.updateMatchChan
 	if len(auth.RedeemSig) == 0 {
 		t.Fatalf("redeem ack sig not set for taker")
 	}
-	rig.db.setUpdateMatchHook(mid, nil)
+	rig.db.updateMatchChan = nil
 	tBtcWallet.redeemErrChan = nil
 
 	// CANCEL ORDER MATCH
@@ -3400,21 +3358,21 @@ func TestRefunds(t *testing.T) {
 	defer rig.shutdown()
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
-		if match.Match.Status != wantStatus {
-			t.Fatalf("%s: wrong status wanted %v, got %v", tag, wantStatus, match.Match.Status)
+		if match.Status != wantStatus {
+			t.Fatalf("%s: wrong status wanted %v, got %v", tag, wantStatus, match.Status)
 		}
 	}
 	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
 		t.Helper()
 		// Confirm that the status is SwapCast.
-		if match.Match.Side == order.Maker {
+		if match.Side == order.Maker {
 			checkStatus("maker swapped", match, order.MakerSwapCast)
 		} else {
 			checkStatus("taker swapped", match, order.TakerSwapCast)
 		}
 		// Confirm isRefundable = true.
 		if !tracker.isRefundable(match) {
-			t.Fatalf("%s's swap not refundable", match.Match.Side)
+			t.Fatalf("%s's swap not refundable", match.Side)
 		}
 		// Check refund.
 		amtRefunded, err := tracker.refundMatches([]*matchTracker{match})
@@ -3427,7 +3385,7 @@ func TestRefunds(t *testing.T) {
 		}
 		// Confirm isRefundable = false.
 		if tracker.isRefundable(match) {
-			t.Fatalf("%s's swap refundable after being refunded", match.Match.Side)
+			t.Fatalf("%s's swap refundable after being refunded", match.Side)
 		}
 		// Expect refund re-attempt to not refund any coin.
 		amtRefunded, err = tracker.refundMatches([]*matchTracker{match})
@@ -3438,7 +3396,7 @@ func TestRefunds(t *testing.T) {
 			t.Fatalf("expected 0 refund amount, got %d", amtRefunded)
 		}
 		// Confirm that the status is unchanged.
-		if match.Match.Side == order.Maker {
+		if match.Side == order.Maker {
 			checkStatus("maker swapped", match, order.MakerSwapCast)
 		} else {
 			checkStatus("taker swapped", match, order.TakerSwapCast)
@@ -3561,7 +3519,7 @@ func TestRefunds(t *testing.T) {
 	}
 	checkStatus("taker matched", match, order.NewlyMatched)
 	// Send through the audit request for the maker's init.
-	rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, 1))
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
@@ -3572,11 +3530,11 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 	// let the async auditContract run, updating match status
-	newMatchStatus := rig.db.waitForMatchUpdateOrFail(mid, t)
+	newMatchStatus := <-rig.db.updateMatchChan
 	if newMatchStatus != order.MakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.MakerSwapCast, newMatchStatus)
 	}
-	rig.db.waitForMatchUpdateOrFail(mid, t) // AuditSig set in second update to match data
+	<-rig.db.updateMatchChan // AuditSig set in second update to match data
 	tracker.mtx.RLock()
 	if !bytes.Equal(match.MetaData.Proof.Auth.AuditSig, audit.Sig) {
 		t.Fatalf("audit sig not set for taker")
@@ -3589,7 +3547,7 @@ func TestRefunds(t *testing.T) {
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	tCore.tickAsset(dc, tBTC.ID)
-	newMatchStatus = rig.db.waitForMatchUpdateOrFail(mid, t) // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
+	newMatchStatus = <-rig.db.updateMatchChan // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
 	if newMatchStatus != order.TakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
@@ -3598,9 +3556,20 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("invalid contract recorded for Taker swap")
 	}
 	tracker.mtx.RUnlock()
+	// still takerswapcast, but with initsig
+	newMatchStatus = <-rig.db.updateMatchChan
+	if newMatchStatus != order.TakerSwapCast {
+		t.Fatalf("wrong match status wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
+	}
+	tracker.mtx.RLock()
+	auth := &match.MetaData.Proof.Auth
+	if len(auth.InitSig) == 0 {
+		t.Fatalf("init sig not recorded for valid init ack")
+	}
+	tracker.mtx.RUnlock()
 
 	// Attempt refund.
-	rig.db.setUpdateMatchHook(mid, nil)
+	rig.db.updateMatchChan = nil
 	checkRefund(tracker, match, matchSize)
 }
 
@@ -3677,7 +3646,6 @@ func TestResolveActiveTrades(t *testing.T) {
 	addr := ordertest.RandomAddress()
 	match := &db.MetaMatch{
 		MetaData: &db.MatchMetaData{
-			Status: order.MakerSwapCast,
 			Proof: db.MatchProof{
 				CounterContract: encode.RandomBytes(50),
 				SecretHash:      encode.RandomBytes(32),
@@ -3690,7 +3658,7 @@ func TestResolveActiveTrades(t *testing.T) {
 			Base:  tDCR.ID,
 			Quote: tBTC.ID,
 		},
-		Match: &order.UserMatch{
+		UserMatch: &order.UserMatch{
 			OrderID:  oid,
 			MatchID:  mid,
 			Quantity: qty - tDCR.LotSize,
@@ -3718,7 +3686,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	ensureGood := func(tag string, expCoinsLoaded int) {
 		t.Helper()
 		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
-			tag, match.Match.Side, dbOrder.MetaData.Status, match.Match.Status)
+			tag, match.Side, dbOrder.MetaData.Status, match.Status)
 		_, err := tCore.Login(tPW)
 		if err != nil {
 			t.Fatalf("%s: login error: %v", description, err)
@@ -3860,11 +3828,11 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	for _, tt := range tests {
 		for _, side := range tt.side {
-			match.Match.Side = side
+			match.Side = side
 			for _, orderStatus := range tt.orderStatuses {
 				dbOrder.MetaData.Status = orderStatus
 				for _, matchStatus := range tt.matchStatuses {
-					match.Match.Status = matchStatus
+					match.Status = matchStatus
 					ensureGood(tt.name, tt.expectedCoins)
 				}
 			}
@@ -3905,10 +3873,9 @@ func TestCompareServerMatches(t *testing.T) {
 	// Known trade, and known match
 	knownID := ordertest.RandomMatchID()
 	knownMatch := &matchTracker{
-		id: knownID,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: knownID},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: knownID},
+			MetaData:  &db.MatchMetaData{},
 		},
 		counterConfirms: -1,
 	}
@@ -3918,10 +3885,9 @@ func TestCompareServerMatches(t *testing.T) {
 	// Known trade, but missing match
 	missingID := ordertest.RandomMatchID()
 	missingMatch := &matchTracker{
-		id: missingID,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: missingID},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: missingID},
+			MetaData:  &db.MatchMetaData{},
 		},
 	}
 	tracker.matches[missingID] = missingMatch
@@ -3938,10 +3904,9 @@ func TestCompareServerMatches(t *testing.T) {
 	// an active match for the missing trade
 	matchIDMissing := ordertest.RandomMatchID()
 	missingTradeMatch := &matchTracker{
-		id: matchIDMissing,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: matchIDMissing},
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: matchIDMissing},
+			MetaData:  &db.MatchMetaData{},
 		},
 		counterConfirms: -1,
 	}
@@ -3950,12 +3915,11 @@ func TestCompareServerMatches(t *testing.T) {
 	matchIDMissingInactive := ordertest.RandomMatchID()
 	missingTradeMatchInactive := &matchTracker{
 		MetaMatch: db.MetaMatch{
-			Match: &order.UserMatch{
+			UserMatch: &order.UserMatch{
 				MatchID: matchIDMissingInactive,
 				Status:  order.MatchComplete,
 			},
 			MetaData: &db.MatchMetaData{
-				Status: order.MatchComplete,
 				Proof: db.MatchProof{
 					Auth: db.MatchAuth{
 						RedeemSig: []byte{1, 2, 3}, // won't be considered complete with out it
@@ -3995,8 +3959,8 @@ func TestCompareServerMatches(t *testing.T) {
 	if len(exc.missing) != 1 {
 		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
-	if exc.missing[0].id != missingID {
-		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+	if exc.missing[0].MatchID != missingID {
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].MatchID, missingID)
 	}
 	if len(exc.extra) != 1 {
 		t.Fatalf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
@@ -4015,8 +3979,8 @@ func TestCompareServerMatches(t *testing.T) {
 	if len(exc.missing) != 1 { // no matchIDMissingInactive
 		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
-	if exc.missing[0].id != matchIDMissing {
-		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+	if exc.missing[0].MatchID != matchIDMissing {
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].MatchID, matchIDMissing)
 	}
 	if len(exc.extra) != 0 {
 		t.Fatalf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
@@ -4280,10 +4244,8 @@ func TestLogout(t *testing.T) {
 	mid := ordertest.RandomMatchID()
 	tracker.matches[mid] = &matchTracker{
 		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{
-				Status: order.NewlyMatched,
-			},
-			Match: &order.UserMatch{
+			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{
 				OrderID: ord.ID(),
 				MatchID: mid,
 				Status:  order.NewlyMatched,
@@ -4602,10 +4564,9 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	// Make sure the coin isn't returned if there are unswapped matches.
 	mid := ordertest.RandomMatchID()
 	match := &matchTracker{
-		id: mid,
 		MetaMatch: db.MetaMatch{
-			Match:    &order.UserMatch{MatchID: mid}, // Default status = NewlyMatched
-			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{MatchID: mid}, // Default status = NewlyMatched
+			MetaData:  &db.MatchMetaData{},
 		},
 		counterConfirms: -1,
 	}
@@ -5306,10 +5267,9 @@ func TestMatchStatusResolution(t *testing.T) {
 	matchID := ordertest.RandomMatchID()
 	matchTime := time.Now()
 	match := &matchTracker{
-		id: matchID,
 		MetaMatch: db.MetaMatch{
 			MetaData: &db.MatchMetaData{},
-			Match: &order.UserMatch{
+			UserMatch: &order.UserMatch{
 				MatchID: matchID,
 				Address: addr,
 			},
@@ -5327,7 +5287,7 @@ func TestMatchStatusResolution(t *testing.T) {
 				OrderID: oid[:],
 				MatchID: matchID[:],
 				Status:  uint8(status),
-				Side:    uint8(match.Match.Side),
+				Side:    uint8(match.Side),
 			},
 		}
 
@@ -5338,7 +5298,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	tTxData := encode.RandomBytes(1)
 
 	setAuthSigs := func(status order.MatchStatus) {
-		isMaker := match.Match.Side == order.Maker
+		isMaker := match.Side == order.Maker
 		match.MetaData.Proof.Auth = db.MatchAuth{}
 		auth := &match.MetaData.Proof.Auth
 		auth.MatchStamp = encode.UnixMilliU(matchTime)
@@ -5374,8 +5334,8 @@ func TestMatchStatusResolution(t *testing.T) {
 
 	// Call setProof before setAuthSigs
 	setProof := func(status order.MatchStatus) {
-		isMaker := match.Match.Side == order.Maker
-		match.SetStatus(status)
+		isMaker := match.Side == order.Maker
+		match.Status = status
 		match.MetaData.Proof = db.MatchProof{}
 		proof := &match.MetaData.Proof
 
@@ -5459,7 +5419,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	}
 
 	runTest := func(tt *test) order.MatchStatus {
-		match.Match.Side = tt.side
+		match.Side = tt.side
 		setLocalMatchStatus(tt.ours, tt.servers)
 		setMatchResults(tt.servers)
 		if tt.tweaker != nil {
@@ -5472,17 +5432,17 @@ func TestMatchStatusResolution(t *testing.T) {
 			return nil
 		})
 		if tt.countStatusUpdates > 0 {
-			rig.db.setUpdateMatchHook(match.id, make(chan order.MatchStatus, tt.countStatusUpdates))
+			rig.db.updateMatchChan = make(chan order.MatchStatus, tt.countStatusUpdates)
 		}
 		if err := tCore.authDEX(dc); err != nil {
 			t.Fatalf("unexpected authDEX error: %v", err)
 		}
 		for i := 0; i < tt.countStatusUpdates; i++ {
-			rig.db.waitForMatchUpdateOrFail(match.id, t)
+			<-rig.db.updateMatchChan
 		}
-		rig.db.setUpdateMatchHook(match.id, nil)
+		rig.db.updateMatchChan = nil
 		trade.mtx.Lock()
-		newStatus := match.MetaData.Status
+		newStatus := match.Status
 		trade.mtx.Unlock()
 		return newStatus
 	}
@@ -5725,19 +5685,18 @@ func TestMatchStatusResolution(t *testing.T) {
 	// Run two matches for the same order.
 	match2ID := ordertest.RandomMatchID()
 	match2 := &matchTracker{
-		id: match2ID,
 		MetaMatch: db.MetaMatch{
 			MetaData: &db.MatchMetaData{},
-			Match: &order.UserMatch{
-				Address: addr,
+			UserMatch: &order.UserMatch{
 				MatchID: match2ID,
+				Address: addr,
 			},
 		},
 	}
 	trade.matches[match2ID] = match2
 	setAuthSigs(order.NewlyMatched)
 	setProof(order.NewlyMatched)
-	match2.Match.Side = order.Taker
+	match2.Side = order.Taker
 	match2.MetaData.Proof = match.MetaData.Proof
 
 	srvMatches := connectMatches(order.MakerSwapCast)
@@ -5758,16 +5717,14 @@ func TestMatchStatusResolution(t *testing.T) {
 		return nil
 	})
 	// 2 matches resolved via contract audit: 2 synchronous updates, 2 async
-	rig.db.setUpdateMatchHook(match.id, make(chan order.MatchStatus, 2))
-	rig.db.setUpdateMatchHook(match2.id, make(chan order.MatchStatus, 2))
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
 	tCore.authDEX(dc)
-	for i := 0; i < 2; i++ {
-		rig.db.waitForMatchUpdateOrFail(match.id, t)
-		rig.db.waitForMatchUpdateOrFail(match2.id, t)
+	for i := 0; i < 4; i++ {
+		<-rig.db.updateMatchChan
 	}
 	trade.mtx.Lock()
-	newStatus1 := match.MetaData.Status
-	newStatus2 := match2.MetaData.Status
+	newStatus1 := match.Status
+	newStatus2 := match2.Status
 	trade.mtx.Unlock()
 	if newStatus1 != order.MakerSwapCast {
 		t.Fatalf("wrong status for match 1: %s", newStatus1)
@@ -5797,9 +5754,7 @@ func TestSuspectTrades(t *testing.T) {
 	dc.trades[oid] = tracker
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
-		mid := ordertest.RandomMatchID()
 		return &matchTracker{
-			id:     mid,
 			prefix: lo.Prefix(),
 			trade:  lo.Trade(),
 			MetaMatch: db.MetaMatch{
@@ -5810,10 +5765,9 @@ func TestSuspectTrades(t *testing.T) {
 							AuditStamp: encode.UnixMilliU(time.Now()),
 						},
 					},
-					Status: status,
 				},
-				Match: &order.UserMatch{
-					MatchID: mid,
+				UserMatch: &order.UserMatch{
+					MatchID: ordertest.RandomMatchID(),
 					Side:    side,
 					Address: ordertest.RandomAddress(),
 					Status:  status,
@@ -5828,17 +5782,17 @@ func TestSuspectTrades(t *testing.T) {
 		swappableMatch2 = newMatch(order.Taker, order.MakerSwapCast)
 
 		// Set counterswaps for both swaps.
-		_, auditInfo := tMsgAudit(oid, swappableMatch2.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
+		_, auditInfo := tMsgAudit(oid, swappableMatch2.MatchID, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
 		tBtcWallet.setConfs(auditInfo.Coin.ID(), tDCR.SwapConf, nil)
 		swappableMatch2.counterSwap = auditInfo
-		_, auditInfo = tMsgAudit(oid, swappableMatch1.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
+		_, auditInfo = tMsgAudit(oid, swappableMatch1.MatchID, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
 		tBtcWallet.setConfs(auditInfo.Coin.ID(), tDCR.SwapConf, nil)
 		swappableMatch1.counterSwap = auditInfo
 
 		tDcrWallet.swapCounter = 0
 		tracker.matches = map[order.MatchID]*matchTracker{
-			swappableMatch1.id: swappableMatch1,
-			swappableMatch2.id: swappableMatch2,
+			swappableMatch1.MatchID: swappableMatch1,
+			swappableMatch2.MatchID: swappableMatch2,
 		}
 	}
 	setSwaps()
@@ -5899,13 +5853,13 @@ func TestSuspectTrades(t *testing.T) {
 	setRedeems := func() {
 		redeemableMatch1 = newMatch(order.Maker, order.TakerSwapCast)
 		redeemableMatch2 = newMatch(order.Taker, order.MakerRedeemed)
-		_, auditInfo := tMsgAudit(oid, redeemableMatch1.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
+		_, auditInfo := tMsgAudit(oid, redeemableMatch1.MatchID, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
 		tBtcWallet.setConfs(auditInfo.Coin.ID(), tBTC.SwapConf, nil)
 		redeemableMatch1.counterSwap = auditInfo
 		tBtcWallet.redeemCounter = 0
 		tracker.matches = map[order.MatchID]*matchTracker{
-			redeemableMatch1.id: redeemableMatch1,
-			redeemableMatch2.id: redeemableMatch2,
+			redeemableMatch1.MatchID: redeemableMatch1,
+			redeemableMatch2.MatchID: redeemableMatch2,
 		}
 		rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
 		rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)

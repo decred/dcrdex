@@ -507,7 +507,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				extra = append(extra, msgMatch)
 				continue
 			}
-			if mt.Match.Status != order.MatchStatus(msgMatch.Status) {
+			if mt.Status != order.MatchStatus(msgMatch.Status) {
 				conflict := statusConflicts[oid]
 				if conflict == nil {
 					conflict = &matchStatusConflict{trade: match.tracker}
@@ -563,7 +563,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 		// matches for this trade.
 		var missing []*matchTracker
 		for _, match := range activeMatches { // each local match
-			if !in(tradeMatches.msgMatches, match.id[:]) { // against reported matches
+			if !in(tradeMatches.msgMatches, match.MatchID[:]) { // against reported matches
 				missing = append(missing, match)
 			}
 		}
@@ -3213,7 +3213,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
 			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
-				dc.acct.host, match.id, oid)
+				dc.acct.host, match, oid)
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
 			match.MetaData.Proof.SelfRevoked = true
@@ -3257,7 +3257,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 							continue
 						}
 						c.log.Infof("Queueing match status resolution for newly discovered match %v (%s) "+
-							"as taker to MakerSwapCast status.", matchID, match.Match.Status) // had better be NewlyMatched!
+							"as taker to MakerSwapCast status.", matchID, match.Status) // had better be NewlyMatched!
 
 						oid := trade.ID()
 						conflicts := matchConflicts[oid]
@@ -3599,12 +3599,11 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		for _, dbMatch := range dbMatches {
 			// Only trade matches are added to the matches map. Detect and skip
 			// cancel order matches, which have an empty Address field.
-			if dbMatch.Match.Address == "" {
+			if dbMatch.Address == "" {
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
 				continue
 			}
-			tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
-				id:        dbMatch.Match.MatchID,
+			tracker.matches[dbMatch.MatchID] = &matchTracker{
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
@@ -3783,42 +3782,41 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
 		var matchesNeedingCoins []*matchTracker
 		for _, match := range tracker.matches {
-			dbMatch, metaData := match.Match, match.MetaData
 			var needsAuditInfo bool
 			var counterSwap []byte
-			if dbMatch.Side == order.Maker {
-				if dbMatch.Status < order.MakerSwapCast {
+			if match.Side == order.Maker {
+				if match.Status < order.MakerSwapCast {
 					matchesNeedingCoins = append(matchesNeedingCoins, match)
 				}
-				if dbMatch.Status == order.TakerSwapCast {
+				if match.Status == order.TakerSwapCast {
 					needsAuditInfo = true // maker needs AuditInfo for takers contract
-					counterSwap = metaData.Proof.TakerSwap
+					counterSwap = match.MetaData.Proof.TakerSwap
 				}
 			} else { // Taker
-				if dbMatch.Status < order.TakerSwapCast {
+				if match.Status < order.TakerSwapCast {
 					matchesNeedingCoins = append(matchesNeedingCoins, match)
 				}
-				if dbMatch.Status < order.MatchComplete && dbMatch.Status >= order.MakerSwapCast {
+				if match.Status < order.MatchComplete && match.Status >= order.MakerSwapCast {
 					needsAuditInfo = true // taker needs AuditInfo for maker's contract
-					counterSwap = metaData.Proof.MakerSwap
+					counterSwap = match.MetaData.Proof.MakerSwap
 				}
 			}
 			c.log.Tracef("Trade %v match %v needs coins = %v, needs audit info = %v",
-				tracker.ID(), match.id, len(matchesNeedingCoins) > 0, needsAuditInfo)
+				tracker.ID(), match.MatchID, len(matchesNeedingCoins) > 0, needsAuditInfo)
 			if needsAuditInfo {
 				// Check for unresolvable states.
 				if len(counterSwap) == 0 {
-					match.swapErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match.id)
-					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap coin.", dbMatch.Side, tracker.token(), dbMatch.Status)
+					match.swapErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match)
+					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap coin.", match.Side, tracker.token(), match.Status)
 					continue
 				}
-				counterContract := metaData.Proof.CounterContract
+				counterContract := match.MetaData.Proof.CounterContract
 				if len(counterContract) == 0 {
-					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match.id)
-					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", dbMatch.Side, tracker.token(), dbMatch.Status)
+					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match)
+					notifyErr(SubjectMatchStatusError, "Match %s for order %s is in state %s, but has no maker swap contract.", match.Side, tracker.token(), match.Status)
 					continue
 				}
-				counterTxData := metaData.Proof.CounterTxData
+				counterTxData := match.MetaData.Proof.CounterTxData
 
 				// Obtaining AuditInfo will fail if it's unmined AND gone from
 				// mempool, or the wallet is otherwise not ready. Note that this
@@ -3840,7 +3838,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						if err != nil {
 							match.swapErr = fmt.Errorf("audit error: %w", err)
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
-								match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0,
+								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)
 							notifyErr(SubjectMatchRecoveryError, "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
 								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)

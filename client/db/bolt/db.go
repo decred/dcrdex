@@ -766,7 +766,7 @@ func (db *BoltDB) ordersUpdate(f bucketFunc) error {
 // UpdateMatch updates the match information in the database. Any existing
 // entry for the same match ID will be overwritten without indication.
 func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
-	match, md := m.Match, m.MetaData
+	match, md := m.UserMatch, m.MetaData
 	if md.Quote == md.Base {
 		return fmt.Errorf("quote and base asset cannot be the same")
 	}
@@ -774,7 +774,7 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		return fmt.Errorf("empty DEX not allowed")
 	}
 	return db.matchesUpdate(func(master *bbolt.Bucket) error {
-		metaID := m.ID()
+		metaID := m.MatchOrderUniqueID()
 		mBkt, err := master.CreateBucketIfNotExists(metaID)
 		if err != nil {
 			return fmt.Errorf("order bucket error: %w", err)
@@ -782,7 +782,7 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		return newBucketPutter(mBkt).
 			put(baseKey, uint32Bytes(md.Base)).
 			put(quoteKey, uint32Bytes(md.Quote)).
-			put(statusKey, []byte{byte(md.Status)}).
+			put(statusKey, []byte{byte(match.Status)}).
 			put(dexKey, []byte(md.DEX)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
@@ -931,20 +931,15 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 				if err != nil {
 					return fmt.Errorf("error decoding proof: %w", err)
 				}
-				statusB := mBkt.Get(statusKey)
-				if len(statusB) != 1 {
-					return fmt.Errorf("expected status length 1, got %d", len(statusB))
-				}
 				matches = append(matches, &dexdb.MetaMatch{
 					MetaData: &dexdb.MatchMetaData{
-						Proof:  *proof,
-						Status: order.MatchStatus(statusB[0]),
-						DEX:    string(getCopy(mBkt, dexKey)),
-						Base:   intCoder.Uint32(mBkt.Get(baseKey)),
-						Quote:  intCoder.Uint32(mBkt.Get(quoteKey)),
-						Stamp:  intCoder.Uint64(mBkt.Get(stampKey)),
+						Proof: *proof,
+						DEX:   string(getCopy(mBkt, dexKey)),
+						Base:  intCoder.Uint32(mBkt.Get(baseKey)),
+						Quote: intCoder.Uint32(mBkt.Get(quoteKey)),
+						Stamp: intCoder.Uint64(mBkt.Get(stampKey)),
 					},
-					Match: match,
+					UserMatch: match,
 				})
 			}
 			return nil
