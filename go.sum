@@ -102,8 +102,8 @@ github.com/gcash/bchutil v0.0.0-20191012211144-98e73ec336ba/go.mod h1:nUIrcbbtEQ
 github.com/gcash/bchutil v0.0.0-20200506001747-c2894cd54b33/go.mod h1:wB++2ZcHUvGLN1OgO9swBmJK1vmyshJLW9SNS+apXwc=
 github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000 h1:vVi7Ym3I9T4ZKhQy0/XLKzS3xAqX4K+/cSAmnvMR+HM=
 github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000/go.mod h1:H2USFGwtiu6CNMxiVQPqZkDzsoVSt9BLNqTfBBqGXRo=
-github.com/go-chi/chi v1.5.1 h1:kfTK3Cxd/dkMu/rKs5ZceWYp+t5CtiE7vmaTv3LjC6w=
-github.com/go-chi/chi v1.5.1/go.mod h1:REp24E+25iKvxgeTfHmdUoL5x15kBiDBlnIl5bCwe2k=
+github.com/go-chi/chi/v5 v5.0.1 h1:ALxjCrTf1aflOlkhMnCUP86MubbWFrzB3gkRPReLpTo=
+github.com/go-chi/chi/v5 v5.0.1/go.mod h1:DslCQbL2OYiznFReuXYUmQ2hGd1aDpCnlMNITLSKoi8=
 github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b/go.mod h1:SBH7ygxi8pfUlaOkMMuAQtPIUF8ecWP5IEl/CR7VP2Q=
 github.com/golang/mock v1.1.1/go.mod h1:oTYuIxOrZwtPieC+H1uAHpcLFnEyAGVDL/k47Jfbm0A=
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=

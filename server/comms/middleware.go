@@ -13,7 +13,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 type contextKey int

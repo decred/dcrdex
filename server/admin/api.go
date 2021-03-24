@@ -20,7 +20,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/market"
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 const (

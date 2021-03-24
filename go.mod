@@ -26,7 +26,7 @@ require (
 	github.com/decred/slog v1.1.0
 	github.com/gcash/bchd v0.17.2-0.20201218180520-5708823e0e99
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
-	github.com/go-chi/chi v1.5.1
+	github.com/go-chi/chi/v5 v5.0.1
 	github.com/gorilla/websocket v1.4.2
 	github.com/jessevdk/go-flags v1.4.1-0.20200711081900-c17162fe8fd7
 	github.com/jrick/logrotate v1.0.0
