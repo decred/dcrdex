@@ -67,6 +67,8 @@ type WalletConfig struct {
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
+	// It should be assumed that once disconnected, subsequent Connect calls
+	// will fail, requiring a new Wallet instance.
 	dex.Connector
 	// Info returns a set of basic information about the wallet.
 	Info() *WalletInfo

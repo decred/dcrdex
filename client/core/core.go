@@ -1796,27 +1796,28 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 			assetID, unbip(assetID), err)
 	}
 
-	isSettingNewPW := newWalletPW != nil // Includes empty but non-nil
-	// If newWalletPW is non-nil, update the wallet's password.
-	if isSettingNewPW {
-		err = c.setWalletPassword(wallet, newWalletPW, crypter)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Must connect to ensure settings are good.
+	// Must connect to ensure settings are good. This comes before
+	// setWalletPassword since it would use connectAndUpdateWallet, which
+	// performs additional deposit address validation and balance updates that
+	// are redundant with the rest of this function.
 	dbWallet.Address, err = c.connectWallet(wallet)
 	if err != nil {
 		return err
 	}
 
-	// If the password was not changed, carry over any cached password
-	// regardless of backend lock state. loadWallet already copied encPW, so
-	// this will decrypt pw rather than actually copying it, and it will
-	// ensure the backend is also unlocked.
-	if !isSettingNewPW && oldWallet.locallyUnlocked() {
-		err := wallet.Unlock(crypter)
+	// If newWalletPW is non-nil, update the wallet's password.
+	if newWalletPW != nil { // includes empty non-nil slice
+		err = c.setWalletPassword(wallet, newWalletPW, crypter)
+		if err != nil {
+			wallet.Disconnect()
+			return err
+		}
+	} else if oldWallet.locallyUnlocked() {
+		// If the password was not changed, carry over any cached password
+		// regardless of backend lock state. loadWallet already copied encPW, so
+		// this will decrypt pw rather than actually copying it, and it will
+		// ensure the backend is also unlocked.
+		err := wallet.Unlock(crypter) // decrypt encPW if set and unlock the backend
 		if err != nil {
 			wallet.Disconnect()
 			return newError(walletAuthErr, "wallet successfully connected, but failed to unlock. "+
@@ -1895,8 +1896,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	return nil
 }
 
-// SetWalletPassword updates the (encrypted) password for the wallet.
-// Returns passwordErr if provided newPW is nil.
+// SetWalletPassword updates the (encrypted) password for the wallet. Returns
+// passwordErr if provided newPW is nil. The wallet will be connected if it is
+// not already.
 func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error {
 	// Ensure newPW isn't nil.
 	if newPW == nil {
@@ -1917,13 +1919,9 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
 	}
 
-	// Set new password.
-	err = c.setWalletPassword(wallet, newPW, crypter)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// Set new password, connecting to it if necessary to verify. It is left
+	// connected since it is in the wallets map.
+	return c.setWalletPassword(wallet, newPW, crypter)
 }
 
 // setWalletPassword updates the (encrypted) password for the wallet.
@@ -1971,13 +1969,10 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 			c.log.Warnf("Unable to relock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
-	// Disconnect if it was not previously connected.
-	if !wasConnected {
-		wallet.Disconnect()
-	}
 
-	details := fmt.Sprintf("Password for %s wallet has been updated.",
-		unbip(wallet.AssetID))
+	// Do not disconnect because the Wallet may not allow reconnection.
+
+	details := fmt.Sprintf("Password for %s wallet has been updated.", unbip(wallet.AssetID))
 	c.notify(newWalletConfigNote(SubjectWalletPasswordUpdated, details,
 		db.Success, wallet.state()))
 
