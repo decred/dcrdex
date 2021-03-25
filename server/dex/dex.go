@@ -201,6 +201,7 @@ func (dm *DEX) Stop() {
 		ss.stop()
 		log.Infof("%s is now shut down.", ss.name)
 	}
+	log.Infof("Stopping storage...")
 	if err := dm.storage.Close(); err != nil {
 		log.Errorf("DEXArchivist.Close: %v", err)
 	}
@@ -217,7 +218,7 @@ func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
 }
 
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
-// shutdown cleanly.
+// shutdown cleanly. The Context is used to abort setup.
 //  1. Validate each specified asset.
 //  2. Create CoinLockers for each asset.
 //  3. Create and start asset backends.
@@ -227,13 +228,11 @@ func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
 //  7. Create and start the markets.
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
-func NewDEX(cfg *DexConf) (*DEX, error) {
+func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Disallow running without user penalization in a mainnet config.
 	if cfg.Anarchy && cfg.Network == dex.Mainnet {
 		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	var subsystems []subsystem
 	startSubSys := func(name string, rc interface{}) (err error) {
@@ -241,10 +240,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		switch st := rc.(type) {
 		case dex.Runner:
 			subsys.ssw = dex.NewStartStopWaiter(st)
-			subsys.ssw.Start(ctx)
+			subsys.ssw.Start(context.Background()) // stopped with Stop
 		case dex.Connector:
 			subsys.cm = dex.NewConnectionMaster(st)
-			err = subsys.cm.Connect(ctx)
+			err = subsys.cm.Connect(context.Background()) // stopped with Disconnect
 			if err != nil {
 				return
 			}
@@ -256,12 +255,15 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return
 	}
 
+	// Do not wrap the caller's context for the DB since we must coordinate it's
+	// shutdown in sequence with the other subsystems.
+	ctxDB, cancelDB := context.WithCancel(context.Background())
 	abort := func() {
 		for _, ss := range subsystems {
 			ss.stop()
 		}
 		// If the DB is running, kill it too.
-		cancel()
+		cancelDB()
 	}
 
 	// Check each configured asset.
@@ -383,6 +385,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		mkt.Name = strings.ToLower(mkt.Name)
 	}
 
+	if err := ctx.Err(); err != nil {
+		abort()
+		return nil, err
+	}
+
 	// Create DEXArchivist with the pg DB driver.
 	pgCfg := &pg.Config{
 		Host:         cfg.DBConf.Host,
@@ -397,13 +404,26 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Net:    cfg.Network,
 		FeeKey: cfg.RegFeeXPub,
 	}
-	storage, err := db.Open(ctx, "pg", pgCfg)
+	// After DEX construction, the storage subsystem should be stopped
+	// gracefully with its Close method, and in coordination with other
+	// subsystems via Stop. To abort its setup, rig a temporary link to the
+	// caller's Context.
+	running := make(chan struct{})
+	defer close(running) // break the link
+	go func() {
+		select {
+		case <-ctx.Done(): // cancelled construction
+			cancelDB()
+		case <-running: // DB shutdown now only via dex.Stop=>db.Close
+		}
+	}()
+	storage, err := db.Open(ctxDB, "pg", pgCfg)
 	if err != nil {
 		abort()
 		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
-	dataAPI := apidata.NewDataAPI(ctx, storage)
+	dataAPI := apidata.NewDataAPI(storage)
 
 	// Create the user order unbook dispatcher for the AuthManager.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
@@ -469,6 +489,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewSwapper: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		abort()
+		return nil, err
+	}
+
 	// Markets
 	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
@@ -480,6 +505,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
+		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
 		err = dataAPI.AddMarketSource(mkt)
 		if err != nil {
 			abort()
@@ -548,6 +574,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Markets:     marketTunnels,
 	})
 	startSubSys("OrderRouter", orderRouter)
+
+	if err := ctx.Err(); err != nil {
+		abort()
+		return nil, err
+	}
 
 	// Client comms RPC server.
 	server, err := comms.NewServer(cfg.CommsCfg)
