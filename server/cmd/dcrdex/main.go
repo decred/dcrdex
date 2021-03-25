@@ -146,7 +146,7 @@ func mainCore(ctx context.Context) error {
 		},
 		NoResumeSwaps: cfg.NoResumeSwaps,
 	}
-	dexMan, err := dexsrv.NewDEX(dexConf)
+	dexMan, err := dexsrv.NewDEX(ctx, dexConf) // ctx cancel just aborts setup; Stop does normal shutdown
 	if err != nil {
 		return err
 	}

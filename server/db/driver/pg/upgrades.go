@@ -186,7 +186,8 @@ func v2Upgrade(tx *sql.Tx) error {
 					}
 					log.Infof(" - Processing epochs [%d, %d)...", idx, to)
 				}
-				rates, quantities, _, err := matchStatsForMarketEpoch(matchStatsStmtPrep, idx, dur)
+				var rates, quantities []uint64 // don't shadow err from outer scope
+				rates, quantities, _, err = matchStatsForMarketEpoch(matchStatsStmtPrep, idx, dur)
 				if err != nil {
 					return err
 				}
@@ -313,8 +314,16 @@ func upgradeDB(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		defer func() {
-			if err != nil {
-				_ = tx.Rollback() // redundant if ctx canceled (sql.ErrTxDone)
+			// On error, rollback the transaction unless ctx was canceled
+			// (sql.ErrTxDone) because then rollback is automatic. See the
+			// (*sql.DB).BeginTx docs.
+			if err == nil || errors.Is(err, sql.ErrTxDone) {
+				return
+			}
+			log.Warnf("Rolling back upgrade to version %d", targetVer-1)
+			errRollback := tx.Rollback()
+			if errRollback != nil {
+				log.Errorf("Rollback failed: %v", errRollback)
 			}
 		}()
 
@@ -335,6 +344,9 @@ func upgradeDB(ctx context.Context, db *sql.DB) error {
 		targetVer := current + uint32(i) + 1
 		log.Debugf("Upgrading DB scheme to %d...", targetVer)
 		if err = runUpgradeTx(targetVer, up); err != nil {
+			if errors.Is(err, sql.ErrTxDone) {
+				return fmt.Errorf("upgrade cancelled (rolled back to version %d)", current+uint32(i))
+			}
 			return err
 		}
 	}

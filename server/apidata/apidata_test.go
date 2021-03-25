@@ -4,7 +4,6 @@
 package apidata
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -43,24 +42,20 @@ func (bs *TBookSource) Book(mktName string) (*msgjson.OrderBook, error) {
 }
 
 type testRig struct {
-	db     *TDBSource
-	api    *DataAPI
-	cancel context.CancelFunc
+	db  *TDBSource
+	api *DataAPI
 }
 
 func newTestRig() *testRig {
-	ctx, cancel := context.WithCancel(context.Background())
 	db := new(TDBSource)
 	return &testRig{
-		db:     db,
-		api:    NewDataAPI(ctx, db),
-		cancel: cancel,
+		db:  db,
+		api: NewDataAPI(db),
 	}
 }
 
 func TestAddMarketSource(t *testing.T) {
 	rig := newTestRig()
-	defer rig.cancel()
 	// initial success
 	err := rig.api.AddMarketSource(&TMarketSource{42, 0})
 	if err != nil {
@@ -87,7 +82,6 @@ func TestAddMarketSource(t *testing.T) {
 
 func TestReportEpoch(t *testing.T) {
 	rig := newTestRig()
-	defer rig.cancel()
 	mktSrc := &TMarketSource{42, 0}
 	err := rig.api.AddMarketSource(mktSrc)
 	if err != nil {
@@ -176,7 +170,6 @@ func TestReportEpoch(t *testing.T) {
 
 func TestOrderBook(t *testing.T) {
 	rig := newTestRig()
-	defer rig.cancel()
 	book := new(msgjson.OrderBook)
 	rig.api.SetBookSource(&TBookSource{book})
 	bookI, err := rig.api.handleOrderBook(&msgjson.OrderBookSubscription{

@@ -4,7 +4,6 @@
 package apidata
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -74,7 +73,7 @@ type DataAPI struct {
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
-func NewDataAPI(ctx context.Context, dbSrc DBSource) *DataAPI {
+func NewDataAPI(dbSrc DBSource) *DataAPI {
 	s := &DataAPI{
 		db:             dbSrc,
 		epochDurations: make(map[string]uint64),
