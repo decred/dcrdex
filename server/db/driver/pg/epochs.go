@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/db"
@@ -92,6 +93,9 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) 
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
+	tstart := time.Now()
+	defer func() { log.Debugf("select epoch candles in: %v", time.Since(tstart)) }()
+
 	stmt := fmt.Sprintf(internal.SelectEpochCandles, epochReportsTableName)
 	rows, err := a.db.QueryContext(ctx, stmt, 0)
 	if err != nil {
@@ -100,14 +104,22 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) 
 
 	defer rows.Close()
 
+	var endStamp, epochDur, matchVol, quoteVol, highRate, lowRate, startRate, endRate fastUint64
 	for rows.Next() {
-		candle := new(db.Candle)
-		var epochDur uint64
-		err = rows.Scan(&candle.EndStamp, &epochDur, &candle.MatchVolume, &candle.QuoteVolume, &candle.HighRate, &candle.LowRate, &candle.StartRate, &candle.EndRate)
+		err = rows.Scan(&endStamp, &epochDur, &matchVol, &quoteVol, &highRate, &lowRate, &startRate, &endRate)
 		if err != nil {
 			return err
 		}
-		candle.StartStamp = candle.EndStamp - epochDur
+		candle := &db.Candle{
+			StartStamp:  uint64(endStamp - epochDur),
+			EndStamp:    uint64(endStamp),
+			MatchVolume: uint64(matchVol),
+			QuoteVolume: uint64(quoteVol),
+			HighRate:    uint64(highRate),
+			LowRate:     uint64(lowRate),
+			StartRate:   uint64(startRate),
+			EndRate:     uint64(endRate),
+		}
 		for _, set := range caches {
 			set.Add(candle)
 		}
