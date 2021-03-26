@@ -115,7 +115,7 @@ func TestAccountDisable(t *testing.T) {
 		host:        ":bad:",
 		wantErr:     true,
 		wantErrCode: true,
-		errCode:     addressParseErr,
+		errCode:     unknownDEXErr,
 	}, {
 		name:        "dex not in conns",
 		host:        tDexHost,

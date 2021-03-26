@@ -152,9 +152,10 @@ export default class SettingsPage extends BasePage {
     const loaded = app.loading(this.body)
     const res = await postJSON('/api/disableaccount', req)
     loaded()
-    if (!app.checkResponse(res)) {
-      page.disableAccountErr.textContet = res.msg
+    if (!app.checkResponse(res, true)) {
+      page.disableAccountErr.textContent = res.msg
       Doc.show(page.disableAccountErr)
+      return
     }
     Doc.hide(page.forms)
     // Initial method of removing disabled account.

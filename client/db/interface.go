@@ -25,13 +25,13 @@ type DB interface {
 	// Accounts retrieves all accounts.
 	Accounts() ([]*AccountInfo, error)
 	// Account gets the AccountInfo associated with the specified DEX node.
-	Account(url string) (*AccountInfo, error)
+	Account(host string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
-	DisableAccount(url string) error
+	DisableAccount(host string) error
 	// AccountProof retrieves the AccountPoof value specified by url.
-	AccountProof(url string) (*AccountProof, error)
+	AccountProof(host string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.
 	AccountPaid(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing

@@ -17,18 +17,10 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 		return codedError(passwordErr, err)
 	}
 
-	// Parse address.
-	host, err := addrHost(addr)
+	// Get dex connection by host.
+	dc, _, err := c.dex(addr)
 	if err != nil {
-		return newError(addressParseErr, "error parsing address: %v", err)
-	}
-
-	// Get the dexConnection.
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	dc, found := c.conns[host]
-	if !found {
-		return newError(unknownDEXErr, "DEX: %s", host)
+		return newError(unknownDEXErr, "error retrieving dex conn: %v", err)
 	}
 
 	// Check active orders.
@@ -36,9 +28,9 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 		return fmt.Errorf("cannot disable account with active orders")
 	}
 
-	err = c.db.DisableAccount(host)
+	err = c.db.DisableAccount(dc.acct.host)
 	if err != nil {
-		return newError(accountDisableErr, "Error disabling account: %v", err)
+		return newError(accountDisableErr, "error disabling account: %v", err)
 	}
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
@@ -63,7 +55,7 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 	dc.cfgMtx.RUnlock()
 	// Disconnect and delete connection from map.
 	dc.connMaster.Disconnect()
-	delete(c.conns, host)
+	delete(c.conns, dc.acct.host)
 
 	return nil
 }
