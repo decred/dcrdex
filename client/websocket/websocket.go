@@ -236,14 +236,12 @@ func newMarketSyncer(cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.Sta
 // Run starts the marketSyncer listening for BookUpdates, which it relays to the
 // websocket client as notifications.
 func (m *marketSyncer) Run(ctx context.Context) {
-	defer m.feed.Close()
 out:
 	for {
 		select {
 		case update, ok := <-m.feed.C:
 			if !ok {
-				// Should not happen, but don't spin furiously.
-				m.log.Warnf("marketSyncer stopping on feed closed")
+				// We are skipping m.feed.Close if the feed were closed (external sig).
 				return
 			}
 			note, err := msgjson.NewNotification(update.Action, update)
@@ -260,6 +258,7 @@ out:
 			break out
 		}
 	}
+	m.feed.Close()
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket route. Subscribes

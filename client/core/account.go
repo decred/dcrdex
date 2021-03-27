@@ -2,10 +2,63 @@ package core
 
 import (
 	"encoding/hex"
+	"fmt"
 
 	"decred.org/dcrdex/client/db"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
+
+// AccountDisable is used to disable an account by given host and application
+// password.
+func (c *Core) AccountDisable(pw []byte, addr string) error {
+	// Validate password.
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return codedError(passwordErr, err)
+	}
+
+	// Get dex connection by host.
+	dc, _, err := c.dex(addr)
+	if err != nil {
+		return newError(unknownDEXErr, "error retrieving dex conn: %v", err)
+	}
+
+	// Check active orders.
+	if dc.hasActiveOrders() {
+		return fmt.Errorf("cannot disable account with active orders")
+	}
+
+	err = c.db.DisableAccount(dc.acct.host)
+	if err != nil {
+		return newError(accountDisableErr, "error disabling account: %v", err)
+	}
+	// Stop dexConnection books.
+	dc.cfgMtx.RLock()
+	for _, m := range dc.cfg.Markets {
+		// Empty bookie's feeds map, close feeds' channels & stop close timers.
+		dc.booksMtx.Lock()
+		if b, found := dc.books[m.Name]; found {
+			b.mtx.Lock()
+			for _, f := range b.feeds {
+				close(f.C)
+			}
+			b.feeds = make(map[uint32]*BookFeed, 1)
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
+			b.mtx.Unlock()
+		}
+		dc.booksMtx.Unlock()
+
+		dc.stopBook(m.Base, m.Quote)
+	}
+	dc.cfgMtx.RUnlock()
+	// Disconnect and delete connection from map.
+	dc.connMaster.Disconnect()
+	delete(c.conns, dc.acct.host)
+
+	return nil
+}
 
 // AccountExport is used to retrieve account by host for export.
 func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {

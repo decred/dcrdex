@@ -261,7 +261,6 @@ type TDB struct {
 	encKeyErr             error
 	createAccountErr      error
 	accountPaidErr        error
-	accts                 []*db.AccountInfo
 	updateOrderErr        error
 	activeDEXOrders       []*db.MetaOrder
 	matchesForOID         []*db.MetaMatch
@@ -285,6 +284,8 @@ type TDB struct {
 	verifyCreateAccount   bool
 	accountInfoPersisted  *db.AccountInfo
 	accountProofPersisted *db.AccountProof
+	disabledAcct          *db.AccountInfo
+	disableAccountErr     error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -294,7 +295,7 @@ func (tdb *TDB) ListAccounts() ([]string, error) {
 }
 
 func (tdb *TDB) Accounts() ([]*db.AccountInfo, error) {
-	return tdb.accts, nil
+	return nil, nil
 }
 
 func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
@@ -307,9 +308,10 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	return tdb.createAccountErr
 }
 
-func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
-	tdb.accts = nil
-	return nil
+func (tdb *TDB) DisableAccount(url string) error {
+	acct, _ := tdb.Account(url)
+	tdb.disabledAcct = acct
+	return tdb.disableAccountErr
 }
 
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
@@ -762,7 +764,6 @@ func newTestRig() *testRig {
 		Host: "somedex.com",
 	}
 	tdb.acct = ai
-	tdb.accts = append(tdb.accts, ai)
 
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)

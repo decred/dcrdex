@@ -316,14 +316,20 @@ func (db *BoltDB) deleteAccount(host string) error {
 	})
 }
 
-// DisableAccount account disables the given account and archives it. The
-// Accounts and Account methods will no longer find the disabled account.
+// DisableAccount disables the account assocaited with the given host
+// and archives it. The Accounts and Account methods will no longer find
+// the disabled account.
 //
 // TODO: Add disabledAccounts method for retrieval of a disabled account and
 // possible recovery of the account data.
-func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
-	// Copy AccountInfo to disabledAccounts
-	err := db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
+func (db *BoltDB) DisableAccount(url string) error {
+	// Get account's info.
+	ai, err := db.Account(url)
+	if err != nil {
+		return err
+	}
+	// Copy AccountInfo to disabledAccounts.
+	err = db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
 		return disabledAccounts.Put(ai.EncKey, ai.Encode())
 	})
 	if err != nil {

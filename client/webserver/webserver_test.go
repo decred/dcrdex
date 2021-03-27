@@ -157,6 +157,7 @@ func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
 func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
+func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 
 type TWriter struct {
 	b []byte
@@ -467,7 +468,7 @@ func TestAPIGetFee(t *testing.T) {
 		ensureResponse(t, s.apiGetFee, want, reader, writer, body)
 	}
 
-	body = &registration{Addr: "somedexaddress.org"}
+	body = &registrationForm{Addr: "somedexaddress.org"}
 	ensure(`{"ok":true,"fee":100000000}`)
 
 	// getFee error

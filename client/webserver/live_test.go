@@ -462,7 +462,7 @@ func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
 func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
-
+func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 func toAtoms(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }

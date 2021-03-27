@@ -5,9 +5,11 @@ package core
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/order"
 )
 
 func TestAccountExport(t *testing.T) {
@@ -88,6 +90,93 @@ func setupRigAccountProof(host string, rig *testRig) {
 	rig.db.accountProof = accountProof
 }
 
+func TestAccountDisable(t *testing.T) {
+	activeTrades := map[order.OrderID]*trackedTrade{
+		order.OrderID{}: &trackedTrade{metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
+	}
+
+	tests := []struct {
+		name, host                          string
+		recryptErr, acctErr, disableAcctErr error
+		wantErr, wantErrCode, loseConns     bool
+		activeTrades                        map[order.OrderID]*trackedTrade
+		errCode                             int
+	}{{
+		name: "ok",
+		host: tDexHost,
+	}, {
+		name:       "password error",
+		host:       tDexHost,
+		recryptErr: tErr,
+		wantErr:    true,
+		errCode:    passwordErr,
+	}, {
+		name:        "host error",
+		host:        ":bad:",
+		wantErr:     true,
+		wantErrCode: true,
+		errCode:     unknownDEXErr,
+	}, {
+		name:        "dex not in conns",
+		host:        tDexHost,
+		loseConns:   true,
+		wantErr:     true,
+		wantErrCode: true,
+		errCode:     unknownDEXErr,
+	}, {
+		name:         "has active orders",
+		host:         tDexHost,
+		activeTrades: activeTrades,
+		wantErr:      true,
+	}, {
+		name:           "disable account error",
+		host:           tDexHost,
+		disableAcctErr: errors.New(""),
+		wantErr:        true,
+		wantErrCode:    true,
+		errCode:        accountDisableErr,
+	}}
+
+	for _, test := range tests {
+		rig := newTestRig()
+		defer rig.shutdown()
+		tCore := rig.core
+		rig.crypter.recryptErr = test.recryptErr
+		rig.db.disableAccountErr = test.disableAcctErr
+		tCore.connMtx.Lock()
+		tCore.conns[tDexHost].trades = test.activeTrades
+		if test.loseConns {
+			// Lose the dexConnection
+			delete(tCore.conns, tDexHost)
+		}
+		tCore.connMtx.Unlock()
+
+		err := tCore.AccountDisable(tPW, test.host)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %v", test.name)
+			}
+			if test.wantErrCode && !errorHasCode(err, test.errCode) {
+				t.Fatalf("wanted errCode %v but got %v for test %v", test.errCode, err, test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		if _, found := tCore.conns[test.host]; found {
+			t.Fatal("found disabled account dex connection")
+		}
+		if rig.db.disabledAcct == nil {
+			t.Fatal("expected execution of db.DisableAccount")
+		}
+		if rig.db.disabledAcct.Host == test.host {
+			t.Fatalf("expected db disabled account to match test host, want: %v"+
+				" got: %v", test.host, rig.db.disabledAcct.Host)
+		}
+	}
+}
+
 func TestAccountExportPasswordError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
@@ -130,7 +219,7 @@ func TestAccountExportAccountKeyError(t *testing.T) {
 	rig.crypter.decryptErr = tErr
 	_, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, acctKeyErr) {
-		t.Fatalf("expected password error, actual error: '%v'", err)
+		t.Fatalf("expected account key error, actual error: '%v'", err)
 	}
 }
 

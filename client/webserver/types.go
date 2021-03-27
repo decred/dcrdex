@@ -33,8 +33,8 @@ type loginForm struct {
 	Pass encode.PassBytes `json:"pass"`
 }
 
-// registration is used to register a new DEX account.
-type registration struct {
+// registrationForm is used to register a new DEX account.
+type registrationForm struct {
 	Addr     string           `json:"addr"`
 	Cert     string           `json:"cert"`
 	Password encode.PassBytes `json:"pass"`
@@ -75,14 +75,19 @@ type withdrawForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 }
 
-type accountExportAuthForm struct {
+type accountExportForm struct {
 	Pass encode.PassBytes `json:"pw"`
 	Host string           `json:"host"`
 }
 
-type accountImportAuthForm struct {
+type accountImportForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 	Account core.Account     `json:"account"`
+}
+
+type accountDisableForm struct {
+	Pass encode.PassBytes `json:"pw"`
+	Host string           `json:"host"`
 }
 
 // orderReader wraps a core.Order and provides methods for info display.
