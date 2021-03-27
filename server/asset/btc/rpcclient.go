@@ -22,8 +22,8 @@ const (
 	methodGetBlock          = "getblock"
 )
 
-// RawRequester defines dcrd's rpcclient RawRequest func where all RPC
-// requests sent through. For testing, it can be satisfied by a stub.
+// RawRequester is for sending context-aware RPC requests, and has methods for
+// shutting down the underlying connection.
 type RawRequester interface {
 	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
 	Shutdown()
@@ -72,8 +72,7 @@ func (rc *RPCClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
 	return chainInfo, nil
 }
 
-// EstimateSmartFee requests the server to estimate a fee level based on the
-// given parameters.
+// EstimateSmartFee requests the server to estimate a fee level.
 func (rc *RPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	res := new(btcjson.EstimateSmartFeeResult)
 	return res, rc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
@@ -95,16 +94,14 @@ func (rc *RPCClient) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, err
 	return res, rc.call(methodGetRawTransaction, anylist{txHash.String()}, res)
 }
 
-// GetRawTransactionVerbose retrieves tx's information with verbose flag set
-// to true.
+// GetRawTransactionVerbose retrieves the verbose tx information.
 func (rc *RPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
 	res := new(btcjson.TxRawResult)
 	return res, rc.call(methodGetRawTransaction, anylist{txHash.String(),
 		true}, res)
 }
 
-// GetBlockVerbose returns a data structure from the server with information
-// about a block given its hash.
+// GetBlockVerbose fetches verbose block data for the specified hash.
 func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
 	res := new(btcjson.GetBlockVerboseResult)
 	return res, rc.call(methodGetBlock, anylist{blockHash.String(), true}, res)

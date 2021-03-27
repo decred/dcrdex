@@ -45,8 +45,9 @@ const (
 	methodGetRawTransaction  = "getrawtransaction"
 )
 
-// RawRequester defines dcred's rpcclient RawRequest func where all RPC
-// requests sent through. For testing, it can be satisfied by a stub.
+// RawRequester is for sending context-aware RPC requests, and has methods for
+// shutting down the underlying connection.  For testing, it can be satisfied
+// by a stub.
 type RawRequester interface {
 	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
 }
@@ -83,8 +84,7 @@ func newWalletClient(requester RawRequester, segwit bool, addrDecoder dexbtc.Add
 // sent via RawRequest.
 type anylist []interface{}
 
-// EstimateSmartFee requests the server to estimate a fee level based on the
-// given parameters.
+// EstimateSmartFee requests the server to estimate a fee level.
 func (wc *rpcClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	res := new(btcjson.EstimateSmartFeeResult)
 	return res, wc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
@@ -151,8 +151,7 @@ func (wc *rpcClient) GetRawMempool() ([]*chainhash.Hash, error) {
 	return hashes, nil
 }
 
-// GetRawTransactionVerbose retrieves tx's information with verbose flag set
-// to true.
+// GetRawTransactionVerbose retrieves the verbose tx information.
 func (wc *rpcClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
 	res := new(btcjson.TxRawResult)
 	return res, wc.call(methodGetRawTransaction, anylist{txHash.String(),
