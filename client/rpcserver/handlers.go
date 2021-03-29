@@ -239,7 +239,7 @@ func handleGetFee(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(getFeeRoute, err)
 	}
-	fee, err := s.core.GetFee(host, cert)
+	fee, err := s.core.GetFee(host, cert) // cert is file contents, not name
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCGetFeeError, err.Error())
 		return createResponse(getFeeRoute, nil, resErr)
