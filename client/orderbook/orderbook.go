@@ -390,9 +390,10 @@ func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 	return ob.updateRemaining(note, false)
 }
 
-// LogEpochReport just checks the notification sequence.
+// LogEpochReport is currently a no-op, and will update market history charts in
+// the future.
 func (ob *OrderBook) LogEpochReport(note *msgjson.EpochReportNote) error {
-	ob.setSeq(note.Seq)
+	// TODO: update future candlestick charts.
 	atomic.StoreUint64(&ob.feeRates.base, note.BaseFeeRate)
 	atomic.StoreUint64(&ob.feeRates.quote, note.QuoteFeeRate)
 	return nil

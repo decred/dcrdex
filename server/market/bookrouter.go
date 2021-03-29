@@ -138,7 +138,12 @@ type BookSource interface {
 	Quote() uint32
 }
 
-// subscribers is a manager for a map of subscribers and a sequence counter.
+// subscribers is a manager for a map of subscribers and a sequence counter. The
+// sequence counter should be incremented whenever the DEX accepts, books,
+// removes, or modifies an order. The client is responsible for tracking the
+// sequence ID to ensure all order updates are received. If an update appears to
+// be missing, the client should re-subscribe to the market to synchronize the
+// order book from scratch.
 type subscribers struct {
 	mtx   sync.RWMutex
 	conns map[uint64]comms.Link
@@ -163,7 +168,10 @@ func (s *subscribers) remove(id uint64) bool {
 	return true
 }
 
-// nextSeq gets the next sequence number by incrementing the counter.
+// nextSeq gets the next sequence number by incrementing the counter. This
+// should be used when the book and orders are modified. Currently this applies
+// to the routes: book_order, unbook_order, update_remaining, and epoch_order,
+// plus suspend if the book is also being purged (persist=false).
 func (s *subscribers) nextSeq() uint64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -394,7 +402,6 @@ out:
 				stats := sigData.stats
 
 				note = &msgjson.EpochReportNote{
-					Seq:          subs.nextSeq(),
 					MarketID:     book.name,
 					Epoch:        uint64(sigData.epochIdx),
 					BaseFeeRate:  sigData.baseFeeRate,
@@ -509,7 +516,7 @@ func (r *BookRouter) Book(mktName string) (*msgjson.OrderBook, error) {
 	}
 	msgOB := r.msgOrderBook(book)
 	if msgOB == nil {
-		return nil, fmt.Errorf("market %s not ruhning", mktName)
+		return nil, fmt.Errorf("market %s not running", mktName)
 	}
 	return msgOB, nil
 }
