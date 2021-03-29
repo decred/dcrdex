@@ -290,14 +290,14 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parseGetFeeArgs(params *RawParams) (host, cert string, err error) {
+func parseGetFeeArgs(params *RawParams) (host string, cert []byte, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	if len(params.Args) == 1 {
-		return params.Args[0], "", nil
+		return params.Args[0], nil, nil
 	}
-	return params.Args[0], params.Args[1], nil
+	return params.Args[0], []byte(params.Args[1]), nil
 }
 
 func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {

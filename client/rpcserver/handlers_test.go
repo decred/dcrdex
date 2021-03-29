@@ -195,12 +195,12 @@ func TestHandleGetFee(t *testing.T) {
 		wantErrCode int
 	}{{
 		name:        "ok",
-		params:      &RawParams{Args: []string{"dex", "cert"}},
+		params:      &RawParams{Args: []string{"dex", "cert bytes"}},
 		regFee:      5,
 		wantErrCode: -1,
 	}, {
 		name:        "core.getFee error",
-		params:      &RawParams{Args: []string{"dex", "cert"}},
+		params:      &RawParams{Args: []string{"dex", "cert bytes"}},
 		getFeeErr:   errors.New("error"),
 		wantErrCode: msgjson.RPCGetFeeError,
 	}, {

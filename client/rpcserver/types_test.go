@@ -244,6 +244,37 @@ func TestCheckBoolArg(t *testing.T) {
 	}
 }
 
+func TestParseGetFeeArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "host and cert",
+		params: &RawParams{PWArgs: nil, Args: []string{"host", "cert bytes"}},
+	}, {
+		name:    "just host",
+		params:  &RawParams{PWArgs: nil, Args: []string{"host"}},
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		host, cert, err := parseGetFeeArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if host != test.params.Args[0] {
+			t.Fatalf("url doesn't match")
+		}
+		if len(test.params.Args) > 1 && string(cert) != test.params.Args[1] {
+			t.Fatalf("cert doesn't match")
+		}
+	}
+}
+
 func TestParseRegisterArgs(t *testing.T) {
 	paramsWithFee := func(fee string) *RawParams {
 		pw := encode.PassBytes("password123")
