@@ -1118,10 +1118,10 @@ func (wc *WireCandles) Candles() []*Candle {
 	return candles
 }
 
-// EpochReportNote is a report about an epoch sent after all of the epoch's
-// book updates.
+// EpochReportNote is a report about an epoch sent after all of the epoch's book
+// updates. Like TradeResumption, and TradeSuspension when Persist is true, Seq
+// is omitted since it doesn't modify the book.
 type EpochReportNote struct {
-	Seq          uint64 `json:"seq"`
 	MarketID     string `json:"marketid"`
 	Epoch        uint64 `json:"epoch"`
 	BaseFeeRate  uint64 `json:"baseFeeRate"`
