@@ -321,7 +321,7 @@ export default class MarketsPage extends BasePage {
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
       epoch: note => { this.handleEpochNote(note) },
-      conn: note => { this.marketList.setConnectionStatus(note) },
+      conn: note => { this.handleConnNote(note) },
       balance: note => { this.handleBalanceNote(note) },
       feepayment: note => { this.handleFeePayment(note) }
     }
@@ -509,6 +509,9 @@ export default class MarketsPage extends BasePage {
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
+    // If we have not yet connected, there is no dex.assets or any other
+    // exchange data, so just put up a message and wait for the connection to be
+    // established, at which time handleConnNote will refresh and reload.
     if (!dex.connected) {
       this.market = { dex: dex }
       this.page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
@@ -522,7 +525,7 @@ export default class MarketsPage extends BasePage {
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
-    Doc.hide(this.page.maxOrd)
+    Doc.hide(this.page.maxOrd, this.page.chartErrMsg)
     if (this.preorderTimer) {
       window.clearTimeout(this.preorderTimer)
       this.preorderTimer = null
@@ -541,6 +544,7 @@ export default class MarketsPage extends BasePage {
       maxSell: null,
       maxBuys: {}
     }
+
     this.page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
     this.setLoaderMsgVisibility()
@@ -1555,6 +1559,19 @@ export default class MarketsPage extends BasePage {
       qtyTD.innerText = tr.qty.toFixed(8)
     }
     return tr
+  }
+
+  /* handleConnNote handles the 'conn' notification.
+   */
+  async handleConnNote (note) {
+    this.marketList.setConnectionStatus(note)
+    if (note.connected) {
+      // Having been disconnected from a DEX server, anything may have changed,
+      // or this may be the first opportunity to get the server's config, so
+      // fetch it all before reloading the markets page.
+      await app.fetchUser()
+      app.loadPage('markets')
+    }
   }
 
   /*

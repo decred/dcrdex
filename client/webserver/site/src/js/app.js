@@ -136,6 +136,7 @@ export default class Application {
    */
   reconnected () {
     window.location.reload() // This triggers another websocket disconnect/connect (!)
+    // a fetchUser() and loadPage(window.history.state.page) might work
   }
 
   /*
@@ -510,8 +511,10 @@ export default class Application {
         if (ord) updateMatch(ord, note.match)
         break
       }
-      case 'conn':
-        this.reconnected()
+      case 'conn': {
+        const dex = this.user.exchanges[note.host]
+        if (dex) dex.connected = note.connected
+      }
     }
 
     // Inform the page.
