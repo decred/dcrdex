@@ -24,8 +24,8 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 // contextKey is the key param type used when saving values to a context using

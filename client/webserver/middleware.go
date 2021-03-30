@@ -12,7 +12,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 type ctxID int
