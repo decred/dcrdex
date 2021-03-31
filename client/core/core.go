@@ -1046,8 +1046,42 @@ func (c *Core) Run(ctx context.Context) {
 	stopDB()
 	dbWG.Wait()
 
+	// At this point, it should be safe to access the data structures without
+	// mutex protection. Goroutines have returned, and consumers should not call
+	// Core methods after shutdown. We'll play it safe anyway.
+
+	// Clear account private keys and wait for the DEX ws connections that began
+	// shutting down on context cancellation (the listen goroutines have already
+	// returned however). Warn about specific active orders, and unlock any
+	// locked coins for inactive orders that are not yet retired.
+	for _, dc := range c.dexConnections() {
+		// context is already canceled, allowing just a Wait(), but just in case
+		// use Disconnect otherwise it could hang forever.
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+
+		// Note active orders, and unlock any coins locked by inactive orders.
+		dc.tradeMtx.Lock()
+		for _, trade := range dc.trades {
+			oid := trade.ID()
+			if trade.isActive() {
+				c.log.Warnf("Shutting down with active order %v in status %v.", oid, trade.metaData.Status)
+				continue
+			}
+			c.log.Debugf("Retiring inactive order %v. Unlocking coins = %v",
+				oid, trade.coinsLocked || trade.changeLocked)
+			delete(dc.trades, oid) // for inspection/debugging
+			trade.returnCoins()
+			// Do not bother with OrderNote/SubjectOrderRetired and BalanceNote
+			// notes since any web/rpc servers should be down by now. Go
+			// consumers can check orders on restart.
+		}
+		dc.tradeMtx.Unlock()
+	}
+
 	// Lock and disconnect the wallets.
 	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
 	for assetID, wallet := range c.wallets {
 		delete(c.wallets, assetID)
 		if !wallet.connected() {
@@ -1059,18 +1093,6 @@ func (c *Core) Run(ctx context.Context) {
 			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
 		}
 		wallet.Disconnect()
-	}
-	c.walletMtx.Unlock()
-
-	// Clear account private keys and wait for the DEX ws connections that began
-	// shutting down on context cancellation.
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-	for _, dc := range c.conns {
-		// context should be canceled allowing just a Wait(), but just in case
-		// use Disconnect otherwise this could hang forever.
-		dc.connMaster.Disconnect()
-		dc.acct.lock()
 	}
 
 	c.log.Infof("DEX client core off")
