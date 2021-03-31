@@ -184,15 +184,26 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 	return marketMap
 }
 
-// marketTrades is a slice of trades in the trades map.
-func (dc *dexConnection) marketTrades(mktID string) []*trackedTrade {
+func (dc *dexConnection) trackedTrades() []*trackedTrade {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
-	trades := make([]*trackedTrade, 0, len(dc.trades))
+	allTrades := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range dc.trades {
-		if trade.mktID == mktID {
+		allTrades = append(allTrades, trade)
+	}
+	return allTrades
+}
+
+// marketTrades is a slice of active trades in the trades map.
+func (dc *dexConnection) marketTrades(mktID string) []*trackedTrade {
+	// Copy trades to avoid locking both tradeMtx and trackedTrade.mtx.
+	allTrades := dc.trackedTrades()
+	trades := make([]*trackedTrade, 0, len(allTrades)) // may over-allocate
+	for _, trade := range allTrades {
+		if trade.mktID == mktID && trade.isActive() {
 			trades = append(trades, trade)
 		}
+		// Retiring inactive orders is presently the responsibility of ticker.
 	}
 	return trades
 }
@@ -1410,16 +1421,14 @@ func (c *Core) updateWalletBalance(wallet *xcWallet) (*WalletBalance, error) {
 // the fromAssetID.
 func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64) {
 	for _, dc := range c.dexConnections() {
-		dc.tradeMtx.RLock()
-		for _, tracker := range dc.trades {
-			tracker.mtx.RLock()
+		for _, tracker := range dc.trackedTrades() {
 			if tracker.fromAssetID == assetID {
+				tracker.mtx.RLock()
 				contractLocked += tracker.unspentContractAmounts()
 				orderLocked += tracker.lockedAmount()
+				tracker.mtx.RUnlock()
 			}
-			tracker.mtx.RUnlock()
 		}
-		dc.tradeMtx.RUnlock()
 	}
 	return
 }
@@ -2671,8 +2680,6 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
-	var wg sync.WaitGroup
-	results := make([]*DEXBrief, 0, len(c.conns))
 	var reconcileConnectionsWg sync.WaitGroup
 	reconcileConnectionsWg.Add(1)
 	disabledAccountHostChan := make(chan string)
@@ -2696,7 +2703,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		}
 	}()
 
-	for _, dc := range c.dexConnections() {
+	var wg sync.WaitGroup
+	conns := c.dexConnections()
+	results := make([]*DEXBrief, 0, len(conns))
+	for _, dc := range conns {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
 		for tradeID := range dc.trades {
@@ -4673,17 +4683,11 @@ func (c *Core) listen(dc *dexConnection) {
 			}
 		}()
 
-		var allTrades, doneTrades, activeTrades []*trackedTrade
+		var doneTrades, activeTrades []*trackedTrade
 		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
 		// since we risk blocking access to the trades map if there is lock
 		// contention for even one trade.
-		dc.tradeMtx.RLock()
-		for _, trade := range dc.trades {
-			allTrades = append(allTrades, trade)
-		}
-		dc.tradeMtx.RUnlock()
-
-		for _, trade := range allTrades {
+		for _, trade := range dc.trackedTrades() {
 			if trade.isActive() {
 				activeTrades = append(activeTrades, trade)
 				continue

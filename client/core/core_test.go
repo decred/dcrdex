@@ -4333,6 +4333,57 @@ func TestHandleMatchProofMsg(t *testing.T) {
 	}
 }
 
+func Test_marketTrades(t *testing.T) {
+	mktID := "dcr_btc"
+	dc := &dexConnection{
+		trades: make(map[order.OrderID]*trackedTrade),
+	}
+
+	preImg := newPreimage()
+	activeOrd := &order.LimitOrder{P: order.Prefix{
+		ServerTime: time.Now(),
+		Commit:     preImg.Commit(),
+	}}
+	activeTracker := &trackedTrade{
+		Order:  activeOrd,
+		preImg: preImg,
+		mktID:  mktID,
+		dc:     dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+		matches: make(map[order.MatchID]*matchTracker),
+	}
+
+	dc.trades[activeTracker.ID()] = activeTracker
+
+	preImg = newPreimage() // different oid
+	inactiveOrd := &order.LimitOrder{P: order.Prefix{
+		ServerTime: time.Now(),
+		Commit:     preImg.Commit(),
+	}}
+	inactiveTracker := &trackedTrade{
+		Order:  inactiveOrd,
+		preImg: preImg,
+		mktID:  mktID,
+		dc:     dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusExecuted,
+		},
+		matches: make(map[order.MatchID]*matchTracker), // no matches
+	}
+
+	dc.trades[inactiveTracker.ID()] = inactiveTracker
+
+	trades := dc.marketTrades(mktID)
+	if len(trades) != 1 {
+		t.Fatalf("Expected only one trade from marketTrades, found %v", len(trades))
+	}
+	if trades[0].ID() != activeOrd.ID() {
+		t.Errorf("Expected active order ID %v, got %v", activeOrd.ID(), trades[0].ID())
+	}
+}
+
 func TestLogout(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
