@@ -25,11 +25,6 @@ type Order struct {
 	Epoch uint64
 }
 
-// copy creates a copy. Note that the OrderID is not a deep copy.
-func (o *Order) copy() *Order {
-	return &(*o)
-}
-
 func (o *Order) sell() bool {
 	return o.Side == msgjson.SellOrderNum
 }
@@ -62,6 +57,9 @@ type OrderBook struct {
 	noteQueueMtx sync.Mutex
 	noteQueue    []*cachedOrderNote
 
+	// Track the orders stored in each bookSide. The Quantity field of the
+	// Orders should not be accessed except via the bookSide methods. Only the
+	// immutable Order fields are to be used by OrderBook methods directly.
 	ordersMtx sync.Mutex
 	orders    map[order.OrderID]*Order
 
@@ -169,8 +167,7 @@ func (ob *OrderBook) processCachedNotes() error {
 		case msgjson.BookOrderRoute:
 			note, ok := entry.OrderNote.(*msgjson.BookOrderNote)
 			if !ok {
-				panic("failed to cast cached book order note" +
-					" as a BookOrderNote")
+				panic("failed to cast cached book order note as a BookOrderNote")
 			}
 			err := ob.book(note, true)
 			if err != nil {
@@ -180,8 +177,7 @@ func (ob *OrderBook) processCachedNotes() error {
 		case msgjson.UnbookOrderRoute:
 			note, ok := entry.OrderNote.(*msgjson.UnbookOrderNote)
 			if !ok {
-				panic("failed to cast cached unbook order note" +
-					" as an UnbookOrderNote")
+				panic("failed to cast cached unbook order note as an UnbookOrderNote")
 			}
 			err := ob.unbook(note, true)
 			if err != nil {
@@ -191,8 +187,7 @@ func (ob *OrderBook) processCachedNotes() error {
 		case msgjson.UpdateRemainingRoute:
 			note, ok := entry.OrderNote.(*msgjson.UpdateRemainingNote)
 			if !ok {
-				panic("failed to cast cached update_remaining note" +
-					" as an UnbookOrderNote")
+				panic("failed to cast cached update_remaining note as an UnbookOrderNote")
 			}
 			err := ob.updateRemaining(note, true)
 			if err != nil {
@@ -200,8 +195,7 @@ func (ob *OrderBook) processCachedNotes() error {
 			}
 
 		default:
-			return fmt.Errorf("unknown cached note route "+
-				" provided: %s", entry.Route)
+			return fmt.Errorf("unknown cached note route provided: %s", entry.Route)
 		}
 	}
 
@@ -237,8 +231,8 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 		defer ob.ordersMtx.Unlock()
 
 		ob.orders = make(map[order.OrderID]*Order)
-		ob.buys = newBookSide(descending)
-		ob.sells = newBookSide(ascending)
+		ob.buys.reset()
+		ob.sells.reset()
 		for _, o := range snapshot.Orders {
 			if len(o.OrderID) != order.OrderIDSize {
 				return fmt.Errorf("expected order id length of %d, got %d", order.OrderIDSize, len(o.OrderID))
@@ -314,6 +308,7 @@ func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
 		Side:     note.Side,
 		Quantity: note.Quantity,
 		Rate:     note.Rate,
+		Time:     note.Time,
 	}
 
 	ob.ordersMtx.Lock()
@@ -366,21 +361,15 @@ func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached b
 
 	ob.ordersMtx.Lock()
 	ord, found := ob.orders[oid]
-	var newOrder *Order
-	if found {
-		newOrder = ord.copy()
-		newOrder.Quantity = note.Remaining
-		ob.orders[oid] = newOrder
-	}
 	ob.ordersMtx.Unlock()
 	if !found {
 		return fmt.Errorf("update_remaining order %s not found", oid)
 	}
 
 	if ord.sell() {
-		ob.sells.ReplaceOrder(newOrder)
+		ob.sells.UpdateRemaining(oid, note.Remaining)
 	} else {
-		ob.buys.ReplaceOrder(newOrder)
+		ob.buys.UpdateRemaining(oid, note.Remaining)
 	}
 	return nil
 }
@@ -424,35 +413,18 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 	copy(oid[:], note.OrderID)
 
 	ob.ordersMtx.Lock()
+	defer ob.ordersMtx.Unlock() // slightly longer than necessary
 	order, ok := ob.orders[oid]
-	ob.ordersMtx.Unlock()
 	if !ok {
-		return fmt.Errorf("no order found with id %s", oid.String())
+		return fmt.Errorf("no order found with id %v", oid)
 	}
+	delete(ob.orders, oid)
 
 	// Remove the order from its associated book side.
-	switch order.Side {
-	case msgjson.BuyOrderNum:
-		err := ob.buys.Remove(order)
-		if err != nil {
-			return err
-		}
-
-	case msgjson.SellOrderNum:
-		err := ob.sells.Remove(order)
-		if err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("unknown order side provided: %d", order.Side)
+	if order.sell() {
+		return ob.sells.Remove(order)
 	}
-
-	ob.ordersMtx.Lock()
-	delete(ob.orders, oid)
-	ob.ordersMtx.Unlock()
-
-	return nil
+	return ob.buys.Remove(order)
 }
 
 // Unbook removes an order from the order book.
@@ -461,6 +433,7 @@ func (ob *OrderBook) Unbook(note *msgjson.UnbookOrderNote) error {
 }
 
 // BestNOrders returns the best n orders from the provided side.
+// NOTE: This is UNUSED, and test coverage is a near dup of bookside_test.go.
 func (ob *OrderBook) BestNOrders(n int, side uint8) ([]*Order, bool, error) {
 	if !ob.isSynced() {
 		return nil, false, fmt.Errorf("order book is unsynced")
@@ -494,7 +467,7 @@ func (ob *OrderBook) Orders() ([]*Order, []*Order, []*Order) {
 		// match_proof and with no orders for a subsequent epoch yet.
 		epochOrders = eq.Orders()
 	}
-	return ob.buys.orders(), ob.sells.orders(), epochOrders
+	return ob.buys.Orders(), ob.sells.Orders(), epochOrders
 }
 
 // Enqueue appends the provided order note to the corresponding epoch's queue.
@@ -624,5 +597,7 @@ func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 // BestFillMarketBuy is the best (rate, quantity) fill for a market buy order.
 // The qty given will be in units of quote asset.
 func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
+	ob.sells.mtx.RLock()
+	defer ob.sells.mtx.RUnlock()
 	return ob.sells.bestFill(qty, true, lotSize)
 }
