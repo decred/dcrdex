@@ -1164,7 +1164,7 @@ func TestServer(t *testing.T) {
 		tCore.Register(new(core.RegisterForm))
 	}
 
-	s, err := New(tCore, ":54321", logger, true)
+	s, err := New(tCore, ":54321", "", logger, true)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
