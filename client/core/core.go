@@ -4612,11 +4612,15 @@ func (c *Core) listen(dc *dexConnection) {
 		msg    *msgjson.Message
 	}
 	runJob := func(job *msgJob) {
+		tStart := time.Now()
 		defer func() {
 			if pv := recover(); pv != nil {
 				c.log.Criticalf("Uh-oh! Panic while handling message from %v.\n\n"+
 					"Message:\n\n%#v\n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n",
 					dc.acct.host, job.msg, pv, string(debug.Stack()))
+			}
+			if eTime := time.Since(tStart); eTime > 250*time.Millisecond {
+				c.log.Infof("runJob(%v) completed in %v", job.msg.Route, eTime)
 			}
 		}()
 		if err := job.hander(c, dc, job.msg); err != nil {
@@ -4638,6 +4642,15 @@ func (c *Core) listen(dc *dexConnection) {
 	}()
 
 	checkTrades := func() {
+		// checkTrades should be snappy. If it takes too long we are creating
+		// lock contention.
+		tStart := time.Now()
+		defer func() {
+			if eTime := time.Since(tStart); eTime > 250*time.Millisecond {
+				c.log.Infof("checkTrades completed in %v", eTime)
+			}
+		}()
+
 		var allTrades, doneTrades, activeTrades []*trackedTrade
 		// NOTE: Don't lock tradeMtx while also locking a trackedTrade's mtx
 		// since we risk blocking access to the trades map if there is lock

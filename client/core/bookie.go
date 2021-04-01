@@ -602,7 +602,9 @@ func (dc *dexConnection) refreshServerConfig() error {
 	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)
 	tickInterval := bTimeout / tickCheckDivisions
 	dc.log.Debugf("Server %v broadcast timeout %v. Tick interval %v", dc.acct.host, bTimeout, tickInterval)
-	dc.ticker.Reset(tickInterval)
+	if dc.ticker.Dur() != tickInterval {
+		dc.ticker.Reset(tickInterval)
+	}
 
 	// Update the dex connection with the new config details, including
 	// StartEpoch and FinalEpoch, and rebuild the market data maps.
