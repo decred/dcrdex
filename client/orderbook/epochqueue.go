@@ -106,9 +106,26 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 	defer eq.mtx.Unlock()
 
 	if len(eq.orders) == 0 {
-		return nil, nil,
-			fmt.Errorf("cannot generate match proof with an empty epoch queue")
+		return nil, nil, fmt.Errorf("cannot generate match proof with an empty epoch queue")
 	}
+
+	// Get the commitments for all orders in the epoch queue.
+	commits := make([]*order.Commitment, 0, len(eq.orders))
+	for _, ord := range eq.orders {
+		commits = append(commits, &ord.Commitment)
+	}
+
+	// Sort the commitments slice.
+	sort.Slice(commits, func(i, j int) bool {
+		return bytes.Compare(commits[i][:], commits[j][:]) < 0
+	})
+
+	// Generate the commitment checksum.
+	comH := blake256.New()
+	for _, commit := range commits {
+		comH.Write(commit[:])
+	}
+	csum := comH.Sum(nil)
 
 	// Remove all misses.
 	for _, oid := range misses {
@@ -118,11 +135,10 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 	// Map the preimages received with their associated epoch order ids.
 	matches := make([]*pimgMatch, 0, len(preimages))
 outer:
-	for i := range preimages {
-		pimg := preimages[i]
+	for _, pimg := range preimages {
 		commitment := blake256.Sum256(pimg[:])
 		for oid, ord := range eq.orders {
-			if bytes.Equal(ord.Commitment[:], commitment[:]) {
+			if ord.Commitment == commitment {
 				matches = append(matches, &pimgMatch{
 					id:   oid,
 					ord:  ord,
@@ -139,26 +155,19 @@ outer:
 		return bytes.Compare(matches[i].id[:], matches[j].id[:]) < 0
 	})
 
-	// Concatenate the sorted preimages per and generate the
-	// seed.
-	sbuff := make([]byte, 0, len(eq.orders)*order.PreimageSize)
-	for _, match := range matches {
-		sbuff = append(sbuff, match.pimg[:]...)
+	for oid := range eq.orders {
+		fmt.Printf("WARNING! Order not accounted for in match proof: %v\n", oid)
+		// csum will not match, so just note what was omitted for debugging.
 	}
-	seed := blake256.Sum256(sbuff)
 
-	sort.Slice(matches, func(i, j int) bool {
-		return bytes.Compare(matches[i].ord.Commitment[:], matches[j].ord.Commitment[:]) < 0
-	})
-	// Concatenate the sorted order commitments and generate the
-	// commitment checksum.
-	cbuff := make([]byte, 0, len(eq.orders)*order.CommitmentSize)
+	// Compute the hash of the concatenated preimages, sorted by order ID.
+	piH := blake256.New()
 	for _, match := range matches {
-		cbuff = append(cbuff, match.ord.Commitment[:]...)
+		piH.Write(match.pimg[:])
 	}
-	csum := blake256.Sum256(cbuff)
+	seed := piH.Sum(nil)
 
-	return seed[:], msgjson.Bytes(csum[:]), nil
+	return seed, csum, nil
 }
 
 // Orders returns the epoch queue as a []*Order.

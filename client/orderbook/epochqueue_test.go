@@ -2,9 +2,10 @@ package orderbook
 
 import (
 	"bytes"
-	"fmt"
+	"encoding/hex"
 	"math/rand"
 	"os"
+	"sort"
 	"testing"
 
 	"decred.org/dcrdex/dex"
@@ -37,42 +38,55 @@ func makeCommitment(pimg order.Preimage) order.Commitment {
 	return order.Commitment(blake256.Sum256(pimg[:]))
 }
 
-// makeMatchProof generates the sorting seed and commmitment checksum from the
-// provided ordered set of preimages and commitments.
-func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (msgjson.Bytes, msgjson.Bytes, error) {
-	if len(preimages) != len(commitments) {
-		return nil, nil, fmt.Errorf("expected equal number of preimages and commitments")
-	}
+// makeMatchProof generates the sorting seed and commitment checksum from the
+// provided ordered set of preimages. The provide commitments are sorted.
+func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (msgjson.Bytes, msgjson.Bytes) {
+	sort.Slice(commitments, func(i, j int) bool {
+		return bytes.Compare(commitments[i][:], commitments[j][:]) < 0
+	})
 
-	sbuff := make([]byte, 0, len(preimages)*order.PreimageSize)
 	cbuff := make([]byte, 0, len(commitments)*order.CommitmentSize)
-	for i := 0; i < len(preimages); i++ {
-		sbuff = append(sbuff, preimages[i][:]...)
+	for i := range commitments {
 		cbuff = append(cbuff, commitments[i][:]...)
 	}
-	seed := blake256.Sum256(sbuff)
 	csum := blake256.Sum256(cbuff)
-	return seed[:], csum[:], nil
+
+	sbuff := make([]byte, 0, len(preimages)*order.PreimageSize)
+	for i := 0; i < len(preimages); i++ {
+		sbuff = append(sbuff, preimages[i][:]...)
+	}
+	seed := blake256.Sum256(sbuff)
+
+	return seed[:], csum[:]
 }
 
 func TestEpochQueue(t *testing.T) {
 	mid := "mkt"
 	epoch := uint64(10)
 	eq := NewEpochQueue()
-	n1Pimg := [32]byte{'1'}
-	n1Commitment := makeCommitment(n1Pimg)
+	n1PimgB, _ := hex.DecodeString("e1f796fa0fc16ba7bb90be2a33e87c3d60ab628471a420834383661801bb0bfd")
+	var n1Pimg order.Preimage
+	copy(n1Pimg[:], n1PimgB)
+	n1Commitment := n1Pimg.Commit() // aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66
 	n1OrderID := [32]byte{'a'}
 	n1 := makeEpochOrderNote(mid, n1OrderID, msgjson.BuyOrderNum, 1, 2, n1Commitment, epoch)
 
-	n2Pimg := [32]byte{'2'}
-	n2Commitment := makeCommitment(n2Pimg)
+	n2PimgB, _ := hex.DecodeString("8e6c140071db1eb2f7a18194f1a045a94c078835c75dff2f3e836180baad9e95")
+	var n2Pimg order.Preimage
+	copy(n2Pimg[:], n2PimgB)
+	n2Commitment := n2Pimg.Commit() // 0f4bc030d392cef3f44d0781870ab7fcb78a0cda36c73e50b88c741b4f851600
 	n2OrderID := [32]byte{'b'}
 	n2 := makeEpochOrderNote(mid, n2OrderID, msgjson.BuyOrderNum, 1, 2, n2Commitment, epoch)
 
-	n3Pimg := [32]byte{'3'}
-	n3Commitment := makeCommitment(n3Pimg)
+	n3PimgB, _ := hex.DecodeString("e1f796fa0fc16ba7bb90be2a33e87c3d60ab628471a420834383661801bb0bfd")
+	var n3Pimg order.Preimage
+	copy(n3Pimg[:], n3PimgB)
+	n3Commitment := n3Pimg.Commit() // aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66
 	n3OrderID := [32]byte{'c'}
 	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment, epoch)
+
+	// This csum matches the server-side tests.
+	wantCSum, _ := hex.DecodeString("8c743c3225b89ffbb50b5d766d3e078cd8e2658fa8cb6e543c4101e1d59a8e8e")
 
 	err := eq.Enqueue(n1)
 	if err != nil {
@@ -144,11 +158,8 @@ func TestEpochQueue(t *testing.T) {
 
 	// Ensure match proof generation works as expected.
 	preimages = []order.Preimage{n1Pimg, n2Pimg, n3Pimg}
-	commitments := []order.Commitment{n3Commitment, n1Commitment, n2Commitment}
-	expectedSeed, expectedCmtChecksum, err := makeMatchProof(preimages, commitments)
-	if err != nil {
-		t.Fatalf("[makeMatchProof] unexpected error: %v", err)
-	}
+	commitments := []order.Commitment{n1Commitment, n3Commitment, n2Commitment}
+	expectedSeed, expectedCmtChecksum := makeMatchProof(preimages, commitments)
 
 	seed, cmtChecksum, err := eq.GenerateMatchProof(preimages, nil)
 	if err != nil {
@@ -156,12 +167,16 @@ func TestEpochQueue(t *testing.T) {
 	}
 
 	if !bytes.Equal(expectedSeed, seed) {
-		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
+		t.Fatalf("expected seed %v, got %v", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
-		t.Fatalf("expected commitment checksum %x, got %x",
+		t.Fatalf("expected commitment checksum %v, got %v",
 			expectedCmtChecksum, cmtChecksum)
+	}
+	if !bytes.Equal(wantCSum, cmtChecksum) {
+		t.Fatalf("expected commitment checksum %v, got %v",
+			wantCSum, cmtChecksum)
 	}
 
 	eq = NewEpochQueue()
@@ -188,26 +203,27 @@ func TestEpochQueue(t *testing.T) {
 	}
 
 	// Ensure match proof generation works as expected, when there are misses.
-	preimages = []order.Preimage{n1Pimg, n3Pimg}
-	commitments = []order.Commitment{n3Commitment, n1Commitment}
-	expectedSeed, expectedCmtChecksum, err = makeMatchProof(preimages, commitments)
-	if err != nil {
-		t.Fatalf("[makeMatchProof] unexpected error: %v", err)
-	}
+	preimages = []order.Preimage{n1Pimg, n2Pimg}                               // n3 missed
+	commitments = []order.Commitment{n1Commitment, n2Commitment, n3Commitment} // all orders in the epoch queue
+	expectedSeed, expectedCmtChecksum = makeMatchProof(preimages, commitments)
 
-	misses := []order.OrderID{n2OrderID}
+	misses := []order.OrderID{n3OrderID}
 	seed, cmtChecksum, err = eq.GenerateMatchProof(preimages, misses)
 	if err != nil {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
 
 	if !bytes.Equal(expectedSeed, seed) {
-		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
+		t.Fatalf("expected seed %v, got %v", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
-		t.Fatalf("expected commitment checksum %x, got %x",
+		t.Fatalf("expected commitment checksum %v, got %v",
 			expectedCmtChecksum, cmtChecksum)
+	}
+	if !bytes.Equal(wantCSum, cmtChecksum) {
+		t.Fatalf("expected commitment checksum %v, got %v",
+			wantCSum, cmtChecksum)
 	}
 
 	// Ensure match proof fails when there is a preimage mismatch.
@@ -220,8 +236,7 @@ func TestEpochQueue(t *testing.T) {
 	preimages = []order.Preimage{n1Pimg, n2Pimg, n3Pimg}
 	_, _, err = eq.GenerateMatchProof(preimages, nil)
 	if err == nil {
-		t.Fatalf("[GenerateMatchProof] expected no order match " +
-			"for preimate error")
+		t.Fatalf("[GenerateMatchProof] expected no order match for preimage error")
 	}
 }
 

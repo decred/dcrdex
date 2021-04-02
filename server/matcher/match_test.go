@@ -2210,3 +2210,55 @@ func compareMatchStats(t *testing.T, sWant, sHave *MatchCycleStats) {
 		t.Errorf("wrong EndRate. wanted %d, got %d", sWant.EndRate, sHave.EndRate)
 	}
 }
+
+func TestCSum(t *testing.T) {
+	// This is just a smoke test to ensure a known result does not change. It
+	// also corresponds to a csum used in market_test:
+	//   a64ee6372a49f9465910ca0b556818dbc765f3c7fa21d5f40ab25bf4b73f45ed
+	// and in client's epochqueue_test:
+	//   8c743c3225b89ffbb50b5d766d3e078cd8e2658fa8cb6e543c4101e1d59a8e8e.
+
+	pi0B, _ := hex.DecodeString("e1f796fa0fc16ba7bb90be2a33e87c3d60ab628471a420834383661801bb0bfd")
+	var pi0 order.Preimage
+	copy(pi0[:], pi0B)
+	fmt.Printf("%x\n", pi0)
+	com0 := pi0.Commit() // aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66
+	lo0 := &order.LimitOrder{
+		P: order.Prefix{
+			Commit: com0,
+		},
+	}
+
+	pi1B, _ := hex.DecodeString("8e6c140071db1eb2f7a18194f1a045a94c078835c75dff2f3e836180baad9e95")
+	var pi1 order.Preimage
+	copy(pi1[:], pi1B)
+	com1 := pi1.Commit() // 0f4bc030d392cef3f44d0781870ab7fcb78a0cda36c73e50b88c741b4f851600
+	lo1 := &order.LimitOrder{
+		P: order.Prefix{
+			Commit: com1,
+		},
+	}
+
+	wantCSum, _ := hex.DecodeString("a64ee6372a49f9465910ca0b556818dbc765f3c7fa21d5f40ab25bf4b73f45ed")
+	csum := CSum([]order.Order{lo0, lo1})
+	if !bytes.Equal(wantCSum, csum) {
+		t.Errorf("got csum %x, wanted %x", csum, wantCSum)
+	}
+
+	// a third for the matching client-side test in epochqueue_test
+	pi2B, _ := hex.DecodeString("e1f796fa0fc16ba7bb90be2a33e87c3d60ab628471a420834383661801bb0bfd")
+	var pi2 order.Preimage
+	copy(pi2[:], pi2B)
+	com2 := pi2.Commit() // aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66
+	lo2 := &order.LimitOrder{
+		P: order.Prefix{
+			Commit: com2,
+		},
+	}
+
+	wantCSum, _ = hex.DecodeString("8c743c3225b89ffbb50b5d766d3e078cd8e2658fa8cb6e543c4101e1d59a8e8e")
+	csum = CSum([]order.Order{lo0, lo1, lo2})
+	if !bytes.Equal(wantCSum, csum) {
+		t.Errorf("got csum %x, wanted %x", csum, wantCSum)
+	}
+}
