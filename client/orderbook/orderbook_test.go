@@ -951,10 +951,8 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
-	expectedCSum, _ := hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
-		"4310e93f766442110fc2c9353230985")
-	expectedSeed, _ := hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
-		"1c1cdd461667c6eb737ae0c65daf2d")
+	expectedCSum, _ := hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef4310e93f766442110fc2c9353230985")
+	expectedSeed, _ := hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b591c1cdd461667c6eb737ae0c65daf2d")
 
 	matchProofNote := msgjson.MatchProofNote{
 		MarketID:  mid,
@@ -987,10 +985,8 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
-	expectedSeedWithMisses, _ := hex.DecodeString("01a161289f06be16ea9b5a5a" +
-		"5492f5664f3e92750dc5ce3fa5775eb9be225730")
-	expectedCSumWithMisses, _ := hex.DecodeString("0433a2dec5f3b9f530fba28a" +
-		"d1b4c15c454b4b41ab3bd0ba8f30a6d1de2a1128")
+	expectedCSumWithMisses := expectedCSum // csum not affected by misses
+	expectedSeedWithMisses, _ := hex.DecodeString("01a161289f06be16ea9b5a5a5492f5664f3e92750dc5ce3fa5775eb9be225730")
 
 	matchProofNoteWithMisses := msgjson.MatchProofNote{
 		MarketID:  mid,
@@ -1034,11 +1030,6 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
-	expectedCSum, _ = hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
-		"4310e93f766442110fc2c9353230985")
-	expectedSeed, _ = hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
-		"1c1cdd461667c6eb737ae0c65daf2d")
-
 	matchProofNote = msgjson.MatchProofNote{
 		MarketID:  mid,
 		Epoch:     epoch,
@@ -1071,10 +1062,7 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
-	expectedCSum, _ = hex.DecodeString("0433a2dec5f3b9f530fba28a" +
-		"d1b4c15c454b4b41ab3bd0ba8f30a6d1de2a1128")
-	expectedSeed, _ = hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
-		"1c1cdd461667c6eb737ae0c65daf2d")
+	junkSeed, _ := hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b591c1cdd461667c6eb737ae0c65daf2d")
 
 	matchProofNote = msgjson.MatchProofNote{
 		MarketID:  mid,
@@ -1082,13 +1070,13 @@ func TestValidateMatchProof(t *testing.T) {
 		Preimages: []msgjson.Bytes{n1Pimg[:], n3Pimg[:]},
 		Misses:    []msgjson.Bytes{n2.OrderID},
 		CSum:      expectedCSum,
-		Seed:      expectedSeed,
+		Seed:      junkSeed,
 	}
 
 	// Ensure a invalid match proof message (invalid seed) gets detected
 	// as expected.
 	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
-		t.Fatalf("[ValidateMatchProof (inavlid seed)]: unexpected error: %v", err)
+		t.Fatalf("[ValidateMatchProof (invalid seed)]: unexpected error: %v", err)
 	}
 
 	ob = NewOrderBook(tLogger)
@@ -1108,23 +1096,20 @@ func TestValidateMatchProof(t *testing.T) {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
-	expectedCSum, _ = hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
-		"4310e93f766442110fc2c9353230985")
-	expectedSeed, _ = hex.DecodeString("01a161289f06be16ea9b5a5a" +
-		"5492f5664f3e92750dc5ce3fa5775eb9be225730")
+	junkCSum, _ := hex.DecodeString("000000000f3b80574df730c3b7005ccef4310e93f766442110fc2c9353230985")
 
 	matchProofNote = msgjson.MatchProofNote{
 		MarketID:  mid,
 		Epoch:     epoch,
 		Preimages: []msgjson.Bytes{n1Pimg[:], n3Pimg[:]},
 		Misses:    []msgjson.Bytes{n2.OrderID},
-		CSum:      expectedCSum,
-		Seed:      expectedSeed,
+		CSum:      junkCSum,
+		Seed:      expectedSeedWithMisses,
 	}
 
 	// Ensure a invalid match proof message (invalid csum) gets detected
 	// as expected.
 	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
-		t.Fatalf("[ValidateMatchProof (inavlid csum)]: unexpected error: %v", err)
+		t.Fatalf("[ValidateMatchProof (invalid csum)]: unexpected error: %v", err)
 	}
 }

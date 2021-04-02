@@ -1166,7 +1166,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 	}
 	defer cleanup()
 
-	rand.Seed(0)
+	rand.Seed(0) // deterministic random data
 
 	// Fill the book. Preimages not needed for these.
 	for i := 0; i < 8; i++ {
@@ -1208,16 +1208,19 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 		Seed:      seed,
 	}
 
+	// Test with a missed preimage.
 	eq2 := NewEpoch(epochIdx, epochDur)
-	coMiss, coMissPI := makeCORevealed(buyer3, randomOrderID())
-	eq2.Insert(coMiss)
+	co2, co2PI := makeCORevealed(buyer3, randomOrderID())
+	lo2, _ := makeLORevealed(seller3, bestBuyRate-dcrRateStep, bestBuyQuant, order.ImmediateTiF)
+	eq2.Insert(co2)
+	eq2.Insert(lo2) // lo2 will not be in preimage map (miss)
 
-	cSum2, _ := hex.DecodeString("a958ef5d180cb9dabf4d6aa120489955e6ad04bcba3414d1f4cf1725ed7e0634")
-	seed2, _ := hex.DecodeString("aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66")
+	cSum2, _ := hex.DecodeString("a64ee6372a49f9465910ca0b556818dbc765f3c7fa21d5f40ab25bf4b73f45ed") // includes both commitments, including the miss
+	seed2, _ := hex.DecodeString("aba75140b1f6edf26955a97e1b09d7b17abdc9c0b099fc73d9729501652fbf66") // includes only the provided preimage
 	mp2 := &order.MatchProof{
 		Epoch:     eID,
-		Preimages: []order.Preimage{coMissPI},
-		Misses:    nil,
+		Preimages: []order.Preimage{co2PI},
+		Misses:    []order.Order{lo2},
 		CSum:      cSum2,
 		Seed:      seed2,
 	}
@@ -1225,7 +1228,8 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 	auth.piMtx.Lock()
 	auth.preimagesByOrdID[lo.UID()] = loPI
 	auth.preimagesByOrdID[co.UID()] = coPI
-	auth.preimagesByOrdID[coMiss.UID()] = coMissPI
+	auth.preimagesByOrdID[co2.UID()] = co2PI
+	// No lo2 (miss)
 	auth.piMtx.Unlock()
 
 	var bookSignals []*updateSignal
@@ -1296,7 +1300,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 			},
 		},
 		{
-			"ok no matches or book updates",
+			"ok no matches or book updates, one miss",
 			eq2,
 			[]*updateSignal{
 				{matchProofAction, sigDataMatchProof{mp2}},
