@@ -274,11 +274,13 @@ The process continues with the next order in the list and iterates until all
 orders have been processed.
 
 The preimages and seed are published at the start of the matching process. In
-addition, a '''''checksum''''', which is the Blake-256 hash of the
-lexicographically sorted order commitments, is sent to the client. Because
-the client already has the commitments from their order book subscription,
-the checksum allows the client to check that the orders underlying the preimages
-are indeed the same set received in their order notification feed.
+addition, a '''''checksum''''' defined as the Blake-256 hash of the
+concatenation of the lexicographically sorted commitments of all orders in the
+epoch queue, is sent to the client. Because the client already has the
+commitments from their order book subscription, the checksum allows the client
+to check that the orders underlying the preimages are indeed the same set
+received in their order notification feed, and that no received orders were
+omitted from either preimage collection or shuffling.
 
 For the special case of an epoch with no orders, the checksum will be null.
 
