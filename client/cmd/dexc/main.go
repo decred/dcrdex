@@ -122,7 +122,7 @@ func main() {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, cfg.SiteDir, logMaker.Logger("WEB"), cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
 			cancel()

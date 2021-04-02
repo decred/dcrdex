@@ -114,8 +114,10 @@ type WebServer struct {
 	authTokens map[string]bool
 }
 
-// New is the constructor for a new WebServer.
-func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*WebServer, error) {
+// New is the constructor for a new WebServer. customSiteDir can be left blank,
+// in which case a handful of default locations will be checked. This will work
+// in most cases.
+func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -136,25 +138,26 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
 
 	// executable path
-	siteDir := filepath.Join(execPath, "site") // e.g. /opt/decred/dex/site
-	log.Debugf("Looking for site in %v", siteDir)
-	if !folderExists(siteDir) {
-
-		// working directory
-		siteDir, _ = filepath.Abs("site")
-		log.Debugf("Looking for site in %v", siteDir)
-		if !folderExists(siteDir) {
-
-			// repo
-			siteDir = filepath.Clean(filepath.Join(execPath, "../../webserver/site"))
-			log.Debugf("Looking for site in %v", siteDir)
-			if !folderExists(siteDir) {
-
-				return nil, fmt.Errorf("no HTML template files found. "+
-					"Place the 'site' folder in the executable's directory %q or the working directory, "+
-					"or run dexc from within the client/cmd/dexc source workspace folder.", execPath)
-			}
+	var siteDir string
+	absDir, _ := filepath.Abs("site")
+	for _, dir := range []string{
+		customSiteDir,
+		filepath.Join(execPath, "site"),
+		absDir,
+		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
+	} {
+		log.Debugf("Looking for site in %s", dir)
+		if folderExists(dir) {
+			siteDir = dir
+			break
 		}
+	}
+
+	if siteDir == "" {
+		return nil, fmt.Errorf("no HTML template files found. "+
+			"Place the 'site' folder in the executable's directory %q or the working directory, "+
+			"or run dexc from within the client/cmd/dexc source workspace folder, or specify the"+
+			"'sitedir' configuration directive to dexc.", execPath)
 	}
 	log.Infof("Located \"site\" folder at %v", siteDir)
 

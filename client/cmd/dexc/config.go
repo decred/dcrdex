@@ -75,6 +75,7 @@ func defaultHostByNetwork(network dex.Network) string {
 type Config struct {
 	AppData      string `long:"appdata" description:"Path to application directory."`
 	Config       string `long:"config" description:"Path to an INI configuration file."`
+	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecifed = default is good in most cases."`
 	DBPath       string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
 	RPCOn        bool   `long:"rpc" description:"turn on the rpc server"`
 	RPCAddr      string `long:"rpcaddr" description:"RPC server listen address"`
