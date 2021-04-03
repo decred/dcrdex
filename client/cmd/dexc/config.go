@@ -90,6 +90,8 @@ type Config struct {
 	ReloadHTML   bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
 	DebugLevel   string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
+	CPUProfile   string `long:"cpuprofile" description:"File for CPU profiling."`
+	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
 	ShowVer      bool   `short:"V" long:"version" description:"Display version information and exit"`
 	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
 	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
