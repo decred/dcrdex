@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -24,20 +25,42 @@ import (
 )
 
 func main() {
+	// Wrap the actual main so defers run in it.
+	err := mainCore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func mainCore() error {
 	appCtx, cancel := context.WithCancel(context.Background())
+	defer cancel() // don't leak on the earliest returns
 
 	// Parse configuration.
 	cfg, err := configure()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "configration error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("configration error: %w", err)
 	}
 
 	// If explicitly running without web server then you must run the rpc
 	// server.
 	if cfg.NoWeb && !cfg.RPCOn {
-		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc is specified\n")
-		os.Exit(1)
+		return fmt.Errorf("cannot run without web server unless --rpc is specified")
+	}
+
+	if cfg.CPUProfile != "" {
+		var f *os.File
+		f, err = os.Create(cfg.CPUProfile)
+		if err != nil {
+			return fmt.Errorf("error starting CPU profiler: %w", err)
+		}
+		err = pprof.StartCPUProfile(f)
+		if err != nil {
+			return fmt.Errorf("error starting CPU profiler: %w", err)
+		}
+		defer pprof.StopCPUProfile()
 	}
 
 	// Initialize logging.
@@ -62,8 +85,7 @@ func main() {
 		TorIsolation: cfg.TorIsolation,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating client core: %w", err)
 	}
 
 	// Catch interrupt signal (e.g. ctrl+c), prompting to shutdown if the user
@@ -83,12 +105,19 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		clientCore.Run(appCtx)
 		cancel() // in the event that Run returns prematurely prior to context cancellation
-		wg.Done()
 	}()
 
 	<-clientCore.Ready()
+
+	defer func() {
+		log.Info("Exiting dexc main.")
+		cancel()  // no-op with clean rpc/web server setup
+		wg.Wait() // no-op with clean setup and shutdown
+		closeFileLogger()
+	}()
 
 	if cfg.RPCOn {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
@@ -103,15 +132,14 @@ func main() {
 		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
-			log.Errorf("Error creating rpc server: %v", err)
-			cancel()
-			goto done
+			return fmt.Errorf("failed to create rpc server: %w", err)
 		}
-		cm := dex.NewConnectionMaster(rpcSrv)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = cm.Connect(appCtx)
+			cm := dex.NewConnectionMaster(rpcSrv)
+			err := cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting rpc server: %v", err)
 				cancel()
@@ -122,17 +150,17 @@ func main() {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, cfg.SiteDir, logMaker.Logger("WEB"), cfg.ReloadHTML)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, cfg.SiteDir, logMaker.Logger("WEB"),
+			cfg.ReloadHTML, cfg.HTTPProfile)
 		if err != nil {
-			log.Errorf("Error creating web server: %v", err)
-			cancel()
-			goto done
+			return fmt.Errorf("failed creating web server: %w", err)
 		}
-		cm := dex.NewConnectionMaster(webSrv)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = cm.Connect(appCtx)
+			cm := dex.NewConnectionMaster(webSrv)
+			err := cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
 				cancel()
@@ -142,8 +170,8 @@ func main() {
 		}()
 	}
 
-done:
+	// Wait for everything to stop.
 	wg.Wait()
-	log.Info("Exiting dexc main.")
-	closeFileLogger()
+
+	return nil
 }

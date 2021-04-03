@@ -117,7 +117,7 @@ type WebServer struct {
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
 // in which case a handful of default locations will be checked. This will work
 // in most cases.
-func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML bool) (*WebServer, error) {
+func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML, httpProf bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -202,6 +202,24 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)
+
+	// HTTP profiler
+	if httpProf {
+		profPath := "/debug/pprof"
+		log.Infof("Mounting the HTTP profiler on %s", profPath)
+		// Option A: mount each httpprof handler directly. The caveat with this
+		// is that httpprof.Index ONLY works when mounted on /debug/pprof/.
+		//
+		// mux.Mount(profPath, http.HandlerFunc(httppprof.Index)) // also
+		// handles: goroutine, heap, threadcreate, block, allocs, mutex
+		// mux.Mount(profPath+"/cmdline", http.HandlerFunc(httppprof.Cmdline))
+		// mux.Mount(profPath+"/profile", http.HandlerFunc(httppprof.Profile))
+		// mux.Mount(profPath+"/symbol", http.HandlerFunc(httppprof.Symbol))
+		// mux.Mount(profPath+"/trace", http.HandlerFunc(httppprof.Trace))
+
+		// Option B: http pprof uses http.DefaultServeMux, so mount it:
+		mux.Mount(profPath, http.DefaultServeMux) // profPath MUST be /debug/pprof this way
+	}
 
 	// The WebSocket handler is mounted on /ws in Connect.
 
