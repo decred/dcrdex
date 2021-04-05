@@ -81,7 +81,8 @@ echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
-  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S alpha${SYMBOL}" C-m
+  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
+  ${EXTRA_ARGS}; tmux wait-for -S alpha${SYMBOL}" C-m
 sleep 3
 
 ################################################################################
@@ -96,7 +97,8 @@ echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
-  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S beta${SYMBOL}" C-m
+  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
+  tmux wait-for -S beta${SYMBOL}" C-m
 sleep 3
 
 ################################################################################
@@ -215,11 +217,13 @@ else
     echo "Restarting alpha/beta nodes"
     tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
       -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
-      -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S alpha${SYMBOL}" C-m
+      -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
+      tmux wait-for -S alpha${SYMBOL}" C-m
 
     tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
       -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
-      -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S beta${SYMBOL}" C-m
+      -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
+      tmux wait-for -S beta${SYMBOL}" C-m
     sleep 3
   fi
 
