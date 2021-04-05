@@ -1385,13 +1385,19 @@ func TestRegister(t *testing.T) {
 	}
 	sign(tDexPriv, regRes)
 
+	var wg sync.WaitGroup
+	defer wg.Wait() // don't allow fail after TestRegister return
+
 	queueTipChange := func() {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			t.Helper()
 			timeout := time.NewTimer(time.Second * 2)
 			for {
 				select {
-				case <-time.NewTimer(time.Millisecond).C:
+				case <-time.After(time.Millisecond):
+					timeout.Stop()
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
