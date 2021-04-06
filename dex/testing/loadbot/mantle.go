@@ -211,6 +211,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 	}
 	go func() {
 		ticker := time.NewTicker(dur / time.Duration(len(ords)))
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -303,8 +304,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		<-harnessCtl(symbol, fmt.Sprintf("./%s", node), "sendtoaddress", coreWallet.Address, valString(chunk))
 	}
 	<-harnessCtl(symbol, fmt.Sprintf("./mine-%s", node), "1")
-	<-time.After(time.Second)
-	return
+	time.Sleep(time.Second)
 }
 
 // replenishBalances will run replenishBalance for all wallets.
