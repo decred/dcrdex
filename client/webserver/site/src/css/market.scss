@@ -1,4 +1,5 @@
 div.marketlist {
+  width: 175px;
   border-right: 1px solid #626262;
   z-index: 99;
   background-color: #dbdbdb;
@@ -288,6 +289,7 @@ table.balance-table button:hover {
 }
 
 #rightSide {
+  width: calc(100% - 175px);
   height: 85vh;
   overflow-y: auto;
 
