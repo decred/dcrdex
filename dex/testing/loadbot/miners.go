@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// blockEvery2 will randomize  the delay, but aim for 1 block of each asset
+// blockEvery2 will randomize the delay, but aim for 1 block of each asset
 // within a 2 epoch window.
 func blockEvery2() {
 	i := 0
@@ -21,7 +21,7 @@ func blockEvery2() {
 		mineAlpha(symbol)
 
 		getDelay := func() time.Duration {
-			return time.Duration(rand.Float64()*float64(epochDuration))*time.Millisecond + time.Second
+			return time.Duration(rand.Float64()*float64(epochDuration))*time.Millisecond + 2*time.Second
 		}
 
 		select {
