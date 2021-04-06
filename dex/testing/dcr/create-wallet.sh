@@ -8,6 +8,7 @@ NAME=$2
 SEED=$3
 RPC_PORT=$4
 ENABLE_VOTING=$5
+HTTPPROF_PORT=$6
 
 WALLET_DIR="${NODES_ROOT}/${NAME}"
 mkdir -p ${WALLET_DIR}
@@ -38,8 +39,12 @@ rpcconnect=127.0.0.1:${DCRD_RPC_PORT}
 cafile=${DCRD_RPC_CERT}
 EOF
 
+if [ -n "${HTTPPROF_PORT}" ]; then
+echo "profile=127.0.0.1:${HTTPPROF_PORT}" >> "${WALLET_DIR}/${NAME}.conf"
+fi
+
 if [ "${ENABLE_VOTING}" = "1" ]; then
-  cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
+cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
 enablevoting=1
 enableticketbuyer=1
 ticketbuyer.limit=6
