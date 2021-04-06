@@ -272,8 +272,9 @@ func main() {
 	betaAddrBTC = getAddress(btc, "./beta", "getnewaddress", "''", "bech32")
 
 	// Unlock wallets, since they may have been locked on a previous shutdown.
-	<-harnessCtl(dcr, "./alpha", "walletpassphrase", "abc", "4294967295")
-	<-harnessCtl(dcr, "./beta", "walletpassphrase", "abc", "4294967295")
+	<-harnessCtl(dcr, "./alpha", "walletpassphrase", "abc", "0")
+	<-harnessCtl(dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
+	<-harnessCtl(dcr, "./beta", "unlockaccount", "default", "abc")
 	<-harnessCtl(btc, "./alpha", "walletpassphrase", "abc", "4294967295")
 	<-harnessCtl(btc, "./beta", "walletpassphrase", "abc", "4294967295")
 
