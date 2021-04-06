@@ -1521,7 +1521,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
 		timeout := t.broadcastTimeout() / 4
-		if timeout == 0 { // if we lack server config for any reason
+		if timeout < time.Minute { // sane minimum, or if we lack server config for any reason
 			// Send would fail right away anyway if the server is really down,
 			// but at least attempt it with a non-zero timeout.
 			timeout = time.Minute
@@ -1734,7 +1734,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
 		timeout := t.broadcastTimeout() / 4
-		if timeout == 0 { // if we lack server config for any reason
+		if timeout < time.Minute { // sane minimum, or if we lack server config for any reason
 			// Send would fail right away anyway if the server is really down,
 			// but at least attempt it with a non-zero timeout.
 			timeout = time.Minute
