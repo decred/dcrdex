@@ -85,18 +85,18 @@ func (d *bookSide) Add(order *Order) {
 	}
 }
 
-// Remove deletes an order from its associated bin.
-func (d *bookSide) Remove(order *Order) error {
+// Remove deletes an order from the given rate bin.
+func (d *bookSide) Remove(oid order.OrderID, rateBin uint64) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
-	bin, exists := d.bins[order.Rate]
+	bin, exists := d.bins[rateBin]
 	if !exists {
-		return fmt.Errorf("no bin found for rate %d", order.Rate)
+		return fmt.Errorf("no bin found for rate %d", rateBin)
 	}
 
 	for i := range bin {
-		if order.OrderID == bin[i].OrderID {
+		if oid == bin[i].OrderID {
 			// Remove the entry and preserve the sort order.
 			if i < len(bin)-1 {
 				copy(bin[i:], bin[i+1:])
@@ -106,29 +106,31 @@ func (d *bookSide) Remove(order *Order) error {
 
 			// Delete the bin if there are no orders left in it.
 			if len(bin) == 0 {
-				delete(d.bins, order.Rate)
-				return d.rateIndex.Remove(order.Rate)
+				delete(d.bins, rateBin)
+				return d.rateIndex.Remove(rateBin)
 			}
 
-			d.bins[order.Rate] = bin
+			d.bins[rateBin] = bin
 			return nil
 		}
 	}
 
-	return fmt.Errorf("order %s not found", order.OrderID)
+	return fmt.Errorf("order %s not found with rate %d", oid, rateBin)
 }
 
 // UpdateRemaining updates the remaining quantity for an order.
-func (d *bookSide) UpdateRemaining(oid order.OrderID, remaining uint64) {
+func (d *bookSide) UpdateRemaining(oid order.OrderID, rateBin, remaining uint64) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
-	for _, bin := range d.bins {
-		for _, ord := range bin {
-			if ord.OrderID == oid {
-				ord.Quantity = remaining
-				return
-			}
+	bin := d.bins[rateBin]
+	for i, ord := range bin {
+		if ord.OrderID == oid {
+			// Make a new Order so other copies aren't modified.
+			newOrder := *ord // deep copy
+			newOrder.Quantity = remaining
+			bin[i] = &newOrder
+			return
 		}
 	}
 }
@@ -164,12 +166,13 @@ func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 
 // BestFill returns the best fill for the provided quantity.
 func (d *bookSide) BestFill(qty uint64) ([]*Fill, bool) {
-	d.mtx.RLock()
-	defer d.mtx.RUnlock()
 	return d.bestFill(qty, false, 0)
 }
 
 func (d *bookSide) bestFill(quantity uint64, convert bool, lotSize uint64) ([]*Fill, bool) {
+	d.mtx.RLock()
+	defer d.mtx.RUnlock()
+
 	remainingQty := quantity
 	best := make([]*Fill, 0)
 
@@ -236,7 +239,7 @@ func (d *bookSide) iterateOrders(check func(*Order) bool) {
 		bin := d.bins[d.rateIndex.Rates[calcIdx(ir)]]
 		for _, ord := range bin {
 			if !check(ord) {
-				break // really next rate bin? or break outer / return?
+				return
 			}
 		}
 	}

@@ -47,6 +47,13 @@ type cachedOrderNote struct {
 	OrderNote interface{}
 }
 
+// rateSell provides the rate and book side information about an order that is
+// required for efficiently referencing it in a bookSide.
+type rateSell struct {
+	rate uint64
+	sell bool
+}
+
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
 	log      dex.Logger
@@ -57,11 +64,9 @@ type OrderBook struct {
 	noteQueueMtx sync.Mutex
 	noteQueue    []*cachedOrderNote
 
-	// Track the orders stored in each bookSide. The Quantity field of the
-	// Orders should not be accessed except via the bookSide methods. Only the
-	// immutable Order fields are to be used by OrderBook methods directly.
+	// Track the orders stored in each bookSide.
 	ordersMtx sync.Mutex
-	orders    map[order.OrderID]*Order
+	orders    map[order.OrderID]rateSell
 
 	buys  *bookSide
 	sells *bookSide
@@ -87,7 +92,7 @@ func NewOrderBook(logger dex.Logger) *OrderBook {
 	ob := &OrderBook{
 		log:         logger,
 		noteQueue:   make([]*cachedOrderNote, 0, 16),
-		orders:      make(map[order.OrderID]*Order),
+		orders:      make(map[order.OrderID]rateSell),
 		buys:        newBookSide(descending),
 		sells:       newBookSide(ascending),
 		epochQueues: make(map[uint64]*EpochQueue),
@@ -230,7 +235,7 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 		ob.ordersMtx.Lock()
 		defer ob.ordersMtx.Unlock()
 
-		ob.orders = make(map[order.OrderID]*Order)
+		ob.orders = make(map[order.OrderID]rateSell, len(snapshot.Orders))
 		ob.buys.reset()
 		ob.sells.reset()
 		for _, o := range snapshot.Orders {
@@ -248,7 +253,7 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 				Time:     o.Time,
 			}
 
-			ob.orders[order.OrderID] = order
+			ob.orders[oid] = rateSell{order.Rate, order.sell()}
 
 			// Append the order to the order book.
 			switch o.Side {
@@ -312,7 +317,7 @@ func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
 	}
 
 	ob.ordersMtx.Lock()
-	ob.orders[order.OrderID] = order
+	ob.orders[order.OrderID] = rateSell{order.Rate, order.sell()}
 	ob.ordersMtx.Unlock()
 
 	// Add the order to its associated books side.
@@ -360,16 +365,16 @@ func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached b
 	copy(oid[:], note.OrderID)
 
 	ob.ordersMtx.Lock()
-	ord, found := ob.orders[oid]
+	ordInfo, found := ob.orders[oid]
 	ob.ordersMtx.Unlock()
 	if !found {
 		return fmt.Errorf("update_remaining order %s not found", oid)
 	}
 
-	if ord.sell() {
-		ob.sells.UpdateRemaining(oid, note.Remaining)
+	if ordInfo.sell {
+		ob.sells.UpdateRemaining(oid, ordInfo.rate, note.Remaining)
 	} else {
-		ob.buys.UpdateRemaining(oid, note.Remaining)
+		ob.buys.UpdateRemaining(oid, ordInfo.rate, note.Remaining)
 	}
 	return nil
 }
@@ -414,17 +419,17 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 
 	ob.ordersMtx.Lock()
 	defer ob.ordersMtx.Unlock() // slightly longer than necessary
-	order, ok := ob.orders[oid]
+	ordInfo, ok := ob.orders[oid]
 	if !ok {
 		return fmt.Errorf("no order found with id %v", oid)
 	}
 	delete(ob.orders, oid)
 
-	// Remove the order from its associated book side.
-	if order.sell() {
-		return ob.sells.Remove(order)
+	// Remove the order from its associated book side and rate bin.
+	if ordInfo.sell {
+		return ob.sells.Remove(oid, ordInfo.rate)
 	}
-	return ob.buys.Remove(order)
+	return ob.buys.Remove(oid, ordInfo.rate)
 }
 
 // Unbook removes an order from the order book.
@@ -597,7 +602,5 @@ func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 // BestFillMarketBuy is the best (rate, quantity) fill for a market buy order.
 // The qty given will be in units of quote asset.
 func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
-	ob.sells.mtx.RLock()
-	defer ob.sells.mtx.RUnlock()
 	return ob.sells.bestFill(qty, true, lotSize)
 }

@@ -31,10 +31,10 @@ echo "Writing markets.json and dcrdex.conf"
 
 set +e
 
-~/dextest/bch/harness-ctl/alpha getblockchaininfo > /dev/null
+~/dextest/bch/harness-ctl/alpha getblockchaininfo &> /dev/null
 BCH_ON=$?
 
-~/dextest/ltc/harness-ctl/alpha getblockchaininfo > /dev/null
+~/dextest/ltc/harness-ctl/alpha getblockchaininfo &> /dev/null
 LTC_ON=$?
 
 set -e
@@ -61,6 +61,7 @@ if [ $LTC_ON -eq 0 ]; then
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
+else echo "WARNING: Litecoin is not running. Configuring dcrdex markets without LTC."
 fi
 
 if [ $BCH_ON -eq 0 ]; then
@@ -72,6 +73,7 @@ if [ $BCH_ON -eq 0 ]; then
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
+else echo "WARNING: Bitcoin Cash is not running. Configuring dcrdex markets without BCH."
 fi
 
 cat << EOF >> "./markets.json"
