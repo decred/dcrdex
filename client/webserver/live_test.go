@@ -272,6 +272,11 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 		Connected: true,
+		Fee: &core.FeeAsset{
+			ID:    42,
+			Confs: 1,
+			Amt:   1e8,
+		},
 	},
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
@@ -282,6 +287,11 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(22, 141): mkMrkt("mona", "kmd"),
 		},
 		Connected: true,
+		Fee: &core.FeeAsset{
+			ID:    42,
+			Confs: 1,
+			Amt:   1e8,
+		},
 	},
 }
 
@@ -379,7 +389,10 @@ func (c *TCore) InitializeClient(pw []byte) error {
 	return nil
 }
 func (c *TCore) GetFee(host string, cert interface{}) (uint64, error) {
-	return 1e8, nil
+	return tExchanges[host].Fee.Amt, nil
+}
+func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, error) {
+	return tExchanges[host], nil
 }
 
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {

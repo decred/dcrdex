@@ -229,6 +229,51 @@ func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfirms = &confs
 }
 
+func (dc *dexConnection) exchangeInfo() *Exchange {
+	// Set AcctID to empty string if not registered.
+	acctID := dc.acct.ID().String()
+	var emptyAcctID account.AccountID
+	if dc.acct.ID() == emptyAcctID {
+		acctID = ""
+	}
+
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
+	if cfg == nil { // no config, assets, or markets data
+		return &Exchange{
+			Host:       dc.acct.host,
+			AcctID:     acctID,
+			FeePending: dc.acct.feePending(),
+			Connected:  atomic.LoadUint32(&dc.connected) == 1,
+			// RegConfirms:   dc.getRegConfirms(), // could show, but we don't know required
+		}
+	}
+
+	dc.assetsMtx.RLock()
+	assets := make(map[uint32]*dex.Asset, len(dc.assets))
+	for assetID, dexAsset := range dc.assets {
+		assets[assetID] = dexAsset
+	}
+	dc.assetsMtx.RUnlock()
+
+	return &Exchange{
+		Host:          dc.acct.host,
+		AcctID:        acctID,
+		Markets:       dc.marketMap(),
+		Assets:        assets,
+		FeePending:    dc.acct.feePending(),
+		Connected:     atomic.LoadUint32(&dc.connected) == 1,
+		ConfsRequired: uint32(cfg.RegFeeConfirms),
+		RegConfirms:   dc.getRegConfirms(),
+		Fee: &FeeAsset{ // v0 is only DCR, but there will be a RegFees map[string]*FeeAsset field
+			ID:    42,
+			Amt:   cfg.Fee,
+			Confs: uint32(cfg.RegFeeConfirms),
+		},
+	}
+}
+
 // hasActiveAssetOrders checks whether there are any active orders or negotiating
 // matches for the specified asset.
 func (dc *dexConnection) hasActiveAssetOrders(assetID uint32) bool {
@@ -1186,38 +1231,7 @@ func (c *Core) dexConnections() []*dexConnection {
 func (c *Core) exchangeMap() map[string]*Exchange {
 	infos := make(map[string]*Exchange, len(c.conns))
 	for _, dc := range c.dexConnections() {
-		var requiredConfs uint32
-		dc.cfgMtx.RLock()
-		cfg := dc.cfg
-		dc.cfgMtx.RUnlock()
-
-		if cfg != nil {
-			requiredConfs = uint32(cfg.RegFeeConfirms)
-		}
-
-		dc.assetsMtx.RLock()
-		assets := make(map[uint32]*dex.Asset, len(dc.assets))
-		for assetID, dexAsset := range dc.assets {
-			assets[assetID] = dexAsset
-		}
-		dc.assetsMtx.RUnlock()
-
-		// Set AcctID to empty string if not initialized.
-		acctID := dc.acct.ID().String()
-		var emptyAcctID account.AccountID
-		if dc.acct.ID() == emptyAcctID {
-			acctID = ""
-		}
-		infos[dc.acct.host] = &Exchange{
-			Host:          dc.acct.host,
-			AcctID:        acctID,
-			Markets:       dc.marketMap(),
-			Assets:        assets,
-			FeePending:    dc.acct.feePending(),
-			Connected:     atomic.LoadUint32(&dc.connected) == 1,
-			ConfsRequired: requiredConfs,
-			RegConfirms:   dc.getRegConfirms(),
-		}
+		infos[dc.acct.host] = dc.exchangeInfo()
 	}
 	return infos
 }
@@ -2092,26 +2106,46 @@ func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 
 func (c *Core) isRegistered(host string) bool {
 	c.connMtx.RLock()
-	_, found := c.conns[host]
+	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
-	return found
+	if !found {
+		return false
+	}
+
+	dc.acct.keyMtx.RLock()
+	defer dc.acct.keyMtx.RUnlock()
+	return len(dc.acct.encKey) > 0 // should be for all in conns map, but check
 }
 
-// GetFee creates a connection to the specified DEX Server and fetches the
-// registration fee. The connection is closed after the fee is retrieved.
+// GetFee creates a temporary connection to the specified DEX Server and fetches
+// the registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX. A TLS certificate,
 // certI, can be provided as either a string filename, or []byte file contents.
 func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
+	exch, err := c.GetDEXConfig(dexAddr, certI)
+	if err != nil {
+		return 0, err
+	}
+	return exch.Fee.Amt, nil
+}
+
+// GetDEXConfig creates a temporary connection to the specified DEX Server and
+// fetches the full exchange config. The connection is closed after the config
+// is retrieved. An error is returned if user is already registered to the DEX
+// since a DEX connection is already established and the config is accessible
+// via the User or Exchanges methods. A TLS certificate, certI, can be provided
+// as either a string filename, or []byte file contents.
+func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
-		return 0, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
 	cert, err := parseCert(host, certI)
 	if err != nil {
-		return 0, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
+		return nil, newError(fileReadErr, "failed to parse certificate: %v", err)
 	}
 	if c.isRegistered(host) {
-		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
+		return nil, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -2123,13 +2157,10 @@ func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
 		defer dc.connMaster.Disconnect()
 	}
 	if err != nil {
-		return 0, codedError(connectionErr, err)
+		return nil, codedError(connectionErr, err)
 	}
 
-	dc.cfgMtx.RLock()
-	defer dc.cfgMtx.RUnlock()
-
-	return dc.cfg.Fee, nil
+	return dc.exchangeInfo(), nil
 }
 
 // Register registers an account with a new DEX. If an error occurs while

@@ -26,7 +26,7 @@ export default class RegistrationPage extends BasePage {
       'addCert', 'submitDEXAddr', 'dexAddrErr', 'dexCertFile', 'dexNeedCert',
       'dexShowMore',
       // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       'dexCertBox'
     ])
 
@@ -146,7 +146,7 @@ export default class RegistrationPage extends BasePage {
     }
 
     const loaded = app.loading(page.dexAddrForm)
-    const res = await postJSON('/api/getfee', {
+    const res = await postJSON('/api/getdexinfo', {
       addr: addr,
       cert: cert
     })
@@ -162,9 +162,11 @@ export default class RegistrationPage extends BasePage {
 
       return
     }
-    this.fee = res.fee
+    this.fee = res.exch.feeAsset.amount
 
-    page.feeDisplay.textContent = Doc.formatCoinValue(res.fee / 1e8)
+    page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    const dcrAsset = res.exch.assets['42'] // res.exch.markets['dcr_btc']
+    if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
     await this.changeForm(page.dexAddrForm, page.confirmRegForm)
   }
 
