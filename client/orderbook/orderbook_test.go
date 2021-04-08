@@ -64,7 +64,7 @@ func makeOrderBook(seq uint64, marketID string, orders []*Order, cachedOrders []
 	ob.seq = seq
 
 	for _, order := range orders {
-		ob.orders[order.OrderID] = order
+		ob.orders[order.OrderID] = rateSell{order.Rate, order.sell()}
 
 		switch order.Side {
 		case msgjson.BuyOrderNum:

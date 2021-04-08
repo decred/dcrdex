@@ -397,7 +397,8 @@ func TestBookSideRemove(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		err := tc.side.Remove(tc.entry)
+		ord := tc.entry
+		err := tc.side.Remove(ord.OrderID, ord.Rate)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[BookSide.Remove] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)

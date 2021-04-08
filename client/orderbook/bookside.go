@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/order"
 )
 
 // orderPreference represents ordering preference for a sort.
@@ -41,6 +42,14 @@ func newBookSide(pref orderPreference) *bookSide {
 		rateIndex: newRateIndex(),
 		orderPref: pref,
 	}
+}
+
+// Reset reinitializes the bookSide without changing the orderPreference.
+func (d *bookSide) reset() {
+	d.mtx.Lock()
+	d.bins = make(map[uint64][]*Order)
+	d.rateIndex = newRateIndex()
+	d.mtx.Unlock()
 }
 
 // Add puts an order in its associated bin.
@@ -76,18 +85,18 @@ func (d *bookSide) Add(order *Order) {
 	}
 }
 
-// Remove deletes an order from its associated bin.
-func (d *bookSide) Remove(order *Order) error {
+// Remove deletes an order from the given rate bin.
+func (d *bookSide) Remove(oid order.OrderID, rateBin uint64) error {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
-	bin, exists := d.bins[order.Rate]
+	bin, exists := d.bins[rateBin]
 	if !exists {
-		return fmt.Errorf("no bin found for rate %d", order.Rate)
+		return fmt.Errorf("no bin found for rate %d", rateBin)
 	}
 
-	for i := 0; i < len(bin); i++ {
-		if bytes.Equal(order.OrderID[:], bin[i].OrderID[:]) {
+	for i := range bin {
+		if oid == bin[i].OrderID {
 			// Remove the entry and preserve the sort order.
 			if i < len(bin)-1 {
 				copy(bin[i:], bin[i+1:])
@@ -97,41 +106,44 @@ func (d *bookSide) Remove(order *Order) error {
 
 			// Delete the bin if there are no orders left in it.
 			if len(bin) == 0 {
-				delete(d.bins, order.Rate)
-				return d.rateIndex.Remove(order.Rate)
+				delete(d.bins, rateBin)
+				return d.rateIndex.Remove(rateBin)
 			}
 
-			d.bins[order.Rate] = bin
+			d.bins[rateBin] = bin
 			return nil
 		}
 	}
 
-	return fmt.Errorf("order %s not found", order.OrderID)
+	return fmt.Errorf("order %s not found with rate %d", oid, rateBin)
 }
 
-// ReplaceOrder replaces the order with the matching ID with a new version.
-func (d *bookSide) ReplaceOrder(ord *Order) {
+// UpdateRemaining updates the remaining quantity for an order.
+func (d *bookSide) UpdateRemaining(oid order.OrderID, rateBin, remaining uint64) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
-	oid := ord.OrderID
-	for _, bin := range d.bins {
-		for i := range bin {
-			if bin[i].OrderID == oid {
-				bin[i] = ord
-				return
-			}
+	bin := d.bins[rateBin]
+	for i, ord := range bin {
+		if ord.OrderID == oid {
+			// Make a new Order so other copies aren't modified.
+			newOrder := *ord // deep copy
+			newOrder.Quantity = remaining
+			bin[i] = &newOrder
+			return
 		}
 	}
 }
 
-// orders is all orders for the side, sorted.
-func (d *bookSide) orders() []*Order {
+// Orders is all orders for the side, sorted. Returned orders are copies and
+// thus safe for concurrent access to their Quantity field.
+func (d *bookSide) Orders() []*Order {
 	orders, _ := d.BestNOrders(int(^uint(0) >> 1)) // Max int value
 	return orders
 }
 
-// BestNOrders returns the best N orders of the book side.
+// BestNOrders returns the best N orders of the book side. Returned orders are
+// copies and thus safe for concurrent access to their Quantity field.
 func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
@@ -142,6 +154,8 @@ func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 		if count == 0 {
 			return false
 		}
+		// Quantity is immutable for a given *Order instance (see
+		// UpdateRemaining), so there is no need to make a deep copy here.
 		best = append(best, ord)
 		count--
 		return true
@@ -156,6 +170,9 @@ func (d *bookSide) BestFill(qty uint64) ([]*Fill, bool) {
 }
 
 func (d *bookSide) bestFill(quantity uint64, convert bool, lotSize uint64) ([]*Fill, bool) {
+	d.mtx.RLock()
+	defer d.mtx.RUnlock()
+
 	remainingQty := quantity
 	best := make([]*Fill, 0)
 
@@ -216,14 +233,13 @@ func (d *bookSide) idxCalculator() func(i int) int {
 }
 
 func (d *bookSide) iterateOrders(check func(*Order) bool) {
-	calcIdx := d.idxCalculator()
+	calcIdx := d.idxCalculator() // ascending or descending Rates index
 
-	for i := 0; i < len(d.rateIndex.Rates); i++ {
-		bin := d.bins[d.rateIndex.Rates[calcIdx(i)]]
-
-		for idx := 0; idx < len(bin); idx++ {
-			if !check(bin[idx]) {
-				break
+	for ir := range d.rateIndex.Rates {
+		bin := d.bins[d.rateIndex.Rates[calcIdx(ir)]]
+		for _, ord := range bin {
+			if !check(ord) {
+				return
 			}
 		}
 	}
