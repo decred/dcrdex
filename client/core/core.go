@@ -2122,11 +2122,11 @@ func (c *Core) isRegistered(host string) bool {
 // Returns an error if user is already registered to the DEX. A TLS certificate,
 // certI, can be provided as either a string filename, or []byte file contents.
 func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
-	exch, err := c.GetDEXConfig(dexAddr, certI)
+	xc, err := c.GetDEXConfig(dexAddr, certI)
 	if err != nil {
 		return 0, err
 	}
-	return exch.Fee.Amt, nil
+	return xc.Fee.Amt, nil
 }
 
 // GetDEXConfig creates a temporary connection to the specified DEX Server and
@@ -2160,6 +2160,8 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 		return nil, codedError(connectionErr, err)
 	}
 
+	// Since connectDEX succeeded, we have the server config. exchangeInfo is
+	// guaranteed to return and *Exchange with full asset and market info.
 	return dc.exchangeInfo(), nil
 }
 

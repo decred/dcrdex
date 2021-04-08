@@ -51,7 +51,7 @@ func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := struct {
 		OK       bool           `json:"ok"`
-		Exchange *core.Exchange `json:"exch,omitempty"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
 	}{
 		OK:       true,
 		Exchange: exchangeInfo,

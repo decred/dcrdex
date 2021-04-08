@@ -453,9 +453,9 @@ type Exchange struct {
 	Assets        map[uint32]*dex.Asset `json:"assets"`
 	FeePending    bool                  `json:"feePending"`
 	Connected     bool                  `json:"connected"`
-	ConfsRequired uint32                `json:"confsrequired"`
+	ConfsRequired uint32                `json:"confsrequired"` // DEPRECATED. RegFees will support multi-asset reg
 	RegConfirms   *uint32               `json:"confs,omitempty"`
-	Fee           *FeeAsset             `json:"feeAsset"`
+	Fee           *FeeAsset             `json:"feeAsset"` // DEPRECATED
 	// RegFees       map[string]*FeeAsset  `json:"regfees"`
 }
 
