@@ -154,9 +154,9 @@ func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 		if count == 0 {
 			return false
 		}
-		// Return copies for thread-safe access to the Quantity field.
-		ordCopy := *ord
-		best = append(best, &ordCopy)
+		// Quantity is immutable for a given *Order instance (see
+		// UpdateRemaining), so there is no need to make a deep copy here.
+		best = append(best, ord)
 		count--
 		return true
 	})
