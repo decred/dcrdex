@@ -14,6 +14,14 @@ $dark_bg_3: #292929;
 $sans: 'source-sans', sans-serif;
 $demi-sans: 'demi-sans', sans-serif;
 $mono: 'mono', monospace;
+$grid-breakpoints: (
+  xs: 0,
+  sm: 576px,
+  md: 768px,
+  lg: 992px,
+  xl: 1200px,
+  xxl: 1750px
+);
 
 // Bootstrap
 @import "~bootstrap/scss/_functions.scss";

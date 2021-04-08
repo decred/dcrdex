@@ -346,6 +346,18 @@ table.balance-table button:hover {
   .ico-unlocked {
     color: #1e7d11;
   }
+
+  .userorders {
+    min-height: 200px;
+  }
+}
+
+.orders-left {
+  min-height: 350px;
+}
+
+.order-panel {
+  min-height: 500px;
 }
 
 #loaderMsg {

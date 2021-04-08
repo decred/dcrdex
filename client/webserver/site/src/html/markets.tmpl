@@ -8,7 +8,7 @@
 
 {{define "markets"}}
 {{template "top" .}}
-<div id="main" data-handler="markets" class="main align-items-stretch justify-content-center clear">
+<div id="main" data-handler="markets" class="row main clear m-0 flex-nowrap">
 
   {{- /* MARKET LIST */ -}}
   <div class="marketlist">
@@ -37,7 +37,7 @@
   </div>
 
   {{- /* RIGHT COLUMN */ -}}
-  <div id="rightSide" class="d-flex flex-column flex-grow-1">
+  <div id="rightSide" class="d-flex flex-column flex-grow-1 h-100 overflow-y-auto">
 
     {{- /* CHART */ -}}
 
@@ -67,13 +67,13 @@
     </div>
 
     {{- /* ORDERS */ -}}
-    <div id="orders" class="w-100 d-flex flex-grow-1 bg1">
+    <div id="orders" class="w-100 d-flex flex-grow-1 flex-wrap bg1">
 
-      <div class="col-14 p-0">
-        <div class="fill-abs d-flex justify-content-around align-items-stretch">
+      <div class="orders-left col-24 col-xxl-14 p-0">
+        <div class="row m-0 h-100">
 
           {{- /* BUY ORDER LIST */ -}}
-          <div class="marketorders col-7 p-0 bg1">
+          <div class="marketorders order-lg-1 order-2 col-lg-7 p-0 bg1">
             <div class="market-header text-center fs14 py-1">Buy Orders</div>
             <div class="max-h-100 stylish-overflow">
               <table class="ordertable">
@@ -99,7 +99,7 @@
           </div>
 
           {{- /* ORDER PANEL */ -}}
-          <div class="col-10 p-0 brdrleft brdrright d-flex flex-column">
+          <div class="col-lg-10 order-1 order-lg-2 order-panel p-0 brdrleft brdrright d-flex flex-column">
             <div class="market-header fs14 d-flex justify-content-start pl-4 align-items-stretch">
               <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">Limit Order</button>
               <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">Market Order</button>
@@ -308,7 +308,7 @@
           </div>
 
           {{- /* SELL ORDER LIST */ -}}
-          <div class="marketorders col-7 p-0 bg1">
+          <div class="marketorders col-lg-7 order-3 p-0 bg1">
             <div class="market-header text-center fs14 py-1">Sell Orders</div>
             <div class="max-h-100 stylish-overflow">
               <table class="ordertable">
@@ -321,7 +321,7 @@
       </div>
 
       {{- /* USER ORDERS */ -}}
-      <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
+      <div class="bg0 p-0 col-24 userorders col-xxl-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">
           Your Orders
         </div>

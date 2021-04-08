@@ -291,8 +291,12 @@ export default class MarketsPage extends BasePage {
     const setChartRatio = r => {
       if (r > 0.7) r = 0.7
       else if (r < 0.25) r = 0.25
-      page.marketChart.style.height = `${r * 100}%`
-      this.chart.resize()
+
+      const h = r * (this.main.clientHeight - app.header.offsetHeight)
+
+      page.marketChart.style.height = `${h}px`
+
+      this.chart.resize(h)
     }
     const chartDivRatio = State.fetch(chartRatioKey)
     if (chartDivRatio) {
