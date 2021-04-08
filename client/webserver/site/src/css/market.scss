@@ -288,16 +288,6 @@ table.balance-table button:hover {
   }
 }
 
-#rightSide {
-  width: calc(100% - 175px);
-  height: 85vh;
-  overflow-y: auto;
-
-  @media (min-width: map-get($grid-breakpoints, md)) {
-    height: 100vh;
-  }
-}
-
 #marketLoader {
   z-index: 50;
   background-color: rgba(0, 0, 0, 0.5);

@@ -8,7 +8,7 @@
 
 {{define "markets"}}
 {{template "top" .}}
-<div id="main" data-handler="markets" class="row main clear m-0">
+<div id="main" data-handler="markets" class="row main clear m-0 flex-nowrap">
 
   {{- /* MARKET LIST */ -}}
   <div class="marketlist">
@@ -37,7 +37,7 @@
   </div>
 
   {{- /* RIGHT COLUMN */ -}}
-  <div id="rightSide" class="d-flex flex-column">
+  <div id="rightSide" class="d-flex flex-column flex-grow-1 h-100 overflow-y-auto">
 
     {{- /* CHART */ -}}
 
