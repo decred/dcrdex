@@ -292,6 +292,9 @@ func (s *Server) Run(ctx context.Context) {
 
 	// Data API endpoints.
 	mux.Route("/api", func(rr chi.Router) {
+		if log.Level() == dex.LevelTrace {
+			rr.Use(middleware.Logger)
+		}
 		rr.Use(s.limitRate)
 		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
 		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
