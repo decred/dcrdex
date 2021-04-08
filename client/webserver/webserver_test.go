@@ -72,9 +72,12 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Network() dex.Network                                        { return dex.Mainnet }
-func (c *TCore) Exchanges() map[string]*core.Exchange                        { return nil }
-func (c *TCore) GetFee(string, interface{}) (uint64, error)                  { return 1e8, c.getFeeErr }
+func (c *TCore) Network() dex.Network                       { return dex.Mainnet }
+func (c *TCore) Exchanges() map[string]*core.Exchange       { return nil }
+func (c *TCore) GetFee(string, interface{}) (uint64, error) { return 1e8, c.getFeeErr }
+func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
+	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
+}
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) InitializeClient(pw []byte) error                            { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }

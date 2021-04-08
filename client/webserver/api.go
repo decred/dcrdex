@@ -37,6 +37,28 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiGetDEXInfo is the handler for the '/getdexinfo' API request.
+func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
+	form := new(registrationForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	exchangeInfo, err := s.core.GetDEXConfig(form.Addr, cert)
+	if err != nil {
+		s.writeAPIError(w, err.Error())
+		return
+	}
+	resp := struct {
+		OK       bool           `json:"ok"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
+	}{
+		OK:       true,
+		Exchange: exchangeInfo,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiRegister is the handler for the '/register' API request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	reg := new(registrationForm)

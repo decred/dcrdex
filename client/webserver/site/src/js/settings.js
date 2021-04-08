@@ -20,7 +20,7 @@ export default class SettingsPage extends BasePage {
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr',
+      'forms', 'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
       'exportAccountHost', 'exportAccountErr',
@@ -293,7 +293,7 @@ export default class SettingsPage extends BasePage {
     }
 
     const loaded = app.loading(page.dexAddrForm)
-    const res = await postJSON('/api/getfee', {
+    const res = await postJSON('/api/getdexinfo', {
       addr: addr,
       cert: cert
     })
@@ -303,9 +303,11 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.dexAddrErr)
       return
     }
-    this.fee = res.fee
+    this.fee = res.xc.feeAsset.amount
 
-    page.feeDisplay.textContent = Doc.formatCoinValue(res.fee / 1e8)
+    page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    const dcrAsset = res.xc.assets['42']
+    if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
     await this.showForm(page.confirmRegForm)
   }
 

@@ -438,6 +438,13 @@ func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
 }
 
+// FeeAsset will also be a msgjson type with preregister/payfee PR 1017.
+type FeeAsset struct {
+	ID    uint32 `json:"id"`
+	Confs uint32 `json:"confs"`
+	Amt   uint64 `json:"amount"`
+}
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
 	Host          string                `json:"host"`
@@ -446,8 +453,10 @@ type Exchange struct {
 	Assets        map[uint32]*dex.Asset `json:"assets"`
 	FeePending    bool                  `json:"feePending"`
 	Connected     bool                  `json:"connected"`
-	ConfsRequired uint32                `json:"confsrequired"`
+	ConfsRequired uint32                `json:"confsrequired"` // DEPRECATED. RegFees will support multi-asset reg
 	RegConfirms   *uint32               `json:"confs,omitempty"`
+	Fee           *FeeAsset             `json:"feeAsset"` // DEPRECATED
+	// RegFees       map[string]*FeeAsset  `json:"regfees"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.
@@ -558,7 +567,7 @@ func (a *dexAccount) ID() account.AccountID {
 func (a *dexAccount) updateKeysEncryption(oldCrypter, newCrypter encrypt.Crypter) error {
 	a.keyMtx.Lock()
 	defer a.keyMtx.Unlock()
-	// Decrypt the encrpyted key with old crypter.
+	// Decrypt the encrypted key with old crypter.
 	key, err := oldCrypter.Decrypt(a.encKey)
 	if err != nil {
 		return fmt.Errorf("error decrypting acct enc key: %w", err)
