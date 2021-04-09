@@ -225,11 +225,17 @@ const (
 )
 
 func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
+	var counterConfs int64
+	if match.counterConfirms > 0 {
+		// This can be -1 before it is actually checked, but for purposes of the
+		// match note, it should be non-negative.
+		counterConfs = match.counterConfirms
+	}
 	return &MatchNote{
 		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
 		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
-			int64(t.wallets.fromAsset.SwapConf), match.counterConfirms, int64(t.wallets.toAsset.SwapConf)),
+			int64(t.wallets.fromAsset.SwapConf), counterConfs, int64(t.wallets.toAsset.SwapConf)),
 		Host:     t.dc.acct.host,
 		MarketID: marketName(t.Base(), t.Quote()),
 	}
