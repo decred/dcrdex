@@ -39,6 +39,7 @@ import (
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
@@ -204,6 +205,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		notify:    func(Notification) {},
 		trades:    make(map[order.OrderID]*trackedTrade),
 		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		apiVer:    serverdex.InitialAPIVersion,
 		connected: 1,
 	}, conn, acct
 }

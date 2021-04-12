@@ -4,6 +4,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -597,6 +598,38 @@ func (dc *dexConnection) refreshServerConfig() error {
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to fetch server config: %w", err)
+	}
+
+	// Check that we are able to communicate with this DEX.
+	apiVer := atomic.LoadInt32(&dc.apiVer)
+	cfgAPIVer := int32(cfg.APIVersion)
+
+	if apiVer != cfgAPIVer {
+		// If not initiation, do not allow api changes
+		// between connections.
+		if apiVer != -1 {
+			return fmt.Errorf("server API version unexpectedly changed from %v to %v",
+				apiVer, cfgAPIVer)
+		}
+		if found := func() bool {
+			for _, version := range serverAPIVers {
+				ver := int32(version)
+				if cfgAPIVer == ver {
+					dc.log.Debugf("Setting server api version to %v.", ver)
+					atomic.StoreInt32(&dc.apiVer, ver)
+					return true
+				}
+			}
+			return false
+		}(); !found {
+			errMsg := fmt.Sprintf("unknown server API version: %v", cfgAPIVer)
+			if cfgAPIVer > apiVer {
+				// TODO: Send this to the Web UI.
+				errMsg = fmt.Sprintf("%s\nYou may need to update your client to trade at %v.",
+					errMsg, dc.acct.host)
+			}
+			return errors.New(errMsg)
+		}
 	}
 
 	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)

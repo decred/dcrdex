@@ -35,6 +35,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -64,6 +65,9 @@ var (
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
 	// ever syncTickerPeriod. var instead of const for testing purposes.
 	syncTickerPeriod = 10 * time.Second
+	// serverAPIVers are the DEX server API versions this client is capable
+	// of communicating with.
+	serverAPIVers = []int{serverdex.InitialAPIVersion}
 )
 
 type dexTicker struct {
@@ -95,6 +99,8 @@ type dexConnection struct {
 	acct       *dexAccount
 	notify     func(Notification)
 	ticker     *dexTicker
+	// apiVer is an atomic. An uninitiated connection should be set to -1.
+	apiVer int32
 
 	assetsMtx sync.RWMutex
 	assets    map[uint32]*dex.Asset
@@ -4349,6 +4355,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		ticker: newDexTicker(defaultTickInterval), // updated when server config obtained
 		books:  make(map[string]*bookie),
 		trades: make(map[order.OrderID]*trackedTrade),
+		apiVer: -1,
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
