@@ -104,6 +104,10 @@ respond with its current configuration.
 |-
 | regfeeconfirms || int   || required confirmations for the registration fee payment transaction
 |-
+| apiver         || int   || the server's [[#API_Version|api version]]
+|-
+| binSizes       || <nowiki>[string]</nowiki>  || bin sizes for candlestick data sets (i.e. <nowiki>["24h", "1h", "5m"]</nowiki>)
+|-
 | assets         || &#91;object&#93; || list of Asset objects (definition below)
 |-
 | markets        || &#91;object&#93; || list of Market objects (definition below)
@@ -331,3 +335,15 @@ There are then two ways to import the asset backend into the server software.
 With the exception of a small handful of assets which will be implemented during
 initial phases of DEX development, it is expected that development communities
 will release their own appropriately vetted plugins.
+
+
+==API Version==
+
+Since DEX v0.2, the dex server has an Application Programming Interface version.
+Clients should check this version before attempting to communicate further with
+the server. An unknown or incompatible version means that communications will
+fail, possibly resulting in penalties or a ban.
+
+===v1===
+
+The server's initial api version.
