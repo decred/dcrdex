@@ -994,17 +994,25 @@ func (db *BoltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 }
 
 // SetWalletPassword set the encrypted password field for the wallet.
-func (db *BoltDB) SetWalletPassword(wid []byte, newPW []byte) error {
+func (db *BoltDB) SetWalletPassword(wid []byte, newEncPW []byte) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
 			return fmt.Errorf("wallet with ID is %x not known", wid)
 		}
-		wallet, err := makeWallet(wBkt)
+		b := getCopy(wBkt, walletKey)
+		if b == nil {
+			return fmt.Errorf("no wallet found in bucket")
+		}
+		wallet, err := dexdb.DecodeWallet(b)
 		if err != nil {
 			return err
 		}
-		wallet.EncryptedPW = newPW
+		wallet.EncryptedPW = make([]byte, len(newEncPW))
+		copy(wallet.EncryptedPW, newEncPW)
+		// No need to populate wallet.Balance since it's not part of the
+		// serialization stored in the walletKey sub-bucket.
+
 		return wBkt.Put(walletKey, wallet.Encode())
 	})
 }
