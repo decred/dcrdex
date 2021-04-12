@@ -1896,6 +1896,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 			wallet.Disconnect()
 			return err
 		}
+		// Update dbWallet so db.UpdateWallet below reflects the new password.
+		dbWallet.EncryptedPW = make([]byte, len(wallet.encPass))
+		copy(dbWallet.EncryptedPW, wallet.encPass)
 	} else if oldWallet.locallyUnlocked() {
 		// If the password was not changed, carry over any cached password
 		// regardless of backend lock state. loadWallet already copied encPW, so
