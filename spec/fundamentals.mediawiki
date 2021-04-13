@@ -344,6 +344,6 @@ Clients should check this version before attempting to communicate further with
 the server. An unknown or incompatible version means that communications will
 fail, possibly resulting in penalties or a ban.
 
-===v1===
+===v0===
 
-The server's initial api version.
+The server's pre-versioning api version with an apiver value of 0.
