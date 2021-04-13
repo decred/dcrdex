@@ -21,6 +21,8 @@ import (
 var (
 	feederID        uint32
 	bookFeedTimeout = time.Minute
+
+	outdatedClientErr = errors.New("outdated client")
 )
 
 // BookFeed manages a channel for receiving order book updates. The only
@@ -592,7 +594,9 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
-func (dc *dexConnection) refreshServerConfig() error {
+// refreshServerConfig fetches and replaces server configuration data. It also
+// initially checks that a server's API version is one of apiVers.
+func (dc *dexConnection) refreshServerConfig(apiVers []int) error {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
@@ -612,7 +616,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 				apiVer, cfgAPIVer)
 		}
 		if found := func() bool {
-			for _, version := range serverAPIVers {
+			for _, version := range apiVers {
 				ver := int32(version)
 				if cfgAPIVer == ver {
 					dc.log.Debugf("Setting server api version to %v.", ver)
@@ -622,13 +626,11 @@ func (dc *dexConnection) refreshServerConfig() error {
 			}
 			return false
 		}(); !found {
-			errMsg := fmt.Sprintf("unknown server API version: %v", cfgAPIVer)
+			err := fmt.Errorf("unknown server API version: %v", cfgAPIVer)
 			if cfgAPIVer > apiVer {
-				// TODO: Send this to the Web UI.
-				errMsg = fmt.Sprintf("%s\nYou may need to update your client to trade at %v.",
-					errMsg, dc.acct.host)
+				err = fmt.Errorf("%v: %w", err, outdatedClientErr)
 			}
-			return errors.New(errMsg)
+			return err
 		}
 	}
 

@@ -32,11 +32,11 @@ import (
 )
 
 const (
-	// InitialAPIVersion is the initial dex server API version.
-	InitialAPIVersion = iota
+	// PreAPIVersion covers all API iterations before versioning started.
+	PreAPIVersion = iota
 
 	// APIVersion is the current API version.
-	APIVersion = InitialAPIVersion
+	APIVersion = PreAPIVersion
 )
 
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID, has Network

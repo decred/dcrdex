@@ -205,7 +205,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		notify:    func(Notification) {},
 		trades:    make(map[order.OrderID]*trackedTrade),
 		epoch:     map[string]uint64{tDcrBtcMktName: 0},
-		apiVer:    serverdex.InitialAPIVersion,
+		apiVer:    serverdex.PreAPIVersion,
 		connected: 1,
 	}, conn, acct
 }
@@ -6453,5 +6453,76 @@ func TestPreOrder(t *testing.T) {
 	_, err = tCore.PreOrder(form)
 	if err != nil {
 		t.Fatalf("PreOrder error after fixing everything: %v", err)
+	}
+}
+
+func TestRefreshServerConfig(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	queueConfig := func(err *msgjson.Error, apiVer uint16) {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			cfg := *rig.dc.cfg
+			cfg.APIVersion = apiVer
+			resp, _ := msgjson.NewResponse(msg.ID, cfg, err)
+			f(resp)
+			return nil
+		})
+	}
+	tests := []struct {
+		name        string
+		configErr   *msgjson.Error
+		initAPIVer  int32
+		wantAPIVers []int
+		gotAPIVer   uint16
+		marketBase  uint32
+		wantErr     bool
+	}{{
+		name:        "ok",
+		initAPIVer:  -1,
+		wantAPIVers: []int{2, 3, 4},
+		marketBase:  tDCR.ID,
+		gotAPIVer:   3,
+	}, {
+		name:      "unable to fetch config",
+		configErr: new(msgjson.Error),
+		wantErr:   true,
+	}, {
+		name:        "api already initiated",
+		initAPIVer:  0,
+		wantAPIVers: []int{2, 3, 4},
+		gotAPIVer:   3,
+		marketBase:  tDCR.ID,
+		wantErr:     true,
+	}, {
+		name:        "api not in wanted versions",
+		initAPIVer:  -1,
+		wantAPIVers: []int{2, 4},
+		gotAPIVer:   3,
+		marketBase:  tDCR.ID,
+		wantErr:     true,
+	}, {
+		name:        "generate maps failure",
+		initAPIVer:  -1,
+		wantAPIVers: []int{2, 3, 4},
+		marketBase:  ^uint32(0),
+		gotAPIVer:   3,
+		wantErr:     true,
+	}}
+
+	for _, test := range tests {
+		rig.dc.apiVer = test.initAPIVer
+		rig.dc.cfg.Markets[0].Base = test.marketBase
+		queueConfig(test.configErr, test.gotAPIVer)
+		err := rig.dc.refreshServerConfig(test.wantAPIVers)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %s", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+		}
 	}
 }

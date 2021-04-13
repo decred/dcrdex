@@ -67,7 +67,7 @@ var (
 	syncTickerPeriod = 10 * time.Second
 	// serverAPIVers are the DEX server API versions this client is capable
 	// of communicating with.
-	serverAPIVers = []int{serverdex.InitialAPIVersion}
+	serverAPIVers = []int{serverdex.PreAPIVersion}
 )
 
 type dexTicker struct {
@@ -4329,6 +4329,14 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 	return assetsUpdated, errs.ifAny()
 }
 
+// sendOutdatedClientNotification will send a notification to the UI that
+// indicates the client should be updated to be used with this DEX server.
+func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
+	details := "You may need to update your client to trade here."
+	n := db.NewNotification("apiver", dc.acct.host, details, db.WarningLevel)
+	c.notify(&n)
+}
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route. If temporary is provided and true, no connect and reconnect handlers
@@ -4409,8 +4417,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 
 	// Request the market configuration.
-	err = dc.refreshServerConfig() // handleReconnect must too
+	err = dc.refreshServerConfig(serverAPIVers) // handleReconnect must too
 	if err != nil {
+		if errors.Is(err, outdatedClientErr) {
+			sendOutdatedClientNotification(c, dc)
+		}
 		return dc, err
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
@@ -4433,8 +4444,11 @@ func (c *Core) handleReconnect(host string) {
 
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
-	err := dc.refreshServerConfig()
+	err := dc.refreshServerConfig(serverAPIVers)
 	if err != nil {
+		if errors.Is(err, outdatedClientErr) {
+			sendOutdatedClientNotification(c, dc)
+		}
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
