@@ -15,13 +15,12 @@ const BipIDs = {
 
 const BipSymbols = Object.values(BipIDs)
 
-// Parameters for printing asset values.
-const fullPrecisionSpecs = {
-  minimumSignificantDigits: 4,
-  maximumSignificantDigits: 8,
-  minimumFractionDigits: 8,
+const intFormatter = new Intl.NumberFormat(navigator.languages)
+
+const decimalFormatter = new Intl.NumberFormat(navigator.languages, {
+  minimumFractionDigits: 2,
   maximumFractionDigits: 8
-}
+})
 
 // Helpers for working with the DOM.
 export default class Doc {
@@ -145,18 +144,9 @@ export default class Doc {
     return page
   }
 
-  // formatCoinValue formats the asset value to a string.
-  static formatCoinValue (x) {
-    let [whole, frac] = x.toLocaleString('en-us', fullPrecisionSpecs).split('.')
-    // toLocalString gives precedence to minimumSignificantDigits, so the result
-    // can have no fractional part, despite the minimumFractionDigits setting.
-    if (!frac) return whole
-    // ... or it can have more than 8 fractional digits, despite of the
-    // maximumFractionDigits setting.
-    frac = frac.substring(0, 8)
-    if (frac === '00000000') return whole
-    // Trim trailing zeros.
-    return `${whole}.${frac.replace(/,+$/, '')}`
+  static formatCoinValue (v) {
+    if (Number.isInteger(v)) return intFormatter.format(v)
+    return decimalFormatter.format(v)
   }
 
   /*
