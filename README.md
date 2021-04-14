@@ -1,4 +1,4 @@
-# <img src="docs/images/logo_wide_v1.svg" width="250">
+# <img src="docs/images/logo_wide_v1.svg" alt="DCRDEX" width="250">
 
 [![Build Status](https://github.com/decred/dcrdex/workflows/Build%20and%20Test/badge.svg)](https://github.com/decred/dcrdex/actions)
 [![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](http://copyfree.org)
@@ -44,7 +44,7 @@ privileges and forfeiture of registration fee.
 
 - It is recommended to have at least 2 GB of available system memory and 25 GB of free disk space to run the DEX client. For the most secure setup, you can also install in a fresh virtual machine.
 
-You can use the 
+You can use the
 [**dcrinstall**](https://github.com/decred/decred-release/releases) tool to
 install everything you need. **dcrinstall** will guide you through installation
 of all needed software and help set up your Decred wallet.
@@ -52,19 +52,19 @@ of all needed software and help set up your Decred wallet.
 `./dcrinstall --dcrdex`
 
 **dcrinstall** will create a directory for your decred binaries.
-For Linux and Mac, the directory is at *~/decred*. For Windows, it's 
+For Linux and Mac, the directory is at *~/decred*. For Windows, it's
 *%HOMEPATH%\decred*. Any commands listed below are assumed be run from this
 directory. Instructions are for Linux. For Windows, you will drop the
 `./` prefix for commands.
 
-**WARNING**: If instead of using **dcrinstall* you decide to build from source and
-you plan to trade on mainnet, use the `release-0.1` branch instead of `master`.
-Furthermore, if you build dcrd and dcrwallet from source, you must use their
+**WARNING**: If instead of using **dcrinstall** you decide to build from source and
+you plan to trade on mainnet, use the `release-0.2` branch instead of `master`.
+Furthermore, if you build dcrd and dcrwallet from source, you **must** use their
 `release-v1.6` branches, not `master`.
 
 ### Sync Blockchains
 
-Once installed, begin syncing your blockchains. In a new console, run 
+Once installed, begin syncing your blockchains. In a new console, run
 
 `cd ~/decred`
 
@@ -158,7 +158,6 @@ of the file.
 
 `wallet=dex`
 
-
 ### Connect Wallets and Register
 
 1. Start the client. `./dexc`
@@ -188,7 +187,6 @@ of the file.
 
 8. And that's it! Once your registration fee has enough confirmations, you can begin trading.
 
-
 ## Important Stuff to Know
 
 Trades settle on-chain and require block confirmations. Trades do not settle instantly.
@@ -208,10 +206,9 @@ orders, your limit will go up.
 
 **If your account is suspended**, you can appeal the suspension.
 You may be asked to provide client log files to the operator for review.
-For dex.decred.org, reach out 
+For dex.decred.org, reach out
 [on Element](https://matrix.to/#/!mlRZqBtfWHrcmgdTWB:decred.org?via=decred.org&via=matrix.org&via=planetdecred.org)
 to appeal.
-
 
 ## Advanced Client Installation
 
@@ -266,7 +263,6 @@ docker volume create --name=dcrdex_data
 docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex
 ```
 
-
 ## DEX Specification
 
 The [DEX specification](spec/README.mediawiki) details the messaging and trading
@@ -293,7 +289,6 @@ managed by the **dexc** utility in *client/cmd/dexc*.
 
 The **dexcctl** utility enables trading via CLI. Commands are parsed and
 issued to **Core** for execution. **dexcctl** also requires **dexc**.
-
 
 ## Server Installation
 
@@ -371,7 +366,6 @@ additional information on a few key options.
 `./dcrdex --testnet`
 
 from **server/cmd/dcrdex**.
-
 
 ## Contribute
 
