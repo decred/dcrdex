@@ -40,7 +40,7 @@ const (
 	defaultLogLevel            = "debug"
 	defaultLogDirname          = "logs"
 	defaultMarketsConfFilename = "markets.json"
-	defaultMaxLogZips          = 32
+	defaultMaxLogZips          = 128
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
 	defaultPGDBName            = "dcrdex_{netname}"
