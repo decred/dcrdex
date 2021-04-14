@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.15
 
 require (
-	decred.org/dcrwallet v1.6.3-0.20210324151833-873c564976fd
+	decred.org/dcrwallet v1.7.0
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
