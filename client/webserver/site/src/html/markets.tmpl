@@ -48,20 +48,20 @@
 
       </div>
       <div class="chart-legend" id="chartLegend">
-        <div class="epoch-line"></div> epoch
+        <div class="epoch-line"></div> [[[epoch]]]
         <div class="flex-grow-1">
           <div id="hoverData" class="d-flex align-items-center d-hide">
             <span class="category-spacer text-center text-nowrap"></span>
             <span>
               <span class="ico-target fs11"></span>
-              price: <span id="hoverPrice"></span>,
-              volume: <span id="hoverVolume"></span>
+              [[[price]]]: <span id="hoverPrice"></span>,
+              [[[volume]]]: <span id="hoverVolume"></span>
             </span>
           </div>
         </div>
         <span>sells: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
         <span class="category-spacer"></span>
-        <span class="mr-2">buys: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+        <span class="mr-2">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
       </div>
       <div id="chartResizer"></div>
     </div>
@@ -74,15 +74,15 @@
 
           {{- /* BUY ORDER LIST */ -}}
           <div class="marketorders order-lg-1 order-2 col-lg-7 p-0 bg1">
-            <div class="market-header text-center fs14 py-1">Buy Orders</div>
+            <div class="market-header text-center fs14 py-1">[[[Buy Orders]]]</div>
             <div class="max-h-100 stylish-overflow">
               <table class="ordertable">
                 {{block "thead" .}}
                 <thead>
                   <tr>
-                    <th class="text-left pl-2">Quantity</th>
-                    <th class="text-right pr-2">Rate</th>
-                    <th class="text-right pr-2">Epoch</th>
+                    <th class="text-left pl-2">[[[Quantity]]]</th>
+                    <th class="text-right pr-2">[[[Rate]]]</th>
+                    <th class="text-right pr-2">[[[Epoch]]]</th>
                   </tr>
                 </thead>
                 {{end}}
@@ -106,8 +106,8 @@
           {{- /* ORDER PANEL */ -}}
           <div class="col-lg-10 order-1 order-lg-2 order-panel p-0 brdrleft brdrright d-flex flex-column">
             <div class="market-header fs14 d-flex justify-content-start pl-4 align-items-stretch">
-              <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">Limit Order</button>
-              <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">Market Order</button>
+              <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">[[[Limit Order]]]</button>
+              <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">[[[Market Order]]]</button>
             </div>
 
             <div class="flex-grow-1 position-relative">
@@ -120,8 +120,7 @@
                   <div class="p-0 w-100">
                     <div class="d-flex flex-column justify-content-center align-items-center">
                       <span id="regStatusTitle" class="title"></span>
-                      <p id="regStatusMessage">In order to trade at <span id="regStatusDex"></span>, the registration fee payment
-                        needs <span id="confReq"></span> confirmations.
+                      <p id="regStatusMessage">[[[reg_status_msg]]]
                       </p>
                       <span id="regStatusConfsDisplay"></span>
                     </div>
@@ -135,11 +134,11 @@
                     {{- /* BUY - SELL SELECTOR */ -}}
                     <div class="d-flex justify-content-start pt-4 pb-2 fs14">
                       <button id="buyBttn" type="button" class="bg2 buygreen selected">
-                        Buy
+                        [[[Buy]]]
                         <span data-unit="base"></span>
                       </button>
                       <button id="sellBttn" type="button" class="bg2 sellred ml-2">
-                        Sell
+                        [[[Sell]]]
                         <span data-unit="base"></span>
                       </button>
                       <span></span>
@@ -148,12 +147,12 @@
                     {{- /* MARKET CONFIG */ -}}
                     <div class="d-flex justify-content-between my-2 fs14">
                       <div>
-                        Lot Size:
+                        [[[Lot Size]]]:
                         <span id="lotSize"></span>
                         <span data-unit="base"></span>
                       </div>
                       <div>
-                        Rate Step:
+                        [[[Rate Step]]]:
                         <span id="rateStep"></span>
                         <span data-unit="quote"></span>
                       </div>
@@ -161,9 +160,9 @@
                     <div class="my-2 fs14 h21" id="maxBox">
                       <div id="maxOrd" class="d-hide position-relative pointer">
                         <span id="maxLotBox" class="d-hide">
-                          <span class="underline">Max <span id="maxLbl">Buy</span></span>:
+                          <span class="underline">[[[Max]]] <span id="maxLbl">[[[Buy]]]</span></span>:
                           <span id="maxFromLots"></span>
-                          <span id="maxFromLotsLbl">lot</span>
+                          <span id="maxFromLotsLbl">[[[lot]]]</span>
                         </span>
                         <span id="maxAboveZero" class="d-hide">
                           ,
@@ -178,17 +177,17 @@
 
                     {{- /* RATE AND QUANTITY INPUTS */ -}}
                     <div class="d-flex mt-3" id="priceBox">
-                      <label for="rateField" class="col-6 d-flex align-items-center p-0">Price</label>
+                      <label for="rateField" class="col-6 d-flex align-items-center p-0">[[[Price]]]</label>
                       <div class="col-18 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="rateField">
                         <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
                       </div>
                     </div>
                     <div class="d-flex mt-4" id="qtyBox">
-                      <label for="qtyField" class="col-6 d-flex align-items-center p-0">Quantity</label>
+                      <label for="qtyField" class="col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
                       <div class="col-6 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="lotField">
-                        <span class="unit unitbox">Lots</span>
+                        <span class="unit unitbox">[[[Lots]]]</span>
                       </div>
                       <div class="col-1 p-0"></div> {{/* spacer */}}
                       <div class="col-11 p-0">
@@ -200,7 +199,7 @@
                     {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                     <div id="mktBuyBox" class="d-hide">
                       <div class="text-center mt-2 fs15">
-                        min trade is about <span id="minMktBuy"></span> <span data-unit="quote"></span>
+                        [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
                       </div>
                       <div class="d-flex justify-content-center mt-2">
                         <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
@@ -212,7 +211,7 @@
                       <div class="p-0 fs14 flex-center mt-1">
                         <span>
                           ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
-                          @ <span id="mktBuyLots">0</span> <span >Lots</span><br>
+                          @ <span id="mktBuyLots">0</span> <span >[[[Lots]]]</span><br>
 
                         </span>
                       </div>
@@ -225,8 +224,8 @@
                     <div class="my-1 text-left pl-4" id="tifBox">
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
                       <label class="form-check-label" for="tifNow">
-                        Immediate or cancel
-                        <span class="ico-info fs12" data-tooltip="If the order doesn't fully match during the next match cycle, any unmatched quantity will not be booked or matched again. Taker-only order."></span>
+                        [[[Immediate or cancel]]]
+                        <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
                       </label>
                     </div>
 
@@ -240,7 +239,7 @@
 
                 {{- /* BALANCES */ -}}
                 <div id="marketBalance" class="market-bal pt-2 pb-1 my-3 position-relative">
-                  <span class="market-bal-lbl">Balances</span>
+                  <span class="market-bal-lbl">[[[Balances]]]</span>
                   <table class="balance-table" id="balanceTable">
                     <thead>
                       <tr>
@@ -251,7 +250,7 @@
                             <span data-unit="base"></span>
                             <div class="flex-grow-1"></div>
                             <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
+                            <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="[[[outdated_tooltip]]]"></span>
                           </div>
                         </th>
                         <th>
@@ -260,48 +259,48 @@
                             <span data-unit="quote"></span>
                             <div class="flex-grow-1"></div>
                             <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
+                            <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="[[[outdated_tooltip]]]"></span>
                           </div>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td class="fs16">available</td>
+                        <td class="fs16">[[[available]]]</td>
                         <td id="baseUnsupported" rowspan="3">
                           <div class="ico-cross"></div>
                         </td>
-                        <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
+                        <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="[[[connect_refresh_tooltip]]]">
                           <div class="ico-sleeping"></div>
                         </td>
                         <td id="baseSpinner" rowspan="3">
                           <div class="ico-spinner spinner"></div>
                         </td>
                         <td id="baseNewWalletRow" rowspan="3">
-                          <button id="baseNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="base"></span><br>wallet</button>
+                          <button id="baseNewButton" type="button" class="newwallet bg1 text-center">[[[add_a_base_wallet]]]</button>
                         </td>
                         <td id="baseAvail" class="fs16"></td>
                         <td id="quoteUnsupported" rowspan="3">
                           <div class="ico-cross"></div>
                         </td>
-                        <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
+                        <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="[[[connect_refresh_tooltip]]]">
                           <div class="ico-sleeping"></div>
                         </td>
                         <td id="quoteSpinner" rowspan="3">
                           <div class="ico-spinner spinner"></div>
                         </td>
                         <td id="quoteNewWalletRow" rowspan="3" class="brdr-left">
-                          <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="quote"></span><br>wallet</button>
+                          <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">[[[add_a_quote_wallet]]]</button>
                         </td>
                         <td id="quoteAvail" class="brdr-left fs16"></td>
                       </tr>
                       <tr>
-                        <td>locked</td>
+                        <td>[[[locked]]]</td>
                         <td id="baseLocked"></td>
                         <td id="quoteLocked" class="brdr-left"></td>
                       </tr>
                       <tr>
-                        <td>immature</td>
+                        <td>[[[immature]]]</td>
                         <td id="baseImmature"></td>
                         <td id="quoteImmature" class="brdr-left"></td>
                       </tr>
@@ -314,7 +313,7 @@
 
           {{- /* SELL ORDER LIST */ -}}
           <div class="marketorders col-lg-7 order-3 p-0 bg1">
-            <div class="market-header text-center fs14 py-1">Sell Orders</div>
+            <div class="market-header text-center fs14 py-1">[[[Sell Orders]]]</div>
             <div class="max-h-100 stylish-overflow">
               <table class="ordertable">
                 {{template "thead"}}
@@ -328,7 +327,7 @@
       {{- /* USER ORDERS */ -}}
       <div class="bg0 p-0 col-24 userorders col-xxl-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">
-          Your Orders
+          [[[Your Orders]]]
         </div>
         <div class="brdrleft flex-grow-1 bg1 position-relative">
 
@@ -336,14 +335,14 @@
             <table id="liveTable" class="ordertable">
               <thead>
                 <tr>
-                  <th data-ordercol="type">Type <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="sell">Side <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="stamp">Age <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="rate">Rate <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="qty">Quantity <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="filled">Filled <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="settled">Settled <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="status">Status <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="type">[[[Type]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="sell">[[[Side]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="stamp">[[[Age]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="rate">[[[Rate]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="qty">[[[Quantity]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="filled">[[[Filled]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="settled">[[[Settled]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="status">[[[Status]]] <span class="ico-arrowdown"></span></th>
                   <th class="last"></th>
                 </tr>
               </thead>
@@ -358,15 +357,15 @@
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
                   <td class="last text-right">
-                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="cancel order"></span>
-                    <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="order details"></a>
+                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="[[[cancel order]]]"></span>
+                    <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="[[[order details]]]"></a>
                   </td>
                 </tr>
               </tbody>
               <tbody>
                 <tr>
                   <td colspan="9" class="text-center">
-                    <a href="/orders" class="d-block fs14 px-2 plainlink">view order history</a>
+                    <a href="/orders" class="d-block fs14 px-2 plainlink">[[[view order history]]]</a>
                   </td>
                 </tr>
               </tbody>
@@ -394,45 +393,44 @@
     {{- /* VERIFY ORDER */ -}}
     <form class="card bg1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
       <div class="px-2 py-1 text-center fs18 position-relative header" id="vHeader">
-        Verify <span id="vSideHeader"></span>  Order
+        [[[verify_order]]]
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="py-3 px-4">
         <div class="echo-data">
-          You are submitting an order to
+          [[[You are submitting an order to]]]
           <div class="fs20 demi py-1">
             <span id="vSide"></span>
             <span id="vQty"></span>
             <span id="vBase"></span>
           </div>
           <div id="verifyLimit">
-            at a rate of
+            [[[at a rate of]]]
             <div class="fs20 demi py-1">
               <span id="vRate"></span>
               <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
             </div>
-            for a total of
+            [[[for a total of]]]
             <div class="fs20 demi py-1">
               <span id="vTotal"></span>
               <span id="vQuote"></span>
             </div>
           </div>
           <div id="verifyMarket">
-            This is a market order and will match the best available order(s) on the
-            book. Based on the current market mid-gap rate, you might receive about
+            [[[verify_market]]]
             <div class="fs20 demi py-1">
               <span id="vmTotal"></span>
               <span id="vmAsset"></span>
-              <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lots)</span>
+              <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> [[[lots]]])</span>
             </div>
           </div>
         </div>
         <hr class="dashed my-3">
         {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">Authorize this order with your app password.</div>
+        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">[[[auth_order_app_pw]]]</div>
         <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
           <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="pl-1 mb-1">Password</label>
+            <label for="vPass" class="pl-1 mb-1">[[[Password]]]</label>
             <input type="password" class="form-control select" id="vPass">
           </div>
           <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
@@ -449,9 +447,7 @@
         <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
         <hr class="dashed my-3">
         <div class="disclaimer mt-2 fs14">
-          <span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
-          or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
-          settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.
+          [[[order_disclaimer]]]
         </div>
       </div>
       

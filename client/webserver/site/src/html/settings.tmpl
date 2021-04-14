@@ -9,13 +9,13 @@
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
       <label class="form-check-label" for="darkMode">
-        Dark Mode
+        [[[Dark Mode]]]
       </label>
     </div>
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
       <label class="form-check-label" for="showPokes">
-        Show pop-up notifications
+        [[[Show pop-up notifications]]]
       </label>
     </div>
     <div>
@@ -23,33 +23,32 @@
         {{range $host, $xc := .UserInfo.Exchanges}}
           <div class="settings-exchange border1">
             <span>
-              DEX Address: {{$host}}
+              [[[DEX Address]]]: {{$host}}
             </span>
             <br>
-            Account ID: <span class="fs12">
+            [[[Account ID]]]: <span class="fs12">
             {{if eq (len $xc.AcctID) 0}}
               &lt;login to show&gt;
             {{else}}
               {{$xc.AcctID}}
               <br>
             {{end}}</span>
-            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Export Account</button>
-            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Disable Account</button>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">[[[Export Account]]]</button>
+            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">[[[Disable Account]]]</button>
           </div>
         {{end}}
       </div>
       <br>
       <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         <p>
-        The Decred DEX Client supports simultaneous use of any number of DEX
-        servers.
+        [[[simultaneous_servers_msg]]]
         </p>
-        <button id="addADex" class="bg2 selected">Add a DEX</button>
-        <button id="importAccount" class="bg2 selected ml-2">Import Account</button>
+        <button id="addADex" class="bg2 selected">[[[Add a DEX]]]</button>
+        <button id="importAccount" class="bg2 selected ml-2">[[[Import Account]]]</button>
       </div>
     </div>
     <div>
-        <button id="changeAppPW" class="bg2 selected">Change App Password</button>
+        <button id="changeAppPW" class="bg2 selected">[[[Change App Password]]]</button>
     </div>
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
       You should carefully write down your application seed and save a copy.
@@ -59,7 +58,7 @@
       it's good practice to backup the account keys separately from the seed.<br>
       <button id="exportSeed" class="fs15 bg2 selected">View Application Seed</button>
     </div>
-    <div>Build ID: <span id="commitHash" class="mono"></span></div>
+    <div>[[[Build ID]]]: <span id="commitHash" class="mono"></span></div>
   </div>
 
   {{- /* POP-UP FORMS */ -}}

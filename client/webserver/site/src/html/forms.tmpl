@@ -1,7 +1,7 @@
 {{define "walletConfigTemplates"}}
 <div class="py-2 px-1 d-flex justify-content-between align-items-center">
   Wallet Settings
-  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> load from file</div>
+  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> [[[load from file]]]</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
 </div>
 <div data-tmpl="allSettings">
@@ -23,9 +23,9 @@
     <span data-tmpl="showHideMsg" class="d-inline-block pl-1 pb-1"></span>
   </div>
   <div data-tmpl="otherSettings" class="d-hide">
-    <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; loaded from file &mdash;</div>
+    <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; [[[loaded from file]]] &mdash;</div>
     <div data-tmpl="loadedSettings" class="dynamicopts"></div>
-    <div data-tmpl="defaultSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; defaults &mdash;</div>
+    <div data-tmpl="defaultSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; [[[defaults]]] &mdash;</div>
     <div data-tmpl="defaultSettings" class="dynamicopts"></div>
   </div>
 </div>
@@ -51,12 +51,12 @@
   <hr class="dashed my-2">
   <div>
     {{if .}}
-    <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
-    <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet software.</div>
+    <label for="newWalletPass" class="pt-3 pl-1 mb-0">[[[Wallet Password]]]</label>
+    <div class="fs14 px-1 mb-1">[[[w_password_helper]]]</div>
     {{else}}
-    <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password
+    <label for="newWalletPass" class="pt-3 pl-1 mb-1">[[[Wallet Password]]]
       {{if not .}} {{- /* Don't show this for registration (when . is set), since Decred always requires a password. */ -}}
-        <span class="ico-info" data-tooltip="Leave the password empty if there is no password required for the wallet."></span>
+        <span class="ico-info" data-tooltip="[[[w_password_tooltip]]]"></span>
       {{end}}
     </label>
     {{end}}
@@ -64,15 +64,15 @@
   </div>
   <div id="newWalletAppPWBox">
     {{if .}}
-    <label for="nwAppPass" class="pt-3 pl-1 mb-0">App Password</label>
-    <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
+    <label for="nwAppPass" class="pt-3 pl-1 mb-0">[[[App Password]]]</label>
+    <div class="fs14 px-1 mb-1">[[[app_password_helper]]]</div>
     {{else}}
-    <label for="nwAppPass" class="pt-3 pl-1 mb-1">App Password</label>
+    <label for="nwAppPass" class="pt-3 pl-1 mb-1">[[[App Password]]]</label>
     {{end}}
     <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="submitAdd" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Add</button>
+    <button id="submitAdd" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Add]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="newWalletErr"></div>
 </div>
@@ -80,10 +80,10 @@
 
 {{define "unlockWalletForm"}}
 <div class="bg2 px-2 py-1 text-center fs18 position-relative">
-  Unlock
+  [[[Unlock]]]
   <img id="uwAssetLogo" class="micro-icon mx-1">
   <span id="uwAssetName"></span>
-  Wallet
+  [[[Wallet]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
@@ -92,22 +92,22 @@
     <hr class="dashed my-4">
   {{end}}
   <div id="uwAppPassBox">
-    <label for="uwAppPass" class="pl-1 mb-0">App Password</label>
-    <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
+    <label for="uwAppPass" class="pl-1 mb-0">[[[App Password]]]</label>
+    <div class="fs14 px-1 mb-1">[[[app_password_reminder]]]</div>
     <input type="password" class="form-control select" id="uwAppPass" autocomplete="off">
   </div>
   <div id="submitUnlockDiv" class="d-flex justify-content-end mt-4">
-    <button id="submitUnlock" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Unlock</button>
+    <button id="submitUnlock" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Unlock]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="unlockErr"></div>
 </div>
 {{end}}
 
 {{define "dexAddrForm"}}
-<div class="bg2 px-2 pt-1 mb-3 text-center fs18">Add a DEX</div>
+<div class="bg2 px-2 pt-1 mb-3 text-center fs18">[[[Add a DEX]]]</div>
 <div class="p-4">
   <div>
-    <label for="dexAddr" class="pl-1 mb-1">DEX Address</label>
+    <label for="dexAddr" class="pl-1 mb-1">[[[DEX Address]]]</label>
     <input type="text" class="form-control select" id="dexAddr">
   </div>
   <div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center" id="dexShowMore"><span class="ico-plus fs11"></span> <div class="pl-2">Show more options</div></div>
@@ -116,23 +116,23 @@
       Looks like we don't have an SSL certificate for this DEX.
       Add the server's certificate to continue.
     </div>
-    <div class="pl-1 mb-1 my-1 pointer">TLS Certificate</div>
+    <div class="pl-1 mb-1 my-1 pointer">[[[TLS Certificate]]]</div>
     <input type="file" class="form-control select d-none" id="certFile">
     <div class="pl-1 mt-2 fs15">
       <span id="selectedCert"></span>
-      <span class="underline ml-3 pointer d-hide" id="removeCert">remove</span>
-      <span class="underline ml-3 pointer" id="addCert">add a file</span>
+      <span class="underline ml-3 pointer d-hide" id="removeCert">[[[remove]]]</span>
+      <span class="underline ml-3 pointer" id="addCert">[[[add a file]]]</span>
     </div>
   </div>
   <div class="d-flex mt-3">
     <div class="col-12 p-0">
       <div id="dexAddrAppPWBox">
-        <label for="dexAddrAppPW" class="pl-1 mb-1">App Password</label>
+        <label for="dexAddrAppPW" class="pl-1 mb-1">[[[App Password]]]</label>
         <input type="password" class="form-control select" id="dexAddrAppPW" autocomplete="current-password">
       </div>
     </div>
     <div class="col-12 d-flex justify-content-end align-items-end p-0">
-      <button id="submitDEXAddr" type="button" class="col-16 justify-content-center fs15 bg2 selected">Submit</button>
+      <button id="submitDEXAddr" type="button" class="col-16 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
     </div>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="dexAddrErr"></div>
@@ -142,28 +142,23 @@
 {{define "confirmRegistrationForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
-  Confirm Registration
+  [[[Confirm Registration]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div class="fs16">
-    <span {{if $passwordIsCached}}class="d-hide"{{end}}>Enter your app password to confirm DEX registration.</span>
-    When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay
-    registration fees.
+    [[[reg_confirm_submit]]]
   </div>
   <div class="fs16 mt-4">
-    The DCR lot size for the <span id="dcrBaseMarketName" class="mono"></span> market is <span id="dexDCRLotSize"></span> DCR.
-    All trades on this market are in multiples of this lot size.
-    This is the minimum possible trade amount in DCR.
-    {{- /*  this will change when lot size is a market setting, not an asset setting */ -}}
+    [[[lot_size_headsup]]]
   </div>
   <hr class="dashed my-4">
   <div {{if $passwordIsCached}}class="d-hide"{{end}}>
-    <label for="appPass" class="pl-1 mb-1">Password</label>
+    <label for="appPass" class="pl-1 mb-1">[[[Password]]]</label>
     <input type="password" class="form-control select" id="appPass" autocomplete="current-password">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="submitConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Register</button>
+    <button id="submitConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">[[[Register]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="regErr"></div>
 </div>
@@ -171,20 +166,20 @@
 
 {{define "authorizeAccountExportForm"}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
-  Authorize Export
+  [[[Authorize Export]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div class="fs16">
-    Enter your app password to confirm Account export for: <span id="exportAccountHost"></span>.
+    [[[export_app_pw_msg]]]: <span id="exportAccountHost"></span>.
   </div>
   <hr class="dashed my-4">
   <div>
-    <label for="exportAccountAppPass" class="pl-1 mb-1">Password</label>
+    <label for="exportAccountAppPass" class="pl-1 mb-1">[[[Password]]]</label>
     <input type="password" class="form-control select" id="exportAccountAppPass" autocomplete="current-password">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="authorizeExportAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Authorize Export</button>
+    <button id="authorizeExportAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">[[[Authorize Export]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="exportAccountErr"></div>
 </div>
@@ -192,25 +187,24 @@
 
 {{ define "disableAccountForm"}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
-  Disable Account
+  [[[Disable Account]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div class="fs16">
-    Enter your app password to disable account: <span id="disableAccountHost"></span>.
+    [[[disable_app_pw_msg]]]: <span id="disableAccountHost"></span>.
   </div>
   <hr class="dashed my-4">
   <div class="my-2">
-    <span class="red">Note:</span> This action is irreversible - once an account is disabled it can't 
-    be re-enabled.
+    [[[disable_irreversible]]]
   </div>
   <hr class="dashed my-4">
   <div>
-    <label for="disableAccountAppPW" class="pl-1 mb-1">Password</label>
+    <label for="disableAccountAppPW" class="pl-1 mb-1">[[[Password]]]</label>
     <input type="password" class="form-control select" id="disableAccountAppPW" autocomplete="current-password">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="disableAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Disable Account</button>
+    <button id="disableAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">[[[Disable Account]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="disableAccountErr"></div>
 </div>
@@ -219,29 +213,29 @@
 {{define "authorizeAccountImportForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
-  Authorize Import
+  [[[Authorize Import]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div class="fs16">
-    Enter your app password to confirm Account import.
+    [[[app_pw_import_msg]]].
   </div>
   <hr class="dashed my-4">
   <div>
-    <div class="pl-1 mb-1 mt-4 pointer">Account File</div>
+    <div class="pl-1 mb-1 mt-4 pointer">[[[Account File]]]</div>
     <input type="file" class="form-control select d-none" id="accountFile">
     <div class="pl-1 mt-2 fs15">
       <span id="selectedAccount"></span>
-      <span class="underline ml-3 pointer d-hide" id="removeAccount">remove</span>
-      <span class="ml-3 pointer" id="addAccount"><span class="ico-textfile mr-1"></span> load from file</span>
+      <span class="underline ml-3 pointer d-hide" id="removeAccount">[[[remove]]]</span>
+      <span class="ml-3 pointer" id="addAccount"><span class="ico-textfile mr-1"></span> [[[load from file]]]</span>
     </div>
   </div>
   <div {{if $passwordIsCached}}class="d-hide"{{end}}>
-    <label for="importAccountAppPass" class="pl-1 mb-1">Password</label>
+    <label for="importAccountAppPass" class="pl-1 mb-1">[[[Password]]]</label>
     <input type="password" class="form-control select" id="importAccountAppPass" autocomplete="current-password">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="authorizeImportAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Authorize Import</button>
+    <button id="authorizeImportAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">[[[Authorize Import]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="importAccountErr"></div>
 </div>
@@ -249,24 +243,24 @@
 
 {{define "changeAppPWForm"}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
-  Change Application Password
+  [[[Change Application Password]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div>
-    <label for="appPW" class="pl-1 mb-1">Current Password</label>
+    <label for="appPW" class="pl-1 mb-1">[[[Current Password]]]</label>
     <input type="password" class="form-control select" id="appPW" autocomplete="current-password">
   </div>
   <div class="mt-2">
-    <label for="newAppPW" class="pl-1 mb-1">New Password</label>
+    <label for="newAppPW" class="pl-1 mb-1">[[[New Password]]]</label>
     <input type="password" class="form-control select" id="newAppPW" autocomplete="new-password">
   </div>
   <div class="mt-2">
-    <label for="confirmNewPW" class="pl-1 mb-1">Confirm New Password</label>
+    <label for="confirmNewPW" class="pl-1 mb-1">[[[Confirm New Password]]]</label>
     <input type="password" class="form-control select" id="confirmNewPW" autocomplete="new-password">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="submitNewPW" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Submit</button>
+    <button id="submitNewPW" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="changePWErrMsg"></div>
 </div>
@@ -275,23 +269,23 @@
 {{define "cancelOrderForm"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center fs18 position-relative">
-  Cancel Order
+  [[[Cancel Order]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-3">
-  Enter your password to submit a cancel order for the remaining
+  [[[cancel_pw]]]
   <span id="cancelRemain"></span>
   <span id="cancelUnit"></span>.<br>
-  The remaining amount may change before the cancel order is matched.
+  [[[cancel_remain]]]
 </div>
 <hr class="dashed mt-2">
 <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4 px-3">
   <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-    <label for="cancelPass" class="pt-3 pl-1 mb-0">Password</label>
+    <label for="cancelPass" class="pt-3 pl-1 mb-0">[[[Password]]]</label>
     <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
   </div>
   <div class="col-12 py-1 {{if not $passwordIsCached}}pl-5{{end}}">
-    <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Submit</button>
+    <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
   </div>
 </div>
 {{end}}
