@@ -2108,16 +2108,10 @@ func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 }
 
 func (c *Core) isRegistered(host string) bool {
-	c.connMtx.RLock()
-	dc, found := c.conns[host]
-	c.connMtx.RUnlock()
-	if !found {
-		return false
-	}
-
-	dc.acct.keyMtx.RLock()
-	defer dc.acct.keyMtx.RUnlock()
-	return len(dc.acct.encKey) > 0 // should be for all in conns map, but check
+	// The important check is if attempting to store a new account for the given
+	// host would fail, so check the DB. Do not rely on the conns map.
+	ai, err := c.db.Account(host)
+	return err == nil && ai != nil
 }
 
 // GetFee creates a temporary connection to the specified DEX Server and fetches

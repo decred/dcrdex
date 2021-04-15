@@ -170,7 +170,7 @@ func TestAccountDisable(t *testing.T) {
 		if rig.db.disabledAcct == nil {
 			t.Fatal("expected execution of db.DisableAccount")
 		}
-		if rig.db.disabledAcct.Host == test.host {
+		if rig.db.disabledAcct.Host != test.host {
 			t.Fatalf("expected db disabled account to match test host, want: %v"+
 				" got: %v", test.host, rig.db.disabledAcct.Host)
 		}

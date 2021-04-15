@@ -806,7 +806,7 @@ func newTestRig() *testRig {
 	}
 
 	ai := &db.AccountInfo{
-		Host: "somedex.com",
+		Host: tDexHost,
 	}
 	tdb.acct = ai
 
@@ -1343,6 +1343,7 @@ func TestGetFee(t *testing.T) {
 	tCore.connMtx.Lock()
 	delete(tCore.conns, tDexHost)
 	tCore.connMtx.Unlock()
+	rig.db.acct = nil
 
 	// connectDEX error
 	_, err = tCore.GetFee(tUnparseableHost, cert)
@@ -1431,6 +1432,7 @@ func TestRegister(t *testing.T) {
 	tWallet.payFeeCoin = &tCoin{id: encode.RandomBytes(36)}
 
 	ch := tCore.NotificationFeed()
+	acctInf := rig.db.acct
 
 	var err error
 	run := func() {
@@ -1438,6 +1440,8 @@ func TestRegister(t *testing.T) {
 		tCore.connMtx.Lock()
 		delete(tCore.conns, tDexHost)
 		tCore.connMtx.Unlock()
+		// actually, in the DB
+		rig.db.acct = nil
 
 		tWallet.setConfs(tWallet.payFeeCoin.id, 0, nil)
 		_, err = tCore.Register(form)
@@ -1513,10 +1517,13 @@ func TestRegister(t *testing.T) {
 	tCore.connMtx.Lock()
 	tCore.conns[tDexHost] = dc
 	tCore.connMtx.Unlock()
+	rig.db.acct = acctInf
+	rig.db.acctErr = nil
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, dupeDEXErr) {
 		t.Fatalf("wrong account exists error: %v", err)
 	}
+	rig.db.acctErr = tErr
 
 	// wallet not found
 	delete(tCore.wallets, tDCR.ID)
