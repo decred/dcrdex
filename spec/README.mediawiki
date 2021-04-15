@@ -76,6 +76,7 @@ the features described above.
 ** [[fundamentals.mediawiki/#Asset_Variables|Asset Variables]]
 ** [[fundamentals.mediawiki/#Market_Variables|Market Variables]]
 ** [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
+** [[fundamentals.mediawiki/#API_Version|API Version]]
 * [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]]
 ** [[fundamentals.mediawiki/#Epoch_Time|Epoch Time]]
 ** [[fundamentals.mediawiki/#Pseudorandom_Order_Matching|Pseudorandom Order Matching]]
