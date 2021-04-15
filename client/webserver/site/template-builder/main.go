@@ -24,7 +24,7 @@ func main() {
 	fmt.Println("Creating output directory:", outputDirectory)
 	err := os.MkdirAll(outputDirectory, 0755)
 	if err != nil {
-		fmt.Println("MkdirAll %q error: %w", outputDirectory, err)
+		fmt.Printf("MkdirAll %q error: %v \n", outputDirectory, err)
 		return
 	}
 
@@ -32,7 +32,7 @@ func main() {
 		langDir := filepath.Join(outputDirectory, lang)
 		err := os.MkdirAll(langDir, 0755)
 		if err != nil {
-			fmt.Println("MkdirAll %q error: %w", langDir, err)
+			fmt.Printf("MkdirAll %q error: %v \n", langDir, err)
 			return
 		}
 	}

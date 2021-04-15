@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/text/language"
 )
 
 // contextKey is the key param type used when saving values to a context using
@@ -120,6 +122,16 @@ type cachedPassword struct {
 	SerializedCrypter []byte
 }
 
+type Config struct {
+	Core          clientCore
+	Addr          string
+	CustomSiteDir string
+	Language      string
+	Logger        dex.Logger
+	ReloadHTML    bool
+	HttpProf      bool
+}
+
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
@@ -142,8 +154,8 @@ type WebServer struct {
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
 // in which case a handful of default locations will be checked. This will work
 // in most cases.
-func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML, httpProf bool) (*WebServer, error) {
-	log = logger
+func New(cfg *Config) (*WebServer, error) {
+	log = cfg.Logger
 
 	folderExists := func(fp string) bool {
 		stat, err := os.Stat(fp)
@@ -166,7 +178,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	var siteDir string
 	absDir, _ := filepath.Abs("site")
 	for _, dir := range []string{
-		customSiteDir,
+		cfg.CustomSiteDir,
 		filepath.Join(execPath, "site"),
 		absDir,
 		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
@@ -196,18 +208,23 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:            core,
+		core:            cfg.Core,
 		mux:             mux,
 		srv:             httpServer,
-		addr:            addr,
+		addr:            cfg.Addr,
 		siteDir:         siteDir,
-		reloadHTML:      reloadHTML,
-		wsServer:        websocket.New(core, log.SubLogger("WS")),
+		reloadHTML:      cfg.ReloadHTML,
+		wsServer:        websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
 	}
 
-	if err := s.buildTemplates("en"); err != nil {
+	lang := cfg.Language
+	if lang == "" {
+		lang = "en-US"
+	}
+
+	if err := s.buildTemplates(lang); err != nil {
 		return nil, fmt.Errorf("error loading en localized templates: %v", err)
 	}
 
@@ -220,7 +237,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	mux.Use(s.authMiddleware)
 
 	// HTTP profiler
-	if httpProf {
+	if cfg.HttpProf {
 		profPath := "/debug/pprof"
 		log.Infof("Mounting the HTTP profiler on %s", profPath)
 		// Option A: mount each httpprof handler directly. The caveat with this
@@ -326,8 +343,45 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	return s, nil
 }
 
-func (s *WebServer) buildTemplates(localeID string) error {
-	tmplDir := filepath.Join(s.siteDir, "src", "localized_html", localeID)
+func (s *WebServer) buildTemplates(lang string) error {
+	langs := make([]language.Tag, 0, 1)
+	dirs := make([]string, 0, 1)
+	var match string
+
+	htmlDir := filepath.Join(s.siteDir, "src", "localized_html")
+	err := filepath.WalkDir(htmlDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() || match != "" {
+			return nil
+		}
+		if d.Name() == lang {
+			match = d.Name()
+			return nil
+		}
+
+		tag, err := language.Parse(d.Name())
+		if err != nil {
+			log.Debugf("error parsing language tag %q: %v", d.Name(), err)
+			return nil
+		}
+		langs = append(langs, tag)
+		dirs = append(dirs, d.Name())
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error parsing localized_html directory: %w", err)
+	}
+
+	if match == "" {
+		matcher := language.NewMatcher(langs)
+		_, idx := language.MatchStrings(matcher, lang)
+		match = dirs[idx]
+	}
+
+	tmplDir := filepath.Join(htmlDir, match)
+
 	bb := "bodybuilder"
 	s.html = newTemplates(tmplDir, s.reloadHTML).
 		addTemplate("login", bb).

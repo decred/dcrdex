@@ -6,6 +6,6 @@ var (
 
 func init() {
 	Locales = map[string]map[string]string{
-		"en": EnUS,
+		"en-US": EnUS,
 	}
 }
