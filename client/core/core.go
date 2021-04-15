@@ -67,6 +67,10 @@ var (
 	syncTickerPeriod = 10 * time.Second
 	// serverAPIVers are the DEX server API versions this client is capable
 	// of communicating with.
+	//
+	// NOTE: API version may change at any time. Keep this in mind when
+	// updating the API. Long-running operations may start and end with
+	// differing versions.
 	serverAPIVers = []int{serverdex.PreAPIVersion}
 )
 
@@ -4417,7 +4421,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 
 	// Request the market configuration.
-	err = dc.refreshServerConfig(serverAPIVers) // handleReconnect must too
+	err = dc.refreshServerConfig() // handleReconnect must too
 	if err != nil {
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
@@ -4444,7 +4448,7 @@ func (c *Core) handleReconnect(host string) {
 
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
-	err := dc.refreshServerConfig(serverAPIVers)
+	err := dc.refreshServerConfig()
 	if err != nil {
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)

@@ -6460,6 +6460,10 @@ func TestRefreshServerConfig(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 
+	// Add an API version to serverAPIVers to use in tests.
+	newAPIVer := ^uint16(0) - 1
+	serverAPIVers = append(serverAPIVers, int(newAPIVer))
+
 	queueConfig := func(err *msgjson.Error, apiVer uint16) {
 		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
 			cfg := *rig.dc.cfg
@@ -6470,59 +6474,43 @@ func TestRefreshServerConfig(t *testing.T) {
 		})
 	}
 	tests := []struct {
-		name        string
-		configErr   *msgjson.Error
-		initAPIVer  int32
-		wantAPIVers []int
-		gotAPIVer   uint16
-		marketBase  uint32
-		wantErr     bool
+		name       string
+		configErr  *msgjson.Error
+		gotAPIVer  uint16
+		marketBase uint32
+		wantErr    bool
 	}{{
-		name:        "ok",
-		initAPIVer:  -1,
-		wantAPIVers: []int{2, 3, 4},
-		marketBase:  tDCR.ID,
-		gotAPIVer:   3,
+		name:       "ok",
+		marketBase: tDCR.ID,
+		gotAPIVer:  newAPIVer,
 	}, {
 		name:      "unable to fetch config",
 		configErr: new(msgjson.Error),
 		wantErr:   true,
 	}, {
-		name:        "api already initiated",
-		initAPIVer:  0,
-		wantAPIVers: []int{2, 3, 4},
-		gotAPIVer:   3,
-		marketBase:  tDCR.ID,
-		wantErr:     true,
+		name:       "api not in wanted versions",
+		gotAPIVer:  ^uint16(0),
+		marketBase: tDCR.ID,
+		wantErr:    true,
 	}, {
-		name:        "api not in wanted versions",
-		initAPIVer:  -1,
-		wantAPIVers: []int{2, 4},
-		gotAPIVer:   3,
-		marketBase:  tDCR.ID,
-		wantErr:     true,
-	}, {
-		name:        "generate maps failure",
-		initAPIVer:  -1,
-		wantAPIVers: []int{2, 3, 4},
-		marketBase:  ^uint32(0),
-		gotAPIVer:   3,
-		wantErr:     true,
+		name:       "generate maps failure",
+		marketBase: ^uint32(0),
+		gotAPIVer:  newAPIVer,
+		wantErr:    true,
 	}}
 
 	for _, test := range tests {
-		rig.dc.apiVer = test.initAPIVer
 		rig.dc.cfg.Markets[0].Base = test.marketBase
 		queueConfig(test.configErr, test.gotAPIVer)
-		err := rig.dc.refreshServerConfig(test.wantAPIVers)
+		err := rig.dc.refreshServerConfig()
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %s", test.name)
+				t.Fatalf("expected error for test %q", test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 	}
 }

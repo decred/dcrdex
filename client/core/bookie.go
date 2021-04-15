@@ -595,8 +595,8 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 }
 
 // refreshServerConfig fetches and replaces server configuration data. It also
-// initially checks that a server's API version is one of apiVers.
-func (dc *dexConnection) refreshServerConfig(apiVers []int) error {
+// initially checks that a server's API version is one of serverAPIVers.
+func (dc *dexConnection) refreshServerConfig() error {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
@@ -609,14 +609,8 @@ func (dc *dexConnection) refreshServerConfig(apiVers []int) error {
 	cfgAPIVer := int32(cfg.APIVersion)
 
 	if apiVer != cfgAPIVer {
-		// If not initiation, do not allow api changes
-		// between connections.
-		if apiVer != -1 {
-			return fmt.Errorf("server API version unexpectedly changed from %v to %v",
-				apiVer, cfgAPIVer)
-		}
 		if found := func() bool {
-			for _, version := range apiVers {
+			for _, version := range serverAPIVers {
 				ver := int32(version)
 				if cfgAPIVer == ver {
 					dc.log.Debugf("Setting server api version to %v.", ver)
