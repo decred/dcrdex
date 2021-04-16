@@ -27,6 +27,7 @@ const alphaAddress = "mt9hgfXXbM3x7hewgEAovBwqoMAAnctJ4V"
 var tLTC = &dex.Asset{
 	ID:           2,
 	Symbol:       "ltc",
+	Version:      version,
 	SwapSize:     dexbtc.InitTxSize,
 	SwapSizeBase: dexbtc.InitTxSizeBase,
 	MaxFeeRate:   10,

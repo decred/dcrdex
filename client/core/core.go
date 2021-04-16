@@ -3402,6 +3402,16 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
 	}
 
+	if ver := baseWallet.Info().Version; baseAsset.Version != ver {
+		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
+			baseID, ver, baseAsset.Version)
+	}
+
+	if ver := quoteWallet.Info().Version; quoteAsset.Version != ver {
+		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
+			quoteID, ver, quoteAsset.Version)
+	}
+
 	// We actually care less about base/quote, and more about from/to, which
 	// depends on whether this is a buy or sell order.
 	fromAsset, toAsset := baseAsset, quoteAsset
@@ -5278,6 +5288,7 @@ func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 	return &dex.Asset{
 		ID:           asset.ID,
 		Symbol:       asset.Symbol,
+		Version:      asset.Version,
 		LotSize:      asset.LotSize,
 		RateStep:     asset.RateStep,
 		MaxFeeRate:   asset.MaxFeeRate,

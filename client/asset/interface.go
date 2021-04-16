@@ -27,6 +27,10 @@ type WalletInfo struct {
 	// Units is the unit used for the smallest (integer) denomination of the
 	// currency, in plural form e.g. atoms, Satoshis.
 	Units string `json:"units"`
+	// Version is the Wallet's version number, which is used to signal when
+	// major changes are made to internal details such as coin ID encoding and
+	// contract structure that must be common to a server's.
+	Version uint32
 	// DefaultConfigPath is the default file path that the Wallet uses for its
 	// configuration file.
 	DefaultConfigPath string `json:"configpath"`

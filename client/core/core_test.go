@@ -50,6 +50,7 @@ var (
 	tDCR = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
+		Version:      0, // match the stubbed (*TXCWallet).Info result
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   10,
@@ -61,6 +62,7 @@ var (
 	tBTC = &dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
+		Version:      0, // match the stubbed (*TXCWallet).Info result
 		SwapSize:     dexbtc.InitTxSize,
 		SwapSizeBase: dexbtc.InitTxSizeBase,
 		MaxFeeRate:   2,
@@ -91,6 +93,7 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 	return &msgjson.Asset{
 		Symbol:       ai.Symbol,
 		ID:           ai.ID,
+		Version:      ai.Version,
 		LotSize:      ai.LotSize,
 		RateStep:     ai.RateStep,
 		MaxFeeRate:   ai.MaxFeeRate,
@@ -552,7 +555,9 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 }
 
 func (w *TXCWallet) Info() *asset.WalletInfo {
-	return &asset.WalletInfo{}
+	return &asset.WalletInfo{
+		Version: 0, // match tDCR/tBTC
+	}
 }
 
 func (w *TXCWallet) OwnsAddress(address string) (bool, error) {
@@ -778,8 +783,9 @@ var tAssetID uint32
 func randomAsset() *msgjson.Asset {
 	tAssetID++
 	return &msgjson.Asset{
-		Symbol: "BT" + strconv.Itoa(int(tAssetID)),
-		ID:     tAssetID,
+		Symbol:  "BT" + strconv.Itoa(int(tAssetID)),
+		ID:      tAssetID,
+		Version: tAssetID * 2,
 	}
 }
 

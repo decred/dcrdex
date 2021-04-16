@@ -39,6 +39,7 @@ var (
 	tDCR            = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
+		Version:      version,
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   24, // FundOrder and swap/redeem fallback when estimation fails
@@ -1105,6 +1106,8 @@ func TestFundEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error fixing split tx: %v", err)
 	}
+
+	// TODO: test version mismatch
 
 	wallet.useSplitTx = false
 

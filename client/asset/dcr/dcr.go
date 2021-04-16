@@ -42,6 +42,9 @@ import (
 )
 
 const (
+	// The implementation version. This considers the dex/networks package too.
+	version = 0
+
 	// BipID is the BIP-0044 asset ID.
 	BipID = 42
 
@@ -142,6 +145,7 @@ var (
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
 		Units:             "atoms",
+		Version:           version,
 		DefaultConfigPath: defaultConfigPath,
 		ConfigOpts:        configOpts,
 	}
@@ -892,6 +896,11 @@ func orderEnough(val, lots uint64, nfo *dex.Asset) func(sum uint64, size uint32,
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
 func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+	// Consumer checks dex asset version, so maybe this is not our job:
+	// if ord.DEXConfig.Version != dcr.Info().Version {
+	// 	return nil, nil, fmt.Errorf("asset version mismatch: server = %d, client = %d",
+	// 		ord.DEXConfig.Version, dcr.Info().Version)
+	// }
 	if ord.Value == 0 {
 		return nil, nil, fmt.Errorf("cannot fund value = 0")
 	}

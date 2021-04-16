@@ -34,6 +34,8 @@ import (
 )
 
 const (
+	version = 0
+
 	// Use RawRequest to get the verbose block header for a blockhash.
 	methodGetBlockHeader = "getblockheader"
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
@@ -140,6 +142,7 @@ var (
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
 		Units:             "Satoshis",
+		Version:           version,
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        configOpts,
 	}
