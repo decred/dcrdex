@@ -35,6 +35,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -64,6 +65,13 @@ var (
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
 	// ever syncTickerPeriod. var instead of const for testing purposes.
 	syncTickerPeriod = 10 * time.Second
+	// serverAPIVers are the DEX server API versions this client is capable
+	// of communicating with.
+	//
+	// NOTE: API version may change at any time. Keep this in mind when
+	// updating the API. Long-running operations may start and end with
+	// differing versions.
+	serverAPIVers = []int{serverdex.PreAPIVersion}
 )
 
 type dexTicker struct {
@@ -95,6 +103,8 @@ type dexConnection struct {
 	acct       *dexAccount
 	notify     func(Notification)
 	ticker     *dexTicker
+	// apiVer is an atomic. An uninitiated connection should be set to -1.
+	apiVer int32
 
 	assetsMtx sync.RWMutex
 	assets    map[uint32]*dex.Asset
@@ -4323,6 +4333,14 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 	return assetsUpdated, errs.ifAny()
 }
 
+// sendOutdatedClientNotification will send a notification to the UI that
+// indicates the client should be updated to be used with this DEX server.
+func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
+	details := "You may need to update your client to trade here."
+	n := db.NewNotification("apiver", dc.acct.host, details, db.WarningLevel)
+	c.notify(&n)
+}
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route. If temporary is provided and true, no connect and reconnect handlers
@@ -4349,6 +4367,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		ticker: newDexTicker(defaultTickInterval), // updated when server config obtained
 		books:  make(map[string]*bookie),
 		trades: make(map[order.OrderID]*trackedTrade),
+		apiVer: -1,
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -4404,6 +4423,9 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	// Request the market configuration.
 	err = dc.refreshServerConfig() // handleReconnect must too
 	if err != nil {
+		if errors.Is(err, outdatedClientErr) {
+			sendOutdatedClientNotification(c, dc)
+		}
 		return dc, err
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
@@ -4428,6 +4450,9 @@ func (c *Core) handleReconnect(host string) {
 	// server configuration.
 	err := dc.refreshServerConfig()
 	if err != nil {
+		if errors.Is(err, outdatedClientErr) {
+			sendOutdatedClientNotification(c, dc)
+		}
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}

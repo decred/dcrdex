@@ -4,6 +4,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,8 @@ import (
 var (
 	feederID        uint32
 	bookFeedTimeout = time.Minute
+
+	outdatedClientErr = errors.New("outdated client")
 )
 
 // BookFeed manages a channel for receiving order book updates. The only
@@ -591,12 +594,38 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
+// refreshServerConfig fetches and replaces server configuration data. It also
+// initially checks that a server's API version is one of serverAPIVers.
 func (dc *dexConnection) refreshServerConfig() error {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to fetch server config: %w", err)
+	}
+
+	// Check that we are able to communicate with this DEX.
+	apiVer := atomic.LoadInt32(&dc.apiVer)
+	cfgAPIVer := int32(cfg.APIVersion)
+
+	if apiVer != cfgAPIVer {
+		if found := func() bool {
+			for _, version := range serverAPIVers {
+				ver := int32(version)
+				if cfgAPIVer == ver {
+					dc.log.Debugf("Setting server api version to %v.", ver)
+					atomic.StoreInt32(&dc.apiVer, ver)
+					return true
+				}
+			}
+			return false
+		}(); !found {
+			err := fmt.Errorf("unknown server API version: %v", cfgAPIVer)
+			if cfgAPIVer > apiVer {
+				err = fmt.Errorf("%v: %w", err, outdatedClientErr)
+			}
+			return err
+		}
 	}
 
 	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)

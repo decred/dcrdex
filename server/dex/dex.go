@@ -31,6 +31,14 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
+const (
+	// PreAPIVersion covers all API iterations before versioning started.
+	PreAPIVersion = iota
+
+	// APIVersion is the current API version.
+	APIVersion = PreAPIVersion
+)
+
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID, has Network
 // and ConfigPath strings, and has JSON tags.
 type AssetConf struct {
@@ -138,6 +146,7 @@ func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*m
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
 		Fee:              cfg.RegFeeAmount,
+		APIVersion:       uint16(APIVersion),
 		BinSizes:         apidata.BinSizes,
 	}
 

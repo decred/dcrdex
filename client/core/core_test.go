@@ -39,6 +39,7 @@ import (
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
@@ -204,6 +205,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		notify:    func(Notification) {},
 		trades:    make(map[order.OrderID]*trackedTrade),
 		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		apiVer:    serverdex.PreAPIVersion,
 		connected: 1,
 	}, conn, acct
 }
@@ -6451,5 +6453,64 @@ func TestPreOrder(t *testing.T) {
 	_, err = tCore.PreOrder(form)
 	if err != nil {
 		t.Fatalf("PreOrder error after fixing everything: %v", err)
+	}
+}
+
+func TestRefreshServerConfig(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	// Add an API version to serverAPIVers to use in tests.
+	newAPIVer := ^uint16(0) - 1
+	serverAPIVers = append(serverAPIVers, int(newAPIVer))
+
+	queueConfig := func(err *msgjson.Error, apiVer uint16) {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			cfg := *rig.dc.cfg
+			cfg.APIVersion = apiVer
+			resp, _ := msgjson.NewResponse(msg.ID, cfg, err)
+			f(resp)
+			return nil
+		})
+	}
+	tests := []struct {
+		name       string
+		configErr  *msgjson.Error
+		gotAPIVer  uint16
+		marketBase uint32
+		wantErr    bool
+	}{{
+		name:       "ok",
+		marketBase: tDCR.ID,
+		gotAPIVer:  newAPIVer,
+	}, {
+		name:      "unable to fetch config",
+		configErr: new(msgjson.Error),
+		wantErr:   true,
+	}, {
+		name:       "api not in wanted versions",
+		gotAPIVer:  ^uint16(0),
+		marketBase: tDCR.ID,
+		wantErr:    true,
+	}, {
+		name:       "generate maps failure",
+		marketBase: ^uint32(0),
+		gotAPIVer:  newAPIVer,
+		wantErr:    true,
+	}}
+
+	for _, test := range tests {
+		rig.dc.cfg.Markets[0].Base = test.marketBase
+		queueConfig(test.configErr, test.gotAPIVer)
+		err := rig.dc.refreshServerConfig()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
 	}
 }
