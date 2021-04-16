@@ -1037,6 +1037,7 @@ type ConfigResult struct {
 	Assets           []*Asset  `json:"assets"`
 	Markets          []*Market `json:"markets"`
 	Fee              uint64    `json:"fee"`
+	APIVersion       uint16    `json:"apiver"`
 	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
 }
 
