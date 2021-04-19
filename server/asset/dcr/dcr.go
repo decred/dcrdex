@@ -241,6 +241,17 @@ func (dcr *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *Backend) FeeRate() (uint64, error) {
+	// estimatesmartfee with Decred is presently (1) pointless given block
+	// utilization, and (2) based on the bitcoin core algorithm that tends to
+	// provide excessively high estimates for several reason including the lack
+	// of any block fullness metric or any special handling for a backlog of
+	// tickets in mempool that is unrelated to the fee market on account of the
+	// 20 ticket max per block.
+	return 10, nil // 0.0001 DCR/kB, the default relay fee
+}
+
+/*
+func (dcr *Backend) FeeRate() (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
 	dcrPerKB, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
 	if err != nil {
@@ -256,6 +267,7 @@ func (dcr *Backend) FeeRate() (uint64, error) {
 	}
 	return atomsPerB, nil
 }
+*/
 
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error

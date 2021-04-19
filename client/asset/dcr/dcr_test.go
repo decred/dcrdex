@@ -46,7 +46,7 @@ var (
 		RateStep:     100,
 		SwapConf:     1,
 	}
-	optimalFeeRate uint64 = 22
+	optimalFeeRate uint64 = 10
 	tErr                  = fmt.Errorf("test error")
 	tTxID                 = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
 	tTxHash        *chainhash.Hash
@@ -238,6 +238,11 @@ func newTRPCClient() *tRPCClient {
 	}
 }
 
+// NOTE: EstimateSmartFee is not currently used by the Backend implementation
+// since Decred's estimatesmartfee is both pointless at present and not
+// particularly sophisticated. However, it is still part of the rpcClient
+// interface required by the Backend, so we will define one, and use it in the
+// future.
 func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
 	if c.estFeeErr != nil {
 		return 0, c.estFeeErr

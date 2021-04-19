@@ -689,7 +689,18 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return &balance, err
 }
 
-// FeeRate returns the current optimal fee rate in atoms / byte.
+// feeRate returns the current optimal fee rate in atoms / byte.
+func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
+	// estimatesmartfee with Decred is presently (1) pointless given block
+	// utilization, and (2) based on the bitcoin core algorithm that tends to
+	// provide excessively high estimates for several reason including the lack
+	// of any block fullness metric or any special handling for a backlog of
+	// tickets in mempool that is unrelated to the fee market on account of the
+	// 20 ticket max per block.
+	return 10, nil // 0.0001 DCR/kB,
+}
+
+/*
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
 	if confTarget < 2 {
@@ -707,6 +718,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	// zero value if the atoms/KB is less than 1000.
 	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerKB * 1e8 / 1e3
 }
+*/
 
 // feeRateWithFallback attempts to get the optimal fee rate in atoms / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
