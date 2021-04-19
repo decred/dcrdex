@@ -1899,6 +1899,33 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		return err
 	}
 
+	// If there are active trades, make sure they can be settled by the
+	// keys held within the new wallet.
+	sameWallet := func() error {
+		for _, dc := range c.dexConnections() {
+			for _, trade := range dc.trackedTrades() {
+				if trade.isActive() {
+					addr := trade.Trade().Address
+					owns, err := wallet.OwnsAddress(addr)
+					if err != nil {
+						return err
+					}
+					if !owns {
+						return fmt.Errorf("new wallet does not own address found in active trades: %v", addr)
+					}
+					// Assume all trades are owned by the
+					// new wallet if one is.
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+	if err := sameWallet(); err != nil {
+		wallet.Disconnect()
+		return newError(walletErr, "new wallet cannot be used with current active trades: %v", err)
+	}
+
 	// If newWalletPW is non-nil, update the wallet's password.
 	if newWalletPW != nil { // includes empty non-nil slice
 		err = c.setWalletPassword(wallet, newWalletPW, crypter)

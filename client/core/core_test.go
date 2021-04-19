@@ -530,14 +530,17 @@ type TXCWallet struct {
 	preSwap           *asset.PreSwap
 	preRedeemForm     *asset.PreRedeemForm
 	preRedeem         *asset.PreRedeem
+	ownsAddress       bool
+	ownsAddressErr    error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
-		changeCoin: &tCoin{id: encode.RandomBytes(36)},
-		syncStatus: func() (synced bool, progress float32, err error) { return true, 1, nil },
-		confs:      make(map[string]uint32),
-		confsErr:   make(map[string]error),
+		changeCoin:  &tCoin{id: encode.RandomBytes(36)},
+		syncStatus:  func() (synced bool, progress float32, err error) { return true, 1, nil },
+		confs:       make(map[string]uint32),
+		confsErr:    make(map[string]error),
+		ownsAddress: true,
 	}
 	xcWallet := &xcWallet{
 		Wallet:       w,
@@ -561,7 +564,7 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 }
 
 func (w *TXCWallet) OwnsAddress(address string) (bool, error) {
-	return true, nil
+	return w.ownsAddress, w.ownsAddressErr
 }
 
 func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -5203,14 +5206,22 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// For the last success, make sure that we also clear any related
 	// tickGovernors.
+	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		suspectSwap:  true,
 		tickGovernor: time.NewTimer(time.Hour),
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			UserMatch: &order.UserMatch{
+				MatchID: matchID,
+			},
+		},
 	}
 	tCore.conns[tDexHost].trades[order.OrderID{}] = &trackedTrade{
 		Order: &order.LimitOrder{
 			P: order.Prefix{
-				BaseAsset: assetID,
+				BaseAsset:  assetID,
+				ServerTime: time.Now(),
 			},
 		},
 		wallets: &walletSet{
@@ -5222,7 +5233,25 @@ func TestReconfigureWallet(t *testing.T) {
 		matches: map[order.MatchID]*matchTracker{
 			{}: match,
 		},
+		metaData: &db.OrderMetaData{},
+		dc:       rig.dc,
 	}
+
+	// Error checking if wallet owns address.
+	tXyzWallet.ownsAddressErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong error when expecting auth error: %v", err)
+	}
+	tXyzWallet.ownsAddressErr = nil
+
+	// Wallet doesn't own address.
+	tXyzWallet.ownsAddress = false
+	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong error when expecting auth error: %v", err)
+	}
+	tXyzWallet.ownsAddress = true
 
 	// Success updating settings.
 	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
