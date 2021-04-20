@@ -745,6 +745,9 @@ export default class MarketsPage extends BasePage {
         quote: qid,
         ...args
       })
+      // If a new timer is set, a change was made while fetching the pre-order.
+      // Abandon this result.
+      if (this.preorderTimer) return
       this.maxLoaded()
       this.maxLoaded = null
 
