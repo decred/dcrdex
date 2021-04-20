@@ -6,7 +6,6 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "watch": "webpack --watch --config webpack/dev.js",
-    "start": "webpack-cli serve --open --config webpack/dev.js",
     "analyze": "webpack --config webpack/analyze.js",
     "build": "webpack --config webpack/prod.js --progress --color",
     "lint": "./node_modules/.bin/eslint src --ext .js"
@@ -39,7 +38,6 @@
     "webpack": "^5.34.0",
     "webpack-bundle-analyzer": "^4.4.1",
     "webpack-cli": "^4.6.0",
-    "webpack-dev-server": "^4.0.0-beta.2",
     "webpack-merge": "^5.7.3"
   }
 }

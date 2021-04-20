@@ -8,10 +8,5 @@ module.exports = merge(common, {
   plugins: [new ESLintPlugin({
     formatter: 'stylish'
   })],
-  devtool: 'inline-source-map',
-  devServer: {
-    static: path.resolve(__dirname, 'public/index.js'),
-    port: 54321,
-    watch: true
-  }
+  devtool: 'inline-source-map'
 })
