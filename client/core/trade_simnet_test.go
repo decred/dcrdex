@@ -1126,19 +1126,29 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		}
 	}
 
-	if refundAmts[btc.BipID] > 0 {
-		// btc swaps cannot be refunded until the MedianTimePast is greater
-		// than the swap locktime. The MedianTimePast is calculated by taking
-		// the timestamps of the last 11 blocks and finding the median. Mining
-		// 11 blocks on btc a second from now will ensure that the MedianTimePast
-		// will be greater than the furthest swap locktime, thereby lifting the
-		// time lock on all btc swaps.
+	// btc and dcr swaps cannot be refunded until the MedianTimePast is greater
+	// than the swap locktime. The MedianTimePast is calculated by taking
+	// the timestamps of the last 11 blocks and finding the median. Mining
+	// 6 blocks on the chain a second from now will ensure that the MedianTimePast
+	// will be greater than the furthest swap locktime, thereby lifting the
+	// time lock on all these swaps.
+	mineMedian := func(assetID uint32) error {
 		time.Sleep(1 * time.Second)
-		if err := mineBlocks(btc.BipID, 11); err == nil {
-			client.log("Mined 11 btc blocks to expire swap locktimes")
-		} else {
-			return fmt.Errorf("client %d: error mining 11 btc blocks for swap refunds: %v",
+		if err := mineBlocks(assetID, 6); err != nil {
+			return fmt.Errorf("client %d: error mining 6 btc blocks for swap refunds: %v",
 				client.id, err)
+		}
+		client.log("Mined 6 blocks for assetID %d to expire swap locktimes", assetID)
+		return nil
+	}
+	if refundAmts[btc.BipID] > 0 {
+		if err := mineMedian(btc.BipID); err != nil {
+			return err
+		}
+	}
+	if refundAmts[dcr.BipID] > 0 {
+		if err := mineMedian(dcr.BipID); err != nil {
+			return err
 		}
 	}
 
