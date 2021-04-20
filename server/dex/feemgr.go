@@ -24,11 +24,16 @@ func NewFeeManager() *FeeManager {
 	}
 }
 
-// AddFetcher adds a fee fetcher (a *BackedAsset) and primes the cache.
+// AddFetcher adds a fee fetcher (a *BackedAsset) and primes the cache. The
+// asset's MaxFeeRate are used to limit the rates returned by the LastRate
+// method as well as the rates returned by child FeeFetchers.
 func (m *FeeManager) AddFetcher(asset *asset.BackedAsset) {
 	rate, err := asset.Backend.FeeRate()
 	if err != nil {
 		log.Warnf("Error priming fee cache for %s: %v", asset.Symbol, err)
+	}
+	if rate > asset.MaxFeeRate {
+		rate = asset.MaxFeeRate
 	}
 	m.cache[asset.ID] = &rate
 	m.assets[asset.ID] = asset
@@ -75,11 +80,16 @@ func (f *feeFetcher) FeeRate() uint64 {
 	if err != nil {
 		log.Errorf("Error retrieving fee rate for %s: %v", f.Symbol, err)
 	}
+	if r > f.Asset.MaxFeeRate {
+		r = f.Asset.MaxFeeRate
+	}
 	atomic.StoreUint64(f.lastRate, r)
 	return r
 }
 
-// MaxFeeRate is a getter for the BackedAsset's dex.Asset.MaxFeeRate
+// MaxFeeRate is a getter for the BackedAsset's dex.Asset.MaxFeeRate. This is
+// provided so consumers that operate on the returned FeeRate can respect the
+// configured limit e.g. ScaleFeeRate in (*Market).processReadyEpoch.
 func (f *feeFetcher) MaxFeeRate() uint64 {
 	return f.Asset.MaxFeeRate
 }
