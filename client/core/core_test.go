@@ -5241,7 +5241,7 @@ func TestReconfigureWallet(t *testing.T) {
 	tXyzWallet.ownsAddressErr = tErr
 	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, walletErr) {
-		t.Fatalf("wrong error when expecting auth error: %v", err)
+		t.Fatalf("wrong error when expecting ownsAddress wallet error: %v", err)
 	}
 	tXyzWallet.ownsAddressErr = nil
 
@@ -5249,7 +5249,7 @@ func TestReconfigureWallet(t *testing.T) {
 	tXyzWallet.ownsAddress = false
 	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
 	if !errorHasCode(err, walletErr) {
-		t.Fatalf("wrong error when expecting auth error: %v", err)
+		t.Fatalf("wrong error when expecting not owned wallet error: %v", err)
 	}
 	tXyzWallet.ownsAddress = true
 

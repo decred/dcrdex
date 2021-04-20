@@ -1913,8 +1913,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 					if !owns {
 						return fmt.Errorf("new wallet does not own address found in active trades: %v", addr)
 					}
-					// Assume all trades are owned by the
-					// new wallet if one is.
+					// Assume all trade addresses are owned
+					// by the new wallet if one is.
 					return nil
 				}
 			}
