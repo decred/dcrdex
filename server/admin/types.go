@@ -14,7 +14,9 @@ type AssetPost struct {
 	FeeRateScale *float64 `json:"feeRateScale,omitempty"`
 }
 
-// AssetInfo is the result of the asset GET.
+// AssetInfo is the result of the asset GET. Note that ScaledFeeRate is
+// CurrentFeeRate multiplied by an operator-specified fee scale rate for this
+// asset, and then limited by the dex.Asset.MaxFeeRate.
 type AssetInfo struct {
 	dex.Asset
 	CurrentFeeRate uint64   `json:"currentFeeRate,omitempty"`

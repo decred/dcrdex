@@ -61,6 +61,7 @@ func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.core.ConfigMsg())
 }
 
+// apiAsset is the handler for the '/asset/{assetID}' API request.
 func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	assetSymbol := strings.ToLower(chi.URLParam(r, assetSymKey))
 	assetID, found := dex.BipSymbolID(assetSymbol)
@@ -82,6 +83,10 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
 	} else {
 		scaledFeeRate = s.core.ScaleFeeRate(assetID, currentFeeRate)
+		// Limit the scaled fee rate just as in (*Market).processReadyEpoch.
+		if scaledFeeRate > asset.MaxFeeRate {
+			scaledFeeRate = asset.MaxFeeRate
+		}
 	}
 
 	synced, err := backend.Synced()
