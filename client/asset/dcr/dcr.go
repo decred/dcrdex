@@ -157,6 +157,7 @@ type rpcClient interface {
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
+	GetBlockHeaderVerbose(ctx context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
 	GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
@@ -1629,7 +1630,43 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	return time.Now().UTC().After(contractExpiry), contractExpiry, nil
+	medianTime, err := dcr.calcPastMedianTime()
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("error calculating median time: %w", err)
+	}
+	return medianTime.After(contractExpiry), contractExpiry, nil
+}
+
+// calcPastMedianTime calculates the median time of the previous few blocks
+// prior to, and including, the best block.
+func (dcr *ExchangeWallet) calcPastMedianTime() (time.Time, error) {
+	dcr.tipMtx.RLock()
+	hash := dcr.currentTip.hash
+	dcr.tipMtx.RUnlock()
+
+	// Look at the last 11 blocks, which is consistent with dcrd.
+	timestamps := make([]int64, 0, 11)
+	for i := 0; i < cap(timestamps); i++ {
+		blockHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, hash)
+		if err != nil {
+			return time.Time{}, err
+		}
+		timestamps = append(timestamps, blockHeader.Time)
+		if blockHeader.Height == 0 {
+			break
+		}
+		hash, err = chainhash.NewHashFromStr(blockHeader.PreviousHash)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("error decoding previous hash: %w", err)
+		}
+	}
+
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+
+	medianTimestamp := timestamps[len(timestamps)/2]
+	return time.Unix(medianTimestamp, 0), nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
