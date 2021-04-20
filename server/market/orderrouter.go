@@ -634,7 +634,7 @@ func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *as
 	if confs > 0 {
 		return nil
 	}
-	lastKnownFeeRate := r.feeSource.LastRate(fundingAsset.ID)
+	lastKnownFeeRate := r.feeSource.LastRate(fundingAsset.ID) // MaxFeeRate applied inside feeSource
 	feeMinimum := uint64(math.Round(float64(lastKnownFeeRate) * ZeroConfFeeRateThreshold))
 	feeRate := dexCoin.FeeRate()
 	if lastKnownFeeRate > 0 && feeRate < feeMinimum {

@@ -558,7 +558,7 @@ func (r *BookRouter) msgOrderBook(book *msgBook) *msgjson.OrderBook {
 		MarketID:     book.name,
 		Epoch:        uint64(epochIdx),
 		Orders:       ords,
-		BaseFeeRate:  r.feeSource.LastRate(book.baseID),
+		BaseFeeRate:  r.feeSource.LastRate(book.baseID), // MaxFeeRate applied inside feeSource
 		QuoteFeeRate: r.feeSource.LastRate(book.quoteID),
 	}
 }
@@ -646,6 +646,7 @@ func (r *BookRouter) handleFeeRate(conn comms.Link, msg *msgjson.Message) *msgjs
 		}
 	}
 
+	// Note that MaxFeeRate is applied inside feeSource.
 	resp, err := msgjson.NewResponse(msg.ID, r.feeSource.LastRate(assetID), nil)
 	if err != nil {
 		log.Errorf("failed to encode fee_rate response: %v", err)
