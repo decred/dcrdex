@@ -243,6 +243,16 @@ type MatchData struct {
 	Status    order.MatchStatus // note that failed swaps, where Active=false, can have any status
 }
 
+// MatchDataWithCoins pairs MatchData (embedded) with the encode swap and redeem
+// coin IDs blobs for both maker and taker.
+type MatchDataWithCoins struct {
+	MatchData
+	MakerSwapCoin   []byte
+	MakerRedeemCoin []byte
+	TakerSwapCoin   []byte
+	TakerRedeemCoin []byte
+}
+
 // MatchStatus is the current status of a match, its known contracts and coin
 // IDs, and its secret, if known.
 type MatchStatus struct {
@@ -331,7 +341,7 @@ type MatchArchiver interface {
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*MatchOutcome, error)
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchData, error)
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchDataWithCoins, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*MatchStatus, error)
 }
 

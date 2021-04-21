@@ -247,31 +247,6 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	return rowsToMatchData(rows, includeInactive)
 }
 
-// MarketMatches retrieves all active matches for a market. If includeInactive,
-// all matches are returned.
-func (a *Archiver) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
-	marketSchema, err := a.marketSchema(base, quote)
-	if err != nil {
-		return nil, err
-	}
-
-	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
-
-	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-	defer cancel()
-
-	query := internal.RetrieveActiveMarketMatches
-	if includeInactive {
-		query = internal.RetrieveMarketMatches
-	}
-	stmt := fmt.Sprintf(query, matchesTableName)
-	rows, err := a.db.QueryContext(ctx, stmt)
-	if err != nil {
-		return nil, err
-	}
-	return rowsToMatchData(rows, includeInactive)
-}
-
 func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, error) {
 	defer rows.Close()
 
@@ -302,6 +277,86 @@ func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, err
 				&m.Maker, &m.MakerAcct, &makerAddr,
 				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
 				&baseRate, &quoteRate, &status)
+			if err != nil {
+				return nil, err
+			}
+			// All are active.
+			m.Active = true
+		}
+		m.Status = order.MatchStatus(status)
+		m.TakerSell = takerSell.Bool
+		m.TakerAddr = takerAddr.String
+		m.MakerAddr = makerAddr.String
+		m.BaseRate = uint64(baseRate.Int64)
+		m.QuoteRate = uint64(quoteRate.Int64)
+
+		ms = append(ms, &m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ms, nil
+}
+
+// MarketMatches retrieves all active matches for a market. If includeInactive,
+// all matches are returned.
+func (a *Archiver) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchDataWithCoins, error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	defer cancel()
+
+	query := internal.RetrieveActiveMarketMatches
+	if includeInactive {
+		query = internal.RetrieveMarketMatches
+	}
+	stmt := fmt.Sprintf(query, matchesTableName)
+	rows, err := a.db.QueryContext(ctx, stmt)
+	if err != nil {
+		return nil, err
+	}
+	return rowsToMatchDataWithCoins(rows, includeInactive)
+}
+
+func rowsToMatchDataWithCoins(rows *sql.Rows, includeInactive bool) ([]*db.MatchDataWithCoins, error) {
+	defer rows.Close()
+
+	var (
+		ms  []*db.MatchDataWithCoins
+		err error
+	)
+	for rows.Next() {
+		var m db.MatchDataWithCoins
+		var status uint8
+		var baseRate, quoteRate sql.NullInt64
+		var takerSell sql.NullBool
+		var takerAddr, makerAddr sql.NullString
+		if includeInactive {
+			// "active" column SELECTed.
+			err = rows.Scan(&m.ID, &m.Active, &takerSell,
+				&m.Taker, &m.TakerAcct, &takerAddr,
+				&m.Maker, &m.MakerAcct, &makerAddr,
+				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+				&baseRate, &quoteRate, &status,
+				&m.MakerSwapCoin, &m.TakerSwapCoin, &m.MakerRedeemCoin, &m.TakerRedeemCoin)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// "active" column not SELECTed.
+			err = rows.Scan(&m.ID, &takerSell,
+				&m.Taker, &m.TakerAcct, &takerAddr,
+				&m.Maker, &m.MakerAcct, &makerAddr,
+				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+				&baseRate, &quoteRate, &status,
+				&m.MakerSwapCoin, &m.TakerSwapCoin, &m.MakerRedeemCoin, &m.TakerRedeemCoin)
 			if err != nil {
 				return nil, err
 			}

@@ -164,7 +164,7 @@ type Storage interface {
 	Fatal() <-chan struct{}
 	Close() error
 	InsertEpoch(ed *db.EpochResults) error
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error)
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchDataWithCoins, error)
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with

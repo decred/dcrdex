@@ -123,7 +123,8 @@ const (
 	RetrieveMarketMatches = `SELECT matchid, active, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
+		aContractCoinID, bContractCoinID, aRedeemCoinID, bRedeemCoinID
 	FROM %s
 	WHERE takerSell IS NOT NULL -- not a cancel order
 	ORDER BY epochIdx * epochDur DESC;`
@@ -131,7 +132,8 @@ const (
 	RetrieveActiveMarketMatches = `SELECT matchid, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
+		aContractCoinID, bContractCoinID, aRedeemCoinID, bRedeemCoinID
 	FROM %s
 	WHERE takerSell IS NOT NULL -- not a cancel order
 		AND active
