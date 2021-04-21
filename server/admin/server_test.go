@@ -31,6 +31,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
+	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -65,7 +66,7 @@ type TCore struct {
 	bookErr          error
 	epochOrders      []order.Order
 	epochOrdersErr   error
-	marketMatches    []*db.MatchData
+	marketMatches    []*dexsrv.MatchData
 	marketMatchesErr error
 	dataEnabled      uint32
 }
@@ -135,7 +136,7 @@ func (c *TCore) EpochOrders(_, _ uint32) ([]order.Order, error) {
 	return c.epochOrders, c.epochOrdersErr
 }
 
-func (c *TCore) MarketMatches(_, _ uint32, _ bool) ([]*db.MatchData, error) {
+func (c *TCore) MarketMatches(_, _ uint32, _ bool) ([]*dexsrv.MatchData, error) {
 	return c.marketMatches, c.marketMatchesErr
 }
 
@@ -661,28 +662,28 @@ func TestMarketMatches(t *testing.T) {
 	tests := []struct {
 		name, mkt, token    string
 		running, tokenValue bool
-		marketMatches       []*db.MatchData
+		marketMatches       []*dexsrv.MatchData
 		marketMatchesErr    error
 		wantCode            int
 	}{{
 		name:          "ok no token",
 		mkt:           "dcr_btc",
 		running:       true,
-		marketMatches: []*db.MatchData{},
+		marketMatches: []*dexsrv.MatchData{},
 		wantCode:      http.StatusOK,
 	}, {
 		name:          "ok with token",
 		mkt:           "dcr_btc",
 		running:       true,
 		token:         "?" + includeInactiveKey + "=true",
-		marketMatches: []*db.MatchData{},
+		marketMatches: []*dexsrv.MatchData{},
 		wantCode:      http.StatusOK,
 	}, {
 		name:          "bad token",
 		mkt:           "dcr_btc",
 		running:       true,
 		token:         "?" + includeInactiveKey + "=blue",
-		marketMatches: []*db.MatchData{},
+		marketMatches: []*dexsrv.MatchData{},
 		wantCode:      http.StatusBadRequest,
 	}, {
 		name:     "no market",
@@ -709,7 +710,7 @@ func TestMarketMatches(t *testing.T) {
 			t.Fatalf("%q: apiMarketMatches returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
 		if w.Code == http.StatusOK {
-			res := new([]*db.MatchData)
+			res := new([]*dexsrv.MatchData)
 			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
 				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
 			}

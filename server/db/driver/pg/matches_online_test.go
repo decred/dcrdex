@@ -532,6 +532,33 @@ func TestMarketMatches(t *testing.T) {
 		Base:    base,
 		Quote:   quote,
 	})
+
+	// This one has txns.
+	mktMatchID := db.MarketMatchID{
+		MatchID: match.ID(),
+		Base:    limitBuyStanding.Base(),
+		Quote:   limitBuyStanding.Quote(),
+	}
+	midWithCoins := mktMatchID.MatchID
+	MakerSwap, MakerContract := encode.RandomBytes(36), encode.RandomBytes(50)
+	err = archie.SaveContractA(mktMatchID, MakerContract, MakerSwap, 0)
+	if err != nil {
+		t.Fatalf("SaveContractA error: %v", err)
+	}
+
+	TakerSwap, TakerContract := encode.RandomBytes(36), encode.RandomBytes(50)
+	err = archie.SaveContractB(mktMatchID, TakerContract, TakerSwap, 0)
+	if err != nil {
+		t.Fatalf("SaveContractB error: %v", err)
+	}
+
+	MakerRedeem, Secret := encode.RandomBytes(36), encode.RandomBytes(32)
+	err = archie.SaveRedeemA(mktMatchID, MakerRedeem, Secret, 0)
+	if err != nil {
+		t.Fatalf("SaveContractB error: %v", err)
+	}
+	// TakerRedeem not stored.
+
 	// Make another perfect 1 lot match on another market.
 	limitBuyStanding = newLimitOrderWithAssets(false, 4500000, 1, order.StandingTiF, 0, AssetBTC, AssetLTC)
 	limitSellImmediate = newLimitOrderWithAssets(true, 4490000, 1, order.ImmediateTiF, 10, AssetBTC, AssetLTC)
@@ -542,6 +569,7 @@ func TestMarketMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertMatch() failed: %v", err)
 	}
+
 	// Don't include inactive.
 	matchData, err := archie.MarketMatches(base, quote, false)
 	if err != nil {
@@ -558,6 +586,31 @@ func TestMarketMatches(t *testing.T) {
 	if len(matchData) != 2 {
 		t.Errorf("Retrieved %d matches for market, expected 2.", len(matchData))
 	}
+
+	// Find the match with the stored coins and verify them.
+	var found bool
+	for _, md := range matchData {
+		if md.ID == midWithCoins {
+			found = true
+			if !bytes.Equal(md.MakerSwapCoin, MakerSwap) {
+				t.Errorf("Wrong maker swap coin %x, wanted %x", md.MakerSwapCoin, MakerSwap)
+			}
+			if !bytes.Equal(md.TakerSwapCoin, TakerSwap) {
+				t.Errorf("Wrong taker swap coin %x, wanted %x", md.TakerSwapCoin, TakerSwap)
+			}
+			if !bytes.Equal(md.MakerRedeemCoin, MakerRedeem) {
+				t.Errorf("Wrong maker redeem coin %x, wanted %x", md.MakerRedeemCoin, MakerRedeem)
+			}
+			if len(md.TakerRedeemCoin) > 0 {
+				t.Errorf("got taker redeem coin %x, but expected none", md.TakerRedeemCoin)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("failed to find match with the coins")
+	}
+
 	// Bad Market.
 	matchData, err = archie.MarketMatches(base, base, true)
 	noMktErr := new(db.ArchiveError)

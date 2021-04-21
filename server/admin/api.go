@@ -277,7 +277,32 @@ func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to obtain match data: %v", err), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, matches)
+	matchData := make([]*MatchData, len(matches))
+	for i, match := range matches {
+		matchData[i] = &MatchData{
+			TakerSell:   match.TakerSell,
+			ID:          match.ID.String(),
+			Maker:       match.Maker.String(),
+			MakerAcct:   match.MakerAcct.String(),
+			MakerSwap:   match.MakerSwap,
+			MakerRedeem: match.MakerRedeem,
+			MakerAddr:   match.MakerAddr,
+			Taker:       match.Taker.String(),
+			TakerAcct:   match.TakerAcct.String(),
+			TakerSwap:   match.TakerSwap,
+			TakerRedeem: match.TakerRedeem,
+			TakerAddr:   match.TakerAddr,
+			EpochIdx:    match.Epoch.Idx,
+			EpochDur:    match.Epoch.Dur,
+			Quantity:    match.Quantity,
+			Rate:        match.Rate,
+			BaseRate:    match.BaseRate,
+			QuoteRate:   match.QuoteRate,
+			Active:      match.Active,
+			Status:      match.Status.String(),
+		}
+	}
+	writeJSON(w, matchData)
 }
 
 // hander for route '/market/{marketName}/resume?t=UNIXMS'

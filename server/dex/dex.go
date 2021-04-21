@@ -882,9 +882,75 @@ func (dm *DEX) EpochOrders(base, quote uint32) ([]order.Order, error) {
 	return dm.storage.EpochOrders(base, quote)
 }
 
+// MatchData embeds db.MatchData with decoded swap transaction coin IDs.
+type MatchData struct {
+	db.MatchData
+	MakerSwap   string
+	TakerSwap   string
+	MakerRedeem string
+	TakerRedeem string
+}
+
 // MarketMatches returns matches for market with base and quote.
-func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
-	return dm.storage.MarketMatches(base, quote, includeInactive)
+func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchData, error) {
+	baseAsset := dm.assets[base]
+	if baseAsset == nil {
+		return nil, fmt.Errorf("asset %d not found", base)
+	}
+	quoteAsset := dm.assets[quote]
+	if quoteAsset == nil {
+		return nil, fmt.Errorf("asset %d not found", quote)
+	}
+	mds, err := dm.storage.MarketMatches(base, quote, includeInactive)
+	if err != nil {
+		return nil, err
+	}
+
+	matchDatas := make([]*MatchData, 0, len(mds))
+	for _, md := range mds {
+		matchData := MatchData{
+			MatchData: md.MatchData,
+		}
+		// asset0 is the maker swap / taker redeem asset.
+		// asset1 is the taker swap / maker redeem asset.
+		// Maker selling means asset 0 is base; asset 1 is quote.
+		asset0, asset1 := baseAsset, quoteAsset
+		if md.TakerSell {
+			asset0, asset1 = quoteAsset, baseAsset
+		}
+		if len(md.MakerSwapCoin) > 0 {
+			coinStr, err := asset0.Backend.ValidateCoinID(md.MakerSwapCoin)
+			if err != nil {
+				log.Errorf("Unable to decode coin %x: %v", md.MakerSwapCoin, err)
+			}
+			matchData.MakerSwap = coinStr
+		}
+		if len(md.TakerSwapCoin) > 0 {
+			coinStr, err := asset1.Backend.ValidateCoinID(md.TakerSwapCoin)
+			if err != nil {
+				log.Errorf("Unable to decode coin %x: %v", md.TakerSwapCoin, err)
+			}
+			matchData.TakerSwap = coinStr
+		}
+		if len(md.MakerRedeemCoin) > 0 {
+			coinStr, err := asset0.Backend.ValidateCoinID(md.MakerRedeemCoin)
+			if err != nil {
+				log.Errorf("Unable to decode coin %x: %v", md.MakerRedeemCoin, err)
+			}
+			matchData.MakerRedeem = coinStr
+		}
+		if len(md.TakerRedeemCoin) > 0 {
+			coinStr, err := asset1.Backend.ValidateCoinID(md.TakerRedeemCoin)
+			if err != nil {
+				log.Errorf("Unable to decode coin %x: %v", md.TakerRedeemCoin, err)
+			}
+			matchData.TakerRedeem = coinStr
+		}
+
+		matchDatas = append(matchDatas, &matchData)
+	}
+
+	return matchDatas, nil
 }
 
 // EnableDataAPI can be called via admin API to enable or disable the HTTP data
