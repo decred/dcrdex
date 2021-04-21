@@ -714,8 +714,13 @@ func TestResendPendingRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// TODO: Rethink how we trigger resendPendingRequests, because causing an
+	// error with a request, esp. by hacking it's match ID to be incorrect, is
+	// very indirect and can cause a data race by modifying a field that is
+	// supposed to be immutable. Can we just call resendPendingRequests?
+
 	// invalidateMatchesAndResumeNegotiations sets an invalid match ID for all
-	// matches of the specified side. This ensures that susbequent attempts by
+	// matches of the specified side. This ensures that subsequent attempts by
 	// the client to send a match-related request to the server will fail. The
 	// swapErr is also unset to resume match negotiations.
 	// Returns the original match IDs for the invalidated matches.
@@ -750,8 +755,8 @@ func TestResendPendingRequests(t *testing.T) {
 			select {
 			case note := <-notes:
 				foundSwapErrorNote = note.Severity() == db.ErrorLevel && note.Subject() == SubjectSwapError
-			case <-time.After(time.Second):
-				return fmt.Errorf("client %d: no init/redeem error note after 1 second", client.id)
+			case <-time.After(4 * time.Second):
+				return fmt.Errorf("client %d: no init/redeem error note after 4 seconds", client.id)
 			}
 		}
 
@@ -816,7 +821,7 @@ func TestResendPendingRequests(t *testing.T) {
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(1 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -868,7 +873,7 @@ func simpleTradeTest(t *testing.T, qty, rate uint64, finalStatus order.MatchStat
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(1 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -983,6 +988,14 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 		for _, match := range tracker.matches {
 			side, status := match.Side, match.Status
 			if status >= finalStatus {
+				// With async redeem request, wait for redeem sig before
+				// declaring the match complete. Sometimes it is almost
+				// instantaneos and other times the server's node takes a while
+				// to see the txns (TODO: diagnose this).
+				if finalStatus == order.MatchComplete && len(match.MetaData.Proof.Auth.RedeemSig) == 0 {
+					client.log("Completed match waiting for async redeem response...")
+					continue // check again later
+				}
 				// Prevent further action by blocking the match with a swapErr.
 				match.swapErr = fmt.Errorf("take no further action")
 				completedTrades++
@@ -1183,7 +1196,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			}
 		}
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	client.expectBalanceDiffs = refundAmts
 	err = client.assertBalanceChanges()

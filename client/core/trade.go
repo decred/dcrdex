@@ -1976,7 +1976,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		}
 
 		// Respond to DEX, but this is not consequential.
-		err = t.dc.ack(msgID, match.MatchID, audit)
+		err = t.dc.ack(msgID, mid, audit)
 		if err != nil {
 			t.dc.log.Debugf("Error acknowledging audit to server (not necessarily an error): %v", err)
 			// The server's response timeout may have just passed, but we got
