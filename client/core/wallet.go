@@ -138,6 +138,7 @@ func (w *xcWallet) state() *WalletState {
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
+		Version:      winfo.Version,
 		Open:         len(w.encPass) == 0 || len(w.pw) > 0,
 		Running:      w.connector.On(),
 		Balance:      w.balance,

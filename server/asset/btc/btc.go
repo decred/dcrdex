@@ -48,6 +48,11 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
+// Version returns the Backend implementation's version number.
+func (d *Driver) Version() uint32 {
+	return version
+}
+
 func init() {
 	asset.Register(assetName, &Driver{})
 }
@@ -60,6 +65,7 @@ var (
 )
 
 const (
+	version                  = 0
 	assetName                = "btc"
 	immatureTransactionError = dex.ErrorKind("immature output")
 )

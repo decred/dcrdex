@@ -194,6 +194,7 @@ func mkDexAsset(symbol string) *dex.Asset {
 	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
+		Version:      uint32(rand.Intn(12)),
 		LotSize:      lotSize,
 		RateStep:     lotSize / 1e3,
 		MaxFeeRate:   uint64(rand.Intn(10) + 1),

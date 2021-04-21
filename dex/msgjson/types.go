@@ -1021,6 +1021,7 @@ func (m *Market) Running() bool {
 type Asset struct {
 	Symbol       string `json:"symbol"`
 	ID           uint32 `json:"id"`
+	Version      uint32 `json:"version"`
 	LotSize      uint64 `json:"lotsize"`
 	RateStep     uint64 `json:"ratestep"`
 	MaxFeeRate   uint64 `json:"maxfeerate"`

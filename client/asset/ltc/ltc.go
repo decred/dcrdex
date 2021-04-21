@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	version = 0
 	// BipID is the BIP-0044 asset ID.
 	BipID = 2
 	// defaultFee is the default value for the fallbackfee.
@@ -89,6 +90,7 @@ var (
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Litecoin",
 		Units:             "Litoshi",
+		Version:           version,
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
 		ConfigOpts:        configOpts,
 	}

@@ -39,8 +39,9 @@ const (
 	APIVersion = PreAPIVersion
 )
 
-// AssetConf is like dex.Asset except it lacks the BIP44 integer ID, has Network
-// and ConfigPath strings, and has JSON tags.
+// AssetConf is like dex.Asset except it lacks the BIP44 integer ID and
+// implementation version, has Network and ConfigPath strings, and has JSON
+// tags.
 type AssetConf struct {
 	Symbol     string `json:"bip44symbol"`
 	Network    string `json:"network"`
@@ -319,6 +320,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		symbol := strings.ToLower(assetConf.Symbol)
 		assetID := assetIDs[i]
 
+		assetVer, err := asset.Version(symbol)
+		if err != nil {
+			abort()
+			return nil, fmt.Errorf("failed to retrieve asset %q version: %w", symbol, err)
+		}
+
 		// Create a new asset backend. An asset driver with a name matching the
 		// asset symbol must be available.
 		log.Infof("Starting asset backend %q...", symbol)
@@ -350,6 +357,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			Asset: dex.Asset{
 				ID:           assetID,
 				Symbol:       symbol,
+				Version:      assetVer,
 				LotSize:      assetConf.LotSize,
 				RateStep:     assetConf.RateStep,
 				MaxFeeRate:   assetConf.MaxFeeRate,
@@ -371,6 +379,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
 			Symbol:       assetConf.Symbol,
 			ID:           assetID,
+			Version:      assetVer,
 			LotSize:      assetConf.LotSize,
 			RateStep:     assetConf.RateStep,
 			MaxFeeRate:   assetConf.MaxFeeRate,

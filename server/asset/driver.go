@@ -15,11 +15,15 @@ var (
 	drivers    = make(map[string]Driver)
 )
 
-// Driver is the interface required of all assets. Setup should create a
-// Backend, but not start the backend connection.
+// Driver is the interface required of all assets.
 type Driver interface {
+	// Setup should create a Backend, but not start the backend connection.
 	Setup(configPath string, logger dex.Logger, network dex.Network) (Backend, error)
 	DecodeCoinID(coinID []byte) (string, error)
+	// Version returns the Backend's version number, which is used to signal
+	// when major changes are made to internal details such as coin ID encoding
+	// and contract structure that must be common to a client's.
+	Version() uint32
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for a named
@@ -58,4 +62,15 @@ func Setup(name, configPath string, logger dex.Logger, network dex.Network) (Bac
 		return nil, fmt.Errorf("asset: unknown asset driver %q", name)
 	}
 	return drv.Setup(configPath, logger, network)
+}
+
+// Version retrieves the version of the named asset's Backend implementation.
+func Version(name string) (uint32, error) {
+	driversMtx.Lock()
+	drv, ok := drivers[name]
+	driversMtx.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("asset: unknown asset driver %q", name)
+	}
+	return drv.Version(), nil
 }

@@ -24,6 +24,11 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 	return NewBackend(configPath, logger, network)
 }
 
+// Version returns the Backend implementation's version number.
+func (d *Driver) Version() uint32 {
+	return version
+}
+
 // DecodeCoinID creates a human-readable representation of a coin ID for
 // Bitcoin Cash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
@@ -35,7 +40,10 @@ func init() {
 	asset.Register(assetName, &Driver{})
 }
 
-const assetName = "bch"
+const (
+	version   = 0
+	assetName = "bch"
+)
 
 // NewBackend generates the network parameters and creates a bch backend as a
 // btc clone using an asset/btc helper function.
