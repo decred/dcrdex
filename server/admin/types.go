@@ -36,6 +36,30 @@ type MarketStatus struct {
 	PersistBook   *bool  `json:"persistbook,omitempty"`
 }
 
+// MatchData describes a match.
+type MatchData struct {
+	ID          string `json:"id"`
+	TakerSell   bool   `json:"takerSell"`
+	Maker       string `json:"makerOrder"`
+	MakerAcct   string `json:"makerAcct"`
+	MakerSwap   string `json:"makerSwap"`
+	MakerRedeem string `json:"makerRedeem"`
+	MakerAddr   string `json:"makerAddr"`
+	Taker       string `json:"takerOrder"`
+	TakerAcct   string `json:"takerAcct"`
+	TakerSwap   string `json:"takerSwap"`
+	TakerRedeem string `json:"takerRedeem"`
+	TakerAddr   string `json:"takerAddr"`
+	EpochIdx    uint64 `json:"epochIdx"`
+	EpochDur    uint64 `json:"epochDur"`
+	Quantity    uint64 `json:"quantity"`
+	Rate        uint64 `json:"rate"`
+	BaseRate    uint64 `json:"baseFeeRate"`
+	QuoteRate   uint64 `json:"quoteFeeRate"`
+	Active      bool   `json:"active"`
+	Status      string `json:"status"`
+}
+
 // APITime marshals and unmarshals a time value in time.RFC3339Nano format.
 type APITime struct {
 	time.Time

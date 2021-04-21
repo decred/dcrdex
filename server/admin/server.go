@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
+	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi/v5"
@@ -69,7 +70,7 @@ type SvrCore interface {
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error)
+	MarketMatches(base, quote uint32, includeInactive bool) ([]*dexsrv.MatchData, error)
 	EnableDataAPI(yes bool)
 }
 

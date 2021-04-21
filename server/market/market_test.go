@@ -56,7 +56,7 @@ func (ta *TArchivist) BookOrders(base, quote uint32) ([]*order.LimitOrder, error
 func (ta *TArchivist) EpochOrders(base, quote uint32) ([]order.Order, error) {
 	return nil, nil
 }
-func (ta *TArchivist) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchData, error) {
+func (ta *TArchivist) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchDataWithCoins, error) {
 	return nil, nil
 }
 func (ta *TArchivist) FlushBook(base, quote uint32) (sells, buys []order.OrderID, err error) {
