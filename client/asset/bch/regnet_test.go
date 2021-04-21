@@ -27,6 +27,7 @@ const alphaAddress = "bchreg:qqnm4z2tftyyeu3kvzzepmlp9mj3g6fvxgft570vll"
 var tBCH = &dex.Asset{
 	ID:           2,
 	Symbol:       "bch",
+	Version:      version,
 	SwapSize:     dexbtc.InitTxSize,
 	SwapSizeBase: dexbtc.InitTxSizeBase,
 	MaxFeeRate:   10,

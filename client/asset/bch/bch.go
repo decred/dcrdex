@@ -25,6 +25,8 @@ import (
 )
 
 const (
+	version = 0
+
 	// BipID is the Bip 44 coin ID for Bitcoin Cash.
 	BipID = 145
 	// The default fee is passed to the user as part of the asset.WalletInfo
@@ -80,8 +82,9 @@ var (
 	}
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:  "Bitcoin Cash",
-		Units: "Satoshi",
+		Name:    "Bitcoin Cash",
+		Units:   "Satoshi",
+		Version: version,
 		// Same as bitcoin. That's dumb.
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        configOpts,

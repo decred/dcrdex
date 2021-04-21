@@ -36,6 +36,7 @@ var (
 	tBTC            = &dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
+		Version:      version,
 		SwapSize:     dexbtc.InitTxSize,
 		SwapSizeBase: dexbtc.InitTxSizeBase,
 		MaxFeeRate:   34,

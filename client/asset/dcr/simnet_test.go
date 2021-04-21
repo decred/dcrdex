@@ -42,6 +42,7 @@ var (
 	tDCR    = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
+		Version:      version,
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   10,

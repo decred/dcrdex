@@ -113,6 +113,7 @@ func NetFromString(net string) (Network, error) {
 type Asset struct {
 	ID           uint32 `json:"id"`
 	Symbol       string `json:"symbol"`
+	Version      uint32 `json:"version"`
 	LotSize      uint64 `json:"lotSize"`
 	RateStep     uint64 `json:"rateStep"`
 	MaxFeeRate   uint64 `json:"maxFeeRate"`

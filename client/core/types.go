@@ -86,6 +86,7 @@ type WalletBalance struct {
 type WalletState struct {
 	Symbol       string         `json:"symbol"`
 	AssetID      uint32         `json:"assetID"`
+	Version      uint32         `json:"version"`
 	Open         bool           `json:"open"`
 	Running      bool           `json:"running"`
 	Balance      *WalletBalance `json:"balance"`
