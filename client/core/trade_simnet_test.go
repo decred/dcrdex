@@ -24,6 +24,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -55,6 +56,7 @@ var (
 			dcr.BipID: dcrWallet("trading1"),
 			btc.BipID: btcWallet("beta", ""), // beta default ("") is encrypted, delta is not
 		},
+		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}
 	client2 = &tClient{
 		id:      2,
@@ -63,6 +65,7 @@ var (
 			dcr.BipID: dcrWallet("trading2"),
 			btc.BipID: btcWallet("alpha", "gamma"), // alpha default ("") is encrypted, gamma is unencrypted
 		},
+		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}
 	clients = []*tClient{client1, client2}
 
@@ -315,6 +318,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 				finalStatus = order.MakerRedeemed // maker shouldn't get past this state
 			} else {
 				client.log("%s: resuming trade negotiations to audit Maker's redeem", side)
+				client.noRedeemWait = true
 			}
 			// Resume maker to redeem even though the redeem request to server
 			// will fail (disconnected) after the redeem bcast.
@@ -326,7 +330,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 			client.log("tick failure: %v", err)
 		}
 
-		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, finalStatus)
+		return monitorTrackedTrade(ctx, client, tracker, finalStatus)
 	}
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
 	resumeTrades.Go(func() error {
@@ -344,7 +348,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(1 * time.Second)
+	time.Sleep(4 * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -574,7 +578,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 			// counter-swap.
 			// Keep the order active to enable receiving audit request when Maker
 			// sends swap.
-			err = monitorTrackedTrade(ctx, client2, tracker, order.NewlyMatched, order.MakerSwapCast)
+			err = monitorTrackedTrade(ctx, client2, tracker, order.MakerSwapCast)
 			if err != nil {
 				return err
 			}
@@ -786,11 +790,11 @@ func TestResendPendingRequests(t *testing.T) {
 				return err
 			}
 			client.log("taker matches restored, now monitoring trade to completion")
-			return monitorTrackedTrade(ctx, client, tracker, order.MakerSwapCast, order.MatchComplete)
+			return monitorTrackedTrade(ctx, client, tracker, order.MatchComplete)
 		}
 
 		// client is maker, pause trade neg after auditing taker's init swap, but before sending redeem
-		if err = monitorTrackedTrade(ctx, client, tracker, order.MakerSwapCast, order.TakerSwapCast); err != nil {
+		if err = monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast); err != nil {
 			return err
 		}
 		client.log("trade paused for maker at %s", order.TakerSwapCast)
@@ -802,7 +806,7 @@ func TestResendPendingRequests(t *testing.T) {
 			return err
 		}
 		client.log("maker matches restored, now monitoring trade to completion")
-		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, order.MatchComplete)
+		return monitorTrackedTrade(ctx, client, tracker, order.MatchComplete)
 	}
 
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
@@ -951,10 +955,10 @@ func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, order
 	}
 	tracker.mtx.RUnlock()
 
-	return monitorTrackedTrade(ctx, client, tracker, order.NewlyMatched, finalStatus)
+	return monitorTrackedTrade(ctx, client, tracker, finalStatus)
 }
 
-func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedTrade, initialStatus, finalStatus order.MatchStatus) error {
+func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
 	recordBalanceChanges := func(assetID uint32, isSwap bool, qty, rate uint64) {
 		amt := qty
 		if client.isSeller != isSwap {
@@ -970,15 +974,6 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 		}
 	}
 
-	// Save last processed status for each match to accurately identify status
-	// changes and prevent re-processing the same status for a match.
-	tracker.mtx.RLock()
-	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
-	for _, match := range tracker.matches {
-		lastProcessedStatus[match.MatchID] = initialStatus
-	}
-	tracker.mtx.RUnlock()
-
 	// run a repeated check for match status changes to mine blocks as necessary.
 	maxTradeDuration := 2 * time.Minute
 	tryUntil(ctx, maxTradeDuration, func() bool {
@@ -990,9 +985,12 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 			if status >= finalStatus {
 				// With async redeem request, wait for redeem sig before
 				// declaring the match complete. Sometimes it is almost
-				// instantaneos and other times the server's node takes a while
+				// instantaneos and other times the server's node takes a while.
 				// to see the txns (TODO: diagnose this).
-				if finalStatus == order.MatchComplete && len(match.MetaData.Proof.Auth.RedeemSig) == 0 {
+				// Tests that don't expect a redeem can set noRedeemWait to true.
+				if finalStatus == order.MatchComplete &&
+					len(match.MetaData.Proof.Auth.RedeemSig) == 0 &&
+					!client.noRedeemWait {
 					client.log("Completed match waiting for async redeem response...")
 					continue // check again later
 				}
@@ -1000,10 +998,14 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				match.swapErr = fmt.Errorf("take no further action")
 				completedTrades++
 			}
-			if status == lastProcessedStatus[match.MatchID] || status > finalStatus {
+
+			client.psMTX.Lock()
+			if status == client.processedStatus[match.MatchID] || status > finalStatus {
+				client.psMTX.Unlock()
 				continue
 			}
-			lastProcessedStatus[match.MatchID] = status
+			client.processedStatus[match.MatchID] = status
+			client.psMTX.Unlock()
 			client.log("NOW =====> %s", status)
 
 			var assetToMine *dex.Asset
@@ -1261,10 +1263,14 @@ func btcWallet(daemon, walletName string) *tWallet {
 }
 
 type tClient struct {
-	id    int
-	wg    sync.WaitGroup
-	core  *Core
-	notes *notificationReader
+	id           int
+	wg           sync.WaitGroup
+	core         *Core
+	notes        *notificationReader
+	noRedeemWait bool
+
+	psMTX           sync.Mutex
+	processedStatus map[order.MatchID]order.MatchStatus
 
 	appPass  []byte
 	wallets  map[uint32]*tWallet
@@ -1463,6 +1469,10 @@ func (client *tClient) updateBalances() error {
 }
 
 func (client *tClient) assertBalanceChanges() error {
+	if client.expectBalanceDiffs == nil {
+		return errors.New("balance diff is nil")
+	}
+
 	defer func() {
 		// Clear after assertion so that the next assertion is only performed
 		// if the expected balance changes are explicitly set.
@@ -1470,11 +1480,12 @@ func (client *tClient) assertBalanceChanges() error {
 	}()
 	prevBalances := client.balances
 	err := client.updateBalances()
-	if err != nil || client.expectBalanceDiffs == nil {
+	if err != nil {
 		return err
 	}
+
 	for assetID, expectedDiff := range client.expectBalanceDiffs {
-		// actual diff wil likely be lesser than expected because of tx fees
+		// actual diff will likely be less than expected because of tx fees
 		// TODO: account for actual fee(s) or use a more realistic fee estimate.
 		minExpectedDiff, maxExpectedDiff := expectedDiff-conversionFactor, expectedDiff
 		if expectedDiff == 0 {
