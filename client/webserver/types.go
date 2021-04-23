@@ -28,6 +28,11 @@ func simpleAck() *standardResponse {
 	}
 }
 
+// The shutdownForm is sent by the client to shutdown the DEX.
+type shutdownForm struct {
+	Force bool `json:"force,omitempty"`
+}
+
 // The loginForm is sent by the client to log in to a DEX.
 type loginForm struct {
 	Pass encode.PassBytes `json:"pass"`

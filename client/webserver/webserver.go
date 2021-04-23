@@ -96,6 +96,7 @@ type clientCore interface {
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() (bool, error)
+	Shutdown(bool) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -261,6 +262,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/init", s.apiInit)
+		r.Post("/shutdown", s.apiShutdown)
 		r.Get("/isinitialized", s.apiIsInitialized)
 
 		r.Group(func(apiInit chi.Router) {

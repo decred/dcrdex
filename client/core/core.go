@@ -1004,6 +1004,7 @@ type Config struct {
 // database access, match negotiation and more.
 type Core struct {
 	ctx           context.Context
+	ctxCancel     context.CancelFunc
 	wg            sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
@@ -1080,6 +1081,16 @@ func New(cfg *Config) (*Core, error) {
 	// those are retrieved when Run is called and the core connects to the DEXes.
 	core.log.Debugf("new client core created")
 	return core, nil
+}
+
+// RunWithCancel stores the given context cancel func, then calls Run to run
+// the core.
+func (c *Core) RunWithCancel(ctx context.Context, ctxCancel context.CancelFunc) {
+	// Store the context CancelFunc as a field, since we will need to be able
+	// to shutdown Core via context cancellation.
+	c.ctxCancel = ctxCancel
+	// Run the core.
+	c.Run(ctx)
 }
 
 // Run runs the core. Satisfies the runner.Runner interface.
@@ -2393,6 +2404,23 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		}
 	})
 
+}
+
+// Shutdown shuts down the client.
+func (c *Core) Shutdown(force bool) error {
+	// We skip the active orders check if the force flag is true.
+	if !force {
+		// Check active orders
+		conns := c.dexConnections()
+		for _, dc := range conns {
+			if dc.hasActiveOrders() {
+				return fmt.Errorf("cannot shutdown with active orders")
+			}
+		}
+	}
+	// Shutdown core via context cancellation
+	c.ctxCancel()
+	return nil
 }
 
 // IsInitialized checks if the app is already initialized.

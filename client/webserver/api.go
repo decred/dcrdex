@@ -316,6 +316,21 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
+// apiShutdown is the handler for the `/shutdown` API request.
+func (s *WebServer) apiShutdown(w http.ResponseWriter, r *http.Request) {
+	shutdown := new(shutdownForm)
+	if !readPost(w, r, shutdown) {
+		return
+	}
+	err := s.core.Shutdown(shutdown.Force)
+	if err != nil {
+		s.writeAPIError(w, "shutdown error: %v", err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiIsInitialized is the handler for the '/isinitialized' request.
 func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	inited, err := s.core.IsInitialized()

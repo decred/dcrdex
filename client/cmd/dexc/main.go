@@ -106,7 +106,7 @@ func mainCore() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		clientCore.Run(appCtx)
+		clientCore.RunWithCancel(appCtx, cancel)
 		cancel() // in the event that Run returns prematurely prior to context cancellation
 	}()
 
