@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -16,10 +17,9 @@ import (
 	_ "decred.org/dcrdex/server/asset/ltc"
 )
 
-type coinDecoder func([]byte) (string, error)
+var symbol string
 
 func main() {
-	var symbol string
 	flag.StringVar(&symbol, "asset", "dcr", "Symbol of asset for the coin ID to decode.")
 	flag.Parse()
 
@@ -30,14 +30,53 @@ func main() {
 
 	coinID, err := hex.DecodeString(flag.Arg(0))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		if err = tryFile(flag.Arg(0)); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
+
 	coinIDStr, err := asset.DecodeCoinID(symbol, coinID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		fmt.Printf("Trying to open file %q", flag.Arg(0))
+		if err = tryFile(flag.Arg(0)); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
-	fmt.Fprintf(os.Stderr, "%v\n", coinIDStr)
+
+	fmt.Fprintf(os.Stdout, "%v\n", coinIDStr)
 	os.Exit(0)
+}
+
+func tryFile(file string) error {
+	fmt.Printf("Trying to open file %q.\n", file)
+
+	f, err := os.Open(flag.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		coinID, err := hex.DecodeString(line)
+		if err != nil {
+			return err
+		}
+		coinIDStr, err := asset.DecodeCoinID(symbol, coinID)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "%v\n", coinIDStr)
+	}
+
+	return scanner.Err()
 }
