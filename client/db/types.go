@@ -254,6 +254,12 @@ type MatchProof struct {
 	SelfRevoked     bool
 }
 
+// MatchProofVer is the current serialization version of a MatchProof.
+const (
+	MatchProofVer    = 2
+	matchProofPushes = 22
+)
+
 // Encode encodes the MatchProof to a versioned blob.
 func (p *MatchProof) Encode() []byte {
 	auth := p.Auth
@@ -266,7 +272,7 @@ func (p *MatchProof) Encode() []byte {
 		selfRevoked = encode.ByteTrue
 	}
 
-	return dbBytes{2}.
+	return dbBytes{MatchProofVer}.
 		AddData(p.Script).
 		AddData(p.CounterContract).
 		AddData(p.SecretHash).
@@ -292,20 +298,23 @@ func (p *MatchProof) Encode() []byte {
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
-func DecodeMatchProof(b []byte) (*MatchProof, error) {
-	ver, pushes, err := encode.DecodeBlob(b)
+func DecodeMatchProof(b []byte) (*MatchProof, uint8, error) {
+	ver, pushes, err := encode.DecodeBlob(b, matchProofPushes)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	switch ver {
-	case 2:
-		return decodeMatchProof_v2(pushes)
+	case 2: // MatchProofVer
+		proof, err := decodeMatchProof_v2(pushes)
+		return proof, ver, err
 	case 1:
-		return decodeMatchProof_v1(pushes)
+		proof, err := decodeMatchProof_v1(pushes)
+		return proof, ver, err
 	case 0:
-		return decodeMatchProof_v0(pushes)
+		proof, err := decodeMatchProof_v0(pushes)
+		return proof, ver, err
 	}
-	return nil, fmt.Errorf("unknown MatchProof version %d", ver)
+	return nil, ver, fmt.Errorf("unknown MatchProof version %d", ver)
 }
 
 func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
@@ -319,8 +328,9 @@ func decodeMatchProof_v1(pushes [][]byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
-	if len(pushes) != 22 {
-		return nil, fmt.Errorf("DecodeMatchProof: expected 21 pushes, got %d", len(pushes))
+	if len(pushes) != matchProofPushes {
+		return nil, fmt.Errorf("DecodeMatchProof: expected %d pushes, got %d",
+			matchProofPushes, len(pushes))
 	}
 	return &MatchProof{
 		Script:          pushes[0],

@@ -2548,7 +2548,8 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 	corder := coreOrderFromTrade(mOrd.Order, mOrd.MetaData)
 	oid := mOrd.Order.ID()
-	matches, err := c.db.MatchesForOrder(oid)
+	excludeCancels := false // maybe don't include cancel order matches?
+	matches, err := c.db.MatchesForOrder(oid, excludeCancels)
 	if err != nil {
 		return nil, fmt.Errorf("MatchesForOrder error loading matches for %s: %w", oid, err)
 	}
@@ -3901,6 +3902,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	}
 
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
+	excludeCancelMatches := true
 	for _, dbOrder := range dbOrders {
 		ord := dbOrder.Order
 		oid := ord.ID()
@@ -3923,7 +3925,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
-		dbMatches, err := c.db.MatchesForOrder(oid)
+		dbMatches, err := c.db.MatchesForOrder(oid, excludeCancelMatches)
 		if err != nil {
 			return nil, fmt.Errorf("error loading matches for order %s: %w", oid, err)
 		}

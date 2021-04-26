@@ -87,7 +87,7 @@ type DB interface {
 	// state.
 	DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error)
 	// MatchesForOrder gets the matches for the order ID.
-	MatchesForOrder(oid order.OrderID) ([]*MetaMatch, error)
+	MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*MetaMatch, error)
 	// Update wallets adds a wallet to the database, or updates the wallet
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).

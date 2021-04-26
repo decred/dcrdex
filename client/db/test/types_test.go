@@ -40,11 +40,14 @@ func TestMatchProof(t *testing.T) {
 	nTimes(spins, func(i int) {
 		proof := proofs[i]
 		proofB := proof.Encode()
-		reProof, err := db.DecodeMatchProof(proofB)
+		reProof, ver, err := db.DecodeMatchProof(proofB)
 		if err != nil {
 			t.Fatalf("match decode error: %v", err)
 		}
 		MustCompareMatchProof(t, proof, reProof)
+		if ver != db.MatchProofVer {
+			t.Errorf("wanted match proof ver %d, got %d", db.MatchProofVer, ver)
+		}
 	})
 	t.Logf("encoded, decoded, and compared %d MatchProof in %d ms", spins, time.Since(tStart)/time.Millisecond)
 }

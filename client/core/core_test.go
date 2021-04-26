@@ -386,7 +386,7 @@ func (tdb *TDB) ActiveMatches() ([]*db.MetaMatch, error) {
 	return nil, nil
 }
 
-func (tdb *TDB) MatchesForOrder(oid order.OrderID) ([]*db.MetaMatch, error) {
+func (tdb *TDB) MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*db.MetaMatch, error) {
 	return tdb.matchesForOID, tdb.matchesForOIDErr
 }
 
