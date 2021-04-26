@@ -704,6 +704,16 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	var linkedID order.OrderID
 	copy(linkedID[:], oBkt.Get(linkedKey))
 
+	// Old cancel orders may not have a maxFeeRate set since the v2 upgrade
+	// doesn't set it for cancel orders.
+	var maxFeeRate uint64
+	if maxFeeRateB := oBkt.Get(maxFeeRateKey); len(maxFeeRateB) == 8 {
+		maxFeeRate = intCoder.Uint64(maxFeeRateB)
+	} else if ord.Type() != order.CancelOrderType {
+		// Cancel orders should use zero, but trades need a non-zero value.
+		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -712,7 +722,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			ChangeCoin:         getCopy(oBkt, changeKey),
 			LinkedOrder:        linkedID,
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
-			MaxFeeRate:         intCoder.Uint64(oBkt.Get(maxFeeRateKey)),
+			MaxFeeRate:         maxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 		},
 		Order: ord,
@@ -818,7 +828,7 @@ func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		status := mBkt.Get(statusKey)
 		return len(status) != 1 || status[0] != uint8(order.MatchComplete)
-	})
+	}, true) // cancel matches are immediately complete, never active, but the status filter will apply first anyway
 }
 
 // DEXOrdersWithActiveMatches retrieves order IDs for any order that has active
@@ -848,12 +858,12 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			}
 
 			// Inactive if refunded.
-			proofB := getCopy(mBkt, proofKey)
+			proofB := mBkt.Get(proofKey)
 			if len(proofB) == 0 {
 				db.log.Errorf("empty match proof")
 				return nil
 			}
-			proof, errM := dexdb.DecodeMatchProof(proofB)
+			proof, _, errM := dexdb.DecodeMatchProof(proofB)
 			if errM != nil {
 				db.log.Errorf("error decoding proof: %v", errM)
 				return nil
@@ -912,18 +922,20 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 }
 
 // MatchesForOrder retrieves the matches for the specified order ID.
-func (db *BoltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*dexdb.MetaMatch, error) {
 	oidB := oid[:]
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		oid := mBkt.Get(orderIDKey)
 		return bytes.Equal(oid, oidB)
-	})
+	}, excludeCancels)
 }
 
 // filteredMatches gets all matches that pass the provided filter function. Each
 // match's bucket is provided to the filter, and a boolean true return value
-// indicates the match should be decoded and returned.
-func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaMatch, error) {
+// indicates the match should be decoded and returned. Matches with cancel
+// orders may be excluded, a separate option so the filter function does not
+// need to load and decode the matchKey value.
+func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool, excludeCancels bool) ([]*dexdb.MetaMatch, error) {
 	var matches []*dexdb.MetaMatch
 	return matches, db.matchesView(func(master *bbolt.Bucket) error {
 		return master.ForEach(func(k, _ []byte) error {
@@ -941,11 +953,14 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 				if err != nil {
 					return fmt.Errorf("error decoding match %x: %w", k, err)
 				}
+				if excludeCancels && match.Address == "" {
+					return nil
+				}
 				proofB := getCopy(mBkt, proofKey)
 				if len(proofB) == 0 {
 					return fmt.Errorf("empty proof")
 				}
-				proof, err = dexdb.DecodeMatchProof(proofB)
+				proof, _, err = dexdb.DecodeMatchProof(proofB)
 				if err != nil {
 					return fmt.Errorf("error decoding proof: %w", err)
 				}

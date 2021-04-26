@@ -9,6 +9,7 @@ import (
 
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
 
@@ -84,16 +85,18 @@ func (db *BoltDB) upgradeDB() error {
 		return fmt.Errorf("failed to backup DB prior to upgrade: %w", err)
 	}
 
-	return db.Update(func(tx *bbolt.Tx) error {
-		// Execute all necessary upgrades in order.
-		for i, upgrade := range upgrades[version:] {
-			err := doUpgrade(tx, upgrade, version+uint32(i)+1)
-			if err != nil {
-				return err
-			}
+	// Each upgrade its own tx, otherwise bolt eats too much RAM.
+	for i, upgrade := range upgrades[version:] {
+		newVersion := version + uint32(i) + 1
+		db.log.Debugf("Upgrading to version %d...", newVersion)
+		err = db.Update(func(tx *bbolt.Tx) error {
+			return doUpgrade(tx, upgrade, newVersion)
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // Get the currently stored DB version.
@@ -129,13 +132,13 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 	if bkt == nil {
 		return fmt.Errorf("appBucket not found")
 	}
-
-	return reloadMatchProofs(dbtx)
+	skipCancels := true // cancel matches don't get revoked, only cancel orders
+	return reloadMatchProofs(dbtx, skipCancels)
 }
 
 // v2Upgrade adds a MaxFeeRate field to the OrderMetaData. The upgrade sets the
-// MaxFeeRate field for all historical orders to the max uint64. This avoids any
-// chance of rejecting a pre-existing active match.
+// MaxFeeRate field for all historical trade orders to the max uint64. This
+// avoids any chance of rejecting a pre-existing active match.
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
 
@@ -161,6 +164,18 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 		if oBkt == nil {
 			return fmt.Errorf("order %x bucket is not a bucket", oid)
 		}
+		// Cancel orders should be stored with a zero maxFeeRate, as done in
+		// (*Core).tryCancelTrade. Besides, the maxFeeRate should not be applied
+		// to cancel matches, as done in (*dexConnection).parseMatches.
+		oTypeB := oBkt.Get(typeKey)
+		if len(oTypeB) != 1 {
+			return fmt.Errorf("order %x type invalid: %x", oid, oTypeB)
+		}
+		if order.OrderType(oTypeB[0]) == order.CancelOrderType {
+			// Don't bother setting maxFeeRate for cancel orders.
+			// decodeOrderBucket will default to zero for cancels.
+			return nil
+		}
 		return oBkt.Put(maxFeeRateKey, maxFeeB)
 	})
 }
@@ -175,7 +190,8 @@ func v3Upgrade(dbtx *bbolt.Tx) error {
 	// Upgrade the match proof. We just have to retrieve and re-store the
 	// buckets. The decoder will recognize the the old version and add the new
 	// field.
-	return reloadMatchProofs(dbtx)
+	skipCancels := true // cancel matches have no tx data
+	return reloadMatchProofs(dbtx, skipCancels)
 }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
@@ -190,21 +206,39 @@ func ensureVersion(tx *bbolt.Tx, ver uint32) error {
 	return nil
 }
 
-func reloadMatchProofs(tx *bbolt.Tx) error {
+// Note that reloadMatchProofs will rewrite the MatchProof with the current
+// match proof encoding version. Thus, multiple upgrades in a row calling
+// reloadMatchProofs may be no-ops. Matches with cancel orders may be skipped.
+func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 	matches := tx.Bucket(matchesBucket)
 	return matches.ForEach(func(k, _ []byte) error {
 		mBkt := matches.Bucket(k)
 		if mBkt == nil {
 			return fmt.Errorf("match %x bucket is not a bucket", k)
 		}
-		proofB := getCopy(mBkt, proofKey)
+		proofB := mBkt.Get(proofKey)
 		if len(proofB) == 0 {
 			return fmt.Errorf("empty match proof")
 		}
-		proof, err := dexdb.DecodeMatchProof(proofB)
+		proof, ver, err := dexdb.DecodeMatchProof(proofB)
 		if err != nil {
 			return fmt.Errorf("error decoding proof: %w", err)
 		}
+		// No need to rewrite this if it was loaded from the current version.
+		if ver == dexdb.MatchProofVer {
+			return nil
+		}
+		// No Script, and MatchComplete status means this is a cancel match.
+		if skipCancels && len(proof.Script) == 0 {
+			statusB := mBkt.Get(statusKey)
+			if len(statusB) != 1 {
+				return fmt.Errorf("no match status")
+			}
+			if order.MatchStatus(statusB[0]) == order.MatchComplete {
+				return nil
+			}
+		}
+
 		err = mBkt.Put(proofKey, proof.Encode())
 		if err != nil {
 			return fmt.Errorf("error re-storing match proof: %w", err)

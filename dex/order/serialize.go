@@ -31,7 +31,7 @@ func EncodePrefix(p *Prefix) []byte {
 
 // DecodePrefix decodes the versioned blob to a *Prefix.
 func DecodePrefix(b []byte) (prefix *Prefix, err error) {
-	ver, pushes, err := encode.DecodeBlob(b)
+	ver, pushes, err := encode.DecodeBlob(b, 7)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func EncodeTrade(ord *Trade) []byte {
 // DecodeTrade decodes the versioned-blob market order, but does not populate
 // the embedded Prefix.
 func DecodeTrade(b []byte) (trade *Trade, err error) {
-	ver, pushes, err := encode.DecodeBlob(b)
+	ver, pushes, err := encode.DecodeBlob(b, 5)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func EncodeMatch(match *UserMatch) []byte {
 
 // DecodeMatch decodes the versioned blob into a UserMatch.
 func DecodeMatch(b []byte) (match *UserMatch, err error) {
-	ver, pushes, err := encode.DecodeBlob(b)
+	ver, pushes, err := encode.DecodeBlob(b, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func EncodeOrder(ord Order) []byte {
 // DecodeOrder decodes the byte-encoded order. DecodeOrder accepts any type of
 // order.
 func DecodeOrder(b []byte) (ord Order, err error) {
-	ver, pushes, err := encode.DecodeBlob(b)
+	ver, pushes, err := encode.DecodeBlob(b, 4) // pushes actually depends on order type
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ var dbUpgradeTests = [...]struct {
 	filename   string // in testdata directory
 	newVersion uint32
 }{
+	// {"testnetbot", v1Upgrade, verifyV1Upgrade, "dexbot-testnet.db.gz", 3}, // only for TestUpgradeDB
 	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz", 1},
 	{"upgradeFromV1", v2Upgrade, verifyV2Upgrade, "v1.db.gz", 2},
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
@@ -82,13 +83,15 @@ func TestUpgrades(t *testing.T) {
 
 func TestUpgradeDB(t *testing.T) {
 	runUpgrade := func(archiveName string) error {
-		dbPath, close := unpack(t, archiveName)
-		defer close()
+		dbPath, cleanup := unpack(t, archiveName)
+		defer cleanup()
+		// NewDB runs upgradeDB.
 		dbi, err := NewDB(dbPath, tLogger)
 		if err != nil {
-			return fmt.Errorf("database initialization error: %w", err)
+			return fmt.Errorf("database initialization or upgrade error: %w", err)
 		}
 		db := dbi.(*BoltDB)
+		// Run upgradeDB again and it should be happy.
 		err = db.upgradeDB()
 		if err != nil {
 			return fmt.Errorf("upgradeDB error: %v", err)
@@ -113,6 +116,7 @@ func TestUpgradeDB(t *testing.T) {
 }
 
 func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
+	t.Helper()
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		return checkVersion(dbtx, 1)
 	})
@@ -122,6 +126,7 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 }
 
 func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
+	t.Helper()
 	maxFeeB := uint64Bytes(^uint64(0))
 
 	err := db.View(func(dbtx *bbolt.Tx) error {
@@ -153,6 +158,7 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 // Nothing to really check here. Any errors would have come out during the
 // upgrade process itself, since we just added a default nil field.
 func verifyV3Upgrade(t *testing.T, db *bbolt.DB) {
+	t.Helper()
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		return checkVersion(dbtx, 3)
 	})
@@ -179,6 +185,7 @@ func checkVersion(dbtx *bbolt.Tx, expectedVersion uint32) error {
 }
 
 func unpack(t *testing.T, db string) (string, func()) {
+	t.Helper()
 	d, err := ioutil.TempDir("", "dcrdex_test_upgrades")
 	if err != nil {
 		t.Fatal(err)
@@ -200,13 +207,13 @@ func unpack(t *testing.T, db string) (string, func()) {
 		t.Fatal(err)
 	}
 	_, err = io.Copy(dbFile, r)
-
+	archive.Close()
+	dbFile.Close()
 	if err != nil {
+		os.RemoveAll(d)
 		t.Fatal(err)
 	}
 	return dbPath, func() {
-		dbFile.Close()
-		archive.Close()
 		os.RemoveAll(d)
 	}
 }
