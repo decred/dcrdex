@@ -322,11 +322,19 @@ func (s *WebServer) apiShutdown(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, shutdown) {
 		return
 	}
-	err := s.core.Shutdown(shutdown.Force)
-	if err != nil {
-		s.writeAPIError(w, "shutdown error: %v", err)
-		return
+
+	// Force flag can be used to skip the logout call which might return an error
+	// in case any active orders found.
+	if !shutdown.Force {
+		err := s.core.Logout()
+		if err != nil {
+			s.writeAPIError(w, "shutdown error: %v", err)
+			return
+		}
 	}
+
+	// Cancel Core's context.
+	s.coreCancel()
 
 	writeJSON(w, simpleAck(), s.indent)
 }

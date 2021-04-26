@@ -1083,16 +1083,6 @@ func New(cfg *Config) (*Core, error) {
 	return core, nil
 }
 
-// RunWithCancel stores the given context cancel func, then calls Run to run
-// the core.
-func (c *Core) RunWithCancel(ctx context.Context, ctxCancel context.CancelFunc) {
-	// Store the context CancelFunc as a field, since we will need to be able
-	// to shutdown Core via context cancellation.
-	c.ctxCancel = ctxCancel
-	// Run the core.
-	c.Run(ctx)
-}
-
 // Run runs the core. Satisfies the runner.Runner interface.
 func (c *Core) Run(ctx context.Context) {
 	c.log.Infof("Starting DEX client core")
@@ -2406,23 +2396,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 
 }
 
-// Shutdown shuts down the client.
-func (c *Core) Shutdown(force bool) error {
-	// We skip the active orders check if the force flag is true.
-	if !force {
-		// Check active orders
-		conns := c.dexConnections()
-		for _, dc := range conns {
-			if dc.hasActiveOrders() {
-				return fmt.Errorf("cannot shutdown with active orders")
-			}
-		}
-	}
-	// Shutdown core via context cancellation
-	c.ctxCancel()
-	return nil
-}
-
 // IsInitialized checks if the app is already initialized.
 func (c *Core) IsInitialized() (bool, error) {
 	return c.db.ValueExists(keyParamsKey)
@@ -2506,10 +2479,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	return result, nil
 }
 
-// Logout logs the user out
+// Logout logs the user out.
 func (c *Core) Logout() error {
 
-	// Check active orders
+	// Check active orders.
 	conns := c.dexConnections()
 	for _, dc := range conns {
 		if dc.hasActiveOrders() {
@@ -2517,7 +2490,7 @@ func (c *Core) Logout() error {
 		}
 	}
 
-	// Lock wallets
+	// Lock wallets.
 	for _, w := range c.xcWallets() {
 		if w.connected() {
 			if err := w.Lock(); err != nil {

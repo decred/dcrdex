@@ -106,7 +106,7 @@ func mainCore() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		clientCore.RunWithCancel(appCtx, cancel)
+		clientCore.Run(appCtx)
 		cancel() // in the event that Run returns prematurely prior to context cancellation
 	}()
 
@@ -151,7 +151,7 @@ func mainCore() error {
 
 	if !cfg.NoWeb {
 		webSrv, err := webserver.New(clientCore, cfg.WebAddr, cfg.SiteDir, logMaker.Logger("WEB"),
-			cfg.ReloadHTML, cfg.HTTPProfile)
+			cfg.ReloadHTML, cfg.HTTPProfile, cancel)
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)
 		}

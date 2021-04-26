@@ -96,7 +96,6 @@ type clientCore interface {
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() (bool, error)
-	Shutdown(bool) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -107,6 +106,7 @@ type WebServer struct {
 	wsServer   *websocket.Server
 	mux        *chi.Mux
 	core       clientCore
+	coreCancel context.CancelFunc
 	addr       string
 	csp        string
 	srv        *http.Server
@@ -119,7 +119,7 @@ type WebServer struct {
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
 // in which case a handful of default locations will be checked. This will work
 // in most cases.
-func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML, httpProf bool) (*WebServer, error) {
+func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML, httpProf bool, coreCancel context.CancelFunc) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -189,6 +189,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
 		core:       core,
+		coreCancel: coreCancel,
 		mux:        mux,
 		srv:        httpServer,
 		addr:       addr,
