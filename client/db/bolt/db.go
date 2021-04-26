@@ -52,7 +52,8 @@ var (
 	appBucket              = []byte("appBucket")
 	accountsBucket         = []byte("accounts")
 	disabledAccountsBucket = []byte("disabledAccounts")
-	ordersBucket           = []byte("orders")
+	ordersBucket           = []byte("activeOrders")
+	archivedOrdersBucket   = []byte("orders")
 	matchesBucket          = []byte("matches")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
@@ -116,7 +117,7 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	}
 
 	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket, disabledAccountsBucket,
-		ordersBucket, matchesBucket, walletsBucket, notesBucket})
+		ordersBucket, archivedOrdersBucket, matchesBucket, walletsBucket, notesBucket})
 	if err != nil {
 		return nil, err
 	}
@@ -437,12 +438,33 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 	if len(md.Proof.DEXSig) == 0 {
 		return fmt.Errorf("cannot save order without DEX signature")
 	}
-	return db.ordersUpdate(func(master *bbolt.Bucket) error {
+	return db.ordersUpdate(func(ob, aob *bbolt.Bucket) error {
 		oid := ord.ID()
-		oBkt, err := master.CreateBucketIfNotExists(oid[:])
-		if err != nil {
-			return fmt.Errorf("order bucket error: %w", err)
+
+		// Create or move an order bucket based on order status. Orders
+		// that have status less than or equal to booked go in the
+		// ordersBucket. Finished orders go in the archivedOrdersBucket.
+		var oBkt *bbolt.Bucket
+		var err error
+		executed := md.Status > order.OrderStatusBooked
+		if executed {
+			if ob.Bucket(oid[:]) != nil {
+				ob.DeleteBucket(oid[:])
+			}
+			oBkt, err = aob.CreateBucketIfNotExists(oid[:])
+			if err != nil {
+				return fmt.Errorf("order bucket error: %w", err)
+			}
+		} else {
+			if aob.Bucket(oid[:]) != nil {
+				return fmt.Errorf("archived order %s set to active", oid)
+			}
+			oBkt, err = ob.CreateBucketIfNotExists(oid[:])
+			if err != nil {
+				return fmt.Errorf("order bucket error: %w", err)
+			}
 		}
+
 		var linkedB []byte
 		if !md.LinkedOrder.IsZero() {
 			linkedB = md.LinkedOrder[:]
@@ -469,10 +491,9 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 // ActiveOrders retrieves all orders which appear to be in an active state,
 // which is either in the epoch queue or in the order book.
 func (db *BoltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
-	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
-		status := oBkt.Get(statusKey)
-		return bEqual(status, byteEpoch) || bEqual(status, byteBooked)
-	})
+	return db.filteredOrders(func(_ *bbolt.Bucket) bool {
+		return true
+	}, false)
 }
 
 // AccountOrders retrieves all orders associated with the specified DEX. n = 0
@@ -483,13 +504,13 @@ func (db *BoltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaO
 	if n == 0 && since == 0 {
 		return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
 			return bEqual(dexB, oBkt.Get(dexKey))
-		})
+		}, true)
 	}
 	sinceB := uint64Bytes(since)
 	return db.newestOrders(n, func(_ []byte, oBkt *bbolt.Bucket) bool {
 		timeB := oBkt.Get(updateTimeKey)
 		return bEqual(dexB, oBkt.Get(dexKey)) && bytes.Compare(timeB, sinceB) >= 0
-	})
+	}, true)
 }
 
 // MarketOrders retrieves all orders for the specified DEX and market. n = 0
@@ -509,9 +530,8 @@ func (db *BoltDB) MarketOrders(dex string, base, quote uint32, n int, since uint
 func (db *BoltDB) ActiveDEXOrders(dex string) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
-		status := oBkt.Get(statusKey)
-		return bEqual(dexB, oBkt.Get(dexKey)) && (bEqual(status, byteEpoch) || bEqual(status, byteBooked))
-	})
+		return bEqual(dexB, oBkt.Get(dexKey))
+	}, false)
 }
 
 // marketOrdersAll retrieves all orders for the specified DEX and market.
@@ -519,7 +539,7 @@ func (db *BoltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrde
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
 		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
 			bEqual(quoteB, oBkt.Get(quoteKey))
-	})
+	}, true)
 }
 
 // marketOrdersSince grabs market orders with optional filters for maximum count
@@ -532,24 +552,30 @@ func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 		timeB := oBkt.Get(updateTimeKey)
 		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
 			bEqual(quoteB, oBkt.Get(quoteKey)) && bytes.Compare(timeB, sinceB) >= 0
-	})
+	}, true)
 }
 
 // newestOrders returns the n newest orders, filtered with a supplied filter
 // function. Each order's bucket is provided to the filter, and a boolean true
 // return value indicates the order should is eligible to be decoded and
 // returned.
-func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, allOrders bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
-	return orders, db.ordersView(func(master *bbolt.Bucket) error {
-		pairs := newestBuckets(master, n, updateTimeKey, filter)
-		for _, pair := range pairs {
-			oBkt := master.Bucket(pair.k)
-			o, err := decodeOrderBucket(pair.k, oBkt)
-			if err != nil {
-				return err
+	return orders, db.ordersView(func(ob, aob *bbolt.Bucket) error {
+		buckets := []*bbolt.Bucket{ob}
+		if allOrders {
+			buckets = append(buckets, aob)
+		}
+		for _, master := range buckets {
+			pairs := newestBuckets(master, n, updateTimeKey, filter)
+			for _, pair := range pairs {
+				oBkt := master.Bucket(pair.k)
+				o, err := decodeOrderBucket(pair.k, oBkt)
+				if err != nil {
+					return err
+				}
+				orders = append(orders, o)
 			}
-			orders = append(orders, o)
 		}
 		return nil
 	})
@@ -558,31 +584,44 @@ func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool) (
 // filteredOrders gets all orders that pass the provided filter function. Each
 // order's bucket is provided to the filter, and a boolean true return value
 // indicates the order should be decoded and returned.
-func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool, allOrders bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
-	return orders, db.ordersView(func(master *bbolt.Bucket) error {
-		return master.ForEach(func(oid, _ []byte) error {
-			oBkt := master.Bucket(oid)
-			if oBkt == nil {
-				return fmt.Errorf("order %x bucket is not a bucket", oid)
-			}
-			if filter(oBkt) {
-				o, err := decodeOrderBucket(oid, oBkt)
-				if err != nil {
-					return err
+	return orders, db.ordersView(func(ob, aob *bbolt.Bucket) error {
+		buckets := []*bbolt.Bucket{ob}
+		if allOrders {
+			buckets = append(buckets, aob)
+		}
+		for _, master := range buckets {
+			err := master.ForEach(func(oid, _ []byte) error {
+				oBkt := master.Bucket(oid)
+				if oBkt == nil {
+					return fmt.Errorf("order %x bucket is not a bucket", oid)
 				}
-				orders = append(orders, o)
+				if filter(oBkt) {
+					o, err := decodeOrderBucket(oid, oBkt)
+					if err != nil {
+						return err
+					}
+					orders = append(orders, o)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
-			return nil
-		})
+		}
+		return nil
 	})
 }
 
 // Order fetches a MetaOrder by order ID.
 func (db *BoltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
 	oidB := oid[:]
-	err = db.ordersView(func(master *bbolt.Bucket) error {
-		oBkt := master.Bucket(oidB)
+	err = db.ordersView(func(ob, aob *bbolt.Bucket) error {
+		oBkt := ob.Bucket(oidB)
+		if oBkt == nil {
+			oBkt = aob.Bucket(oidB)
+		}
 		if oBkt == nil {
 			return fmt.Errorf("order %s not found", oid)
 		}
@@ -645,6 +684,7 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 		})
 	}
 
+	allOrders := true
 	if len(orderFilter.Statuses) > 0 {
 		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
 			status := order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey)))
@@ -655,14 +695,23 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 			}
 			return false
 		})
+		allOrders = false
+		for _, status := range orderFilter.Statuses {
+			if status > order.OrderStatusBooked {
+				allOrders = true
+				break
+			}
+		}
 	}
 
 	if !orderFilter.Offset.IsZero() {
-		offsetOID := orderFilter.Offset[:]
-		var offsetBucket *bbolt.Bucket
+		offsetOID := orderFilter.Offset
 		var stampB []byte
-		err := db.ordersView(func(master *bbolt.Bucket) error {
-			offsetBucket = master.Bucket(offsetOID)
+		err := db.ordersView(func(ob, aob *bbolt.Bucket) error {
+			offsetBucket := ob.Bucket(offsetOID[:])
+			if offsetBucket == nil {
+				offsetBucket = aob.Bucket(offsetOID[:])
+			}
 			if offsetBucket == nil {
 				return fmt.Errorf("order %s not found", offsetOID)
 			}
@@ -675,11 +724,11 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 
 		filters = append(filters, func(oidB []byte, oBkt *bbolt.Bucket) bool {
 			comp := bytes.Compare(oBkt.Get(updateTimeKey), stampB)
-			return comp < 0 || (comp == 0 && bytes.Compare(offsetOID, oidB) < 0)
+			return comp < 0 || (comp == 0 && bytes.Compare(offsetOID[:], oidB) < 0)
 		})
 	}
 
-	return db.newestOrders(orderFilter.N, filters.check)
+	return db.newestOrders(orderFilter.N, filters.check, allOrders)
 }
 
 // decodeOrderBucket decodes the order's *bbolt.Bucket into a *MetaOrder.
@@ -729,12 +778,48 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}, nil
 }
 
+// updateOrderBucket expects an oid to exist in either the orders or archived
+// order buckets. If status is greater than booked, it first checks active
+// orders. If found it moves the order to the archived bucket and returns the
+// order bucket. If status is less than or equal to booked, it expects the order
+// to already be in active orders and returns the bucket.
+func updateOrderBucket(ob, aob *bbolt.Bucket, oid order.OrderID, status order.OrderStatus) (*bbolt.Bucket, error) {
+	executed := status > order.OrderStatusBooked
+	if executed {
+		if bkt := ob.Bucket(oid[:]); bkt != nil {
+			oBkt, err := aob.CreateBucket(oid[:])
+			if err != nil {
+				return nil, err
+			}
+			// NOTE: Assumes no buckets saved in bkt.
+			bkt.ForEach(func(k, v []byte) error {
+				return oBkt.Put(k, v)
+			})
+			ob.DeleteBucket(oid[:])
+			return oBkt, nil
+		}
+		oBkt := aob.Bucket(oid[:])
+		if oBkt == nil {
+			return nil, fmt.Errorf("order %s not found", oid)
+		}
+		return oBkt, nil
+	}
+	if aob.Bucket(oid[:]) != nil {
+		return nil, fmt.Errorf("archived order %s set to active", oid)
+	}
+	oBkt := ob.Bucket(oid[:])
+	if oBkt == nil {
+		return nil, fmt.Errorf("order %s not found", oid)
+	}
+	return oBkt, nil
+}
+
 // UpdateOrderMetaData updates the order metadata, not including the Host.
 func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) error {
-	return db.ordersUpdate(func(master *bbolt.Bucket) error {
-		oBkt := master.Bucket(oid[:])
-		if oBkt == nil {
-			return fmt.Errorf("UpdateOrderMetaData - order %s not found", oid)
+	return db.ordersUpdate(func(ob, aob *bbolt.Bucket) error {
+		oBkt, err := updateOrderBucket(ob, aob, oid, md.Status)
+		if err != nil {
+			return fmt.Errorf("UpdateOrderMetaData: %w", err)
 		}
 
 		var linkedB []byte
@@ -757,10 +842,10 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 
 // UpdateOrderStatus sets the order status for an order.
 func (db *BoltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
-	return db.ordersUpdate(func(master *bbolt.Bucket) error {
-		oBkt := master.Bucket(oid[:])
-		if oBkt == nil {
-			return fmt.Errorf("UpdateOrderStatus - order %s not found", oid)
+	return db.ordersUpdate(func(ob, aob *bbolt.Bucket) error {
+		oBkt, err := updateOrderBucket(ob, aob, oid, status)
+		if err != nil {
+			return fmt.Errorf("UpdateOrderStatus: %w", err)
 		}
 		return oBkt.Put(statusKey, uint16Bytes(uint16(status)))
 	})
@@ -768,8 +853,11 @@ func (db *BoltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus)
 
 // LinkOrder sets the linked order.
 func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
-	return db.ordersUpdate(func(master *bbolt.Bucket) error {
-		oBkt := master.Bucket(oid[:])
+	return db.ordersUpdate(func(ob, aob *bbolt.Bucket) error {
+		oBkt := ob.Bucket(oid[:])
+		if oBkt == nil {
+			oBkt = aob.Bucket(oid[:])
+		}
 		if oBkt == nil {
 			return fmt.Errorf("LinkOrder - order %s not found", oid)
 		}
@@ -781,14 +869,40 @@ func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
 	})
 }
 
-// ordersView is a convenience function for reading from the order bucket.
-func (db *BoltDB) ordersView(f bucketFunc) error {
-	return db.withBucket(ordersBucket, db.View, f)
+// ordersView is a convenience function for reading from the order buckets.
+// Orders are spread over two buckets to make searching active orders faster.
+// Any reads of the order buckets should be done in the same transaction, as
+// orders may move from active to archived at any time.
+func (db *BoltDB) ordersView(f func(ob, aob *bbolt.Bucket) error) error {
+	return db.View(func(tx *bbolt.Tx) error {
+		ob := tx.Bucket(ordersBucket)
+		if ob == nil {
+			return fmt.Errorf("failed to open %s bucket", string(ordersBucket))
+		}
+		aob := tx.Bucket(archivedOrdersBucket)
+		if aob == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+		}
+		return f(ob, aob)
+	})
 }
 
-// ordersUpdate is a convenience function for updating the order bucket.
-func (db *BoltDB) ordersUpdate(f bucketFunc) error {
-	return db.withBucket(ordersBucket, db.Update, f)
+// ordersUpdate is a convenience function for updating the order buckets.
+// Orders are spread over two buckets to make searching active orders faster.
+// Any writes of the order buckets should be done in the same transaction to
+// ensure that reads can be kept concurrent.
+func (db *BoltDB) ordersUpdate(f func(ob, aob *bbolt.Bucket) error) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		ob := tx.Bucket(ordersBucket)
+		if ob == nil {
+			return fmt.Errorf("failed to open %s bucket", string(ordersBucket))
+		}
+		aob := tx.Bucket(archivedOrdersBucket)
+		if aob == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+		}
+		return f(ob, aob)
+	})
 }
 
 // UpdateMatch updates the match information in the database. Any existing

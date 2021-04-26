@@ -664,8 +664,11 @@ func TestOrderFilters(t *testing.T) {
 		}
 
 		// Set the update time.
-		boltdb.ordersUpdate(func(master *bbolt.Bucket) error {
-			oBkt := master.Bucket(oid[:])
+		boltdb.ordersUpdate(func(aob, eob *bbolt.Bucket) error {
+			oBkt := aob.Bucket(oid[:])
+			if oBkt == nil {
+				oBkt = eob.Bucket(oid[:])
+			}
 			if oBkt == nil {
 				t.Fatalf("order %s not found", oid)
 			}
@@ -706,7 +709,7 @@ func TestOrderFilters(t *testing.T) {
 			filter: &db.OrderFilter{
 				N: orderCount,
 			},
-			expected: []int{4, 5, 3, 2, 1, 0},
+			expected: []int{4, 3, 5, 2, 1, 0},
 		},
 		{
 			name: "all-hosts",
@@ -714,7 +717,7 @@ func TestOrderFilters(t *testing.T) {
 				N:     orderCount,
 				Hosts: []string{host1, host2},
 			},
-			expected: []int{4, 5, 3, 2, 1, 0},
+			expected: []int{4, 3, 5, 2, 1, 0},
 		},
 		{
 			name: "host1",
@@ -739,7 +742,7 @@ func TestOrderFilters(t *testing.T) {
 				N:      orderCount,
 				Assets: []uint32{asset1},
 			},
-			expected: []int{5, 3, 2, 0},
+			expected: []int{3, 5, 2, 0},
 		},
 		// Open filter with last order as Offset should return all but that
 		// order, since order 5 is lexicographically after order 4.

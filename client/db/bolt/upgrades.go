@@ -26,6 +26,8 @@ var upgrades = [...]upgradefunc{
 	v2Upgrade,
 	// v2 => v3 adds a tx data field to the match proof.
 	v3Upgrade,
+	// v3 => v4 splits orders into active and archived.
+	v4Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -141,6 +143,7 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 // avoids any chance of rejecting a pre-existing active match.
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
+	ordersBucketV1 := []byte("orders")
 
 	dbVersion, err := fetchDBVersion(dbtx)
 	if err != nil {
@@ -154,7 +157,7 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 	// For each order, set a maxfeerate of max uint64.
 	maxFeeB := uint64Bytes(^uint64(0))
 
-	master := dbtx.Bucket(ordersBucket)
+	master := dbtx.Bucket(ordersBucketV1)
 	if master == nil {
 		return fmt.Errorf("failed to open orders bucket")
 	}
@@ -243,6 +246,70 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 		if err != nil {
 			return fmt.Errorf("error re-storing match proof: %w", err)
 		}
+		return nil
+	})
+}
+
+// v4Upgrade moves active orders from what will become the archivedOrdersBucket
+// to a new ordersBucket. This is done in order to make searching active orders
+// faster, as they do not need to be pulled out of all orders any longer. This
+// upgrade moves active orders as apposed to inactive orders under the
+// assumption that there are less active orders to move, and so a smaller
+// database transaction occurs.
+func v4Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 3
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	// Move any executed orders to the new archivedOrdersBucket.
+	return moveActiveOrders(dbtx)
+}
+
+// moveActiveOrders searches the v1 ordersBucket for orders that are not yet
+// booked booked status, adds those to the v2 ordersBucket, and deletes them
+// from the v1 ordersBucket.
+func moveActiveOrders(tx *bbolt.Tx) error {
+	ordersBucketV1 := []byte("orders")
+	ordersBucketV2 := []byte("activeOrders")
+	// NOTE: orderBucketV2 created in NewDB, but TestUpgrades skips that.
+	_, err := tx.CreateBucketIfNotExists(ordersBucketV2)
+	if err != nil {
+		return err
+	}
+
+	ordersBktV1 := tx.Bucket(ordersBucketV1)
+	ordersBktV2 := tx.Bucket(ordersBucketV2)
+	var (
+		oBktV1, oBktV2 *bbolt.Bucket
+		status         order.OrderStatus
+	)
+	return ordersBktV1.ForEach(func(k, _ []byte) error {
+		oBktV1 = ordersBktV1.Bucket(k)
+		if oBktV1 == nil {
+			return fmt.Errorf("order %x bucket is not a bucket", k)
+		}
+		status = order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
+		if status == order.OrderStatusUnknown {
+			println(fmt.Sprintf("Encountered order with unknown status: %x", k))
+			return nil
+		}
+		if status > order.OrderStatusBooked {
+			return nil
+		}
+		oBktV2, err = ordersBktV2.CreateBucket(k)
+		if err != nil {
+			return err
+		}
+		// NOTE: Assumes no buckets saved in oBktV1.
+		err = oBktV1.ForEach(func(k, v []byte) error {
+			return oBktV2.Put(k, v)
+		})
+		if err != nil {
+			return err
+		}
+		ordersBktV1.DeleteBucket(k)
 		return nil
 	})
 }

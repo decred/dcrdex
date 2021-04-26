@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/order"
+
 	"go.etcd.io/bbolt"
 )
 
@@ -25,10 +27,11 @@ var dbUpgradeTests = [...]struct {
 	filename   string // in testdata directory
 	newVersion uint32
 }{
-	// {"testnetbot", v1Upgrade, verifyV1Upgrade, "dexbot-testnet.db.gz", 3}, // only for TestUpgradeDB
+	// {"testnetbot", v4Upgrade, verifyV4Upgrade, "dexbot-testnet.db.gz", 4}, // only for TestUpgradeDB
 	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz", 1},
 	{"upgradeFromV1", v2Upgrade, verifyV2Upgrade, "v1.db.gz", 2},
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
+	{"upgradeFromV3", v4Upgrade, verifyV4Upgrade, "v3.db.gz", 4},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -128,6 +131,7 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 	t.Helper()
 	maxFeeB := uint64Bytes(^uint64(0))
+	ordersBucketV1 := []byte("orders")
 
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		err := checkVersion(dbtx, 2)
@@ -135,7 +139,7 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 			return err
 		}
 
-		master := dbtx.Bucket(ordersBucket)
+		master := dbtx.Bucket(ordersBucketV1)
 		if master == nil {
 			return fmt.Errorf("orders bucket not found")
 		}
@@ -161,6 +165,69 @@ func verifyV3Upgrade(t *testing.T, db *bbolt.DB) {
 	t.Helper()
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		return checkVersion(dbtx, 3)
+	})
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
+	ordersBucketV1 := []byte("orders")
+	ordersBucketV2 := []byte("activeOrders")
+	err := db.View(func(dbtx *bbolt.Tx) error {
+		err := checkVersion(dbtx, 4)
+		if err != nil {
+			return err
+		}
+		// Ensure we have both old and new buckets.
+		ordersBktV1 := dbtx.Bucket(ordersBucketV1)
+		if ordersBktV1 == nil {
+			return fmt.Errorf("orders bucket V1 not found")
+		}
+		ordersBktV2 := dbtx.Bucket(ordersBucketV2)
+		if ordersBktV2 == nil {
+			return fmt.Errorf("orders bucket V2 not found")
+		}
+
+		// Ensure the old bucket now only contains finished orders.
+		err = ordersBktV1.ForEach(func(k, _ []byte) error {
+			oBktV1 := ordersBktV1.Bucket(k)
+			if oBktV1 == nil {
+				return fmt.Errorf("order %x bucket is not a bucket", k)
+			}
+			status := order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
+			if status == order.OrderStatusUnknown {
+				println(fmt.Sprintf("Encountered order with unknown status: %x", k))
+				return nil
+			}
+			if status <= order.OrderStatusBooked {
+				return fmt.Errorf("v1 orders bucket has active order: %x", k)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// Ensure the new bucket only contains active orders.
+		err = ordersBktV2.ForEach(func(k, _ []byte) error {
+			oBktV2 := ordersBktV2.Bucket(k)
+			if oBktV2 == nil {
+				return fmt.Errorf("order %x bucket is not a bucket", k)
+			}
+			status := order.OrderStatus(intCoder.Uint16(oBktV2.Get(statusKey)))
+			if status == order.OrderStatusUnknown {
+				return fmt.Errorf("encountered order with unknown status: %x", k)
+			}
+			if status > order.OrderStatusBooked {
+				return fmt.Errorf("v2 orders bucket has archived order: %x", k)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		t.Error(err)
