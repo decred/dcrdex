@@ -207,7 +207,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	s, err := New(c, "127.0.0.1:0", "", tLogger, false, false)
+	s, err := New(c, "127.0.0.1:0", "", tLogger, false, false, nil)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestNew_siteError(t *testing.T) {
 	}
 
 	c := &TCore{}
-	_, err = New(c, "127.0.0.1:0", "", tLogger, false, false)
+	_, err = New(c, "127.0.0.1:0", "", tLogger, false, false, nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "no HTML template files found") {
 		t.Errorf("Should have failed to start with no site folder.")
 	}
@@ -299,7 +299,7 @@ func TestConnectBindError(t *testing.T) {
 	defer shutdown()
 
 	tAddr := s0.addr
-	s, err := New(&TCore{}, tAddr, "", tLogger, false, false)
+	s, err := New(&TCore{}, tAddr, "", tLogger, false, false, nil)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}

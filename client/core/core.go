@@ -1004,7 +1004,6 @@ type Config struct {
 // database access, match negotiation and more.
 type Core struct {
 	ctx           context.Context
-	ctxCancel     context.CancelFunc
 	wg            sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
