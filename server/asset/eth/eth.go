@@ -22,6 +22,7 @@ func init() {
 }
 
 const (
+	version   = 0
 	assetName = "eth"
 	// coinIdSize = flags (2) + smart contract address where funds are locked (20) + secret
 	// hash map key (32)
@@ -32,12 +33,18 @@ const (
 )
 
 var (
-	zeroHash          = common.Hash{}
-	notImplementedErr = errors.New("not implemented")
+	zeroHash                       = common.Hash{}
+	notImplementedErr              = errors.New("not implemented")
+	_                 asset.Driver = (*Driver)(nil)
 )
 
 // Driver implements asset.Driver.
 type Driver struct{}
+
+// Version returns the Backend implementation's version number.
+func (d *Driver) Version() uint32 {
+	return version
+}
 
 // Setup creates the ETH backend. Start the backend with its Run method.
 func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
