@@ -116,6 +116,7 @@ export class DepthChart {
   // wheel is a mousewheel event handler.
   wheel (e) {
     this.zoom(e.deltaY < 0)
+    e.preventDefault()
   }
 
   // zoom zooms the current view in or out. bigger=true is zoom in.
