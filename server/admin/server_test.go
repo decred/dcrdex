@@ -136,8 +136,16 @@ func (c *TCore) EpochOrders(_, _ uint32) ([]order.Order, error) {
 	return c.epochOrders, c.epochOrdersErr
 }
 
-func (c *TCore) MarketMatches(_, _ uint32, _ bool) ([]*dexsrv.MatchData, error) {
-	return c.marketMatches, c.marketMatchesErr
+func (c *TCore) MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error) {
+	if c.marketMatchesErr != nil {
+		return 0, c.marketMatchesErr
+	}
+	for _, mm := range c.marketMatches {
+		if err := f(mm); err != nil {
+			return 0, err
+		}
+	}
+	return len(c.marketMatches), nil
 }
 
 func (c *TCore) MarketStatuses() map[string]*market.Status {
@@ -617,7 +625,7 @@ func TestMarketEpochOrders(t *testing.T) {
 		mkt:      "btc_dcr",
 		wantCode: http.StatusBadRequest,
 	}, {
-		name:           "core.OrderBook error",
+		name:           "core.EpochOrders error",
 		mkt:            "dcr_btc",
 		running:        true,
 		epochOrdersErr: errors.New(""),
@@ -690,10 +698,10 @@ func TestMarketMatches(t *testing.T) {
 		mkt:      "btc_dcr",
 		wantCode: http.StatusBadRequest,
 	}, {
-		name:             "core.OrderBook error",
+		name:             "core.MarketMatchesStreaming error",
 		mkt:              "dcr_btc",
 		running:          true,
-		marketMatchesErr: errors.New(""),
+		marketMatchesErr: errors.New("boom"),
 		wantCode:         http.StatusInternalServerError,
 	}}
 	for _, test := range tests {
@@ -709,11 +717,23 @@ func TestMarketMatches(t *testing.T) {
 		if w.Code != test.wantCode {
 			t.Fatalf("%q: apiMarketMatches returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
-		if w.Code == http.StatusOK {
-			res := new([]*dexsrv.MatchData)
-			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
-				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+		if w.Code != http.StatusOK {
+			continue
+		}
+		dec := json.NewDecoder(w.Body)
+
+		var resi dexsrv.MatchData
+		mustDec := func() {
+			t.Helper()
+			if err := dec.Decode(&resi); err != nil {
+				t.Fatalf("%q: Failed to decode element: %v", test.name, err)
 			}
+		}
+		if len(test.marketMatches) > 0 {
+			mustDec()
+		}
+		for dec.More() {
+			mustDec()
 		}
 	}
 }

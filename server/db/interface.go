@@ -341,7 +341,8 @@ type MatchArchiver interface {
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*MatchOutcome, error)
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchDataWithCoins, error)
+	MarketMatches(base, quote uint32) ([]*MatchDataWithCoins, error)
+	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*MatchDataWithCoins) error) (int, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*MatchStatus, error)
 }
 

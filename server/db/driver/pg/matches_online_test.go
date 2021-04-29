@@ -570,18 +570,25 @@ func TestMarketMatches(t *testing.T) {
 		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
-	// Don't include inactive.
-	matchData, err := archie.MarketMatches(base, quote, false)
+	// Only active.
+	matchData, err := archie.MarketMatches(base, quote)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(matchData) != 1 {
 		t.Errorf("Retrieved %d matches for market, expected 1.", len(matchData))
 	}
-	// Include inactive.
-	matchData, err = archie.MarketMatches(base, quote, true)
+	// Include inactive (true), and no limit (-1).
+	matchData = []*db.MatchDataWithCoins{}
+	N, err := archie.MarketMatchesStreaming(base, quote, true, -1, func(md *db.MatchDataWithCoins) error {
+		matchData = append(matchData, md)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if N != len(matchData) {
+		t.Errorf("Retrieved %d matches for market, but method claimed %d.", len(matchData), N)
 	}
 	if len(matchData) != 2 {
 		t.Errorf("Retrieved %d matches for market, expected 2.", len(matchData))
@@ -612,7 +619,7 @@ func TestMarketMatches(t *testing.T) {
 	}
 
 	// Bad Market.
-	matchData, err = archie.MarketMatches(base, base, true)
+	matchData, err = archie.MarketMatches(base, base)
 	noMktErr := new(db.ArchiveError)
 	if !errors.As(err, noMktErr) || noMktErr.Code != db.ErrUnsupportedMarket {
 		t.Fatalf("incorrect error for unsupported market: %v", err)

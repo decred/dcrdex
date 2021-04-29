@@ -891,8 +891,68 @@ type MatchData struct {
 	TakerRedeem string
 }
 
+func convertMatchData(baseAsset, quoteAsset asset.Backend, md *db.MatchDataWithCoins) *MatchData {
+	matchData := MatchData{
+		MatchData: md.MatchData,
+	}
+	// asset0 is the maker swap / taker redeem asset.
+	// asset1 is the taker swap / maker redeem asset.
+	// Maker selling means asset 0 is base; asset 1 is quote.
+	asset0, asset1 := baseAsset, quoteAsset
+	if md.TakerSell {
+		asset0, asset1 = quoteAsset, baseAsset
+	}
+	if len(md.MakerSwapCoin) > 0 {
+		coinStr, err := asset0.ValidateCoinID(md.MakerSwapCoin)
+		if err != nil {
+			log.Errorf("Unable to decode coin %x: %v", md.MakerSwapCoin, err)
+		}
+		matchData.MakerSwap = coinStr
+	}
+	if len(md.TakerSwapCoin) > 0 {
+		coinStr, err := asset1.ValidateCoinID(md.TakerSwapCoin)
+		if err != nil {
+			log.Errorf("Unable to decode coin %x: %v", md.TakerSwapCoin, err)
+		}
+		matchData.TakerSwap = coinStr
+	}
+	if len(md.MakerRedeemCoin) > 0 {
+		coinStr, err := asset0.ValidateCoinID(md.MakerRedeemCoin)
+		if err != nil {
+			log.Errorf("Unable to decode coin %x: %v", md.MakerRedeemCoin, err)
+		}
+		matchData.MakerRedeem = coinStr
+	}
+	if len(md.TakerRedeemCoin) > 0 {
+		coinStr, err := asset1.ValidateCoinID(md.TakerRedeemCoin)
+		if err != nil {
+			log.Errorf("Unable to decode coin %x: %v", md.TakerRedeemCoin, err)
+		}
+		matchData.TakerRedeem = coinStr
+	}
+
+	return &matchData
+}
+
+// MarketMatchesStreaming streams all matches for market with base and quote.
+func (dm *DEX) MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*MatchData) error) (int, error) {
+	baseAsset := dm.assets[base]
+	if baseAsset == nil {
+		return 0, fmt.Errorf("asset %d not found", base)
+	}
+	quoteAsset := dm.assets[quote]
+	if quoteAsset == nil {
+		return 0, fmt.Errorf("asset %d not found", quote)
+	}
+	fDB := func(md *db.MatchDataWithCoins) error {
+		matchData := convertMatchData(baseAsset.Backend, quoteAsset.Backend, md)
+		return f(matchData)
+	}
+	return dm.storage.MarketMatchesStreaming(base, quote, includeInactive, N, fDB)
+}
+
 // MarketMatches returns matches for market with base and quote.
-func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*MatchData, error) {
+func (dm *DEX) MarketMatches(base, quote uint32) ([]*MatchData, error) {
 	baseAsset := dm.assets[base]
 	if baseAsset == nil {
 		return nil, fmt.Errorf("asset %d not found", base)
@@ -901,53 +961,15 @@ func (dm *DEX) MarketMatches(base, quote uint32, includeInactive bool) ([]*Match
 	if quoteAsset == nil {
 		return nil, fmt.Errorf("asset %d not found", quote)
 	}
-	mds, err := dm.storage.MarketMatches(base, quote, includeInactive)
+	mds, err := dm.storage.MarketMatches(base, quote)
 	if err != nil {
 		return nil, err
 	}
 
 	matchDatas := make([]*MatchData, 0, len(mds))
 	for _, md := range mds {
-		matchData := MatchData{
-			MatchData: md.MatchData,
-		}
-		// asset0 is the maker swap / taker redeem asset.
-		// asset1 is the taker swap / maker redeem asset.
-		// Maker selling means asset 0 is base; asset 1 is quote.
-		asset0, asset1 := baseAsset, quoteAsset
-		if md.TakerSell {
-			asset0, asset1 = quoteAsset, baseAsset
-		}
-		if len(md.MakerSwapCoin) > 0 {
-			coinStr, err := asset0.Backend.ValidateCoinID(md.MakerSwapCoin)
-			if err != nil {
-				log.Errorf("Unable to decode coin %x: %v", md.MakerSwapCoin, err)
-			}
-			matchData.MakerSwap = coinStr
-		}
-		if len(md.TakerSwapCoin) > 0 {
-			coinStr, err := asset1.Backend.ValidateCoinID(md.TakerSwapCoin)
-			if err != nil {
-				log.Errorf("Unable to decode coin %x: %v", md.TakerSwapCoin, err)
-			}
-			matchData.TakerSwap = coinStr
-		}
-		if len(md.MakerRedeemCoin) > 0 {
-			coinStr, err := asset0.Backend.ValidateCoinID(md.MakerRedeemCoin)
-			if err != nil {
-				log.Errorf("Unable to decode coin %x: %v", md.MakerRedeemCoin, err)
-			}
-			matchData.MakerRedeem = coinStr
-		}
-		if len(md.TakerRedeemCoin) > 0 {
-			coinStr, err := asset1.Backend.ValidateCoinID(md.TakerRedeemCoin)
-			if err != nil {
-				log.Errorf("Unable to decode coin %x: %v", md.TakerRedeemCoin, err)
-			}
-			matchData.TakerRedeem = coinStr
-		}
-
-		matchDatas = append(matchDatas, &matchData)
+		matchData := convertMatchData(baseAsset.Backend, quoteAsset.Backend, md)
+		matchDatas = append(matchDatas, matchData)
 	}
 
 	return matchDatas, nil

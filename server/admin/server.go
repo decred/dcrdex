@@ -44,6 +44,7 @@ const (
 	ruleKey            = "rule"
 	scaleKey           = "scale"
 	includeInactiveKey = "includeinactive"
+	nKey               = "n"
 )
 
 var (
@@ -70,7 +71,7 @@ type SvrCore interface {
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*dexsrv.MatchData, error)
+	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error)
 	EnableDataAPI(yes bool)
 }
 
