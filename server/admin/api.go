@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
 	"github.com/go-chi/chi/v5"
 )
@@ -254,8 +255,8 @@ func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-// hander for route '/market/{marketName}/matches?includeinactive=BOOL' API
-// request.
+// hander for route '/market/{marketName}/matches?includeinactive=BOOL&n=INT' API
+// request. The n value is only used when includeinactive is true.
 func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 	var includeInactive bool
 	if includeInactiveStr := r.URL.Query().Get(includeInactiveKey); includeInactiveStr != "" {
@@ -266,43 +267,61 @@ func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var N int64 // <=0 is all
+	if nStr := r.URL.Query().Get(nKey); nStr != "" {
+		var err error
+		N, err = strconv.ParseInt(nStr, 10, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid n int %q: %v", nStr, err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
 	status := s.core.MarketStatus(mkt)
 	if status == nil {
 		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
 		return
 	}
-	matches, err := s.core.MarketMatches(status.Base, status.Quote, includeInactive)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	// The response is not an array, but a series of objects. TIP: Use "jq -s"
+	// to generate an array of these objects.
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "    ")
+	Nout, err := s.core.MarketMatchesStreaming(status.Base, status.Quote, includeInactive, N,
+		func(match *dexsrv.MatchData) error {
+			md := &MatchData{
+				TakerSell:   match.TakerSell,
+				ID:          match.ID.String(),
+				Maker:       match.Maker.String(),
+				MakerAcct:   match.MakerAcct.String(),
+				MakerSwap:   match.MakerSwap,
+				MakerRedeem: match.MakerRedeem,
+				MakerAddr:   match.MakerAddr,
+				Taker:       match.Taker.String(),
+				TakerAcct:   match.TakerAcct.String(),
+				TakerSwap:   match.TakerSwap,
+				TakerRedeem: match.TakerRedeem,
+				TakerAddr:   match.TakerAddr,
+				EpochIdx:    match.Epoch.Idx,
+				EpochDur:    match.Epoch.Dur,
+				Quantity:    match.Quantity,
+				Rate:        match.Rate,
+				BaseRate:    match.BaseRate,
+				QuoteRate:   match.QuoteRate,
+				Active:      match.Active,
+				Status:      match.Status.String(),
+			}
+			return enc.Encode(md)
+		})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to obtain match data: %v", err), http.StatusInternalServerError)
-		return
+		log.Warnf("Failed to write matches response: %v", err)
+		if Nout == 0 {
+			http.Error(w, fmt.Sprintf("failed to retrieve matches: %v", err), http.StatusInternalServerError)
+		} // otherwise too late for an http error code
 	}
-	matchData := make([]*MatchData, len(matches))
-	for i, match := range matches {
-		matchData[i] = &MatchData{
-			TakerSell:   match.TakerSell,
-			ID:          match.ID.String(),
-			Maker:       match.Maker.String(),
-			MakerAcct:   match.MakerAcct.String(),
-			MakerSwap:   match.MakerSwap,
-			MakerRedeem: match.MakerRedeem,
-			MakerAddr:   match.MakerAddr,
-			Taker:       match.Taker.String(),
-			TakerAcct:   match.TakerAcct.String(),
-			TakerSwap:   match.TakerSwap,
-			TakerRedeem: match.TakerRedeem,
-			TakerAddr:   match.TakerAddr,
-			EpochIdx:    match.Epoch.Idx,
-			EpochDur:    match.Epoch.Dur,
-			Quantity:    match.Quantity,
-			Rate:        match.Rate,
-			BaseRate:    match.BaseRate,
-			QuoteRate:   match.QuoteRate,
-			Active:      match.Active,
-			Status:      match.Status.String(),
-		}
-	}
-	writeJSON(w, matchData)
 }
 
 // hander for route '/market/{marketName}/resume?t=UNIXMS'

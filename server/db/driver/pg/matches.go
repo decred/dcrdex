@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"decred.org/dcrdex/dex/order"
@@ -300,12 +301,10 @@ func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, err
 	return ms, nil
 }
 
-// MarketMatches retrieves all active matches for a market. If includeInactive,
-// all matches are returned.
-func (a *Archiver) MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchDataWithCoins, error) {
+func (a *Archiver) marketMatches(base, quote uint32, includeInactive bool, N int64, f func(*db.MatchDataWithCoins) error) (int, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
@@ -313,25 +312,49 @@ func (a *Archiver) MarketMatches(base, quote uint32, includeInactive bool) ([]*d
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
-	query := internal.RetrieveActiveMarketMatches
+	var rows *sql.Rows
 	if includeInactive {
-		query = internal.RetrieveMarketMatches
+		stmt := fmt.Sprintf(internal.RetrieveMarketMatches, matchesTableName)
+		if N <= 0 {
+			N = math.MaxInt64
+		}
+		rows, err = a.db.QueryContext(ctx, stmt, N)
+	} else {
+		stmt := fmt.Sprintf(internal.RetrieveActiveMarketMatches, matchesTableName)
+		rows, err = a.db.QueryContext(ctx, stmt) // no N
 	}
-	stmt := fmt.Sprintf(query, matchesTableName)
-	rows, err := a.db.QueryContext(ctx, stmt)
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsToMatchDataWithCoinsStreaming(rows, includeInactive, f)
+}
+
+// MarketMatches retrieves all active matches for a market.
+func (a *Archiver) MarketMatches(base, quote uint32) ([]*db.MatchDataWithCoins, error) {
+	var ms []*db.MatchDataWithCoins
+	f := func(m *db.MatchDataWithCoins) error {
+		ms = append(ms, m)
+		return nil
+	}
+	_, err := a.marketMatches(base, quote, false, -1, f) // N ignored with only active
 	if err != nil {
 		return nil, err
 	}
-	return rowsToMatchDataWithCoins(rows, includeInactive)
+	return ms, nil
 }
 
-func rowsToMatchDataWithCoins(rows *sql.Rows, includeInactive bool) ([]*db.MatchDataWithCoins, error) {
+// MarketMatchesStreaming streams all active matches for a market into the
+// provided function. If includeInactive, all matches are streamed. A limit may
+// be specified, where <=0 means unlimited.
+func (a *Archiver) MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*db.MatchDataWithCoins) error) (int, error) {
+	return a.marketMatches(base, quote, includeInactive, N, f)
+}
+
+func rowsToMatchDataWithCoinsStreaming(rows *sql.Rows, includeInactive bool, f func(*db.MatchDataWithCoins) error) (int, error) {
 	defer rows.Close()
 
-	var (
-		ms  []*db.MatchDataWithCoins
-		err error
-	)
+	var N int
 	for rows.Next() {
 		var m db.MatchDataWithCoins
 		var status uint8
@@ -340,25 +363,25 @@ func rowsToMatchDataWithCoins(rows *sql.Rows, includeInactive bool) ([]*db.Match
 		var takerAddr, makerAddr sql.NullString
 		if includeInactive {
 			// "active" column SELECTed.
-			err = rows.Scan(&m.ID, &m.Active, &takerSell,
+			err := rows.Scan(&m.ID, &m.Active, &takerSell,
 				&m.Taker, &m.TakerAcct, &takerAddr,
 				&m.Maker, &m.MakerAcct, &makerAddr,
 				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
 				&baseRate, &quoteRate, &status,
 				&m.MakerSwapCoin, &m.TakerSwapCoin, &m.MakerRedeemCoin, &m.TakerRedeemCoin)
 			if err != nil {
-				return nil, err
+				return N, err
 			}
 		} else {
 			// "active" column not SELECTed.
-			err = rows.Scan(&m.ID, &takerSell,
+			err := rows.Scan(&m.ID, &takerSell,
 				&m.Taker, &m.TakerAcct, &takerAddr,
 				&m.Maker, &m.MakerAcct, &makerAddr,
 				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
 				&baseRate, &quoteRate, &status,
 				&m.MakerSwapCoin, &m.TakerSwapCoin, &m.MakerRedeemCoin, &m.TakerRedeemCoin)
 			if err != nil {
-				return nil, err
+				return N, err
 			}
 			// All are active.
 			m.Active = true
@@ -370,14 +393,13 @@ func rowsToMatchDataWithCoins(rows *sql.Rows, includeInactive bool) ([]*db.Match
 		m.BaseRate = uint64(baseRate.Int64)
 		m.QuoteRate = uint64(quoteRate.Int64)
 
-		ms = append(ms, &m)
+		if err := f(&m); err != nil {
+			return N, err
+		}
+		N++
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return ms, nil
+	return N, rows.Err()
 }
 
 // AllActiveUserMatches retrieves a MatchData slice for active matches in all

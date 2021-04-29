@@ -164,7 +164,7 @@ type Storage interface {
 	Fatal() <-chan struct{}
 	Close() error
 	InsertEpoch(ed *db.EpochResults) error
-	MarketMatches(base, quote uint32, includeInactive bool) ([]*db.MatchDataWithCoins, error)
+	MarketMatches(base, quote uint32) ([]*db.MatchDataWithCoins, error)
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with
@@ -313,7 +313,7 @@ ordersLoop:
 	}
 
 	// Populate the order settling amount map from the active matches in DB.
-	activeMatches, err := storage.MarketMatches(base, quote, false)
+	activeMatches, err := storage.MarketMatches(base, quote)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load active matches for market %v: %w", mktInfo.Name, err)
 	}

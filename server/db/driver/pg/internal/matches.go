@@ -127,7 +127,8 @@ const (
 		aContractCoinID, bContractCoinID, aRedeemCoinID, bRedeemCoinID
 	FROM %s
 	WHERE takerSell IS NOT NULL -- not a cancel order
-	ORDER BY epochIdx * epochDur DESC;`
+	ORDER BY epochIdx * epochDur DESC
+	LIMIT $1;`
 
 	RetrieveActiveMarketMatches = `SELECT matchid, takerSell,
 		takerOrder, takerAccount, takerAddress,
