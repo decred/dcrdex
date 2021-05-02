@@ -34,6 +34,7 @@ privileges and forfeiture of registration fee.
 - [Client Quick Start Installation](#client-quick-start-installation)
 - [Client Configuration](#client-configuration)
 - [Important Stuff to Know](#important-stuff-to-know)
+- [Fees](#fees)
 - [Advanced Client Installation](#advanced-client-installation)
 - [DEX Specification](#dex-specification)
 - [Client Applications and the Core Package](#client-applications-and-the-core-package)
@@ -209,6 +210,27 @@ You may be asked to provide client log files to the operator for review.
 For dex.decred.org, reach out
 [on Element](https://matrix.to/#/!mlRZqBtfWHrcmgdTWB:decred.org?via=decred.org&via=matrix.org&via=planetdecred.org)
 to appeal.
+
+## Fees
+
+The dex does not charge fees, but users have to pay on-chain transaction fees.
+Unlike on centralized exchanges where users can trade any arbitrary amount of
+funds, orders on the dex must be made in increments of a specified lot size.
+For example, if the lot size for the DCR/BTC market is 40 DCR, users can
+make orders to buy or sell DCR in increments of 40.
+
+You might be lucky and have your entire order matched by one other user. In
+this case, you will have to pay 2 transaction fees: one for sending funds on
+one chain, and one for receiving funds on the other. In the worst case, each
+lot of your order is matched by a different user, and you will pay a separate
+sending and recieving transaction for each match. Check the 
+[dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
+for more details about how atomic swaps work.
+
+The client contains on option to pre-split UTXOs in order to not lock up
+more funds than necessary for the duration of an atomic swap. This option will
+potentially introduce an additional transaction (for each match) on the chain
+you are sending funds from, but it could also speed up the entire process.
 
 ## Advanced Client Installation
 
