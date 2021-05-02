@@ -21,6 +21,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/bch"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
+	_ "decred.org/dcrdex/server/asset/eth" // register eth asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
 	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"

@@ -23,7 +23,7 @@ TEST_DB=dcrdex_simnet_test
 sudo -u postgres -H psql -c "DROP DATABASE IF EXISTS ${TEST_DB}" \
 -c "CREATE DATABASE ${TEST_DB} OWNER dcrdex"
 
-EPOCH_DURATION=${EPOCH:-15000} 
+EPOCH_DURATION=${EPOCH:-15000}
 if [ "${EPOCH_DURATION}" -lt 1000 ]; then
     echo "epoch duration cannot be < 1000 ms"
     exit 1
@@ -38,6 +38,9 @@ BCH_ON=$?
 
 ~/dextest/ltc/harness-ctl/alpha getblockchaininfo &> /dev/null
 LTC_ON=$?
+
+~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
+ETH_ON=$?
 
 set -e
 
@@ -129,6 +132,20 @@ if [ $BCH_ON -eq 0 ]; then
 EOF
 fi
 
+if [ $ETH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "ETH_simnet": {
+            "bip44symbol": "eth",
+            "network": "simnet",
+            "lotSize": 1000000,
+            "rateStep": 1000000,
+            "maxFeeRate": 20,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
+EOF
+fi
+
 cat << EOF >> "./markets.json"
         }
     }
@@ -156,7 +173,7 @@ abstakerlotlimit=1200
 httpprof=1
 EOF
 
-# Set the postgres user pass if provided. 
+# Set the postgres user pass if provided.
 if [ -n "${PG_PASS}" ]; then
 echo pgpass="${PG_PASS}" >> ./dcrdex.conf
 fi
