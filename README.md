@@ -227,7 +227,7 @@ sending and recieving transaction for each match. Check the
 [dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
 for more details about how atomic swaps work.
 
-The client contains on option to pre-split UTXOs in order to not lock up
+The client contains an option to pre-split UTXOs in order to not lock up
 more funds than necessary for the duration of an atomic swap. This option will
 potentially introduce an additional transaction (for each match) on the chain
 you are sending funds from, but it could also speed up the entire process.
