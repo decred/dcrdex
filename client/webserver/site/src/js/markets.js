@@ -327,7 +327,8 @@ export default class MarketsPage extends BasePage {
       epoch: note => { this.handleEpochNote(note) },
       conn: note => { this.handleConnNote(note) },
       balance: note => { this.handleBalanceNote(note) },
-      feepayment: note => { this.handleFeePayment(note) }
+      feepayment: note => { this.handleFeePayment(note) },
+      walletstate: note => { this.handleWalletStateNote(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -1183,6 +1184,14 @@ export default class MarketsPage extends BasePage {
       return
     }
     this.showVerify()
+  }
+
+  /*
+   * handleWalletStateNote is the handler for the 'walletstate' notification
+   * type.
+   */
+  handleWalletStateNote (note) {
+    this.balanceWgt.updateAsset(note.wallet.assetID)
   }
 
   /*
