@@ -213,9 +213,9 @@ to appeal.
 
 ## Fees
 
-The dex does not charge fees, but users have to pay on-chain transaction fees.
-Unlike on centralized exchanges where users can trade any arbitrary amount of
-funds, orders on the dex must be made in increments of a specified lot size.
+The dex does not charge trading fees, but users have to pay on-chain transaction
+fees. Unlike on centralized exchanges where users can trade any arbitrary amount
+of funds, orders on the dex must be made in increments of a specified lot size.
 For example, if the lot size for the DCR/BTC market is 40 DCR, users can
 make orders to buy or sell DCR in increments of 40.
 
