@@ -1899,23 +1899,57 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		return err
 	}
 
+	ownsAddr := func(addr string) error {
+		owns, err := wallet.OwnsAddress(addr)
+		if err != nil {
+			return err
+		}
+		if !owns {
+			return fmt.Errorf("new wallet does not own address found in active trades: %v", addr)
+		}
+		return nil
+	}
+
 	// If there are active trades, make sure they can be settled by the
 	// keys held within the new wallet.
 	sameWallet := func() error {
 		for _, dc := range c.dexConnections() {
 			for _, trade := range dc.trackedTrades() {
 				if trade.isActive() {
-					addr := trade.Trade().Address
-					owns, err := wallet.OwnsAddress(addr)
-					if err != nil {
-						return err
+					t := trade.Trade()
+					waID := wallet.AssetID
+					// If the to asset, check if we own an
+					// contract.Address.
+					if (t.Sell && trade.Quote() == waID) ||
+						(!t.Sell && trade.Base() == waID) {
+						if err := ownsAddr(t.Address); err != nil {
+							return err
+						}
+						// Assume all trade addresses are
+						// owned by the new wallet if one is.
+						return nil
 					}
-					if !owns {
-						return fmt.Errorf("new wallet does not own address found in active trades: %v", addr)
+					// If the from asset, check if we own a
+					// refund address for a match if any exist.
+					if trade.fromAssetID == waID {
+						for _, match := range trade.matches {
+							script := match.MetaData.Proof.Script
+							if len(script) == 0 {
+								continue
+							}
+							addr, err := wallet.RefundAddress(script)
+							if err != nil {
+								return err
+							}
+							if err := ownsAddr(addr); err != nil {
+								return err
+							}
+							// Assume all refund addresses
+							// are owned by the new
+							// wallet if one is.
+							return nil
+						}
 					}
-					// Assume all trade addresses are owned
-					// by the new wallet if one is.
-					return nil
 				}
 			}
 		}

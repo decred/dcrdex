@@ -180,6 +180,8 @@ type Wallet interface {
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.
 	SyncStatus() (synced bool, progress float32, err error)
+	// RefundAddress extracts and returns the refund address from a contract.
+	RefundAddress(contract dex.Bytes) (string, error)
 }
 
 // Balance is categorized information about a wallet's balance.
