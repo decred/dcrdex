@@ -428,15 +428,15 @@ func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
 
-func (tdb *TDB) Store(k string, b []byte) error {
+func (tdb *TDB) SetEncryptionParams(k string, b []byte) error {
 	return tdb.storeErr
 }
 
-func (tdb *TDB) ValueExists(k string) (bool, error) {
+func (tdb *TDB) IsEncryptionParamsSet(k string) (bool, error) {
 	return tdb.existValues[k], nil
 }
 
-func (tdb *TDB) Get(k string) ([]byte, error) {
+func (tdb *TDB) EncryptionParams(k string) ([]byte, error) {
 	if k == keyParamsKey {
 		return nil, tdb.encKeyErr
 	}

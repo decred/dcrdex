@@ -159,8 +159,9 @@ func (db *BoltDB) Run(ctx context.Context) {
 	db.Close()
 }
 
-// Store stores a value at the specified key in the general-use bucket.
-func (db *BoltDB) Store(k string, v []byte) error {
+// SetEncryptionParams stores encryption parameters params (associated with key k)
+// overwriting previous value if any already exists for key k.
+func (db *BoltDB) SetEncryptionParams(k string, v []byte) error {
 	if len(k) == 0 {
 		return fmt.Errorf("cannot store with empty key")
 	}
@@ -174,9 +175,9 @@ func (db *BoltDB) Store(k string, v []byte) error {
 	})
 }
 
-// ValueExists checks if a value was previously stored in the general-use
-// bucket at the specified key.
-func (db *BoltDB) ValueExists(k string) (bool, error) {
+// IsEncryptionParamsSet checks whether encryption parameters associated with key k were previously stored in DB
+// via a call to SetEncryptionParams.
+func (db *BoltDB) IsEncryptionParamsSet(k string) (bool, error) {
 	var exists bool
 	return exists, db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(appBucket)
@@ -188,8 +189,9 @@ func (db *BoltDB) ValueExists(k string) (bool, error) {
 	})
 }
 
-// Get retrieves value previously stored with Store.
-func (db *BoltDB) Get(k string) ([]byte, error) {
+// EncryptionParams retrieves encryption parameters (associated with key k) set via SetEncryptionParams.
+// EncryptionParams returns error if encryption parameters (associated with key k) haven't previously been set via SetEncryptionParams.
+func (db *BoltDB) EncryptionParams(k string) ([]byte, error) {
 	var v []byte
 	keyB := []byte(k)
 	return v, db.View(func(tx *bbolt.Tx) error {

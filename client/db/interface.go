@@ -12,12 +12,15 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// Store allows the storage of arbitrary data.
-	Store(string, []byte) error
-	// Get retrieves values stored with Store.
-	Get(string) ([]byte, error)
-	// ValueExists checks if a value was previously stored.
-	ValueExists(k string) (bool, error)
+	// SetEncryptionParams stores encryption parameters params (associated with key k)
+	// overwriting previous value if any already exists for key k.
+	SetEncryptionParams(k string, params []byte) error
+	// EncryptionParams retrieves encryption parameters (associated with key k) set via SetEncryptionParams.
+	// EncryptionParams returns error if encryption parameters (associated with key k) haven't previously been set via SetEncryptionParams.
+	EncryptionParams(k string) ([]byte, error)
+	// IsEncryptionParamsSet checks whether encryption parameters associated with key k were previously stored in DB
+	// via a call to SetEncryptionParams.
+	IsEncryptionParamsSet(k string) (bool, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.
@@ -88,7 +91,7 @@ type DB interface {
 	DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error)
 	// MatchesForOrder gets the matches for the order ID.
 	MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*MetaMatch, error)
-	// Update wallets adds a wallet to the database, or updates the wallet
+	// UpdateWallet adds a wallet to the database, or updates the wallet
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).
 	UpdateWallet(wallet *Wallet) error

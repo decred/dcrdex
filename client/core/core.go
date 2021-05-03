@@ -1257,7 +1257,7 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 // encryptionKey retrieves the application encryption key. The key itself is
 // encrypted using an encryption key derived from the user's password.
 func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
-	keyParams, err := c.db.Get(keyParamsKey)
+	keyParams, err := c.db.EncryptionParams(keyParamsKey)
 	if err != nil {
 		return nil, fmt.Errorf("key retrieval error: %w", err)
 	}
@@ -1779,7 +1779,7 @@ func (c *Core) setAppPass(pw []byte) (encrypt.Crypter, error) {
 	}
 
 	crypter := c.newCrypter(pw)
-	err := c.db.Store(keyParamsKey, crypter.Serialize())
+	err := c.db.SetEncryptionParams(keyParamsKey, crypter.Serialize())
 	if err != nil {
 		return nil, fmt.Errorf("error storing key parameters: %w", err)
 	}
@@ -2397,7 +2397,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 
 // IsInitialized checks if the app is already initialized.
 func (c *Core) IsInitialized() (bool, error) {
-	return c.db.ValueExists(keyParamsKey)
+	return c.db.IsEncryptionParamsSet(keyParamsKey)
 }
 
 // InitializeClient sets the initial app-wide password for the client.

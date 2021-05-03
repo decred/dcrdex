@@ -86,7 +86,7 @@ func TestStore(t *testing.T) {
 	k := "some random key"
 	boltdb := newTestDB(t)
 	// Check no key
-	exists, err := boltdb.ValueExists(k)
+	exists, err := boltdb.IsEncryptionParamsSet(k)
 	if err != nil {
 		t.Fatalf("error checking if value exists for key: %v", err)
 	}
@@ -94,12 +94,12 @@ func TestStore(t *testing.T) {
 		t.Fatalf("value exists for missing key")
 	}
 	v := randBytes(50)
-	err = boltdb.Store(k, v)
+	err = boltdb.SetEncryptionParams(k, v)
 	if err != nil {
 		t.Fatalf("error storing value: %v", err)
 	}
 	// Confirm value exists for key
-	exists, err = boltdb.ValueExists(k)
+	exists, err = boltdb.IsEncryptionParamsSet(k)
 	if err != nil {
 		t.Fatalf("error checking if value exists for key: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestStore(t *testing.T) {
 		t.Fatalf("no value found for stored key")
 	}
 	// Confirm db value for key matches what was stored.
-	reV, err := boltdb.Get(k)
+	reV, err := boltdb.EncryptionParams(k)
 	if err != nil {
 		t.Fatalf("error storing value: %v", err)
 	}
