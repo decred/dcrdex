@@ -12,13 +12,17 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// SetEncryptionParams stores encryption parameters params (associated with key k)
-	// overwriting previous value if any already exists for key k.
+	// SetEncryptionParams stores encryption parameters
+	// params (associated with key k) overwriting previous value
+	// if any already exists for key k.
 	SetEncryptionParams(k string, params []byte) error
-	// EncryptionParams retrieves encryption parameters (associated with key k) set via SetEncryptionParams.
-	// EncryptionParams returns error if encryption parameters (associated with key k) haven't previously been set via SetEncryptionParams.
+	// EncryptionParams retrieves encryption parameters (associated with key k)
+	// set via SetEncryptionParams.
+	// EncryptionParams returns error if encryption parameters (associated with key k)
+	// haven't previously been set via SetEncryptionParams.
 	EncryptionParams(k string) ([]byte, error)
-	// IsEncryptionParamsSet checks whether encryption parameters associated with key k were previously stored in DB
+	// IsEncryptionParamsSet checks whether encryption parameters
+	// associated with key k were previously stored in DB
 	// via a call to SetEncryptionParams.
 	IsEncryptionParamsSet(k string) (bool, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
