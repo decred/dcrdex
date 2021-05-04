@@ -75,14 +75,14 @@ func matchStatsForMarketEpoch(stmt *sql.Stmt, epochIdx, epochDur uint64) (rates,
 	defer rows.Close()
 
 	for rows.Next() {
-		var rate, quantity uint64
+		var rate, quantity fastUint64
 		var takerSell bool
 		err = rows.Scan(&quantity, &rate, &takerSell)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		rates = append(rates, rate)
-		quantities = append(quantities, quantity)
+		rates = append(rates, uint64(rate))
+		quantities = append(quantities, uint64(quantity))
 		sell = append(sell, takerSell)
 	}
 
