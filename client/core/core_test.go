@@ -5215,7 +5215,11 @@ func TestReconfigureWallet(t *testing.T) {
 		suspectSwap:  true,
 		tickGovernor: time.NewTimer(time.Hour),
 		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{},
+			MetaData: &db.MatchMetaData{
+				Proof: db.MatchProof{
+					Script: dex.Bytes{0},
+				},
+			},
 			UserMatch: &order.UserMatch{
 				MatchID: matchID,
 			},
