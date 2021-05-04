@@ -510,18 +510,6 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
-// // UpdateAccount updates account's info blob.
-// func (db *BoltDB) UpdateAccount(ai *dexdb.AccountInfo) error {
-// 	acctKey := []byte(ai.Host)
-// 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-// 		acct := accts.Bucket(acctKey)
-// 		if acct == nil {
-// 			return fmt.Errorf("account not found for %s", ai.Host)
-// 		}
-// 		return acct.Put(accountKey, ai.Encode())
-// 	})
-// }
-
 // deleteAccount removes the account by host.
 func (db *BoltDB) deleteAccount(host string) error {
 	acctKey := []byte(host)

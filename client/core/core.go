@@ -1814,58 +1814,6 @@ func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
 	return dbWallet.Settings, nil
 }
 
-// func (c *Core) setAppPass(pw []byte) (encrypt.Crypter, error) {
-// 	if len(pw) == 0 {
-// 		return nil, fmt.Errorf("empty password not allowed")
-// 	}
-
-// 	crypter := c.newCrypter(pw)
-// 	err := c.db.Store(keyParamsKey, crypter.Serialize())
-// 	if err != nil {
-// 		return nil, fmt.Errorf("error storing key parameters: %w", err)
-// 	}
-
-// 	return crypter, nil
-// }
-
-// func (c *Core) updateWalletsEncPW(oldCrypter, newCrypter encrypt.Crypter) error {
-// 	updateWalletPW := func(w *xcWallet) error {
-// 		// If encrypted password set, decrypt using old app pw then encrypt again
-// 		// using new app pw.
-// 		oldEncPW := w.encPW()
-// 		if len(oldEncPW) == 0 {
-// 			return nil
-// 		}
-
-// 		// Decrypt with old app pw.
-// 		pwB, err := oldCrypter.Decrypt(oldEncPW)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		// Re-encrypt with new app pw.
-// 		encPW, err := newCrypter.Encrypt(pwB)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		// Store encrypted pw.
-// 		w.setEncPW(encPW)
-// 		err = c.db.SetWalletPassword(w.dbID, encPW)
-// 		if err != nil {
-// 			return codedError(dbErr, err)
-// 		}
-// 		return nil
-// 	}
-
-// 	for _, w := range c.xcWallets() {
-// 		err := updateWalletPW(w)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
-
 // ChangeAppPass updates the application password to the provided new password
 // after validating the current password.
 func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {

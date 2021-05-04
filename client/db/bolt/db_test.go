@@ -292,39 +292,6 @@ func TestDisableAccount(t *testing.T) {
 	}
 }
 
-// func TestUpdateAccount(t *testing.T) {
-// 	boltdb := newTestDB(t)
-// 	acct := dbtest.RandomAccountInfo()
-// 	host := acct.Host
-
-// 	err := boltdb.CreateAccount(acct)
-// 	if err != nil {
-// 		t.Fatalf("Unexpected CreateAccount error: %v", err)
-// 	}
-
-// 	oldAcct, err := boltdb.Account(host)
-// 	if err != nil {
-// 		t.Fatalf("Unexpected Account error: %v", err)
-// 	}
-
-// 	// Change account's enc key & update account entry
-// 	acct.LegacyEncKey = randBytes(32)
-// 	err = boltdb.UpdateAccount(acct)
-// 	if err != nil {
-// 		t.Fatalf("Unexpected UpdateAccount error: %v", err)
-// 	}
-
-// 	newAcct, err := boltdb.Account(host)
-// 	if err != nil {
-// 		t.Fatalf("Unexpected Account error: %v", err)
-// 	}
-
-// 	// Ensure enc key was updated.
-// 	if bytes.Equal(oldAcct.LegacyEncKey, newAcct.LegacyEncKey) {
-// 		t.Fatalf("Expected to get updated account's enc key")
-// 	}
-// }
-
 func TestAccountProof(t *testing.T) {
 	boltdb := newTestDB(t)
 	acct := dbtest.RandomAccountInfo()

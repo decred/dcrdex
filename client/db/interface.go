@@ -42,11 +42,6 @@ type DB interface {
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
-	// // UpdateAccount updates account's info blob.
-	// //
-	// // It is almost certainly incorrect to change any of the keys since changing
-	// // the key pair itself effectively creates a new account.
-	// UpdateAccount(ai *AccountInfo) error
 	// AccountProof retrieves the AccountPoof value specified by url.
 	AccountProof(host string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.
