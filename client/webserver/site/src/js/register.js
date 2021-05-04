@@ -14,6 +14,7 @@ export default class RegistrationPage extends BasePage {
     app = application
     this.body = body
     this.notifiers = {}
+    this.restoring = false
     const page = this.page = Doc.parsePage(body, [
       // Form 1: Set the application password
       'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
@@ -28,7 +29,7 @@ export default class RegistrationPage extends BasePage {
       'dexShowMore',
       // Form 5: Confirm DEX registration and pay fee
       'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
-      'dexCertBox'
+      'dexCertBox', 'restorationMsg'
     ])
 
     // Hide the form closers for the registration process.
@@ -123,6 +124,7 @@ export default class RegistrationPage extends BasePage {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app.loading(page.appPWForm)
+    const seed = page.seedInput.value
     const res = await postJSON('/api/init', {
       pass: pw,
       seed: page.seedInput.value
@@ -133,6 +135,7 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appErrMsg)
       return
     }
+    if (seed) this.restoring = true
     this.auth()
     app.updateMenuItemsDisplay()
     this.changeForm(page.appPWForm, page.newWalletForm)
@@ -176,6 +179,7 @@ export default class RegistrationPage extends BasePage {
     page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
     const dcrAsset = res.xc.assets['42']
     if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
+    if (this.restoring) Doc.show(page.restorationMsg)
     await this.changeForm(page.dexAddrForm, page.confirmRegForm)
   }
 

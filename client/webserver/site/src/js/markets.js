@@ -415,12 +415,10 @@ export default class MarketsPage extends BasePage {
     const base = this.market.base
     const quote = this.market.quote
     const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
-
     if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
       return
     }
-
     Doc.hide(page.orderForm)
   }
 
@@ -1265,16 +1263,15 @@ export default class MarketsPage extends BasePage {
   setBalanceVisibility () {
     if (this.market.dex.connected) {
       Doc.show(this.page.balanceTable)
-      Doc.show(this.page.orderForm)
     } else {
       Doc.hide(this.page.balanceTable)
-      Doc.hide(this.page.orderForm)
     }
   }
 
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     this.setBalanceVisibility()
+    this.resolveOrderFormVisibility()
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     if (!this.market.dex.connected) return
