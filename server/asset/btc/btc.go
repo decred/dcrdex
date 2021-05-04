@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -23,12 +22,10 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/rpcclient/v6"
 )
-
-const methodGetBlockchainInfo = "getblockchaininfo"
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -70,20 +67,6 @@ const (
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
-// BTCNode represents a blockchain information fetcher. In practice, it is
-// satisfied by rpcclient.Client, and all methods are matches for Client
-// methods. For testing, it can be satisfied by a stub.
-type BTCNode interface {
-	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
-	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
-	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
-	GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
-	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	GetBestBlockHash() (*chainhash.Hash, error)
-	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
-	GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error)
-}
-
 // Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
 // fetching UTXO information and subscribing to block updates. It maintains a
 // cache of block data for quick lookups. Backend implements asset.Backend, so
@@ -95,12 +78,8 @@ type Backend struct {
 	// segwit should be set to true for blockchains that support segregated
 	// witness.
 	segwit bool
-	// If an rpcclient.Client is used for the node, keeping a reference at client
-	// will result the (Client).Shutdown() being called on context cancellation.
-	client *rpcclient.Client
-	// node is used throughout for RPC calls, and in typical use will be the same
-	// as client. For testing, it can be set to a stub.
-	node BTCNode
+	// node is used throughout for RPC calls. For testing, it can be set to a stub.
+	node *RPCClient
 	// The block cache stores just enough info about the blocks to shortcut future
 	// calls to GetBlockVerbose.
 	blockCache *blockCache
@@ -113,7 +92,7 @@ type Backend struct {
 	// use the provided logger.
 	log         dex.Logger
 	decodeAddr  dexbtc.AddressDecoder
-	estimateFee func(BTCNode) (uint64, error)
+	estimateFee func(*RPCClient) (uint64, error)
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -151,7 +130,6 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 }
 
 func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.Config) *Backend {
-
 	feeEstimator := feeRate
 	if cloneCfg.FeeEstimator != nil {
 		feeEstimator = cloneCfg.FeeEstimator
@@ -188,7 +166,7 @@ type BackendCloneConfig struct {
 	Ports          dexbtc.NetPorts
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
-	FeeEstimator func(BTCNode) (uint64, error)
+	FeeEstimator func(*RPCClient) (uint64, error)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
@@ -206,9 +184,9 @@ func NewBTCClone(cloneCfg *BackendCloneConfig) (*Backend, error) {
 }
 
 func (btc *Backend) shutdown() {
-	if btc.client != nil {
-		btc.client.Shutdown()
-		btc.client.WaitForShutdown()
+	if btc.node != nil {
+		btc.node.requester.Shutdown()
+		btc.node.requester.WaitForShutdown()
 	}
 }
 
@@ -225,12 +203,13 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error creating %q RPC client: %w", btc.name, err)
 	}
 
-	// Setting the client field will enable shutdown
-	btc.client = client
-	btc.node = client
+	btc.node = &RPCClient{
+		ctx:       ctx,
+		requester: client,
+	}
 
 	// Prime the cache
-	bestHash, err := btc.client.GetBestBlockHash()
+	bestHash, err := btc.node.GetBestBlockHash()
 	if err != nil {
 		btc.shutdown()
 		return nil, fmt.Errorf("error getting best block from rpc: %w", err)
@@ -293,7 +272,7 @@ func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (btc *Backend) Synced() (bool, error) {
-	chainInfo, err := btc.getBlockchainInfo()
+	chainInfo, err := btc.node.GetBlockChainInfo()
 	if err != nil {
 		return false, fmt.Errorf("GetBlockChainInfo error: %w", err)
 	}
@@ -448,51 +427,6 @@ func (btc *Backend) blockInfo(verboseTx *btcjson.TxRawResult) (blockHeight uint3
 		blockHash = blk.hash
 	}
 	return
-}
-
-// anylist is a list of RPC parameters to be converted to []json.RawMessage and
-// sent via RawRequest.
-type anylist []interface{}
-
-// call is used internally to  marshal parmeters and send requests to  the RPC
-// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
-// will be marshaled into `thing`.
-func (btc *Backend) call(method string, args anylist, thing interface{}) error {
-	params := make([]json.RawMessage, 0, len(args))
-	for i := range args {
-		p, err := json.Marshal(args[i])
-		if err != nil {
-			return err
-		}
-		params = append(params, p)
-	}
-	b, err := btc.node.RawRequest(method, params)
-	if err != nil {
-		return fmt.Errorf("rawrequest error: %w", err)
-	}
-	if thing != nil {
-		return json.Unmarshal(b, thing)
-	}
-	return nil
-}
-
-// getBlockchainInfoResult models the data returned from the getblockchaininfo
-// command.
-type getBlockchainInfoResult struct {
-	Blocks               int64  `json:"blocks"`
-	Headers              int64  `json:"headers"`
-	BestBlockHash        string `json:"bestblockhash"`
-	InitialBlockDownload bool   `json:"initialblockdownload"`
-}
-
-// getBlockchainInfo sends the getblockchaininfo request and returns the result.
-func (btc *Backend) getBlockchainInfo() (*getBlockchainInfoResult, error) {
-	chainInfo := new(getBlockchainInfoResult)
-	err := btc.call(methodGetBlockchainInfo, nil, chainInfo)
-	if err != nil {
-		return nil, err
-	}
-	return chainInfo, nil
 }
 
 // Get the UTXO data and perform some checks for script support.
@@ -1046,7 +980,7 @@ func isTxNotFoundErr(err error) bool {
 
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC.
-func feeRate(node BTCNode) (uint64, error) {
+func feeRate(node *RPCClient) (uint64, error) {
 	feeResult, err := node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
