@@ -560,18 +560,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Start the AuthManager and Swapper subsystems after populating the markets
 	// map used by the unbook callbacks, and setting the AuthManager's unbook
 	// timers for the users with currently booked orders.
-	const authManagerName = "Auth manager"
-	err = startSubSys(authManagerName, authMgr)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("start subsystems for %s: %w", authManagerName, err)
-	}
-	const swapperName = "Swapper"
-	err = startSubSys(swapperName, swapper)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("start subsystems for %s: %w", swapperName, err)
-	}
+	//
+	// This subsystem is a dex.Runner, it doesn't return errors.
+	_ = startSubSys("Auth manager", authMgr)
+
+	// This subsystem is a dex.Runner, it doesn't return errors.
+	_ = startSubSys("Swapper", swapper)
 
 	// Set start epoch index for each market. Also create BookSources for the
 	// BookRouter, and MarketTunnels for the OrderRouter.
@@ -596,14 +590,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		})
 	}
 
-	// Book router
+	// Book router.
 	bookRouter := market.NewBookRouter(bookSources, feeMgr)
-	const bookRouterName = "BookRouter"
-	err = startSubSys(bookRouterName, bookRouter)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("start subsystems for %s: %w", bookRouterName, err)
-	}
+	// This subsystem is a dex.Runner, it doesn't return errors.
+	_ = startSubSys("BookRouter", bookRouter)
 
 	// The data API gets the order book from the book router.
 	dataAPI.SetBookSource(bookRouter)
@@ -611,11 +601,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Market, now that book router is running.
 	for name, mkt := range markets {
 		mktName := marketSubSysName(name)
-		err = startSubSys(mktName, mkt)
-		if err != nil {
-			abort()
-			return nil, fmt.Errorf("start subsystems for %s: %w", mktName, err)
-		}
+		// This subsystem is a dex.Runner, it doesn't return errors.
+		_ = startSubSys(mktName, mkt)
 	}
 
 	// Order router
@@ -625,12 +612,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		Markets:     marketTunnels,
 		FeeSource:   feeMgr,
 	})
-	const orderRouterName = "OrderRouter"
-	err = startSubSys(orderRouterName, orderRouter)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("start subsystems for %s: %w", orderRouterName, err)
-	}
+	// This subsystem is a dex.Runner, it doesn't return errors.
+	_ = startSubSys("OrderRouter", orderRouter)
 
 	if err := ctx.Err(); err != nil {
 		abort()
@@ -666,12 +649,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 
-	const commsServerName = "Comms Server"
-	err = startSubSys(commsServerName, server)
-	if err != nil {
-		abort()
-		return nil, fmt.Errorf("start subsystems for %s: %w", commsServerName, err)
-	}
+	// This subsystem is a dex.Runner, it doesn't return errors.
+	_ = startSubSys("Comms Server", server)
 
 	return dexMgr, nil
 }
