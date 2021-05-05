@@ -560,7 +560,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Start the AuthManager and Swapper subsystems after populating the markets
 	// map used by the unbook callbacks, and setting the AuthManager's unbook
 	// timers for the users with currently booked orders.
-	//
+
 	// This subsystem is a dex.Runner, it doesn't return errors.
 	_ = startSubSys("Auth manager", authMgr)
 
