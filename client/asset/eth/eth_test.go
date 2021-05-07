@@ -40,6 +40,8 @@ type testNode struct {
 	syncProgErr    error
 	peerInfo       []*p2p.PeerInfo
 	peersErr       error
+	bal            *big.Int
+	balErr         error
 }
 
 func (n *testNode) connect(ctx context.Context, node *node.Node, addr common.Address) error {
@@ -59,7 +61,7 @@ func (n *testNode) accounts() []*accounts.Account {
 	return nil
 }
 func (n *testNode) balance(ctx context.Context, acct *accounts.Account) (*big.Int, error) {
-	return nil, nil
+	return n.bal, n.balErr
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
@@ -261,6 +263,73 @@ func TestSyncStatus(t *testing.T) {
 		}
 		if ratio != test.wantRatio {
 			t.Fatalf("want ratio %v got %v for test %q", test.wantRatio, ratio, test.name)
+		}
+	}
+}
+
+func TestBalance(t *testing.T) {
+	maxInt := ^uint64(0)
+	maxWei := new(big.Int).SetUint64(maxInt)
+	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
+	maxWei.Mul(maxWei, gweiFactorBig)
+	overMaxWei := new(big.Int).Set(maxWei)
+	overMaxWei.Add(overMaxWei, gweiFactorBig)
+	tests := []struct {
+		name    string
+		bal     *big.Int
+		balErr  error
+		wantBal uint64
+		wantErr bool
+	}{{
+		name:    "ok zero",
+		bal:     big.NewInt(0),
+		wantBal: 0,
+	}, {
+		name:    "ok rounded down",
+		bal:     big.NewInt(dexeth.GweiFactor - 1),
+		wantBal: 0,
+	}, {
+		name:    "ok one",
+		bal:     big.NewInt(dexeth.GweiFactor),
+		wantBal: 1,
+	}, {
+		name:    "ok max int",
+		bal:     maxWei,
+		wantBal: maxInt,
+	}, {
+		name:    "over max int",
+		bal:     overMaxWei,
+		wantErr: true,
+	}, {
+		name:    "node balance error",
+		bal:     big.NewInt(0),
+		balErr:  errors.New(""),
+		wantErr: true,
+	}}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{}
+		node.bal = test.bal
+		node.balErr = test.balErr
+		eth := &ExchangeWallet{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+		}
+		bal, err := eth.Balance()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if bal.Available != test.wantBal {
+			t.Fatalf("want available balance %v got %v for test %q", test.wantBal, bal.Available, test.name)
 		}
 	}
 }

@@ -78,6 +78,9 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "byzantiumBlock": 0,
     "constantinopleBlock": 0,
     "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
     "clique": {
       "period": 1,
       "epoch": 30000
@@ -183,9 +186,7 @@ echo "Sending 5000 eth to delta and gamma."
 
 # Our transactions will PROBABLY appear in one of these blocks.
 echo "Mining some blocks"
-"${NODES_ROOT}/harness-ctl/mine-beta" "1"
-"${NODES_ROOT}/harness-ctl/mine-alpha" "1"
-"${NODES_ROOT}/harness-ctl/mine-beta" "5"
+"${NODES_ROOT}/harness-ctl/mine-beta" "15"
 
 # Initial sync for light nodes takes quite a while. Wait for them to show
 # blocks on the network.

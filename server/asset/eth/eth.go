@@ -29,13 +29,11 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	gweiFactor        = 1e9
 )
 
 var (
 	zeroHash                       = common.Hash{}
 	notImplementedErr              = errors.New("not implemented")
-	gweiFactorBig                  = big.NewInt(gweiFactor)
 	_                 asset.Driver = (*Driver)(nil)
 )
 
@@ -69,16 +67,6 @@ type ethFetcher interface {
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
-}
-
-// toGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
-// Errors if the amount of gwei is too big to fit fully into a uint64.
-func toGwei(wei *big.Int) (uint64, error) {
-	wei.Div(wei, gweiFactorBig)
-	if !wei.IsUint64() {
-		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
-	}
-	return wei.Uint64(), nil
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -190,7 +178,7 @@ func (eth *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return toGwei(bigGP)
+	return ToGwei(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
