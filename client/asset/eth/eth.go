@@ -33,8 +33,11 @@ func init() {
 const (
 	// BipID is the BIP-0044 asset ID.
 	BipID              = 60
-	defaultGasFee      = 8.2e10
-	defaultGasFeeLimit = 2e11
+	defaultGasFee      = 82  // gwei
+	defaultGasFeeLimit = 200 // gwei
+
+	// Eth balances are floored as gwei, or 1e9 wei.
+	gweiFactor = 1e9
 )
 
 var (
@@ -49,7 +52,7 @@ var (
 			Description: "This is the highest network fee rate you are willing to " +
 				"pay on swap transactions. If gasfeelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: wei",
+				"wallet.  Units: gwei / gas",
 			DefaultValue: defaultGasFeeLimit,
 		},
 		{
@@ -68,12 +71,13 @@ var (
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Ethereum",
-		Units:             "wei",
+		Units:             "gwei",
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
 	}
 	notImplementedErr   = errors.New("not implemented")
 	mainnetContractAddr = common.HexToAddress("")
+	gweiFactorBig       = big.NewInt(gweiFactor)
 )
 
 // Check that Driver implements asset.Driver.
@@ -239,19 +243,23 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 
 // Balance returns the total available funds in the account.
 //
-// NOTE: Ethereum balance does not return Immature or Locked values.
+// NOTE: Ethereum Balance does not return Immature or Locked values.
 //
-// TODO: Ethereum balances can easily go over the max value of a uint64.
-// asset.Balance must be changed in a way to accomodate this.
+// NOTE: The eth node returns balances in wei. Those are flored and stored as
+// gwei, or 1e9 wei.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	eth.acctMtx.RLock()
 	defer eth.acctMtx.RUnlock()
-	bigbal, err := eth.node.balance(eth.ctx, eth.acct)
+	bigBal, err := eth.node.balance(eth.ctx, eth.acct)
 	if err != nil {
 		return nil, err
 	}
+	bigBal.Div(bigBal, gweiFactorBig)
+	if !bigBal.IsUint64() {
+		return nil, fmt.Errorf("balance %v gwei is too big for a uint64", bigBal)
+	}
 	bal := &asset.Balance{
-		Available: bigbal.Uint64(),
+		Available: bigBal.Uint64(),
 		// Immature: , How to know?
 		// Locked: , Not lockable?
 	}
@@ -425,16 +433,16 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasFee *big.Int)
 	return eth.node.sendTransaction(eth.ctx, tx)
 }
 
-// Withdraw withdraws funds to the specified address. Fees are subtracted from
-// the value.
+// Withdraw withdraws funds to the specified address. Value is gwei.
 //
-// TODO: Value could be larger than a uint64. Deal with it...
 // TODO: Return the asset.Coin.
+// TODO: Subtract fees from the value.
 func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
 	eth.acctMtx.RLock()
 	defer eth.acctMtx.RUnlock()
+	bigVal := big.NewInt(0).SetUint64(value)
 	_, err := eth.sendToAddr(common.HexToAddress(addr),
-		big.NewInt(0).SetUint64(value), big.NewInt(0).SetUint64(defaultGasFee))
+		bigVal.Mul(bigVal, gweiFactorBig), big.NewInt(0).SetUint64(defaultGasFee))
 	if err != nil {
 		return nil, err
 	}
