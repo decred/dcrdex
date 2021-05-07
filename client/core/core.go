@@ -1395,8 +1395,11 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 		// crypter. This case could instead be handled with a refreshUnlock.
 		err := wallet.Unlock(crypter)
 		if err != nil {
-			return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return newError(walletAuthErr, "failed to unlock %s wallet: %v",
+				unbip(wallet.AssetID), err)
 		}
+		// Notify new wallet state.
+		c.notify(newWalletStateNote(wallet.state()))
 	}
 	return nil
 }
@@ -3153,6 +3156,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if err != nil {
 		return nil, 0, err
 	}
+
 	err = prepareWallet(toWallet)
 	if err != nil {
 		return nil, 0, err
