@@ -1,5 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 decred.org/cspp v0.3.0/go.mod h1:UygjYilC94dER3BEU65Zzyoqy9ngJfWCD2rdJqvUs2A=
+decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa h1:cafi5DQOEU3frG3wAvlbkUhFB7+gMKLRQ5VICSuity4=
+decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa/go.mod h1:WflBF81Mt/FIcEEuSBx0uc5ng2rNDb+CKM8qHISYhNQ=
 github.com/Azure/azure-pipeline-go v0.2.1/go.mod h1:UGSo8XybXnIGZ3epmeBw7Jdz+HiUVpqIlpz/HKHylF4=
 github.com/Azure/azure-pipeline-go v0.2.2/go.mod h1:4rQ/NZncSvGqNkkOsNpOU1tgoNuIlp9AfUH5G1tvCHc=
 github.com/Azure/azure-storage-blob-go v0.7.0/go.mod h1:f9YQKtsG1nMisotuTPpO0tjNuEjKRYAcJU8/ydDI++4=
@@ -72,7 +74,7 @@ github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea h1:j4317fAZh7X
 github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea/go.mod h1:93vsz/8Wt4joVM7c2AVqh+YRMiUSc14yDtF28KmMOgQ=
 github.com/decred/base58 v1.0.3 h1:KGZuh8d1WEMIrK0leQRM47W85KqCAdl2N+uagbctdDI=
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
-github.com/decred/dcrd/addrmgr v1.2.0/go.mod h1:QlZF9vkzwYh0qs25C76SAFZBRscjETga/K28GEE6qIc=
+github.com/decred/dcrd/addrmgr/v2 v2.0.0-20210412162101-76f80ba180f0/go.mod h1:VKxDZPQTcFkUhJjEsr+dcnExKlp8qdS4sUR5XUsonwg=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210129192908-660d0518b4cf/go.mod h1:zALtZt59lCrhoj6dVMptHHAMw1hq0Zz9s2ZULWjhtZs=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210330065944-a2366e6e0b3b h1:youRwH9SuH/g4YctM9K8/3/Awmi5aQ+WlFMZDXkHqd4=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210330065944-a2366e6e0b3b/go.mod h1:zALtZt59lCrhoj6dVMptHHAMw1hq0Zz9s2ZULWjhtZs=
@@ -218,8 +220,6 @@ github.com/huin/goutil v0.0.0-20170803182201-1ca381bf3150/go.mod h1:PpLOETDnJ0o3
 github.com/improbable-eng/grpc-web v0.9.1/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
 github.com/improbable-eng/grpc-web v0.13.0/go.mod h1:6hRR09jOEG81ADP5wCQju1z71g6OL4eEvELdran/3cs=
 github.com/influxdata/influxdb v1.2.3-0.20180221223340-01288bdb0883/go.mod h1:qZna6X/4elxqT3yI9iZYdZrWWdeFOOprn86kgg4+IzY=
-github.com/itswisdomagain/dcrwallet/v2 v2.0.0-20210331205912-c57f61d71b62 h1:KuOlbq84t+mrIAwH6KauRCilIqKIFX9jDVoPL/joq3o=
-github.com/itswisdomagain/dcrwallet/v2 v2.0.0-20210331205912-c57f61d71b62/go.mod h1:qsPTCVNsLzbMxxrbHxDy8oeW5J6n1uF3SaUG9v7RrwA=
 github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458 h1:6OvNmYgJyexcZ3pYbTI9jWx5tHo1Dee/tWbLMfPe2TA=
 github.com/jackpal/go-nat-pmp v1.0.2-0.20160603034137-1fa385a6f458/go.mod h1:QPH045xvCAeXUZOxsnwmrtiCoxIr9eob+4orBN1SBKc=
 github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e/go.mod h1:G1CVv03EnqU1wYL2dFwXxW2An0az9JTl/ZsqXQeBlkU=
