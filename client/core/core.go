@@ -117,7 +117,8 @@ type dexConnection struct {
 
 	// tradeMtx is used to synchronize access to the trades map.
 	tradeMtx sync.RWMutex
-	trades   map[order.OrderID]*trackedTrade
+	// trades tracks outstanding orders issued by this client.
+	trades map[order.OrderID]*trackedTrade
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
@@ -4648,7 +4649,30 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 			note.MarketID)
 	}
 
-	return book.ValidateMatchProof(note)
+	err = book.ValidateMatchProof(note)
+	if err != nil {
+		return fmt.Errorf("match proof validation failed: %w", err)
+	}
+
+	// Validate server match checksum for client orders (trades) in this epoch.
+	for _, trade := range dc.trackedTrades() {
+		// TODO - think about len(trade.csum) > 0 fits with the rest of these conditions, and at least document the reason for having it.
+		if trade.metaData.Status == order.OrderStatusEpoch && len(trade.csum) > 0 && !bytes.Equal(note.CSum, trade.csum) {
+			// Validation can fail either due to server trying to cheat
+			// (by seeing preimage before committing to csum for a match), or
+			// client loosing (e.g. due to restarting, since we don't
+			// persistently store these at the moment) his csums for the trades
+			// involved.
+			//
+			// Just warning the user for now, later on we might wanna revoke the order if this happens.
+			c.log.Warnf("validating match checksum for epoch %d, "+
+				"match commit checksum %s is not of the same value as "+
+				"client's order commit checksum %s, order ID: %s",
+				note.Epoch, note.CSum, trade.csum, trade.ID())
+		}
+	}
+
+	return nil
 }
 
 // handleRevokeOrderMsg is called when a revoke_order message is received.
@@ -4987,7 +5011,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		go func() {
 			// Order request success OR fail closes the channel.
 			<-commitSig
-			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
+			if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
 				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
 			} else {
 				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
@@ -5013,7 +5037,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		delete(c.piSyncers, oid)
 		c.piSyncMtx.Unlock()
 		dc.log.Debugf("Received preimage request for known order %v", oid)
-		return processPreimageRequest(c, dc, msg.ID, oid)
+		return processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum)
 	}
 
 	// If we didn't find an entry, Trade or Cancel is still running. Add a chan
@@ -5030,7 +5054,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	go func() {
 		select {
 		case <-syncChan:
-			if err := processPreimageRequest(c, dc, msg.ID, oid); err != nil {
+			if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
 				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
 			} else {
 				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
@@ -5049,11 +5073,14 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	return nil
 }
 
-func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID) error {
+func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID, commitChecksum dex.Bytes) error {
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
+
+	tracker.csum = commitChecksum
+
 	// Clean up the sentCommits now that we loaded the commitment. This can be
 	// removed when the old piSyncers method is removed.
 	defer func() {

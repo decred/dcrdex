@@ -114,9 +114,9 @@ type trackedCancel struct {
 	}
 }
 
-// trackedTrade is an order, its matches, and its cancel order, if applicable.
-// The trackedTrade has methods for handling requests from the DEX to progress
-// match negotiation.
+// trackedTrade is an order (issued by this client), its matches, and its cancel
+// order, if applicable. The trackedTrade has methods for handling requests
+// from the DEX to progress match negotiation.
 type trackedTrade struct {
 	// redeemFeeSuggestion is cached fee suggestion for redemption. We can't
 	// request a fee suggestion at redeem time because it would require making
@@ -129,13 +129,15 @@ type trackedTrade struct {
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
 	// matchTrackers in the matches map.
-	mtx           sync.RWMutex
-	metaData      *db.OrderMetaData
-	dc            *dexConnection
-	db            db.DB
-	latencyQ      *wait.TickerQueue
-	wallets       *walletSet
-	preImg        order.Preimage
+	mtx      sync.RWMutex
+	metaData *db.OrderMetaData
+	dc       *dexConnection
+	db       db.DB
+	latencyQ *wait.TickerQueue
+	wallets  *walletSet
+	preImg   order.Preimage
+	// csum is a checksum, committed to by the server during some match.
+	csum          dex.Bytes
 	mktID         string
 	coins         map[string]asset.Coin
 	coinsLocked   bool

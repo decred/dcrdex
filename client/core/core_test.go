@@ -2495,10 +2495,12 @@ func TestHandlePreimageRequest(t *testing.T) {
 	}
 
 	commit := preImg.Commit()
+	commitCSum := dex.Bytes{2, 3, 5, 7, 11, 13}
 	commitSig := readyCommitment(commit)
 	payload = &msgjson.PreimageRequest{
-		OrderID:    oid[:],
-		Commitment: commit[:],
+		OrderID:        oid[:],
+		Commitment:     commit[:],
+		CommitChecksum: commitCSum,
 	}
 	reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
@@ -2509,6 +2511,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handlePreimageRequest error: %v", err)
 	}
+
 	// It has gone async now, waiting for commitSig.
 	// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
 	close(commitSig) // pretend like the order submission just finished
@@ -2520,6 +2523,16 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no order note from preimage request handling")
+	}
+
+	// tracker might be modified in different go-routines from the one running here,
+	// due to the usage of channel above its state should already be synchronized here.
+	if !bytes.Equal(commitCSum, tracker.csum) {
+		t.Fatalf(
+			"handlePreimageRequest must initialize tracker csum, exp: %s, got: %s",
+			commitCSum,
+			tracker.csum,
+		)
 	}
 
 	// negative paths
@@ -4334,8 +4347,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
 
-	// Ensure match proof validation generates an error for a non-existent
-	// orderbook generates an error.
+	// Ensure match proof validation generates an error for a non-existent orderbook.
 	err = handleMatchProofMsg(rig.core, rig.dc, req)
 	if err == nil {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
@@ -4488,7 +4500,7 @@ func TestSetEpoch(t *testing.T) {
 		t.Fatalf("error advancing epoch: %v", err)
 	}
 	if mktEpoch() != 2 {
-		t.Fatalf("expected epoch 1, got %d", mktEpoch())
+		t.Fatalf("expected epoch 2, got %d", mktEpoch())
 	}
 
 	payload.Epoch = 0
@@ -4498,7 +4510,7 @@ func TestSetEpoch(t *testing.T) {
 		t.Fatalf("error handling match proof: %v", err)
 	}
 	if mktEpoch() != 2 {
-		t.Fatalf("epoch decremented")
+		t.Fatalf("epoch changed, expected epoch 2, got %d", mktEpoch())
 	}
 }
 
