@@ -32,13 +32,21 @@ possible.
 {|
 ! variable !! units !! description
 |-
-| lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
+| lot&nbsp;size  || atoms or gwei ||  the minimum order quantity and the order quantity increment when an asset is the base asset
 |-
-| rate&nbsp;step || atoms || the minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate&nbsp;step || atoms or gwei || the minimum price rate and the price rate increment when an asset is the quote asset. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
-| fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
+| fee&nbsp;rate  || atoms/byte or gwei/gas || the minimum fee rate for swap transactions
 |-
 | swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
+|-
+| max fee rate  || atoms/byte or gwei/gas || the maximum fee rate for swap transactions
+|-
+| network || string || the network the coin daemon is running one (i.e. "mainnet")
+|-
+| bip44symbol || int || the symbol of the [https://github.com/satoshilabs/slips/blob/master/slip-0044.md registered coin type]
+|-
+| config || string || the path to the coin daemon's config file or ipc file in the case of Ethereum
 |}
 
 See also [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]].

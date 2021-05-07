@@ -23,8 +23,8 @@ While they remove the trusted third party (TTP), they insert their own products
 as a means to capture trading fees, which replaces the TTP friction with a
 new platform friction.
 
-A more robust solution is based on atomic swap technology [https://github.com/decred/atomicswap &#91;2&#93;], 
-which enables trustless exchange directly between wallets. 
+A more robust solution is based on atomic swap technology [https://github.com/decred/atomicswap &#91;2&#93;],
+which enables trustless exchange directly between wallets.
 Until recently, few blockchains supported atomic swaps, but the past few years
 have seen widespread adoption, and such an exchange is now possible.
 

@@ -110,7 +110,7 @@ All commands listed below are of the Linux variety, and assume you already
 
 1. dcrd, dcrwallet, and bitcoind should be running and synced.
 
-2. It is highly recommended that you create separate accounts for trading. 
+2. It is highly recommended that you create separate accounts for trading.
 
 #### Creating a trading account for Decred
 
@@ -373,7 +373,7 @@ network if not using mainnet.
 
 A sample is given at
 [*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
-[**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
+[**Per-asset Variables**](spec/admin.mediawiki#per-asset-variables) section of the specification for
 more information on individual options.
 
 ### Build and run dcrdex
