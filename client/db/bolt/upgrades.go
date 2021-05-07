@@ -33,20 +33,6 @@ var upgrades = [...]upgradefunc{
 // upgrades prevent reverting to older software).
 const DBVersion = uint32(len(upgrades))
 
-func fetchDBVersion(tx *bbolt.Tx) (uint32, error) {
-	bucket := tx.Bucket(appBucket)
-	if bucket == nil {
-		return 0, fmt.Errorf("app bucket not found")
-	}
-
-	versionB := bucket.Get(versionKey)
-	if versionB == nil {
-		return 0, fmt.Errorf("database version not found")
-	}
-
-	return intCoder.Uint32(versionB), nil
-}
-
 func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 	bucket := tx.Bucket(appBucket)
 	if bucket == nil {
@@ -142,7 +128,7 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
 
-	dbVersion, err := fetchDBVersion(dbtx)
+	dbVersion, err := getVersionTx(dbtx)
 	if err != nil {
 		return fmt.Errorf("error fetching database version: %w", err)
 	}
@@ -195,7 +181,7 @@ func v3Upgrade(dbtx *bbolt.Tx) error {
 }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
-	dbVersion, err := fetchDBVersion(tx)
+	dbVersion, err := getVersionTx(tx)
 	if err != nil {
 		return fmt.Errorf("error fetching database version: %w", err)
 	}
