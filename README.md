@@ -213,24 +213,23 @@ to appeal.
 
 ## Fees
 
-The dex does not charge trading fees, but users have to pay on-chain transaction
-fees. Unlike on centralized exchanges where users can trade any arbitrary amount
-of funds, orders on the dex must be made in increments of a specified lot size.
-For example, if the lot size for the DCR/BTC market is 40 DCR, users can
-make orders to buy or sell DCR in increments of 40.
+The dex does not charge fees, but users pay on-chain transaction fees.
 
-You might be lucky and have your entire order matched by one other user. In
-this case, you will have to pay 2 transaction fees: one for sending funds on
-one chain, and one for receiving funds on the other. In the worst case, each
-lot of your order is matched by a different user, and you will pay a separate
-sending and recieving transaction for each match. Check the 
+To ensure that on-chain transaction fees do not eat a significant portion of the
+order quantity, orders must be specified in increments of a minimum lot size.
+For example, if on-chain transaction fees worked out to $5, and a user was able
+to place an order to trade $10, they would lose half of their trade to
+transaction fees. So for high-fee assets, the operator must set a large lot
+size.
+
+The best case scenario is for an entire order be consumed by a single match.
+If this happens, the user pays 2 transaction fees: one swap and one redemption.
+The worst case is for the order to be consumed by single lot matches per epoch,
+in which case the user pays for a separate swap and redemption transaction per
+lot in their order.
+Check the
 [dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
 for more details about how atomic swaps work.
-
-The client contains an option to pre-split UTXOs in order to not lock up
-more funds than necessary for the duration of an atomic swap. This option will
-potentially introduce an additional transaction (for each match) on the chain
-you are sending funds from, but it could also speed up the entire process.
 
 ## Advanced Client Installation
 
