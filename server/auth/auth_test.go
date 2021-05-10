@@ -491,6 +491,7 @@ func newPreimageResult(miss bool, t int64) *db.PreimageResult {
 	return &db.PreimageResult{
 		Miss: miss,
 		Time: t,
+		ID:   randomOrderID(),
 	}
 }
 

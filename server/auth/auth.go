@@ -657,44 +657,73 @@ func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.Mark
 	return limit
 }
 
-// userScore computes the user score from the user's recent match outcomes and
-// preimage history. This must be called with the violationMtx locked.
-func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
-	if outcomes, found := auth.matchOutcomes[user]; found {
-		for v, count := range outcomes.binViolations() {
+func integrateOutcomes(matchOutcomes *latestMatchOutcomes, preimgOutcomes *latestPreimageOutcomes) (score, successCount, piMissCount int32) {
+	if matchOutcomes != nil {
+		matchCounts := matchOutcomes.binViolations()
+		for v, count := range matchCounts {
 			score += v.Score() * int32(count)
 		}
+		successCount = int32(matchCounts[ViolationSwapSuccess])
 	}
-	if outcomes, found := auth.preimgOutcomes[user]; found {
-		score += ViolationPreimageMiss.Score() * outcomes.misses()
+	if preimgOutcomes != nil {
+		piMissCount = preimgOutcomes.misses()
+		score += ViolationPreimageMiss.Score() * piMissCount
 	}
 	return
 }
 
-func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) int32 {
+// userScore computes an authenticated user's score from their recent match
+// outcomes and preimage history. They must have entries in the outcome maps.
+// Use loadUserScore to compute score from history in DB. This must be called
+// with the violationMtx locked.
+func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
+	score, _, _ = integrateOutcomes(auth.matchOutcomes[user], auth.preimgOutcomes[user])
+	return score
+}
+
+func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) (score int32) {
 	violation := misstep.Violation()
 
 	auth.violationMtx.Lock()
 	defer auth.violationMtx.Unlock()
-	outcomes, found := auth.matchOutcomes[user]
-	if !found {
-		outcomes = newLatestMatchOutcomes(scoringMatchLimit)
-		auth.matchOutcomes[user] = outcomes
+	matchOutcomes, found := auth.matchOutcomes[user]
+	if found {
+		matchOutcomes.add(&matchOutcome{
+			time:    encode.UnixMilli(refTime),
+			mid:     mmid.MatchID,
+			outcome: violation,
+			value:   value,
+			base:    mmid.Base,
+			quote:   mmid.Quote,
+		})
+		score = auth.userScore(user)
+		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+			violation.String(), violation.Score(), user, score)
+		return
 	}
-	outcomes.add(&matchOutcome{
-		time:    encode.UnixMilli(refTime),
-		mid:     mmid.MatchID,
-		outcome: violation,
-		value:   value,
-		base:    mmid.Base,
-		quote:   mmid.Quote,
-	})
 
-	score := auth.userScore(user)
-	log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+	// The user is currently not connected and authenticated. When the user logs
+	// back in, their history will be reloaded (loadUserScore) and their account
+	// will be suspended/restored as required, but compute their score now from
+	// DB so their orders may be unbooked if need.
+	matchOutcomes, piOutcomes, err := auth.loadUserOutcomes(user)
+	if err != nil {
+		log.Errorf("Failed to load swap and preimage outcomes for user %v: %v", user, err)
+		return 0
+	}
+
+	// Make outcome entries for the user to optimize subsequent outcomes calls
+	// while they are disconnected? This could lead to adding duplicate outcomes
+	// with a concurrent connect/login or subsequent outcomes while offline.
+	//
+	// auth.matchOutcomes[user] = matchOutcomes
+	// auth.preimgOutcomes[user] = piOutcomes
+
+	score, _, _ = integrateOutcomes(matchOutcomes, piOutcomes)
+	log.Debugf("Registering outcome %q (badness %d) for user %v (offline), current score = %d",
 		violation.String(), violation.Score(), user, score)
 
-	return score
+	return
 }
 
 // SwapSuccess registers the successful completion of a swap by the given user.
@@ -728,26 +757,48 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 	}
 }
 
-func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) int32 {
+func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) (score int32) {
 	auth.violationMtx.Lock()
 	defer auth.violationMtx.Unlock()
-	outcomes, found := auth.preimgOutcomes[user]
-	if !found {
-		outcomes = newLatestPreimageOutcomes(scoringOrderLimit)
-		auth.preimgOutcomes[user] = outcomes
+	piOutcomes, found := auth.preimgOutcomes[user]
+	if found {
+		piOutcomes.add(&preimageOutcome{
+			time: encode.UnixMilli(refTime),
+			oid:  oid,
+			miss: miss,
+		})
+		score = auth.userScore(user)
+		if miss {
+			log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+				ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, score)
+		}
+		return
 	}
-	outcomes.add(&preimageOutcome{
-		time: encode.UnixMilli(refTime),
-		oid:  oid,
-		miss: miss,
-	})
 
-	score := auth.userScore(user)
+	// The user is currently not connected and authenticated. When the user logs
+	// back in, their history will be reloaded (loadUserScore) and their account
+	// will be suspended/restored as required, but compute their score now from
+	// DB so their orders may be unbooked if need.
+	matchOutcomes, piOutcomes, err := auth.loadUserOutcomes(user)
+	if err != nil {
+		log.Errorf("Failed to load swap and preimage outcomes for user %v: %v", user, err)
+		return 0
+	}
+
+	// Make outcome entries for the user to optimize subsequent outcomes calls
+	// while they are disconnected? This could lead to adding duplicate outcomes
+	// with a concurrent connect/login or subsequent outcomes while offline.
+	//
+	// auth.matchOutcomes[user] = matchOutcomes
+	// auth.preimgOutcomes[user] = piOutcomes
+
+	score, _, _ = integrateOutcomes(matchOutcomes, piOutcomes)
 	if miss {
-		log.Debugf("Registering outcome %q (badness %d) for user %v, new score = %d",
+		log.Debugf("Registering outcome %q (badness %d) for user %v (offline), current score = %d",
 			ViolationPreimageMiss.String(), ViolationPreimageMiss.Score(), user, score)
 	}
-	return score
+
+	return
 }
 
 // PreimageSuccess registers an accepted preimage for the user.
@@ -944,15 +995,14 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.violationMtx.Unlock()
 }
 
-// loadUserScore computes the user's current score from order and swap data
-// retrieved from the DB.
-func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
-	var successCount, piMissCount int32
+// loadUserOutcomes returns user's latest match and preimage outcomes from order
+// and swap data retrieved from the DB.
+func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchOutcomes, *latestPreimageOutcomes, error) {
 	// Load the N most recent matches resulting in success or an at-fault match
 	// revocation for the user.
 	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, scoringMatchLimit)
 	if err != nil {
-		return 0, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
+		return nil, nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
 	}
 
 	matchStatusToViol := func(status order.MatchStatus) Violation {
@@ -975,22 +1025,16 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	// Load the count of preimage misses in the N most recently placed orders.
 	piOutcomes, err := auth.storage.PreimageStats(user, scoringOrderLimit)
 	if err != nil {
-		return 0, fmt.Errorf("PreimageStats: %w", err)
+		return nil, nil, fmt.Errorf("PreimageStats: %w", err)
 	}
 
-	auth.violationMtx.Lock()
-	defer auth.violationMtx.Unlock()
-
 	latestMatches := newLatestMatchOutcomes(scoringMatchLimit)
-	auth.matchOutcomes[user] = latestMatches
 	for _, mo := range matchOutcomes {
 		// The Fail flag qualifies MakerRedeemed, which is always success for
 		// maker, but fail for taker if revoked.
 		v := ViolationSwapSuccess
 		if mo.Fail {
 			v = matchStatusToViol(mo.Status)
-		} else {
-			successCount++
 		}
 		latestMatches.add(&matchOutcome{
 			time:    mo.Time,
@@ -1003,11 +1047,7 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 	}
 
 	latestPreimageResults := newLatestPreimageOutcomes(scoringOrderLimit)
-	auth.preimgOutcomes[user] = latestPreimageResults
 	for _, po := range piOutcomes {
-		if po.Miss {
-			piMissCount++
-		}
 		latestPreimageResults.add(&preimageOutcome{
 			time: po.Time,
 			oid:  po.ID,
@@ -1015,8 +1055,27 @@ func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
 		})
 	}
 
-	// Integrate the match and preimage outcomes.
-	score := auth.userScore(user)
+	return latestMatches, latestPreimageResults, nil
+}
+
+// loadUserScore computes the user's current score from order and swap data
+// retrieved from the DB. The creates entries in the matchOutcomes and
+// preimgOutcomes maps for the user.
+func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
+	// Load the N most recent matches resulting in success or an at-fault match
+	// revocation for the user.
+	latestMatches, latestPreimageResults, err := auth.loadUserOutcomes(user)
+	if err != nil {
+		return 0, err
+	}
+
+	score, successCount, piMissCount := integrateOutcomes(latestMatches, latestPreimageResults)
+
+	// Make outcome entries for the user.
+	auth.violationMtx.Lock()
+	auth.matchOutcomes[user] = latestMatches
+	auth.preimgOutcomes[user] = latestPreimageResults
+	auth.violationMtx.Unlock()
 
 	successScore := successCount * successScore // negative
 	piMissScore := piMissCount * preimageMissScore
@@ -1131,6 +1190,13 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		client.suspended = true
 		auth.storage.CloseAccount(user, account.FailureToAct)
 		log.Debugf("Suspended account %v (score = %d) connected.", acctInfo.ID, score)
+	} else if score < int32(auth.banScore) && !open {
+		if err = auth.Unban(user); err == nil {
+			log.Warnf("Restoring suspended account %v (score = %d).", acctInfo.ID, score)
+		} else {
+			log.Errorf("Failed to restore suspended account %v (score = %d): %v.",
+				acctInfo.ID, score, err)
+		}
 	}
 
 	// Get the list of active orders for this user.
