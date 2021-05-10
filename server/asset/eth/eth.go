@@ -8,11 +8,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -59,10 +62,13 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
-	shutdown()
-	connect(ctx context.Context, IPC string) error
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
+	connect(ctx context.Context, IPC string) error
+	shutdown()
+	suggestGasPrice(ctx context.Context) (*big.Int, error)
+	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
+	blockNumber(ctx context.Context) (uint64, error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -70,6 +76,12 @@ type ethFetcher interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
+	// syncingStarted and initBlockNum are atomics and are used to determine
+	// whether the node has started syncing.
+	syncingStarted uint32
+	initBlockNum   uint64
+
+	ctx  context.Context
 	cfg  *config
 	node ethFetcher
 	// The backend provides block notification channels through the BlockChannel
@@ -161,9 +173,17 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 	return 0
 }
 
-// FeeRate returns the current optimal fee rate in atoms / byte.
+// FeeRate returns the current optimal fee rate in gwei / gas.
 func (eth *Backend) FeeRate() (uint64, error) {
-	return 0, notImplementedErr
+	bigGP, err := eth.node.suggestGasPrice(eth.ctx)
+	if err != nil {
+		return 0, err
+	}
+	bigGP.Div(bigGP, gweiFactorBig)
+	if !bigGP.IsUint64() {
+		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", bigGP)
+	}
+	return bigGP.Uint64(), nil
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -189,7 +209,34 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (eth *Backend) Synced() (bool, error) {
-	return false, notImplementedErr
+	// node.SyncProgress will return nil both before syncing has begun and
+	// after it has finished. In order to discern when syncing has begun,
+	// wait for at least one change in block count, then defer to
+	// node.SyncProgress for the lifetime of the eth backend.
+	syncingStarted := atomic.LoadUint32(&eth.syncingStarted)
+	if syncingStarted != 1 {
+		ibn := atomic.LoadUint64(&eth.initBlockNum)
+		bn, err := eth.node.blockNumber(eth.ctx)
+		if err != nil {
+			return false, err
+		}
+		if ibn == 0 {
+			atomic.StoreUint64(&eth.initBlockNum, bn)
+			return false, nil
+		}
+		if bn == ibn {
+			return false, nil
+		}
+		atomic.StoreUint32(&eth.syncingStarted, 1)
+	}
+	sp, err := eth.node.syncProgress(eth.ctx)
+	if err != nil {
+		return false, err
+	}
+	if sp == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -225,6 +272,7 @@ func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 
 // run processes the queue and monitors the application context.
 func (eth *Backend) run(ctx context.Context) {
+	eth.ctx = ctx
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().

@@ -6,11 +6,13 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -26,6 +28,12 @@ type testNode struct {
 	bestBlkHashErr error
 	blk            *types.Block
 	blkErr         error
+	blkNum         uint64
+	blkNumErr      error
+	syncProg       *ethereum.SyncProgress
+	syncProgErr    error
+	sugGasPrice    *big.Int
+	sugGasPriceErr error
 }
 
 func (n *testNode) connect(ctx context.Context, IPC string) error {
@@ -40,6 +48,18 @@ func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
 
 func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return n.blk, n.blkErr
+}
+
+func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
+	return n.blkNum, n.blkNumErr
+}
+
+func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return n.syncProg, n.syncProgErr
+}
+
+func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
+	return n.sugGasPrice, n.sugGasPriceErr
 }
 
 func TestLoad(t *testing.T) {
@@ -235,4 +255,166 @@ func TestRun(t *testing.T) {
 		t.Fatalf("want header hash %x but got %x", blockHash1, best.hash)
 	}
 	cancel()
+}
+
+func TestFeeRate(t *testing.T) {
+	maxInt := ^uint64(0)
+	maxWei := new(big.Int).SetUint64(maxInt)
+	maxWei.Mul(maxWei, gweiFactorBig)
+	overMaxWei := new(big.Int).Set(maxWei)
+	overMaxWei.Add(overMaxWei, gweiFactorBig)
+	tests := []struct {
+		name    string
+		gas     *big.Int
+		gasErr  error
+		wantFee uint64
+		wantErr bool
+	}{{
+		name:    "ok zero",
+		gas:     big.NewInt(0),
+		wantFee: 0,
+	}, {
+		name:    "ok rounded down",
+		gas:     big.NewInt(gweiFactor - 1),
+		wantFee: 0,
+	}, {
+		name:    "ok one",
+		gas:     big.NewInt(gweiFactor),
+		wantFee: 1,
+	}, {
+		name:    "ok max int",
+		gas:     maxWei,
+		wantFee: maxInt,
+	}, {
+		name:    "over max int",
+		gas:     overMaxWei,
+		wantErr: true,
+	}, {
+		name:    "node suggest gas fee error",
+		gas:     big.NewInt(0),
+		gasErr:  errors.New(""),
+		wantErr: true,
+	}}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{
+			sugGasPrice:    test.gas,
+			sugGasPriceErr: test.gasErr,
+		}
+		eth := &Backend{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+		}
+		fee, err := eth.FeeRate()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if fee != test.wantFee {
+			t.Fatalf("want fee %v got %v for test %q", test.wantFee, fee, test.name)
+		}
+	}
+}
+
+func TestSynced(t *testing.T) {
+	tests := []struct {
+		name                   string
+		SS, wantSS             uint32
+		IBN, wantIBN, blkNum   uint64
+		syncProg               *ethereum.SyncProgress
+		blkNumErr, syncProgErr error
+		wantErr, wantSynced    bool
+	}{{
+		name:    "ok not initially synced ibm zero",
+		SS:      0,
+		wantSS:  0,
+		IBN:     0,
+		wantIBN: 100,
+		blkNum:  100,
+	}, {
+		name:    "ok not initially synced no block number change",
+		SS:      0,
+		wantSS:  0,
+		IBN:     100,
+		wantIBN: 100,
+		blkNum:  100,
+	}, {
+		name:     "ok not initially synced progress returned",
+		SS:       0,
+		wantSS:   1,
+		IBN:      100,
+		wantIBN:  100,
+		blkNum:   101,
+		syncProg: new(ethereum.SyncProgress),
+	}, {
+		name:       "ok not initially synced progress not returned",
+		SS:         0,
+		wantSS:     1,
+		IBN:        100,
+		wantIBN:    100,
+		blkNum:     101,
+		wantSynced: true,
+	}, {
+		name:     "ok initially synced progress returned",
+		SS:       1,
+		wantSS:   1,
+		IBN:      100,
+		wantIBN:  100,
+		syncProg: new(ethereum.SyncProgress),
+	}, {
+		name:      "not initially synced blockNumber error",
+		SS:        0,
+		blkNumErr: errors.New(""),
+		wantErr:   true,
+	}, {
+		name:        "initially synced syncProgress error",
+		SS:          1,
+		syncProgErr: errors.New(""),
+		wantErr:     true,
+	}}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{
+			syncProg:    test.syncProg,
+			syncProgErr: test.syncProgErr,
+			blkNum:      test.blkNum,
+			blkNumErr:   test.blkNumErr,
+		}
+		eth := &Backend{
+			node:           node,
+			ctx:            ctx,
+			log:            tLogger,
+			syncingStarted: test.SS,
+			initBlockNum:   test.IBN,
+		}
+		synced, err := eth.Synced()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if synced != test.wantSynced {
+			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
+		}
+		if eth.syncingStarted != test.wantSS {
+			t.Fatalf("want syncing started %v got %v for test %q", test.wantSS, eth.syncingStarted, test.name)
+		}
+		if eth.initBlockNum != test.wantIBN {
+			t.Fatalf("want initial block number %v got %v for test %q", test.wantIBN, eth.initBlockNum, test.name)
+		}
+	}
 }

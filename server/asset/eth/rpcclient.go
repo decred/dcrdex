@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -21,6 +22,10 @@ type rpcclient struct {
 	ec *ethclient.Client
 }
 
+const gweiFactor = 1e9
+
+var gweiFactorBig = big.NewInt(gweiFactor)
+
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easil use.
 func (c *rpcclient) connect(ctx context.Context, IPC string) error {
@@ -28,8 +33,7 @@ func (c *rpcclient) connect(ctx context.Context, IPC string) error {
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
-	ec := ethclient.NewClient(client)
-	c.ec = ec
+	c.ec = ethclient.NewClient(client)
 	return nil
 }
 
@@ -70,4 +74,32 @@ func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, 
 		return nil, err
 	}
 	return block, nil
+}
+
+// suggestGasPrice retrieves the currently suggested gas price to allow a timely
+// execution of a transaction.
+func (c *rpcclient) suggestGasPrice(ctx context.Context) (sgp *big.Int, err error) {
+	// NOTE: geth will panic if this is called too soon after creating the
+	// node.
+	defer func() {
+		if r := recover(); r != nil {
+			sgp = nil
+			err = fmt.Errorf("geth panic: %v", r)
+		}
+	}()
+	sgp, err = c.ec.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sgp, nil
+}
+
+// syncProgress return the current sync progress. Returns no error and nil when not syncing.
+func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return c.ec.SyncProgress(ctx)
+}
+
+// blockNumber returns the current block number.
+func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
+	return c.ec.BlockNumber(ctx)
 }
