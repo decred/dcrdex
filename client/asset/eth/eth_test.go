@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -29,6 +30,10 @@ type testNode struct {
 	bestBlkHashErr error
 	blk            *types.Block
 	blkErr         error
+	blkNum         uint64
+	blkNumErr      error
+	syncProg       *ethereum.SyncProgress
+	syncProgErr    error
 }
 
 func (n *testNode) connect(ctx context.Context, node *node.Node, addr common.Address) error {
@@ -47,7 +52,7 @@ func (n *testNode) accounts() []*accounts.Account {
 func (n *testNode) balance(ctx context.Context, acct *accounts.Account) (*big.Int, error) {
 	return nil, nil
 }
-func (n *testNode) sendToAddr(ctx context.Context, acct *accounts.Account, addr common.Address, amt, gasFee *big.Int) (common.Hash, error) {
+func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
 }
 func (n *testNode) syncStatus(ctx context.Context) (bool, float32, error) {
@@ -59,8 +64,8 @@ func (n *testNode) unlock(ctx context.Context, pw string, acct *accounts.Account
 func (n *testNode) lock(ctx context.Context, acct *accounts.Account) error {
 	return nil
 }
-func (n *testNode) locked(ctx context.Context, acct *accounts.Account) (bool, error) {
-	return false, nil
+func (n *testNode) listWallets(ctx context.Context) ([]rawWallet, error) {
+	return nil, nil
 }
 func (n *testNode) importAccount(pw string, privKeyB []byte) (*accounts.Account, error) {
 	return nil, nil
@@ -72,7 +77,10 @@ func (n *testNode) nodeInfo(ctx context.Context) (*p2p.NodeInfo, error) {
 	return nil, nil
 }
 func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
-	return 0, nil
+	return n.blkNum, n.blkNumErr
+}
+func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return n.syncProg, n.syncProgErr
 }
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
 	return nil, nil
@@ -175,5 +183,111 @@ func TestCheckForNewBlocks(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
+	}
+}
+
+func TestSyncStatus(t *testing.T) {
+	fourthSyncProg := &ethereum.SyncProgress{
+		CurrentBlock: 25,
+		HighestBlock: 100,
+	}
+	tests := []struct {
+		name                   string
+		SS, wantSS             uint32
+		IBN, wantIBN, blkNum   uint64
+		syncProg               *ethereum.SyncProgress
+		blkNumErr, syncProgErr error
+		wantRatio              float32
+		wantErr, wantSynced    bool
+	}{{
+		name:    "ok not initially synced ibm zero",
+		SS:      0,
+		wantSS:  0,
+		IBN:     0,
+		wantIBN: 100,
+		blkNum:  100,
+	}, {
+		name:    "ok not initially synced no block number change",
+		SS:      0,
+		wantSS:  0,
+		IBN:     100,
+		wantIBN: 100,
+		blkNum:  100,
+	}, {
+		name:      "ok not initially synced progress returned",
+		SS:        0,
+		wantSS:    1,
+		IBN:       100,
+		wantIBN:   100,
+		blkNum:    101,
+		syncProg:  fourthSyncProg,
+		wantRatio: 0.25,
+	}, {
+		name:       "ok not initially synced progress not returned",
+		SS:         0,
+		wantSS:     1,
+		IBN:        100,
+		wantIBN:    100,
+		blkNum:     101,
+		wantSynced: true,
+		wantRatio:  1,
+	}, {
+		name:      "ok initially synced progress returned",
+		SS:        1,
+		wantSS:    1,
+		IBN:       100,
+		wantIBN:   100,
+		syncProg:  fourthSyncProg,
+		wantRatio: 0.25,
+	}, {
+		name:      "not initially synced blockNumber error",
+		SS:        0,
+		blkNumErr: errors.New(""),
+		wantErr:   true,
+	}, {
+		name:        "initially synced syncProgress error",
+		SS:          1,
+		syncProgErr: errors.New(""),
+		wantErr:     true,
+	}}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{
+			syncProg:    test.syncProg,
+			syncProgErr: test.syncProgErr,
+			blkNum:      test.blkNum,
+			blkNumErr:   test.blkNumErr,
+		}
+		eth := &ExchangeWallet{
+			node:           node,
+			ctx:            ctx,
+			log:            tLogger,
+			syncingStarted: test.SS,
+			initBlockNum:   test.IBN,
+		}
+		synced, ratio, err := eth.SyncStatus()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if synced != test.wantSynced {
+			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
+		}
+		if ratio != test.wantRatio {
+			t.Fatalf("want ratio %v got %v for test %q", test.wantRatio, ratio, test.name)
+		}
+		if eth.syncingStarted != test.wantSS {
+			t.Fatalf("want syncing started %v got %v for test %q", test.wantSS, eth.syncingStarted, test.name)
+		}
+		if eth.initBlockNum != test.wantIBN {
+			t.Fatalf("want initial block number %v got %v for test %q", test.wantIBN, eth.initBlockNum, test.name)
+		}
 	}
 }

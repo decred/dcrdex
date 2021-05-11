@@ -253,26 +253,26 @@ func TestLock(t *testing.T) {
 	}
 }
 
-func TestLocked(t *testing.T) {
-	err := ethClient.unlock(ctx, pw, simnetAcct)
+func TestListWallets(t *testing.T) {
+	wallets, err := ethClient.listWallets(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	locked, err := ethClient.locked(ctx, simnetAcct)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if locked {
-		t.Fatal("expected account to be unlocked")
-	}
+	spew.Dump(wallets)
 }
 
-func TestSendToAddr(t *testing.T) {
+func TestSendTransaction(t *testing.T) {
 	err := ethClient.unlock(ctx, pw, simnetAcct)
 	if err != nil {
 		t.Fatal(err)
 	}
-	txHash, err := ethClient.sendToAddr(ctx, simnetAcct, simnetAddr, big.NewInt(1), gasPrice)
+	tx := map[string]string{
+		"from":     fmt.Sprintf("0x%x", simnetAddr),
+		"to":       fmt.Sprintf("0x%x", simnetAddr),
+		"value":    fmt.Sprintf("0x%x", big.NewInt(1)),
+		"gasPrice": fmt.Sprintf("0x%x", gasPrice),
+	}
+	txHash, err := ethClient.sendTransaction(ctx, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,13 @@ func TestTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	txHash, err := ethClient.sendToAddr(ctx, simnetAcct, simnetAddr, big.NewInt(1), gasPrice)
+	tx := map[string]string{
+		"from":     fmt.Sprintf("0x%x", simnetAddr),
+		"to":       fmt.Sprintf("0x%x", simnetAddr),
+		"value":    fmt.Sprintf("0x%x", big.NewInt(1)),
+		"gasPrice": fmt.Sprintf("0x%x", gasPrice),
+	}
+	txHash, err := ethClient.sendTransaction(ctx, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,11 +316,10 @@ func TestPendingTransactions(t *testing.T) {
 	spew.Dump(txs)
 }
 
-func TestSyncStatus(t *testing.T) {
-	synced, ratio, err := ethClient.syncStatus(ctx)
+func TestSyncProgress(t *testing.T) {
+	progress, err := ethClient.syncProgress(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spew.Dump(synced)
-	spew.Dump(ratio)
+	spew.Dump(progress)
 }

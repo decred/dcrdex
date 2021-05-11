@@ -4,12 +4,11 @@
 package eth
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
@@ -47,7 +46,7 @@ func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr c
 	return nil
 }
 
-// Shutdown shuts down the client.
+// shutdown shuts down the client.
 func (c *rpcclient) shutdown() {
 	if c.ec != nil {
 		// this will also close c.c
@@ -79,7 +78,7 @@ func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return header, nil
 }
 
-// Block gets the block identified by hash.
+// block gets the block identified by hash.
 func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	block, err := c.ec.BlockByHash(ctx, hash)
 	if err != nil {
@@ -88,7 +87,7 @@ func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, 
 	return block, nil
 }
 
-// Accounts uses a raw request to obtain all accounts from personal.listAccounts.
+// accounts returns all accounts from the internal node.
 func (c *rpcclient) accounts() []*accounts.Account {
 	var accts []*accounts.Account
 	for _, wallet := range c.n.AccountManager().Wallets() {
@@ -99,18 +98,18 @@ func (c *rpcclient) accounts() []*accounts.Account {
 	return accts
 }
 
-// Balance gets the current balance of an account.
+// balance gets the current balance of an account.
 func (c *rpcclient) balance(ctx context.Context, acct *accounts.Account) (*big.Int, error) {
 	return c.ec.BalanceAt(ctx, acct.Address, nil)
 }
 
-// Unlock uses a raw request to unlock an account indefinitely.
+// unlock uses a raw request to unlock an account indefinitely.
 func (c *rpcclient) unlock(ctx context.Context, pw string, acct *accounts.Account) error {
 	// Passing 0 as the last argument unlocks with not lock time.
 	return c.c.CallContext(ctx, nil, "personal_unlockAccount", acct.Address.String(), pw, 0)
 }
 
-// Lock uses a raw request to unlock an account indefinitely.
+// lock uses a raw request to unlock an account indefinitely.
 func (c *rpcclient) lock(ctx context.Context, acct *accounts.Account) error {
 	return c.c.CallContext(ctx, nil, "personal_lockAccount", acct.Address.String())
 }
@@ -158,44 +157,18 @@ func (c *rpcclient) nodeInfo(ctx context.Context) (*p2p.NodeInfo, error) {
 	return info, nil
 }
 
-// Locked uses a raw request to unlock an account indefinitely.
-func (c *rpcclient) locked(ctx context.Context, acct *accounts.Account) (bool, error) {
-	type rawWallet struct {
-		URL      string             `json:"url"`
-		Status   string             `json:"status"`
-		Failure  string             `json:"failure,omitempty"`
-		Accounts []accounts.Account `json:"accounts,omitempty"`
-	}
+// listWallets list all of the wallet's wallets? and accounts along with details
+// such as locked status.
+func (c *rpcclient) listWallets(ctx context.Context) ([]rawWallet, error) {
 	var res []rawWallet
 	if err := c.c.CallContext(ctx, &res, "personal_listWallets"); err != nil {
-		return false, err
+		return nil, err
 	}
-	var wallet rawWallet
-	findWallet := func() bool {
-		for _, w := range res {
-			for _, a := range w.Accounts {
-				if bytes.Equal(a.Address[:], acct.Address[:]) {
-					wallet = w
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if !findWallet() {
-		return false, errors.New("unable to find account")
-	}
-	return wallet.Status != "Unlocked", nil
+	return res, nil
 }
 
-// SendToAddr uses a raw request to send funds to an addr from acct.
-func (c *rpcclient) sendToAddr(ctx context.Context, acct *accounts.Account, addr common.Address, amt, gasFee *big.Int) (common.Hash, error) {
-	tx := map[string]string{
-		"from":     fmt.Sprintf("0x%x", acct.Address),
-		"to":       fmt.Sprintf("0x%x", addr),
-		"value":    fmt.Sprintf("0x%x", amt),
-		"gasPrice": fmt.Sprintf("0x%x", gasFee),
-	}
+// sendTransaction uses a raw request to send tx.
+func (c *rpcclient) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	res := common.Hash{}
 	err := c.c.CallContext(ctx, &res, "eth_sendTransaction", tx)
 	if err != nil {
@@ -204,21 +177,9 @@ func (c *rpcclient) sendToAddr(ctx context.Context, acct *accounts.Account, addr
 	return res, nil
 }
 
-// SyncStatus gets the current sync status of a node.
-//
-// TODO: sync logic is most likely wrong and has been reported as not working
-// correctly on testnet. Fix it.
-func (c *rpcclient) syncStatus(ctx context.Context) (bool, float32, error) {
-	sync, err := c.ec.SyncProgress(ctx)
-	if err != nil {
-		return false, 0, err
-	}
-	// TODO: Ensure sync == nil means that the node is no longer syncing.
-	if sync == nil {
-		return true, 1, nil
-	}
-	ratio := float32(sync.CurrentBlock) / float32(sync.HighestBlock)
-	return false, ratio, nil
+// syncProgress return the current sync progress. Returns no error and nil when not syncing.
+func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return c.ec.SyncProgress(ctx)
 }
 
 // importAccount imports an account into the ethereum wallet by private key
@@ -226,7 +187,7 @@ func (c *rpcclient) syncStatus(ctx context.Context) (bool, float32, error) {
 func (c *rpcclient) importAccount(pw string, privKeyB []byte) (*accounts.Account, error) {
 	privKey, err := crypto.ToECDSA(privKeyB)
 	if err != nil {
-		return new(accounts.Account), fmt.Errorf("error restoring private key: %v \n", err)
+		return new(accounts.Account), fmt.Errorf("error parsing private key: %v", err)
 	}
 	ks := c.n.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
 	acct, err := ks.ImportECDSA(privKey, pw)
