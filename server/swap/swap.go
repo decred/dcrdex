@@ -843,6 +843,7 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	// Record the end of this match's processing.
 	s.storage.SetMatchInactive(db.MatchID(match.Match))
 
+	// Cancellation rate accounting
 	s.swapDone(orderAtFault, match.Match, true) // will also unbook/revoke order if needed
 	s.swapDone(otherOrder, match.Match, false)
 
@@ -1473,11 +1474,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		// SaveRedeemB flags the match as inactive in the DB.
 	}
 
-	// Credit the user for completing the swap, adjusting the user's score.
-	if actor.user != counterParty.user || newStatus == order.MatchComplete { // if user is both sides, only credit on MatchComplete (taker done too)
-		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime) // maybe call this in swapDone callback
-	}
-
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
 	// the secret. Taker is party B, the participant.
@@ -1495,6 +1491,11 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		// Neither party's fault. Continue.
+	}
+
+	// Credit the user for completing the swap, adjusting the user's score.
+	if actor.user != counterParty.user || newStatus == order.MatchComplete { // if user is both sides, only credit on MatchComplete (taker done too)
+		s.authMgr.SwapSuccess(actor.user, db.MatchID(match.Match), match.Quantity, redeemTime) // maybe call this in swapDone callback
 	}
 
 	// Issue a positive response to the actor.

@@ -46,6 +46,15 @@ func (la *latestMatchOutcomes) add(mo *matchOutcome) {
 	la.mtx.Lock()
 	defer la.mtx.Unlock()
 
+	// Do a dumb search for the match ID, without regard to time, so we can't
+	// insert a match twice.
+	for _, oc := range la.outcomes {
+		if oc.mid == mo.mid {
+			log.Warnf("(*latestMatchOutcomes).add: Rejecting duplicate match ID: %v", mo.mid)
+			return
+		}
+	}
+
 	// Use sort.Search and insert it at the right spot.
 	n := len(la.outcomes)
 	i := sort.Search(n, func(i int) bool {
@@ -68,6 +77,9 @@ func (la *latestMatchOutcomes) add(mo *matchOutcome) {
 }
 
 func (la *latestMatchOutcomes) binViolations() map[Violation]int64 {
+	la.mtx.Lock()
+	defer la.mtx.Unlock()
+
 	bins := make(map[Violation]int64)
 	for _, mo := range la.outcomes {
 		bins[mo.outcome]++
@@ -148,6 +160,15 @@ func (la *latestPreimageOutcomes) add(po *preimageOutcome) {
 	la.mtx.Lock()
 	defer la.mtx.Unlock()
 
+	// Do a dumb search for the order ID, without regard to time, so we can't
+	// insert an order twice.
+	for _, oc := range la.outcomes {
+		if oc.oid == po.oid {
+			log.Warnf("(*latestPreimageOutcomes).add: Rejecting duplicate order ID: %v", po.oid)
+			return
+		}
+	}
+
 	// Use sort.Search and insert it at the right spot.
 	n := len(la.outcomes)
 	i := sort.Search(n, func(i int) bool {
@@ -170,6 +191,9 @@ func (la *latestPreimageOutcomes) add(po *preimageOutcome) {
 }
 
 func (la *latestPreimageOutcomes) misses() (misses int32) {
+	la.mtx.Lock()
+	defer la.mtx.Unlock()
+
 	for _, th := range la.outcomes {
 		if th.miss {
 			misses++
