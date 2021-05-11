@@ -1191,8 +1191,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		auth.storage.CloseAccount(user, account.FailureToAct)
 		log.Debugf("Suspended account %v (score = %d) connected.", acctInfo.ID, score)
 	} else if score < int32(auth.banScore) && !open {
-		// banScore is a configurable threshold that may have change. This also
-		// assists recover in the event of an online accounting bug.
+		// banScore is a configurable threshold that may have changed. This also
+		// assists account recovery in the event of an online accounting bug.
 		if err = auth.Unban(user); err == nil {
 			log.Warnf("Restoring suspended account %v (score = %d).", acctInfo.ID, score)
 			client.suspended = false
