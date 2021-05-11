@@ -127,7 +127,7 @@ var _ asset.Backend = (*Backend)(nil)
 func unconnectedDCR(logger dex.Logger, cfg *config) *Backend {
 	return &Backend{
 		cfg:        cfg,
-		blockCache: dexdcr.NewBlockCache(logger),
+		blockCache: dexdcr.NewBlockCache(),
 		log:        logger,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
 	}

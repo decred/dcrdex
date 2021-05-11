@@ -531,7 +531,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
-		blockCache:          dexdcr.NewBlockCache(logger),
+		blockCache:          dexdcr.NewBlockCache(),
 	}, nil
 }
 
@@ -2792,7 +2792,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	// adding the new best block to the cache and notifying consumers of the tip
 	// change.
 	var redemptionSearchStartBlock *block
-	err = (func() error {
+	err = func() error {
 		// If the new best block builds on the cached best block or the cache is empty,
 		// it's good to add.
 		if cachedBestHash == nil {
@@ -2830,10 +2830,11 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 			return nil
 		}
 
-		// Cached best block is still a valid mainchain block but some other intermediate
+		// Cached best block is still a valid mainchain block but some of the subsequent
 		// blocks that were previously cached may have been reorged out. Purge the cached
 		// mainchain blocks in the uncertain range.
 		afterPrivTip := cachedBestBlock.Height + 1
+		dcr.blockCache.PurgeMainchainBlocks(afterPrivTip)
 		hashAfterPrevTip, err := dcr.getBlockHash(afterPrivTip)
 		if err != nil {
 			return fmt.Errorf("getblockhash error for height %d: %w", afterPrivTip, translateRPCCancelErr(err))
@@ -2842,7 +2843,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 			newTip.height, newTip.hash)
 		redemptionSearchStartBlock = &block{hash: hashAfterPrevTip, height: afterPrivTip}
 		return nil
-	})()
+	}()
 	if err != nil {
 		go dcr.tipChange(err)
 		return

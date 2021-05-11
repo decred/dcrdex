@@ -7,21 +7,24 @@ import (
 	"fmt"
 	"sync"
 
-	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 )
 
 // Block defines basic information about a block.
 type Block struct {
-	Hash         *chainhash.Hash
-	Height       int64
-	PreviousHash string
-	Vote         bool // stakeholder vote result for the previous block
+	Hash   *chainhash.Hash
+	Height int64
+	Vote   bool // stakeholder vote result for the previous block
 }
 
 // BlockCache caches block information to prevent repeated calls to
 // rpcclient.GetblockVerbose.
+//
+// TODO: To prevent the cache from growing infinitely, add a pruning
+// mechanism. Consider setting a capacity and evicting blocks based on
+// height since there's no obvious way to know which block is no longer
+// needed and should be evicted.
 type BlockCache struct {
 	mtx       sync.RWMutex
 	blocks    map[chainhash.Hash]*Block
@@ -30,14 +33,12 @@ type BlockCache struct {
 		hash   *chainhash.Hash
 		height int64
 	}
-	log dex.Logger
 }
 
-func NewBlockCache(log dex.Logger) *BlockCache {
+func NewBlockCache() *BlockCache {
 	return &BlockCache{
 		blocks:    make(map[chainhash.Hash]*Block),
 		mainchain: make(map[int64]*chainhash.Hash),
-		log:       log,
 	}
 }
 
@@ -54,15 +55,14 @@ func (cache *BlockCache) Add(block *chainjson.GetBlockVerboseResult) (*Block, er
 	}
 
 	blk := &Block{
-		Hash:         hash,
-		Height:       block.Height,
-		PreviousHash: block.PreviousHash,
-		Vote:         block.VoteBits&1 != 0,
+		Hash:   hash,
+		Height: block.Height,
+		Vote:   block.VoteBits&1 != 0,
 	}
 	cache.blocks[*hash] = blk
 
-	// Orphaned blocks will have -1 confirmations. Don't add them to mainchain.
-	if block.Confirmations > -1 {
+	// Orphaned blocks will have < 0 confirmations. Don't add them to mainchain.
+	if block.Confirmations >= 0 {
 		cache.mainchain[block.Height] = hash
 		if block.Height > cache.bestBlock.height {
 			cache.bestBlock.height = block.Height

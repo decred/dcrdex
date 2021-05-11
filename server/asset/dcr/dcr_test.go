@@ -1199,7 +1199,7 @@ func TestReorg(t *testing.T) {
 	var tipHash *chainhash.Hash
 	reset := func() {
 		cleanTestChain()
-		dcr.blockCache = dexdcr.NewBlockCache(dcr.log)
+		dcr.blockCache = dexdcr.NewBlockCache()
 		for h := int64(0); h <= tipHeight; h++ {
 			blockHash := testAddBlockVerbose(nil, tipHeight-h+1, h, 1)
 			// force dcr to get and cache the block
