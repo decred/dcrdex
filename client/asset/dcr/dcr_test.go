@@ -2253,11 +2253,8 @@ func TestCalcPastMedianTime(t *testing.T) {
 		prefix += "00"
 	}
 
-	hash, err := chainhash.NewHashFromStr(fmt.Sprintf("%v00", prefix))
-	if err != nil {
-		t.Fatalf("error creating chain hash: %v", err)
-	}
-	wallet.currentTip.hash = hash
+	// Initialize best block cache at height 0.
+	wallet.blockCache.Add(&chainjson.GetBlockVerboseResult{Hash: fmt.Sprintf("%v00", prefix)})
 
 	blockHeaders := func(n int) map[string]*chainjson.GetBlockHeaderVerboseResult {
 		m := make(map[string]*chainjson.GetBlockHeaderVerboseResult)

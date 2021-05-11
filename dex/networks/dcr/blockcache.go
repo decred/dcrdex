@@ -36,10 +36,12 @@ type BlockCache struct {
 }
 
 func NewBlockCache() *BlockCache {
-	return &BlockCache{
+	cache := &BlockCache{
 		blocks:    make(map[chainhash.Hash]*Block),
 		mainchain: make(map[int64]*chainhash.Hash),
 	}
+	cache.bestBlock.height = -1
+	return cache
 }
 
 // Add adds a block to the BlockCache. This method will translate the RPC result

@@ -1675,9 +1675,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 // calcPastMedianTime calculates the median time of the previous few blocks
 // prior to, and including, the best block.
 func (dcr *ExchangeWallet) calcPastMedianTime() (time.Time, error) {
-	dcr.tipMtx.RLock()
-	hash := dcr.currentTip.hash
-	dcr.tipMtx.RUnlock()
+	hash, _ := dcr.blockCache.Tip()
 
 	// Look at the last 11 blocks, which is consistent with dcrd.
 	timestamps := make([]int64, 0, 11)
