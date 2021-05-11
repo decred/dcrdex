@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -96,6 +97,14 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// rawWallet is a return type from the eth client.
+type rawWallet struct {
+	URL      string             `json:"url"`
+	Status   string             `json:"status"`
+	Failure  string             `json:"failure,omitempty"`
+	Accounts []accounts.Account `json:"accounts,omitempty"`
+}
+
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
@@ -107,14 +116,14 @@ type ethFetcher interface {
 	blockNumber(ctx context.Context) (uint64, error)
 	connect(ctx context.Context, node *node.Node, contractAddr common.Address) error
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
+	listWallets(ctx context.Context) ([]rawWallet, error)
 	lock(ctx context.Context, acct *accounts.Account) error
-	locked(ctx context.Context, acct *accounts.Account) (bool, error)
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
 	transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
-	sendToAddr(ctx context.Context, acct *accounts.Account, addr common.Address, amt, gasFee *big.Int) (common.Hash, error)
+	sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error)
 	shutdown()
-	syncStatus(ctx context.Context) (bool, float32, error)
+	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	unlock(ctx context.Context, pw string, acct *accounts.Account) error
 }
 
@@ -128,10 +137,16 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
-	ctx          context.Context // the asset subsystem starts with Connect(ctx)
-	node         ethFetcher
-	log          dex.Logger
-	tipChange    func(error)
+
+	// syncingStarted and initBlockNum are atomics and are used to determine
+	// whether the node has started syncing.
+	initBlockNum   uint64
+	syncingStarted uint32
+
+	ctx       context.Context // the asset subsystem starts with Connect(ctx)
+	node      ethFetcher
+	log       dex.Logger
+	tipChange func(error)
 
 	internalNode *node.Node
 
@@ -365,15 +380,30 @@ func (eth *ExchangeWallet) Lock() error {
 
 // Locked will be true if the wallet is currently locked.
 func (eth *ExchangeWallet) Locked() bool {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
-	locked, err := eth.node.locked(eth.ctx, eth.acct)
+	wallets, err := eth.node.listWallets(eth.ctx)
 	if err != nil {
-		eth.log.Errorf("unable to get locked status of account: %v", err)
-		// TODO: Not reliable if errored. Consider adding an error return.
+		eth.log.Errorf("list wallets error: %v", err)
 		return false
 	}
-	return locked
+	eth.acctMtx.RLock()
+	defer eth.acctMtx.RUnlock()
+	var wallet rawWallet
+	findWallet := func() bool {
+		for _, w := range wallets {
+			for _, a := range w.Accounts {
+				if bytes.Equal(a.Address[:], eth.acct.Address[:]) {
+					wallet = w
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !findWallet() {
+		eth.log.Error("unable to find wallet for account: %v", eth.acct)
+		return false
+	}
+	return wallet.Status != "Unlocked"
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
@@ -384,17 +414,27 @@ func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error)
 	return nil, notImplementedErr
 }
 
+// sendToAddr sends funds from acct to addr.
+func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasFee *big.Int) (common.Hash, error) {
+	tx := map[string]string{
+		"from":     fmt.Sprintf("0x%x", eth.acct.Address),
+		"to":       fmt.Sprintf("0x%x", addr),
+		"value":    fmt.Sprintf("0x%x", amt),
+		"gasPrice": fmt.Sprintf("0x%x", gasFee),
+	}
+	return eth.node.sendTransaction(eth.ctx, tx)
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
 //
-// NOTE: This does not return a valid asset.Coin.
-//
 // TODO: Value could be larger than a uint64. Deal with it...
+// TODO: Return the asset.Coin.
 func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
 	eth.acctMtx.RLock()
 	defer eth.acctMtx.RUnlock()
-	_, err := eth.node.sendToAddr(eth.ctx, eth.acct, common.HexToAddress(addr),
-		big.NewInt(0).SetUint64(value), new(big.Int).SetUint64(defaultGasFee))
+	_, err := eth.sendToAddr(common.HexToAddress(addr),
+		big.NewInt(0).SetUint64(value), big.NewInt(0).SetUint64(defaultGasFee))
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +454,35 @@ func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs u
 
 // SyncStatus is information about the blockchain sync status.
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
-	return eth.node.syncStatus(eth.ctx)
+	// node.SyncProgress will return nil both before syncing has begun and
+	// after it has finished. In order to discern when syncing has begun,
+	// wait for at least one change in block count, then defer to
+	// node.SyncProgress for the lifetime of the eth backend.
+	syncingStarted := atomic.LoadUint32(&eth.syncingStarted)
+	if syncingStarted != 1 {
+		ibn := atomic.LoadUint64(&eth.initBlockNum)
+		bn, err := eth.node.blockNumber(eth.ctx)
+		if err != nil {
+			return false, 0, err
+		}
+		if ibn == 0 {
+			atomic.StoreUint64(&eth.initBlockNum, bn)
+			return false, 0, nil
+		}
+		if bn == ibn {
+			return false, 0, nil
+		}
+		atomic.StoreUint32(&eth.syncingStarted, 1)
+	}
+	sp, err := eth.node.syncProgress(eth.ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	if sp == nil {
+		return true, 1, nil
+	}
+	ratio := float32(sp.CurrentBlock) / float32(sp.HighestBlock)
+	return false, ratio, nil
 }
 
 // RefundAddress extracts and returns the refund address from a contract.
@@ -470,6 +538,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 
 	prevTip := eth.currentTip
 	eth.currentTip = newTip
-	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(), prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
+	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
+		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
 	go eth.tipChange(nil)
 }
