@@ -1707,8 +1707,6 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 	for _, ord := range misses {
 		log.Infof("No preimage received for order %v from user %v. Recording violation and revoking order.",
 			ord.ID(), ord.User())
-		// Register the preimage miss violation, adjusting the user's score.
-		m.auth.MissedPreimage(ord.User(), epochEnd, ord.ID())
 		// Unlock the order's coins locked in processOrder.
 		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
 		// Change the order status from orderStatusEpoch to orderStatusRevoked.
@@ -1719,6 +1717,8 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 				ord.UID(), err)
 		}
+		// Register the preimage miss violation, adjusting the user's score.
+		m.auth.MissedPreimage(ord.User(), epochEnd, ord.ID())
 	}
 
 	// Register the preimage collection successes, potentially evicting preimage

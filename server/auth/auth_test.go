@@ -491,6 +491,7 @@ func newPreimageResult(miss bool, t int64) *db.PreimageResult {
 	return &db.PreimageResult{
 		Miss: miss,
 		Time: t,
+		ID:   randomOrderID(),
 	}
 }
 
@@ -912,6 +913,11 @@ func TestAccountErrors(t *testing.T) {
 	}
 
 	// closed accounts allowed to connect
+
+	// Make a violation score above ban score reflected by the DB.
+	score := setViolations()
+	defer clearViolations()
+
 	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
 	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID
 	rig.storage.closed = true
@@ -926,6 +932,27 @@ func TestAccountErrors(t *testing.T) {
 	}
 	if !client.isSuspended() {
 		t.Errorf("client should have been in suspended state")
+	}
+
+	// Raise the ban score threshold to ensure automatic reinstatement.
+	initBanScore := rig.mgr.banScore
+	defer func() { rig.mgr.banScore = initBanScore }()
+	rig.mgr.banScore = uint32(score + 1)
+
+	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
+	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID
+	rig.storage.closed = true
+	rpcErr = rig.mgr.handleConnect(user.conn, connect)
+	rig.storage.closed = false
+	if rpcErr != nil {
+		t.Fatalf("should be no error for closed account")
+	}
+	client = rig.mgr.user(user.acctID)
+	if client == nil {
+		t.Fatalf("client not found")
+	}
+	if client.isSuspended() {
+		t.Errorf("client should have unbaned automatically")
 	}
 
 }

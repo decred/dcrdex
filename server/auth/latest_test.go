@@ -24,7 +24,7 @@ func Test_latestMatchOutcomes(t *testing.T) {
 		times[i] = t
 		ordList.add(&matchOutcome{
 			time: t,
-			// zero OrderID
+			mid:  randomMatchID(),
 		})
 	}
 
@@ -87,7 +87,7 @@ func Test_latestPreimageOutcomes(t *testing.T) {
 		times[i] = t
 		ordList.add(&preimageOutcome{
 			time: t,
-			// zero OrderID
+			oid:  randomOrderID(),
 		})
 	}
 
