@@ -210,6 +210,15 @@ func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.
 	return ai, nil
 }
 
+// RefundAddress extracts and returns the refund address from a contract.
+func (bch *BCHWallet) RefundAddress(contract dex.Bytes) (string, error) {
+	addr, err := bch.ExchangeWallet.RefundAddress(contract)
+	if err != nil {
+		return "", err
+	}
+	return dexbch.RecodeCashAddress(addr, bch.Net())
+}
+
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature
 // hash and signing algorithm.
 func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, btcKey *btcec.PrivateKey, val uint64) ([]byte, error) {

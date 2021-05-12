@@ -1687,6 +1687,15 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 	}, nil
 }
 
+// RefundAddress extracts and returns the refund address from a contract.
+func (btc *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
+	sender, _, _, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
+	if err != nil {
+		return "", fmt.Errorf("error extracting refund address: %w", err)
+	}
+	return sender.String(), nil
+}
+
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
 func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
