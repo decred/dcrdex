@@ -751,6 +751,9 @@ func (dcr *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 // []*compositeUTXO and network fee rate to be used for further order estimation
 // without additional calls to listunspent.
 func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
+	if lotSize == 0 {
+		return nil, nil, errors.New("cannot divide by lotSize zero")
+	}
 
 	utxos, err = dcr.spendableUTXOs()
 	if err != nil {
@@ -761,8 +764,9 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 		avail += toAtoms(utxo.rpc.Amount)
 	}
 
-	// Start by attempting max lots with no fees.
-	lots := avail / lotSize
+	// Start by attempting max lots with a basic fee.
+	basicFee := nfo.SwapSize * nfo.MaxFeeRate
+	lots := avail / (lotSize + basicFee)
 	for lots > 0 {
 		est, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, dcr.useSplitTx)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is

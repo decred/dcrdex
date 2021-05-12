@@ -650,20 +650,21 @@ export default class MarketsPage extends BasePage {
   previewQuoteAmt (show) {
     const page = this.page
     const order = this.parseOrder()
+    const adjusted = this.adjustedRate()
     page.orderErr.textContent = ''
-    if (order.rate) {
+    if (adjusted) {
       if (order.sell) this.preSell()
       else this.preBuy()
     }
     this.depthLines.input = []
-    if (order.rate && this.isLimit()) {
+    if (adjusted && this.isLimit()) {
       this.depthLines.input = [{
         rate: order.rate / 1e8,
         color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
       }]
     }
     this.drawChartLines()
-    if (!show || !order.rate || !order.qty) {
+    if (!show || !adjusted || !order.qty) {
       page.orderPreview.textContent = ''
       this.drawChartLines()
       return
@@ -1409,15 +1410,15 @@ export default class MarketsPage extends BasePage {
    * input.
    */
   rateFieldChanged () {
-    const order = this.parseOrder()
-    if (order.rate <= 0) {
+    // Truncate to rate step. If it is a market buy order, do not adjust.
+    const adjusted = this.adjustedRate()
+    if (adjusted <= 0) {
       this.depthLines.input = []
       this.drawChartLines()
       this.page.rateField.value = 0
       return
     }
-    // Truncate to rate step. If it is a market buy order, do not adjust.
-    const adjusted = this.adjustedRate()
+    const order = this.parseOrder()
     const v = (adjusted / 1e8)
     this.page.rateField.value = v
     this.depthLines.input = [{
