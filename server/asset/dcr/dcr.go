@@ -20,13 +20,13 @@ import (
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/server/asset"
-	"github.com/decred/dcrd/blockchain/stake/v3"
+	"github.com/decred/dcrd/blockchain/stake/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v6"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -62,7 +62,7 @@ var (
 	// check for new blocks.
 	blockPollInterval = time.Second
 
-	requiredNodeVersion = dex.Semver{Major: 6, Minor: 1, Patch: 2}
+	requiredNodeVersion = dex.Semver{Major: 7, Minor: 0, Patch: 0}
 )
 
 const (
@@ -75,8 +75,8 @@ const (
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
 type dcrNode interface {
-	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
+	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
+	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
@@ -248,11 +248,11 @@ func (dcr *Backend) InitTxSizeBase() uint32 {
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *Backend) FeeRate() (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
-	dcrPerKB, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
+	estimateFeeResult, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
-	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB)
+	atomsPerKB, err := dcrutil.NewAmount(estimateFeeResult.FeeRate)
 	if err != nil {
 		return 0, err
 	}
@@ -417,7 +417,10 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	if err != nil {
 		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeRegular, true) // check regular tree first
+	if err == nil && txOut == nil {
+		txOut, err = dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeStake, true) // check stake tree
+	}
 	if err != nil {
 		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, translateRPCCancelErr(err))
 	}
@@ -514,7 +517,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %w", txHash, err)
 	}
-	isStake := stake.DetermineTxType(msgTx, true) != stake.TxTypeRegular
+	isStake := determineTxTree(msgTx) == wire.TxTreeStake
 
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
@@ -931,8 +934,8 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
-	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32, tree int8) (*chainjson.GetTxOutResult, []byte, error) {
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, tree, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w",
 			txHash, vout, translateRPCCancelErr(err))
@@ -950,15 +953,37 @@ func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash,
 // Get information for an unspent transaction output, plus the verbose
 // transaction.
 func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
-	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
+	msgTx, err := msgTxFromHex(verboseTx.Hex)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %w", txHash, err)
+	}
+	tree := determineTxTree(msgTx)
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout, tree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	return txOut, verboseTx, pkScript, nil
+}
+
+func determineTxTree(msgTx *wire.MsgTx) int8 {
+	// stake.DetermineTxType will produce correct results if we pass true for
+	// isTreasuryEnabled regardless of whether the treasury vote has activated
+	// or not.
+	// The only possiblity for wrong results is passing isTreasuryEnabled=false
+	// _after_ the treasury vote activates - some stake tree votes may identify
+	// as regular tree transactions.
+	// Could try with isTreasuryEnabled false, then true and if neither comes up
+	// as a stake transaction, then we infer regular, but that isn't necessary
+	// as explained above.
+	isTreasuryEnabled := true
+	if stake.DetermineTxType(msgTx, isTreasuryEnabled) != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+	return wire.TxTreeRegular
 }
 
 // Get the block information, checking the cache first. Same as

@@ -3,11 +3,11 @@ module decred.org/dcrdex
 go 1.15
 
 require (
-	decred.org/dcrwallet v1.7.0
+	decred.org/dcrwallet/v2 v2.0.0-20210415173800-2c9ede7f8daa
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
-	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0
+	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/certgen v1.1.1
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v3 v3.0.0
@@ -16,11 +16,11 @@ require (
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.1
 	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0
 	github.com/decred/dcrd/dcrjson/v3 v3.1.0
-	github.com/decred/dcrd/dcrutil/v3 v3.0.0
+	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.0
-	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.3.0
-	github.com/decred/dcrd/rpcclient/v6 v6.0.2
-	github.com/decred/dcrd/txscript/v3 v3.0.0
+	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b
+	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b
+	github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/wire v1.4.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0

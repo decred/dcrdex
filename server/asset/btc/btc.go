@@ -24,7 +24,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrd/rpcclient/v6"
+	"github.com/decred/dcrd/rpcclient/v7"
 )
 
 // Driver implements asset.Driver.

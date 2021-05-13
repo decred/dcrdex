@@ -18,7 +18,7 @@ import (
 
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/dex/msgjson"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/gorilla/websocket"
 )
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 )
 
 var (
