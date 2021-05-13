@@ -1,6 +1,6 @@
 # DCRDEX v0.2.0 (beta)
 
-Apr 30, 2021
+May 7, 2021
 
 For a high level introduction to DCRDEX, please read the [0.1.0 release notes](release-notes-0.1.0.md).
 
@@ -11,14 +11,15 @@ communications protocol, and software design.
 
 The most notable new features are:
 
-- Numerous UI and usability enhancements including responsive design and depth chart interactivity
+- Numerous UI and usability enhancements including responsive design and depth
+  chart interactivity
 - Support client control by the Decrediton GUI wallet and use of its accounts
 - Experimental Bitcoin Cash (BCH) support
 - Initial changes to support SPV (light) wallets in the next release
 - Account import/export
 
 The latest 1.6 release of dcrd and dcrwallet is required for this release of
-dcrdex. At the time of release, this corresponds to the v1.6.2 releases.
+DCRDEX. At the time of release, this corresponds to the v1.6.2 releases.
 Bitcoin Core 0.20 and 0.21 are both supported.
 
 ## Important Notices
@@ -179,7 +180,7 @@ understand the following:
   ([44a3363](https://github.com/decred/dcrdex/commit/44a33633e40bee15e70b700b982c69833317692f))
 - Notification subjects are now package-level constants.
   ([3aef72d](https://github.com/decred/dcrdex/commit/3aef72d00790b2d8b0354efaf844a8fd08f3bdc6))
-- ReconfigureWallet has a new pass input (`nil` indicates no password change).
+- `ReconfigureWallet` has a new pass input (`nil` indicates no password change).
   ([761e3e1](https://github.com/decred/dcrdex/commit/761e3e13981a9595623718036913fe54a2c2d764))
 - New order fee estimate API. See the new `(*Core).PreOrder` method and the new
   returned `OrderEstimate` type. Also see the `PreSwap` and `PreRedeem` methods
@@ -187,7 +188,7 @@ understand the following:
   ([5394cea](https://github.com/decred/dcrdex/commit/5394ceaa2a0e69518cabb2a3ae4fdb2164a6a08e))
 - New `isinitialized` http API endpoint and `Core` method.
   ([b767a23](https://github.com/decred/dcrdex/commit/b767a23f0c89ec54a1f60e61c9bd21d05daba906))
-- Add the `(*Core).GetDEXConfig` method and a corresponding http api endpoint
+- Add the `(*Core).GetDEXConfig` method and a corresponding http API endpoint
   `getdexinfo` the functions similar to `getfee` by making a temporary
   connection to a DEX with *no existing account*, except that it returns the
   server's entire config.
@@ -203,10 +204,10 @@ understand the following:
 - Add profiling switches to dcrdex. A CPU profile file may be specified with
   `--cpuprofile`. The http profiler may be started with `--httpprof`.
   ([c17baf9](https://github.com/decred/dcrdex/commit/c17baf93a76f6803af1d354bf0d9d7a51332e475))
-- (internal) DCR asset backends now use rpcclient/v6, which provide cancelable requests.
+- (internal) DCR asset backends now use `rpcclient/v6`, which provide cancelable requests.
   ([312397a](https://github.com/decred/dcrdex/commit/312397a56d307f71c12696bcaae126f4629c7aea),
   [9d65d55](https://github.com/decred/dcrdex/commit/9d65d55c8f3b0ca613fb3a7d401346706d65d7e7))
-- (internal) BTC's asset backend now uses Decred's rpcclient package for
+- (internal) BTC's asset backend now uses Decred's `rpcclient` package for
   cancellation capability. All request now use `RawRequest`.
   ([cefe6a5](https://github.com/decred/dcrdex/commit/cefe6a5ced3cce460311d3b50dffdfd4ce9aa22f))
 - (internal) All incoming response and notification message handlers are wrapped
@@ -215,7 +216,8 @@ understand the following:
 - (internal) Message unmarshalling is now more robust with respect to null
   payloads.
   ([9bf1a3e](https://github.com/decred/dcrdex/commit/9bf1a3eeacb86247e8b33067aabcf7fc0cf59f8a))
-- Many third party Go dependency updates. ([go.mod diff](https://github.com/decred/dcrdex/compare/4517832...release-v0.2#diff-33ef32bf6c23acb95f5902d7097b7a1d5128ca061167ec0716715b0b9eeaa5f6))
+- Many third party Go dependency updates.
+  ([go.mod diff](https://github.com/decred/dcrdex/compare/4517832...release-v0.2#diff-33ef32bf6c23acb95f5902d7097b7a1d5128ca061167ec0716715b0b9eeaa5f6))
 - Update site build system to Webpack 5, and update most other deps.
   ([a8e76ea](https://github.com/decred/dcrdex/commit/a8e76eacdecf4e30d96248a885c13a27f81a867e))
 - Add an ETH simnet harness for support of upcoming ETH support.
@@ -249,7 +251,8 @@ most notable fixes are:
 - Commitment checksum handling in the presence of missed preimage is now handled
   the same way as on the server by including the all epoch order commitments in
   the csum computation, not just the ones with revealed preimages.
-  ([25e3679](https://github.com/decred/dcrdex/commit/25e3679e4e909adf5f0c34821ef14b34357fab42), [7d71ffd](https://github.com/decred/dcrdex/commit/7d71ffd5221e0965aefd532e05d6520b17302a54))
+  ([25e3679](https://github.com/decred/dcrdex/commit/25e3679e4e909adf5f0c34821ef14b34357fab42),
+  [7d71ffd](https://github.com/decred/dcrdex/commit/7d71ffd5221e0965aefd532e05d6520b17302a54))
 - Never show negative confirmations for swap transactions even before they have
   been checked.
   ([fb39b97](https://github.com/decred/dcrdex/commit/fb39b97f1d73e942f6dd79ef0cf0ae4e1a061fcc))
@@ -259,7 +262,7 @@ most notable fixes are:
 
 ## Server (dcrdex)
 
-- Swapper resumes on startup from DB rather than a state file.
+- `Swapper` resumes on startup from DB rather than a state file.
   ([a676e07](https://github.com/decred/dcrdex/commit/a676e074a6845a2b05b3597856d226a22f3c9234))
 - Market data API endpoints. `/spots` is the spot price and booked volume of all
   markets. `/candles` is candlestick data, available in bin sizes of 24h, 1h,
@@ -271,19 +274,18 @@ most notable fixes are:
 - Configurable trade limits with the new `--inittakerlotlimit` and
   `--abstakerlotlimit` dcrdex switches, and `userBookedLotLimit` set in
   markets.json.
+  ([5771186](https://github.com/decred/dcrdex/commit/5771186321eb7b969685fc722ffdb65d42a64539))
 - Provide API and asset versions in the `'config'` response.
   ([e59b47f](https://github.com/decred/dcrdex/commit/e59b47fe777ba94741a38da62b06edd317101873),
   [205e802](https://github.com/decred/dcrdex/commit/205e8022adcaf8e7a5bda026e80d43edc3c07497),
   [1bc0cc9](https://github.com/decred/dcrdex/commit/1bc0cc9e9c1ffab8b6ed37dcad96cc136bbcf33f))
-  ([5771186](https://github.com/decred/dcrdex/commit/5771186321eb7b969685fc722ffdb65d42a64539))
-- Begin sending TxData (raw tx) in audit and match_status requests to
+- Begin sending `TxData` (raw tx) in audit and match_status requests to
   counterparty. This will support SPV clients.
   ([370451](https://github.com/decred/dcrdex/commit/3704513bc63facc234edabf742ec1f87ef80b35d))
 - Experimental Bitcoin Cash (BCH) support.
-  ([542ed9b](https://github.com/decred/dcrdex/commit/542ed9ba9ef8db3d8f5d3e36b3078c9fa3d5888f),
-  [5771186](https://github.com/decred/dcrdex/commit/5771186321eb7b969685fc722ffdb65d42a64539))
+  ([542ed9b](https://github.com/decred/dcrdex/commit/542ed9ba9ef8db3d8f5d3e36b3078c9fa3d5888f))
 - Version the DB scheme and implement initial updates to populate historical
-  market data in the epoch_reports table.
+  market data in the `epoch_reports` table.
   ([d000f19](https://github.com/decred/dcrdex/commit/d000f196923497122a71790e8c8f0c89503cfaaf))
 - The outgoing preimage request now includes the commitment for the preimage
   being requested.
@@ -297,7 +299,7 @@ most notable fixes are:
   actual book was purged, but clients would still pull a book snapshot listing
   orders if they restarted after a purge.
   ([a25d14e](https://github.com/decred/dcrdex/commit/a25d14e3a397268bae8a8e899b836d53e0219d79))
-- Order priority queue automatic reallocation and smaller initial capacity
+- Order priority queue automatic reallocation and smaller initial capacity.
   ([3750cce](https://github.com/decred/dcrdex/commit/3750cce2abeed01879d26b54483b85a2f78f9187))
 - New administrative endpoints: `orderbook`, `epochorders`, and `matches`.
   ([0ce3ec7](https://github.com/decred/dcrdex/commit/0ce3ec70024f48fc21b9e9e8aee925e31e2ceb02))
@@ -319,7 +321,7 @@ most notable fixes are:
 - Go 1.15 or 1.16
 - Node 14 is the minimum supported version for building the site assets.
 - dcrd and dcrwallet must *still* be built from their `release-v1.6` branches.
-- The minium required dcrwallet RPC server version is 8.5.0, which corresponds
+- The minimum required dcrwallet RPC server version is 8.5.0, which corresponds
   to the v1.6.2 patch release of dcrwallet, but the latest `release-v1.6.x` tag
   should be used.
 
@@ -327,7 +329,7 @@ most notable fixes are:
 
 166 commits, 287 files changed, 40,296 insertions(+), 18,072 deletions(-)
 
-<https://github.com/decred/dcrdex/compare/4517832...release-v0.2>
+https://github.com/decred/dcrdex/compare/4517832...release-v0.2
 
 9 contributors
 
