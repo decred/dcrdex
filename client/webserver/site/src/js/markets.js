@@ -1446,6 +1446,23 @@ export default class MarketsPage extends BasePage {
     this.loadTableSide(false)
   }
 
+  /* binOrdersByRate groups orders with the same rate into arrays. Assumes
+     that the orders in the argument are sorted. */
+  binOrdersByRate (orders) {
+    if (!orders || !orders.length) return []
+    const bins = []
+    let currBin = [orders[0]]
+    for (let i = 1; i < orders.length; i++) {
+      if (orders[i].rate !== currBin[0].rate) {
+        bins.push(currBin)
+        currBin = []
+      }
+      currBin.push(orders[i])
+    }
+    bins.push(currBin)
+    return bins
+  }
+
   /* loadTables loads the order book side into its table. */
   loadTableSide (sell) {
     const bookSide = sell ? this.book.sells : this.book.buys
@@ -1453,7 +1470,8 @@ export default class MarketsPage extends BasePage {
     const cssClass = sell ? 'sellcolor' : 'buycolor'
     Doc.empty(tbody)
     if (!bookSide || !bookSide.length) return
-    bookSide.forEach(order => { tbody.appendChild(this.orderTableRow(order, cssClass)) })
+    const orderBins = this.binOrdersByRate(bookSide)
+    orderBins.forEach(bin => { tbody.appendChild(this.orderTableRow(bin, cssClass)) })
   }
 
   /* addTableOrder adds a single order to the appropriate table. */
@@ -1464,23 +1482,28 @@ export default class MarketsPage extends BasePage {
     // Handle market order differently.
     if (order.rate === 0) {
       // This is a market order.
-      if (!row || row.order.rate !== 0) {
-        row = this.orderTableRow(order, cssClass)
+      if (row && row.getRate() === 0) {
+        row.insertOrder(order)
+      } else {
+        row = this.orderTableRow([order], cssClass)
         tbody.insertBefore(row, tbody.firstChild)
       }
-      row.addQty(order.qty)
       return
     }
     // Must be a limit order. Sort by rate. Skip the market order row.
-    if (row && row.order.rate === 0) row = row.nextSibling
-    const tr = this.orderTableRow(order, cssClass)
+    if (row && row.getRate() === 0) row = row.nextSibling
     while (row) {
-      if ((order.rate < row.order.rate) === order.sell) {
+      if (order.rate === row.getRate()) {
+        row.insertOrder(order)
+        return
+      } else if ((order.rate < row.getRate()) === order.sell) {
+        const tr = this.orderTableRow([order], cssClass)
         tbody.insertBefore(tr, row)
         return
       }
       row = row.nextSibling
     }
+    const tr = this.orderTableRow([order], cssClass)
     tbody.appendChild(tr)
   }
 
@@ -1489,8 +1512,7 @@ export default class MarketsPage extends BasePage {
     const token = order.token
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
-        if (tr.order.token === token) {
-          tr.remove()
+        if (tr.removeOrder(token)) {
           return
         }
       }
@@ -1500,11 +1522,10 @@ export default class MarketsPage extends BasePage {
   /* updateTableOrder looks for the order in the table and updates the qty */
   updateTableOrder (update) {
     const token = update.token
+    const qty = update.qty
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
-        if (tr.order.token === token) {
-          const td = tr.querySelector('[data-type=qty]')
-          td.innerText = update.qty.toFixed(8)
+        if (tr.updateOrderQty(token, qty)) {
           return
         }
       }
@@ -1525,18 +1546,19 @@ export default class MarketsPage extends BasePage {
    */
   clearOrderTableEpochSide (tbody, newEpoch) {
     for (const tr of Array.from(tbody.children)) {
-      if (tr.order.epoch && tr.order.epoch !== newEpoch) tr.remove()
+      tr.removeEpochOrders()
     }
   }
 
   /*
    * orderTableRow creates a new <tr> element to insert into an order table.
+     Takes a bin of orders with the same rate, and displays the total quantity.
    */
-  orderTableRow (order, cssClass) {
+  orderTableRow (orderBin, cssClass) {
     const tr = this.page.rowTemplate.cloneNode(true)
-    tr.qty = order.qty
-    tr.order = order
-    const rate = order.rate
+    const { rate, sell } = orderBin[0]
+    const qty = orderBin.reduce((total, curr) => total + curr.qty, 0)
+    tr.orderBin = orderBin
     bind(tr, 'click', () => {
       this.reportClick(rate)
     })
@@ -1545,33 +1567,68 @@ export default class MarketsPage extends BasePage {
       switch (td.dataset.type) {
         case 'qty':
           qtyTD = td
-          td.innerText = order.qty.toFixed(8)
+          td.innerText = qty.toFixed(8)
           break
         case 'rate':
-          if (order.rate === 0) {
+          if (rate === 0) {
             td.innerText = 'market'
           } else {
-            td.innerText = order.rate.toFixed(8)
+            td.innerText = rate.toFixed(8)
             td.classList.add(cssClass)
             // Draw a line on the chart on hover.
             Doc.bind(tr, 'mouseenter', e => {
               const chart = this.chart
               this.depthLines.hover = [{
-                rate: order.rate,
-                color: order.sell ? chart.theme.sellLine : chart.theme.buyLine
+                rate: rate,
+                color: sell ? chart.theme.sellLine : chart.theme.buyLine
               }]
               this.drawChartLines()
             })
           }
           break
-        case 'epoch':
-          if (order.epoch) td.appendChild(check.cloneNode())
-          break
       }
     })
-    tr.addQty = (qty) => {
-      tr.qty += qty
-      qtyTD.innerText = tr.qty.toFixed(8)
+    tr.updateQty = () => {
+      const qty = tr.orderBin.reduce((total, curr) => total + curr.qty, 0)
+      qtyTD.innerText = qty.toFixed(8)
+    }
+    tr.insertOrder = (order) => {
+      tr.orderBin.push(order)
+      tr.updateQty()
+    }
+    tr.updateOrderQty = (token, qty) => {
+      for (let i = 0; i < tr.orderBin.length; i++) {
+        if (tr.orderBin[i].token === token) {
+          tr.orderBin[i].qty = qty
+          tr.updateQty()
+          return true
+        }
+      }
+      return false
+    }
+    tr.removeOrder = (token) => {
+      const index = tr.orderBin.findIndex(order => order.token === token)
+      if (index < 0) return false
+      tr.orderBin.splice(index, 1)
+      if (!tr.orderBin.length) {
+        tr.remove()
+      } else {
+        tr.updateQty()
+      }
+      return true
+    }
+    tr.removeEpochOrders = (newEpoch) => {
+      tr.orderBin = tr.orderBin.filter((order) => {
+        return !(order.epoch && order.epoch !== newEpoch)
+      })
+      if (!tr.orderBin.length) {
+        tr.remove()
+      } else {
+        tr.updateQty()
+      }
+    }
+    tr.getRate = () => {
+      return tr.orderBin[0].rate
     }
     return tr
   }
