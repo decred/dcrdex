@@ -101,8 +101,7 @@ func getVersionTx(tx *bbolt.Tx) (uint32, error) {
 	}
 	versionB := bucket.Get(versionKey)
 	if versionB == nil {
-		// A nil version indicates a version 0 database.
-		return 0, nil
+		return 0, fmt.Errorf("database version not found")
 	}
 	return intCoder.Uint32(versionB), nil
 }
