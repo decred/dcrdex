@@ -455,6 +455,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 	switch symbol {
 	case dcr:
 		form = &core.WalletForm{
+			Type:    "dcrwalletRPC",
 			AssetID: dcrID,
 			Config: map[string]string{
 				"account":   name,
@@ -466,6 +467,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 		}
 	case btc:
 		form = &core.WalletForm{
+			Type:    "bitcoindRPC",
 			AssetID: btcID,
 			Config: map[string]string{
 				"walletname":  name,

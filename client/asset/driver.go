@@ -19,6 +19,7 @@ var (
 // Settings provided should be the same wallet configuration settings passed to
 // Open.
 type CreateWalletParams struct {
+	Type     string
 	Seed     []byte
 	Pass     []byte
 	Settings map[string]string
@@ -28,6 +29,7 @@ type CreateWalletParams struct {
 
 // Driver is the interface required of all exchange wallets.
 type Driver interface {
+	Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error)
 	Create(*CreateWalletParams) error
 	Open(*WalletConfig, dex.Logger, dex.Network) (Wallet, error)
 	DecodeCoinID(coinID []byte) (string, error)
@@ -61,8 +63,15 @@ func Register(assetID uint32, driver Driver) {
 	drivers[assetID] = driver
 }
 
-// CreateWallet creates a new wallet. This method should only be used once to create a
-// seeded wallet, after which OpenWallet should be used to load and access the wallet.
+// WalletExists will be true if the specified wallet exists.
+func WalletExists(assetID uint32, walletType, dataDir string, settings map[string]string, net dex.Network) (exists bool, err error) {
+	return exists, withDriver(assetID, func(drv Driver) error {
+		exists, err = drv.Exists(walletType, dataDir, settings, net)
+		return err
+	})
+}
+
+// CreateWallet creates a new wallet. Only use Create for seeded wallet types.
 func CreateWallet(assetID uint32, seedParams *CreateWalletParams) error {
 	return withDriver(assetID, func(drv Driver) error {
 		return drv.Create(seedParams)

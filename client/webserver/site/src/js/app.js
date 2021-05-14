@@ -681,6 +681,25 @@ export default class Application {
     return encRate / RateEncodingFactor * r
   }
 
+  walletDefinition (assetID) {
+    const asset = this.assets[assetID]
+    const walletType = asset.wallet.type || asset.info.availablewallets[0].type
+    return asset.info.availablewallets.filter(def => def.type === walletType)[0]
+  }
+
+  /*
+   * fetchBalance requests a balance update from the API. The API response does
+   * include the balance, but we're ignoring it, since a balance update
+   * notification is received via the Application anyways.
+   */
+  async fetchBalance (assetID) {
+    const res = await postJSON('/api/balance', { assetID: assetID })
+    if (!this.checkResponse(res)) {
+      console.error('failed to fetch balance for asset ID', assetID)
+    }
+    return res.balance
+  }
+
   /*
    * checkResponse checks the response object as returned from the functions in
    * the http module. If the response indicates that the request failed, a

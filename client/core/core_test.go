@@ -83,7 +83,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelInfo)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
 		UnitInfo: dex.UnitInfo{
@@ -91,6 +91,9 @@ var (
 				ConversionFactor: 1e8,
 			},
 		},
+		AvailableWallets: []*asset.WalletDefinition{{
+			Type: "type",
+		}},
 	}
 )
 
@@ -1368,9 +1371,20 @@ func TestBookFeed(t *testing.T) {
 }
 
 type tDriver struct {
-	f       func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
-	decoder func(coinID []byte) (string, error)
-	winfo   *asset.WalletInfo
+	f           func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
+	decoder     func(coinID []byte) (string, error)
+	winfo       *asset.WalletInfo
+	doesntExist bool
+	existsErr   error
+	createErr   error
+}
+
+func (drv *tDriver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	return !drv.doesntExist, drv.existsErr
+}
+
+func (drv *tDriver) Create(*asset.CreateWalletParams) error {
+	return drv.createErr
 }
 
 func (drv *tDriver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
@@ -1412,6 +1426,7 @@ func TestCreateWallet(t *testing.T) {
 		Config: map[string]string{
 			"rpclisten": "localhost",
 		},
+		Type: "type",
 	}
 
 	ensureErr := func(tag string) {
@@ -5829,36 +5844,69 @@ func TestReconfigureWallet(t *testing.T) {
 	}
 	var assetID uint32 = 54321
 
+	form := &WalletForm{
+		AssetID: assetID,
+		Config:  newSettings,
+		Type:    "type",
+	}
+
 	// App Password error
 	rig.crypter.(*tCrypter).recryptErr = tErr
-	err := tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err := tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, authErr) {
 		t.Fatalf("wrong error for password error: %v", err)
 	}
 	rig.crypter.(*tCrypter).recryptErr = nil
 
 	// Missing wallet error
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
-	if !errorHasCode(err, missingWalletErr) {
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, assetSupportErr) {
 		t.Fatalf("wrong error for missing wallet: %v", err)
 	}
 
 	xyzWallet, tXyzWallet := newTWallet(assetID)
 	tCore.wallets[assetID] = xyzWallet
-	asset.Register(assetID, &tDriver{
+	walletDef := &asset.WalletDefinition{
+		Type:   "type",
+		Seeded: true,
+	}
+	winfo := *tWalletInfo
+	winfo.AvailableWallets = []*asset.WalletDefinition{walletDef}
+
+	assetDriver := &tDriver{
 		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 			return xyzWallet.Wallet, nil
 		},
-		winfo: tWalletInfo,
-	})
+		winfo: &winfo,
+	}
+	asset.Register(assetID, assetDriver)
 	if err = xyzWallet.Connect(); err != nil {
 		t.Fatal(err)
 	}
 	defer xyzWallet.Disconnect()
 
+	// Errors for seeded wallets.
+	walletDef.Seeded = true
+	// Exists error
+	assetDriver.existsErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, existenceCheckErr) {
+		t.Fatalf("wrong error when expecting existence check error: %v", err)
+	}
+	assetDriver.existsErr = nil
+	// Create error
+	assetDriver.doesntExist = true
+	assetDriver.createErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, createWalletErr) {
+		t.Fatalf("wrong error when expecting wallet creation error error: %v", err)
+	}
+	assetDriver.createErr = nil
+	walletDef.Seeded = false
+
 	// Connect error
 	tXyzWallet.connectErr = tErr
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, connectWalletErr) {
 		t.Fatalf("wrong error when expecting connection error: %v", err)
 	}
@@ -5867,7 +5915,7 @@ func TestReconfigureWallet(t *testing.T) {
 	// Unlock error
 	tXyzWallet.Unlock(wPW)
 	tXyzWallet.unlockErr = tErr
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, walletAuthErr) {
 		t.Fatalf("wrong error when expecting auth error: %v", err)
 	}
@@ -5912,7 +5960,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// Error checking if wallet owns address.
 	tXyzWallet.ownsAddressErr = tErr
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, walletErr) {
 		t.Fatalf("wrong error when expecting ownsAddress wallet error: %v", err)
 	}
@@ -5920,14 +5968,14 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// Wallet doesn't own address.
 	tXyzWallet.ownsAddress = false
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, walletErr) {
 		t.Fatalf("wrong error when expecting not owned wallet error: %v", err)
 	}
 	tXyzWallet.ownsAddress = true
 
 	// Success updating settings.
-	err = tCore.ReconfigureWallet(tPW, nil, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if err != nil {
 		t.Fatalf("ReconfigureWallet error: %v", err)
 	}
@@ -5943,7 +5991,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// Success updating wallet PW.
 	newWalletPW := []byte("password")
-	err = tCore.ReconfigureWallet(tPW, newWalletPW, assetID, newSettings)
+	err = tCore.ReconfigureWallet(tPW, newWalletPW, form)
 	if err != nil {
 		t.Fatalf("ReconfigureWallet error: %v", err)
 	}

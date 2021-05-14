@@ -77,12 +77,20 @@ var (
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:              "Ethereum",
-		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
-		ConfigOpts:        configOpts,
-		UnitInfo:          dexeth.UnitInfo,
-		Seeded:            true,
+		Name:     "Ethereum",
+		UnitInfo: dexeth.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:              "geth",
+				Tab:               "Internal",
+				Description:       "Use the built-in DEX wallet with snap sync",
+				ConfigOpts:        configOpts,
+				Seeded:            true,
+				DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
+			},
+		},
 	}
+
 	mainnetContractAddr = common.HexToAddress("")
 )
 
@@ -91,10 +99,6 @@ var _ asset.Driver = (*Driver)(nil)
 
 // Driver implements asset.Driver.
 type Driver struct{}
-
-func (d *Driver) Create(params *asset.CreateWalletParams) error {
-	return CreateWallet(params)
-}
 
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -113,6 +117,14 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	return false, fmt.Errorf("unimplemented")
+}
+
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	return CreateWallet(params)
 }
 
 // rawWallet is an unexported return type from the eth client. Watch for changes at

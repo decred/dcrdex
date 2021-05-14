@@ -2123,7 +2123,7 @@ class BalanceWidget {
     // If there is no balance, but the wallet is connected, show the loading
     // icon while we fetch an update.
     if (!bal) {
-      this.fetchBalance(side.id)
+      app().fetchBalance(side.id)
       Doc.show(side.spinner)
       return
     }
@@ -2137,7 +2137,7 @@ class BalanceWidget {
     const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
     if (expired) {
       Doc.show(side.expired)
-      if (wallet.running) this.fetchBalance(side.id)
+      if (wallet.running) app().fetchBalance(side.id)
     } else Doc.hide(side.expired)
   }
 
@@ -2149,18 +2149,6 @@ class BalanceWidget {
   updateAsset (assetID) {
     if (assetID === this.base.id) this.updateWallet(this.base)
     else if (assetID === this.quote.id) this.updateWallet(this.quote)
-  }
-
-  /*
-   * fetchBalance requests a balance update from the API. The API response does
-   * include the balance, but we're ignoring it, since a balance update
-   * notification is received via the Application anyways.
-   */
-  async fetchBalance (assetID) {
-    const res = await postJSON('/api/balance', { assetID: assetID })
-    if (!app().checkResponse(res)) {
-      console.error('failed to fetch balance for asset ID', assetID)
-    }
   }
 }
 

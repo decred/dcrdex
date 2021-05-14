@@ -17,9 +17,10 @@ import (
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
-	connector *dex.ConnectionMaster
-	AssetID   uint32
-	dbID      []byte
+	connector  *dex.ConnectionMaster
+	AssetID    uint32
+	dbID       []byte
+	walletType string
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -151,6 +152,7 @@ func (w *xcWallet) state() *WalletState {
 		Encrypted:    len(w.encPass) > 0,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
+		WalletType:   w.walletType,
 	}
 }
 

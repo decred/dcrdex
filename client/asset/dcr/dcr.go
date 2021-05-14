@@ -69,14 +69,13 @@ const (
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
+	walletTypeDcrwRPC        = "dcrwalletRPC"
 )
 
 var (
 	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
 	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
-)
 
-var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
@@ -148,11 +147,16 @@ var (
 	}
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:              "Decred",
-		Version:           version,
-		DefaultConfigPath: defaultConfigPath,
-		ConfigOpts:        configOpts,
-		UnitInfo:          dexdcr.UnitInfo,
+		Name:     "Decred",
+		Version:  version,
+		UnitInfo: dexdcr.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			Type:              walletTypeDcrwRPC,
+			Tab:               "External",
+			Description:       "Connect to dcrwallet",
+			DefaultConfigPath: defaultConfigPath,
+			ConfigOpts:        configOpts,
+		}},
 	}
 )
 
@@ -378,7 +382,40 @@ type fundingCoin struct {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Open opens the DCR exchange wallet. Start the wallet with its Run method.
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	if walletType != walletTypeDcrwRPC {
+		return false, fmt.Errorf("no Decred wallet type %q available", walletType)
+	}
+	cfg, _, err := loadConfig(settings, net)
+	if err != nil {
+		return false, err
+	}
+	cl, err := rpcclient.New(&rpcclient.ConnConfig{
+		HTTPPostMode: true,
+		DisableTLS:   true,
+		Host:         cfg.RPCListen + "/wallet/" + cfg.Account,
+		User:         cfg.RPCUser,
+		Pass:         cfg.RPCPass,
+	}, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		cl.Shutdown()
+		cl.WaitForShutdown()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	defer cancel()
+
+	_, err = cl.Version(ctx)
+	if err != nil {
+		return false, fmt.Errorf("DCR ExchangeWallet version fetch error: %w", err)
+	}
+	return err == nil, nil
+}
+
+// Open creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
@@ -539,7 +576,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	return &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
-		acct:                cfg.Settings["account"],
+		acct:                dcrCfg.Account,
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
@@ -1641,22 +1678,38 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, txTree, err := dcr.getTxOut(txHash, vout, true)
+	txOutRes, txTree, err := dcr.getTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
-	if txOut == nil {
-		return nil, asset.CoinNotFoundError
-	}
-
-	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
-			txOut.ScriptPubKey.Hex, err)
+	coinNotFound := txOutRes == nil
+	var pkScript []byte
+	var value uint64
+	var version uint16
+	if txOutRes != nil {
+		pkScript, err = hex.DecodeString(txOutRes.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
+				txOutRes.ScriptPubKey.Hex, err)
+		}
+		value = toAtoms(txOutRes.Value)
+		version = txOutRes.ScriptPubKey.Version
+	} else {
+		tx, err := msgTxFromBytes(txData)
+		if err != nil {
+			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
+		}
+		if len(tx.TxOut) <= int(vout) {
+			return nil, fmt.Errorf("specified output not found in decoded tx")
+		}
+		txOut := tx.TxOut[vout]
+		pkScript = txOut.PkScript
+		value = uint64(txOut.Value)
+		version = txOut.Version
 	}
 
 	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(txOut.ScriptPubKey.Version,
+	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(version,
 		pkScript, dcr.chainParams, false)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
@@ -1681,8 +1734,11 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addrScript)
 	}
+	if coinNotFound {
+		return nil, asset.CoinNotFoundError
+	}
 	return &asset.AuditInfo{
-		Coin:       newOutput(txHash, vout, toAtoms(txOut.Value), txTree),
+		Coin:       newOutput(txHash, vout, value, txTree),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
@@ -2603,6 +2659,15 @@ func newTxOut(amount int64, pkScriptVer uint16, pkScript []byte) *wire.TxOut {
 func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
 	msgTx := wire.NewMsgTx()
 	if err := msgTx.Deserialize(hex.NewDecoder(strings.NewReader(txHex))); err != nil {
+		return nil, err
+	}
+	return msgTx, nil
+}
+
+// msgTxFromBytes creates a wire.MsgTx by deserializing the transaction bytes.
+func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
+	msgTx := wire.NewMsgTx()
+	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
 		return nil, err
 	}
 	return msgTx, nil

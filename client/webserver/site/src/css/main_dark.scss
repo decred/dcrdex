@@ -2,11 +2,6 @@ body.dark {
   background-color: #13202b;
   color: $font-color-dark;
 
-  .card {
-    background-color: $dark_bg_1;
-    border-color: #333;
-  }
-
   header.maintop {
     background-color: black;
     border-bottom-style: none;
@@ -35,6 +30,10 @@ body.dark {
 
   .bg0 {
     background-color: black;
+  }
+
+  .border1 {
+    border: 1px solid #333;
   }
 
   .bg1 {

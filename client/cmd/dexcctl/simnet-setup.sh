@@ -20,24 +20,24 @@ echo initializing
 ./dexcctl -p abc --simnet init
 
 echo configuring Decred wallet
-./dexcctl -p abc -p abc --simnet newwallet 42 ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
+./dexcctl -p abc -p abc --simnet newwallet 42 dcrwalletRPC ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
 
 echo configuring Bitcoin wallet
-./dexcctl -p abc -p "" --simnet newwallet 0 ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
+./dexcctl -p abc -p "" --simnet newwallet 0 bitcoindRPC ~/dextest/btc/alpha/alpha.conf '{"walletname":"gamma"}'
 
 if [ $LTC_ON -eq 0 ]; then
 	echo configuring Litecoin wallet
-	./dexcctl -p abc -p "" --simnet newwallet 2 ~/dextest/ltc/alpha/alpha.conf '{"walletname":"gamma"}'
+	./dexcctl -p abc -p "" --simnet newwallet 2 litecoindRPC ~/dextest/ltc/alpha/alpha.conf '{"walletname":"gamma"}'
 fi
 
 if [ $BCH_ON -eq 0 ]; then
 	echo configuring Bitcoin Cash wallet
-	./dexcctl -p abc -p "" --simnet newwallet 145 ~/dextest/bch/alpha/alpha.conf '{"walletname":"gamma"}'
+	./dexcctl -p abc -p "" --simnet newwallet 145 bitcoindRPC ~/dextest/bch/alpha/alpha.conf '{"walletname":"gamma"}'
 fi
 
 if [ $ETH_ON -eq 0 ]; then
 	echo configuring Eth wallet
-	./dexcctl -p abc -p "" --simnet newwallet 60 "" '{"appDir":"~/dextest/eth/testnode"}'
+	./dexcctl -p abc -p "" --simnet newwallet 60 geth "" '{"appDir":"~/dextest/eth/testnode"}'
 fi
 
 echo registering with DEX

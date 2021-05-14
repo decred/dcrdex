@@ -1,11 +1,11 @@
 {{define "walletConfigTemplates"}}
-<div class="py-2 px-1 d-flex justify-content-between align-items-center">
+<div class="py-2 px-1 d-flex justify-content-between align-items-center" id="walletSettingsHeader">
   Wallet Settings
   <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> load from file</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
 </div>
 <div data-tmpl="allSettings">
-  <div data-tmpl="dynamicOpts" class="dynamicopts">
+  <div data-tmpl="dynamicOpts" class="dynamicopts mb-3">
     <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end">
       <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
       <input type="text" class="form-control select">
@@ -17,7 +17,7 @@
       </div>
     </div>
   </div>
-  <div data-tmpl="showOther" class="d-hide mt-3 mb-1 pointer d-flex align-items-center justify-content-start">
+  <div data-tmpl="showOther" class="d-hide mb-1 pointer d-flex align-items-center justify-content-start">
     <span data-tmpl="showIcon" class="ico-plus fs8 pl-1"></span>
     <span data-tmpl="hideIcon" class="ico-minus fs8 pl-1"></span>
     <span data-tmpl="showHideMsg" class="d-inline-block pl-1 pb-1"></span>
@@ -33,16 +33,19 @@
 {{end}}
 
 {{define "newWalletForm"}}
+<div class="wallet-tabs" id="walletTypeTabs">
+  <div class="wtab bg1" id="walletTabTmpl"></div>
+</div>
 <div class="bg2 px-2 py-1 text-center fs18 position-relative">
   Add a <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span> Wallet
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
-<div class="p-4">
+<div class="bg1 border1 p-3" id="nwMainForm">
   <div id="walletSettings">
     {{template "walletConfigTemplates"}}
   </div>
   <hr class="dashed my-2">
-  <div>
+  <div id="newWalletPassBox">
     <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password
       <span class="ico-info" data-tooltip="Leave the password empty if there is no password required for the wallet."></span>
     </label>
@@ -161,6 +164,10 @@
           <td class="text-center">
             <button data-tmpl="setupWallet" type="button" class="justify-content-center w-100 selected"></button>
             <span data-tmpl="walletReady"></span>
+            <div class="d-inline-block text-nowrap p-1 d-hide" data-tmpl="walletSyncing" data-tooltip="waiting for the wallet to sync">
+              <div class="d-inline-block ico-spinner spinner fs11"></div>
+              syncing
+            </span>
           </td>
         </tr>
       </tbody>

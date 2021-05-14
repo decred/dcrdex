@@ -412,17 +412,17 @@
   <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="card bg1 m-auto d-hide" id="walletForm" autocomplete="off">
+    <form class="card m-auto d-hide" id="walletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* VERIFY ORDER */ -}}
-    <form class="card bg1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+    <form class="card bg1 border1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
       <div class="px-2 py-1 text-center fs18 position-relative header" id="vHeader">
         检查<span id="vSideHeader"></span> 请求
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
@@ -486,7 +486,7 @@
       
     </form>
 
-    <form class="card bg1 d-hide" id="cancelForm" autocomplete="off">
+    <form class="card bg1 border1 d-hide" id="cancelForm" autocomplete="off">
       {{template "cancelOrderForm" .}}
     </form>
 

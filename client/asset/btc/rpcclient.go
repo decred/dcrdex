@@ -111,6 +111,8 @@ func (wc *rpcClient) connect(ctx context.Context) error {
 	return nil
 }
 
+func (wc *rpcClient) stop() {}
+
 // RawRequest passes the reqeuest to the wallet's RawRequester.
 func (wc *rpcClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
 	return wc.requester.RawRequest(wc.ctx, method, params)
@@ -474,7 +476,7 @@ func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 		return nil, err
 	}
 	var txid string
-	err = wc.call(methodSendRawTx, anylist{hex.EncodeToString(b)}, &txid)
+	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -710,6 +712,5 @@ func txOutFromTxBytes(txB []byte, vout uint32) (*wire.TxOut, error) {
 	if len(msgTx.TxOut) <= int(vout) {
 		return nil, fmt.Errorf("no vout %d in tx %s", vout, msgTx.TxHash())
 	}
-
 	return msgTx.TxOut[vout], nil
 }

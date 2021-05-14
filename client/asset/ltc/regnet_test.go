@@ -40,5 +40,9 @@ var (
 )
 
 func TestWallet(t *testing.T) {
-	livetest.Run(t, NewWallet, alphaAddress, tLotSize, tLTC, false)
+	livetest.Run(t, &livetest.Config{
+		New:     NewWallet,
+		LotSize: tLotSize,
+		Asset:   tLTC,
+	})
 }

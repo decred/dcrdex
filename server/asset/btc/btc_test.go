@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
@@ -52,8 +53,8 @@ func TestMain(m *testing.M) {
 
 // TestConfig tests the LoadConfig function.
 func TestConfig(t *testing.T) {
-	cfg := &dexbtc.Config{}
-	parsedCfg := &dexbtc.Config{}
+	cfg := &dexbtc.RPCConfig{}
+	parsedCfg := &dexbtc.RPCConfig{}
 
 	tempDir, err := os.MkdirTemp("", "btctest")
 	if err != nil {
@@ -62,8 +63,8 @@ func TestConfig(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 	filePath := filepath.Join(tempDir, "test.conf")
 
-	runCfg := func(config *dexbtc.Config) error {
-		*cfg = *config
+	runCfg := func(inCfg *dexbtc.RPCConfig) error {
+		*cfg = *inCfg
 		cfgFile := ini.Empty()
 		err := cfgFile.ReflectFrom(cfg)
 		if err != nil {
@@ -73,8 +74,12 @@ func TestConfig(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = dexbtc.LoadConfigFromPath(filePath, assetName, dex.Mainnet, dexbtc.RPCPorts)
-		return err
+		parsedCfg = new(dexbtc.RPCConfig)
+		err = config.ParseInto(filePath, parsedCfg)
+		if err != nil {
+			return err
+		}
+		return dexbtc.CheckRPCConfig(parsedCfg, assetName, dex.Mainnet, dexbtc.RPCPorts)
 	}
 
 	// Check that there is an error from an unpopulated configuration.
@@ -84,7 +89,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the name. Error expected.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 	})
 	if err == nil {
@@ -92,7 +97,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the password. Error expected.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCPass: "somepass",
 	})
 	if err == nil {
@@ -100,7 +105,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Give both name and password. This should not be an error.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 	})
@@ -109,7 +114,7 @@ func TestConfig(t *testing.T) {
 	}
 	h, p, err := net.SplitHostPort(parsedCfg.RPCBind)
 	if err != nil {
-		t.Fatalf("error splitting host and port: %v", err)
+		t.Fatalf("error splitting host and port from %q: %v", parsedCfg.RPCBind, err)
 	}
 	if h != defaultHost {
 		t.Fatalf("unexpected default host. wanted %s, got %s", defaultHost, h)
@@ -126,7 +131,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with a designated port, but no host specified.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCPort: 1234,
@@ -147,7 +152,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with rpcbind set (without designated port) and custom rpcport.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2",
@@ -169,7 +174,7 @@ func TestConfig(t *testing.T) {
 
 	// Check with a port set with both rpcbind and rpcport. The rpcbind port
 	// should take precedence.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2:1234",
@@ -190,7 +195,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with just a port for rpcbind and make sure it gets parsed.
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: ":1234",
@@ -210,7 +215,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// IPv6
-	err = runCfg(&dexbtc.Config{
+	err = runCfg(&dexbtc.RPCConfig{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "[24c2:2865:4c7e:fd9b:76ea:4aa0:263d:6377]:1234",

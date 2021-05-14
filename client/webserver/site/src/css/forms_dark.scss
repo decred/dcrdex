@@ -3,3 +3,14 @@ body.dark {
     color: #a1a1a1;
   }
 }
+
+.wallet-tabs {
+  .wtab {
+    background-color: $dark_bg_1;
+    border-color: #333;
+  }
+
+  .wtab.selected {
+    background-color: $dark_bg_2;
+  }
+}

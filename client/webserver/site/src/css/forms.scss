@@ -38,3 +38,42 @@ table.marketstable {
     border: 1px solid #686767;
   }
 }
+
+.wallet-tabs {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+
+  .wtab {
+    padding: 8px 20px;
+    font-size: 15px;
+    border-style: solid solid none solid;
+    border-radius: 5px 5px 0 0;
+    border-width: 1px;
+    border-color: #aaa;
+    opacity: 0.8;
+    background-color: $light_bg_1;
+    position: relative;
+    z-index: 150;
+  }
+
+  .wtab:not(:first-child) {
+    border-left-style: none;
+  }
+
+  .wtab.selected {
+    opacity: 1;
+    top: 1px;
+    background-color: $light_bg_2;
+    cursor: default;
+  }
+
+  .wtab:not(.selected) {
+    cursor: pointer;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+}

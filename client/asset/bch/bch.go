@@ -5,6 +5,7 @@ package bch
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -33,9 +34,15 @@ const (
 	// structure.
 	defaultFee        = 100
 	minNetworkVersion = 221100
+	walletTypeRPC     = "bitcoindRPC"
 )
 
 var (
+	NetPorts = dexbtc.NetPorts{
+		Mainnet: "8332",
+		Testnet: "18332",
+		Simnet:  "18443",
+	}
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
@@ -85,9 +92,14 @@ var (
 		Name:    "Bitcoin Cash",
 		Version: version,
 		// Same as bitcoin. That's dumb.
-		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        configOpts,
-		UnitInfo:          dexbch.UnitInfo,
+		UnitInfo: dexbch.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			Type:              walletTypeRPC,
+			Tab:               "External",
+			Description:       "Connect to bitcoind",
+			DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
+			ConfigOpts:        configOpts,
+		}},
 	}
 )
 
@@ -98,13 +110,29 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Open opens the BCH exchange wallet. Start the wallet with its Run method.
-func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	return NewWallet(cfg, logger, network)
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	switch walletType {
+	case "", walletTypeRPC:
+		_, client, err := btc.ParseRPCWalletConfig(settings, "bch", net, NetPorts)
+		if err != nil {
+			return false, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
+		_, err = client.RawRequest(ctx, "getnetworkinfo", nil)
+		return err == nil, nil
+	}
+
+	return false, fmt.Errorf("no Bitcoin Cash wallet of type %q available", walletType)
 }
 
-func (d *Driver) Create(params *asset.CreateWalletParams) error {
+func (d *Driver) Create(*asset.CreateWalletParams) error {
 	return fmt.Errorf("no creatable wallet types")
+}
+
+// Open creates the BCH exchange wallet. Start the wallet with its Run method.
+func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+	return NewWallet(cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -139,11 +167,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
-	ports := dexbtc.NetPorts{
-		Mainnet: "8332",
-		Testnet: "18332",
-		Simnet:  "18443",
-	}
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:          cfg,
 		MinNetworkVersion:  minNetworkVersion,
@@ -152,7 +175,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Logger:             logger,
 		Network:            network,
 		ChainParams:        params,
-		Ports:              ports,
+		Ports:              NetPorts,
 		DefaultFallbackFee: defaultFee,
 		Segwit:             false,
 		LegacyBalance:      true,

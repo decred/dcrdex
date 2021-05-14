@@ -78,6 +78,7 @@ func TestParseNewWalletArgs(t *testing.T) {
 		pwArgs := []encode.PassBytes{pw, pw}
 		args := []string{
 			id,
+			"spv",
 			"rpclisten=127.0.0.0",
 		}
 		return &RawParams{PWArgs: pwArgs, Args: args}

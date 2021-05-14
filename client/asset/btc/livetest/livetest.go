@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os/exec"
@@ -32,24 +33,25 @@ import (
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, newWallet WalletConstructor, symbol, node, name string,
-	logger dex.Logger, blkFunc func(string, error), splitTx bool) (asset.Wallet, *dex.ConnectionMaster) {
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
+	logger dex.Logger, blkFunc func(string, error)) (asset.Wallet, *dex.ConnectionMaster) {
+
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	cfgPath := filepath.Join(user.HomeDir, "dextest", symbol, node, node+".conf")
+	cfgPath := filepath.Join(user.HomeDir, "dextest", cfg.Asset.Symbol, node, node+".conf")
 	settings, err := config.Parse(cfgPath)
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
 	settings["walletname"] = name
-	if splitTx {
+	if cfg.SplitTx {
 		settings["txsplit"] = "1"
 	}
 
-	reportName := fmt.Sprintf("%s:%s", symbol, node)
+	reportName := fmt.Sprintf("%s:%s-%s", cfg.Asset.Symbol, node, name)
 
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
@@ -57,16 +59,19 @@ func tBackend(ctx context.Context, t *testing.T, newWallet WalletConstructor, sy
 			blkFunc(reportName, err)
 		},
 	}
-	backend, err := newWallet(walletCfg, logger, dex.Regtest)
+
+	w, err := cfg.New(walletCfg, logger, dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
-	cm := dex.NewConnectionMaster(backend)
+
+	cm := dex.NewConnectionMaster(w)
 	err = cm.Connect(ctx)
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
-	return backend, cm
+
+	return w, cm
 }
 
 type testRig struct {
@@ -94,7 +99,7 @@ func (rig *testRig) close() {
 		}()
 		select {
 		case <-closed:
-		case <-time.NewTimer(time.Second).C:
+		case <-time.NewTimer(time.Second * 5).C:
 			rig.t.Fatalf("failed to disconnect from %s", name)
 		}
 	}
@@ -110,15 +115,21 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint64, dexAsset *dex.Asset, splitTx bool) {
-	tLogger := dex.StdOutLogger("TEST", dex.LevelTrace)
+type Config struct {
+	New     WalletConstructor
+	LotSize uint64
+	Asset   *dex.Asset
+	SplitTx bool
+	SPV     bool
+}
+
+func Run(t *testing.T, cfg *Config) {
+	tLogger := dex.StdOutLogger("TEST", dex.LevelInfo)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 
 	tStart := time.Now()
 
-	tBlockTick := time.Second
-	tBlockWait := tBlockTick + time.Millisecond*50
 	walletPassword := "abc"
 
 	var blockReported uint32
@@ -129,16 +140,30 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 
 	rig := &testRig{
 		t:                 t,
-		symbol:            dexAsset.Symbol,
+		symbol:            cfg.Asset.Symbol,
 		backends:          make(map[string]asset.Wallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
-	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc, splitTx)
-	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "beta", "", tLogger, blkFunc, splitTx)
-	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc, splitTx)
+
+	var expConfs uint32
+	blockWait := time.Second
+	if cfg.SPV {
+		blockWait = time.Second * 5
+	}
+	mine := func() {
+		rig.mineAlpha()
+		expConfs++
+		time.Sleep(blockWait)
+	}
+
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(tCtx, t, cfg, "alpha", "", tLogger.SubLogger("alpha"), blkFunc)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
+	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, cfg, "alpha", "gamma", tLogger.SubLogger("gamma"), blkFunc)
 	defer rig.close()
 	var lots uint64 = 2
-	contractValue := lots * lotSize
+	contractValue := lots * cfg.LotSize
+
+	tLogger.Info("Wallets configured")
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
 		for _, u := range utxos {
@@ -155,7 +180,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		if err != nil {
 			t.Fatalf("error getting available balance: %v", err)
 		}
-		tLogger.Debugf("%s %f available, %f immature, %f locked",
+		tLogger.Infof("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}
 
@@ -168,16 +193,17 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	ord := &asset.Order{
 		Value:        contractValue * 3,
 		MaxSwapCount: lots * 3,
-		DEXConfig:    dexAsset,
+		DEXConfig:    cfg.Asset,
 	}
 	setOrderValue := func(v uint64) {
 		ord.Value = v
-		ord.MaxSwapCount = v / lotSize
+		ord.MaxSwapCount = v / cfg.LotSize
 	}
+
+	tLogger.Info("Testing FundOrder")
 
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
-
 	utxos, _, err := rig.gamma().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
@@ -193,7 +219,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	rig.gamma().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
 	utxos, _, _ = rig.gamma().FundOrder(ord)
-	if !splitTx && !inUTXOs(utxo, utxos) {
+	if !cfg.SplitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.gamma().ReturnCoins(utxos)
@@ -209,6 +235,11 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	utxos2, _, err := rig.gamma().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
+	}
+
+	address, err := rig.alpha().Address()
+	if err != nil {
+		t.Fatalf("error getting alpha address: %v", err)
 	}
 
 	secretKey1 := randBytes(32)
@@ -232,16 +263,29 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	swaps := &asset.Swaps{
 		Inputs:    append(utxos1, utxos2...),
 		Contracts: []*asset.Contract{contract1, contract2},
-		FeeRate:   dexAsset.MaxFeeRate,
+		FeeRate:   cfg.Asset.MaxFeeRate,
 	}
+
+	tLogger.Info("Testing Swap")
 
 	receipts, _, _, err := rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
-
 	if len(receipts) != 2 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
+	}
+
+	tLogger.Infof("Sent %d swaps", len(receipts))
+	for i, r := range receipts {
+		tLogger.Infof("      Swap # %d: %s", i+1, r.Coin())
+	}
+
+	// Don't check zero confs for SPV. Core deals with the failures until the
+	// tx is mined.
+
+	if cfg.SPV {
+		mine()
 	}
 
 	confCoin := receipts[0].Coin()
@@ -250,7 +294,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		t.Helper()
 		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
 		if err != nil {
-			t.Fatalf("error getting %d confs: %v", n, err)
+			if n > 0 || !errors.Is(err, asset.CoinNotFoundError) {
+				t.Fatalf("error getting %d confs: %v", n, err)
+			}
 		}
 		if confs != n {
 			t.Fatalf("expected %d confs, got %d", n, confs)
@@ -259,11 +305,12 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 			t.Fatalf("checkConfs: expected spent = %t, got %t", expSpent, spent)
 		}
 	}
-	// Check that there are 0 confirmations.
-	checkConfs(0, false)
+
+	checkConfs(expConfs, false)
 
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
+
 		// Alpha should be able to redeem.
 		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil, tStart)
 		if err != nil {
@@ -280,8 +327,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
-		if confs != 0 {
-			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
+		if confs != expConfs {
+			t.Fatalf("unexpected number of confirmations. wanted %d, got %d", expConfs, confs)
 		}
 		if spent {
 			t.Fatalf("makeRedemption: expected unspent, got spent")
@@ -295,10 +342,14 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		}
 	}
 
+	tLogger.Info("Testing AuditContract")
+
 	redemptions := []*asset.Redemption{
 		makeRedemption(contractValue, receipts[0], secretKey1),
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
+
+	tLogger.Info("Testing Redeem")
 
 	_, _, _, err = rig.alpha().Redeem(&asset.RedeemForm{
 		Redemptions: redemptions,
@@ -308,28 +359,36 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	}
 
 	// Find the redemption
+
+	// Only do the mempool zero-conf redemption check when not spv.
+	if cfg.SPV {
+		mine()
+	}
+
 	swapReceipt := receipts[0]
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*10))
 	defer cancel()
-	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
+
+	tLogger.Info("Testing FindRedemption")
+
+	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
-	if !bytes.Equal(checkKey, secretKey1) {
-		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
-	}
 
 	// Mine a block and find the redemption again.
-	rig.mineAlpha()
-	time.Sleep(tBlockWait)
+	mine()
 	if atomic.LoadUint32(&blockReported) == 0 {
 		t.Fatalf("no block reported")
 	}
 	// Check that there is 1 confirmation on the swap
-	checkConfs(1, true)
-	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
+	checkConfs(expConfs, true)
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
+	}
+	if !bytes.Equal(checkKey, secretKey1) {
+		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
 	}
 
 	// Now send another one with lockTime = now and try to refund it.
@@ -349,10 +408,10 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	swaps = &asset.Swaps{
 		Inputs:    utxos,
 		Contracts: []*asset.Contract{contract},
-		FeeRate:   dexAsset.MaxFeeRate,
+		FeeRate:   cfg.Asset.MaxFeeRate,
 	}
 
-	time.Sleep(time.Second)
+	tLogger.Info("Testing Refund")
 
 	receipts, _, _, err = rig.gamma().Swap(swaps)
 	if err != nil {
@@ -364,22 +423,26 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	}
 	swapReceipt = receipts[0]
 
-	_, err = rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
+	coinID, err := rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
+	c, _ := asset.DecodeCoinID(cfg.Asset.ID, coinID)
+	tLogger.Infof("Refunded with %s", c)
 
 	// Test PayFee
 	coin, err := rig.gamma().PayFee(address, 1e8)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
-	tLogger.Infof("fee paid with tx %s", coin.String())
+	tLogger.Infof("Fee paid with %s", coin.String())
+
+	tLogger.Info("Testing Withdraw")
 
 	// Test Withdraw
 	coin, err = rig.gamma().Withdraw(address, 5e7)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}
-	tLogger.Infof("withdrew with tx %s", coin.String())
+	tLogger.Infof("Withdrew with %s", coin.String())
 }

@@ -141,7 +141,13 @@ func startClients(ctx context.Context) error {
 
 		// connect wallets
 		for assetID, wallet := range c.wallets {
+			walletType := "dcrwalletRPC"
+			if assetID == btc.BipID {
+				walletType = "bitcoindRPC"
+			}
+
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
+				Type:    walletType,
 				AssetID: assetID,
 				Config:  wallet.config,
 			})

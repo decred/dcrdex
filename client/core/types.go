@@ -77,6 +77,7 @@ func (set *errorSet) Error() string {
 type WalletForm struct {
 	AssetID uint32
 	Config  map[string]string
+	Type    string
 }
 
 // WalletBalance is an exchange wallet's balance which includes contractlocked
@@ -97,6 +98,7 @@ type WalletState struct {
 	Symbol       string         `json:"symbol"`
 	AssetID      uint32         `json:"assetID"`
 	Version      uint32         `json:"version"`
+	WalletType   string         `json:"type"`
 	Open         bool           `json:"open"`
 	Running      bool           `json:"running"`
 	Balance      *WalletBalance `json:"balance"`
