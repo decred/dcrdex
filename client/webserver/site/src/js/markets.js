@@ -1326,7 +1326,6 @@ export default class MarketsPage extends BasePage {
    */
   async submitOrder () {
     const page = this.page
-    const market = this.market
     Doc.hide(page.forms)
     const order = this.parseOrder()
     const pw = page.vPass.value
@@ -1337,14 +1336,10 @@ export default class MarketsPage extends BasePage {
     }
     if (!this.validateOrder(order)) return
     const res = await postJSON('/api/trade', req)
-    if (!app.checkResponse(res)) return
-    // If the wallets are not open locally, they must have been opened during
-    // ordering. Grab updated info.
-    const baseWallet = app.walletMap[market.base.id]
-    const quoteWallet = app.walletMap[market.quote.id]
-    if (!baseWallet.open || !quoteWallet.open) {
-      this.balanceWgt.updateAsset(market.base.id)
-      this.balanceWgt.updateAsset(market.quote.id)
+    if (!app.checkResponse(res, true)) {
+      page.orderErr.textContent = res.msg
+      Doc.show(page.orderErr)
+      return
     }
     this.refreshActiveOrders()
     this.chart.draw()
