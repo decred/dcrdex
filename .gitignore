@@ -15,6 +15,7 @@ debug
 dex*key
 server/cmd/genkey/genkey
 server/cmd/dcrdex/dcrdex
+server/cmd/usermatches/usermatches
 markets.json
 dist/
 node_modules/

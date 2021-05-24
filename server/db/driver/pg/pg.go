@@ -102,8 +102,10 @@ func (a *Archiver) fatalBackendErr(err error) {
 	a.fatalMtx.Unlock()
 }
 
-// NewArchiver constructs a new Archiver. Use Close when done with the Archiver.
-func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
+// NewArchiverForRead constructs a new Archiver without creating or modifying
+// any data structures. This should be used for read-only applications. Use
+// Close when done with the Archiver.
+func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 	// Connect to the PostgreSQL daemon and return the *sql.DB.
 	db, err := connect(cfg.Host, cfg.Port, cfg.User, cfg.Pass, cfg.DBName)
 	if err != nil {
@@ -140,7 +142,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		mktMap[mkt.Name] = mkt
 	}
 
-	archiver := &Archiver{
+	return &Archiver{
 		ctx:          ctx,
 		db:           db,
 		dbName:       cfg.DBName,
@@ -151,6 +153,16 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),
 		},
 		fatal: make(chan struct{}),
+	}, nil
+}
+
+// NewArchiver constructs a new Archiver. All tables are created, including
+// tables for markets that may have been added since last startup. Use Close
+// when done with the Archiver.
+func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
+	archiver, err := NewArchiverForRead(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check critical performance-related settings.
@@ -159,12 +171,12 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	// Ensure all tables required by the current market configuration are ready.
-	purgeMarkets, err := prepareTables(ctx, db, cfg.MarketCfg)
+	purgeMarkets, err := prepareTables(ctx, archiver.db, cfg.MarketCfg)
 	if err != nil {
 		return nil, err
 	}
 	for _, staleMarket := range purgeMarkets {
-		mkt := mktMap[staleMarket]
+		mkt := archiver.markets[staleMarket]
 		if mkt == nil { // shouldn't happen
 			return nil, fmt.Errorf("unrecognized market %v", staleMarket)
 		}
