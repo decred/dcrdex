@@ -54,8 +54,12 @@ export function statusString (order) {
   switch (order.status) {
     case StatusUnknown: return 'unknown'
     case StatusEpoch: return 'epoch'
-    case StatusBooked: return order.cancelling ? 'cancelling' : 'booked'
-    case StatusExecuted: return isLive ? 'settling' : 'executed'
+    case StatusBooked:
+      if (order.cancelling) return 'cancelling'
+      return isLive ? 'booked/settling' : 'booked'
+    case StatusExecuted:
+      if (isLive) return 'settling'
+      return (order.filled === 0) ? 'expired' : 'executed'
     case StatusCanceled: return isLive ? 'canceled/settling' : 'canceled'
     case StatusRevoked: return isLive ? 'revoked/settling' : 'revoked'
   }
