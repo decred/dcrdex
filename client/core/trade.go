@@ -1131,7 +1131,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			c.log.Errorf("refreshUnlock error redeeming %s: %v", t.wallets.toAsset.Symbol, err)
 		}
 		if didUnlock {
-			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.fromAsset.Symbol)
+			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.toAsset.Symbol)
 		}
 		toAsset := t.wallets.toAsset.ID
 		assets.count(toAsset)
