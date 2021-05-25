@@ -12,10 +12,10 @@ import (
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -40,32 +40,36 @@ func newPubKey() []byte {
 }
 
 type tAddrs struct {
-	pkh       *dcrutil.AddressPubKeyHash
-	sh        *dcrutil.AddressScriptHash
-	pk1       *dcrutil.AddressSecpPubKey
-	pk2       *dcrutil.AddressSecpPubKey
-	edwards   *dcrutil.AddressPubKeyHash
-	schnorrPK *dcrutil.AddressSecSchnorrPubKey
+	pkh       *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0
+	sh        *stdaddr.AddressScriptHashV0
+	pk1       *stdaddr.AddressPubKeyEcdsaSecp256k1V0
+	pk2       *stdaddr.AddressPubKeyEcdsaSecp256k1V0
+	edwards   *stdaddr.AddressPubKeyHashEd25519V0
+	schnorrPK *stdaddr.AddressPubKeySchnorrSecp256k1V0
 	multiSig  []byte
 }
 
-func multiSigScript(pubkeys []*dcrutil.AddressSecpPubKey, numReq int64) ([]byte, error) {
+func multiSigScript(pubkeys []*stdaddr.AddressPubKeyEcdsaSecp256k1V0, numReq int64) ([]byte, error) {
 	builder := txscript.NewScriptBuilder().AddInt64(numReq)
 	for _, key := range pubkeys {
-		builder.AddData(key.ScriptAddress())
+		script, err := AddressScript(key)
+		if err != nil {
+			return nil, err
+		}
+		builder.AddData(script)
 	}
 	builder.AddInt64(int64(len(pubkeys))).AddOp(txscript.OP_CHECKMULTISIG)
 	return builder.Script()
 }
 
 func testAddresses() *tAddrs {
-	p2pkh, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
-	pk1, _ := dcrutil.NewAddressSecpPubKey(newPubKey(), tParams)
-	pk2, _ := dcrutil.NewAddressSecpPubKey(newPubKey(), tParams)
-	edwards, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEd25519)
-	schnorrPK, _ := dcrutil.NewAddressSecSchnorrPubKey(newPubKey(), tParams)
-	multiSig, _ := multiSigScript([]*dcrutil.AddressSecpPubKey{pk1, pk2}, 1)
-	p2sh, _ := dcrutil.NewAddressScriptHash(multiSig, tParams)
+	p2pkh, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
+	pk1, _ := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(newPubKey(), tParams)
+	pk2, _ := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(newPubKey(), tParams)
+	edwards, _ := stdaddr.NewAddressPubKeyHashEd25519V0(randBytes(20), tParams)
+	schnorrPK, _ := stdaddr.NewAddressPubKeySchnorrSecp256k1V0Raw(newPubKey(), tParams)
+	multiSig, _ := multiSigScript([]*stdaddr.AddressPubKeyEcdsaSecp256k1V0{pk1, pk2}, 1)
+	p2sh, _ := stdaddr.NewAddressScriptHashV0(multiSig, tParams)
 	return &tAddrs{
 		pkh:       p2pkh,
 		sh:        p2sh,
@@ -81,12 +85,9 @@ func TestParseScriptType(t *testing.T) {
 	addrs := testAddresses()
 
 	var scriptType DCRScriptType
-	parse := func(addr dcrutil.Address, redeem []byte, stakeOpcode byte) ([]byte, DCRScriptType) {
+	parse := func(addr stdaddr.Address, redeem []byte, stakeOpcode byte) ([]byte, DCRScriptType) {
 		t.Helper()
-		pkScript, err := txscript.PayToAddrScript(addr)
-		if err != nil {
-			t.Fatalf("error creating script for address %s: %v", addr, err)
-		}
+		_, pkScript := addr.PaymentScript()
 		if stakeOpcode != 0 {
 			pkScript = append([]byte{stakeOpcode}, pkScript...)
 		}
@@ -148,9 +149,9 @@ func TestParseScriptType(t *testing.T) {
 }
 
 func TestMakeContract(t *testing.T) {
-	ra, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	ra, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	recipient := ra.String()
-	sa, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	sa, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	sender := sa.String()
 	badAddr := "notanaddress"
 
@@ -160,7 +161,7 @@ func TestMakeContract(t *testing.T) {
 		t.Fatalf("no error for bad recipient")
 	}
 	// Wrong recipient address type
-	p2sh, _ := dcrutil.NewAddressScriptHash(randBytes(50), tParams)
+	p2sh, _ := stdaddr.NewAddressScriptHashV0(randBytes(50), tParams)
 	_, err = MakeContract(p2sh.String(), sender, randBytes(32), tStamp, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong recipient address type")
@@ -172,7 +173,7 @@ func TestMakeContract(t *testing.T) {
 		t.Fatalf("no error for bad sender")
 	}
 	// Wrong sender address type.
-	altAddr, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEd25519)
+	altAddr, _ := stdaddr.NewAddressPubKeyHashEd25519V0(randBytes(20), tParams)
 	_, err = MakeContract(recipient, altAddr.String(), randBytes(32), tStamp, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong sender address type")
@@ -313,7 +314,7 @@ func Test_nonstandardScript(t *testing.T) {
 func TestExtractScriptAddrs(t *testing.T) {
 	addrs := testAddresses()
 	type test struct {
-		addr   dcrutil.Address
+		addr   stdaddr.Address
 		nonStd bool
 		script []byte
 		pk     int
@@ -331,7 +332,7 @@ func TestExtractScriptAddrs(t *testing.T) {
 	for _, tt := range tests {
 		s := tt.script
 		if s == nil {
-			s, _ = txscript.PayToAddrScript(tt.addr)
+			_, s = tt.addr.PaymentScript()
 		}
 		scriptAddrs, nonStd, err := ExtractScriptAddrs(0, s, tParams)
 		if err != nil {
@@ -354,9 +355,9 @@ func TestExtractScriptAddrs(t *testing.T) {
 }
 
 func TestExtractSwapDetails(t *testing.T) {
-	rAddr, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	rAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	recipient := rAddr.String()
-	sAddr, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	sAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	sender := sAddr.String()
 	keyHash := randBytes(32)
 	contract, err := MakeContract(recipient, sender, keyHash, tStamp, tParams)
@@ -414,8 +415,8 @@ func TestInputInfo(t *testing.T) {
 	}
 
 	var script []byte
-	payToAddr := func(addr dcrutil.Address, redeem []byte) {
-		script, _ = txscript.PayToAddrScript(addr)
+	payToAddr := func(addr stdaddr.Address, redeem []byte) {
+		_, script = addr.PaymentScript()
 		spendInfo, err = InputInfo(0, script, redeem, tParams)
 		if err != nil {
 			t.Fatalf("InputInfo script: %v", err)
@@ -429,7 +430,7 @@ func TestInputInfo(t *testing.T) {
 	check("p2sh", 74+uint32(len(addrs.multiSig))+1, ScriptP2SH|ScriptMultiSig)
 
 	// bad version
-	script, _ = txscript.PayToAddrScript(addrs.pkh)
+	_, script = addrs.pkh.PaymentScript()
 	spendInfo, err = InputInfo(1, script, nil, tParams)
 	if err != dex.UnsupportedScriptError {
 		t.Fatalf("InputInfo should have errored for script version 1")
@@ -442,17 +443,17 @@ func TestInputInfo(t *testing.T) {
 	}
 
 	// InputInfo P2SH requires a redeem script
-	script, _ = txscript.PayToAddrScript(addrs.sh)
-	_, err = InputInfo(0, script, nil, tParams)
+	version, script := addrs.sh.PaymentScript()
+	_, err = InputInfo(version, script, nil, tParams)
 	if err == nil {
 		t.Fatalf("no error for missing redeem script")
 	}
 }
 
 func TestFindKeyPush(t *testing.T) {
-	rAddr, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	rAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	recipient := rAddr.String()
-	sAddr, _ := dcrutil.NewAddressPubKeyHash(randBytes(20), tParams, dcrec.STEcdsaSecp256k1)
+	sAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
 	sender := sAddr.String()
 
 	secret := randBytes(32)
@@ -514,19 +515,20 @@ func TestExtractContractHash(t *testing.T) {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// wrong script types
-	p2pkh, _ := txscript.PayToAddrScript(addrs.pkh)
+	_, p2pkh := addrs.pkh.PaymentScript()
 	_, err = ExtractContractHash(hex.EncodeToString(p2pkh))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// ok
-	p2sh, _ := txscript.PayToAddrScript(addrs.sh)
+	_, p2sh := addrs.sh.PaymentScript()
 	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh))
 	if err != nil {
 		t.Fatalf("error extracting contract hash: %v", err)
 	}
-	if !bytes.Equal(checkHash, addrs.sh.ScriptAddress()) {
-		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.sh.ScriptAddress(), checkHash)
+	realHash := addrs.sh.Hash160()[:]
+	if !bytes.Equal(checkHash, realHash) {
+		t.Fatalf("hash mismatch. wanted %x, got %x", realHash, checkHash)
 	}
 }
 

@@ -12,8 +12,8 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 )
 
 // CloseAccount closes the account by setting the value of the rule column to
@@ -164,13 +164,13 @@ out:
 	}
 
 	pubKeyBytes := childExtKey.SerializedPubKey()
-	addr, err := dcrutil.NewAddressSecpPubKey(pubKeyBytes, a.keyParams)
+	addr, err := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(pubKeyBytes, a.keyParams)
 	if err != nil {
 		log.Errorf("error creating new AddressSecpPubKey: %v", err)
 		return "", fmt.Errorf("error encoding fee address")
 	}
 
-	return addr.Address(), nil
+	return addr.String(), nil
 }
 
 // createAccountTables creates the accounts and fee_keys tables.
