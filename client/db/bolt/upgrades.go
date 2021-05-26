@@ -253,7 +253,7 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 // v4Upgrade moves active orders from what will become the archivedOrdersBucket
 // to a new ordersBucket. This is done in order to make searching active orders
 // faster, as they do not need to be pulled out of all orders any longer. This
-// upgrade moves active orders as apposed to inactive orders under the
+// upgrade moves active orders as opposed to inactive orders under the
 // assumption that there are less active orders to move, and so a smaller
 // database transaction occurs.
 func v4Upgrade(dbtx *bbolt.Tx) error {
@@ -263,13 +263,13 @@ func v4Upgrade(dbtx *bbolt.Tx) error {
 		return err
 	}
 
-	// Move any executed orders to the new archivedOrdersBucket.
+	// Move any inactive orders to the new archivedOrdersBucket.
 	return moveActiveOrders(dbtx)
 }
 
-// moveActiveOrders searches the v1 ordersBucket for orders that are not yet
-// booked booked status, adds those to the v2 ordersBucket, and deletes them
-// from the v1 ordersBucket.
+// moveActiveOrders searches the v1 ordersBucket for orders that are inactive,
+// adds those to the v2 ordersBucket, and deletes them from the v1 ordersBucket,
+// which becomes the archived orders bucket.
 func moveActiveOrders(tx *bbolt.Tx) error {
 	ordersBucketV1 := []byte("orders")
 	ordersBucketV2 := []byte("activeOrders")
@@ -281,36 +281,30 @@ func moveActiveOrders(tx *bbolt.Tx) error {
 
 	ordersBktV1 := tx.Bucket(ordersBucketV1)
 	ordersBktV2 := tx.Bucket(ordersBucketV2)
-	var (
-		oBktV1, oBktV2 *bbolt.Bucket
-		status         order.OrderStatus
-	)
 	return ordersBktV1.ForEach(func(k, _ []byte) error {
-		oBktV1 = ordersBktV1.Bucket(k)
+		oBktV1 := ordersBktV1.Bucket(k)
 		if oBktV1 == nil {
 			return fmt.Errorf("order %x bucket is not a bucket", k)
 		}
-		status = order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
+		status := order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
 		if status == order.OrderStatusUnknown {
-			println(fmt.Sprintf("Encountered order with unknown status: %x", k))
+			fmt.Printf("Encountered order with unknown status: %x\n", k)
 			return nil
 		}
 		if !status.IsActive() {
 			return nil
 		}
-		oBktV2, err = ordersBktV2.CreateBucket(k)
+		oBktV2, err := ordersBktV2.CreateBucket(k)
 		if err != nil {
 			return err
 		}
-		// NOTE: Assumes no buckets saved in oBktV1.
-		err = oBktV1.ForEach(func(k, v []byte) error {
+		// Assume the order bucket contains only values, no sub-buckets
+		if err := oBktV1.ForEach(func(k, v []byte) error {
 			return oBktV2.Put(k, v)
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
-		ordersBktV1.DeleteBucket(k)
-		return nil
+		return ordersBktV1.DeleteBucket(k)
 	})
 }
 
