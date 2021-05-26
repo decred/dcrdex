@@ -200,7 +200,7 @@ func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
 				println(fmt.Sprintf("Encountered order with unknown status: %x", k))
 				return nil
 			}
-			if status <= order.OrderStatusBooked {
+			if status.IsActive() {
 				return fmt.Errorf("v1 orders bucket has active order: %x", k)
 			}
 			return nil
@@ -219,7 +219,7 @@ func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
 			if status == order.OrderStatusUnknown {
 				return fmt.Errorf("encountered order with unknown status: %x", k)
 			}
-			if status > order.OrderStatusBooked {
+			if !status.IsActive() {
 				return fmt.Errorf("v2 orders bucket has archived order: %x", k)
 			}
 			return nil

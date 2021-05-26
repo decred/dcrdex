@@ -446,8 +446,8 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		// ordersBucket. Finished orders go in the archivedOrdersBucket.
 		var oBkt *bbolt.Bucket
 		var err error
-		executed := md.Status > order.OrderStatusBooked
-		if executed {
+		inactive := !md.Status.IsActive()
+		if inactive {
 			if ob.Bucket(oid[:]) != nil {
 				ob.DeleteBucket(oid[:])
 			}
@@ -697,7 +697,7 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 		})
 		allOrders = false
 		for _, status := range orderFilter.Statuses {
-			if status > order.OrderStatusBooked {
+			if !status.IsActive() {
 				allOrders = true
 				break
 			}
@@ -784,8 +784,8 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 // order bucket. If status is less than or equal to booked, it expects the order
 // to already be in active orders and returns the bucket.
 func updateOrderBucket(ob, aob *bbolt.Bucket, oid order.OrderID, status order.OrderStatus) (*bbolt.Bucket, error) {
-	executed := status > order.OrderStatusBooked
-	if executed {
+	inactive := !status.IsActive()
+	if inactive {
 		if bkt := ob.Bucket(oid[:]); bkt != nil {
 			oBkt, err := aob.CreateBucket(oid[:])
 			if err != nil {

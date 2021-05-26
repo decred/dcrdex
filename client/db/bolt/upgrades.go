@@ -295,7 +295,7 @@ func moveActiveOrders(tx *bbolt.Tx) error {
 			println(fmt.Sprintf("Encountered order with unknown status: %x", k))
 			return nil
 		}
-		if status > order.OrderStatusBooked {
+		if !status.IsActive() {
 			return nil
 		}
 		oBktV2, err = ordersBktV2.CreateBucket(k)
