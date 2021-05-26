@@ -7,6 +7,9 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 
 	"decred.org/dcrdex/dex"
 	"github.com/ethereum/go-ethereum/core"
@@ -31,7 +34,8 @@ type nodeConfig struct {
 	listenAddr, appDir string
 }
 
-// SetSimnetGenesis should be set before using on simnet.
+// SetSimnetGenesis should be set before using on simnet. It must be set before
+// calling runNode, or a default will be used if found.
 func SetSimnetGenesis(sng string) {
 	simnetGenesis = sng
 }
@@ -52,6 +56,12 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 	var urls []string
 	switch cfg.net {
 	case dex.Simnet:
+		urls = []string{
+			"enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304", // alpha
+			"enode://b1d3e358ee5c9b268e911f2cab47bc12d0e65c80a6d2b453fece34facc9ac3caed14aa3bc7578166bb08c5bc9719e5a2267ae14e0b42da393f4d86f6d5829061@127.0.0.1:30305", // beta
+			"enode://b1c14deee09b9d5549c90b7b30a35c812a56bf6afea5873b05d7a1bcd79c7b0848bcfa982faf80cc9e758a3a0d9b470f0a002840d365050fd5bf45052a6ec313@127.0.0.1:30306", // gamma
+			"enode://ca414c361d1a38716170923e4900d9dc9203dbaf8fdcaee73e1f861df9fdf20a1453b76fd218c18bc6f3c7e13cbca0b3416af02a53b8e31188faa45aab398d1c@127.0.0.1:30307", // delta
+		}
 	case dex.Testnet:
 		urls = params.GoerliBootnodes
 	case dex.Mainnet:
@@ -89,6 +99,20 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 	switch cfg.net {
 	case dex.Simnet:
 		var sp core.Genesis
+		if simnetGenesis == "" {
+			homeDir := os.Getenv("HOME")
+			genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
+			genBytes, err := ioutil.ReadFile(genesisFile)
+			if err != nil {
+				return nil, fmt.Errorf("error reading genesis file: %v\n", err)
+			}
+			genLen := len(genBytes)
+			if genLen == 0 {
+				return nil, fmt.Errorf("no genesis found at %v\n", genesisFile)
+			}
+			genBytes = genBytes[:genLen-1]
+			SetSimnetGenesis(string(genBytes))
+		}
 		if err := json.Unmarshal([]byte(simnetGenesis), &sp); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal simnent genesis: %v", err)
 		}

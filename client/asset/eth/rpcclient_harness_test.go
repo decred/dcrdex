@@ -43,7 +43,6 @@ const (
 var (
 	gasPrice        = big.NewInt(82e9)
 	homeDir         = os.Getenv("HOME")
-	genesisFile     = filepath.Join(homeDir, "dextest", "eth", "genesis.json")
 	alphaNodeDir    = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
 	ethClient       = new(rpcclient)
 	ctx             context.Context
@@ -108,19 +107,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(tmpDir)
-	genBytes, err := ioutil.ReadFile(genesisFile)
-	if err != nil {
-		fmt.Printf("error reading genesis file: %v\n", err)
-		os.Exit(1)
-	}
-	genLen := len(genBytes)
-	if genLen == 0 {
-		fmt.Printf("no genesis found at %v\n", genesisFile)
-		os.Exit(1)
-	}
-	genBytes = genBytes[:genLen-1]
-	fmt.Printf("Genesis is:\n%v\n", string(genBytes))
-	SetSimnetGenesis(string(genBytes))
 	settings := map[string]string{
 		"appdir":         tmpDir,
 		"nodelistenaddr": "localhost:30355",
