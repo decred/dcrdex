@@ -201,7 +201,7 @@ func (db *BoltDB) LegacyKeyParams() ([]byte, error) {
 }
 
 // UpgradeLegacyCredentials updates the stored credentials to the new
-// *PrimaryCredential format and updates the stored core version.
+// *PrimaryCredentials format and updates the stored core version.
 func (db *BoltDB) UpgradeLegacyCredentials(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter,
 	newCoreVersion uint8) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
 
@@ -309,7 +309,7 @@ func (db *BoltDB) recryptPasswords(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials
 			return err
 		}
 		walletUpdates[w.AssetID] = w.EncryptedPW
-		return err
+		return nil
 
 	}); err != nil {
 		return nil, nil, fmt.Errorf("wallets update error: %w", err)
@@ -358,16 +358,16 @@ func (db *BoltDB) recryptPasswords(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials
 
 func validateCreds(creds *dexdb.PrimaryCredentials) error {
 	if len(creds.EncSeed) == 0 {
-		return fmt.Errorf("EncSeed not set")
+		return errors.New("EncSeed not set")
 	}
 	if len(creds.EncInnerKey) == 0 {
-		return fmt.Errorf("EncInnerKey not set")
+		return errors.New("EncInnerKey not set")
 	}
 	if len(creds.InnerKeyParams) == 0 {
-		return fmt.Errorf("InnerKeyParams not set")
+		return errors.New("InnerKeyParams not set")
 	}
 	if len(creds.OuterKeyParams) == 0 {
-		return fmt.Errorf("OuterKeyParams not set")
+		return errors.New("OuterKeyParams not set")
 	}
 	return nil
 }
@@ -379,7 +379,7 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 			return fmt.Errorf("no credentials bucket")
 		}
 		if bkt.Stats().KeyN == 0 {
-			return fmt.Errorf("no credentials have been stored")
+			return dexdb.ErrNoCredentials
 		}
 		creds = &dexdb.PrimaryCredentials{
 			EncSeed:        getCopy(bkt, encSeedKey),

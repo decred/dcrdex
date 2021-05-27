@@ -55,6 +55,7 @@ const (
 	ErrOrderNotExecuted
 	ErrUpdateCount
 	ErrAccountExists
+	ErrAccountSuspended
 )
 
 func (ae ArchiveError) Error() string {

@@ -84,6 +84,9 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 
 // AccountInfo returns data for an account.
 func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
+
+	fmt.Printf("-- AccountInfo.0 %x \n", aid[:])
+
 	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
 	acct := new(db.Account)
 	var feeAddress sql.NullString
@@ -91,6 +94,9 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 		&acct.FeeCoin, &acct.BrokenRule); err != nil {
 		return nil, err
 	}
+
+	fmt.Println("-- AccountInfo.1")
+
 	acct.FeeAddress = feeAddress.String
 	return acct, nil
 }
@@ -98,9 +104,18 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 // CreateAccount creates an entry for a new account in the accounts table. A
 // DCR registration fee address is created and returned.
 func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
-	_, err := a.AccountInfo(acct.ID)
+	ai, err := a.AccountInfo(acct.ID)
 	if err == nil {
-		return "", &db.ArchiveError{Code: db.ErrAccountExists}
+		if len(ai.FeeCoin) > 0 {
+			if ai.BrokenRule == account.NoRule {
+				return "", &db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
+			} else {
+				return "", &db.ArchiveError{Code: db.ErrAccountSuspended}
+			}
+
+		} else {
+			return ai.FeeAddress, nil
+		}
 	}
 
 	regAddr, err := a.getNextAddress()
