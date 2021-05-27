@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import { feeSendErr } from './constants'
 
 const DCR_ID = 42
@@ -15,18 +15,17 @@ export default class RegistrationPage extends BasePage {
     app = application
     this.body = body
     this.notifiers = {}
+    this.pwCache = {}
     const page = this.page = Doc.parsePage(body, [
       // Form 1: Set the application password
       'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
-      'showSeedRestore', 'seedRestore', 'seedInput',
+      'showSeedRestore', 'seedRestore', 'seedInput', 'appPassBox',
       // Form 2: Create Decred wallet
       'newWalletForm',
       // Form 3: Unlock Decred wallet
       'unlockWalletForm',
       // Form 4: Configure DEX server
-      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert',
-      'addCert', 'submitDEXAddr', 'dexAddrErr', 'dexCertFile', 'dexNeedCert',
-      'dexShowMore',
+      'dexAddrForm',
       // Form 5: Confirm DEX registration and pay fee
       'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       'dexCertBox', 'failedRegForm', 'regFundsErr'
@@ -45,27 +44,27 @@ export default class RegistrationPage extends BasePage {
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
+      this.dexAddrForm.refresh()
       this.changeForm(page.newWalletForm, page.dexAddrForm)
-    })
+    }, this.pwCache)
 
     // OPEN DCR WALLET
     // This form is only shown if there is a wallet, but it's not open.
-    bindOpenWallet(app, page.unlockWalletForm, () => {
+    this.unlockForm = new UnlockWalletForm(app, page.unlockWalletForm, () => {
+      this.dexAddrForm.refresh()
       this.changeForm(page.unlockWalletForm, page.dexAddrForm)
-    })
+    }, this.pwCache)
 
     // ADD DEX
-    // tls certificate upload
-    this.defaultTLSText = 'none selected'
-    page.selectedCert.textContent = this.defaultTLSText
-    Doc.bind(page.certFile, 'change', () => this.readCert())
-    Doc.bind(page.removeCert, 'click', () => this.resetCert())
-    Doc.bind(page.addCert, 'click', () => page.certFile.click())
-    bindForm(page.dexAddrForm, page.submitDEXAddr, () => this.checkDEX())
-    Doc.bind(page.dexShowMore, 'click', () => {
-      Doc.hide(page.dexShowMore)
-      Doc.show(page.dexCertBox)
-    })
+    this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
+      this.fee = xc.feeAsset.amount
+      page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+      const dcrAsset = xc.assets['42']
+      if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
+      if (this.pwCache.pw) Doc.hide(page.appPassBox)
+      else Doc.show(page.appPassBox)
+      await this.changeForm(page.dexAddrForm, page.confirmRegForm)
+    }, this.pwCache)
 
     // SUBMIT DEX REGISTRATION
     bindForm(page.confirmRegForm, page.submitConfirm, () => this.registerDEX())
@@ -74,11 +73,15 @@ export default class RegistrationPage extends BasePage {
     if (app.user.authed) this.auth()
   }
 
+  unload () {
+    delete this.pwCache.pw
+  }
+
   // auth should be called once user is known to be authed with the server.
   async auth () {
     await app.fetchUser()
     this.walletForm.setAsset(app.assets[DCR_ID])
-    this.page.unlockWalletForm.setAsset(app.assets[DCR_ID])
+    this.unlockForm.setAsset(app.assets[DCR_ID])
     this.walletForm.loadDefaults()
   }
 
@@ -136,42 +139,20 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appErrMsg)
       return
     }
+    this.pwCache.pw = pw
     this.auth()
     app.updateMenuItemsDisplay()
-    this.changeForm(page.appPWForm, page.newWalletForm)
+    this.walletForm.refresh()
+    await this.changeForm(page.appPWForm, page.newWalletForm)
   }
 
-  /* Get the reg fees for the DEX. */
-  async checkDEX () {
+  /* Authorize DEX registration. */
+  async registerDEX () {
     const page = this.page
-    Doc.hide(page.dexAddrErr)
-    const addr = page.dexAddr.value
-    if (addr === '') {
-      page.dexAddrErr.textContent = 'DEX address cannot be empty'
-      Doc.show(page.dexAddrErr)
-      return
-    }
-
-    let cert = ''
-    if (page.certFile.value) {
-      cert = await page.certFile.files[0].text()
-    }
-
-    const loaded = app.loading(page.dexAddrForm)
-    const res = await postJSON('/api/getdexinfo', {
-      addr: addr,
-      cert: cert
-    })
-    loaded()
-    if (!app.checkResponse(res, true)) {
-      if (res.msg === 'certificate required') {
-        Doc.hide(page.dexShowMore)
-        Doc.show(page.dexCertBox, page.dexNeedCert)
-      } else {
-        page.dexAddrErr.textContent = res.msg
-        Doc.show(page.dexAddrErr)
-      }
-
+    const pw = page.appPass.value || this.pwCache.pw
+    if (!pw) {
+      page.regErr.textContent = 'password required'
+      Doc.show(page.regErr)
       return
     }
     this.fee = res.xc.feeAsset.amount
@@ -201,17 +182,14 @@ export default class RegistrationPage extends BasePage {
     await this.changeForm(page.dexAddrForm, page.confirmRegForm)
   }
 
-  /* Authorize DEX registration. */
-  async registerDEX () {
-    const page = this.page
     Doc.hide(page.regErr)
     let cert = ''
-    if (page.certFile.value) {
-      cert = await page.certFile.files[0].text()
+    if (this.dexAddrForm.page.certFile.value) {
+      cert = await this.dexAddrForm.page.certFile.files[0].text()
     }
     const registration = {
-      addr: page.dexAddr.value,
-      pass: page.appPass.value,
+      addr: this.dexAddrForm.page.dexAddr.value,
+      pass: pw,
       fee: this.fee,
       cert: cert
     }
@@ -236,22 +214,5 @@ export default class RegistrationPage extends BasePage {
     // websocket update instead.
     await app.fetchUser()
     app.loadPage('markets')
-  }
-
-  async readCert () {
-    const page = this.page
-    const files = page.certFile.files
-    if (!files.length) return
-    page.selectedCert.textContent = files[0].name
-    Doc.show(page.removeCert)
-    Doc.hide(page.addCert)
-  }
-
-  resetCert () {
-    const page = this.page
-    page.certFile.value = ''
-    page.selectedCert.textContent = this.defaultTLSText
-    Doc.hide(page.removeCert)
-    Doc.show(page.addCert)
   }
 }

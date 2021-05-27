@@ -37,6 +37,8 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
+	fmt.Println("-- PreRegister.0", register.PubKey)
+
 	// Create account.Account from pubkey.
 	acct, err := account.NewAccountFromPubKey(register.PubKey)
 	if err != nil {
@@ -61,10 +63,18 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	if err != nil {
 		log.Debugf("CreateAccount(%v) failed: %v", acct, err)
 		var archiveErr *db.ArchiveError
-		if errors.As(err, &archiveErr) && archiveErr.Code == db.ErrAccountExists {
-			return &msgjson.Error{
-				Code:    msgjson.AccountExistsError,
-				Message: "account already exists",
+		if errors.As(err, &archiveErr) {
+			switch archiveErr.Code {
+			case db.ErrAccountExists:
+				return &msgjson.Error{
+					Code:    msgjson.AccountExistsError,
+					Message: archiveErr.Detail, // Fee coin
+				}
+			case db.ErrAccountSuspended:
+				return &msgjson.Error{
+					Code:    msgjson.AccountSuspendedError,
+					Message: "account exists and is suspended",
+				}
 			}
 		}
 		return &msgjson.Error{

@@ -40,6 +40,8 @@ const (
 	ErrorLevel
 )
 
+const ErrNoCredentials = dex.ErrorKind("no credentials have been stored")
+
 // String satisfies fmt.Stringer for Severity.
 func (s Severity) String() string {
 	switch s {

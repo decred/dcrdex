@@ -616,7 +616,7 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	}
 
 	// Deterministically generate the DEX private key using a chain of extended
-	// keys. We could surmise a hundred different algortithms to derive the DEX
+	// keys. We could surmise a hundred different algorithms to derive the DEX
 	// key, and there's nothing particularly special about doing it this way,
 	// but it works.
 
@@ -677,6 +677,13 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	a.keyMtx.Unlock()
 
 	return encKey, pubB, nil
+}
+
+func (a *dexAccount) resetKeys() {
+	a.keyMtx.Lock()
+	a.encKey = nil
+	a.privKey = nil
+	a.keyMtx.Unlock()
 }
 
 // unlock decrypts the account private key.

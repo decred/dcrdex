@@ -22,6 +22,7 @@ const (
 	NoteTypeWalletConfig = "walletconfig"
 	NoteTypeWalletState  = "walletstate"
 	NoteTypeServerNotify = "notify"
+	NoteTypeSecurity     = "security"
 )
 
 // notify sends a notification to all subscribers. If the notification is of
@@ -123,7 +124,7 @@ const (
 
 func newSecurityNote(subject, details string, severity db.Severity) *SecurityNote {
 	return &SecurityNote{
-		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeSecurity, subject, details, severity),
 	}
 }
 
@@ -143,6 +144,10 @@ const (
 	SubjectFeeCoinError            = "Fee coin error"
 	SubjectWalletConnectionWarning = "Wallet connection warning"
 	SubjectWalletUnlockError       = "Wallet unlock error"
+)
+
+const (
+	SubjectAccountFeeLost = "Missing Fee Coin"
 )
 
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {

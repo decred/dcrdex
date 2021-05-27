@@ -1070,42 +1070,42 @@ func TestUpgradeLegacyCredentials(t *testing.T) {
 		}
 
 		if len(walletUpdates) != 1 {
-			t.Fatalf("expected 1 wallet update, got %d", len(walletUpdates))
+			return fmt.Errorf("expected 1 wallet update, got %d", len(walletUpdates))
 		}
 		for _, newEncPW := range walletUpdates {
 			if len(newEncPW) == 0 {
-				t.Fatalf("no updated key")
+				return fmt.Errorf("no updated key")
 			}
 			if !bytes.Equal(newEncPW, encPW) {
-				t.Fatalf("wrong encrypted password. wanted %x, got %x", encPW, newEncPW)
+				return fmt.Errorf("wrong encrypted password. wanted %x, got %x", encPW, newEncPW)
 			}
 		}
 
 		w, err := boltdb.Wallet(walletID)
 		if err != nil {
-			t.Fatalf("error retrieving wallet: %v", err)
+			return fmt.Errorf("error retrieving wallet: %v", err)
 		}
 		if !bytes.Equal(w.EncryptedPW, encPW) {
-			t.Fatalf("wallet not wallet updated")
+			return fmt.Errorf("wallet not wallet updated")
 		}
 
 		if len(acctUpdates) != 1 {
-			t.Fatalf("expected 1 account update, got %d", len(acctUpdates))
+			return fmt.Errorf("expected 1 account update, got %d", len(acctUpdates))
 		}
 		newEncPW := acctUpdates[host]
 		if len(newEncPW) == 0 {
-			t.Fatalf("no account update")
+			return fmt.Errorf("no account update")
 		}
 		if !bytes.Equal(newEncPW, encPW) {
-			t.Fatalf("wrong encrypted account password")
+			return fmt.Errorf("wrong encrypted account password")
 		}
 
 		acct, err := boltdb.Account(host)
 		if err != nil {
-			t.Fatalf("error retrieving account: %v", err)
+			return fmt.Errorf("error retrieving account: %v", err)
 		}
 		if !bytes.Equal(acct.LegacyEncKey, encPW) {
-			t.Fatalf("account not updated")
+			return fmt.Errorf("account not updated")
 		}
 
 		return nil

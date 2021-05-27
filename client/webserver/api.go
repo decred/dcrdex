@@ -38,6 +38,30 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiPreRegister is the handler for the '/preregister' API request.
+func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
+	form := new(registrationForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, form.Password, cert)
+	if err != nil {
+		s.writeAPIError(w, err.Error())
+		return
+	}
+	resp := struct {
+		OK       bool           `json:"ok"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
+		Paid     bool           `json:"paid"`
+	}{
+		OK:       true,
+		Exchange: exchangeInfo,
+		Paid:     paid,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

@@ -229,6 +229,7 @@ func (conn *TWebsocket) NextID() uint64 {
 	conn.id++
 	return conn.id
 }
+func (conn *TWebsocket) SetCallbacks(connectCB func(bool), reconnectCB func()) {}
 func (conn *TWebsocket) Send(msg *msgjson.Message) error {
 	if conn.sendMsgErrChan != nil {
 		resp, err := msg.Response()
@@ -1418,7 +1419,7 @@ func TestGetFee(t *testing.T) {
 
 	// connectDEX error
 	_, err = tCore.GetFee(tUnparseableHost, cert)
-	if !errorHasCode(err, connectionErr) {
+	if !errorHasCode(err, addressParseErr) {
 		t.Fatalf("wrong connectDEX error: %v", err)
 	}
 
@@ -1448,7 +1449,12 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
-	delete(tCore.conns, tDexHost)
+	clearConn := func() {
+		tCore.connMtx.Lock()
+		delete(tCore.conns, tDexHost)
+		tCore.connMtx.Unlock()
+	}
+	clearConn()
 
 	if legacyKeys {
 		dc.cfg.DEXPubKey = nil
@@ -1520,9 +1526,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	var err error
 	run := func() {
 		// Register method will error if url is already in conns map.
-		tCore.connMtx.Lock()
-		delete(tCore.conns, tDexHost)
-		tCore.connMtx.Unlock()
+		clearConn()
 
 		tWallet.setConfs(tWallet.payFeeCoin.id, 0, nil)
 		_, err = tCore.Register(form)
@@ -1755,19 +1759,40 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	}
 
 	// Test the account recovery path.
-	tCore.connMtx.Lock()
-	delete(tCore.conns, tDexHost)
-	tCore.connMtx.Unlock()
+	clearConn()
 	rig.queueConfig()
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountExistsError, ""))
+		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountExistsError, "abcdef"))
 		f(accountExistsResp)
 		return nil
 	})
 
 	_, err = tCore.Register(form)
 	if err != nil {
-		t.Fatalf("Register error: %v", err)
+		t.Fatalf("Pre-paid Register error: %v", err)
+	}
+
+	// Account suspended should force legacy credentials..
+	clearConn()
+	rig.queueConfig()
+	dc.acct.keyMtx.Lock()
+	dc.acct.encKey = nil
+	dc.acct.privKey = nil
+	dc.acct.keyMtx.Unlock()
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountSuspendedError, ""))
+		f(accountExistsResp)
+		return nil
+	})
+	queueResponses() // Queing an extra config response here, but we're done anyway.
+
+	_, err = tCore.Register(form)
+	if err != nil {
+		t.Fatalf("Suspended Register error: %v", err)
+	}
+
+	if len(rig.db.acct.EncKeyV2) != 0 || len(rig.db.acct.LegacyEncKey) == 0 {
+		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
 	}
 }
 

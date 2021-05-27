@@ -395,6 +395,18 @@ func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, er
 	return tExchanges[host], nil
 }
 
+// PreRegister - use secondDEX = "thisdexwithalongname.com" to get paid = true.
+func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+	xc := tExchanges[dexAddr]
+	if xc == nil {
+		xc = tExchanges[firstDEX]
+	}
+	if dexAddr == secondDEX {
+		c.reg = &core.RegisterForm{}
+	}
+	return tExchanges[firstDEX], dexAddr == secondDEX, nil
+}
+
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	randomDelay()
 	c.reg = r

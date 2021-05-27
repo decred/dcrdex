@@ -6,6 +6,7 @@ package bolt
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -261,7 +262,7 @@ func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
 				return err
 			}
 			if len(acctInfo.LegacyEncKey) == 0 {
-				return fmt.Errorf("LegacyEncKey not sets")
+				return errors.New("LegacyEncKey not sets")
 			}
 		}
 		return nil

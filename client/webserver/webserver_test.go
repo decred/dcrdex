@@ -78,6 +78,10 @@ func (c *TCore) GetFee(string, interface{}) (uint64, error) { return 1e8, c.getF
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
 	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
 }
+
+func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+	return nil, false, nil
+}
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) InitializeClient(pw, seed []byte) error                      { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }

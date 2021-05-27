@@ -58,6 +58,7 @@ type WsConn interface {
 	RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
 	Connect(ctx context.Context) (*sync.WaitGroup, error)
 	MessageSource() <-chan *msgjson.Message
+	SetCallbacks(connectCB func(bool), reconnectCB func())
 }
 
 // When the DEX sends a request to the client, a responseHandler is created
@@ -119,6 +120,10 @@ type wsConn struct {
 	respHandlers map[uint64]*responseHandler
 
 	reconnectCh chan struct{} // trigger for immediate reconnect
+
+	callbackMtx sync.RWMutex
+	connectCB   func(bool)
+	reconnectCB func()
 }
 
 // NewWsConn creates a client websocket connection.
@@ -158,7 +163,34 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		readCh:       make(chan *msgjson.Message, readBuffSize),
 		respHandlers: make(map[uint64]*responseHandler),
 		reconnectCh:  make(chan struct{}, 1),
+		connectCB:    cfg.ConnectEventFunc,
+		reconnectCB:  cfg.ReconnectSync,
 	}, nil
+}
+
+func (conn *wsConn) connectFunc(status bool) {
+	conn.callbackMtx.RLock()
+	defer conn.callbackMtx.RUnlock()
+	if conn.connectCB == nil {
+		return
+	}
+	conn.connectCB(status)
+}
+
+func (conn *wsConn) reconnectFunc() {
+	conn.callbackMtx.RLock()
+	defer conn.callbackMtx.RUnlock()
+	if conn.reconnectCB == nil {
+		return
+	}
+	conn.reconnectCB()
+}
+
+func (conn *wsConn) SetCallbacks(connectCB func(bool), reconnectCB func()) {
+	conn.callbackMtx.Lock()
+	defer conn.callbackMtx.Unlock()
+	conn.connectCB = connectCB
+	conn.reconnectCB = reconnectCB
 }
 
 // IsDown indicates if the connection is known to be down.
@@ -175,8 +207,8 @@ func (conn *wsConn) setConnected(connected bool) {
 	statusChange := conn.connected != connected
 	conn.connected = connected
 	conn.connectedMtx.Unlock()
-	if statusChange && conn.cfg.ConnectEventFunc != nil {
-		conn.cfg.ConnectEventFunc(connected)
+	if statusChange {
+		conn.connectFunc(connected)
 	}
 }
 
@@ -384,9 +416,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 			rcInt = reconnectInterval
 
 			// Synchronize after a reconnection.
-			if conn.cfg.ReconnectSync != nil {
-				conn.cfg.ReconnectSync()
-			}
+			conn.reconnectFunc()
 
 		case <-ctx.Done():
 			return
