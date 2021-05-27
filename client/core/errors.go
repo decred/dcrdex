@@ -53,11 +53,21 @@ func (e *Error) Error() string {
 	return e.s
 }
 
+func (e *Error) Code() int {
+	return e.code
+}
+
 // newError is a constructor for a new Error.
 func newError(code int, s string, a ...interface{}) error {
 	return &Error{
 		s:    fmt.Sprintf(s, a...),
 		code: code,
+	}
+}
+
+func NewError(s string, a ...interface{}) error {
+	return &Error{
+		s: fmt.Sprintf(s, a...),
 	}
 }
 

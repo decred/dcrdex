@@ -17,8 +17,9 @@ import (
 
 // standardResponse is a basic API response when no data needs to be returned.
 type standardResponse struct {
-	OK  bool   `json:"ok"`
-	Msg string `json:"msg,omitempty"`
+	OK   bool   `json:"ok"`
+	Msg  string `json:"msg,omitempty"`
+	Code int    `json:"code,omitempty"`
 }
 
 // simpleAck is a plain standardResponse with "ok" = true.
