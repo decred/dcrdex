@@ -310,7 +310,7 @@ func (ord *orderReader) StatusString() string {
 			return "settling"
 		}
 		if ord.Filled == 0 {
-			return "expired"
+			return "no match"
 		}
 		return "executed"
 	case order.OrderStatusCanceled:

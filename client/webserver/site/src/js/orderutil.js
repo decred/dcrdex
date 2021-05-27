@@ -59,7 +59,7 @@ export function statusString (order) {
       return isLive ? 'booked/settling' : 'booked'
     case StatusExecuted:
       if (isLive) return 'settling'
-      return (order.filled === 0) ? 'expired' : 'executed'
+      return (order.filled === 0) ? 'no match' : 'executed'
     case StatusCanceled: return isLive ? 'canceled/settling' : 'canceled'
     case StatusRevoked: return isLive ? 'revoked/settling' : 'revoked'
   }
