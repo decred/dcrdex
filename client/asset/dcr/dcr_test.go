@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -2245,112 +2244,5 @@ func TestPreRedeem(t *testing.T) {
 	// Just a sanity check.
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
-	}
-}
-
-func TestCalcPastMedianTime(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet()
-	defer shutdown()
-
-	var prefix string
-	for i := 0; i < 31; i++ {
-		prefix += "00"
-	}
-
-	hash, err := chainhash.NewHashFromStr(fmt.Sprintf("%v00", prefix))
-	if err != nil {
-		t.Fatalf("error creating chain hash: %v", err)
-	}
-	wallet.currentTip.hash = hash
-
-	blockHeaders := func(n int) map[string]*chainjson.GetBlockHeaderVerboseResult {
-		m := make(map[string]*chainjson.GetBlockHeaderVerboseResult)
-
-		// Only good for 0-98.
-		for i := 0; i < n; i++ {
-			key, prevHash := prefix, prefix
-			switch {
-			case i < 10:
-				key = fmt.Sprintf("%s0", key)
-				if i < 9 {
-					prevHash = fmt.Sprintf("%s0", prevHash)
-				}
-				fallthrough
-			default:
-				key = fmt.Sprintf("%s%d", key, i)
-				prevHash = fmt.Sprintf("%s%d", prevHash, i+1)
-			}
-			m[key] = &chainjson.GetBlockHeaderVerboseResult{
-				PreviousHash: prevHash,
-				Time:         int64(n - i - 1),
-				Height:       uint32(n - i - 1),
-			}
-		}
-		return m
-	}
-
-	tests := []struct {
-		name                       string
-		medianTime                 time.Time
-		mixTimes, wantErr, badHash bool
-		numBlks                    int
-		getBlockHeaderVerboseErr   error
-	}{{
-		name:       "ok one block",
-		numBlks:    1,
-		medianTime: time.Unix(0, 0), // *0*
-	}, {
-		name:       "ok 6 blocks",
-		numBlks:    6,
-		medianTime: time.Unix(3, 0), // 0, 1, 2, *3*, 4, 5
-	}, {
-		name:       "ok 15 blocks",
-		numBlks:    15,
-		medianTime: time.Unix(9, 0), // 4, 5, 6, 7, 8, *9*, 10, 11, 12, 13, 14
-	}, {
-		name:       "ok 15 blocks mixed times",
-		numBlks:    15,
-		mixTimes:   true,
-		medianTime: time.Unix(9, 0), // 13, 5, 6, 7, 8, 14, 10, 11, 12, 4, *9*
-	}, {
-		name:                     "get block header verbose error",
-		numBlks:                  1,
-		getBlockHeaderVerboseErr: errors.New(""),
-		wantErr:                  true,
-	}, {
-		name:    "bad hash in block header verbose result",
-		numBlks: 2,
-		badHash: true,
-		wantErr: true,
-	}}
-
-	for _, test := range tests {
-		blkHdrs := blockHeaders(test.numBlks)
-		if test.mixTimes {
-			fourteenSecs := fmt.Sprintf("%s0%d", prefix, 15-14-1)
-			nineSecs := fmt.Sprintf("%s0%d", prefix, 15-9-1)
-			fourSecs := fmt.Sprintf("%s%d", prefix, 15-4-1)
-			thirteenSecs := fmt.Sprintf("%s0%d", prefix, 15-13-1)
-			blkHdrs[fourteenSecs], blkHdrs[nineSecs] = blkHdrs[nineSecs], blkHdrs[fourteenSecs]
-			blkHdrs[fourSecs], blkHdrs[thirteenSecs] = blkHdrs[thirteenSecs], blkHdrs[fourSecs]
-		}
-		if test.badHash {
-			blkHdrs[fmt.Sprintf("%s00", prefix)].PreviousHash = "bad hash"
-		}
-		node.verboseBlockHeaders = blkHdrs
-		node.getBlockHeaderVerboseErr = test.getBlockHeaderVerboseErr
-		medianTime, err := wallet.calcPastMedianTime()
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-		if medianTime != test.medianTime {
-			t.Fatalf("want %v got %v for test %q", test.medianTime, medianTime, test.name)
-		}
 	}
 }
