@@ -2,12 +2,10 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import { sendFeeErr } from './constants'
 
 const DCR_ID = 42
 const animationLength = 300
-
-// XXX: move code errors to a specific file?
-const sendFeeErr = 8;
 
 let app
 
