@@ -4654,21 +4654,22 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("match proof validation failed: %w", err)
 	}
 
-	// Validate server match checksum for client orders (trades) in this epoch.
+	// Validate match_proof commitment checksum for client orders in this epoch.
 	for _, trade := range dc.trackedTrades() {
-		// TODO - think about len(trade.csum) > 0 fits with the rest of these conditions, and at least document the reason for having it.
-		if trade.metaData.Status == order.OrderStatusEpoch && len(trade.csum) > 0 && !bytes.Equal(note.CSum, trade.csum) {
-			// Validation can fail either due to server trying to cheat
-			// (by seeing preimage before committing to csum for a match), or
-			// client loosing (e.g. due to restarting, since we don't
-			// persistently store these at the moment) his csums for the trades
-			// involved.
-			//
-			// Just warning the user for now, later on we might wanna revoke the order if this happens.
-			c.log.Warnf("validating match checksum for epoch %d, "+
-				"match commit checksum %s is not of the same value as "+
-				"client's order commit checksum %s, order ID: %s",
-				note.Epoch, note.CSum, trade.csum, trade.ID())
+		if note.MarketID != trade.mktID {
+			continue
+		}
+
+		// Validation can fail either due to server trying to cheat (by
+		// requesting a preimage before closing the epoch to more orders), or
+		// client losing trades' epoch csums (e.g. due to restarting, since we
+		// don't persistently store these at the moment).
+		//
+		// Just warning the user for now, later on we might wanna revoke the
+		// order if this happens.
+		if err = trade.verifyCSum(note.CSum, note.Epoch); err != nil {
+			c.log.Warnf("Failed to validate commitment checksum for %s epoch %d at %s: %v"+
+				note.MarketID, note.Epoch, dc.acct.host, err)
 		}
 	}
 
@@ -5079,7 +5080,17 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
 
-	tracker.csum = commitChecksum
+	// Record the commitment checksum so we can verify that the subsequent
+	// match_proof with this order has the same checksum. If it does not, the
+	// server may have used the knowledge of this preimage we are sending them
+	// now to alter the epoch shuffle.
+	tracker.mtx.Lock()
+	if isCancel {
+		tracker.cancel.csum = commitChecksum
+	} else {
+		tracker.csum = commitChecksum
+	}
+	tracker.mtx.Unlock()
 
 	// Clean up the sentCommits now that we loaded the commitment. This can be
 	// removed when the old piSyncers method is removed.
