@@ -567,48 +567,36 @@ func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 // return value indicates the order should is eligible to be decoded and
 // returned.
 func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, includeArchived bool) ([]*dexdb.MetaOrder, error) {
-	var orders []*dexdb.MetaOrder
-	return orders, db.ordersView(func(ob, archivedOB *bbolt.Bucket) error {
+	type orderTime struct {
+		o *dexdb.MetaOrder
+		t uint64
+	}
+	var ordersTime []*orderTime
+	orders := make([]*dexdb.MetaOrder, 0, n)
+	return orders, db.ordersView(func(ob, aob *bbolt.Bucket) error {
 		buckets := []*bbolt.Bucket{ob}
 		if includeArchived {
-			buckets = append(buckets, archivedOB)
+			buckets = append(buckets, aob)
 		}
-		idx := newTimeIndexNewest(n)
-		for i, master := range buckets {
-			err := master.ForEach(func(k, _ []byte) error {
-				bkt := master.Bucket(k)
-				stamp := intCoder.Uint64(bkt.Get(updateTimeKey))
-				if filter == nil || filter(k, bkt) {
-					// Append the key to a new bucket slice
-					// with bucket position so that we know
-					// which bucket it is later.
-					bKey := make([]byte, 1, len(k)+1)
-					bKey[0] = uint8(i)
-					bKey = append(bKey, k...)
-					idx.add(stamp, bKey)
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		for i, master := range buckets {
-			for _, pair := range idx.pairs {
-				// Skip the other bucket.
-				if pair.k[0] != byte(i) {
-					continue
-				}
-				// Remove the bucket identifier.
-				k := pair.k[1:]
-				oBkt := master.Bucket(k)
-				o, err := decodeOrderBucket(k, oBkt)
+		for _, master := range buckets {
+			pairs := newestBuckets(master, n, updateTimeKey, filter)
+			for _, pair := range pairs {
+				oBkt := master.Bucket(pair.k)
+				o, err := decodeOrderBucket(pair.k, oBkt)
 				if err != nil {
 					return err
 				}
-				orders = append(orders, o)
+				ot := &orderTime{o: o, t: pair.t}
+				ordersTime = append(ordersTime, ot)
 			}
+		}
+		// Sort big times first, as they are newer.
+		sort.Slice(ordersTime, func(i, j int) bool { return ordersTime[i].t > ordersTime[j].t })
+		for i, ot := range ordersTime {
+			if n != 0 && i >= n {
+				break
+			}
+			orders = append(orders, ot.o)
 		}
 		return nil
 	})
