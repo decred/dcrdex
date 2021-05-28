@@ -18,7 +18,7 @@ require (
 	github.com/decred/dcrd/dcrjson/v3 v3.1.0
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.0
-	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b
+	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210525214639-70483c835b7f
 	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b
 	github.com/decred/dcrd/wire v1.4.0
