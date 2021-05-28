@@ -573,10 +573,10 @@ func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, i
 	}
 	var ordersTime []*orderTime
 	orders := make([]*dexdb.MetaOrder, 0, n)
-	return orders, db.ordersView(func(ob, aob *bbolt.Bucket) error {
+	return orders, db.ordersView(func(ob, archivedOB *bbolt.Bucket) error {
 		buckets := []*bbolt.Bucket{ob}
 		if includeArchived {
-			buckets = append(buckets, aob)
+			buckets = append(buckets, archivedOB)
 		}
 		for _, master := range buckets {
 			pairs := newestBuckets(master, n, updateTimeKey, filter)
