@@ -125,12 +125,13 @@ $NODE_KEY
 EOF
 
 echo "Starting simnet ${NAME} node"
-if [ "${SYNC_MODE}" = "fast" ]; then
+if [ "${SYNC_MODE}" = "snap" ]; then
   # Start the eth node with the chain account unlocked, listening restricted to
   # localhost, and our custom configuration file.
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
-	  "--password ${GROUP_DIR}/password --light.serve 25" C-m
+	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
+	  "${NODE_DIR}/geth-ancient" C-m
 
 else
   # Start the eth node listening restricted to localhost and our custom
