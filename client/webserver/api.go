@@ -69,7 +69,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	dcrID, _ := dex.BipSymbolID("dcr")
 	wallet := s.core.WalletState(dcrID)
 	if wallet == nil {
-		s.writeAPIError(w, core.NewError("No Decred wallet", nil))
+		s.writeAPIError(w, core.NewError("No Decred wallet"))
 		return
 	}
 
@@ -110,7 +110,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		Config:  form.Config,
 	})
 	if err != nil {
-		s.writeAPIError(w, err)
+		s.writeAPIError(w, core.NewError("error creating %s wallet: %v", unbip(form.AssetID), err))
 		return
 	}
 
