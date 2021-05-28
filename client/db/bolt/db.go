@@ -579,10 +579,13 @@ func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, i
 				bkt := master.Bucket(k)
 				stamp := intCoder.Uint64(bkt.Get(updateTimeKey))
 				if filter == nil || filter(k, bkt) {
-					// Append the bucket position to the key
-					// so that we know which bucket it is later.
-					k = append(k, byte(i))
-					idx.add(stamp, k)
+					// Append the key to a new bucket slice
+					// with bucket position so that we know
+					// which bucket it is later.
+					bKey := make([]byte, 1, len(k)+1)
+					bKey[0] = uint8(i)
+					bKey = append(bKey, k...)
+					idx.add(stamp, bKey)
 				}
 				return nil
 			})
@@ -594,11 +597,11 @@ func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, i
 		for i, master := range buckets {
 			for _, pair := range idx.pairs {
 				// Skip the other bucket.
-				if pair.k[len(pair.k)-1] != byte(i) {
+				if pair.k[0] != byte(i) {
 					continue
 				}
 				// Remove the bucket identifier.
-				k := pair.k[:len(pair.k)-1]
+				k := pair.k[1:]
 				oBkt := master.Bucket(k)
 				o, err := decodeOrderBucket(k, oBkt)
 				if err != nil {
