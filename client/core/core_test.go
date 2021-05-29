@@ -2535,6 +2535,10 @@ func TestHandlePreimageRequest(t *testing.T) {
 		)
 	}
 
+	// TODO
+	// We shouldn't allow for a duplicate request to contain different csum (test against that),
+	// see https://github.com/decred/dcrdex/pull/1077#discussion_r641593845 for details.
+
 	// negative paths
 	ensureErr := func(tag string, req *msgjson.Message, errPrefix string) {
 		t.Helper()
