@@ -2498,8 +2498,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		commit := preImg.Commit()
 		commitSig := readyCommitment(commit)
 		payload = &msgjson.PreimageRequest{
-			OrderID:        oid[:],
-			Commitment:     commit[:],
+			OrderID:    oid[:],
+			Commitment: commit[:],
 		}
 		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
