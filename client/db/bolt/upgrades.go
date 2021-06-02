@@ -143,7 +143,7 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 // avoids any chance of rejecting a pre-existing active match.
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
-	ordersBucketV1 := []byte("orders")
+	ordersBucket := []byte("orders")
 
 	dbVersion, err := fetchDBVersion(dbtx)
 	if err != nil {
@@ -157,7 +157,7 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 	// For each order, set a maxfeerate of max uint64.
 	maxFeeB := uint64Bytes(^uint64(0))
 
-	master := dbtx.Bucket(ordersBucketV1)
+	master := dbtx.Bucket(ordersBucket)
 	if master == nil {
 		return fmt.Errorf("failed to open orders bucket")
 	}
@@ -271,22 +271,22 @@ func v4Upgrade(dbtx *bbolt.Tx) error {
 // adds those to the v2 ordersBucket, and deletes them from the v1 ordersBucket,
 // which becomes the archived orders bucket.
 func moveActiveOrders(tx *bbolt.Tx) error {
-	ordersBucketV1 := []byte("orders")
-	ordersBucketV2 := []byte("activeOrders")
-	// NOTE: orderBucketV2 created in NewDB, but TestUpgrades skips that.
-	_, err := tx.CreateBucketIfNotExists(ordersBucketV2)
+	oldOrdersBucket := []byte("orders")
+	newActiveOrdersBucket := []byte("activeOrders")
+	// NOTE: newActiveOrdersBucket created in NewDB, but TestUpgrades skips that.
+	_, err := tx.CreateBucketIfNotExists(newActiveOrdersBucket)
 	if err != nil {
 		return err
 	}
 
-	ordersBktV1 := tx.Bucket(ordersBucketV1)
-	ordersBktV2 := tx.Bucket(ordersBucketV2)
-	return ordersBktV1.ForEach(func(k, _ []byte) error {
-		oBktV1 := ordersBktV1.Bucket(k)
-		if oBktV1 == nil {
+	archivedOrdersBkt := tx.Bucket(oldOrdersBucket)
+	activeOrdersBkt := tx.Bucket(newActiveOrdersBucket)
+	return archivedOrdersBkt.ForEach(func(k, _ []byte) error {
+		archivedOBkt := archivedOrdersBkt.Bucket(k)
+		if archivedOBkt == nil {
 			return fmt.Errorf("order %x bucket is not a bucket", k)
 		}
-		status := order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
+		status := order.OrderStatus(intCoder.Uint16(archivedOBkt.Get(statusKey)))
 		if status == order.OrderStatusUnknown {
 			fmt.Printf("Encountered order with unknown status: %x\n", k)
 			return nil
@@ -294,17 +294,17 @@ func moveActiveOrders(tx *bbolt.Tx) error {
 		if !status.IsActive() {
 			return nil
 		}
-		oBktV2, err := ordersBktV2.CreateBucket(k)
+		activeOBkt, err := activeOrdersBkt.CreateBucket(k)
 		if err != nil {
 			return err
 		}
 		// Assume the order bucket contains only values, no sub-buckets
-		if err := oBktV1.ForEach(func(k, v []byte) error {
-			return oBktV2.Put(k, v)
+		if err := archivedOBkt.ForEach(func(k, v []byte) error {
+			return activeOBkt.Put(k, v)
 		}); err != nil {
 			return err
 		}
-		return ordersBktV1.DeleteBucket(k)
+		return archivedOrdersBkt.DeleteBucket(k)
 	})
 }
 

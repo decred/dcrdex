@@ -131,7 +131,7 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 	t.Helper()
 	maxFeeB := uint64Bytes(^uint64(0))
-	ordersBucketV1 := []byte("orders")
+	ordersBucket := []byte("orders")
 
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		err := checkVersion(dbtx, 2)
@@ -139,7 +139,7 @@ func verifyV2Upgrade(t *testing.T, db *bbolt.DB) {
 			return err
 		}
 
-		master := dbtx.Bucket(ordersBucketV1)
+		master := dbtx.Bucket(ordersBucket)
 		if master == nil {
 			return fmt.Errorf("orders bucket not found")
 		}
@@ -172,36 +172,36 @@ func verifyV3Upgrade(t *testing.T, db *bbolt.DB) {
 }
 
 func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
-	ordersBucketV1 := []byte("orders")
-	ordersBucketV2 := []byte("activeOrders")
+	oldOrdersBucket := []byte("orders")
+	newActiveOrdersBucket := []byte("activeOrders")
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		err := checkVersion(dbtx, 4)
 		if err != nil {
 			return err
 		}
 		// Ensure we have both old and new buckets.
-		ordersBktV1 := dbtx.Bucket(ordersBucketV1)
-		if ordersBktV1 == nil {
-			return fmt.Errorf("orders bucket V1 not found")
+		archivedOrdersBkt := dbtx.Bucket(oldOrdersBucket)
+		if archivedOrdersBkt == nil {
+			return fmt.Errorf("archived orders bucket not found")
 		}
-		ordersBktV2 := dbtx.Bucket(ordersBucketV2)
-		if ordersBktV2 == nil {
-			return fmt.Errorf("orders bucket V2 not found")
+		activeOrdersBkt := dbtx.Bucket(newActiveOrdersBucket)
+		if activeOrdersBkt == nil {
+			return fmt.Errorf("active orders bucket not found")
 		}
 
 		// Ensure the old bucket now only contains finished orders.
-		err = ordersBktV1.ForEach(func(k, _ []byte) error {
-			oBktV1 := ordersBktV1.Bucket(k)
-			if oBktV1 == nil {
+		err = archivedOrdersBkt.ForEach(func(k, _ []byte) error {
+			archivedOBkt := archivedOrdersBkt.Bucket(k)
+			if archivedOBkt == nil {
 				return fmt.Errorf("order %x bucket is not a bucket", k)
 			}
-			status := order.OrderStatus(intCoder.Uint16(oBktV1.Get(statusKey)))
+			status := order.OrderStatus(intCoder.Uint16(archivedOBkt.Get(statusKey)))
 			if status == order.OrderStatusUnknown {
-				println(fmt.Sprintf("Encountered order with unknown status: %x", k))
+				fmt.Printf("Encountered order with unknown status: %x\n", k)
 				return nil
 			}
 			if status.IsActive() {
-				return fmt.Errorf("v1 orders bucket has active order: %x", k)
+				return fmt.Errorf("archived bucket has active order: %x", k)
 			}
 			return nil
 		})
@@ -210,17 +210,17 @@ func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
 		}
 
 		// Ensure the new bucket only contains active orders.
-		err = ordersBktV2.ForEach(func(k, _ []byte) error {
-			oBktV2 := ordersBktV2.Bucket(k)
-			if oBktV2 == nil {
+		err = activeOrdersBkt.ForEach(func(k, _ []byte) error {
+			activeOBkt := activeOrdersBkt.Bucket(k)
+			if activeOBkt == nil {
 				return fmt.Errorf("order %x bucket is not a bucket", k)
 			}
-			status := order.OrderStatus(intCoder.Uint16(oBktV2.Get(statusKey)))
+			status := order.OrderStatus(intCoder.Uint16(activeOBkt.Get(statusKey)))
 			if status == order.OrderStatusUnknown {
 				return fmt.Errorf("encountered order with unknown status: %x", k)
 			}
 			if !status.IsActive() {
-				return fmt.Errorf("v2 orders bucket has archived order: %x", k)
+				return fmt.Errorf("active orders bucket has archived order: %x", k)
 			}
 			return nil
 		})

@@ -52,7 +52,7 @@ var (
 	appBucket              = []byte("appBucket")
 	accountsBucket         = []byte("accounts")
 	disabledAccountsBucket = []byte("disabledAccounts")
-	ordersBucket           = []byte("activeOrders")
+	activeOrdersBucket     = []byte("activeOrders")
 	archivedOrdersBucket   = []byte("orders")
 	matchesBucket          = []byte("matches")
 	walletsBucket          = []byte("wallets")
@@ -117,7 +117,7 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	}
 
 	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket, disabledAccountsBucket,
-		ordersBucket, archivedOrdersBucket, matchesBucket, walletsBucket, notesBucket})
+		activeOrdersBucket, archivedOrdersBucket, matchesBucket, walletsBucket, notesBucket})
 	if err != nil {
 		return nil, err
 	}
@@ -445,10 +445,10 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		oid := ord.ID()
 
 		// Create or move an order bucket based on order status. Active
-		// orders go in the ordersBucket. Inactive orders go in the
+		// orders go in the activeOrdersBucket. Inactive orders go in the
 		// archivedOrdersBucket.
-		var oBkt *bbolt.Bucket
-		var err error
+		bkt := ob
+		whichBkt := "active"
 		inactive := !md.Status.IsActive()
 		if inactive {
 			// No order means that it was never added to the active
@@ -461,15 +461,12 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 					return fmt.Errorf("archived order bucket delete error: %w", err)
 				}
 			}
-			oBkt, err = archivedOB.CreateBucketIfNotExists(oid[:])
-			if err != nil {
-				return fmt.Errorf("archive order bucket error: %w", err)
-			}
-		} else {
-			oBkt, err = ob.CreateBucketIfNotExists(oid[:])
-			if err != nil {
-				return fmt.Errorf("active order bucket error: %w", err)
-			}
+			bkt = archivedOB
+			whichBkt = "archived"
+		}
+		oBkt, err := bkt.CreateBucketIfNotExists(oid[:])
+		if err != nil {
+			return fmt.Errorf("%s bucket error: %w", whichBkt, err)
 		}
 
 		var linkedB []byte
@@ -615,8 +612,6 @@ func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool, includeArchive
 		for _, master := range buckets {
 			err := master.ForEach(func(oid, _ []byte) error {
 				oBkt := master.Bucket(oid)
-				// If the order is not in the active bucket,
-				// check the archived orders bucket.
 				if oBkt == nil {
 					return fmt.Errorf("order %x bucket is not a bucket", oid)
 				}
@@ -912,9 +907,9 @@ func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
 // orders may move from active to archived at any time.
 func (db *BoltDB) ordersView(f func(ob, archivedOB *bbolt.Bucket) error) error {
 	return db.View(func(tx *bbolt.Tx) error {
-		ob := tx.Bucket(ordersBucket)
+		ob := tx.Bucket(activeOrdersBucket)
 		if ob == nil {
-			return fmt.Errorf("failed to open %s bucket", string(ordersBucket))
+			return fmt.Errorf("failed to open %s bucket", string(activeOrdersBucket))
 		}
 		archivedOB := tx.Bucket(archivedOrdersBucket)
 		if archivedOB == nil {
@@ -930,9 +925,9 @@ func (db *BoltDB) ordersView(f func(ob, archivedOB *bbolt.Bucket) error) error {
 // ensure that reads can be kept concurrent.
 func (db *BoltDB) ordersUpdate(f func(ob, archivedOB *bbolt.Bucket) error) error {
 	return db.Update(func(tx *bbolt.Tx) error {
-		ob := tx.Bucket(ordersBucket)
+		ob := tx.Bucket(activeOrdersBucket)
 		if ob == nil {
-			return fmt.Errorf("failed to open %s bucket", string(ordersBucket))
+			return fmt.Errorf("failed to open %s bucket", string(activeOrdersBucket))
 		}
 		archivedOB := tx.Bucket(archivedOrdersBucket)
 		if archivedOB == nil {
