@@ -239,15 +239,14 @@ func TestRun(t *testing.T) {
 	node.blk = block1
 	backend := unconnectedETH(tLogger, nil)
 	ch := backend.BlockChannel(1)
-	blocker := make(chan struct{})
+	running := make(chan struct{})
 	backend.node = node
 	go func() {
 		<-ch
 		cancel()
-		close(blocker)
 	}()
-	backend.run(ctx)
-	<-blocker
+	backend.run(ctx, running)
+	<-running
 	backend.blockCache.mtx.Lock()
 	best := backend.blockCache.best
 	backend.blockCache.mtx.Unlock()

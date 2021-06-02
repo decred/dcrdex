@@ -78,8 +78,8 @@ type ethFetcher interface {
 type Backend struct {
 	// syncingStarted and initBlockNum are atomics and are used to determine
 	// whether the node has started syncing.
-	syncingStarted uint32
 	initBlockNum   uint64
+	syncingStarted uint32
 
 	ctx  context.Context
 	cfg  *config
@@ -148,12 +148,14 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		eth.log.Errorf("error adding new best block to cache: %v", err)
 	}
 
+	running := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		eth.run(ctx)
+		eth.run(ctx, running)
 		wg.Done()
 	}()
+	<-running
 	return &wg, nil
 }
 
@@ -233,10 +235,7 @@ func (eth *Backend) Synced() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if sp == nil {
-		return true, nil
-	}
-	return false, nil
+	return sp == nil, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -270,9 +269,15 @@ func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	return notImplementedErr
 }
 
-// run processes the queue and monitors the application context.
-func (eth *Backend) run(ctx context.Context) {
+// run processes the queue and monitors the application context. The supplied
+// running channel will be closed upon setting the context which is used by the
+// rpcclient.
+func (eth *Backend) run(ctx context.Context, running chan struct{}) {
 	eth.ctx = ctx
+
+	// Indicate the backend is ready to accept commands.
+	close(running)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().

@@ -79,14 +79,6 @@ func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, 
 // suggestGasPrice retrieves the currently suggested gas price to allow a timely
 // execution of a transaction.
 func (c *rpcclient) suggestGasPrice(ctx context.Context) (sgp *big.Int, err error) {
-	// NOTE: geth will panic if this is called too soon after creating the
-	// node.
-	defer func() {
-		if r := recover(); r != nil {
-			sgp = nil
-			err = fmt.Errorf("geth panic: %v", r)
-		}
-	}()
 	sgp, err = c.ec.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, err
