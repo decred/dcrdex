@@ -610,8 +610,8 @@ func findRedemptionsInTx(segwit bool, reqs map[outPoint]*findRedemptionReq, msgT
 					continue
 				}
 				discovered[outPt] = &findRedemptionResult{
-					RedemptionCoinID: toCoinID(&txHash, uint32(vin)),
-					Secret:           secret,
+					redemptionCoinID: toCoinID(&txHash, uint32(vin)),
+					secret:           secret,
 				}
 			}
 		}

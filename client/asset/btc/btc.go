@@ -405,8 +405,8 @@ func (req *findRedemptionReq) fail(s string, a ...interface{}) {
 
 // findRedemptionResult models the result of a find redemption attempt.
 type findRedemptionResult struct {
-	RedemptionCoinID dex.Bytes
-	Secret           dex.Bytes
+	redemptionCoinID dex.Bytes
+	secret           dex.Bytes
 	err              error
 }
 
@@ -607,7 +607,7 @@ func (btc *ExchangeWallet) shutdown() {
 	// to wait on these channels end gracefully.
 	btc.findRedemptionMtx.Lock()
 	for contractOutpoint, req := range btc.findRedemptionQueue {
-		req.fail("shutdownzz")
+		req.fail("shutdown")
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
@@ -1789,7 +1789,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 	// without data, which would happen if the redemption search is aborted when
 	// this ExchangeWallet is shut down.
 	if result != nil {
-		return result.RedemptionCoinID, result.Secret, result.err
+		return result.redemptionCoinID, result.secret, result.err
 	}
 	return nil, nil, err
 }
