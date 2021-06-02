@@ -287,7 +287,7 @@ func main() {
 	}
 
 	// Catch ctrl+c for a clean shutdown.
-	killChan := make(chan os.Signal)
+	killChan := make(chan os.Signal, 1)
 	signal.Notify(killChan, os.Interrupt)
 	go func() {
 		<-killChan

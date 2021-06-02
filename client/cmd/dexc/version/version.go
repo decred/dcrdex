@@ -24,7 +24,7 @@ const (
 const (
 	AppName  string = "dexc"
 	AppMajor uint   = 0
-	AppMinor uint   = 2
+	AppMinor uint   = 3
 	AppPatch uint   = 0
 )
 

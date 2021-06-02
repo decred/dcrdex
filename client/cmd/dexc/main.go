@@ -90,7 +90,7 @@ func mainCore() error {
 
 	// Catch interrupt signal (e.g. ctrl+c), prompting to shutdown if the user
 	// is logged in, and there are active orders or matches.
-	killChan := make(chan os.Signal)
+	killChan := make(chan os.Signal, 1)
 	signal.Notify(killChan, os.Interrupt)
 	go func() {
 		for range killChan {
