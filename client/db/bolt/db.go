@@ -564,36 +564,19 @@ func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 // return value indicates the order should is eligible to be decoded and
 // returned.
 func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool, includeArchived bool) ([]*dexdb.MetaOrder, error) {
-	type orderTime struct {
-		o *dexdb.MetaOrder
-		t uint64
-	}
-	var ordersTime []*orderTime
 	orders := make([]*dexdb.MetaOrder, 0, n)
 	return orders, db.ordersView(func(ob, archivedOB *bbolt.Bucket) error {
 		buckets := []*bbolt.Bucket{ob}
 		if includeArchived {
 			buckets = append(buckets, archivedOB)
 		}
-		for _, master := range buckets {
-			pairs := newestBuckets(master, n, updateTimeKey, filter)
-			for _, pair := range pairs {
-				oBkt := master.Bucket(pair.k)
-				o, err := decodeOrderBucket(pair.k, oBkt)
-				if err != nil {
-					return err
-				}
-				ot := &orderTime{o: o, t: pair.t}
-				ordersTime = append(ordersTime, ot)
+		trios := newestBuckets(buckets, n, updateTimeKey, filter)
+		for _, trio := range trios {
+			o, err := decodeOrderBucket(trio.k, trio.b)
+			if err != nil {
+				return err
 			}
-		}
-		// Sort big times first, as they are newer.
-		sort.Slice(ordersTime, func(i, j int) bool { return ordersTime[i].t > ordersTime[j].t })
-		for i, ot := range ordersTime {
-			if n != 0 && i >= n {
-				break
-			}
-			orders = append(orders, ot.o)
+			orders = append(orders, o)
 		}
 		return nil
 	})
@@ -1286,14 +1269,13 @@ func (db *BoltDB) AckNotification(id []byte) error {
 func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 	notes := make([]*dexdb.Notification, 0, n)
 	return notes, db.notesView(func(master *bbolt.Bucket) error {
-		pairs := newestBuckets(master, n, stampKey, nil)
-		for _, pair := range pairs {
-			noteBkt := master.Bucket(pair.k)
-			note, err := dexdb.DecodeNotification(getCopy(noteBkt, noteKey))
+		trios := newestBuckets([]*bbolt.Bucket{master}, n, stampKey, nil)
+		for _, trio := range trios {
+			note, err := dexdb.DecodeNotification(getCopy(trio.b, noteKey))
 			if err != nil {
 				return err
 			}
-			note.Ack = bEqual(noteBkt.Get(ackKey), byteTrue)
+			note.Ack = bEqual(trio.b.Get(ackKey), byteTrue)
 			note.Id = note.ID()
 			notes = append(notes, note)
 		}
@@ -1312,19 +1294,21 @@ func (db *BoltDB) notesUpdate(f bucketFunc) error {
 }
 
 // newest buckets gets the nested buckets with the hightest timestamp from the
-// specified master bucket. The nested bucket should have an encoded uint64 at
+// specified master buckets. The nested bucket should have an encoded uint64 at
 // the timeKey. An optional filter function can be used to reject buckets.
-func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func([]byte, *bbolt.Bucket) bool) []*keyTimePair {
+func newestBuckets(buckets []*bbolt.Bucket, n int, timeKey []byte, filter func([]byte, *bbolt.Bucket) bool) []*keyTimeTrio {
 	idx := newTimeIndexNewest(n)
-	master.ForEach(func(k, _ []byte) error {
-		bkt := master.Bucket(k)
-		stamp := intCoder.Uint64(bkt.Get(timeKey))
-		if filter == nil || filter(k, bkt) {
-			idx.add(stamp, k)
-		}
-		return nil
-	})
-	return idx.pairs
+	for _, master := range buckets {
+		master.ForEach(func(k, _ []byte) error {
+			bkt := master.Bucket(k)
+			stamp := intCoder.Uint64(bkt.Get(timeKey))
+			if filter == nil || filter(k, bkt) {
+				idx.add(stamp, k, bkt)
+			}
+			return nil
+		})
+	}
+	return idx.trios
 }
 
 // makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
@@ -1410,55 +1394,58 @@ func (bp *bucketPutter) err() error {
 	return bp.putErr
 }
 
-// keyTimePair is used to build an on-the-fly time-sorted index.
-type keyTimePair struct {
+// keyTimeTrio is used to build an on-the-fly time-sorted index.
+type keyTimeTrio struct {
 	k []byte
 	t uint64
+	b *bbolt.Bucket
 }
 
-// timeIndexNewest is a struct used to build an index of sorted keyTimePairs.
+// timeIndexNewest is a struct used to build an index of sorted keyTimeTrios.
 // The index can have a maximum capacity. If the capacity is set to zero, the
 // index size is unlimited.
 type timeIndexNewest struct {
-	pairs []*keyTimePair
+	trios []*keyTimeTrio
 	cap   int
 }
 
 // Create a new *timeIndexNewest, with the specified capacity.
 func newTimeIndexNewest(n int) *timeIndexNewest {
 	return &timeIndexNewest{
-		pairs: make([]*keyTimePair, 0, n),
+		trios: make([]*keyTimeTrio, 0, n),
 		cap:   n,
 	}
 }
 
-// Conditionally add a time-key pair to the index. The pair will only be added
+// Conditionally add a time-key trio to the index. The trio will only be added
 // if the timeIndexNewest is under capacity and the time t is larger than the
-// oldest pair's time.
-func (idx *timeIndexNewest) add(t uint64, k []byte) {
-	count := len(idx.pairs)
+// oldest trio's time.
+func (idx *timeIndexNewest) add(t uint64, k []byte, b *bbolt.Bucket) {
+	count := len(idx.trios)
 	if idx.cap == 0 || count < idx.cap {
-		idx.pairs = append(idx.pairs, &keyTimePair{
+		idx.trios = append(idx.trios, &keyTimeTrio{
 			// Need to make a copy, and []byte(k) upsets the linter.
 			k: append([]byte(nil), k...),
 			t: t,
+			b: b,
 		})
 	} else {
 		// non-zero length, at capacity.
-		if t <= idx.pairs[count-1].t {
+		if t <= idx.trios[count-1].t {
 			// Too old. Discard.
 			return
 		}
-		idx.pairs[count-1] = &keyTimePair{
+		idx.trios[count-1] = &keyTimeTrio{
 			k: append([]byte(nil), k...),
 			t: t,
+			b: b,
 		}
 	}
-	sort.Slice(idx.pairs, func(i, j int) bool {
+	sort.Slice(idx.trios, func(i, j int) bool {
 		// newest (highest t) first, or by lexicographically by key if the times
 		// are equal.
-		t1, t2 := idx.pairs[i].t, idx.pairs[j].t
-		return t1 > t2 || (t1 == t2 && bytes.Compare(idx.pairs[i].k, idx.pairs[j].k) == 1)
+		t1, t2 := idx.trios[i].t, idx.trios[j].t
+		return t1 > t2 || (t1 == t2 && bytes.Compare(idx.trios[i].k, idx.trios[j].k) == 1)
 	})
 }
 
