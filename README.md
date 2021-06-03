@@ -213,20 +213,22 @@ to appeal.
 
 ## Fees
 
-The dex does not charge fees, but users pay on-chain transaction fees.
+The dex does not charge trading fees, but users pay on-chain transaction fees.
+Transaction fees vary based on how orders are matched.
 
 To ensure that on-chain transaction fees do not eat a significant portion of the
 order quantity, orders must be specified in increments of a minimum lot size.
-For example, if on-chain transaction fees worked out to $5, and a user was able
+To illustrate, if on-chain transaction fees worked out to $5, and a user was able
 to place an order to trade $10, they would lose half of their trade to
-transaction fees. So for high-fee assets, the operator must set a large lot
-size.
+transaction fees. For chains with single-match fees of $5, if the operator wanted
+to limit possible fees to under 1% of the trade, the minimum lot size would need
+to be set to about $500.
 
-The best case scenario is for an entire order be consumed by a single match.
-If this happens, the user pays 2 transaction fees: one swap and one redemption.
-The worst case is for the order to be consumed by single lot matches per epoch,
-in which case the user pays for a separate swap and redemption transaction per
-lot in their order.
+The scenario with the lowest fees is for an entire order to be consumed by a
+single match. If this happens, the user pays 2 transaction fees: one swap and
+one redemption. The worst case is for the order to be consumed by one single-lot
+match per epoch, in which case the user pays for a separate swap and redemption
+transaction per lot in their order.
 Check the
 [dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
 for more details about how atomic swaps work.
