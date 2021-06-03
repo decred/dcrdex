@@ -3,6 +3,7 @@ package bolt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -1074,7 +1075,7 @@ func TestUpgradeLegacyCredentials(t *testing.T) {
 		}
 		for _, newEncPW := range walletUpdates {
 			if len(newEncPW) == 0 {
-				return fmt.Errorf("no updated key")
+				return errors.New("no updated key")
 			}
 			if !bytes.Equal(newEncPW, encPW) {
 				return fmt.Errorf("wrong encrypted password. wanted %x, got %x", encPW, newEncPW)

@@ -505,7 +505,7 @@ func (c *Core) register(dc *dexConnection, crypter encrypt.Crypter) (regRes *msg
 	creds := c.creds()
 
 	// register is called before the *dexConnection is in the Core.conns map,
-	// so no risk of
+	// so no risk of concurrent access.
 	regV2 := dc.acct.dexPubKey != nil
 
 	var accountSuspended bool
@@ -536,14 +536,17 @@ newkey:
 			if errors.As(err, &msgErr) {
 				switch msgErr.Code {
 				case msgjson.AccountExistsError:
-					err, paid = nil, true
 					// Server provides fee coin as the error message.
 					dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
 					if err != nil {
 						err = fmt.Errorf("error decoding coin ID from message %q", msgErr.Message)
+					} else {
+						paid = true
 					}
 					return
 				case msgjson.AccountSuspendedError:
+					// Retry with a legacy-style key.
+					c.log.Infof("HD account key for %s was reported as suspended. Generating a legacy-style key instead.", dc.acct.host)
 					accountSuspended = true
 					dc.acct.resetKeys()
 					continue newkey
@@ -2342,7 +2345,11 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 	return dc.exchangeInfo(), nil
 }
 
-func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (*Exchange, bool, error) {
+// PreRegister fetches the DEXConfig and a registration address. If the host
+// supports the v2 registration protocol, and the generated account key is
+// recognized and has completed registration, paid will be true and the account
+// will be ready for immediate use.
+func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc *Exchange, paid bool, err error) {
 	if initialized, err := c.IsInitialized(); err != nil {
 		return nil, false, fmt.Errorf("error checking if app is initialized: %w", err)
 	} else if !initialized {
@@ -2354,7 +2361,10 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (*Ex
 		return nil, false, newError(addressParseErr, "error parsing address: %v", err)
 	}
 
-	var paid bool
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, false, codedError(passwordErr, err)
+	}
 
 	dc, err := c.tempDexConnection(host, certI)
 	if dc != nil {
@@ -2372,11 +2382,6 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (*Ex
 	// Older DEX server.
 	if dc.acct.dexPubKey == nil {
 		return dc.exchangeInfo(), false, nil
-	}
-
-	crypter, err := c.encryptionKey(appPW)
-	if err != nil {
-		return nil, false, codedError(passwordErr, err)
 	}
 
 	regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
@@ -2519,7 +2524,6 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.preRegisterMtx.RUnlock()
 
 	if reg == nil || reg.host != host || time.Since(reg.stamp) >= time.Minute*5 {
-		var paid bool
 		// c.register must be called before the *dexConnection is added to the
 		// c.conns map.
 		regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
@@ -2790,10 +2794,11 @@ func (c *Core) generateCredentials(pw, restorationSeed []byte) (encrypt.Crypter,
 
 	// Generate a seed to use as the root for all future key generation.
 	seed := restorationSeed
+	const seedLen = 64
 	if len(seed) == 0 {
-		seed = encode.RandomBytes(64)
-	} else if len(seed) != 64 {
-		return nil, nil, fmt.Errorf("invalid seed length %d. expected 64", len(seed))
+		seed = encode.RandomBytes(seedLen)
+	} else if len(seed) != seedLen {
+		return nil, nil, fmt.Errorf("invalid seed length %d. expected %d", len(seed), seedLen)
 	}
 
 	encSeed, err := innerCrypter.Encrypt(seed)

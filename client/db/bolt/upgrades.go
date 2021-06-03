@@ -212,7 +212,7 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 
 	master := dbtx.Bucket(accountsBucket)
 	if master == nil {
-		return fmt.Errorf("failed to open orders bucket")
+		return fmt.Errorf("failed to open accounts bucket")
 	}
 
 	return master.ForEach(func(hostB, _ []byte) error {
@@ -224,7 +224,6 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 		if acctB == nil {
 			return fmt.Errorf("empty account found for %s", (hostB))
 		}
-		var err error
 		acctInfo, err := dexdb.DecodeAccountInfo(acctB)
 		if err != nil {
 			return err

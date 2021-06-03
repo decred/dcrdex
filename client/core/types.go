@@ -23,6 +23,9 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
+// HDKeyPurpose is here because we're high-jacking the BIP-32 + BIP-43 HD key
+// system to create child keys, so we must set a the purpose field to create an
+// hdkeychain.ExtendedKey.
 var HDKeyPurpose uint32 = hdkeychain.HardenedKeyStart + 0x646578 // ASCII "dex"
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.
@@ -594,15 +597,13 @@ func (a *dexAccount) setupCryptoLegacy(crypter encrypt.Crypter) (encPriv, pubB [
 // setupCryptoV2 should be called before adding the account's *dexConnection
 // to the Core.conns map.
 func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt.Crypter) (encKey, pkBytes []byte, err error) {
-	// If we already have a DEX pubkey, this DEX is configured for us to support
-	// hierarchical keys.
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
 		return nil, nil, fmt.Errorf("seed decryption error: %w", err)
 	}
 
 	// Get the root key.
-	root, err := hdkeychain.NewMaster(seed, &RootKeyParams{})
+	root, err := hdkeychain.NewMaster(seed, &rootKeyParams{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewMaster error: %w", err)
 	}
@@ -618,17 +619,17 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	// key, and there's nothing particularly special about doing it this way,
 	// but it works.
 
-	genChild := func(parent *hdkeychain.ExtendedKey, i uint32) (*hdkeychain.ExtendedKey, error) {
+	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
 		err := hdkeychain.ErrUnusableSeed
 		for err == hdkeychain.ErrUnusableSeed {
 			var kid *hdkeychain.ExtendedKey
 			// Hardened child by modding i first, technically doubling the
 			// collision rate, but OK.
-			kid, err = parent.Child(i%hdkeychain.HardenedKeyStart + hdkeychain.HardenedKeyStart)
+			kid, err = parent.Child(childIdx%hdkeychain.HardenedKeyStart + hdkeychain.HardenedKeyStart)
 			if err == nil {
 				return kid, nil
 			}
-			i++
+			childIdx++
 		}
 		return nil, err
 	}
@@ -648,8 +649,8 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	// Start with the root key
 	extKey := root
 
-	for _, i := range kids {
-		extKey, err = genChild(extKey, i)
+	for _, childIdx := range kids {
+		extKey, err = genChild(extKey, childIdx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("genChild error: %w", err)
 		}
@@ -887,11 +888,13 @@ type OrderEstimate struct {
 	Redeem *asset.PreRedeem `json:"redeem"`
 }
 
-type RootKeyParams struct{}
+// RootKeyParams implements hdkeychain.NetworkParams for master
+// hdkeychain.ExtendedKey creation.
+type rootKeyParams struct{}
 
-func (*RootKeyParams) HDPrivKeyVersion() [4]byte {
+func (*rootKeyParams) HDPrivKeyVersion() [4]byte {
 	return [4]byte{0x74, 0x61, 0x63, 0x6f} // ASCII "taco"
 }
-func (*RootKeyParams) HDPubKeyVersion() [4]byte {
+func (*rootKeyParams) HDPubKeyVersion() [4]byte {
 	return [4]byte{0x64, 0x65, 0x78, 0x63} // ASCII "dexc"
 }

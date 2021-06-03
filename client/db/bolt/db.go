@@ -187,12 +187,12 @@ func (db *BoltDB) CoreVersion() (ver uint8, err error) {
 	})
 }
 
-// LegacyKeyParams retrieves the old app key parameters stored using the
-// deprecated Store method.
+// LegacyKeyParams retrieves the old app key parameters stored using the removed
+// Store method.
 func (db *BoltDB) LegacyKeyParams() ([]byte, error) {
 	var keyParams []byte
 	return keyParams, db.appView(func(bkt *bbolt.Bucket) error {
-		keyParams = bkt.Get(legacyKeyParamsKey)
+		keyParams = getCopy(bkt, legacyKeyParamsKey)
 		if len(keyParams) == 0 {
 			return fmt.Errorf("no legacy key params stored")
 		}
@@ -214,11 +214,82 @@ func (db *BoltDB) UpgradeLegacyCredentials(creds *dexdb.PrimaryCredentials, oldC
 		return nil, nil, err
 	}
 
+	walletUpdates = make(map[uint32][]byte)
+	acctUpdates = make(map[string][]byte)
+
 	return walletUpdates, acctUpdates, db.Update(func(tx *bbolt.Tx) error {
 		// Updates accounts and wallets.
-		walletUpdates, acctUpdates, err = db.recryptPasswords(tx, creds, oldCrypter, newCrypter)
+		wallets := tx.Bucket(walletsBucket)
+		if wallets == nil {
+			return fmt.Errorf("no wallets bucket")
+		}
+
+		accounts := tx.Bucket(accountsBucket)
+		if accounts == nil {
+			return fmt.Errorf("no accounts bucket")
+		}
+
+		if err := wallets.ForEach(func(wid, _ []byte) error {
+			wBkt := wallets.Bucket(wid)
+			w, err := makeWallet(wBkt)
+			if err != nil {
+				return err
+			}
+			if len(w.EncryptedPW) == 0 {
+				return nil
+			}
+
+			pw, err := oldCrypter.Decrypt(w.EncryptedPW)
+			if err != nil {
+				return fmt.Errorf("Decrypt error: %w", err)
+			}
+			w.EncryptedPW, err = newCrypter.Encrypt(pw)
+			if err != nil {
+				return fmt.Errorf("Encrypt error: %w", err)
+			}
+			err = wBkt.Put(walletKey, w.Encode())
+			if err != nil {
+				return err
+			}
+			walletUpdates[w.AssetID] = w.EncryptedPW
+			return nil
+
+		}); err != nil {
+			return fmt.Errorf("wallets update error: %w", err)
+		}
+
+		err = accounts.ForEach(func(hostB, _ []byte) error {
+			acct := accounts.Bucket(hostB)
+			if acct == nil {
+				return fmt.Errorf("account bucket %s value not a nested bucket", string(hostB))
+			}
+			acctB := getCopy(acct, accountKey)
+			if acctB == nil {
+				return fmt.Errorf("empty account found for %s", string(hostB))
+			}
+			acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+			if err != nil {
+				return err
+			}
+			if len(acctInfo.LegacyEncKey) == 0 {
+				db.log.Warnf("no LegacyEncKey for %s during UpgradeLegacyCredentials?", string(hostB))
+				return nil
+			}
+			privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
+			if err != nil {
+				return err
+			}
+
+			acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
+			if err != nil {
+				return err
+			}
+
+			acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
+			return acct.Put(accountKey, acctInfo.Encode())
+		})
 		if err != nil {
-			return err
+			return fmt.Errorf("accounts update error: %w", err)
 		}
 
 		if err := db.updateCoreVersion(tx, newCoreVersion); err != nil {
@@ -238,7 +309,7 @@ func (db *BoltDB) updateCoreVersion(tx *bbolt.Tx, newCoreVersion uint8) error {
 	}
 	err := appBkt.Put(coreVersionKey, []byte{newCoreVersion})
 	if err != nil {
-		return fmt.Errorf("error updating core version: %v", err)
+		return fmt.Errorf("error updating core version: %w", err)
 	}
 	return nil
 }
@@ -277,89 +348,6 @@ func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials, newCore
 	})
 }
 
-// recryptPasswords re-encrypts the wallet passwords and dex account keys,
-// returning maps of updated data.
-func (db *BoltDB) recryptPasswords(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials, oldCrypter,
-	newCrypter encrypt.Crypter) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
-
-	walletUpdates = make(map[uint32][]byte)
-	acctUpdates = make(map[string][]byte)
-
-	wallets := tx.Bucket(walletsBucket)
-	if wallets == nil {
-		return nil, nil, fmt.Errorf("no wallets bucket")
-	}
-
-	if err := wallets.ForEach(func(wid, _ []byte) error {
-		wBkt := wallets.Bucket(wid)
-		w, err := makeWallet(wBkt)
-		if err != nil {
-			return err
-		}
-		if len(w.EncryptedPW) == 0 {
-			return nil
-		}
-
-		pw, err := oldCrypter.Decrypt(w.EncryptedPW)
-		if err != nil {
-			return fmt.Errorf("Decrypt error: %w", err)
-		}
-		w.EncryptedPW, err = newCrypter.Encrypt(pw)
-		if err != nil {
-			return fmt.Errorf("Encrypt error: %w", err)
-		}
-		err = wBkt.Put(walletKey, w.Encode())
-		if err != nil {
-			return err
-		}
-		walletUpdates[w.AssetID] = w.EncryptedPW
-		return nil
-
-	}); err != nil {
-		return nil, nil, fmt.Errorf("wallets update error: %w", err)
-	}
-
-	accounts := tx.Bucket(accountsBucket)
-	if accounts == nil {
-		return nil, nil, fmt.Errorf("no accounts bucket")
-	}
-
-	err = accounts.ForEach(func(hostB, _ []byte) error {
-		acct := accounts.Bucket(hostB)
-		if acct == nil {
-			return fmt.Errorf("account bucket %s value not a nested bucket", string(hostB))
-		}
-		acctB := getCopy(acct, accountKey)
-		if acctB == nil {
-			return fmt.Errorf("empty account found for %s", string(hostB))
-		}
-		acctInfo, err := dexdb.DecodeAccountInfo(acctB)
-		if err != nil {
-			return err
-		}
-		if len(acctInfo.LegacyEncKey) == 0 {
-			db.log.Warnf("no LegacyEncKey for %s during UpgradeLegacyCredentials?", string(hostB))
-			return nil
-		}
-		privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
-		if err != nil {
-			return err
-		}
-
-		acctInfo.LegacyEncKey, err = newCrypter.Encrypt(privB)
-		if err != nil {
-			return err
-		}
-
-		acctUpdates[acctInfo.Host] = acctInfo.LegacyEncKey
-		return acct.Put(accountKey, acctInfo.Encode())
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("accounts update error: %w", err)
-	}
-	return
-}
-
 // validateCreds checks that the PrimaryCredentials fields are properly
 // populated.
 func validateCreds(creds *dexdb.PrimaryCredentials) error {
@@ -380,7 +368,7 @@ func validateCreds(creds *dexdb.PrimaryCredentials) error {
 
 // primaryCreds reconstructs the *PrimaryCredentials.
 func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
-	return creds, db.Update(func(tx *bbolt.Tx) error {
+	return creds, db.View(func(tx *bbolt.Tx) error {
 		bkt := tx.Bucket(credentialsBucket)
 		if bkt == nil {
 			return fmt.Errorf("no credentials bucket")
@@ -1405,14 +1393,14 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 
 	w, err := dexdb.DecodeWallet(b)
 	if err != nil {
-		return nil, fmt.Errorf("DecodeWallet error: %v", err)
+		return nil, fmt.Errorf("DecodeWallet error: %w", err)
 	}
 
 	balB := getCopy(wBkt, balanceKey)
 	if balB != nil {
 		bal, err := db.DecodeBalance(balB)
 		if err != nil {
-			return nil, fmt.Errorf("DecodeBalance error: %v", err)
+			return nil, fmt.Errorf("DecodeBalance error: %w", err)
 		}
 		w.Balance = bal
 	}
