@@ -1766,6 +1766,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		f(accountExistsResp)
 		return nil
 	})
+	rig.queueConnect(nil, nil, nil)
 
 	_, err = tCore.Register(form)
 	if err != nil {

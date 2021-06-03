@@ -37,8 +37,6 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
-	fmt.Println("-- PreRegister.0", register.PubKey)
-
 	// Create account.Account from pubkey.
 	acct, err := account.NewAccountFromPubKey(register.PubKey)
 	if err != nil {

@@ -642,7 +642,7 @@ func decodeAccountBackup(b []byte) (*AccountBackup, error) {
 	switch ver {
 	case 0, 1:
 		keyParams := pushes[0]
-		accts := make([]*AccountInfo, 0, len(pushes[1:]))
+		accts := make([]*AccountInfo, 0, len(pushes)-1)
 		for _, push := range pushes[1:] {
 			ai, err := decodeDEXAccount(push)
 			if err != nil {

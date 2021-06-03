@@ -246,7 +246,6 @@ func (db *BoltDB) updateCoreVersion(tx *bbolt.Tx, newCoreVersion uint8) error {
 // UpdatePrimaryCredentials sets the *PrimaryCredentials and the core version
 // for the client.
 func (db *BoltDB) UpdatePrimaryCredentials(creds *dexdb.PrimaryCredentials) error {
-
 	if err := validateCreds(creds); err != nil {
 		return err
 	}
@@ -256,6 +255,9 @@ func (db *BoltDB) UpdatePrimaryCredentials(creds *dexdb.PrimaryCredentials) erro
 	})
 }
 
+// SetPrimaryCredentials validates and stores the PrimaryCredentials and sets
+// the core version. For general updates e.g. password changes, use
+// UpdatePrimaryCredentials.
 func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials, newCoreVersion uint8) error {
 	if err := validateCreds(creds); err != nil {
 		return err
@@ -275,6 +277,8 @@ func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials, newCore
 	})
 }
 
+// recryptPasswords re-encrypts the wallet passwords and dex account keys,
+// returning maps of updated data.
 func (db *BoltDB) recryptPasswords(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials, oldCrypter,
 	newCrypter encrypt.Crypter) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
 
@@ -356,6 +360,8 @@ func (db *BoltDB) recryptPasswords(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials
 	return
 }
 
+// validateCreds checks that the PrimaryCredentials fields are properly
+// populated.
 func validateCreds(creds *dexdb.PrimaryCredentials) error {
 	if len(creds.EncSeed) == 0 {
 		return errors.New("EncSeed not set")
@@ -372,6 +378,7 @@ func validateCreds(creds *dexdb.PrimaryCredentials) error {
 	return nil
 }
 
+// primaryCreds reconstructs the *PrimaryCredentials.
 func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 	return creds, db.Update(func(tx *bbolt.Tx) error {
 		bkt := tx.Bucket(credentialsBucket)
@@ -391,6 +398,7 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 	})
 }
 
+// setCreds stores the *PrimaryCredentials.
 func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error {
 	bkt := tx.Bucket(credentialsBucket)
 	if bkt == nil {

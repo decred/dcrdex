@@ -260,6 +260,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res, s.indent)
 }
 
+// apiExportSeed is the handler for the '/exportseed' API request.
 func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		Pass encode.PassBytes `json:"pass"`
@@ -282,7 +283,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
-// apiAccountImport is the handler for the '/account' API request.
+// apiAccountImport is the handler for the '/importaccount' API request.
 func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	form := new(accountImportForm)
 	defer form.Pass.Clear()

@@ -29,7 +29,7 @@ func simpleAck() *standardResponse {
 	}
 }
 
-// The initForm is sent by the client to log initialize the DEX.
+// The initForm is sent by the client to initialize the DEX.
 type initForm struct {
 	Pass encode.PassBytes `json:"pass"`
 	Seed dex.Bytes        `json:"seed,omitempty"`

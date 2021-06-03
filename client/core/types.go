@@ -23,7 +23,7 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
-var HDKeyPurpose uint32 = hdkeychain.HardenedKeyStart + 0x00646578 // little-endian from ASCII "dex"
+var HDKeyPurpose uint32 = hdkeychain.HardenedKeyStart + 0x646578 // ASCII "dex"
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.
 type errorSet struct {
@@ -594,17 +594,15 @@ func (a *dexAccount) setupCryptoLegacy(crypter encrypt.Crypter) (encPriv, pubB [
 // setupCryptoV2 should be called before adding the account's *dexConnection
 // to the Core.conns map.
 func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt.Crypter) (encKey, pkBytes []byte, err error) {
-	// If we already have an DEX pubkey, this DEX is configured for us to
-	// support hierarchical keys.
+	// If we already have a DEX pubkey, this DEX is configured for us to support
+	// hierarchical keys.
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
 		return nil, nil, fmt.Errorf("seed decryption error: %w", err)
 	}
 
-	keyParams := &RootKeyParams{}
-
 	// Get the root key.
-	root, err := hdkeychain.NewMaster(seed, keyParams)
+	root, err := hdkeychain.NewMaster(seed, &RootKeyParams{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewMaster error: %w", err)
 	}

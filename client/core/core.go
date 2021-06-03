@@ -497,12 +497,15 @@ func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjs
 	return nil
 }
 
-// register -- the dexPubKey may be written, so the *dexConnection should not be
-// in the Core.conns map yet.
+// register submits a new 'register' request to the server. Depending on the
+// server version, either encKey or encKeyLegacy will be set, but not both.
 func (c *Core) register(dc *dexConnection, crypter encrypt.Crypter) (regRes *msgjson.RegisterResult,
 	acctPubB, encKey, encKeyLegacy []byte, paid bool, err error) {
 
 	creds := c.creds()
+
+	// register is called before the *dexConnection is in the Core.conns map,
+	// so no risk of
 	regV2 := dc.acct.dexPubKey != nil
 
 	var accountSuspended bool
@@ -552,15 +555,18 @@ newkey:
 		break newkey
 	}
 
-	// Check the DEX server's signature.
-	msg := regRes.Serialize()
-	// If we didn't get the dex pubkey in the config result, this is an older
-	// server and we need to get it now.
+	// If we already had a DEX pubkey from the 'config' response, check for
+	// discrepancies.
 	if dc.acct.dexPubKey != nil && !bytes.Equal(dc.acct.dexPubKey.SerializeCompressed(), regRes.DEXPubKey) {
 		return nil, nil, nil, nil, false, fmt.Errorf("different pubkeys reported by dex in 'config' and 'register' responses")
 	}
 
-	// dexPubKey was probably already set for > 0.3 servers.
+	// Check the DEX server's signature.
+	msg := regRes.Serialize()
+
+	// If this was a legacy registration, we'll be setting the pubkey here. For
+	// v2 registrations, we're overwriting the existing key, but whatever. We
+	// already checked that they're identical a few lines up.
 	dc.acct.dexPubKey, err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
 		return nil, nil, nil, nil, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
@@ -1063,6 +1069,8 @@ type blockWaiter struct {
 	action  func(error)
 }
 
+// inProcessRegistration is used internally to Register, and to cache info
+// during the PreRegister -> Register sequence.
 type inProcessRegistration struct {
 	host                          string
 	regRes                        *msgjson.RegisterResult
@@ -2330,7 +2338,7 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 	}
 
 	// Since connectDEX succeeded, we have the server config. exchangeInfo is
-	// guaranteed to return and *Exchange with full asset and market info.
+	// guaranteed to return an *Exchange with full asset and market info.
 	return dc.exchangeInfo(), nil
 }
 
@@ -2378,7 +2386,6 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (*Ex
 	if paid {
 		// It's an AccountExistsError. This is now account recovery, which is
 		// great news since we don't have to pay the fee.
-		// DRAFT TODO: How to handle suspended accounts?
 		err = c.authDEX(dc)
 		if err != nil {
 			return nil, false, fmt.Errorf("error authorizing pre-paid account: %v", err)
@@ -2513,6 +2520,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	if reg == nil || reg.host != host || time.Since(reg.stamp) >= time.Minute*5 {
 		var paid bool
+		// c.register must be called before the *dexConnection is added to the
+		// c.conns map.
 		regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
 		if err != nil {
 			return nil, err
@@ -2520,8 +2529,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		if paid {
 			// It's an AccountExistsError. This is now account recovery, which is
 			// great news since we don't have to pay the fee.
-			// DRAFT TODO: How to handle suspended accounts?
-
+			err = c.authDEX(dc)
+			if err != nil {
+				return nil, fmt.Errorf("error authorizing pre-paid account: %v", err)
+			}
 			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
 			res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}
 			return res, c.markAccountPrePaid(dc, encKey, encKeyLegacy)
@@ -2598,9 +2609,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	return res, nil
 }
 
+// markAccountPrePaid takes an unauthorized *dexConnection and completes the
+// process of storing the account info in the db and adding the connection to
+// the conns map.
 func (c *Core) markAccountPrePaid(dc *dexConnection, encKey, encKeyLegacy []byte) error {
-	// Make sure the account is stored. If this is reached via PreRegister with
-	// a discover of pre-paid status, the connection is not stored yet.
 	c.connMtx.Lock()
 	c.conns[dc.acct.host] = dc
 	c.connMtx.Unlock()
