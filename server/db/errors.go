@@ -79,6 +79,8 @@ func (ae ArchiveError) Error() string {
 		desc = "unexpected number of rows updated"
 	case ErrAccountExists:
 		desc = "account already exists"
+	case ErrAccountSuspended:
+		desc = "account suspended"
 	}
 
 	if ae.Detail == "" {

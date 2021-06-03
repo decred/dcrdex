@@ -83,7 +83,7 @@ type PrimaryCredentials struct {
 type AccountInfo struct {
 	Host string
 	Cert []byte
-	// EncKeyV2 is an encrypted private key generated deterministacally from the
+	// EncKeyV2 is an encrypted private key generated deterministically from the
 	// app seed.
 	EncKeyV2 []byte
 	// LegacyEncKey is an old-style non-hierarchical key that must be included

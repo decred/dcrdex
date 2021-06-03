@@ -102,16 +102,18 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
 	ai, err := a.AccountInfo(acct.ID)
 	if err == nil {
-		if len(ai.FeeCoin) > 0 {
-			if ai.BrokenRule == account.NoRule {
-				return "", &db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
-			} else {
-				return "", &db.ArchiveError{Code: db.ErrAccountSuspended}
-			}
-
-		} else {
+		if len(ai.FeeCoin) == 0 {
 			return ai.FeeAddress, nil
+
 		}
+		if ai.BrokenRule == account.NoRule {
+			return "", &db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
+		}
+		return "", &db.ArchiveError{Code: db.ErrAccountSuspended}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		log.Errorf("AccountInfo error for ID %s: %v", acct.ID, err)
+		return "", db.ArchiveError{Code: db.ErrGeneralFailure}
 	}
 
 	regAddr, err := a.getNextAddress()

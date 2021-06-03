@@ -240,7 +240,7 @@ func verifyV4Upgrade(t *testing.T, db *bbolt.DB) {
 // Ensure that the LegacyEncKey field is populated for the accounts in the DB.
 func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
 	if err := db.View(func(tx *bbolt.Tx) error {
-		return checkVersion(tx, 4)
+		return checkVersion(tx, 5)
 	}); err != nil {
 		t.Error(err)
 	}
