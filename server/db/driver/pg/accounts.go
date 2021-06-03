@@ -85,8 +85,6 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 // AccountInfo returns data for an account.
 func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 
-	fmt.Printf("-- AccountInfo.0 %x \n", aid[:])
-
 	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
 	acct := new(db.Account)
 	var feeAddress sql.NullString
@@ -94,8 +92,6 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 		&acct.FeeCoin, &acct.BrokenRule); err != nil {
 		return nil, err
 	}
-
-	fmt.Println("-- AccountInfo.1")
 
 	acct.FeeAddress = feeAddress.String
 	return acct, nil

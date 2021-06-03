@@ -146,10 +146,6 @@ const (
 	SubjectWalletUnlockError       = "Wallet unlock error"
 )
 
-const (
-	SubjectAccountFeeLost = "Missing Fee Coin"
-)
-
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	host, _ := addrHost(dexAddr)
 	return &FeePaymentNote{

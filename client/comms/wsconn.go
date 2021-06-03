@@ -168,7 +168,9 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 	}, nil
 }
 
-func (conn *wsConn) connectFunc(status bool) {
+// notifyConnect invokes the user-specified callback function for changes in
+// connection status.
+func (conn *wsConn) notifyConnect(status bool) {
 	conn.callbackMtx.RLock()
 	defer conn.callbackMtx.RUnlock()
 	if conn.connectCB == nil {
@@ -177,7 +179,8 @@ func (conn *wsConn) connectFunc(status bool) {
 	conn.connectCB(status)
 }
 
-func (conn *wsConn) reconnectFunc() {
+// notifyReconnect invokes the user-specified callback function for reconnects.
+func (conn *wsConn) notifyReconnect() {
 	conn.callbackMtx.RLock()
 	defer conn.callbackMtx.RUnlock()
 	if conn.reconnectCB == nil {
@@ -186,6 +189,7 @@ func (conn *wsConn) reconnectFunc() {
 	conn.reconnectCB()
 }
 
+// SetCallbacks sets the connect and reconnect callback functions.
 func (conn *wsConn) SetCallbacks(connectCB func(bool), reconnectCB func()) {
 	conn.callbackMtx.Lock()
 	defer conn.callbackMtx.Unlock()
@@ -208,7 +212,7 @@ func (conn *wsConn) setConnected(connected bool) {
 	conn.connected = connected
 	conn.connectedMtx.Unlock()
 	if statusChange {
-		conn.connectFunc(connected)
+		conn.notifyConnect(connected)
 	}
 }
 
@@ -416,7 +420,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 			rcInt = reconnectInterval
 
 			// Synchronize after a reconnection.
-			conn.reconnectFunc()
+			conn.notifyReconnect()
 
 		case <-ctx.Done():
 			return
