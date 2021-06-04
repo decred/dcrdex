@@ -742,6 +742,7 @@ func (a amount) String() string {
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
+// lotSize must not be zero and will cause a panic if so.
 func (dcr *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
 	_, est, err := dcr.maxOrder(lotSize, feeSuggestion, nfo)
 	return est, err
@@ -751,10 +752,6 @@ func (dcr *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 // []*compositeUTXO and network fee rate to be used for further order estimation
 // without additional calls to listunspent.
 func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
-	if lotSize == 0 {
-		return nil, nil, errors.New("cannot divide by lotSize zero")
-	}
-
 	utxos, err = dcr.spendableUTXOs()
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)

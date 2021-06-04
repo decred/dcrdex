@@ -757,6 +757,7 @@ func (btc *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64)
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
+// lotSize must not be zero and will cause a panic if so.
 func (btc *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
 	_, maxEst, err := btc.maxOrder(lotSize, feeSuggestion, nfo)
 	return maxEst, err
@@ -766,9 +767,6 @@ func (btc *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 // []*compositeUTXO to be used for further order estimation without additional
 // calls to listunspent.
 func (btc *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
-	if lotSize == 0 {
-		return nil, nil, errors.New("cannot divide by lotSize zero")
-	}
 	btc.fundingMtx.RLock()
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	btc.fundingMtx.RUnlock()
