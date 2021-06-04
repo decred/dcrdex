@@ -33,18 +33,17 @@ import (
 )
 
 var (
-	tLogger  dex.Logger
-	tCtx     context.Context
-	tLotSize uint64 = 1e7
-	tDCR            = &dex.Asset{
+	tLogger   dex.Logger
+	tCtx      context.Context
+	tLotSize  uint64 = 1e7
+	tRateStep uint64 = 100
+	tDCR             = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
 		Version:      version,
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   24, // FundOrder and swap/redeem fallback when estimation fails
-		LotSize:      tLotSize,
-		RateStep:     100,
 		SwapConf:     1,
 	}
 	optimalFeeRate uint64 = 22
@@ -667,7 +666,7 @@ func TestAvailableFund(t *testing.T) {
 
 	setOrderValue := func(v uint64) {
 		ord.Value = v
-		ord.MaxSwapCount = v / tDCR.LotSize
+		ord.MaxSwapCount = v / tLotSize
 	}
 
 	// Zero value
@@ -976,7 +975,7 @@ func TestFundingCoins(t *testing.T) {
 
 func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
-	maxOrder, err := wallet.MaxOrder(tDCR.LotSize, feeSuggestion, tDCR)
+	maxOrder, err := wallet.MaxOrder(tLotSize, feeSuggestion, tDCR)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
@@ -1012,7 +1011,7 @@ func TestFundEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	swapVal := uint64(1e8)
-	lots := swapVal / tDCR.LotSize
+	lots := swapVal / tLotSize
 
 	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
@@ -1059,7 +1058,7 @@ func TestFundEdges(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tDCR.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMax(lots-1, swapVal-tDCR.LotSize, fees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
+	checkMax(lots-1, swapVal-tLotSize, fees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
 		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+fees-1)
 
 	_, _, err = wallet.FundOrder(ord)
@@ -2190,7 +2189,7 @@ func TestPreSwap(t *testing.T) {
 	// See math from TestFundEdges. 10 lots with max fee rate of 34 sats/vbyte.
 
 	swapVal := uint64(1e8)
-	lots := swapVal / tDCR.LotSize // 10 lots
+	lots := swapVal / tLotSize // 10 lots
 
 	const swapSize = 251
 	const totalBytes = 2510
@@ -2213,7 +2212,7 @@ func TestPreSwap(t *testing.T) {
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 
 	form := &asset.PreSwapForm{
-		LotSize:       tDCR.LotSize,
+		LotSize:       tLotSize,
 		Lots:          lots,
 		AssetConfig:   tDCR,
 		Immediate:     false,

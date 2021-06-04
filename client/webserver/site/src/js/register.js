@@ -180,8 +180,8 @@ export default class RegistrationPage extends BasePage {
     }
 
     page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-    const dcrAsset = res.xc.assets['42']
-    if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
+    // const dcrAsset = res.xc.assets['42']
+    page.dexDCRLotSize.textContent = '<depends on market>' // Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
     await this.changeForm(page.dexAddrForm, page.confirmRegForm)
   }
 

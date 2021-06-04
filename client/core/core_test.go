@@ -46,16 +46,16 @@ import (
 )
 
 var (
-	tCtx context.Context
-	tDCR = &dex.Asset{
+	tCtx           context.Context
+	dcrBtcLotSize  uint64 = 1e7
+	dcrBtcRateStep uint64 = 10
+	tDCR                  = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
 		Version:      0, // match the stubbed (*TXCWallet).Info result
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   10,
-		LotSize:      1e7,
-		RateStep:     100,
 		SwapConf:     1,
 	}
 
@@ -66,8 +66,6 @@ var (
 		SwapSize:     dexbtc.InitTxSize,
 		SwapSizeBase: dexbtc.InitTxSizeBase,
 		MaxFeeRate:   2,
-		LotSize:      1e6,
-		RateStep:     10,
 		SwapConf:     1,
 	}
 	tDexPriv            *secp256k1.PrivateKey
@@ -94,8 +92,6 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 		Symbol:       ai.Symbol,
 		ID:           ai.ID,
 		Version:      ai.Version,
-		LotSize:      ai.LotSize,
-		RateStep:     ai.RateStep,
 		MaxFeeRate:   ai.MaxFeeRate,
 		SwapSize:     ai.SwapSize,
 		SwapSizeBase: ai.SwapSizeBase,
@@ -195,6 +191,8 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 					Name:            tDcrBtcMktName,
 					Base:            tDCR.ID,
 					Quote:           tBTC.ID,
+					LotSize:         dcrBtcLotSize,
+					RateStep:        dcrBtcRateStep,
 					EpochLen:        60000,
 					MarketBuyBuffer: 1.1,
 					MarketStatus: msgjson.MarketStatus{
@@ -1752,8 +1750,8 @@ func TestLogin(t *testing.T) {
 	rig = newTestRig()
 	defer rig.shutdown()
 	dc := rig.dc
-	qty := 3 * tDCR.LotSize
-	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
+	qty := 3 * dcrBtcLotSize
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep*10)
 	lo.Force = order.StandingTiF
 	dbOrder.MetaData.Status = order.OrderStatusBooked // leave unfunded to have it canceled on auth/'connect'
 	oid := lo.ID()
@@ -2121,8 +2119,8 @@ func TestTrade(t *testing.T) {
 	btcWallet.Unlock(rig.crypter)
 
 	var lots uint64 = 10
-	qty := tDCR.LotSize * lots
-	rate := tBTC.RateStep * 1000
+	qty := dcrBtcLotSize * lots
+	rate := dcrBtcRateStep * 1000
 
 	form := &TradeForm{
 		Host:    tDexHost,
@@ -2159,7 +2157,7 @@ func TestTrade(t *testing.T) {
 		},
 		TradeNote: msgjson.TradeNote{
 			Side:     msgjson.SellOrderNum,
-			Quantity: tDCR.LotSize,
+			Quantity: dcrBtcLotSize,
 			Time:     uint64(time.Now().Unix()),
 			Rate:     rate,
 		},
@@ -2299,7 +2297,7 @@ func TestTrade(t *testing.T) {
 
 	// Lot size violation
 	ogQty := form.Qty
-	form.Qty += tDCR.LotSize / 2
+	form.Qty += dcrBtcLotSize / 2
 	ensureErr("bad size")
 	form.Qty = ogQty
 
@@ -3061,8 +3059,8 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	// fundCoinBID := encode.RandomBytes(36)
 	// fundCoinB := &tCoin{id: fundCoinBID}
 
-	qty := 2 * tDCR.LotSize
-	rate := tBTC.RateStep * 10
+	qty := 2 * dcrBtcLotSize
+	rate := dcrBtcRateStep * 10
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, rate) // sell DCR
 	lo.Coins = []order.CoinID{fundCoinDcrID}
 	dbOrder.MetaData.Status = order.OrderStatusBooked
@@ -3133,11 +3131,11 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	// fundCoinBID := encode.RandomBytes(36)
 	// fundCoinB := &tCoin{id: fundCoinBID}
 
-	matchSize := 4 * tDCR.LotSize
-	cancelledQty := tDCR.LotSize
+	matchSize := 4 * dcrBtcLotSize
+	cancelledQty := dcrBtcLotSize
 	qty := 2*matchSize + cancelledQty
-	//rate := tBTC.RateStep * 10
-	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	//rate := dcrBtcRateStep * 10
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
 	lo.Coins = []order.CoinID{fundCoinDcrID}
 	dbOrder.MetaData.Status = order.OrderStatusBooked
 	oid := lo.ID()
@@ -3199,11 +3197,11 @@ func TestTradeTracking(t *testing.T) {
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(rig.crypter)
 
-	matchSize := 4 * tDCR.LotSize
-	cancelledQty := tDCR.LotSize
+	matchSize := 4 * dcrBtcLotSize
+	cancelledQty := dcrBtcLotSize
 	qty := 2*matchSize + cancelledQty
-	rate := tBTC.RateStep * 10
-	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	rate := dcrBtcRateStep * 10
+	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
 	lo.Force = order.StandingTiF
 	// fundCoinDcrID := encode.RandomBytes(36)
 	// lo.Coins = []order.CoinID{fundCoinDcrID}
@@ -3973,8 +3971,8 @@ func TestReconcileTrades(t *testing.T) {
 }
 
 func makeTradeTracker(rig *testRig, mkt *msgjson.Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus) *trackedTrade {
-	qty := 4 * tDCR.LotSize
-	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, tBTC.RateStep)
+	qty := 4 * dcrBtcLotSize
+	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, dcrBtcRateStep)
 	lo.Force = force
 	dbOrder.MetaData.Status = status
 
@@ -4047,10 +4045,10 @@ func TestRefunds(t *testing.T) {
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(rig.crypter)
 
-	matchSize := 4 * tDCR.LotSize
+	matchSize := 4 * dcrBtcLotSize
 	qty := 3 * matchSize
-	rate := tBTC.RateStep * 10
-	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	rate := dcrBtcRateStep * 10
+	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
 	loid := lo.ID()
 	mid := ordertest.RandomMatchID()
 	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
@@ -4237,8 +4235,8 @@ func TestResolveActiveTrades(t *testing.T) {
 	rig.acct.auth() // Short path through initializeDEXConnections
 
 	// Create an order
-	qty := tDCR.LotSize * 5
-	rate := tDCR.RateStep * 5
+	qty := dcrBtcLotSize * 5
+	rate := dcrBtcRateStep * 5
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			OrderType:  order.LimitOrderType,
@@ -4293,7 +4291,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		UserMatch: &order.UserMatch{
 			OrderID:  oid,
 			MatchID:  mid,
-			Quantity: qty - tDCR.LotSize,
+			Quantity: qty - dcrBtcLotSize,
 			Rate:     rate,
 			Address:  addr,
 			Status:   order.MakerSwapCast,
@@ -4529,7 +4527,7 @@ func TestCompareServerMatches(t *testing.T) {
 	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
 
 	// Entirely missing order
-	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*dcrBtcLotSize, dcrBtcRateStep*10)
 	trackerMissing := newTrackedTrade(dbOrderMissing, preImgMissing, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, nil, nil, notify)
 	oidMissing := loMissing.ID()
@@ -5002,7 +5000,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Quantity: qty,
 			Address:  addr,
 		},
-		Rate:  tBTC.RateStep,
+		Rate:  dcrBtcRateStep,
 		Force: order.ImmediateTiF,
 	}
 	dbOrder := &db.MetaOrder{
@@ -5274,8 +5272,8 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		Sell:    true,
 		Base:    tDCR.ID,
 		Quote:   tBTC.ID,
-		Qty:     tDCR.LotSize * 10,
-		Rate:    tBTC.RateStep * 1000,
+		Qty:     dcrBtcLotSize * 10,
+		Rate:    dcrBtcRateStep * 1000,
 		TifNow:  false,
 	}
 
@@ -5366,8 +5364,8 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 		Sell:    true,
 		Base:    tDCR.ID,
 		Quote:   tBTC.ID,
-		Qty:     tDCR.LotSize * 10,
-		Rate:    tBTC.RateStep * 1000,
+		Qty:     dcrBtcLotSize * 10,
+		Rate:    dcrBtcRateStep * 1000,
 		TifNow:  false,
 	}
 
@@ -5451,7 +5449,7 @@ func TestHandleNomatch(t *testing.T) {
 	// Four types of order to check
 
 	// 1. Immediate limit order
-	loImmediate, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loImmediate, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
 	loImmediate.Force = order.ImmediateTiF
 	immediateOID := loImmediate.ID()
 	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -5459,7 +5457,7 @@ func TestHandleNomatch(t *testing.T) {
 	dc.trades[immediateOID] = immediateTracker
 
 	// 2. Standing limit order
-	loStanding, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loStanding, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
 	loStanding.Force = order.StandingTiF
 	standingOID := loStanding.ID()
 	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -5478,7 +5476,7 @@ func TestHandleNomatch(t *testing.T) {
 	}
 
 	// 4. Market order.
-	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
 	mktOrder := &order.MarketOrder{
 		P: loWillBeMarket.P,
 		T: *loWillBeMarket.Trade().Copy(),
@@ -5926,8 +5924,8 @@ func TestPreimageSync(t *testing.T) {
 	btcWallet.Unlock(rig.crypter)
 
 	var lots uint64 = 10
-	qty := tDCR.LotSize * lots
-	rate := tBTC.RateStep * 1000
+	qty := dcrBtcLotSize * lots
+	rate := dcrBtcRateStep * 1000
 
 	form := &TradeForm{
 		Host:    tDexHost,
@@ -6019,11 +6017,11 @@ func TestMatchStatusResolution(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 
-	qty := 3 * tDCR.LotSize
+	qty := 3 * dcrBtcLotSize
 	secret := encode.RandomBytes(32)
 	secretHash := sha256.Sum256(secret)
 
-	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep*10)
 	dbOrder.MetaData.Status = order.OrderStatusExecuted // so there is no order_status request for this
 	oid := lo.ID()
 	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -6787,7 +6785,7 @@ func TestPreOrder(t *testing.T) {
 	tCore.wallets[tDCR.ID] = dcrWallet
 
 	var rate uint64 = 1e8
-	quoteConvertedLotSize := calc.BaseToQuote(rate, tDCR.LotSize)
+	quoteConvertedLotSize := calc.BaseToQuote(rate, dcrBtcLotSize)
 
 	book := newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
 	dc.books[tDcrBtcMktName] = book
@@ -6805,7 +6803,7 @@ func TestPreOrder(t *testing.T) {
 	}
 
 	buyNote := *sellNote
-	buyNote.TradeNote.Quantity = tDCR.LotSize * 10
+	buyNote.TradeNote.Quantity = dcrBtcLotSize * 10
 	buyNote.TradeNote.Side = msgjson.BuyOrderNum
 
 	var baseFeeRate uint64 = 5

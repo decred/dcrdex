@@ -37,17 +37,17 @@ const (
 )
 
 var (
-	tLogger dex.Logger
-	tCtx    context.Context
-	tDCR    = &dex.Asset{
+	tLogger   dex.Logger
+	tCtx      context.Context
+	tLotSize  uint64 = 1e7
+	tRateStep uint64 = 100
+	tDCR             = &dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
 		Version:      version,
 		SwapSize:     dexdcr.InitTxSize,
 		SwapSizeBase: dexdcr.InitTxSizeBase,
 		MaxFeeRate:   10,
-		LotSize:      1e7,
-		RateStep:     100,
 		SwapConf:     1,
 	}
 )
@@ -161,7 +161,7 @@ func runTest(t *testing.T, splitTx bool) {
 	})
 	defer rig.close(t)
 	contractValue := toAtoms(2)
-	lots := contractValue / tDCR.LotSize
+	lots := contractValue / tLotSize
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
 		for _, u := range utxos {
@@ -196,7 +196,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	setOrderValue := func(v uint64) {
 		ord.Value = v
-		ord.MaxSwapCount = v / tDCR.LotSize
+		ord.MaxSwapCount = v / tLotSize
 	}
 
 	// Grab some coins.
