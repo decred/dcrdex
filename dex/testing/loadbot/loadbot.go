@@ -71,6 +71,8 @@ var (
 	dcrAssetCfg, btcAssetCfg   *dexsrv.AssetConf
 	orderCounter, matchCounter uint32
 	epochDuration              uint64
+	lotSize                    uint64
+	rateStep                   uint64
 )
 
 func init() {
@@ -229,6 +231,8 @@ func main() {
 	for _, mkt := range mktsCfg.Markets {
 		if mkt.Base == "DCR_simnet" && mkt.Quote == "BTC_simnet" {
 			epochDuration = mkt.Duration
+			lotSize = mkt.LotSize
+			rateStep = mkt.RateStep
 		}
 	}
 	if epochDuration == 0 {
@@ -424,6 +428,8 @@ type marketsDotJSON struct {
 	Markets []*struct {
 		Base     string  `json:"base"`
 		Quote    string  `json:"quote"`
+		LotSize  uint64  `json:"lotSize"`
+		RateStep uint64  `json:"rateStep"`
 		Duration uint64  `json:"epochDuration"`
 		MBBuffer float64 `json:"marketBuyBuffer"`
 	} `json:"markets"`

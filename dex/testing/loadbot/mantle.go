@@ -259,8 +259,8 @@ func (m *Mantle) book() *core.OrderBook {
 // truncatedMidGap is the dcr_btc mid-gap value truncated to the next lowest
 // multiple of BTC rate-step.
 func (m *Mantle) truncatedMidGap() uint64 {
-	midGap := midGap(m.book(), btcAssetCfg.RateStep)
-	return truncate(int64(midGap), int64(btcAssetCfg.RateStep))
+	midGap := midGap(m.book(), rateStep)
+	return truncate(int64(midGap), int64(rateStep))
 }
 
 // createWallet creates a new wallet/account for the asset and node. If an error
