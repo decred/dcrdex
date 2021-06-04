@@ -3,12 +3,16 @@
         {
             "base": "DCR_mainnet",
             "quote": "BTC_mainnet",
+            "lotSize": 100000000,
+            "rateStep": 100000,
             "epochDuration": 10000,
             "marketBuyBuffer": 1.25
         },
         {
             "base": "BTC_testnet",
             "quote": "LTC_testnet",
+            "lotSize": 100000,
+            "rateStep": 1000000,
             "epochDuration": 6000,
             "marketBuyBuffer": 1.25
         }
@@ -17,8 +21,6 @@
         "DCR_mainnet": {
             "bip44symbol": "dcr",
             "network": "mainnet",
-            "lotSize": 100000000,
-            "rateStep": 100000000,
             "maxFeeRate": 10,
             "swapConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
@@ -26,8 +28,6 @@
         "DCR_testnet": {
             "bip44symbol": "dcr",
             "network": "testnet",
-            "lotSize": 100000000,
-            "rateStep": 100000000,
             "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
@@ -35,32 +35,24 @@
         "BTC_mainnet": {
             "bip44symbol": "btc",
             "network": "mainnet",
-            "lotSize": 100000,
-            "rateStep": 100000,
             "maxFeeRate": 100,
             "swapConf": 3
         },
         "BTC_testnet": {
             "bip44symbol": "btc",
             "network": "testnet",
-            "lotSize": 100000,
-            "rateStep": 100000,
             "maxFeeRate": 100,
             "swapConf": 1
         },
         "LTC_mainnet": {
             "bip44symbol": "ltc",
             "network": "mainnet",
-            "lotSize": 1000000,
-            "rateStep": 1000000,
             "maxFeeRate": 20,
             "swapConf": 6
         },
         "LTC_testnet": {
             "bip44symbol": "ltc",
             "network": "testnet",
-            "lotSize": 1000000,
-            "rateStep": 1000000,
             "maxFeeRate": 20,
             "swapConf": 6
         },

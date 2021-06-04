@@ -20,6 +20,8 @@ type marketConfig struct {
 	Markets []*struct {
 		Base           string  `json:"base"`
 		Quote          string  `json:"quote"`
+		LotSize        uint64  `json:"lotSize"`
+		RateStep       uint64  `json:"rateStep"`
 		Duration       uint64  `json:"epochDuration"`
 		MBBuffer       float64 `json:"marketBuyBuffer"`
 		BookedLotLimit uint32  `json:"userBookedLotLimit"`
@@ -50,17 +52,33 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 
 	log.Debug("-------------------- BEGIN parsed markets.json --------------------")
 	log.Debug("MARKETS")
-	log.Debug("                  Base         Quote   EpochDur")
+	log.Debug("                  Base         Quote    LotSize     EpochDur")
 	for i, mktConf := range conf.Markets {
-		log.Debugf("Market %d: % 12s  % 12s  % 8d ms", i, mktConf.Base, mktConf.Quote, mktConf.Duration)
+		if mktConf.LotSize == 0 {
+			return nil, nil, fmt.Errorf("market (%s, %s) has NO lot size specified (was an asset setting)",
+				mktConf.Base, mktConf.Quote)
+		}
+		if mktConf.RateStep == 0 {
+			return nil, nil, fmt.Errorf("market (%s, %s) has NO rate step specified (was an asset setting)",
+				mktConf.Base, mktConf.Quote)
+		}
+		log.Debugf("Market %d: % 12s  % 12s   %6de8  % 8d ms",
+			i, mktConf.Base, mktConf.Quote, mktConf.LotSize/1e8, mktConf.Duration)
 	}
 	log.Debug("")
 
 	log.Debug("ASSETS")
-	log.Debug("                  LotSize     RateStep   MaxFeeRate   Network")
+	log.Debug("             MaxFeeRate   SwapConf   Network")
 	for asset, assetConf := range conf.Assets {
-		log.Debugf("%-12s % 12d % 12d % 12d % 9s", asset, assetConf.LotSize,
-			assetConf.RateStep, assetConf.MaxFeeRate, assetConf.Network)
+		if assetConf.LotSizeOLD > 0 {
+			return nil, nil, fmt.Errorf("asset %s has a lot size (%d) specified, "+
+				"but this is now a market setting", asset, assetConf.LotSizeOLD)
+		}
+		if assetConf.RateStepOLD > 0 {
+			return nil, nil, fmt.Errorf("asset %s has a rate step (%d) specified, "+
+				"but this is now a market setting", asset, assetConf.RateStepOLD)
+		}
+		log.Debugf("%-12s % 10d  % 9d % 9s", asset, assetConf.MaxFeeRate, assetConf.SwapConf, assetConf.Network)
 	}
 	log.Debug("--------------------- END parsed markets.json ---------------------")
 
@@ -123,7 +141,7 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 		}
 
 		mkt, err := dex.NewMarketInfoFromSymbols(baseConf.Symbol, quoteConf.Symbol,
-			baseConf.LotSize, mktConf.Duration, mktConf.MBBuffer)
+			mktConf.LotSize, mktConf.RateStep, mktConf.Duration, mktConf.MBBuffer)
 		if err != nil {
 			return nil, nil, err
 		}
