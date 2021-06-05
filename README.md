@@ -225,10 +225,11 @@ to limit possible fees to under 1% of the trade, the minimum lot size would need
 to be set to about $500.
 
 The scenario with the lowest fees is for an entire order to be consumed by a
-single match. If this happens, the user pays 2 transaction fees: one swap and
-one redemption. The worst case is for the order to be consumed by one single-lot
-match per epoch, in which case the user pays for a separate swap and redemption
-transaction per lot in their order.
+single match. If this happens, the user pays the fees for two transactions: one
+on the chain of the asset the user is selling and one on the chain of the asset
+the user is buying. The worst case is for the order to be filled in multiple
+matches each of one lot in amount, potentially requiring as many swaps as lots
+in the order.
 Check the
 [dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
 for more details about how atomic swaps work.
