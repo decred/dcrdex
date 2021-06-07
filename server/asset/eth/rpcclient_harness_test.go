@@ -67,6 +67,13 @@ func TestBlockNumber(t *testing.T) {
 	}
 }
 
+func TestPeers(t *testing.T) {
+	_, err := ethClient.peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSyncProgress(t *testing.T) {
 	_, err := ethClient.syncProgress(ctx)
 	if err != nil {

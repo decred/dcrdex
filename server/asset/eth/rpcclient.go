@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -19,7 +20,10 @@ import (
 var _ ethFetcher = (*rpcclient)(nil)
 
 type rpcclient struct {
+	// ec wraps the client with some useful calls.
 	ec *ethclient.Client
+	// c is a direct client for raw calls.
+	c *rpc.Client
 }
 
 const gweiFactor = 1e9
@@ -34,6 +38,7 @@ func (c *rpcclient) connect(ctx context.Context, IPC string) error {
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
 	c.ec = ethclient.NewClient(client)
+	c.c = client
 	return nil
 }
 
@@ -94,4 +99,14 @@ func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, e
 // blockNumber returns the current block number.
 func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 	return c.ec.BlockNumber(ctx)
+}
+
+// peers returns connected peers.
+func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	var peers []*p2p.PeerInfo
+	err := c.c.CallContext(ctx, &peers, "admin_peers")
+	if err != nil {
+		return nil, err
+	}
+	return peers, nil
 }

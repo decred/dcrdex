@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/p2p"
 )
 
 var (
@@ -34,6 +35,8 @@ type testNode struct {
 	syncProgErr    error
 	sugGasPrice    *big.Int
 	sugGasPriceErr error
+	peerInfo       []*p2p.PeerInfo
+	peersErr       error
 }
 
 func (n *testNode) connect(ctx context.Context, IPC string) error {
@@ -56,6 +59,10 @@ func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
 
 func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
 	return n.syncProg, n.syncProgErr
+}
+
+func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	return n.peerInfo, n.peersErr
 }
 
 func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
@@ -325,57 +332,29 @@ func TestFeeRate(t *testing.T) {
 
 func TestSynced(t *testing.T) {
 	tests := []struct {
-		name                   string
-		SS, wantSS             uint32
-		IBN, wantIBN, blkNum   uint64
-		syncProg               *ethereum.SyncProgress
-		blkNumErr, syncProgErr error
-		wantErr, wantSynced    bool
+		name                  string
+		syncProg              *ethereum.SyncProgress
+		peerInfo              []*p2p.PeerInfo
+		peersErr, syncProgErr error
+		wantErr, wantSynced   bool
 	}{{
-		name:    "ok not initially synced ibm zero",
-		SS:      0,
-		wantSS:  0,
-		IBN:     0,
-		wantIBN: 100,
-		blkNum:  100,
-	}, {
-		name:    "ok not initially synced no block number change",
-		SS:      0,
-		wantSS:  0,
-		IBN:     100,
-		wantIBN: 100,
-		blkNum:  100,
-	}, {
-		name:     "ok not initially synced progress returned",
-		SS:       0,
-		wantSS:   1,
-		IBN:      100,
-		wantIBN:  100,
-		blkNum:   101,
-		syncProg: new(ethereum.SyncProgress),
-	}, {
-		name:       "ok not initially synced progress not returned",
-		SS:         0,
-		wantSS:     1,
-		IBN:        100,
-		wantIBN:    100,
-		blkNum:     101,
+		name:       "ok synced",
+		peerInfo:   make([]*p2p.PeerInfo, 2),
 		wantSynced: true,
 	}, {
-		name:     "ok initially synced progress returned",
-		SS:       1,
-		wantSS:   1,
-		IBN:      100,
-		wantIBN:  100,
+		name:     "ok not enough peers",
+		peerInfo: make([]*p2p.PeerInfo, 1),
+	}, {
+		name:     "ok syncing",
+		peerInfo: make([]*p2p.PeerInfo, 2),
 		syncProg: new(ethereum.SyncProgress),
 	}, {
-		name:      "not initially synced blockNumber error",
-		SS:        0,
-		blkNumErr: errors.New(""),
-		wantErr:   true,
+		name:     "peers error",
+		peersErr: errors.New(""),
+		wantErr:  true,
 	}, {
-		name:        "initially synced syncProgress error",
-		SS:          1,
+		name:        "sync progress error",
+		peerInfo:    make([]*p2p.PeerInfo, 2),
 		syncProgErr: errors.New(""),
 		wantErr:     true,
 	}}
@@ -385,15 +364,13 @@ func TestSynced(t *testing.T) {
 		node := &testNode{
 			syncProg:    test.syncProg,
 			syncProgErr: test.syncProgErr,
-			blkNum:      test.blkNum,
-			blkNumErr:   test.blkNumErr,
+			peerInfo:    test.peerInfo,
+			peersErr:    test.peersErr,
 		}
 		eth := &Backend{
-			node:           node,
-			ctx:            ctx,
-			log:            tLogger,
-			syncingStarted: test.SS,
-			initBlockNum:   test.IBN,
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
 		}
 		synced, err := eth.Synced()
 		cancel()
@@ -408,12 +385,6 @@ func TestSynced(t *testing.T) {
 		}
 		if synced != test.wantSynced {
 			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
-		}
-		if eth.syncingStarted != test.wantSS {
-			t.Fatalf("want syncing started %v got %v for test %q", test.wantSS, eth.syncingStarted, test.name)
-		}
-		if eth.initBlockNum != test.wantIBN {
-			t.Fatalf("want initial block number %v got %v for test %q", test.wantIBN, eth.initBlockNum, test.name)
 		}
 	}
 }

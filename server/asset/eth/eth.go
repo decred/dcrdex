@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -18,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/p2p"
 )
 
 func init() {
@@ -33,6 +33,7 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
+	requiredNPeers    = 2
 )
 
 var (
@@ -69,6 +70,7 @@ type ethFetcher interface {
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	blockNumber(ctx context.Context) (uint64, error)
+	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -76,11 +78,6 @@ type ethFetcher interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	// syncingStarted and initBlockNum are atomics and are used to determine
-	// whether the node has started syncing.
-	initBlockNum   uint64
-	syncingStarted uint32
-
 	ctx  context.Context
 	cfg  *config
 	node ethFetcher
@@ -124,7 +121,7 @@ func (eth *Backend) shutdown() {
 	eth.node.shutdown()
 }
 
-// Connect connects to the node RPC server. A dex.Connector.
+// Connect connects to the node RPC server and initializes some variables.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
 	if err := c.connect(ctx, eth.cfg.IPC); err != nil {
@@ -213,23 +210,15 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 func (eth *Backend) Synced() (bool, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// wait for at least one change in block count, then defer to
-	// node.SyncProgress for the lifetime of the eth backend.
-	syncingStarted := atomic.LoadUint32(&eth.syncingStarted)
-	if syncingStarted != 1 {
-		ibn := atomic.LoadUint64(&eth.initBlockNum)
-		bn, err := eth.node.blockNumber(eth.ctx)
-		if err != nil {
-			return false, err
-		}
-		if ibn == 0 {
-			atomic.StoreUint64(&eth.initBlockNum, bn)
-			return false, nil
-		}
-		if bn == ibn {
-			return false, nil
-		}
-		atomic.StoreUint32(&eth.syncingStarted, 1)
+	// ensure we are connected to at least requiredNPeers, assume the node
+	// has started syncing from those peers were they ahead, and then defer
+	// to syncProgress.
+	peers, err := eth.node.peers(eth.ctx)
+	if err != nil {
+		return false, err
+	}
+	if len(peers) < requiredNPeers {
+		return false, nil
 	}
 	sp, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
