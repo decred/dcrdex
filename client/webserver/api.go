@@ -4,7 +4,6 @@
 package webserver
 
 import (
-	"bytes"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -486,12 +485,12 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+// createCSVFromOrders creates a CSV string from a list of orders.
 func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (string, error) {
-	var buffer bytes.Buffer
+	var buffer strings.Builder
 	csvWriter := csv.NewWriter(&buffer)
 	// UseCRLF for Window users
 	csvWriter.UseCRLF = windowsUser
-
 	err := csvWriter.Write([]string{
 		"Host",
 		"Base",
@@ -513,14 +512,9 @@ func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (s
 	}
 	for _, ord := range ords {
 		ordReader := orderReader{ord}
-
 		timestamp, err := encode.UnixTimeMilli(int64(ord.Stamp)).MarshalText()
 		if err != nil {
-			return "", err
-		}
-		side := "buy"
-		if ord.Sell {
-			side = "sell"
+			return "", fmt.Errorf("failed to write CSV: %v", err)
 		}
 
 		err = csvWriter.Write([]string{
@@ -530,7 +524,7 @@ func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (s
 			ordReader.AskString(),        // Ask
 			ordReader.OfferString(),      // Offer
 			ordReader.Type.String(),      // Type
-			side,                         // Side
+			ordReader.SideString(),       // Side
 			ord.TimeInForce.String(),     // Time in Force
 			ordReader.StatusString(),     // Status
 			ordReader.SimpleRateString(), // Rate
@@ -540,19 +534,19 @@ func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (s
 			string(timestamp[:]),         // Time
 		})
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("failed to write CSV: %v", err)
 		}
 	}
 	csvWriter.Flush()
 	err = csvWriter.Error()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to write CSV: %v", err)
 	}
-
-	return string(buffer.Bytes()), nil
-
+	return string(buffer.String()), nil
 }
 
+// apiOrdersCsv responds with a csv containing data of a filtered list of
+// user orders
 func (s *WebServer) apiOrdersCsv(w http.ResponseWriter, r *http.Request) {
 	filter := new(core.OrderFilter)
 	if !readPost(w, r, filter) {

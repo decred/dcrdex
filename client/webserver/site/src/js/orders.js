@@ -167,7 +167,10 @@ export default class OrdersPage extends BasePage {
   /* exportOrders opens a new page that downloads a csv of orders based on the
    * current filters */
   async exportOrders () {
-    console.log('wtf')
+    const currentFilter = { ...this.currentFilter() }
+    // return all orders instead of only the ones on the current page
+    currentFilter.n = 0
+    currentFilter.offset = ''
     const res = await postJSON('/api/orderscsv', this.currentFilter())
     if (res.ok) {
       // eslint-disable-next-line no-undef
@@ -180,6 +183,7 @@ export default class OrdersPage extends BasePage {
       a.download = 'dcrdex-orders.csv'
       a.click()
       window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
     }
   }
 

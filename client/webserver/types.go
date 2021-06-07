@@ -214,6 +214,14 @@ func (ord *orderReader) FilledPercent() string {
 	return ord.percent(filledFilter)
 }
 
+// SideString is "sell" for sell orders and "buy" for buy orders.
+func (ord *orderReader) SideString() string {
+	if ord.Sell {
+		return "sell"
+	}
+	return "buy"
+}
+
 func (ord *orderReader) percent(filter func(match *core.Match) bool) string {
 	var sum uint64
 	if ord.Sell {
@@ -327,6 +335,11 @@ func (ord *orderReader) StatusString() string {
 	return "unknown"
 }
 
+// SimpleRateString is the formatted match rate.
+func (ord *orderReader) SimpleRateString() string {
+	return precision8(ord.Rate)
+}
+
 // RateString is a formatted rate with units.
 func (ord *orderReader) RateString() string {
 	if ord.Type == order.MarketOrderType {
@@ -394,11 +407,6 @@ func (m *matchReader) StatusString() string {
 		return "Match Complete"
 	}
 	return "Unknown Order Status"
-}
-
-// SimpleRateString is the formatted match rate.
-func (ord *orderReader) SimpleRateString() string {
-	return precision8(ord.Rate)
 }
 
 // RateString is the formatted match rate, with units.
