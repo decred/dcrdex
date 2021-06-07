@@ -396,6 +396,11 @@ func (m *matchReader) StatusString() string {
 	return "Unknown Order Status"
 }
 
+// SimpleRateString is the formatted match rate.
+func (ord *orderReader) SimpleRateString() string {
+	return precision8(ord.Rate)
+}
+
 // RateString is the formatted match rate, with units.
 func (m *matchReader) RateString() string {
 	return fmt.Sprintf("%s %s/%s", precision8(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)

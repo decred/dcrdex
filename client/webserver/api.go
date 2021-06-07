@@ -4,8 +4,11 @@
 package webserver
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/core"
@@ -480,6 +483,100 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Orders: ords,
+	}, s.indent)
+}
+
+func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (string, error) {
+	var buffer bytes.Buffer
+	csvWriter := csv.NewWriter(&buffer)
+	// UseCRLF for Window users
+	csvWriter.UseCRLF = windowsUser
+
+	err := csvWriter.Write([]string{
+		"Host",
+		"Base",
+		"Quote",
+		"Ask",
+		"Offer",
+		"Type",
+		"Side",
+		"Time in Force",
+		"Status",
+		"Rate",
+		"Filled (%)",
+		"Settled (%)",
+		"Quantity",
+		"Time",
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, ord := range ords {
+		ordReader := orderReader{ord}
+
+		timestamp, err := encode.UnixTimeMilli(int64(ord.Stamp)).MarshalText()
+		if err != nil {
+			return "", err
+		}
+		side := "buy"
+		if ord.Sell {
+			side = "sell"
+		}
+
+		err = csvWriter.Write([]string{
+			ord.Host,                     // Host
+			ord.BaseSymbol,               // Base
+			ord.QuoteSymbol,              // Quote
+			ordReader.AskString(),        // Ask
+			ordReader.OfferString(),      // Offer
+			ordReader.Type.String(),      // Type
+			side,                         // Side
+			ord.TimeInForce.String(),     // Time in Force
+			ordReader.StatusString(),     // Status
+			ordReader.SimpleRateString(), // Rate
+			ordReader.FilledPercent(),    // Filled
+			ordReader.SettledPercent(),   // Settled
+			ordReader.OfferString(),      // Quantity
+			string(timestamp[:]),         // Time
+		})
+		if err != nil {
+			return "", err
+		}
+	}
+	csvWriter.Flush()
+	err = csvWriter.Error()
+	if err != nil {
+		return "", err
+	}
+
+	return string(buffer.Bytes()), nil
+
+}
+
+func (s *WebServer) apiOrdersCsv(w http.ResponseWriter, r *http.Request) {
+	filter := new(core.OrderFilter)
+	if !readPost(w, r, filter) {
+		return
+	}
+
+	ords, err := s.core.Orders(filter)
+	if err != nil {
+		s.writeAPIError(w, "OrdersCsv error: %v", err)
+		return
+	}
+
+	csv, err := s.createCSVFromOrders(ords, strings.Contains(r.UserAgent(), "Windows"))
+	if err != nil {
+		s.writeAPIError(w, "OrdersCsv error: %v", err)
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK  bool   `json:"ok"`
+		Csv string `json:"csv"`
+	}{
+		OK:  true,
+		Csv: csv,
 	}, s.indent)
 }
 

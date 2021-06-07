@@ -18,7 +18,7 @@ export default class OrdersPage extends BasePage {
     this.loading = false
     const page = this.page = Doc.parsePage(main, [
       'rowTmpl', 'tableBody', 'hostFilter', 'assetFilter', 'statusFilter',
-      'orderLoader', 'ordersTable'
+      'orderLoader', 'ordersTable', 'exportOrders'
     ])
     this.orderTmpl = page.rowTmpl
     this.orderTmpl.remove()
@@ -78,6 +78,10 @@ export default class OrdersPage extends BasePage {
       if (belowBottom < 0) {
         this.nextPage()
       }
+    })
+
+    Doc.bind(page.exportOrders, 'click', () => {
+      this.exportOrders()
     })
 
     this.submitFilter()
@@ -149,25 +153,6 @@ export default class OrdersPage extends BasePage {
     filterState.assets = parseSubFilter(page.assetFilter)
     filterState.statuses = parseSubFilter(page.statusFilter)
 
-    const url = new URL(window.location)
-    const search = new URLSearchParams(url.search)
-    search.delete('offset')
-
-    const setQuery = (k) => {
-      const subFilter = filterState[k]
-      if (subFilter.length === 0) {
-        search.delete(k)
-      } else {
-        search.set(k, subFilter.join(','))
-      }
-    }
-    setQuery('hosts')
-    setQuery('assets')
-    setQuery('statuses')
-
-    url.search = search.toString()
-    window.history.replaceState({ page: 'orders' }, '', url)
-
     this.setOrders(await this.fetchOrders())
   }
 
@@ -177,6 +162,25 @@ export default class OrdersPage extends BasePage {
     const res = await postJSON('/api/orders', this.currentFilter())
     loaded()
     return res.orders
+  }
+
+  /* exportOrders opens a new page that downloads a csv of orders based on the
+   * current filters */
+  async exportOrders () {
+    console.log('wtf')
+    const res = await postJSON('/api/orderscsv', this.currentFilter())
+    if (res.ok) {
+      // eslint-disable-next-line no-undef
+      const csvFile = new Blob([res.csv], { type: 'text/csv' })
+      const a = document.createElement('a')
+      a.style = 'display: none'
+      document.body.appendChild(a)
+      const url = window.URL.createObjectURL(csvFile)
+      a.href = url
+      a.download = 'dcrdex-orders.csv'
+      a.click()
+      window.URL.revokeObjectURL(url)
+    }
   }
 
   /*

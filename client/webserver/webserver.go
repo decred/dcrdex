@@ -289,6 +289,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 			apiAuth.Post("/changeapppass", s.apiChangeAppPass)
 			apiAuth.Post("/walletsettings", s.apiWalletSettings)
 			apiAuth.Post("/orders", s.apiOrders)
+			apiAuth.Post("/orderscsv", s.apiOrdersCsv)
 			apiAuth.Post("/order", s.apiOrder)
 			apiAuth.Post("/withdraw", s.apiWithdraw)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
