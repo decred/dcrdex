@@ -542,7 +542,7 @@ func (s *WebServer) createCSVFromOrders(ords []*core.Order, windowsUser bool) (s
 	if err != nil {
 		return "", fmt.Errorf("failed to write CSV: %v", err)
 	}
-	return string(buffer.String()), nil
+	return buffer.String(), nil
 }
 
 // apiOrdersCsv responds with a csv containing data of a filtered list of
