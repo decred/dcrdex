@@ -309,3 +309,11 @@ func TestSyncProgress(t *testing.T) {
 	}
 	spew.Dump(progress)
 }
+
+func TestPeers(t *testing.T) {
+	peers, err := ethClient.peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spew.Dump(peers)
+}
