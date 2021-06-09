@@ -141,9 +141,10 @@ type stepActor struct {
 	status *swapStatus
 }
 
-// String satisfies the Stringer interface for pretty printing.
+// String satisfies the Stringer interface for pretty printing. The swapStatus
+// RWMutex should be held for reads when using for a.status reads.
 func (a stepActor) String() string {
-	return fmt.Sprintf("user: %v, swapAsset: %v, isMaker: %v, order: %v, status: %v",
+	return fmt.Sprintf("user: %v, swapAsset: %v, isMaker: %v, order: %v, status: {%v}",
 		a.user, a.swapAsset, a.isMaker, a.order, a.status)
 }
 
