@@ -54,8 +54,7 @@ func (c *rpcclient) shutdown() {
 	}
 }
 
-// bestBlockHash gets the best block's hash at the time of calling. Due to the
-// speed of Ethereum blocks, this changes often.
+// bestBlockHash gets the best block's hash at the time of calling.
 func (c *rpcclient) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	header, err := c.bestHeader(ctx)
 	if err != nil {
@@ -64,8 +63,7 @@ func (c *rpcclient) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return header.Hash(), nil
 }
 
-// bestHeader gets the best header at the time of calling. Due to the speed of
-// Ethereum blocks, this changes often.
+// bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	bn, err := c.ec.BlockNumber(ctx)
 	if err != nil {
@@ -138,8 +136,7 @@ func (c *rpcclient) addPeer(ctx context.Context, peer string) error {
 	return c.c.CallContext(ctx, nil, "admin_addPeer", peer)
 }
 
-// blockNumber gets the block number at time of calling.  Due to the speed of
-// Ethereum blocks, this changes often.
+// blockNumber gets the block number at time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 	bn, err := c.ec.BlockNumber(ctx)
 	if err != nil {

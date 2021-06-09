@@ -16,7 +16,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/server/asset/eth"
+	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -90,7 +90,7 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	return eth.CoinIDToString(coinID)
+	return dexeth.CoinIDToString(coinID)
 }
 
 // Info returns basic information about the wallet and asset.
@@ -98,7 +98,8 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
-// rawWallet is a return type from the eth client.
+// rawWallet is an unexported return type from the eth client. Watch for changes at
+// https://github.com/ethereum/go-ethereum/blob/c503f98f6d5e80e079c1d8a3601d188af2a899da/internal/ethapi/api.go#L227-L253
 type rawWallet struct {
 	URL      string             `json:"url"`
 	Status   string             `json:"status"`
