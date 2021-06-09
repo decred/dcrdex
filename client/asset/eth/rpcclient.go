@@ -206,3 +206,13 @@ func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
 	}
 	return wallet, nil
 }
+
+// peers returns connected peers.
+func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	var peers []*p2p.PeerInfo
+	err := c.c.CallContext(ctx, &peers, "admin_peers")
+	if err != nil {
+		return nil, err
+	}
+	return peers, nil
+}

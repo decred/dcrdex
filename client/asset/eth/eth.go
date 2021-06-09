@@ -35,6 +35,7 @@ const (
 	BipID              = 60
 	defaultGasFee      = 8.2e10
 	defaultGasFeeLimit = 2e11
+	requiredNPeers     = 2
 )
 
 var (
@@ -120,6 +121,7 @@ type ethFetcher interface {
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
+	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 	sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error)
 	shutdown()
@@ -137,11 +139,6 @@ type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
-
-	// syncingStarted and initBlockNum are atomics and are used to determine
-	// whether the node has started syncing.
-	initBlockNum   uint64
-	syncingStarted uint32
 
 	ctx       context.Context // the asset subsystem starts with Connect(ctx)
 	node      ethFetcher
@@ -456,23 +453,15 @@ func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs u
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// wait for at least one change in block count, then defer to
-	// node.SyncProgress for the lifetime of the eth backend.
-	syncingStarted := atomic.LoadUint32(&eth.syncingStarted)
-	if syncingStarted != 1 {
-		ibn := atomic.LoadUint64(&eth.initBlockNum)
-		bn, err := eth.node.blockNumber(eth.ctx)
-		if err != nil {
-			return false, 0, err
-		}
-		if ibn == 0 {
-			atomic.StoreUint64(&eth.initBlockNum, bn)
-			return false, 0, nil
-		}
-		if bn == ibn {
-			return false, 0, nil
-		}
-		atomic.StoreUint32(&eth.syncingStarted, 1)
+	// ensure we are connected to at least requiredNPeers, assume the node
+	// has started syncing from those peers were they ahead, and then defer
+	// to syncProgress.
+	peers, err := eth.node.peers(eth.ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	if len(peers) < requiredNPeers {
+		return false, 0, nil
 	}
 	sp, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
