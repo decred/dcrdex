@@ -1596,13 +1596,16 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
+
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
 			txOut.ScriptPubKey.Hex, err)
 	}
+
 	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, dcr.chainParams, false)
+	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(txOut.ScriptPubKey.Version,
+		pkScript, dcr.chainParams, false)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
 	}
@@ -2317,7 +2320,9 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", txout.TxID, txout.RedeemScript, err)
 		}
 
-		nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, dcr.chainParams)
+		// NOTE: listunspent does not indicate script version, so for the
+		// purposes of our funding coins, we are going to assume 0.
+		nfo, err := dexdcr.InputInfo(0, scriptPK, redeemScript, dcr.chainParams)
 		if err != nil {
 			if errors.Is(err, dex.UnsupportedScriptError) {
 				continue

@@ -1519,7 +1519,7 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vout := uint32(5)
+	vout := uint32(2)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
@@ -1533,7 +1533,19 @@ func TestAuditContract(t *testing.T) {
 		t.Fatalf("bad address %s (%T)", addr, addr)
 	}
 
-	node.txOutRes[newOutPoint(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
+	txoutRes := makeGetTxOutRes(1, 5, pkScript) // 1 conf
+	node.txOutRes[newOutPoint(tTxHash, vout)] = txoutRes
+
+	// need getblock, getblockhash, and getrawtransaction results too
+	_, bestBlockHeight, err := node.GetBestBlock(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected GetBestBlock error: %v", err)
+	}
+	contractHeight := bestBlockHeight + 1
+	inputs := []chainjson.Vin{makeRPCVin("feeddabeef", 0, nil)}
+	newBlockHash, _ := node.addRawTx(contractHeight, makeRawTx(tTxHash.String(), []dex.Bytes{nil, nil, pkScript /* vout 2 */}, inputs))
+
+	txoutRes.BestBlock = newBlockHash.String() // with 1 conf and this best block hash, the tx is in this block
 
 	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
 	if err != nil {
