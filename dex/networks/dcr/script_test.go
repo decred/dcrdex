@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -89,7 +90,7 @@ func TestParseScriptType(t *testing.T) {
 		if stakeOpcode != 0 {
 			pkScript = append([]byte{stakeOpcode}, pkScript...)
 		}
-		scriptType = ParseScriptType(CurrentScriptVersion, pkScript, redeem)
+		scriptType = ParseScriptType(0, pkScript, redeem)
 		return pkScript, scriptType
 	}
 
@@ -272,7 +273,7 @@ func Test_nonstandardScript(t *testing.T) {
 		"b6ed289515f2dbcc95f05ce80dff466704fe03865eb17576a91498a67ed502ad" +
 		"b04173d88fb1ef92d0317711c3816888ac")
 
-	scriptType := ParseScriptType(CurrentScriptVersion, pkScript, contractScript)
+	scriptType := ParseScriptType(0, pkScript, contractScript)
 	if !scriptType.IsP2SH() {
 		t.Fatalf("script was not P2SH, got %v (see script.go)", scriptType)
 	}
@@ -290,7 +291,7 @@ func Test_nonstandardScript(t *testing.T) {
 	// ExtractScriptAddrs should not error for non-standard scripts, but should
 	// detect them as such.
 	chainParams := chaincfg.TestNet3Params()
-	_, nonStd, err := ExtractScriptAddrs(contractScript, chainParams)
+	_, nonStd, err := ExtractScriptAddrs(0, contractScript, chainParams)
 	if err != nil {
 		t.Fatalf("ExtractScriptAddrs failed: %v", err)
 	}
@@ -300,7 +301,7 @@ func Test_nonstandardScript(t *testing.T) {
 
 	// InputInfo currently calls ExtractScriptAddrs at the time of writing, but
 	// InputInfo should error regardless.
-	spendInfo, err := InputInfo(pkScript, contractScript, chainParams)
+	spendInfo, err := InputInfo(0, pkScript, contractScript, chainParams)
 	if err != nil {
 		t.Fatalf("InputInfo failed: %v", err)
 	}
@@ -332,7 +333,7 @@ func TestExtractScriptAddrs(t *testing.T) {
 		if s == nil {
 			s, _ = txscript.PayToAddrScript(tt.addr)
 		}
-		scriptAddrs, nonStd, err := ExtractScriptAddrs(s, tParams)
+		scriptAddrs, nonStd, err := ExtractScriptAddrs(0, s, tParams)
 		if err != nil {
 			t.Fatalf("error extracting script addresses: %v", err)
 		}
@@ -415,7 +416,7 @@ func TestInputInfo(t *testing.T) {
 	var script []byte
 	payToAddr := func(addr dcrutil.Address, redeem []byte) {
 		script, _ = txscript.PayToAddrScript(addr)
-		spendInfo, err = InputInfo(script, redeem, tParams)
+		spendInfo, err = InputInfo(0, script, redeem, tParams)
 		if err != nil {
 			t.Fatalf("InputInfo script: %v", err)
 		}
@@ -427,15 +428,22 @@ func TestInputInfo(t *testing.T) {
 	payToAddr(addrs.sh, addrs.multiSig)
 	check("p2sh", 74+uint32(len(addrs.multiSig))+1, ScriptP2SH|ScriptMultiSig)
 
+	// bad version
+	script, _ = txscript.PayToAddrScript(addrs.pkh)
+	spendInfo, err = InputInfo(1, script, nil, tParams)
+	if err != dex.UnsupportedScriptError {
+		t.Fatalf("InputInfo should have errored for script version 1")
+	}
+
 	// Unknown script type.
-	_, err = InputInfo([]byte{0x02, 0x03}, nil, tParams)
+	_, err = InputInfo(0, []byte{0x02, 0x03}, nil, tParams)
 	if err == nil {
 		t.Fatalf("no error for unknown script type")
 	}
 
 	// InputInfo P2SH requires a redeem script
 	script, _ = txscript.PayToAddrScript(addrs.sh)
-	_, err = InputInfo(script, nil, tParams)
+	_, err = InputInfo(0, script, nil, tParams)
 	if err == nil {
 		t.Fatalf("no error for missing redeem script")
 	}
