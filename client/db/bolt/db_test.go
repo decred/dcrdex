@@ -664,8 +664,11 @@ func TestOrderFilters(t *testing.T) {
 		}
 
 		// Set the update time.
-		boltdb.ordersUpdate(func(master *bbolt.Bucket) error {
-			oBkt := master.Bucket(oid[:])
+		boltdb.ordersUpdate(func(aob, eob *bbolt.Bucket) error {
+			oBkt := aob.Bucket(oid[:])
+			if oBkt == nil {
+				oBkt = eob.Bucket(oid[:])
+			}
 			if oBkt == nil {
 				t.Fatalf("order %s not found", oid)
 			}
