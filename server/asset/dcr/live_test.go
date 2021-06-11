@@ -160,10 +160,10 @@ func TestLiveUTXO(t *testing.T) {
 				if out.Value == 0 {
 					continue
 				}
-				if out.Version != dexdcr.CurrentScriptVersion {
+				if out.Version != 0 {
 					continue
 				}
-				scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, out.PkScript, nil)
+				scriptType := dexdcr.ParseScriptType(out.Version, out.PkScript, nil)
 				// We can't do P2SH during live testing, because we don't have the
 				// scripts. Just count them for now.
 				if scriptType.IsP2SH() {
