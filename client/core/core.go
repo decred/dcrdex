@@ -5085,7 +5085,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	// server may have used the knowledge of this preimage we are sending them
 	// now to alter the epoch shuffle.
 	//
-	// Allow to initialize csum just once per order to prevent possible
+	// Allow to initialize csum only once per order to prevent possible
 	// malicious behavior.
 	tracker.mtx.Lock()
 	if isCancel {

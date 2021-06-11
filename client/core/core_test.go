@@ -2486,8 +2486,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatalf("handlePreimageRequest error: %v", err)
 		}
 
-		// Reset csum for the second preimage request since testing is done with
-		// the same tracker object.
+		// Reset csum for the second preimage request since further tests rely
+		// on this tracker object.
 		tracker.mtx.Lock()
 		tracker.csum = nil
 		tracker.mtx.Unlock()
