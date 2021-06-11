@@ -5084,10 +5084,39 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	// match_proof with this order has the same checksum. If it does not, the
 	// server may have used the knowledge of this preimage we are sending them
 	// now to alter the epoch shuffle.
+	//
+	// Allow to initialize csum just once per order to prevent possible
+	// malicious behavior.
 	tracker.mtx.Lock()
 	if isCancel {
+		if tracker.cancel.csum != nil {
+			csumErr := errors.New("csum is already initialized")
+			resp, err := msgjson.NewResponse(reqID, nil,
+				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+			if err != nil {
+				return fmt.Errorf("preimage response encoding error: %w", err)
+			}
+			err = dc.Send(resp)
+			if err != nil {
+				return fmt.Errorf("preimage send error: %w", err)
+			}
+			return csumErr
+		}
 		tracker.cancel.csum = commitChecksum
 	} else {
+		if tracker.csum != nil {
+			csumErr := errors.New("csum is already initialized")
+			resp, err := msgjson.NewResponse(reqID, nil,
+				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+			if err != nil {
+				return fmt.Errorf("preimage response encoding error: %w", err)
+			}
+			err = dc.Send(resp)
+			if err != nil {
+				return fmt.Errorf("preimage send error: %w", err)
+			}
+			return csumErr
+		}
 		tracker.csum = commitChecksum
 	}
 	tracker.mtx.Unlock()
