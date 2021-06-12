@@ -2776,15 +2776,15 @@ func TestHandlePreimageRequest(t *testing.T) {
 		firstCSum := dex.Bytes{2, 3, 5, 7, 11, 13}
 
 		tracker := &trackedTrade{
-			Order:  ord,
-			preImg: preImg,
-			mktID:  tDcrBtcMktName,
-			db:     rig.db,
-			dc:     rig.dc,
+			Order:    ord,
+			preImg:   preImg,
+			mktID:    tDcrBtcMktName,
+			db:       rig.db,
+			dc:       rig.dc,
 			metaData: &db.OrderMetaData{},
 			cancel: &trackedCancel{
 				// Simulate first preimage request by initializing csum here.
-				csum:     firstCSum,
+				csum: firstCSum,
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
 						AccountID:  rig.dc.acct.ID(),
