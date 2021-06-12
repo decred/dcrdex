@@ -213,7 +213,7 @@ to appeal.
 
 ## Fees
 
-The dex does not charge trading fees, but users pay on-chain transaction fees.
+DEX does not charge trading fees, but users pay on-chain transaction fees.
 Transaction fees vary based on how orders are matched.
 
 To ensure that on-chain transaction fees do not eat a significant portion of the
