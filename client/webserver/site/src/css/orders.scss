@@ -28,6 +28,20 @@
   }
 }
 
+.export-bttn {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  button {
+    font-size: 13px;
+    font-family: $demi-sans;
+    padding: 2px 8px;
+    border: 1px solid #7777;
+    border-radius: 2px;
+  }
+}
+
 #ordersTable {
   width: 100%;
   // max-width: 90%;
