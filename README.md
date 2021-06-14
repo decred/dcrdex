@@ -373,7 +373,7 @@ network if not using mainnet.
 
 A sample is given at
 [*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
-[**Per-asset Variables**](spec/admin.mediawiki#per-asset-variables) section of the specification for
+[**market json**](https://github.com/decred/dcrdex/wiki/Server-Admin#markets-json) section of the wiki for
 more information on individual options.
 
 ### Build and run dcrdex
