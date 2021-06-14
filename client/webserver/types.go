@@ -19,7 +19,7 @@ import (
 type standardResponse struct {
 	OK   bool   `json:"ok"`
 	Msg  string `json:"msg,omitempty"`
-	Code int    `json:"code,omitempty"`
+	Code *int   `json:"code,omitempty"`
 }
 
 // simpleAck is a plain standardResponse with "ok" = true.
