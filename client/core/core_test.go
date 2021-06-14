@@ -2562,7 +2562,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		// Response send error also only returned on synchronous request handling.
 		rig.ws.sendErr = tErr
-		ensureErr("send error", reqNoCommit, "preimage send error")
+		ensureErr("send error", reqNoCommit, "accept csum: preimage send error")
 		rig.ws.sendErr = nil // reset
 	})
 	t.Run("csum for order", func(t *testing.T) {

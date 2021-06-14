@@ -5080,43 +5080,10 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
 
-	checkCsum := func(csum dex.Bytes) error {
-		if csum != nil {
-			csumErr := errors.New("csum is already initialized")
-			resp, err := msgjson.NewResponse(reqID, nil,
-				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
-			if err != nil {
-				return fmt.Errorf("preimage response encoding error: %w", err)
-			}
-			err = dc.Send(resp)
-			if err != nil {
-				return fmt.Errorf("preimage send error: %w", err)
-			}
-			return csumErr
-		}
-		return nil
+	err := acceptCsum(dc, reqID, tracker, isCancel, commitChecksum)
+	if err != nil {
+		return fmt.Errorf("accept csum: %w", err)
 	}
-
-	// Record the commitment checksum so we can verify that the subsequent
-	// match_proof with this order has the same checksum. If it does not, the
-	// server may have used the knowledge of this preimage we are sending them
-	// now to alter the epoch shuffle.
-	//
-	// Allow to initialize csum only once per order to prevent possible
-	// malicious behavior.
-	tracker.mtx.Lock()
-	if isCancel {
-		if err := checkCsum(tracker.cancel.csum); err != nil {
-			return err
-		}
-		tracker.cancel.csum = commitChecksum
-	} else {
-		if err := checkCsum(tracker.csum); err != nil {
-			return err
-		}
-		tracker.csum = commitChecksum
-	}
-	tracker.mtx.Unlock()
 
 	// Clean up the sentCommits now that we loaded the commitment. This can be
 	// removed when the old piSyncers method is removed.
@@ -5141,6 +5108,49 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		subject = SubjectCancelPreimageSent
 	}
 	c.notify(newOrderNote(subject, "", db.Data, tracker.coreOrder()))
+	return nil
+}
+
+func acceptCsum(dc *dexConnection, reqID uint64, tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) error {
+	checkCsum := func(csum dex.Bytes) error {
+		if csum != nil {
+			csumErr := errors.New("csum is already initialized")
+			resp, err := msgjson.NewResponse(reqID, nil,
+				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+			if err != nil {
+				return fmt.Errorf("preimage response encoding error: %w", err)
+			}
+			err = dc.Send(resp)
+			if err != nil {
+				return fmt.Errorf("preimage send error: %w", err)
+			}
+			return csumErr
+		}
+		return nil
+	}
+
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
+	// Record the commitment checksum so we can verify that the subsequent
+	// match_proof with this order has the same checksum. If it does not, the
+	// server may have used the knowledge of this preimage we are sending them
+	// now to alter the epoch shuffle.
+	//
+	// Allow to initialize csum only once per order to prevent possible
+	// malicious behavior.
+	if isCancel {
+		if err := checkCsum(tracker.cancel.csum); err != nil {
+			return err
+		}
+		tracker.cancel.csum = commitChecksum
+	} else {
+		if err := checkCsum(tracker.csum); err != nil {
+			return err
+		}
+		tracker.csum = commitChecksum
+	}
+
 	return nil
 }
 
