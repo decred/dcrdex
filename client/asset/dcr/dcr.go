@@ -1575,6 +1575,56 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
+// verboseTxTheHardWay gets a TxRawResult for the given tx with a known number
+// of confirmations as of a certain best block. This is required for
+// dcrd/dcrwallet 1.6 without txindex enabled.
+func (dcr *ExchangeWallet) verboseTxTheHardWay(txHash *chainhash.Hash, confs int64, bestBlock string) (*chainjson.TxRawResult, error) {
+	if confs > 0 {
+		bestBlockHash, err := chainhash.NewHashFromStr(bestBlock)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding best block hash %s: %w",
+				bestBlock, err)
+		}
+		block, err := dcr.node.GetBlockVerbose(dcr.ctx, bestBlockHash, true)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
+		}
+		if confs > 1 { // 1 means it is in the best block above
+			txHeight := block.Height - confs + 1
+			txBlockHash, err := dcr.node.GetBlockHash(dcr.ctx, txHeight)
+			if err != nil {
+				return nil, fmt.Errorf("error getting block hash at %d: %w",
+					txHeight, translateRPCCancelErr(err))
+			}
+			block, err = dcr.node.GetBlockVerbose(dcr.ctx, txBlockHash, true)
+			if err != nil {
+				return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
+			}
+		}
+
+		txid := txHash.String()
+		for i := range block.RawTx { // assume not stake tx
+			tx := &block.RawTx[i]
+			if tx.Txid == txid {
+				return tx, nil
+			}
+		}
+
+		return nil, fmt.Errorf("block %v does not include tx %v", block.Hash, txid)
+	}
+
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+	if err != nil {
+		// This will also be an error if it was mined between gettxout and
+		// getrawtransaction. This whole thing is a temporary hack because of
+		// the gettxout version shortcoming that is resolved in dcrd/dcrwallet
+		// 1.7, so just error and let the caller retry.
+		return nil, fmt.Errorf("error getting tx: %w", translateRPCCancelErr(err))
+	}
+
+	return verboseTx, nil
+}
+
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
@@ -1596,13 +1646,36 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
+
+	// Since txOut.Version with dcrd 1.6 is the transaction version NOT the
+	// output script version, we need to pull the entire transaction to get it.
+	// Unfortunately, for confirmed transactions we cannot do that with
+	// getrawtransaction without txindex. If confirmed, use
+	// GetTxOutResult.Confirmations and BestBlock to pull the block that is
+	// expected to include this tx.
+	//
+	// In dcrd 1.7, the actual script version is in
+	// GetTxOutResult.ScriptPubKey.Version, and GetTxOutResult.Version is
+	// removed:
+	//
+	// scriptversion := txOut.ScriptPubKey.Version // dcrd/dcrwallet 1.7
+	verboseTx, err := dcr.verboseTxTheHardWay(txHash, txOut.Confirmations, txOut.BestBlock)
+	if err != nil {
+		return nil, fmt.Errorf("unable to locate contract txn: %w", err)
+	}
+	if len(verboseTx.Vout) <= int(vout) {
+		return nil, fmt.Errorf("unable to locate contract tx out")
+	}
+	scriptversion := verboseTx.Vout[vout].Version
+
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
 			txOut.ScriptPubKey.Hex, err)
 	}
+
 	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, dcr.chainParams, false)
+	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(scriptversion, pkScript, dcr.chainParams, false)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
 	}
@@ -2339,7 +2412,9 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", txout.TxID, txout.RedeemScript, err)
 		}
 
-		nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, dcr.chainParams)
+		// NOTE: listunspent does not indicate script version, so for the
+		// purposes of our funding coins, we are going to assume 0.
+		nfo, err := dexdcr.InputInfo(0, scriptPK, redeemScript, dcr.chainParams)
 		if err != nil {
 			if errors.Is(err, dex.UnsupportedScriptError) {
 				continue

@@ -185,7 +185,7 @@ tmux new-window -t $SESSION:1 -n 'alpha' $SHELL
 tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 
-echo "Starting simnet alpha node"
+echo "Starting simnet alpha node (txindex for server)"
 tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
 --miningaddr=${ALPHA_MINING_ADDR} --rpclisten=:${ALPHA_RPC_PORT} \
@@ -198,12 +198,12 @@ tmux new-window -t $SESSION:2 -n 'beta' $SHELL
 tmux send-keys -t $SESSION:2 "set +o history" C-m
 tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 
-echo "Starting simnet beta node"
+echo "Starting simnet beta node (no txindex for a typical client)"
 tmux send-keys -t $SESSION:2 "dcrd --appdata=${NODES_ROOT}/beta \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
 --listen=:${BETA_NODE_PORT} --rpclisten=:${BETA_RPC_PORT} \
 --miningaddr=${BETA_MINING_ADDR} \
---txindex --connect=127.0.0.1:${ALPHA_NODE_PORT} \
+--connect=127.0.0.1:${ALPHA_NODE_PORT} \
 --debuglevel=debug \
 --whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S betadcr" C-m

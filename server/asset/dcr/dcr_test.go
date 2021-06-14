@@ -275,7 +275,7 @@ func testGetTxOut(confirmations int64, pkScript []byte) *chainjson.GetTxOutResul
 }
 
 // Create a *chainjson.TxRawResult such as is returned by
-// GetRawTransactionVerbose.
+// GetRawTransactionVerbose, kinda, no Vin and other things.
 func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Hash, blockHeight,
 	confirmations int64) *chainjson.TxRawResult {
 
@@ -288,12 +288,38 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 		fmt.Printf("error encoding MsgTx")
 	}
 
+	vouts := make([]chainjson.Vout, 0, len(msgTx.TxOut))
+	for i, vout := range msgTx.TxOut {
+		disbuf, _ := txscript.DisasmString(vout.PkScript)
+		sc, addrs, reqSigs, _ := txscript.ExtractPkScriptAddrs(
+			vout.Version, vout.PkScript, chainParams, false)
+
+		addrStrs := make([]string, len(addrs))
+		for i, addr := range addrs {
+			addrStrs[i] = addr.Address()
+		}
+
+		vouts = append(vouts, chainjson.Vout{
+			Value:   dcrutil.Amount(vout.Value).ToCoin(),
+			N:       uint32(i),
+			Version: vout.Version,
+			ScriptPubKey: chainjson.ScriptPubKeyResult{
+				Asm:       disbuf,
+				Hex:       hex.EncodeToString(vout.PkScript),
+				ReqSigs:   int32(reqSigs),
+				Type:      sc.String(),
+				Addresses: addrStrs,
+			},
+		})
+	}
+
 	return &chainjson.TxRawResult{
 		Hex:           hex.EncodeToString(hexTx),
 		Txid:          txid.String(),
 		BlockHash:     hash,
 		BlockHeight:   blockHeight,
 		Confirmations: confirmations,
+		Vout:          vouts,
 	}
 }
 
@@ -771,6 +797,7 @@ func TestUTXOs(t *testing.T) {
 	txout := testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
 	// Set the value of this one.
 	txout.Value = 2.0
+	testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
 	// There is no block info to add, since this is a mempool transaction
 	utxo, err := dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
@@ -789,6 +816,7 @@ func TestUTXOs(t *testing.T) {
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
 	// Overwrite the test blockchain transaction details.
 	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), 1)
 	confs, err := utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
@@ -812,6 +840,7 @@ func TestUTXOs(t *testing.T) {
 		txHash = randomHash()
 		msg = testMsgTxRegular(sigType)
 		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+		testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), 1)
 		utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 		if err != nil {
 			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
@@ -837,6 +866,7 @@ func TestUTXOs(t *testing.T) {
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), 1)
 	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
@@ -850,6 +880,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 5 - unexpected error: %v", err)
@@ -875,6 +906,7 @@ func TestUTXOs(t *testing.T) {
 	immatureHash := testAddBlockVerbose(nil, 2, txHeight, 1)
 	msg = testMsgTxVote()
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, immatureHash, int64(txHeight), 1)
 	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 6 - no error for immature transaction")
@@ -897,6 +929,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 6 - error adding to maturing block cache: %v", err)
 	}
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), int64(txHeight)+maturity-1)
+	testAddTxVerbose(msg.tx, txHash, immatureHash, int64(txHeight), int64(txHeight)+maturity-1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
@@ -913,6 +946,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
@@ -940,6 +974,7 @@ func TestUTXOs(t *testing.T) {
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, orphanHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 8 - received error for utxo")
@@ -949,6 +984,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*betterHash])
 	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, int64(txHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, betterHash, int64(txHeight), 1)
 	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error after reorg: %v", err)
@@ -961,6 +997,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*evenBetter])
 	testAddTxOut(msg.tx, msg.vout, txHash, evenBetter, 0, 0)
+	testAddTxVerbose(msg.tx, txHash, evenBetter, 0, 0)
 	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error for mempool tx after reorg")
@@ -976,6 +1013,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig := testMsgTxP2SHMofN(1, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msgMultiSig.tx, txHash, blockHash, int64(txHeight), 1)
 	// First try to get the UTXO without providing the raw script.
 	_, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, nil)
 	if err == nil {
@@ -1005,6 +1043,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxVerbose(msgMultiSig.tx, txHash, blockHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
@@ -1033,6 +1072,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, maturity, txHeight, 1)
 	msg = testMsgTxP2SHVote()
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), maturity)
 	// mature the vote
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
@@ -1060,6 +1100,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, maturity, txHeight, 1)
 	msg = testMsgTxRevocation()
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), maturity)
 	// mature the revocation
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
 	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
@@ -1084,6 +1125,7 @@ func TestUTXOs(t *testing.T) {
 	swap := testMsgTxSwapInit(int64(val))
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
 	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = float64(val) / 1e8
+	testAddTxVerbose(swap.tx, txHash, blockHash, int64(txHeight), 1)
 	verboseTx := testChain.txRaws[*txHash]
 	spentTx := randomHash()
 	spentVout := rand.Uint32()
@@ -1362,9 +1404,9 @@ func TestAuxiliary(t *testing.T) {
 	// Check that values returned from FeeCoin are as set.
 	cleanTestChain()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	msg.tx.TxOut[0].Value = 8 // for consistency with fake TxRawResult added below
+	msg.tx.TxOut[0].Value = 8e8 // for consistency with fake TxRawResult added below
 
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
+	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].Version, msg.tx.TxOut[0].PkScript, chainParams)
 	if err != nil {
 		t.Fatalf("ExtractScriptAddrs error: %v", err)
 	}
@@ -1377,17 +1419,6 @@ func TestAuxiliary(t *testing.T) {
 	txHash = &msgHash
 	confs := int64(3)
 	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), confs)
-	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
-		N:       0,
-		Value:   8,
-		Version: 0,
-		ScriptPubKey: chainjson.ScriptPubKeyResult{
-			Hex:       hex.EncodeToString(msg.tx.TxOut[0].PkScript),
-			ReqSigs:   1,
-			Type:      "pubkeyhash",
-			Addresses: []string{addr},
-		},
-	})
 
 	txAddr, v, confs, err := dcr.FeeCoin(toCoinID(txHash, 0))
 	if err != nil {
@@ -1426,29 +1457,17 @@ func TestAuxiliary(t *testing.T) {
 
 	// make a p2sh
 	msgP2SH := testMsgTxP2SHMofN(1, 2)
-	scriptAddrs, nonStandard, err = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].PkScript, chainParams)
+	_, nonStandard, err = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].Version, msgP2SH.tx.TxOut[0].PkScript, chainParams)
 	if err != nil {
 		t.Fatalf("ExtractScriptAddrs error: %v", err)
 	}
 	if nonStandard {
 		t.Errorf("output 0 was non-standard")
 	}
-	addr = scriptAddrs.PkHashes[0].String()
 	msgHash = msgP2SH.tx.TxHash()
 	txHash = &msgHash
 	confs = int64(3)
-	verboseTx = testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
-	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
-		N:       0,
-		Value:   8,
-		Version: 0,
-		ScriptPubKey: chainjson.ScriptPubKeyResult{
-			Hex:       hex.EncodeToString(msgP2SH.tx.TxOut[0].PkScript),
-			ReqSigs:   1,
-			Type:      "scripthash",
-			Addresses: []string{addr},
-		},
-	})
+	testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
 	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
 	if err == nil {
 		t.Fatal("FeeCoin accepted a p2sh output")

@@ -276,7 +276,6 @@ func runTest(t *testing.T, splitTx bool) {
 		if confs != n {
 			t.Fatalf("expected %d confs, got %d", n, confs)
 		}
-		// Not using checkConfs until after redemption, so expect spent.
 		if spent != expSpent {
 			t.Fatalf("checkConfs: expected spent = %t, got %t", expSpent, spent)
 		}
@@ -292,7 +291,56 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Fatalf("error unlocking alpha wallet: %v", err)
 	}
 
-	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
+	// getVoutVersion tests the verboseTxTheHardWay method to check a tx out's
+	// script version with no txindex using the dcrd 1.6 gettxout fields.
+	getVoutVersion := func(coinID []byte) {
+		txHash, vout, err := decodeCoinID(coinID)
+		if err != nil {
+			t.Fatalf("unable to decode swap coin: %v", err)
+		}
+		txOut, err := rig.beta().node.GetTxOut(tCtx, txHash, vout, true)
+		if err != nil {
+			t.Fatalf("error finding unspent contract: %v", err)
+		}
+		if txOut == nil {
+			t.Fatalf("gettxout fail")
+		}
+		verboseTx, err := rig.beta().verboseTxTheHardWay(txHash, txOut.Confirmations, txOut.BestBlock)
+		if err != nil {
+			t.Fatalf("verboseTxTheHardWay: %v", err)
+		}
+		t.Logf("Got tx out version: %v", verboseTx.Vout[vout].Version)
+	}
+
+	// Test the unconfirmed path.
+	getVoutVersion(receipts[0].Coin().ID())
+
+	// Test the 1 conf path.
+	mineAlpha()
+	waitNetwork()
+	// Check that the swap has one confirmation, still unspent.
+	checkConfs(1, false)
+	if !blockReported {
+		t.Fatalf("no block reported")
+	}
+	blockReported = false
+
+	getVoutVersion(receipts[0].Coin().ID())
+
+	// Test the >1 conf path.
+	mineAlpha()
+	waitNetwork()
+	// Check that the swap has 2 confirmations, still unspent.
+	checkConfs(2, false)
+	if !blockReported {
+		t.Fatalf("no block reported")
+	}
+	blockReported = false
+
+	getVoutVersion(receipts[0].Coin().ID()) // also tested in AuditContract below
+
+	// Now redeem.
+	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte, wantSwapConfs uint32) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
 		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil)
@@ -310,7 +358,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
-		if confs != 0 {
+		if confs != wantSwapConfs {
 			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
 		}
 		if ci.Expiration.Equal(lockTime) {
@@ -326,8 +374,8 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	redemptions := []*asset.Redemption{
-		makeRedemption(contractValue, receipts[0], secretKey1),
-		makeRedemption(contractValue*2, receipts[1], secretKey2),
+		makeRedemption(contractValue, receipts[0], secretKey1, 2),
+		makeRedemption(contractValue*2, receipts[1], secretKey2, 2),
 	}
 
 	_, _, _, err = rig.alpha().Redeem(&asset.RedeemForm{
@@ -337,7 +385,7 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Fatalf("redemption error: %v", err)
 	}
 
-	// Find the redemption
+	// Find the unconfirmed redemption.
 	swapReceipt := receipts[0]
 	waitNetwork()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
@@ -353,11 +401,12 @@ func runTest(t *testing.T, splitTx bool) {
 	// Mine a block and find the redemption again.
 	mineAlpha()
 	waitNetwork()
-	// Check that the swap has one confirmation.
-	checkConfs(1, true)
+	// Check that the swap has 3 confirmations, now spent.
+	checkConfs(3, true)
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
+	blockReported = false
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
 	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
