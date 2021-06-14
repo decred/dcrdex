@@ -199,6 +199,7 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	wf, ok := w.(http.Flusher)
 	if !ok {
+		log.Errorf("unable to flush streamed data")
 		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
 		return
 	}
@@ -215,7 +216,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	assets := r.Form["assets"]
 	filter.Assets = make([]uint32, len(assets))
 	for k, assetStrID := range assets {
-		assetNumID, err := strconv.Atoi(assetStrID)
+		assetNumID, err := strconv.ParseUint(assetStrID, 0, 64)
 		if err != nil {
 			log.Errorf("error parsing asset id: %v", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -278,7 +279,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 
 	for _, ord := range ords {
 		ordReader := orderReader{ord}
-		timestamp, err := encode.UnixTimeMilli(int64(ord.Stamp)).MarshalText()
+		timestamp, err := encode.UnixTimeMilliLocal(int64(ord.Stamp)).MarshalText()
 		if err != nil {
 			log.Errorf("error writing CSV: %v", err)
 			return
