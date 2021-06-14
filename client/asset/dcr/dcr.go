@@ -1575,6 +1575,56 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
+// verboseTxTheHardWay gets a TxRawResult for the given tx with a known number
+// of confirmations as of a certain best block. This is required for
+// dcrd/dcrwallet 1.6 without txindex enabled.
+func (dcr *ExchangeWallet) verboseTxTheHardWay(txHash *chainhash.Hash, confs int64, bestBlock string) (*chainjson.TxRawResult, error) {
+	if confs > 0 {
+		bestBlockHash, err := chainhash.NewHashFromStr(bestBlock)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding best block hash %s: %w",
+				bestBlock, err)
+		}
+		block, err := dcr.node.GetBlockVerbose(dcr.ctx, bestBlockHash, true)
+		if err != nil {
+			return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
+		}
+		if confs > 1 { // 1 means it is in the best block above
+			txHeight := block.Height - confs + 1
+			txBlockHash, err := dcr.node.GetBlockHash(dcr.ctx, txHeight)
+			if err != nil {
+				return nil, fmt.Errorf("error getting block hash at %d: %w",
+					txHeight, translateRPCCancelErr(err))
+			}
+			block, err = dcr.node.GetBlockVerbose(dcr.ctx, txBlockHash, true)
+			if err != nil {
+				return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
+			}
+		}
+
+		txid := txHash.String()
+		for i := range block.RawTx { // assume not stake tx
+			tx := &block.RawTx[i]
+			if tx.Txid == txid {
+				return tx, nil
+			}
+		}
+
+		return nil, fmt.Errorf("block %v does not include tx %v", block.Hash, txid)
+	}
+
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+	if err != nil {
+		// This will also be an error if it was mined between gettxout and
+		// getrawtransaction. This whole thing is a temporary hack because of
+		// the gettxout version shortcoming that is resolved in dcrd/dcrwallet
+		// 1.7, so just error and let the caller retry.
+		return nil, fmt.Errorf("error getting tx: %w", translateRPCCancelErr(err))
+	}
+
+	return verboseTx, nil
+}
+
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
@@ -1608,50 +1658,10 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 	// GetTxOutResult.ScriptPubKey.Version, and GetTxOutResult.Version is
 	// removed:
 	//
-	// const scriptversion uint16 = txOut.ScriptPubKey.Version // dcrd/dcrwallet 1.7 *release*, not yet
-	var verboseTx *chainjson.TxRawResult
-	if txOut.Confirmations > 0 {
-		bestBlockHash, err := chainhash.NewHashFromStr(txOut.BestBlock)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding best block hash %s: %w",
-				txOut.BestBlock, err)
-		}
-		block, err := dcr.node.GetBlockVerbose(dcr.ctx, bestBlockHash, true)
-		if err != nil {
-			return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
-		}
-		if txOut.Confirmations > 0 { // 1 means it is in the best block above
-			txHeight := block.Height - txOut.Confirmations + 1
-			txBlockHash, err := dcr.node.GetBlockHash(dcr.ctx, txHeight)
-			if err != nil {
-				return nil, fmt.Errorf("error getting block hash at %d: %w",
-					txHeight, translateRPCCancelErr(err))
-			}
-			block, err = dcr.node.GetBlockVerbose(dcr.ctx, txBlockHash, true)
-			if err != nil {
-				return nil, fmt.Errorf("error getting block header: %w", translateRPCCancelErr(err))
-			}
-		}
-		txid := txHash.String()
-		for i := range block.RawTx { // assume not stake tx or coinbase
-			tx := &block.RawTx[i]
-			if tx.Txid == txid {
-				verboseTx = tx
-				break
-			}
-		}
-	} else {
-		verboseTx, err = dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
-		if err != nil {
-			// This will also be an error if it was mined between gettxout and
-			// getrawtransaction. This whole thing is a temporary hack because
-			// of the gettxout version shortcoming that is resolved in
-			// dcrd/dcrwallet 1.7, so just error and let the caller retry.
-			return nil, fmt.Errorf("error getting tx: %w", translateRPCCancelErr(err))
-		}
-	}
-	if verboseTx == nil {
-		return nil, fmt.Errorf("unable to locate contract txn")
+	// scriptversion := txOut.ScriptPubKey.Version // dcrd/dcrwallet 1.7
+	verboseTx, err := dcr.verboseTxTheHardWay(txHash, txOut.Confirmations, txOut.BestBlock)
+	if err != nil {
+		return nil, fmt.Errorf("unable to locate contract txn: %w", err)
 	}
 	if len(verboseTx.Vout) <= int(vout) {
 		return nil, fmt.Errorf("unable to locate contract tx out")
