@@ -88,6 +88,13 @@ type swapStatus struct {
 	redemption asset.Coin
 }
 
+// String satisfies the Stringer interface for pretty printing. The swapStatus
+// RWMutex should be held for reads when using.
+func (ss *swapStatus) String() string {
+	return fmt.Sprintf("swapAsset: %d, redeemAsset: %d, swapTime: %v, swap: %v, swapConfirmed: %v, redeemTime: %v, redemption: %v",
+		ss.swapAsset, ss.redeemAsset, ss.swapTime, ss.swap, ss.swapConfirmed, ss.redeemTime, ss.redemption)
+}
+
 func (ss *swapStatus) swapConfTime() time.Time {
 	ss.mtx.RLock()
 	defer ss.mtx.RUnlock()
@@ -132,6 +139,13 @@ type stepActor struct {
 	// (matchTracker).makerStatus or (matchTracker).takerStatus, depending on who
 	// this actor is.
 	status *swapStatus
+}
+
+// String satisfies the Stringer interface for pretty printing. The swapStatus
+// RWMutex should be held for reads when using for a.status reads.
+func (a stepActor) String() string {
+	return fmt.Sprintf("user: %v, swapAsset: %v, isMaker: %v, order: %v, status: {%v}",
+		a.user, a.swapAsset, a.isMaker, a.order, a.status)
 }
 
 // stepInformation holds information about the current state of the swap
@@ -1246,8 +1260,10 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		if errors.Is(err, asset.CoinNotFoundError) {
 			return wait.TryAgain
 		}
-		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %x and contract %x: %v",
-			stepInfo.match.ID(), actor.user, params.CoinID, params.Contract, err)
+		actor.status.mtx.RLock()
+		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %v and contract %v: %v",
+			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
+		actor.status.mtx.RUnlock()
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			"redemption error")
 		return wait.DontTryAgain
@@ -1426,8 +1442,10 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		if errors.Is(err, asset.CoinNotFoundError) {
 			return wait.TryAgain
 		}
+		actor.status.mtx.RLock()
 		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
+		actor.status.mtx.RUnlock()
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
 		return wait.DontTryAgain
 	}
