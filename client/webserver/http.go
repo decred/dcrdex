@@ -216,7 +216,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	assets := r.Form["assets"]
 	filter.Assets = make([]uint32, len(assets))
 	for k, assetStrID := range assets {
-		assetNumID, err := strconv.ParseUint(assetStrID, 0, 64)
+		assetNumID, err := strconv.ParseUint(assetStrID, 10, 32)
 		if err != nil {
 			log.Errorf("error parsing asset id: %v", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -227,7 +227,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	statuses := r.Form["statuses"]
 	filter.Statuses = make([]order.OrderStatus, len(statuses))
 	for k, statusStrID := range statuses {
-		statusNumID, err := strconv.Atoi(statusStrID)
+		statusNumID, err := strconv.ParseUint(statusStrID, 10, 16)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			log.Errorf("error parsing status id: %v", err)
