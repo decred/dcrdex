@@ -1693,7 +1693,22 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 		t.Fatalf("got error response: %d %q", respMsg.Type, string(respMsg.Payload))
 	}
 
-	// 5. payload is not msgjson.PreimageResponse, unmarshal still succeeds, but PI is nil
+	// 5. client classified server request as invalid: InvalidRequestError
+	msg, _ = msgjson.NewResponse(5, nil, msgjson.NewError(msgjson.InvalidRequestError, "invalid request"))
+	lo, pi = newOrder()
+	dat = &piData{lo, make(chan *order.Preimage)}
+	piRes = runAndReceive(msg, dat)
+	if piRes != nil {
+		t.Errorf("Expected <nil> preimage, got %v", piRes)
+	}
+
+	// Inspect the servers rpc error response message.
+	respMsg = authMgr.getSend()
+	if respMsg != nil {
+		t.Fatalf("server is not expected to respond with anything")
+	}
+
+	// 6. payload is not msgjson.PreimageResponse, unmarshal still succeeds, but PI is nil
 	notaPiMsg := new(msgjson.OrderBookSubscription)
 	msg, _ = msgjson.NewResponse(5, notaPiMsg, nil)
 	dat = &piData{lo, make(chan *order.Preimage)}
@@ -1718,7 +1733,7 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 			msgErr.Message)
 	}
 
-	// 6. payload unmarshal error
+	// 7. payload unmarshal error
 	msg, _ = msgjson.NewResponse(5, piMsg, nil)
 	msg.Payload = json.RawMessage(`{"result":1}`) // ResponsePayload with invalid Result
 	dat = &piData{lo, make(chan *order.Preimage)}
