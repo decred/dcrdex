@@ -28,6 +28,8 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
+	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -62,9 +64,11 @@ const (
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
 	// RawRequest RPC methods
+	methodGetCFilterV2       = "getcfilterv2"
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
+	methodSyncStatus         = "syncstatus"
 )
 
 var (
@@ -73,6 +77,8 @@ var (
 )
 
 var (
+	zeroHash chainhash.Hash
+
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
 	configOpts  = []*asset.ConfigOption{
@@ -154,7 +160,6 @@ var (
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
-	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
@@ -402,6 +407,7 @@ type ExchangeWallet struct {
 	client           *rpcclient.Client
 	node             rpcClient
 	chainParams      *chaincfg.Params
+	spvMode          bool
 	log              dex.Logger
 	acct             string
 	tipChange        func(error)
@@ -419,6 +425,9 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+
+	externalTxMtx sync.RWMutex
+	externalTxs   map[chainhash.Hash]*externalTx
 }
 
 type block struct {
@@ -526,6 +535,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
+		externalTxs:         make(map[chainhash.Hash]*externalTx),
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
@@ -603,19 +613,25 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
 			walletSemver, requiredWalletVersion)
 	}
+
 	ver, exists = versions["dcrdjsonrpcapi"]
 	if !exists {
-		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
-	}
-	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
-	}
+		dcr.spvMode = true
+		dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
+	} else {
+		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+			return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+				nodeSemver, requiredNodeVersion)
+		}
 
-	curnet, err := dcr.client.GetCurrentNet(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
+		curnet, err := dcr.client.GetCurrentNet(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("getcurrentnet failure: %w", err)
+		}
+
+		dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
+			walletSemver, nodeSemver, curnet)
 	}
 
 	// Initialize the best block.
@@ -626,9 +642,6 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
 	atomic.StoreInt64(&dcr.tipAtConnect, dcr.currentTip.height)
-
-	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, curnet)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1575,45 +1588,54 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
-// AuditContract retrieves information about a swap contract on the
-// blockchain. This would be used to verify the counter-party's contract
-// during a swap.
+// AuditContract retrieves information about a swap contract from the provided
+// txData if the provided txData
+// - represents a valid transaction that pays to the provided contract at the
+// specified coinID and
+// - can be broadcasted or is already broadcasted to the blockchain network.
+// This information would be used to verify the counter-party's contract during
+// a swap.
 func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
+
 	// Get the receiving address.
 	_, receiver, stamp, secretHash, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
-	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, txTree, err := dcr.getTxOut(txHash, vout, true)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+
+	// Validate the provided txData against the provided coinID (hash and vout).
+	contractTx := wire.NewMsgTx()
+	if err := contractTx.Deserialize(bytes.NewReader(txData)); err != nil {
+		return nil, fmt.Errorf("invalid contract tx data: %w", err)
 	}
-	if txOut == nil {
-		return nil, asset.CoinNotFoundError
+	if checkHash := contractTx.TxHash(); checkHash != *txHash {
+		// TODO: skip this check and broadcast first then check returned hash?
+		// Or check but only log a message and proceed to second check after bcast?
+		return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
 	}
-	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
-			txOut.ScriptPubKey.Hex, err)
+	if int(vout) >= len(contractTx.TxOut) {
+		return nil, fmt.Errorf("invalid contract tx data: no output at %d", vout)
 	}
-	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, dcr.chainParams, false)
+
+	// Verify that the output of interest pays to the hash of the provided contract.
+	// Output script must be P2SH, with 1 address and 1 required signature.
+	contractTxOut := contractTx.TxOut[vout]
+	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, contractTxOut.PkScript, dcr.chainParams, false)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
+		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", contractTxOut.PkScript, err)
 	}
 	if scriptClass != txscript.ScriptHashTy {
 		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
 	}
-	if numReq != 1 {
-		return nil, fmt.Errorf("unexpected number of signatures expected for P2SH script: %d", numReq)
-	}
 	if len(addrs) != 1 {
 		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
+	}
+	if sigsReq != 1 {
+		return nil, fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
 	}
 	// Compare the contract hash to the P2SH address.
 	contractHash := dcrutil.Hash160(contract)
@@ -1622,13 +1644,55 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
 	}
+
+	// SPV clients don't check tx sanity before broadcasting, so do that here.
+	if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
+		return nil, fmt.Errorf("invalid contract tx data: %v", err)
+	}
+
+	// The counter-party should have broadcasted the contract tx but
+	// rebroadcast just in case to ensure that the tx is sent to the
+	// network and so this wallet records the tx and can treat it just
+	// like any other of its own.
+	dcr.log.Debugf("Rebroadcasting contract tx %v.", txData)
+	finalTxHash, err := dcr.node.SendRawTransaction(dcr.ctx, contractTx, true) // high fees shouldn't prevent this tx from being bcast
+	if err != nil {
+		// TODO: Check if the error indicates that the tx is mined and call gettxout
+		// to validate the contract.
+		return nil, translateRPCCancelErr(err)
+	}
+	if !finalTxHash.IsEqual(txHash) {
+		return nil, fmt.Errorf("broadcasted contract tx, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s", txHash, finalTxHash)
+	}
+
+	// Record this audit coin txout to easily get confirmations later
+	// using cfilters.
+	dcr.trackExternalTxOut(txHash, vout, contractTxOut.PkScript)
+
 	return &asset.AuditInfo{
-		Coin:       newOutput(txHash, vout, toAtoms(txOut.Value), txTree),
+		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), determineTxTree(contractTx)),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
+}
+
+func determineTxTree(msgTx *wire.MsgTx) int8 {
+	// Try with treasury disabled first.
+	txType := stake.DetermineTxType(msgTx, false)
+	if txType != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+
+	// Try with treasury enabled.
+	txType = stake.DetermineTxType(msgTx, true)
+	if txType != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+
+	return wire.TxTreeRegular
 }
 
 // RefundAddress extracts and returns the refund address from a contract.
@@ -2076,7 +2140,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
+			"expected %s, got %s", checkHash, *refundHash)
 	}
 	return toCoinID(refundHash, 0), nil
 }
@@ -2228,14 +2292,20 @@ func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (con
 		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
+	// The only reason a wallet output will not be found by gettxout
+	// is if it is spent.
 	tx, err := dcr.node.GetTransaction(ctx, txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return 0, false, asset.CoinNotFoundError
-		}
+	if err == nil {
+		return uint32(tx.Confirmations), true, nil
+	}
+	if !isTxNotFoundErr(err) {
 		return 0, false, translateRPCCancelErr(err)
 	}
-	return uint32(tx.Confirmations), true, nil
+
+	// Attempt to find this tx's block if it is an external tx.
+	// Will return asset.CoinNotFoundError if the coin was not previously tracked.
+	// TODO: Don't do this for non-spv wallets.
+	return dcr.externalTxOutConfirmations(txHash, vout)
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
@@ -2277,21 +2347,12 @@ func (dcr *ExchangeWallet) shutdown() {
 
 // SyncStatus is information about the blockchain sync status.
 func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
-	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
+	syncStatus := new(walletjson.SyncStatusResult)
+	err := dcr.nodeRawRequest(methodSyncStatus, nil, syncStatus)
 	if err != nil {
-		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
+		return false, 0, fmt.Errorf("rawrequest error: %w", err)
 	}
-	toGo := chainInfo.Headers - chainInfo.Blocks
-	if chainInfo.InitialBlockDownload || toGo > 1 {
-		ogTip := atomic.LoadInt64(&dcr.tipAtConnect)
-		totalToSync := chainInfo.Headers - ogTip
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
-		}
-		return false, progress, nil
-	}
-	return true, 1, nil
+	return syncStatus.Synced || syncStatus.InitialBlockDownload, syncStatus.HeadersFetchProgress, nil
 }
 
 // Combines the RPC type with the spending input information.
@@ -2818,6 +2879,56 @@ func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
 		return nil, translateRPCCancelErr(err)
 	}
 	return &block{hash: hash, height: height}, nil
+}
+
+func (dcr *ExchangeWallet) getBlock(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+	blockVerbose, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving block %s: %w", blockHash, translateRPCCancelErr(err))
+	}
+	return blockVerbose, nil
+}
+
+func (dcr *ExchangeWallet) isMainchainBlock(blockHash *chainhash.Hash) (*chainjson.GetBlockVerboseResult, bool, error) {
+	block, err := dcr.getBlock(blockHash, false)
+	if err != nil {
+		return nil, false, err
+	}
+	return block, block.Confirmations >= 0, nil
+}
+
+// mainChainAncestor crawls blocks backwards starting at the provided hash
+// until finding a mainchain block. Returns the first mainchain block found.
+func (dcr *ExchangeWallet) mainChainAncestor(blockHash *chainhash.Hash) (*chainhash.Hash, *chainjson.GetBlockVerboseResult, error) {
+	if *blockHash == zeroHash {
+		return nil, nil, fmt.Errorf("invalid block hash %s", blockHash.String())
+	}
+
+	checkHash := blockHash
+	for {
+		checkBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, checkHash, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error retrieving block %s: %w", checkHash, translateRPCCancelErr(err))
+		}
+		if checkBlock.Confirmations > -1 {
+			// This is a mainchain block, return the hash.
+			return checkHash, checkBlock, nil
+		}
+		if checkBlock.Height == 0 {
+			return nil, nil, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
+		}
+		checkHash, err = chainhash.NewHashFromStr(checkBlock.PreviousHash)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error decoding previous hash %s for block %s: %w",
+				checkBlock.PreviousHash, checkHash.String(), translateRPCCancelErr(err))
+		}
+	}
+}
+
+func (dcr *ExchangeWallet) cachedBestBlock() block {
+	dcr.tipMtx.RLock()
+	defer dcr.tipMtx.RLock()
+	return *dcr.currentTip
 }
 
 // wireBytes dumps the serialized transaction bytes.

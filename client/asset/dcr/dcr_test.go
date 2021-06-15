@@ -217,8 +217,6 @@ type tRPCClient struct {
 	lluCoins                 []walletjson.ListUnspentResult // Returned from ListLockUnspent
 	lockedCoins              []*wire.OutPoint               // Last submitted to LockUnspent
 	listLockedErr            error
-	blockchainInfo           *chainjson.GetBlockChainInfoResult
-	blockchainInfoErr        error
 	estFeeErr                error
 }
 
@@ -252,10 +250,6 @@ func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mo
 	optimalRate := float64(optimalFeeRate) * 1e-5 // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return &chainjson.EstimateSmartFeeResult{FeeRate: optimalRate}, nil
-}
-
-func (c *tRPCClient) GetBlockChainInfo(_ context.Context) (*chainjson.GetBlockChainInfoResult, error) {
-	return c.blockchainInfo, c.blockchainInfoErr
 }
 
 func (c *tRPCClient) SendRawTransaction(_ context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
@@ -1514,12 +1508,12 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet()
+	wallet, _, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	vout := uint32(5)
+
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
@@ -1533,9 +1527,23 @@ func TestAuditContract(t *testing.T) {
 		t.Fatalf("bad address %s (%T)", addr, addr)
 	}
 
-	node.txOutRes[newOutPoint(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
+	// Prepare the contract tx data.
+	contractTx := wire.NewMsgTx()
+	contractTx.AddTxIn(&wire.TxIn{})
+	contractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: pkScript,
+	})
+	contractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing contract txdata: %v", err)
+	}
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
+	contractHash := contractTx.TxHash()
+	contractVout := uint32(0)
+	contractCoinID := toCoinID(&contractHash, contractVout)
+
+	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1550,29 +1558,65 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, contractTxData)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
-	// GetTxOut error
-	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
-	if err == nil {
-		t.Fatalf("no error for unknown txout")
-	}
-	node.txOutErr = nil
-
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, tChainParams, dcrec.STEcdsaSecp256k1)
-	badContract, err := txscript.PayToAddrScript(wrongAddr)
+	wrongAddrStr := wrongAddr.String()
+	wrongContract, err := dexdcr.MakeContract(wrongAddrStr, wrongAddrStr, secretHash, lockTime.Unix(), tChainParams)
+	if err != nil {
+		t.Fatalf("error making wrong swap contract: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, wrongContract, contractTxData)
+	if err == nil {
+		t.Fatalf("no error for wrong contract")
+	}
+
+	// Invalid contract
+	wrongPkScript, err := txscript.PayToAddrScript(wrongAddr)
 	if err != nil {
 		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
 	}
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil)
+	_, err = wallet.AuditContract(contractCoinID, wrongPkScript, contractTxData) // addrPkScript not a valid contract
 	if err == nil {
-		t.Fatalf("no error for wrong contract")
+		t.Fatalf("no error for invalid contract")
+	}
+
+	// No txdata
+	_, err = wallet.AuditContract(contractCoinID, contract, nil)
+	if err == nil {
+		t.Fatalf("no error for no txdata")
+	}
+
+	// Invalid txdata, zero inputs
+	contractTx.TxIn = nil
+	invalidContractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing invalid contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, invalidContractTxData)
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
+	}
+
+	// Wrong txdata, wrong output script
+	wrongContractTx := wire.NewMsgTx()
+	wrongContractTx.AddTxIn(&wire.TxIn{})
+	wrongContractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: wrongPkScript,
+	})
+	wrongContractTxData, err := wrongContractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing wrong contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData)
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
 	}
 }
 
@@ -2123,43 +2167,46 @@ func TestSyncStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 100,
-		Blocks:  99,
-	}
+
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(&walletjson.SyncStatusResult{
+		Synced:               true,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 1,
+	})
 
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
 	if !synced {
-		t.Fatalf("synced = false for 1 block to go")
+		t.Fatalf("synced = false for progress=1")
 	}
 	if progress < 1 {
-		t.Fatalf("progress not complete when loading last block")
+		t.Fatalf("progress not complete with sync true")
 	}
 
-	node.blockchainInfoErr = tErr
+	node.rawErr[methodSyncStatus] = tErr
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
-	node.blockchainInfoErr = nil
+	node.rawErr[methodSyncStatus] = nil
 
-	wallet.tipAtConnect = 100
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 200,
-		Blocks:  150,
+	nodeSyncStatusResult := &walletjson.SyncStatusResult{
+		Synced:               false,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 0.5, // Headers: 200, WalletTip: 100
 	}
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(nodeSyncStatusResult)
 	synced, progress, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
 	if synced {
-		t.Fatalf("synced = true for 50 blocks to go")
+		t.Fatalf("synced = true for progress=0.5")
 	}
-	if progress > 0.500001 || progress < 0.4999999 {
-		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	if progress != nodeSyncStatusResult.HeadersFetchProgress {
+		t.Fatalf("progress out of range. Expected %.2f, got %.2f", nodeSyncStatusResult.HeadersFetchProgress, progress)
 	}
 }
 
