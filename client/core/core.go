@@ -5111,44 +5111,43 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	return nil
 }
 
+// acceptCsum will record the commitment checksum so we can verify that the
+// subsequent match_proof with this order has the same checksum. If it does not,
+// the server may have used the knowledge of this preimage we are sending them
+// now to alter the epoch shuffle.
 func acceptCsum(dc *dexConnection, reqID uint64, tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) error {
-	checkCsum := func(csum dex.Bytes) error {
-		if csum != nil {
-			csumErr := errors.New("csum is already initialized")
-			resp, err := msgjson.NewResponse(reqID, nil,
-				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
-			if err != nil {
-				return fmt.Errorf("preimage response encoding error: %w", err)
-			}
-			err = dc.Send(resp)
-			if err != nil {
-				return fmt.Errorf("preimage send error: %w", err)
-			}
-			return csumErr
-		}
-		return nil
-	}
+	var respondWithErr bool
 
-	tracker.mtx.Lock()
-	defer tracker.mtx.Unlock()
-
-	// Record the commitment checksum so we can verify that the subsequent
-	// match_proof with this order has the same checksum. If it does not, the
-	// server may have used the knowledge of this preimage we are sending them
-	// now to alter the epoch shuffle.
-	//
 	// Allow to initialize csum only once per order to prevent possible
 	// malicious behavior.
+	tracker.mtx.Lock()
 	if isCancel {
-		if err := checkCsum(tracker.cancel.csum); err != nil {
-			return err
+		if tracker.cancel.csum != nil {
+			respondWithErr = true
+		} else {
+			tracker.cancel.csum = commitChecksum
 		}
-		tracker.cancel.csum = commitChecksum
 	} else {
-		if err := checkCsum(tracker.csum); err != nil {
-			return err
+		if tracker.csum != nil {
+			respondWithErr = true
+		} else {
+			tracker.csum = commitChecksum
 		}
-		tracker.csum = commitChecksum
+	}
+	tracker.mtx.Unlock()
+
+	if respondWithErr {
+		csumErr := errors.New("csum is already initialized")
+		resp, err := msgjson.NewResponse(reqID, nil,
+			msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+		if err != nil {
+			return fmt.Errorf("preimage response encoding error: %w", err)
+		}
+		err = dc.Send(resp)
+		if err != nil {
+			return fmt.Errorf("preimage send error: %w", err)
+		}
+		return csumErr
 	}
 
 	return nil
