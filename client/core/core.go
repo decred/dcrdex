@@ -5118,18 +5118,23 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 func acceptCsum(dc *dexConnection, reqID uint64, tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) error {
 	var respondWithErr bool
 
-	// Allow to initialize csum only once per order to prevent possible
-	// malicious behavior.
+	// Do not allow csum to be changed once it has been committed to
+	// (initialized to something other than `nil`) because it is probably a
+	// malicious behavior by the server.
 	tracker.mtx.Lock()
 	if isCancel {
 		if tracker.cancel.csum != nil {
-			respondWithErr = true
+			if !bytes.Equal(commitChecksum, tracker.cancel.csum) {
+				respondWithErr = true
+			}
 		} else {
 			tracker.cancel.csum = commitChecksum
 		}
 	} else {
 		if tracker.csum != nil {
-			respondWithErr = true
+			if !bytes.Equal(commitChecksum, tracker.csum) {
+				respondWithErr = true
+			}
 		} else {
 			tracker.csum = commitChecksum
 		}

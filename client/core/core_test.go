@@ -2636,7 +2636,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		tracker.mtx.RUnlock()
 	})
-	t.Run("more than one preimage request for order", func(t *testing.T) {
+	t.Run("more than one preimage request for order (different csums)", func(t *testing.T) {
 		rig := newTestRig()
 		defer rig.shutdown()
 		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
@@ -2674,6 +2674,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
+		notes := rig.core.NotificationFeed()
+
 		rig.dc.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
@@ -2684,11 +2686,87 @@ func TestHandlePreimageRequest(t *testing.T) {
 		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
 		close(commitSig) // pretend like the order submission just finished
 
+		select {
+		case note := <-notes:
+			t.Fatalf("got unexpected note: %v", note)
+		case <-time.After(time.Millisecond):
+			// We've waited enough for a note to come, hopefully it won't after
+			// this point in time.
+		}
+
 		tracker.mtx.RLock()
 		if !bytes.Equal(firstCSum, tracker.csum) {
 			t.Fatalf(
 				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
 				firstCSum,
+				tracker.csum,
+			)
+		}
+		tracker.mtx.RUnlock()
+	})
+	t.Run("more than one preimage request for order (same csum)", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+		oid := ord.ID()
+		preImg := newPreimage()
+		csum := dex.Bytes{2, 3, 5, 7, 11, 13}
+
+		tracker := &trackedTrade{
+			Order:  ord,
+			preImg: preImg,
+			mktID:  tDcrBtcMktName,
+			db:     rig.db,
+			dc:     rig.dc,
+			// Simulate first preimage request by initializing csum here.
+			csum:     csum,
+			metaData: &db.OrderMetaData{},
+		}
+
+		// Test the new path with rig.core.sentCommits.
+		readyCommitment := func(commit order.Commitment) chan struct{} {
+			commitSig := make(chan struct{}) // close after fake order submission is "done"
+			rig.core.sentCommitsMtx.Lock()
+			rig.core.sentCommits[commit] = commitSig
+			rig.core.sentCommitsMtx.Unlock()
+			return commitSig
+		}
+
+		commit := preImg.Commit()
+		commitSig := readyCommitment(commit)
+		payload := &msgjson.PreimageRequest{
+			OrderID:        oid[:],
+			Commitment:     commit[:],
+			CommitChecksum: csum,
+		}
+		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+		notes := rig.core.NotificationFeed()
+
+		rig.dc.trades[oid] = tracker
+		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
+		}
+
+		// It has gone async now, waiting for commitSig.
+		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+		close(commitSig) // pretend like the order submission just finished
+
+		select {
+		case note := <-notes:
+			if note.Subject() != SubjectPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no order note from preimage request handling")
+		}
+
+		tracker.mtx.RLock()
+		if !bytes.Equal(csum, tracker.csum) {
+			t.Fatalf(
+				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
+				csum,
 				tracker.csum,
 			)
 		}
@@ -2773,7 +2851,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		tracker.mtx.RUnlock()
 	})
-	t.Run("more than one preimage request for cancel order", func(t *testing.T) {
+	t.Run("more than one preimage request for cancel order (different csums)", func(t *testing.T) {
 		rig := newTestRig()
 		defer rig.shutdown()
 		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
@@ -2824,6 +2902,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
+		notes := rig.core.NotificationFeed()
+
 		rig.dc.trades[order.OrderID{}] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
@@ -2834,11 +2914,100 @@ func TestHandlePreimageRequest(t *testing.T) {
 		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
 		close(commitSig) // pretend like the order submission just finished
 
+		select {
+		case note := <-notes:
+			t.Fatalf("got unexpected note: %v", note)
+		case <-time.After(time.Millisecond):
+			// We've waited enough for a note to come, hopefully it won't after
+			// this point in time.
+		}
+
 		tracker.mtx.RLock()
 		if !bytes.Equal(firstCSum, tracker.cancel.csum) {
 			t.Fatalf(
 				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
 				firstCSum,
+				tracker.cancel.csum,
+			)
+		}
+		tracker.mtx.RUnlock()
+	})
+	t.Run("more than one preimage request for cancel order (same csum)", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+		preImg := newPreimage()
+		csum := dex.Bytes{2, 3, 5, 7, 11, 13}
+
+		tracker := &trackedTrade{
+			Order:    ord,
+			preImg:   preImg,
+			mktID:    tDcrBtcMktName,
+			db:       rig.db,
+			dc:       rig.dc,
+			metaData: &db.OrderMetaData{},
+			cancel: &trackedCancel{
+				// Simulate first preimage request by initializing csum here.
+				csum: csum,
+				CancelOrder: order.CancelOrder{
+					P: order.Prefix{
+						AccountID:  rig.dc.acct.ID(),
+						BaseAsset:  tDCR.ID,
+						QuoteAsset: tBTC.ID,
+						OrderType:  order.MarketOrderType,
+						ClientTime: time.Now(),
+						ServerTime: time.Now().Add(time.Millisecond),
+						Commit:     preImg.Commit(),
+					},
+				},
+			},
+		}
+		oid := tracker.cancel.ID()
+
+		// Test the new path with rig.core.sentCommits.
+		readyCommitment := func(commit order.Commitment) chan struct{} {
+			commitSig := make(chan struct{}) // close after fake order submission is "done"
+			rig.core.sentCommitsMtx.Lock()
+			rig.core.sentCommits[commit] = commitSig
+			rig.core.sentCommitsMtx.Unlock()
+			return commitSig
+		}
+
+		commit := preImg.Commit()
+		commitSig := readyCommitment(commit)
+		payload := &msgjson.PreimageRequest{
+			OrderID:        oid[:],
+			Commitment:     commit[:],
+			CommitChecksum: csum,
+		}
+		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+		notes := rig.core.NotificationFeed()
+
+		rig.dc.trades[order.OrderID{}] = tracker
+		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
+		}
+
+		// It has gone async now, waiting for commitSig.
+		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+		close(commitSig) // pretend like the order submission just finished
+
+		select {
+		case note := <-notes:
+			if note.Subject() != SubjectCancelPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no order note from preimage request handling")
+		}
+
+		tracker.mtx.RLock()
+		if !bytes.Equal(csum, tracker.cancel.csum) {
+			t.Fatalf(
+				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
+				csum,
 				tracker.cancel.csum,
 			)
 		}
