@@ -2479,18 +2479,21 @@ func TestHandlePreimageRequest(t *testing.T) {
 			rig.core.piSyncMtx.Unlock()
 		}
 
+		// resetCsum resets csum for further preimage request since multiple
+		// testing scenarios use the same tracker object.
+		resetCsum := func(tracker *trackedTrade) {
+			tracker.mtx.Lock()
+			tracker.csum = nil
+			tracker.mtx.Unlock()
+		}
+
 		rig.dc.trades[oid] = tracker
 		loadSyncer()
 		err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
 		}
-
-		// Reset csum for further preimage request since the tests below rely on
-		// this tracker object.
-		tracker.mtx.Lock()
-		tracker.csum = nil
-		tracker.mtx.Unlock()
+		resetCsum(tracker)
 
 		// Test the new path with rig.core.sentCommits.
 		readyCommitment := func(commit order.Commitment) chan struct{} {
@@ -2516,12 +2519,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
 		}
-
-		// Reset csum for further preimage request since the tests below rely on
-		// this tracker object.
-		tracker.mtx.Lock()
-		tracker.csum = nil
-		tracker.mtx.Unlock()
+		resetCsum(tracker)
 
 		// It has gone async now, waiting for commitSig.
 		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
@@ -2549,12 +2547,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			if !strings.HasPrefix(err.Error(), errPrefix) {
 				t.Fatalf("expected error starting with %q, got %q", errPrefix, err)
 			}
-
-			// Reset csum for further preimage request since the tests below rely on
-			// this tracker object.
-			tracker.mtx.Lock()
-			tracker.csum = nil
-			tracker.mtx.Unlock()
+			resetCsum(tracker)
 		}
 
 		// unknown commitment in request
