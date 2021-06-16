@@ -5080,9 +5080,21 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
 
-	err := acceptCsum(dc, reqID, tracker, isCancel, commitChecksum)
-	if err != nil {
-		return fmt.Errorf("accept csum: %w", err)
+	// Record the csum if this preimage request is novel, and deny it if this is
+	// a duplicate request with an altered csum.
+	if !acceptCsum(tracker, isCancel, commitChecksum) {
+		csumErr := errors.New("invalid csum in duplicate preimage request")
+		resp, err := msgjson.NewResponse(reqID, nil,
+			msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+		if err != nil {
+			c.log.Errorf("Failed to encode response to denied preimage request: %v", err)
+			return csumErr
+		}
+		err = dc.Send(resp)
+		if err != nil {
+			c.log.Errorf("Failed to send response to denied preimage request: %v", err)
+		}
+		return csumErr
 	}
 
 	// Clean up the sentCommits now that we loaded the commitment. This can be
@@ -5114,48 +5126,28 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 // acceptCsum will record the commitment checksum so we can verify that the
 // subsequent match_proof with this order has the same checksum. If it does not,
 // the server may have used the knowledge of this preimage we are sending them
-// now to alter the epoch shuffle.
-func acceptCsum(dc *dexConnection, reqID uint64, tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) error {
-	var respondWithErr bool
-
+// now to alter the epoch shuffle. The return value is false if a previous
+// checksum has been recorded that differs from the provided one.
+func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) bool {
 	// Do not allow csum to be changed once it has been committed to
 	// (initialized to something other than `nil`) because it is probably a
 	// malicious behavior by the server.
 	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
 	if isCancel {
-		if tracker.cancel.csum != nil {
-			if !bytes.Equal(commitChecksum, tracker.cancel.csum) {
-				respondWithErr = true
-			}
-		} else {
+		if tracker.cancel.csum == nil {
 			tracker.cancel.csum = commitChecksum
+			return true
 		}
-	} else {
-		if tracker.csum != nil {
-			if !bytes.Equal(commitChecksum, tracker.csum) {
-				respondWithErr = true
-			}
-		} else {
-			tracker.csum = commitChecksum
-		}
+		return bytes.Equal(commitChecksum, tracker.cancel.csum)
 	}
-	tracker.mtx.Unlock()
-
-	if respondWithErr {
-		csumErr := errors.New("csum is already initialized")
-		resp, err := msgjson.NewResponse(reqID, nil,
-			msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
-		if err != nil {
-			return fmt.Errorf("preimage response encoding error: %w", err)
-		}
-		err = dc.Send(resp)
-		if err != nil {
-			return fmt.Errorf("preimage send error: %w", err)
-		}
-		return csumErr
+	if tracker.csum == nil {
+		tracker.csum = commitChecksum
+		return true
 	}
 
-	return nil
+	return bytes.Equal(commitChecksum, tracker.csum)
 }
 
 // handleMatchRoute processes the DEX-originating match route request,

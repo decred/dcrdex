@@ -136,12 +136,13 @@ var (
 )
 
 type TWebsocket struct {
-	mtx        sync.RWMutex
-	id         uint64
-	sendErr    error
-	reqErr     error
-	connectErr error
-	msgs       <-chan *msgjson.Message
+	mtx            sync.RWMutex
+	id             uint64
+	sendErr        error
+	sendMsgErrChan chan *msgjson.Error
+	reqErr         error
+	connectErr     error
+	msgs           <-chan *msgjson.Message
 	// handlers simulates a peer (server) response for request, and handles the
 	// response with the msgFunc.
 	handlers map[string][]func(*msgjson.Message, msgFunc) error
@@ -229,7 +230,20 @@ func (conn *TWebsocket) NextID() uint64 {
 	conn.id++
 	return conn.id
 }
-func (conn *TWebsocket) Send(msg *msgjson.Message) error { return conn.sendErr }
+func (conn *TWebsocket) Send(msg *msgjson.Message) error {
+	if conn.sendMsgErrChan != nil {
+		resp, err := msg.Response()
+		if err != nil {
+			return err
+		}
+		if resp.Error != nil {
+			conn.sendMsgErrChan <- resp.Error
+			return nil // the response was sent successfully
+		}
+	}
+
+	return conn.sendErr
+}
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
@@ -2674,7 +2688,10 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
-		notes := rig.core.NotificationFeed()
+		// Prepare to have processPreimageRequest respond with a payload with
+		// the Error field set.
+		rig.ws.sendMsgErrChan = make(chan *msgjson.Error, 1)
+		defer func() { rig.ws.sendMsgErrChan = nil }()
 
 		rig.dc.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
@@ -2687,11 +2704,12 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
-			t.Fatalf("got unexpected note: %v", note)
-		case <-time.After(time.Millisecond):
-			// We've waited enough for a note to come, hopefully it won't after
-			// this point in time.
+		case msgErr := <-rig.ws.sendMsgErrChan:
+			if msgErr.Code != msgjson.InvalidRequestError {
+				t.Fatalf("expected error code %d got %d", msgjson.InvalidRequestError, msgErr.Code)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
 
 		tracker.mtx.RLock()
@@ -2902,7 +2920,10 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
-		notes := rig.core.NotificationFeed()
+		// Prepare to have processPreimageRequest respond with a payload with
+		// the Error field set.
+		rig.ws.sendMsgErrChan = make(chan *msgjson.Error, 1)
+		defer func() { rig.ws.sendMsgErrChan = nil }()
 
 		rig.dc.trades[order.OrderID{}] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
@@ -2915,13 +2936,13 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
-			t.Fatalf("got unexpected note: %v", note)
-		case <-time.After(time.Millisecond):
-			// We've waited enough for a note to come, hopefully it won't after
-			// this point in time.
+		case msgErr := <-rig.ws.sendMsgErrChan:
+			if msgErr.Code != msgjson.InvalidRequestError {
+				t.Fatalf("expected error code %d got %d", msgjson.InvalidRequestError, msgErr.Code)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
-
 		tracker.mtx.RLock()
 		if !bytes.Equal(firstCSum, tracker.cancel.csum) {
 			t.Fatalf(
