@@ -1596,13 +1596,16 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*a
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
+
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
 			txOut.ScriptPubKey.Hex, err)
 	}
+
 	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(dexdcr.CurrentScriptVersion, pkScript, dcr.chainParams, false)
+	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(txOut.ScriptPubKey.Version,
+		pkScript, dcr.chainParams, false)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
 	}
@@ -1648,43 +1651,15 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	medianTime, err := dcr.calcPastMedianTime()
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("error calculating median time: %w", err)
-	}
-	return medianTime.After(contractExpiry), contractExpiry, nil
-}
-
-// calcPastMedianTime calculates the median time of the previous few blocks
-// prior to, and including, the best block.
-func (dcr *ExchangeWallet) calcPastMedianTime() (time.Time, error) {
 	dcr.tipMtx.RLock()
 	hash := dcr.currentTip.hash
 	dcr.tipMtx.RUnlock()
-
-	// Look at the last 11 blocks, which is consistent with dcrd.
-	timestamps := make([]int64, 0, 11)
-	for i := 0; i < cap(timestamps); i++ {
-		blockHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, hash)
-		if err != nil {
-			return time.Time{}, err
-		}
-		timestamps = append(timestamps, blockHeader.Time)
-		if blockHeader.Height == 0 {
-			break
-		}
-		hash, err = chainhash.NewHashFromStr(blockHeader.PreviousHash)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("error decoding previous hash: %w", err)
-		}
+	blockHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, hash)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("unable to retrieve block header: %w", err)
 	}
-
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
-
-	medianTimestamp := timestamps[len(timestamps)/2]
-	return time.Unix(medianTimestamp, 0), nil
+	medianTime := time.Unix(blockHeader.MedianTime, 0)
+	return medianTime.After(contractExpiry), contractExpiry, nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -2345,7 +2320,9 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", txout.TxID, txout.RedeemScript, err)
 		}
 
-		nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, dcr.chainParams)
+		// NOTE: listunspent does not indicate script version, so for the
+		// purposes of our funding coins, we are going to assume 0.
+		nfo, err := dexdcr.InputInfo(0, scriptPK, redeemScript, dcr.chainParams)
 		if err != nil {
 			if errors.Is(err, dex.UnsupportedScriptError) {
 				continue

@@ -2451,111 +2451,267 @@ func TestCancel(t *testing.T) {
 }
 
 func TestHandlePreimageRequest(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
-	oid := ord.ID()
-	preImg := newPreimage()
-	payload := &msgjson.PreimageRequest{
-		OrderID: oid[:],
-		// No commitment in this request.
-	}
-	reqNoCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
-
-	tracker := &trackedTrade{
-		Order:    ord,
-		preImg:   preImg,
-		mktID:    tDcrBtcMktName,
-		db:       rig.db,
-		dc:       rig.dc,
-		metaData: &db.OrderMetaData{},
-	}
-
-	// Simulate an order submission request having completed.
-	loadSyncer := func() {
-		rig.core.piSyncMtx.Lock()
-		rig.core.piSyncers[oid] = nil // set nil to ensure it's just a map entry
-		rig.core.piSyncMtx.Unlock()
-	}
-
-	rig.dc.trades[oid] = tracker
-	loadSyncer()
-	err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
-	if err != nil {
-		t.Fatalf("handlePreimageRequest error: %v", err)
-	}
-
-	// Test the new path with rig.core.sentCommits.
-	readyCommitment := func(commit order.Commitment) chan struct{} {
-		commitSig := make(chan struct{}) // close after fake order submission is "done"
-		rig.core.sentCommitsMtx.Lock()
-		rig.core.sentCommits[commit] = commitSig
-		rig.core.sentCommitsMtx.Unlock()
-		return commitSig
-	}
-
-	commit := preImg.Commit()
-	commitSig := readyCommitment(commit)
-	payload = &msgjson.PreimageRequest{
-		OrderID:    oid[:],
-		Commitment: commit[:],
-	}
-	reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
-
-	notes := rig.core.NotificationFeed()
-
-	rig.dc.trades[oid] = tracker
-	err = handlePreimageRequest(rig.core, rig.dc, reqCommit)
-	if err != nil {
-		t.Fatalf("handlePreimageRequest error: %v", err)
-	}
-	// It has gone async now, waiting for commitSig.
-	// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
-	close(commitSig) // pretend like the order submission just finished
-
-	select {
-	case note := <-notes:
-		if note.Subject() != SubjectPreimageSent {
-			t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+	t.Run("basic checks", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+		oid := ord.ID()
+		preImg := newPreimage()
+		payload := &msgjson.PreimageRequest{
+			OrderID: oid[:],
+			// No commitment in this request.
 		}
-	case <-time.After(time.Second):
-		t.Fatal("no order note from preimage request handling")
-	}
+		reqNoCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
-	// negative paths
-	ensureErr := func(tag string, req *msgjson.Message, errPrefix string) {
-		t.Helper()
+		tracker := &trackedTrade{
+			Order:    ord,
+			preImg:   preImg,
+			mktID:    tDcrBtcMktName,
+			db:       rig.db,
+			dc:       rig.dc,
+			metaData: &db.OrderMetaData{},
+		}
+
+		// Simulate an order submission request having completed.
+		loadSyncer := func() {
+			rig.core.piSyncMtx.Lock()
+			rig.core.piSyncers[oid] = nil // set nil to ensure it's just a map entry
+			rig.core.piSyncMtx.Unlock()
+		}
+
+		rig.dc.trades[oid] = tracker
 		loadSyncer()
+		err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
+		}
+
+		// Test the new path with rig.core.sentCommits.
+		readyCommitment := func(commit order.Commitment) chan struct{} {
+			commitSig := make(chan struct{}) // close after fake order submission is "done"
+			rig.core.sentCommitsMtx.Lock()
+			rig.core.sentCommits[commit] = commitSig
+			rig.core.sentCommitsMtx.Unlock()
+			return commitSig
+		}
+
+		commit := preImg.Commit()
 		commitSig := readyCommitment(commit)
-		close(commitSig) // ready before preimage request
-		err := handlePreimageRequest(rig.core, rig.dc, req)
-		if err == nil {
-			t.Fatalf("%s: no error", tag)
+		payload = &msgjson.PreimageRequest{
+			OrderID:    oid[:],
+			Commitment: commit[:],
 		}
-		if !strings.HasPrefix(err.Error(), errPrefix) {
-			t.Fatalf("expected error starting with %q, got %q", errPrefix, err)
+		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+		notes := rig.core.NotificationFeed()
+
+		rig.dc.trades[oid] = tracker
+		err = handlePreimageRequest(rig.core, rig.dc, reqCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
 		}
-	}
 
-	// unknown commitment in request
-	payloadBad := &msgjson.PreimageRequest{
-		OrderID:    oid[:],
-		Commitment: encode.RandomBytes(order.CommitmentSize), // junk, but correct length
-	}
-	reqCommitBad, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payloadBad)
-	ensureErr("unknown commitment", reqCommitBad, "received preimage request for unknown commitment")
-	// all other errors for
+		// It has gone async now, waiting for commitSig.
+		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+		close(commitSig) // pretend like the order submission just finished
 
-	// Trade-not-found error only returned on synchronous non-commitment request
-	// handling, so use reqNoCommit to test that part of processPreimageRequest.
-	delete(rig.dc.trades, oid)
-	ensureErr("no tracker", reqNoCommit, "no active order found for preimage request")
-	rig.dc.trades[oid] = tracker // reset
+		select {
+		case note := <-notes:
+			if note.Subject() != SubjectPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no order note from preimage request handling")
+		}
 
-	// Response send error also only returned on synchronous request handling.
-	rig.ws.sendErr = tErr
-	ensureErr("send error", reqNoCommit, "preimage send error")
-	rig.ws.sendErr = nil // reset
+		// negative paths
+		ensureErr := func(tag string, req *msgjson.Message, errPrefix string) {
+			t.Helper()
+			loadSyncer()
+			commitSig := readyCommitment(commit)
+			close(commitSig) // ready before preimage request
+			err := handlePreimageRequest(rig.core, rig.dc, req)
+			if err == nil {
+				t.Fatalf("%s: no error", tag)
+			}
+			if !strings.HasPrefix(err.Error(), errPrefix) {
+				t.Fatalf("expected error starting with %q, got %q", errPrefix, err)
+			}
+		}
+
+		// unknown commitment in request
+		payloadBad := &msgjson.PreimageRequest{
+			OrderID:    oid[:],
+			Commitment: encode.RandomBytes(order.CommitmentSize), // junk, but correct length
+		}
+		reqCommitBad, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payloadBad)
+		ensureErr("unknown commitment", reqCommitBad, "received preimage request for unknown commitment")
+		// all other errors for
+
+		// Trade-not-found error only returned on synchronous non-commitment request
+		// handling, so use reqNoCommit to test that part of processPreimageRequest.
+		delete(rig.dc.trades, oid)
+		ensureErr("no tracker", reqNoCommit, "no active order found for preimage request")
+		rig.dc.trades[oid] = tracker // reset
+
+		// Response send error also only returned on synchronous request handling.
+		rig.ws.sendErr = tErr
+		ensureErr("send error", reqNoCommit, "preimage send error")
+		rig.ws.sendErr = nil // reset
+	})
+	t.Run("csum for order", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+		oid := ord.ID()
+		preImg := newPreimage()
+
+		tracker := &trackedTrade{
+			Order:    ord,
+			preImg:   preImg,
+			mktID:    tDcrBtcMktName,
+			db:       rig.db,
+			dc:       rig.dc,
+			metaData: &db.OrderMetaData{},
+		}
+
+		// Test the new path with rig.core.sentCommits.
+		readyCommitment := func(commit order.Commitment) chan struct{} {
+			commitSig := make(chan struct{}) // close after fake order submission is "done"
+			rig.core.sentCommitsMtx.Lock()
+			rig.core.sentCommits[commit] = commitSig
+			rig.core.sentCommitsMtx.Unlock()
+			return commitSig
+		}
+
+		commit := preImg.Commit()
+		commitCSum := dex.Bytes{2, 3, 5, 7, 11, 13}
+		commitSig := readyCommitment(commit)
+		payload := &msgjson.PreimageRequest{
+			OrderID:        oid[:],
+			Commitment:     commit[:],
+			CommitChecksum: commitCSum,
+		}
+		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+		notes := rig.core.NotificationFeed()
+
+		rig.dc.trades[oid] = tracker
+		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
+		}
+
+		// It has gone async now, waiting for commitSig.
+		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+		close(commitSig) // pretend like the order submission just finished
+
+		select {
+		case note := <-notes:
+			if note.Subject() != SubjectPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no order note from preimage request handling")
+		}
+
+		tracker.mtx.RLock()
+		if !bytes.Equal(commitCSum, tracker.csum) {
+			t.Fatalf(
+				"handlePreimageRequest must initialize tracker csum, exp: %s, got: %s",
+				commitCSum,
+				tracker.csum,
+			)
+		}
+		tracker.mtx.RUnlock()
+
+		// TODO
+		// We shouldn't allow for a duplicate request to contain different csum (test against that),
+		// see https://github.com/decred/dcrdex/pull/1077#discussion_r641593845 for details.
+	})
+	t.Run("csum for cancel order", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+		preImg := newPreimage()
+
+		tracker := &trackedTrade{
+			Order:    ord,
+			preImg:   preImg,
+			mktID:    tDcrBtcMktName,
+			db:       rig.db,
+			dc:       rig.dc,
+			metaData: &db.OrderMetaData{},
+			cancel: &trackedCancel{
+				CancelOrder: order.CancelOrder{
+					P: order.Prefix{
+						AccountID:  rig.dc.acct.ID(),
+						BaseAsset:  tDCR.ID,
+						QuoteAsset: tBTC.ID,
+						OrderType:  order.MarketOrderType,
+						ClientTime: time.Now(),
+						ServerTime: time.Now().Add(time.Millisecond),
+						Commit:     preImg.Commit(),
+					},
+				},
+			},
+		}
+		oid := tracker.cancel.ID()
+
+		// Test the new path with rig.core.sentCommits.
+		readyCommitment := func(commit order.Commitment) chan struct{} {
+			commitSig := make(chan struct{}) // close after fake order submission is "done"
+			rig.core.sentCommitsMtx.Lock()
+			rig.core.sentCommits[commit] = commitSig
+			rig.core.sentCommitsMtx.Unlock()
+			return commitSig
+		}
+
+		commit := preImg.Commit()
+		commitCSum := dex.Bytes{2, 3, 5, 7, 11, 13}
+		commitSig := readyCommitment(commit)
+		payload := &msgjson.PreimageRequest{
+			OrderID:        oid[:],
+			Commitment:     commit[:],
+			CommitChecksum: commitCSum,
+		}
+		reqCommit, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+		notes := rig.core.NotificationFeed()
+
+		rig.dc.trades[order.OrderID{}] = tracker
+		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
+		if err != nil {
+			t.Fatalf("handlePreimageRequest error: %v", err)
+		}
+
+		// It has gone async now, waiting for commitSig.
+		// i.e. "Received preimage request for %v with no corresponding order submission response! Waiting..."
+		close(commitSig) // pretend like the order submission just finished
+
+		select {
+		case note := <-notes:
+			if note.Subject() != SubjectCancelPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectCancelPreimageSent)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no order note from preimage request handling")
+		}
+
+		tracker.mtx.RLock()
+		if !bytes.Equal(commitCSum, tracker.cancel.csum) {
+			t.Fatalf(
+				"handlePreimageRequest must initialize tracker cancel csum, exp: %s, got: %s",
+				commitCSum,
+				tracker.cancel.csum,
+			)
+		}
+		tracker.mtx.RUnlock()
+
+		// TODO
+		// We shouldn't allow for a duplicate request to contain different csum (test against that),
+		// see https://github.com/decred/dcrdex/pull/1077#discussion_r641593845 for details.
+	})
 }
 
 func TestHandleRevokeOrderMsg(t *testing.T) {
@@ -4334,8 +4490,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
 
-	// Ensure match proof validation generates an error for a non-existent
-	// orderbook generates an error.
+	// Ensure match proof validation generates an error for a non-existent orderbook.
 	err = handleMatchProofMsg(rig.core, rig.dc, req)
 	if err == nil {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
@@ -4488,7 +4643,7 @@ func TestSetEpoch(t *testing.T) {
 		t.Fatalf("error advancing epoch: %v", err)
 	}
 	if mktEpoch() != 2 {
-		t.Fatalf("expected epoch 1, got %d", mktEpoch())
+		t.Fatalf("expected epoch 2, got %d", mktEpoch())
 	}
 
 	payload.Epoch = 0
@@ -4498,7 +4653,7 @@ func TestSetEpoch(t *testing.T) {
 		t.Fatalf("error handling match proof: %v", err)
 	}
 	if mktEpoch() != 2 {
-		t.Fatalf("epoch decremented")
+		t.Fatalf("epoch changed, expected epoch 2, got %d", mktEpoch())
 	}
 }
 

@@ -173,7 +173,8 @@ type Output struct {
 	// P2SH pkScript.
 	addresses []string
 	// A bitmask for script type information.
-	scriptType dexdcr.DCRScriptType
+	scriptType    dexdcr.DCRScriptType
+	scriptVersion uint16
 	// If the pkScript, or redeemScript in the case of a P2SH pkScript, is
 	// non-standard according to txscript.
 	nonStandardScript bool
@@ -251,7 +252,7 @@ func (output *Output) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if output.scriptType.IsP2SH() {
 		evalScript = output.redeemScript
 	}
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(evalScript, chainParams)
+	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(output.scriptVersion, evalScript, chainParams)
 	if err != nil {
 		return err
 	}
@@ -374,6 +375,12 @@ func auditContract(op *Output) (*asset.Contract, error) {
 	tx := op.tx
 	if len(tx.outs) <= int(op.vout) {
 		return nil, fmt.Errorf("invalid index %d for transaction %s", op.vout, tx.hash)
+	}
+	// InputInfo via (*Backend).output would already have screened out script
+	// versions >0, but do it again to be safe. However, note that this will
+	// break when other versions become standard.
+	if op.scriptVersion != 0 {
+		return nil, fmt.Errorf("invalid script version %d", op.scriptVersion)
 	}
 	output := tx.outs[int(op.vout)]
 	scriptHash := dexdcr.ExtractScriptHash(output.pkScript)

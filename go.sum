@@ -114,8 +114,8 @@ github.com/decred/dcrd/hdkeychain/v3 v3.0.0 h1:hOPb4c8+K6bE3a/qFtzt2Z2yzK4SpmXmx
 github.com/decred/dcrd/hdkeychain/v3 v3.0.0/go.mod h1:Vz7PJSlLzhqmOR2lmjGD9JqAZgmUnM8P6r8hg7U4Zho=
 github.com/decred/dcrd/lru v1.1.0/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210129200153-14fd1a785bf2/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
-github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b h1:/Wm+Ej6Xeif0HsYYuo/DpZgBNcAkAHRzx6ry54gfDy8=
-github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210330065944-a2366e6e0b3b/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
+github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210525214639-70483c835b7f h1:8FKj3NM2LbhnxSgVDcrzsloixqZele5B0ktTG+Rh8vE=
+github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210525214639-70483c835b7f/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
 github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b h1:m85c5YGIqwAc49bVTer0XYwDm8Q5ZjvqGnyklr0+bSA=
 github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210330065944-a2366e6e0b3b/go.mod h1:6hJkpRGYSSgW4BYOg5VgTvyUVTP7ElaWscn2t/Z7Y0U=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210129190127-4ebd135a82f1/go.mod h1:EnS4vtxTESoI59geLo9M8AUOvIprJy+O4gSVsQp6/h4=

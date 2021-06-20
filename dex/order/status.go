@@ -74,3 +74,8 @@ func (s OrderStatus) String() string {
 	}
 	return name
 }
+
+// IsActive returns whether the status is considered active.
+func (s OrderStatus) IsActive() bool {
+	return s == OrderStatusEpoch || s == OrderStatusBooked
+}

@@ -108,15 +108,16 @@ func (m *matchTracker) matchTime() time.Time {
 type trackedCancel struct {
 	order.CancelOrder
 	preImg  order.Preimage
+	csum    dex.Bytes // the commitment checksum provided in the preimage request
 	matches struct {
 		maker *msgjson.Match
 		taker *msgjson.Match
 	}
 }
 
-// trackedTrade is an order, its matches, and its cancel order, if applicable.
-// The trackedTrade has methods for handling requests from the DEX to progress
-// match negotiation.
+// trackedTrade is an order (issued by this client), its matches, and its cancel
+// order, if applicable. The trackedTrade has methods for handling requests
+// from the DEX to progress match negotiation.
 type trackedTrade struct {
 	// redeemFeeSuggestion is cached fee suggestion for redemption. We can't
 	// request a fee suggestion at redeem time because it would require making
@@ -136,6 +137,7 @@ type trackedTrade struct {
 	latencyQ      *wait.TickerQueue
 	wallets       *walletSet
 	preImg        order.Preimage
+	csum          dex.Bytes // the commitment checksum provided in the preimage request
 	mktID         string
 	coins         map[string]asset.Coin
 	coinsLocked   bool
@@ -180,6 +182,42 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		fromAssetID:   fromID,
 	}
 	return t
+}
+
+func (t *trackedTrade) epochIdx() uint64 {
+	return encode.UnixMilliU(t.Prefix().ServerTime) / t.epochLen
+}
+
+// cancelEpochIdx gives the epoch index of any cancel associated cancel order.
+// The mutex must be at least read locked.
+func (t *trackedTrade) cancelEpochIdx() uint64 {
+	if t.cancel == nil {
+		return 0
+	}
+	return encode.UnixMilliU(t.cancel.Prefix().ServerTime) / t.epochLen
+}
+
+func (t *trackedTrade) verifyCSum(csum []byte, epochIdx uint64) error {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+
+	// First check the trade's recorded csum, if it is in this epoch.
+	if epochIdx == t.epochIdx() && !bytes.Equal(csum, t.csum) {
+		return fmt.Errorf("checksum %s != trade order preimage request checksum %s for trade order %v",
+			csum, t.csum, t.ID())
+	}
+
+	if t.cancel == nil {
+		return nil // no linked cancel order
+	}
+
+	// Check the linked cancel order if it is for this epoch.
+	if epochIdx == t.cancelEpochIdx() && !bytes.Equal(csum, t.cancel.csum) {
+		return fmt.Errorf("checksum %s != cancel order preimage request checksum %s for cancel order %v",
+			csum, t.cancel.csum, t.cancel.ID())
+	}
+
+	return nil // includes not in epoch
 }
 
 // rate returns the order's rate, or zero if a market or cancel order.
@@ -1131,7 +1169,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			c.log.Errorf("refreshUnlock error redeeming %s: %v", t.wallets.toAsset.Symbol, err)
 		}
 		if didUnlock {
-			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.fromAsset.Symbol)
+			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.toAsset.Symbol)
 		}
 		toAsset := t.wallets.toAsset.ID
 		assets.count(toAsset)

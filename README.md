@@ -34,6 +34,7 @@ privileges and forfeiture of registration fee.
 - [Client Quick Start Installation](#client-quick-start-installation)
 - [Client Configuration](#client-configuration)
 - [Important Stuff to Know](#important-stuff-to-know)
+- [Fees](#fees)
 - [Advanced Client Installation](#advanced-client-installation)
 - [DEX Specification](#dex-specification)
 - [Client Applications and the Core Package](#client-applications-and-the-core-package)
@@ -109,7 +110,7 @@ All commands listed below are of the Linux variety, and assume you already
 
 1. dcrd, dcrwallet, and bitcoind should be running and synced.
 
-2. It is highly recommended that you create separate accounts for trading. 
+2. It is highly recommended that you create separate accounts for trading.
 
 #### Creating a trading account for Decred
 
@@ -209,6 +210,29 @@ You may be asked to provide client log files to the operator for review.
 For dex.decred.org, reach out
 [on Element](https://matrix.to/#/!mlRZqBtfWHrcmgdTWB:decred.org?via=decred.org&via=matrix.org&via=planetdecred.org)
 to appeal.
+
+## Fees
+
+DEX does not charge trading fees, but users pay on-chain transaction fees.
+Transaction fees vary based on how orders are matched.
+
+To ensure that on-chain transaction fees do not eat a significant portion of the
+order quantity, orders must be specified in increments of a minimum lot size.
+To illustrate, if on-chain transaction fees worked out to $5, and a user was able
+to place an order to trade $10, they would lose half of their trade to
+transaction fees. For chains with single-match fees of $5, if the operator wanted
+to limit possible fees to under 1% of the trade, the minimum lot size would need
+to be set to about $500.
+
+The scenario with the lowest fees is for an entire order to be consumed by a
+single match. If this happens, the user pays the fees for two transactions: one
+on the chain of the asset the user is selling and one on the chain of the asset
+the user is buying. The worst case is for the order to be filled in multiple
+matches each of one lot in amount, potentially requiring as many swaps as lots
+in the order.
+Check the
+[dex specification](https://github.com/decred/dcrdex/blob/master/spec/atomic.mediawiki)
+for more details about how atomic swaps work.
 
 ## Advanced Client Installation
 
@@ -349,7 +373,7 @@ network if not using mainnet.
 
 A sample is given at
 [*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
-[**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
+[**market json**](https://github.com/decred/dcrdex/wiki/Server-Admin#markets-json) section of the wiki for
 more information on individual options.
 
 ### Build and run dcrdex

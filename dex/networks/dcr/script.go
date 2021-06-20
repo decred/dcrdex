@@ -36,9 +36,6 @@ const (
 	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
 
-	// All pubkey scripts are assumed to be version 0.
-	CurrentScriptVersion = 0
-
 	// Overhead for a wire.TxIn with a scriptSig length < 254.
 	// prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes)
 	// + BlockIndex (4 bytes) + sig script var int (at least 1 byte)
@@ -573,8 +570,8 @@ func ExtractScriptHashByType(scriptType DCRScriptType, pkScript []byte) ([]byte,
 // count from a pkScript. Non-standard scripts are not necessarily an error;
 // non-nil errors are only returned if the script cannot be parsed. See also
 // InputInfo for additional signature script size data
-func ExtractScriptData(script []byte, chainParams *chaincfg.Params) (DCRScriptType, []string, int, error) {
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams, false)
+func ExtractScriptData(version uint16, script []byte, chainParams *chaincfg.Params) (DCRScriptType, []string, int, error) {
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(version, script, chainParams, false)
 	if err != nil {
 		return ScriptUnsupported, nil, 0, err
 	}
@@ -584,7 +581,7 @@ func ExtractScriptData(script []byte, chainParams *chaincfg.Params) (DCRScriptTy
 
 	// Could switch on class from ExtractPkScriptAddrs, but use ParseScriptType
 	// for internal consistency.
-	scriptType := ParseScriptType(CurrentScriptVersion, script, nil)
+	scriptType := ParseScriptType(version, script, nil)
 
 	addresses := make([]string, len(addrs))
 	for i, addr := range addrs {
@@ -612,11 +609,11 @@ type DCRScriptAddrs struct {
 // use on P2SH pkScripts. Rather, the corresponding redeem script should be
 // processed with ExtractScriptAddrs. The returned bool indicates if the script
 // is non-standard.
-func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, bool, error) {
+func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, bool, error) {
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams, false)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(version, script, chainParams, false)
 	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
 		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
@@ -672,8 +669,8 @@ func (nfo *SpendInfo) Size() uint32 {
 // InputInfo is some basic information about the input required to spend an
 // output. The pubkey script of the output is provided. If the pubkey script
 // parses as P2SH or P2WSH, the redeem script must be provided.
-func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*SpendInfo, error) {
-	scriptType := ParseScriptType(CurrentScriptVersion, pkScript, redeemScript)
+func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*SpendInfo, error) {
+	scriptType := ParseScriptType(version, pkScript, redeemScript)
 	if scriptType == ScriptUnsupported {
 		return nil, dex.UnsupportedScriptError
 	}
@@ -686,9 +683,9 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 		}
 		evalScript = redeemScript
 	}
-	scriptAddrs, nonStandard, err := ExtractScriptAddrs(evalScript, chainParams)
+	scriptAddrs, nonStandard, err := ExtractScriptAddrs(version, evalScript, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing utxo script addresses")
+		return nil, fmt.Errorf("error parsing utxo script addresses: %w", err)
 	}
 	if nonStandard {
 		return &SpendInfo{

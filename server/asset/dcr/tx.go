@@ -41,6 +41,7 @@ type txIn struct {
 // A txOut holds information about a transaction output.
 type txOut struct {
 	value    uint64
+	version  uint16
 	pkScript []byte
 }
 

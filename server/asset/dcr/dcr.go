@@ -493,16 +493,17 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(scriptHex, chainParams)
+	// out.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.Version, scriptHex, chainParams)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
 
 	txOut = &TxOutData{
 		Value:        toAtoms(out.Value),
-		Addresses:    addrs,
-		SigsRequired: numRequired,
-		ScriptType:   scriptType,
+		Addresses:    addrs,       // out.ScriptPubKey.Addresses
+		SigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
+		ScriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
 	}
 
 	confs = verboseTx.Confirmations
@@ -564,6 +565,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 		sumOut += toAtoms(output.Value)
 		outputs = append(outputs, txOut{
 			value:    toAtoms(output.Value),
+			version:  output.Version, // output.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
 			pkScript: pkScript,
 		})
 	}
@@ -758,8 +760,12 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 	if err != nil {
 		return nil, err
 	}
+	if len(verboseTx.Vout) <= int(vout) { // shouldn't happen if gettxout worked
+		return nil, fmt.Errorf("only %d outputs, requested index %d", len(verboseTx.Vout), vout)
+	}
 
-	inputNfo, err := dexdcr.InputInfo(pkScript, redeemScript, chainParams)
+	scriptVersion := txOut.ScriptPubKey.Version // or verboseTx.Vout[vout].Version
+	inputNfo, err := dexdcr.InputInfo(scriptVersion, pkScript, redeemScript, chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -809,6 +815,7 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 		},
 		vout:              vout,
 		scriptType:        scriptType,
+		scriptVersion:     scriptVersion,
 		nonStandardScript: inputNfo.NonStandardScript,
 		pkScript:          pkScript,
 		redeemScript:      redeemScript,
@@ -875,7 +882,7 @@ func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 
 	txOut := txio.tx.outs[vout]
 	pkScript := txOut.pkScript
-	inputNfo, err := dexdcr.InputInfo(pkScript, redeemScript, chainParams)
+	inputNfo, err := dexdcr.InputInfo(txOut.version, pkScript, redeemScript, chainParams)
 	if err != nil {
 		return nil, err
 	}

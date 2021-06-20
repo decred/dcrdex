@@ -26,26 +26,14 @@ var upgrades = [...]upgradefunc{
 	v2Upgrade,
 	// v2 => v3 adds a tx data field to the match proof.
 	v3Upgrade,
+	// v3 => v4 splits orders into active and archived.
+	v4Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
 // with recorded versions higher than this will fail to open (meaning any
 // upgrades prevent reverting to older software).
 const DBVersion = uint32(len(upgrades))
-
-func fetchDBVersion(tx *bbolt.Tx) (uint32, error) {
-	bucket := tx.Bucket(appBucket)
-	if bucket == nil {
-		return 0, fmt.Errorf("app bucket not found")
-	}
-
-	versionB := bucket.Get(versionKey)
-	if versionB == nil {
-		return 0, fmt.Errorf("database version not found")
-	}
-
-	return intCoder.Uint32(versionB), nil
-}
 
 func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 	bucket := tx.Bucket(appBucket)
@@ -115,8 +103,7 @@ func getVersionTx(tx *bbolt.Tx) (uint32, error) {
 	}
 	versionB := bucket.Get(versionKey)
 	if versionB == nil {
-		// A nil version indicates a version 0 database.
-		return 0, nil
+		return 0, fmt.Errorf("database version not found")
 	}
 	return intCoder.Uint32(versionB), nil
 }
@@ -141,8 +128,9 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 // avoids any chance of rejecting a pre-existing active match.
 func v2Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 1
+	ordersBucket := []byte("orders")
 
-	dbVersion, err := fetchDBVersion(dbtx)
+	dbVersion, err := getVersionTx(dbtx)
 	if err != nil {
 		return fmt.Errorf("error fetching database version: %w", err)
 	}
@@ -195,7 +183,7 @@ func v3Upgrade(dbtx *bbolt.Tx) error {
 }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
-	dbVersion, err := fetchDBVersion(tx)
+	dbVersion, err := getVersionTx(tx)
 	if err != nil {
 		return fmt.Errorf("error fetching database version: %w", err)
 	}
@@ -244,6 +232,64 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 			return fmt.Errorf("error re-storing match proof: %w", err)
 		}
 		return nil
+	})
+}
+
+// v4Upgrade moves active orders from what will become the archivedOrdersBucket
+// to a new ordersBucket. This is done in order to make searching active orders
+// faster, as they do not need to be pulled out of all orders any longer. This
+// upgrade moves active orders as opposed to inactive orders under the
+// assumption that there are less active orders to move, and so a smaller
+// database transaction occurs.
+func v4Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 3
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	// Move any inactive orders to the new archivedOrdersBucket.
+	return moveActiveOrders(dbtx)
+}
+
+// moveActiveOrders searches the v1 ordersBucket for orders that are inactive,
+// adds those to the v2 ordersBucket, and deletes them from the v1 ordersBucket,
+// which becomes the archived orders bucket.
+func moveActiveOrders(tx *bbolt.Tx) error {
+	oldOrdersBucket := []byte("orders")
+	newActiveOrdersBucket := []byte("activeOrders")
+	// NOTE: newActiveOrdersBucket created in NewDB, but TestUpgrades skips that.
+	_, err := tx.CreateBucketIfNotExists(newActiveOrdersBucket)
+	if err != nil {
+		return err
+	}
+
+	archivedOrdersBkt := tx.Bucket(oldOrdersBucket)
+	activeOrdersBkt := tx.Bucket(newActiveOrdersBucket)
+	return archivedOrdersBkt.ForEach(func(k, _ []byte) error {
+		archivedOBkt := archivedOrdersBkt.Bucket(k)
+		if archivedOBkt == nil {
+			return fmt.Errorf("order %x bucket is not a bucket", k)
+		}
+		status := order.OrderStatus(intCoder.Uint16(archivedOBkt.Get(statusKey)))
+		if status == order.OrderStatusUnknown {
+			fmt.Printf("Encountered order with unknown status: %x\n", k)
+			return nil
+		}
+		if !status.IsActive() {
+			return nil
+		}
+		activeOBkt, err := activeOrdersBkt.CreateBucket(k)
+		if err != nil {
+			return err
+		}
+		// Assume the order bucket contains only values, no sub-buckets
+		if err := archivedOBkt.ForEach(func(k, v []byte) error {
+			return activeOBkt.Put(k, v)
+		}); err != nil {
+			return err
+		}
+		return archivedOrdersBkt.DeleteBucket(k)
 	})
 }
 

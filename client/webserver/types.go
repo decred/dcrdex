@@ -301,10 +301,16 @@ func (ord *orderReader) StatusString() string {
 		if ord.Cancelling {
 			return "cancelling"
 		}
+		if isLive {
+			return "booked/settling"
+		}
 		return "booked"
 	case order.OrderStatusExecuted:
 		if isLive {
 			return "settling"
+		}
+		if ord.Filled == 0 {
+			return "no match"
 		}
 		return "executed"
 	case order.OrderStatusCanceled:
