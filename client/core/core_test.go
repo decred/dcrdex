@@ -503,6 +503,10 @@ func (r *tReceipt) String() string {
 	return r.coin.String()
 }
 
+func (r *tReceipt) SignedRefund() dex.Bytes {
+	return nil
+}
+
 type TXCWallet struct {
 	mtx               sync.RWMutex
 	payFeeCoin        *tCoin

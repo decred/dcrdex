@@ -220,6 +220,9 @@ type Receipt interface {
 	Contract() dex.Bytes
 	// String provides a human-readable representation of the contract's Coin.
 	String() string
+	// SignedRefund is a signed refund script that can be used to return
+	// funds to the user in the case a contract expires.
+	SignedRefund() dex.Bytes
 }
 
 // AuditInfo is audit information about a swap contract needed to audit the

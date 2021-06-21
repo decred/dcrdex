@@ -293,9 +293,10 @@ func (ci *auditInfo) SecretHash() dex.Bytes {
 // swapReceipt is information about a swap contract that was broadcast by this
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
-	output     *output
-	contract   []byte
-	expiration time.Time
+	output       *output
+	contract     []byte
+	signedRefund []byte
+	expiration   time.Time
 }
 
 // Expiration is the time that the contract will expire, allowing the user to
@@ -318,6 +319,12 @@ func (r *swapReceipt) Coin() asset.Coin {
 // String provides a human-readable representation of the contract's Coin.
 func (r *swapReceipt) String() string {
 	return r.output.String()
+}
+
+// SignedRefund is a signed refund script that can be used to return
+// funds to the user in the case a contract expires.
+func (r *swapReceipt) SignedRefund() dex.Bytes {
+	return r.signedRefund
 }
 
 // Driver implements asset.Driver.
@@ -1341,6 +1348,8 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, err
 	}
 
+	refundAddrs := make([]btcutil.Address, 0, len(swaps.Contracts))
+
 	// Add the contract outputs.
 	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
 	// legacy/non-segwit swap contracts pkScripts.
@@ -1352,6 +1361,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
+		refundAddrs = append(refundAddrs, revokeAddr)
 
 		contractAddr, err := btc.decodeAddr(contract.Address, btc.chainParams)
 		if err != nil {
@@ -1407,10 +1417,21 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
+		output := newOutput(&txHash, uint32(i), contract.Value)
+		signedRefundTx, err := btc.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i])
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
+		}
+		refundBuff := new(bytes.Buffer)
+		err = signedRefundTx.Serialize(refundBuff)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error serializing refund tx: %w", err)
+		}
 		receipts = append(receipts, &swapReceipt{
-			output:     newOutput(&txHash, uint32(i), contract.Value),
-			contract:   contracts[i],
-			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
+			output:       output,
+			contract:     contracts[i],
+			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
+			signedRefund: refundBuff.Bytes(),
 		})
 	}
 
@@ -2061,19 +2082,42 @@ func (btc *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // was created. The client should store this information for persistence across
 // sessions.
 func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
+	msgTx, err := btc.refundTx(coinID, contract, 0, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating refund tx: %w", err)
+	}
+
+	checkHash := msgTx.TxHash()
+	refundHash, err := btc.sendRawTransaction(msgTx)
+	if err != nil {
+		return nil, fmt.Errorf("sendRawTransaction: %w", err)
+	}
+	if *refundHash != checkHash {
+		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s", *refundHash, checkHash)
+	}
+	return toCoinID(refundHash, 0), nil
+}
+
+// refundTx crates and signs a contract`s refund transaction. If refundAddr is
+// not supplied, one will be requested from the wallet. If val is not supplied
+// it will be retrieved with gettxout.
+func (btc *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr btcutil.Address) (*wire.MsgTx, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := btc.node.GetTxOut(txHash, vout, true)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", err)
+	// Grab the unspent output to make sure it's good and to get the value if not supplied.
+	if val == 0 {
+		utxo, err := btc.node.GetTxOut(txHash, vout, true)
+		if err != nil {
+			return nil, fmt.Errorf("error finding unspent contract: %w", err)
+		}
+		if utxo == nil {
+			return nil, asset.CoinNotFoundError
+		}
+		val = toSatoshi(utxo.Value)
 	}
-	if utxo == nil {
-		return nil, asset.CoinNotFoundError
-	}
-	val := toSatoshi(utxo.Value)
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -2103,9 +2147,11 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	if fee > val {
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
-	refundAddr, err := btc.node.ChangeAddress()
-	if err != nil {
-		return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
+	if refundAddr == nil {
+		refundAddr, err = btc.node.ChangeAddress()
+		if err != nil {
+			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
+		}
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
@@ -2136,17 +2182,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 			return nil, fmt.Errorf("RefundP2SHContract: %w", err)
 		}
 	}
-	// Send it.
-	checkHash := msgTx.TxHash()
-	refundHash, err := btc.sendRawTransaction(msgTx)
-	if err != nil {
-		return nil, fmt.Errorf("sendRawTransaction: %w", err)
-	}
-	if *refundHash != checkHash {
-		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
-	}
-	return toCoinID(refundHash, 0), nil
+	return msgTx, nil
 }
 
 // Address returns a new external address from the wallet.

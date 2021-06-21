@@ -1308,6 +1308,7 @@ func testSwap(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, toSatoshi(3)),
@@ -1321,6 +1322,14 @@ func testSwap(t *testing.T, segwit bool) {
 	node.rawRes[methodNewAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
 	node.rawRes[methodLockUnspent] = []byte(`true`)
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
+	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
+	if err != nil {
+		t.Fatalf("error encoding wif: %v", err)
+	}
+	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	contract := &asset.Contract{
