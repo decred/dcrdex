@@ -52,7 +52,7 @@ export default class MarketsPage extends BasePage {
       // Order submission is verified with the user's password.
       'verifyForm', 'vHeader', 'vSideHeader', 'vSide', 'vQty', 'vBase', 'vRate',
       'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit', 'verifyLimit', 'verifyMarket',
-      'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
+      'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore', 'vErr',
       // Create wallet form
       'walletForm',
       // Active orders
@@ -1326,7 +1326,8 @@ export default class MarketsPage extends BasePage {
    */
   async submitOrder () {
     const page = this.page
-    Doc.hide(page.forms)
+    page.vSubmit.disabled = true
+    Doc.hide(page.orderErr, page.vErr)
     const order = this.parseOrder()
     const pw = page.vPass.value
     page.vPass.value = ''
@@ -1336,11 +1337,16 @@ export default class MarketsPage extends BasePage {
     }
     if (!this.validateOrder(order)) return
     const res = await postJSON('/api/trade', req)
+    // If errors display error on confirmation modal.
     if (!app.checkResponse(res, true)) {
-      page.orderErr.textContent = res.msg
-      Doc.show(page.orderErr)
+      page.vErr.textContent = res.msg
+      Doc.show(page.vErr)
+      page.vSubmit.disabled = false
       return
     }
+    // Hide confirmation modal only on success.
+    Doc.hide(page.forms)
+    page.vSubmit.disabled = false
     this.refreshActiveOrders()
     this.chart.draw()
   }
