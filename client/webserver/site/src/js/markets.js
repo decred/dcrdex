@@ -410,6 +410,9 @@ export default class MarketsPage extends BasePage {
    */
   resolveOrderFormVisibility () {
     const page = this.page
+    // By default the order form should be hidden, and only if market is set
+    // and ready for trading the form should show up.
+    Doc.hide(page.orderForm)
     const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported()
     const base = this.market.base
@@ -418,10 +421,7 @@ export default class MarketsPage extends BasePage {
 
     if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
-      return
     }
-
-    Doc.hide(page.orderForm)
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not
@@ -550,7 +550,8 @@ export default class MarketsPage extends BasePage {
       maxBuys: {}
     }
 
-    this.page.marketLoader.classList.remove('d-none')
+    const { page } = this
+    page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
@@ -1265,10 +1266,8 @@ export default class MarketsPage extends BasePage {
   setBalanceVisibility () {
     if (this.market.dex.connected) {
       Doc.show(this.page.balanceTable)
-      Doc.show(this.page.orderForm)
     } else {
       Doc.hide(this.page.balanceTable)
-      Doc.hide(this.page.orderForm)
     }
   }
 
