@@ -514,23 +514,24 @@ export default class MarketsPage extends BasePage {
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
+    const { page } = this
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
     if (!dex.connected) {
       this.market = { dex: dex }
-      this.page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
+      page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
         'You can close dexc and try again later or wait for it to reconnect.'
-      Doc.show(this.page.chartErrMsg)
+      Doc.show(page.chartErrMsg)
       this.loaded()
       this.main.style.opacity = 1
-      Doc.hide(this.page.marketLoader)
+      Doc.hide(page.marketLoader)
       return
     }
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
-    Doc.hide(this.page.maxOrd, this.page.chartErrMsg)
+    Doc.hide(page.maxOrd, page.chartErrMsg)
     if (this.preorderTimer) {
       window.clearTimeout(this.preorderTimer)
       this.preorderTimer = null
@@ -550,7 +551,6 @@ export default class MarketsPage extends BasePage {
       maxBuys: {}
     }
 
-    const { page } = this
     page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
     this.setLoaderMsgVisibility()
