@@ -963,6 +963,16 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (note) {
     app.log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
+    const { book } = mktBook
+    // gets first price value from buy or from sell, so we can show it on
+    // title.
+    const firstKnownValue = book.buys[0] ? book.buys[0] : book.sells[0]
+    if (firstKnownValue) {
+      // remove rate from title if already have it.
+      document.title = (document.title).replace(/\d+([.])?/g, '')
+      // more than 6 numbers it gets too big for the title.
+      document.title = `${firstKnownValue.rate.toFixed(6)} ${document.title}`
+    }
     const market = this.market
     const page = this.page
     const host = market.dex.host
