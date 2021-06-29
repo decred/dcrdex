@@ -75,7 +75,7 @@ var EnUS = map[string]string{
 	"outdated_tooltip":               "Balance may be outdated. Connect to the wallet to refresh.",
 	"available":                      "available",
 	"connect_refresh_tooltip":        "Click to connect and refresh",
-	"add_a_wallet":                   `Add a<br><span data-unit="base"></span><br>wallet`,
+	"add_a_base_wallet":              `Add a<br><span data-unit="base"></span><br>wallet`,
 	"add_a_quote_wallet":             `Add a<br><span data-unit="quote"></span><br>wallet`,
 	"locked":                         "locked",
 	"immature":                       "immature",
@@ -96,6 +96,7 @@ var EnUS = map[string]string{
 	"for a total of":                 "for a total of",
 	"verify_market":                  "This is a market order and will match the best available order(s) on the book. Based on the current market mid-gap rate, you might receive about",
 	"auth_order_app_pw":              "Authorize this order with your app password.",
+	"lots":                           "lots",
 	"order_disclaimer": `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
 		or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
 		settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.`,

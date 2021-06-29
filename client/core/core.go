@@ -2684,8 +2684,8 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		}
 
 		if confs < reqConfs {
-			subject, details := c.formatDetails(SubjectRegUpdate, confs, reqConfs)
 			dc.setRegConfirms(confs)
+			subject, details := c.formatDetails(SubjectRegUpdate, confs, reqConfs)
 			c.notify(newFeePaymentNoteWithConfirmations(subject, details, db.Data, confs, dc.acct.host))
 		}
 
@@ -4836,9 +4836,8 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 // sendOutdatedClientNotification will send a notification to the UI that
 // indicates the client should be updated to be used with this DEX server.
 func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
-	details := "You may need to update your client to trade here."
-	n := db.NewNotification("apiver", dc.acct.host, details, db.WarningLevel)
-	c.notify(&n)
+	subject, details := c.formatDetails(SubjectUpgradeNeeded, dc.acct.host)
+	c.notify(newUpgradeNote(subject, details, db.WarningLevel))
 }
 
 // connectDEX establishes a ws connection to a DEX server using the provided
@@ -4893,10 +4892,14 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		wsCfg.NetDialContext = proxy.DialContext
 	}
 
-	wsCfg.ReconnectSync = func() {
-		go c.handleReconnect(host)
+	if listen {
+		wsCfg.ReconnectSync = func() {
+			go c.handleReconnect(host)
+		}
+		wsCfg.ConnectEventFunc = func(connected bool) {
+			c.handleConnectEvent(dc, connected)
+		}
 	}
-	wsCfg.ConnectEventFunc = dc.handleConnectEvent
 
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&wsCfg)
@@ -5039,17 +5042,17 @@ func (dc *dexConnection) broadcastingConnect() bool {
 // lost or established.
 //
 // NOTE: Disconnect event notifications may lag behind actual disconnections.
-func (dc *dexConnection) handleConnectEvent(connected bool) {
+func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 	var v uint32
-	statusStr := "disconnected"
+	subject := SubjectDEXConnected
 	if connected {
 		v = 1
-		statusStr = "connected"
+		subject = SubjectDEXDisconnected
 	}
 	atomic.StoreUint32(&dc.connected, v)
 	if dc.broadcastingConnect() {
-		details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
-		dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
+		subject, details := c.formatDetails(subject, dc.acct.host)
+		dc.notify(newConnEventNote(subject, dc.acct.host, connected, details, db.Poke))
 	}
 
 }
@@ -5187,10 +5190,9 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 	t := encode.UnixTimeMilli(int64(note.Penalty.Time))
 	// d := time.Duration(note.Penalty.Duration) * time.Millisecond
-	details := fmt.Sprintf("Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
-		dc.acct.host, note.Penalty.Rule, t, note.Penalty.Details)
-	n := db.NewNotification("penalty", dc.acct.host, details, db.WarningLevel)
-	c.notify(&n)
+
+	subject, details := c.formatDetails(SubjectPenalized, dc.acct.host, note.Penalty.Rule, t, note.Penalty.Details)
+	c.notify(newServerNotifyNote(subject, details, db.WarningLevel))
 	return nil
 }
 

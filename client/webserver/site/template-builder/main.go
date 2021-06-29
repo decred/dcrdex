@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -37,11 +36,11 @@ func main() {
 		}
 	}
 
-	err = filepath.WalkDir(templateDir, func(path string, d fs.DirEntry, err error) error {
-		if d.IsDir() {
+	err = filepath.Walk(templateDir, func(path string, fi os.FileInfo, err error) error {
+		if fi.IsDir() {
 			return nil
 		}
-		baseName := d.Name()
+		baseName := fi.Name()
 		fmt.Println(baseName)
 		rawTmplPath := filepath.Join(templateDir, baseName)
 		rawTmpl, err := ioutil.ReadFile(rawTmplPath)
@@ -71,6 +70,7 @@ func main() {
 				if !found {
 					replacement := enDict[key]
 					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
+					os.Exit(1)
 				}
 				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement), -1) // Could just do 1
 			}
@@ -83,7 +83,7 @@ func main() {
 			// name := baseName[:len(baseName)-len(ext)]
 			// localizedName := filepath.Join(outputDirectory, name+"_"+lang+ext)
 			fmt.Println("Writing", localizedName)
-			if err := os.WriteFile(localizedName, tmpl, 0644); err != nil {
+			if err := ioutil.WriteFile(localizedName, tmpl, 0644); err != nil {
 				return fmt.Errorf("error writing localized template %s: %v", localizedName, err)
 			}
 		}

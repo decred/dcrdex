@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -349,29 +348,28 @@ func (s *WebServer) buildTemplates(lang string) error {
 	var match string
 
 	htmlDir := filepath.Join(s.siteDir, "src", "localized_html")
-	err := filepath.WalkDir(htmlDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+
+	fileInfos, err := ioutil.ReadDir(htmlDir)
+	if err != nil {
+		return fmt.Errorf("ReadDir error: %w", err)
+	}
+
+	for _, fi := range fileInfos {
+		if !fi.IsDir() {
+			continue
 		}
-		if !d.IsDir() || match != "" {
-			return nil
-		}
-		if d.Name() == lang {
-			match = d.Name()
-			return nil
+		if fi.Name() == lang {
+			match = fi.Name()
+			break
 		}
 
-		tag, err := language.Parse(d.Name())
+		tag, err := language.Parse(fi.Name())
 		if err != nil {
-			log.Debugf("error parsing language tag %q: %v", d.Name(), err)
-			return nil
+			log.Debugf("error parsing language tag %q: %v", fi.Name(), err)
+			continue
 		}
 		langs = append(langs, tag)
-		dirs = append(dirs, d.Name())
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("error parsing localized_html directory: %w", err)
+		dirs = append(dirs, fi.Name())
 	}
 
 	if match == "" {

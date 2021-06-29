@@ -111,6 +111,14 @@ var TemplateKeys = map[string]string{
 	SubjectMarketResumeScheduled: "Market %s at %s is now scheduled for resumption at %v",
 	// [market name, host, epoch]
 	SubjectMarketResumed: "Market %s at %s has resumed trading at epoch %d",
+	// [host]
+	SubjectUpgradeNeeded: "You may need to update your client to trade at %s.",
+	// [host]
+	SubjectDEXConnected: "%s is connected",
+	// [host]
+	SubjectDEXDisconnected: "%s is disconnected",
+	// [host, rule, time, details]
+	SubjectPenalized: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
 }
 
 // EnLocale is the english translations. We can construct the EnLocale in an
