@@ -114,12 +114,17 @@ func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 // handleInit handles requests for init. *msgjson.ResponsePayload.Error is empty
 // if successful.
 func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, err := parseInitArgs(params)
+	appPass, seed, err := parseInitArgs(params)
 	if err != nil {
 		return usage(initRoute, err)
 	}
-	defer appPass.Clear()
-	if err := s.core.InitializeClient(appPass); err != nil {
+	defer func() {
+		appPass.Clear()
+		if len(seed) > 0 {
+			seed.Clear()
+		}
+	}()
+	if err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
 		return createResponse(initRoute, nil, resErr)
@@ -643,9 +648,12 @@ var helpMsgs = map[string]helpMsg{
 	},
 	initRoute: {
 		pwArgsShort: `"appPass"`,
+		argsShort:   `("seed")`,
 		cmdSummary:  `Initialize the client.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    seed (string): Optional. hex-encoded 512-bit restoration seed.`,
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},

@@ -131,7 +131,7 @@ func startClients(ctx context.Context) error {
 		<-c.core.Ready()
 
 		// init app
-		err = c.core.InitializeClient(c.appPass)
+		err = c.core.InitializeClient(c.appPass, nil)
 		if err != nil {
 			return err
 		}

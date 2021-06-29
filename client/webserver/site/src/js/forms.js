@@ -8,19 +8,22 @@ let app
  * <form> element should be the second argument.
  */
 export class NewWalletForm {
-  constructor (application, form, success) {
+  constructor (application, form, success, pwCache) {
     this.form = form
     this.currentAsset = null
+    this.pwCache = pwCache
     const fields = this.fields = Doc.parsePage(form, [
       'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
-      'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr'
+      'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
+      'newWalletAppPWBox'
     ])
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
 
     bind(form, fields.submitAdd, async () => {
-      if (fields.nwAppPass.value === '') {
+      const pw = fields.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
+      if (!pw) {
         fields.newWalletErr.textContent = 'app password cannot be empty'
         Doc.show(fields.newWalletErr)
         return
@@ -31,7 +34,7 @@ export class NewWalletForm {
         assetID: parseInt(this.currentAsset.id),
         pass: fields.newWalletPass.value || '',
         config: this.subform.map(),
-        appPass: fields.nwAppPass.value
+        appPass: pw
       }
       fields.nwAppPass.value = ''
       const loaded = app.loading(form)
@@ -41,9 +44,15 @@ export class NewWalletForm {
         this.setError(res.msg)
         return
       }
+      if (this.pwCache) this.pwCache.pw = pw
       fields.newWalletPass.value = ''
       success()
     })
+  }
+
+  refresh () {
+    if (this.pwCache && this.pwCache.pw) Doc.hide(this.fields.newWalletAppPWBox)
+    else Doc.show(this.fields.newWalletAppPWBox)
   }
 
   async setAsset (asset) {
@@ -55,6 +64,7 @@ export class NewWalletForm {
     fields.newWalletPass.value = ''
     this.subform.update(asset.info)
     Doc.hide(fields.newWalletErr)
+    this.refresh()
   }
 
   /* setError sets and shows the in-form error message. */
@@ -273,35 +283,46 @@ export class WalletConfigForm {
     }
   }
 }
-/*
- * bindOpenWallet should be used with the "unlockWalletForm" template. The
- * enclosing <form> element should be second argument.
- */
-export function bindOpenWallet (app, form, success) {
-  const fields = Doc.parsePage(form, [
-    'uwAssetLogo', 'uwAssetName',
-    'uwAppPass', 'submitUnlock', 'unlockErr'
-  ])
-  let currentAsset
-  form.setAsset = asset => {
-    currentAsset = asset
+
+export class UnlockWalletForm {
+  constructor (application, form, success, pwCache) {
+    this.fields = Doc.parsePage(form, [
+      'uwAssetLogo', 'uwAssetName', 'uwAppPassBox', 'uwAppPass', 'submitUnlock',
+      'unlockErr'
+    ])
+    app = application
+    this.form = form
+    this.pwCache = pwCache
+    this.currentAsset = null
+    this.success = success
+    bind(form, this.fields.submitUnlock, () => this.submit())
+  }
+
+  setAsset (asset) {
+    const fields = this.fields
+    this.currentAsset = asset
     fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
     fields.uwAssetName.textContent = asset.info.name
     fields.uwAppPass.value = ''
+    if (this.pwCache.pw) Doc.hide(fields.uwAppPassBox)
+    else Doc.show(fields.uwAppPassBox)
   }
-  bind(form, fields.submitUnlock, async () => {
-    if (fields.uwAppPass.value === '') {
+
+  async submit () {
+    const fields = this.fields
+    const pw = fields.uwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
+    if (!pw) {
       fields.unlockErr.textContent = 'app password cannot be empty'
       Doc.show(fields.unlockErr)
       return
     }
     Doc.hide(fields.unlockErr)
     const open = {
-      assetID: parseInt(currentAsset.id),
-      pass: fields.uwAppPass.value
+      assetID: parseInt(this.currentAsset.id),
+      pass: pw
     }
     fields.uwAppPass.value = ''
-    const loaded = app.loading(form)
+    const loaded = app.loading(this.form)
     const res = await postJSON('/api/openwallet', open)
     loaded()
     if (!app.checkResponse(res)) {
@@ -309,8 +330,110 @@ export function bindOpenWallet (app, form, success) {
       Doc.show(fields.unlockErr)
       return
     }
-    success()
-  })
+    if (this.pwCache) this.pwCache.pw = pw
+    this.success()
+  }
+}
+
+export class DEXAddressForm {
+  constructor (application, form, success, pwCache) {
+    app = application
+    this.form = form
+    this.success = success
+    this.pwCache = pwCache
+    this.defaultTLSText = 'none selected'
+
+    const page = this.page = Doc.parsePage(form, [
+      'dexAddr', 'dexShowMore', 'dexCertBox', 'dexNeedCert', 'certFile',
+      'removeCert', 'addCert', 'selectedCert', 'dexAddrAppPWBox', 'dexAddrAppPW',
+      'submitDEXAddr', 'dexAddrErr'
+    ])
+
+    page.selectedCert.textContent = this.defaultTLSText
+    Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
+    Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
+    Doc.bind(page.addCert, 'click', () => page.certFile.click())
+    Doc.bind(page.dexShowMore, 'click', () => {
+      Doc.hide(page.dexShowMore)
+      Doc.show(page.dexCertBox)
+    })
+
+    bind(form, page.submitDEXAddr, () => this.checkDEX())
+  }
+
+  refresh () {
+    if (this.pwCache && this.pwCache.pw) Doc.hide(this.page.dexAddrAppPWBox)
+    else Doc.show(this.page.dexAddrAppPWBox)
+  }
+
+  async checkDEX () {
+    const page = this.page
+    Doc.hide(page.dexAddrErr)
+    const addr = page.dexAddr.value
+    if (addr === '') {
+      page.dexAddrErr.textContent = 'DEX address cannot be empty'
+      Doc.show(page.dexAddrErr)
+      return
+    }
+
+    let cert = ''
+    if (page.certFile.value) {
+      cert = await page.certFile.files[0].text()
+    }
+
+    const pw = page.dexAddrAppPW.value || this.pwCache.pw
+
+    const loaded = app.loading(this.form)
+
+    const res = await postJSON('/api/preregister', {
+      addr: addr,
+      cert: cert,
+      pass: pw
+    })
+    loaded()
+    if (!app.checkResponse(res, true)) {
+      if (res.msg === 'certificate required') {
+        Doc.hide(page.dexShowMore)
+        Doc.show(page.dexCertBox, page.dexNeedCert)
+      } else {
+        page.dexAddrErr.textContent = res.msg
+        Doc.show(page.dexAddrErr)
+      }
+
+      return
+    }
+
+    if (res.paid) {
+      await app.fetchUser()
+      app.loadPage('markets')
+      return
+    }
+
+    if (this.pwCache) this.pwCache.pw = pw
+    this.success(res.xc)
+  }
+
+  /**
+   * onCertFileChange when the input certFile changed, read the file
+   * and setting cert name into text of selectedCert to display on the view
+   */
+  async onCertFileChange () {
+    const page = this.page
+    const files = page.certFile.files
+    if (!files.length) return
+    page.selectedCert.textContent = files[0].name
+    Doc.show(page.removeCert)
+    Doc.hide(page.addCert)
+  }
+
+  /* clearCertFile cleanup certFile value and selectedCert text */
+  clearCertFile () {
+    const page = this.page
+    page.certFile.value = ''
+    page.selectedCert.textContent = this.defaultTLSText
+    Doc.hide(page.removeCert)
+    Doc.show(page.addCert)
+  }
 }
 
 /*

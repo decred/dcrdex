@@ -4,7 +4,7 @@ import BasePage from './basepage'
 import OrderBook from './orderbook'
 import { DepthChart } from './charts'
 import { postJSON } from './http'
-import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as Order from './orderutil'
 import ws from './ws'
 
@@ -190,7 +190,7 @@ export default class MarketsPage extends BasePage {
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, data => { this.handleEpochOrderRoute(data) })
     // Bind the wallet unlock form.
-    bindOpenWallet(app, page.openForm, async () => { this.openFunc() })
+    this.unlockForm = new UnlockWalletForm(app, page.openForm, async () => { this.openFunc() })
     // Create a wallet
     this.walletForm = new NewWalletForm(app, page.walletForm, async () => { this.createWallet() })
     // Main order form.
@@ -415,12 +415,10 @@ export default class MarketsPage extends BasePage {
     const base = this.market.base
     const quote = this.market.quote
     const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
-
     if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
       return
     }
-
     Doc.hide(page.orderForm)
   }
 
@@ -1265,16 +1263,15 @@ export default class MarketsPage extends BasePage {
   setBalanceVisibility () {
     if (this.market.dex.connected) {
       Doc.show(this.page.balanceTable)
-      Doc.show(this.page.orderForm)
     } else {
       Doc.hide(this.page.balanceTable)
-      Doc.hide(this.page.orderForm)
     }
   }
 
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     this.setBalanceVisibility()
+    this.resolveOrderFormVisibility()
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     if (!this.market.dex.connected) return

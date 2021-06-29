@@ -384,7 +384,7 @@ func (c *TCore) Network() dex.Network { return dex.Mainnet }
 
 func (c *TCore) Exchanges() map[string]*core.Exchange { return tExchanges }
 
-func (c *TCore) InitializeClient(pw []byte) error {
+func (c *TCore) InitializeClient(pw, seed []byte) error {
 	randomDelay()
 	c.inited = true
 	return nil
@@ -394,6 +394,18 @@ func (c *TCore) GetFee(host string, cert interface{}) (uint64, error) {
 }
 func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, error) {
 	return tExchanges[host], nil
+}
+
+// PreRegister - use secondDEX = "thisdexwithalongname.com" to get paid = true.
+func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+	xc := tExchanges[dexAddr]
+	if xc == nil {
+		xc = tExchanges[firstDEX]
+	}
+	if dexAddr == secondDEX {
+		c.reg = &core.RegisterForm{}
+	}
+	return tExchanges[firstDEX], dexAddr == secondDEX, nil
 }
 
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
@@ -1140,6 +1152,11 @@ func (c *TCore) runRandomNotes() {
 	}
 }
 
+func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
+	b, _ := hex.DecodeString("deadbeef1234567890")
+	return b, nil
+}
+
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
 	asset.Register(22, &TDriver{})  // mona
@@ -1151,7 +1168,7 @@ func TestServer(t *testing.T) {
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
 	initialize := false
-	register := true
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true
@@ -1167,13 +1184,13 @@ func TestServer(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 
 	if initialize {
-		tCore.InitializeClient([]byte(""))
+		tCore.InitializeClient([]byte(""), nil)
 	}
 
 	if register {
 		// initialize is implied and forced if register = true.
 		if !initialize {
-			tCore.InitializeClient([]byte(""))
+			tCore.InitializeClient([]byte(""), nil)
 		}
 		tCore.Register(new(core.RegisterForm))
 	}

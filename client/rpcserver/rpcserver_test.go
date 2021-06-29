@@ -79,7 +79,7 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
 }
 func (c *TCore) Exchanges() (exchanges map[string]*core.Exchange) { return c.exchanges }
-func (c *TCore) InitializeClient(pw []byte) error {
+func (c *TCore) InitializeClient(pw, seed []byte) error {
 	return c.initializeClientErr
 }
 func (c *TCore) Login(appPass []byte) (*core.LoginResult, error) {

@@ -37,6 +37,30 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiPreRegister is the handler for the '/preregister' API request.
+func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
+	form := new(registrationForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, form.Password, cert)
+	if err != nil {
+		s.writeAPIError(w, err.Error())
+		return
+	}
+	resp := struct {
+		OK       bool           `json:"ok"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
+		Paid     bool           `json:"paid"`
+	}{
+		OK:       true,
+		Exchange: exchangeInfo,
+		Paid:     paid,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
@@ -234,6 +258,29 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res, s.indent)
 }
 
+// apiExportSeed is the handler for the '/exportseed' API request.
+func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Pass encode.PassBytes `json:"pass"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	r.Close = true
+	seed, err := s.core.ExportSeed(form.Pass)
+	if err != nil {
+		s.writeAPIError(w, "error exporting seed: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK   bool      `json:"ok"`
+		Seed dex.Bytes `json:"seed"`
+	}{
+		OK:   true,
+		Seed: seed,
+	}, s.indent)
+}
+
 // apiAccountImport is the handler for the '/importaccount' API request.
 func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	form := new(accountImportForm)
@@ -303,17 +350,17 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
-	login := new(loginForm)
-	defer login.Pass.Clear()
-	if !readPost(w, r, login) {
+	init := new(initForm)
+	defer init.Pass.Clear()
+	if !readPost(w, r, init) {
 		return
 	}
-	err := s.core.InitializeClient(login.Pass)
+	err := s.core.InitializeClient(init.Pass, init.Seed)
 	if err != nil {
 		s.writeAPIError(w, "initialization error: %v", err)
 		return
 	}
-	s.actuallyLogin(w, r, login)
+	s.actuallyLogin(w, r, &loginForm{Pass: init.Pass})
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.

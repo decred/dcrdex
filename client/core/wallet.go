@@ -30,14 +30,14 @@ type xcWallet struct {
 	syncProgress float32
 }
 
-// encPW returns xcWallet's encPW.
+// encPW returns xcWallet's encrypted password.
 func (w *xcWallet) encPW() []byte {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	return w.encPass
 }
 
-// setEncPW sets xcWallet's encPW.
+// setEncPW sets xcWallet's encrypted password.
 func (w *xcWallet) setEncPW(encPW []byte) {
 	w.mtx.Lock()
 	w.encPass = encPW
@@ -84,6 +84,9 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 		return false, nil // unlocked
 	}
 	// Locked backend requires both encrypted and decrypted passwords.
+	if len(w.encPW()) == 0 {
+		return false, fmt.Errorf("%s wallet reporting as locked but no password has been set", unbip(w.AssetID))
+	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	if len(w.encPass) == 0 {
