@@ -101,7 +101,10 @@ func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, err
 func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
 	return s.matchStatuses, nil
 }
-func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
+func (s *TStorage) CreateAccount(*account.Account) (string, error) { return s.acctAddr, s.acctErr }
+func (s *TStorage) CreateAccountWithTx(acct *account.Account, regAddr string, rawTx []byte) error {
+	return s.acctErr
+}
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
 func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
 func (s *TStorage) setRatioData(dat *ratioData) {
@@ -116,10 +119,12 @@ func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (oids, t
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
-	sig    *ecdsa.Signature
+	sig *ecdsa.Signature
+	//privKey *secp256k1.PrivateKey
 	pubkey *secp256k1.PublicKey
 }
 
+// Maybe actually change this to an ecdsa.Sign with a private key instead?
 func (s *TSigner) Sign(hash []byte) *ecdsa.Signature { return s.sig }
 func (s *TSigner) PubKey() *secp256k1.PublicKey      { return s.pubkey }
 
@@ -214,14 +219,15 @@ type tUser struct {
 	privKey *secp256k1.PrivateKey
 }
 
+// makes a new user with its own account ID, tRPCClient
 func tNewUser(t *testing.T) *tUser {
 	conn := tNewRPCClient()
-	// register the RPCClient with a 'connect' Message
-	acctID := newAccountID()
+	// acctID := newAccountID()
 	privKey, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
 		t.Fatalf("error generating private key: %v", err)
 	}
+	acctID := account.NewID(privKey.PubKey().SerializeCompressed())
 	return &tUser{
 		conn:    conn,
 		acctID:  acctID,
@@ -240,6 +246,20 @@ type testRig struct {
 }
 
 var rig *testRig
+
+type tAddrPooler struct {
+	addr string
+}
+
+var _ AddressPooler = (*tAddrPooler)(nil)
+
+func (ap *tAddrPooler) Get() string {
+	return ap.addr
+}
+func (ap *tAddrPooler) Owns(address string) bool {
+	return address == ap.addr
+}
+func (ap *tAddrPooler) Used(address string) {}
 
 type tSignable struct {
 	b   []byte
@@ -327,10 +347,25 @@ var (
 	tCheckFeeVal   uint64 = 500_000_000
 	tCheckFeeConfs int64  = 5
 	tCheckFeeErr   error
+
+	tParseBondTxAddr string
+	tParseBondTxAcct account.AccountID
+	tParseBondTxErr  error
+
+	tSentFeeCoinID []byte
+	tSendFeeTxErr  error
 )
 
 func tCheckFee([]byte) (addr string, val uint64, confs int64, err error) {
 	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
+}
+
+func tParseTxFee(rawTx []byte, wantFee int64) (addr string, acct account.AccountID, err error) {
+	return tParseBondTxAddr, tParseBondTxAcct, tParseBondTxErr
+}
+
+func tSendFeeTx(rawTx []byte) (coinid []byte, err error) {
+	return tSentFeeCoinID, tSendFeeTxErr
 }
 
 const (
@@ -355,18 +390,22 @@ func TestMain(m *testing.M) {
 		ctx, shutdown := context.WithCancel(context.Background())
 		defer shutdown()
 		storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+		// secp256k1.PrivKeyFromBytes
 		dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
 		signer := &TSigner{pubkey: dexKey}
 		authMgr := NewAuthManager(&Config{
-			Storage:         storage,
-			Signer:          signer,
-			RegistrationFee: tRegFee,
-			FeeConfs:        tCheckFeeConfs,
-			FeeChecker:      tCheckFee,
-			UserUnbooker:    func(account.AccountID) {},
-			MiaUserTimeout:  90 * time.Second, // TODO: test
-			CancelThreshold: 0.9,
-			TxDataSources:   make(map[uint32]TxDataSource),
+			Storage:          storage,
+			Signer:           signer,
+			RegistrationFee:  tRegFee,
+			FeeConfs:         tCheckFeeConfs,
+			FeeChecker:       tCheckFee,
+			FeeTxParser:      tParseTxFee,
+			FeeTxSender:      tSendFeeTx,
+			FeeAddressPooler: &tAddrPooler{}, // TODO: set an address
+			UserUnbooker:     func(account.AccountID) {},
+			MiaUserTimeout:   90 * time.Second, // TODO: test
+			CancelThreshold:  0.9,
+			TxDataSources:    make(map[uint32]TxDataSource),
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -839,7 +878,10 @@ func TestConnect(t *testing.T) {
 	connectUser(t, reuser)
 	a10 := &tPayload{A: 10}
 	msg, _ = msgjson.NewRequest(comms.NextID(), "request", a10)
-	rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, time.Minute, func() {})
+	err = rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, time.Minute, func() {})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	// The a10 message should be in the new connection
 	if user.conn.getReq() != nil {
 		t.Fatalf("old connection received a request after reconnection")
@@ -930,7 +972,8 @@ func TestAccountErrors(t *testing.T) {
 	if client == nil {
 		t.Fatalf("client not found")
 	}
-	if !client.isSuspended() {
+	_, suspended := client.acctStatus()
+	if !suspended {
 		t.Errorf("client should have been in suspended state")
 	}
 
@@ -1272,8 +1315,100 @@ func TestHandleResponse(t *testing.T) {
 	client.mtx.Unlock()
 }
 
+func TestHandlePreregister(t *testing.T) {
+	user := tNewUser(t)
+	rig.mgr.feeAddrPool.(*tAddrPooler).addr = tFeeAddr
+	req := msgjson.PreRegister{AssetID: 42}
+	msg, err := msgjson.NewRequest(comms.NextID(), msgjson.PreRegisterRoute, &req)
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+
+	// ensure there are no sends waiting first
+	respMsg := user.conn.getSend()
+	if respMsg != nil {
+		b, _ := json.Marshal(respMsg)
+		t.Fatalf("unexpected response: %s", string(b))
+	}
+
+	rig.signer.sig = user.randomSignature()
+	rpcErr := rig.mgr.handlePreRegister(user.conn, msg)
+	if rpcErr != nil {
+		t.Fatalf("error for valid registration: %s", rpcErr.Message)
+	}
+	respMsg = user.conn.getSend()
+	if respMsg == nil {
+		t.Fatalf("no preregister response")
+	}
+	resp, _ := respMsg.Response()
+	preregRes := new(msgjson.PreRegisterResult)
+	err = json.Unmarshal(resp.Result, preregRes)
+	if err != nil {
+		t.Fatalf("error unmarshaling payload")
+	}
+
+	if preregRes.DEXPubKey.String() != tDexPubKeyHex {
+		t.Fatalf("wrong DEX pubkey. expected %s, got %s", tDexPubKeyHex, preregRes.DEXPubKey.String())
+	}
+	if preregRes.Address != tFeeAddr {
+		t.Fatalf("wrong fee address. expected %s, got %s", tFeeAddr, preregRes.Address)
+	}
+	if preregRes.Fee != tRegFee {
+		t.Fatalf("wrong fee. expected %d, got %d", tRegFee, preregRes.Fee)
+	}
+}
+
+func TestHandlePayFee(t *testing.T) {
+	user := tNewUser(t)
+	resetStorage()
+	rig.mgr.feeAddrPool.(*tAddrPooler).addr = tFeeAddr
+
+	payfee := &msgjson.PayFee{
+		PubKey:   user.privKey.PubKey().SerializeCompressed(),
+		AssetID:  42,
+		RawFeeTx: nil, // TODO: make a tx that decodes
+	}
+	sigMsg := payfee.Serialize()
+	sig := ecdsa.Sign(user.privKey, sigMsg)
+	payfee.SetSig(sig.Serialize())
+
+	msg, err := msgjson.NewRequest(comms.NextID(), msgjson.PayFeeRoute, payfee)
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+
+	// ensure there are no sends waiting first
+	respMsg := user.conn.getSend()
+	if respMsg != nil {
+		b, _ := json.Marshal(respMsg)
+		t.Fatalf("unexpected response: %s", string(b))
+	}
+
+	// Make ParseBondTx return the address in the pooler and the account
+	// commitment for this user.
+	tParseBondTxAddr = tFeeAddr
+	tParseBondTxAcct = user.acctID
+	tParseBondTxErr = nil
+	rig.signer.sig = user.randomSignature()
+	rpcErr := rig.mgr.handlePayFee(user.conn, msg)
+	if rpcErr != nil {
+		t.Fatalf("error for valid registration: %s", rpcErr.Message)
+	}
+	respMsg = user.conn.getSend()
+	if respMsg == nil {
+		t.Fatalf("no payfee response")
+	}
+	resp, _ := respMsg.Response()
+	payfeeRes := new(msgjson.PayFeeResult)
+	err = json.Unmarshal(resp.Result, payfeeRes)
+	if err != nil {
+		t.Fatalf("error unmarshaling payload")
+	}
+}
+
 func TestHandleRegister(t *testing.T) {
 	user := tNewUser(t)
+	resetStorage()
 	dummyError := fmt.Errorf("test error")
 
 	newReg := func() *msgjson.Register {
@@ -1302,6 +1437,10 @@ func TestHandleRegister(t *testing.T) {
 	ensureErr := makeEnsureErr(t)
 
 	msg := newMsg(newReg())
+	msg.Payload = []byte(`null`)
+	ensureErr(do(msg), "null payload", msgjson.RPCParseError)
+
+	msg = newMsg(newReg())
 	msg.Payload = []byte(`?`)
 	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
 
@@ -1432,7 +1571,7 @@ func TestHandleNotifyFee(t *testing.T) {
 	rig.storage.acct = userAcct
 
 	// account already paid
-	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
+	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AccountExistsError)
 
 	// Signature error
 	rig.storage.unpaid = true // notifyfee cannot be sent for paid account

@@ -1411,8 +1411,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Disallow trade orders from suspended accounts. Cancel orders are allowed.
 	if rec.order.Type() != order.CancelOrderType {
 		// Do not bother the auth manager for cancel orders.
-		if _, suspended := m.auth.Suspended(rec.order.User()); suspended {
-			log.Debugf("Account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
+		if _, tier := m.auth.AcctStatus(rec.order.User()); tier < 1 {
+			log.Debugf("Account %v with tier %d not allowed to submit order %v", rec.order.User(), tier, rec.order.ID())
 			errChan <- ErrSuspendedAccount
 			return nil
 		}
