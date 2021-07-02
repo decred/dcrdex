@@ -41,8 +41,17 @@ type registrationForm struct {
 	Addr     string           `json:"addr"`
 	Cert     string           `json:"cert"`
 	Password encode.PassBytes `json:"pass"`
-	Fee      uint64           `json:"fee"`
-	AssetID  *uint32          `json:"asset,omitempty"` // prevent out-of-date frontend from paying fee in BTC
+	AssetID  *uint32          `json:"asset,omitempty"` // prevent omission using BTC
+}
+
+// postBondForm is used to post a new bond for an existing DEX account.
+type postBondForm struct {
+	Addr     string           `json:"addr"`
+	Cert     string           `json:"cert"` // may be empty for adding bond to existing account
+	Password encode.PassBytes `json:"pass"`
+	Bond     uint64           `json:"bond"`
+	AssetID  *uint32          `json:"asset,omitempty"` // prevent omission using BTC
+	LockTime uint64           `json:"lockTime"`
 }
 
 type registrationTxFeeForm struct {
@@ -99,7 +108,7 @@ type accountExportForm struct {
 
 type accountImportForm struct {
 	Pass    encode.PassBytes `json:"pw"`
-	Account core.Account     `json:"account"`
+	Account *core.Account    `json:"account"`
 }
 
 type accountDisableForm struct {

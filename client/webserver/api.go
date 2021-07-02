@@ -34,7 +34,7 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	exchangeInfo, paid, err := s.core.DiscoverAccount(form.Addr, pass, cert)
+	exchangeInfo, paid, err := s.core.DiscoverAccount(form.Addr, pass, cert) // TODO: update when paid return removed
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -121,11 +121,45 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		Addr:    reg.Addr,
 		Cert:    []byte(reg.Cert),
 		AppPass: pass,
-		Fee:     reg.Fee,
 		Asset:   &assetID,
 	})
 	if err != nil {
 		s.writeAPIError(w, err)
+		return
+	}
+	// There was no error paying the fee, but we must wait on confirmations
+	// before informing the DEX of the fee payment. Those results will come
+	// through as a notification.
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiPostBond is the handler for the '/postbond' API request.
+func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
+	post := new(postBondForm)
+	defer post.Password.Clear()
+	if !readPost(w, r, post) {
+		return
+	}
+	assetID := uint32(42)
+	if post.AssetID != nil {
+		assetID = *post.AssetID
+	}
+	wallet := s.core.WalletState(assetID)
+	if wallet == nil {
+		s.writeAPIError(w, errors.New("no wallet"))
+		return
+	}
+
+	_, err := s.core.PostBond(&core.PostBondForm{
+		Addr:     post.Addr,
+		Cert:     []byte(post.Cert),
+		AppPass:  post.Password,
+		Bond:     post.Bond,
+		Asset:    &assetID,
+		LockTime: post.LockTime,
+	})
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("add bond error: %w", err))
 		return
 	}
 	// There was no error paying the fee, but we must wait on confirmations
@@ -346,7 +380,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	account, err := s.core.AccountExport(pass, form.Host)
+	account, _, err := s.core.AccountExport(pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error exporting account: %w", err))
 		return
@@ -355,9 +389,11 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	res := &struct {
 		OK      bool          `json:"ok"`
 		Account *core.Account `json:"account"`
+		Bonds   []*db.Bond    `json:"bonds"`
 	}{
 		OK:      true,
 		Account: account,
+		// Bonds TODO
 	}
 	writeJSON(w, res, s.indent)
 }
@@ -401,7 +437,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	err = s.core.AccountImport(pass, form.Account)
+	err = s.core.AccountImport(pass, form.Account, nil /* Bonds TODO */)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
 		return

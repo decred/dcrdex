@@ -22,6 +22,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -77,6 +78,7 @@ type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
+	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
@@ -106,8 +108,8 @@ type clientCore interface {
 	Order(oid dex.Bytes) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
-	AccountExport(pw []byte, host string) (*core.Account, error)
-	AccountImport(pw []byte, account core.Account) error
+	AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error)
+	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
@@ -329,6 +331,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Get("/user", s.apiUser)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
+			apiAuth.Post("/postbond", s.apiPostBond)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)
