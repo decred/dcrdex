@@ -45,7 +45,18 @@ type registrationForm struct {
 	Addr     string           `json:"addr"`
 	Cert     string           `json:"cert"`
 	Password encode.PassBytes `json:"pass"`
-	Fee      uint64           `json:"fee"`
+	Bond     uint64           `json:"bond"`
+	LockTime uint64           `json:"lockTime"`
+	// TODO: BondAssetID
+}
+
+// addBondForm is used to post a new bond for an existing DEX account.
+type addBondForm struct {
+	Addr     string           `json:"addr"`
+	Password encode.PassBytes `json:"pass"`
+	Bond     uint64           `json:"bond"`
+	LockTime uint64           `json:"lockTime"`
+	// TODO: BondAssetID
 }
 
 // newWalletForm is information necessary to create a new wallet.
@@ -89,7 +100,7 @@ type accountExportForm struct {
 
 type accountImportForm struct {
 	Pass    encode.PassBytes `json:"pw"`
-	Account core.Account     `json:"account"`
+	Account *core.Account    `json:"account"`
 }
 
 type accountDisableForm struct {

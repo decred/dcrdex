@@ -18,6 +18,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -57,6 +58,7 @@ type TCore struct {
 	syncFeed        *core.BookFeed
 	syncErr         error
 	regErr          error
+	addBondErr      error
 	loginErr        error
 	logoutErr       error
 	initErr         error
@@ -71,9 +73,8 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Network() dex.Network                       { return dex.Mainnet }
-func (c *TCore) Exchanges() map[string]*core.Exchange       { return nil }
-func (c *TCore) GetFee(string, interface{}) (uint64, error) { return 1e8, c.getFeeErr }
+func (c *TCore) Network() dex.Network                 { return dex.Mainnet }
+func (c *TCore) Exchanges() map[string]*core.Exchange { return nil }
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
 	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
 }
@@ -82,6 +83,7 @@ func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core
 	return nil, false, nil
 }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
+func (c *TCore) AddBond(r *core.AddBondForm) (*core.AddBondResult, error)    { return nil, c.addBondErr }
 func (c *TCore) InitializeClient(pw, seed []byte) error                      { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }
 func (c *TCore) IsInitialized() bool                                         { return c.isInited }
@@ -158,10 +160,10 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 	return nil, nil
 }
-func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
-	return nil, nil
+func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error) {
+	return nil, nil, nil
 }
-func (c *TCore) AccountImport(pw []byte, account core.Account) error {
+func (c *TCore) AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
@@ -463,6 +465,8 @@ func TestAPIInit(t *testing.T) {
 	tCore.initErr = nil
 }
 
+// TODO: TestAPIGetDEXConfig
+/*
 func TestAPIGetFee(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
@@ -482,6 +486,7 @@ func TestAPIGetFee(t *testing.T) {
 	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.getFeeErr = nil
 }
+*/
 
 func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)

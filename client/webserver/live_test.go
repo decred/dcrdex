@@ -272,11 +272,11 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 		Connected: true,
-		Fee: &core.FeeAsset{
-			ID:    42,
-			Confs: 1,
-			Amt:   1e8,
-		},
+		// Fee: &core.FeeAsset{
+		// 	ID:    42,
+		// 	Confs: 1,
+		// 	Amt:   1e8,
+		// },
 	},
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
@@ -287,11 +287,11 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(22, 141): mkMrkt("mona", "kmd"),
 		},
 		Connected: true,
-		Fee: &core.FeeAsset{
-			ID:    42,
-			Confs: 1,
-			Amt:   1e8,
-		},
+		// Fee: &core.FeeAsset{
+		// 	ID:    42,
+		// 	Confs: 1,
+		// 	Amt:   1e8,
+		// },
 	},
 }
 

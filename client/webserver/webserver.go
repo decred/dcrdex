@@ -22,6 +22,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"github.com/go-chi/chi/v5"
@@ -65,6 +66,7 @@ type clientCore interface {
 	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
+	AddBond(form *core.AddBondForm) (*core.AddBondResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
@@ -80,9 +82,8 @@ type clientCore interface {
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
-	GetFee(url string, cert interface{}) (uint64, error)
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
-	PreRegister(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
+	PreRegister(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
@@ -93,8 +94,8 @@ type clientCore interface {
 	Order(oid dex.Bytes) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
-	AccountExport(pw []byte, host string) (*core.Account, error)
-	AccountImport(pw []byte, account core.Account) error
+	AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error)
+	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
@@ -269,7 +270,6 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
-			apiInit.Post("/getfee", s.apiGetFee)
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
 			apiInit.Post("/preregister", s.apiPreRegister)
 		})
@@ -279,6 +279,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 			apiAuth.Get("/user", s.apiUser)
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
+			apiAuth.Post("/addbond", s.apiAddBond)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)
