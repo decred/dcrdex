@@ -553,27 +553,6 @@ func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, status 
 		}
 	}
 
-	// If enabled, search all tables for the order to ensure it is not already
-	// stored somewhere.
-	// if a.checkedStores {
-	// 	var foundStatus pgOrderStatus
-	// 	switch ord.Type() {
-	// 	case order.MarketOrderType, order.LimitOrderType:
-	// 		foundStatus, _, _, err = orderStatus(a.db, ord.ID(), a.dbName, marketSchema)
-	// 	case order.CancelOrderType:
-	// 		foundStatus, err = cancelOrderStatus(a.db, ord.ID(), a.dbName, marketSchema)
-	// 	}
-	//
-	// 	if err == nil {
-	// 		return fmt.Errorf("attempted to store a %s order while it exists "+
-	// 			"in another table as %s", pgToMarketStatus(status), pgToMarketStatus(foundStatus))
-	// 	}
-	// 	if !db.IsErrOrderUnknown(err) {
-	// 		a.fatalBackendErr(err)
-	// 		return fmt.Errorf("findOrder failed: %v", err)
-	// 	}
-	// }
-
 	// Check for order commitment duplicates. This also covers order ID since
 	// commitment is part of order serialization. Note that it checks ALL
 	// markets, so this may be excessive. This check may be more appropriate in

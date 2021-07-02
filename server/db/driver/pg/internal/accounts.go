@@ -2,7 +2,7 @@ package internal
 
 const (
 	// CreateFeeKeysTable creates the fee_keys table, which is a small table that
-	// is used as a persistent child key counter for a master extended public key.
+	// is used as a persistent child key counter for master extended public key.
 	CreateFeeKeysTable = `CREATE TABLE IF NOT EXISTS %s (
 		key_hash BYTEA PRIMARY KEY,    -- UNIQUE INDEX
 		child INT8 DEFAULT 0
@@ -12,10 +12,38 @@ const (
 	CreateAccountsTable = `CREATE TABLE IF NOT EXISTS %s (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
 		pubkey BYTEA,
-		fee_address TEXT,
-		fee_coin BYTEA,
-		broken_rule INT2 DEFAULT 0 -- TODO: change to banned BOOL
+		fee_address TEXT,          -- DEPRECATED
+		fee_coin BYTEA             -- DEPRECATED
 		);`
+	// TODO: upgrade to drop the broken_rule column
+
+	CreateBondsTableV0 = `CREATE TABLE IF NOT EXISTS %s (
+		bond_coin_id BYTEA,
+		asset_id INT4,
+		account_id BYTEA,
+		script BYTEA,
+		amount INT8,
+		lockTime INT8,
+		pending BOOL,
+		PRIMARY KEY (bond_coin_id, asset_id)
+		);`
+	CreateBondsTable = CreateBondsTableV0
+
+	CreateBondsAcctIndexV0 = `CREATE INDEX IF NOT EXISTS %s ON %s (account_id);`
+	CreateBondsAcctIndex   = CreateBondsAcctIndexV0
+
+	CreateBondsLockTimeIndexV0 = `CREATE INDEX IF NOT EXISTS %s ON %s (lockTime);`
+	CreateBondsLockTimeIndex   = CreateBondsLockTimeIndexV0
+
+	AddBond = `INSERT INTO %s (bond_coin_id, asset_id, account_id, script, amount, lockTime, pending)
+		VALUES ($1, $2, $3, $4, $5, $6, $7);`  // TODO: consider upsert of pending
+
+	SelectActiveBondsForUser = `SELECT bond_coin_id, asset_id, script, amount, lockTime, pending FROM %s
+		WHERE account_id = $1 AND lockTime >= $2
+		ORDER BY lockTime;`
+
+	ActivateBond = `UPDATE %s SET pending = TRUE
+		WHERE asset_id = $1 AND bond_coin_id = $2;`
 
 	// InsertKeyIfMissing creates an entry for the specified key hash, if it
 	// doesn't already exist.
@@ -33,18 +61,16 @@ const (
 	// that the account is closed.
 	CloseAccount = `UPDATE %s SET broken_rule = $1 WHERE account_id = $2;`
 
-	// SelectAccount gathers account details for the specified account ID. The
-	// details returned from this query are sufficient to determine 1) whether the
-	// registration fee has been paid, or 2) whether the account has been closed.
-	SelectAccount = `SELECT pubkey, fee_coin, broken_rule
+	// SelectAccount gathers account details for the specified account ID.
+	SelectAccount = `SELECT pubkey, fee_coin
 		FROM %s
 		WHERE account_id = $1;`
 
 	// SelectAllAccounts retrieves all accounts.
-	SelectAllAccounts = `SELECT * FROM %s;`
+	SelectAllAccounts = `SELECT account_id, pubkey, fee_address, fee_coin FROM %s;`
 
 	// SelectAccountInfo retrieves all fields for an account.
-	SelectAccountInfo = `SELECT * FROM %s
+	SelectAccountInfo = `SELECT account_id, pubkey, fee_address, fee_coin FROM %s
 		WHERE account_id = $1;`
 
 	// CreateAccount creates an entry for a new account.
