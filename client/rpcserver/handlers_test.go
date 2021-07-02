@@ -186,6 +186,8 @@ func TestHandleVersion(t *testing.T) {
 	}
 }
 
+// TestHandleGetDEXConfig
+/*
 func TestHandleGetFee(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -225,6 +227,7 @@ func TestHandleGetFee(t *testing.T) {
 		}
 	}
 }
+*/
 
 func TestHandleInit(t *testing.T) {
 	pw := encode.PassBytes("password123")
@@ -453,7 +456,7 @@ func TestHandleRegister(t *testing.T) {
 		name:        "core.GetFee error",
 		params:      params,
 		getFeeErr:   errors.New("error"),
-		wantErrCode: msgjson.RPCGetFeeError,
+		wantErrCode: msgjson.RPCGetDexConfError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
