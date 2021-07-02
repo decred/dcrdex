@@ -69,7 +69,8 @@ type clientCore interface {
 	OpenWallet(assetID uint32, appPass []byte) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
-	Register(form *core.RegisterForm) (*core.RegisterResult, error)
+	Register(form *core.RegisterForm) (*core.RegisterResult, error) // V0PURGE
+	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
