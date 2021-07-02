@@ -15,28 +15,6 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
-// apiGetFee is the handler for the '/getfee' API request.
-func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
-	form := new(registrationForm)
-	if !readPost(w, r, form) {
-		return
-	}
-	cert := []byte(form.Cert)
-	fee, err := s.core.GetFee(form.Addr, cert)
-	if err != nil {
-		s.writeAPIError(w, err.Error())
-		return
-	}
-	resp := struct {
-		OK  bool   `json:"ok"`
-		Fee uint64 `json:"fee,omitempty"`
-	}{
-		OK:  true,
-		Fee: fee,
-	}
-	writeJSON(w, resp, s.indent)
-}
-
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
@@ -74,13 +52,44 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := s.core.Register(&core.RegisterForm{
-		Addr:    reg.Addr,
-		Cert:    []byte(reg.Cert),
-		AppPass: reg.Password,
-		Fee:     reg.Fee,
+		Addr:     reg.Addr,
+		Cert:     []byte(reg.Cert),
+		AppPass:  reg.Password,
+		Bond:     reg.Bond,
+		LockTime: reg.LockTime,
 	})
 	if err != nil {
 		s.writeAPIError(w, "registration error: %v", err)
+		return
+	}
+	// There was no error paying the fee, but we must wait on confirmations
+	// before informing the DEX of the fee payment. Those results will come
+	// through as a notification.
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiAddBond is the handler for the '/addbond' API request.
+func (s *WebServer) apiAddBond(w http.ResponseWriter, r *http.Request) {
+	add := new(addBondForm)
+	defer add.Password.Clear()
+	if !readPost(w, r, add) {
+		return
+	}
+	dcrID, _ := dex.BipSymbolID("dcr")
+	wallet := s.core.WalletState(dcrID)
+	if wallet == nil {
+		s.writeAPIError(w, "No Decred wallet")
+		return
+	}
+
+	_, err := s.core.AddBond(&core.AddBondForm{
+		Addr:     add.Addr,
+		AppPass:  add.Password,
+		Bond:     add.Bond,
+		LockTime: add.LockTime,
+	})
+	if err != nil {
+		s.writeAPIError(w, "add bond error: %v", err)
 		return
 	}
 	// There was no error paying the fee, but we must wait on confirmations
@@ -218,7 +227,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	account, err := s.core.AccountExport(form.Pass, form.Host)
+	account, _, err := s.core.AccountExport(form.Pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error exporting account: %v", err)
 		return
@@ -227,9 +236,11 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	res := &struct {
 		OK      bool          `json:"ok"`
 		Account *core.Account `json:"account"`
+		Bonds   []*db.Bond    `json:"bonds"`
 	}{
 		OK:      true,
 		Account: account,
+		// Bonds TODO
 	}
 	writeJSON(w, res, s.indent)
 }
@@ -242,7 +253,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	err := s.core.AccountImport(form.Pass, form.Account)
+	err := s.core.AccountImport(form.Pass, form.Account, nil /* Bonds TODO */)
 	if err != nil {
 		s.writeAPIError(w, "error importing account: %v", err)
 		return
