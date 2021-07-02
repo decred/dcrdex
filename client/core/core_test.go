@@ -202,6 +202,9 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		privKey:   privKey,
 		id:        account.NewID(privKey.PubKey().SerializeCompressed()),
 		feeCoin:   []byte("somecoin"),
+		// feeAssetID is 0 (btc)
+		// tier, bonds, etc. set on auth
+		tier: 1, // not suspended by default
 	}
 }
 
@@ -223,6 +226,8 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		},
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
+			APIVersion:       serverdex.PreAPIVersion,
+			DEXPubKey:        acct.dexPubKey.SerializeCompressed(),
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
 			Assets: []*msgjson.Asset{
@@ -259,9 +264,12 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 					},
 				},
 			},
+			BondExpiry: 86400, // >0 make client treat as API v1
+			BondAssets: map[string]*msgjson.BondAsset{
+				"dcr": {ID: 42, Amt: tFee, Confs: 1},
+			},
 			Fee:            tFee,
-			RegFeeConfirms: 0,
-			DEXPubKey:      acct.dexPubKey.SerializeCompressed(),
+			RegFeeConfirms: 0, // 1 or remove?
 			BinSizes:       []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
@@ -321,7 +329,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 	}
 	return fmt.Errorf("no handler for route %q", msg.Route)
 }
-func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs } // use when Core.listen is running
 func (conn *TWebsocket) IsDown() bool {
 	return false
 }
@@ -337,7 +345,8 @@ type TDB struct {
 	acct                     *db.AccountInfo
 	acctErr                  error
 	createAccountErr         error
-	accountPaidErr           error
+	addBondErr               error
+	storeAccountProofErr     error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
 	matchesForOID            []*db.MetaMatch
@@ -360,7 +369,6 @@ type TDB struct {
 	verifyAccountPaid        bool
 	verifyCreateAccount      bool
 	verifyUpdateAccountInfo  bool
-	accountProofPersisted    *db.AccountProof
 	disabledHost             *string
 	disableAccountErr        error
 	creds                    *db.PrimaryCredentials
@@ -390,6 +398,17 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	tdb.verifyCreateAccount = true
 	tdb.acct = ai
 	return tdb.createAccountErr
+}
+
+func (tdb *TDB) AddBond(host string, bond *db.Bond) error {
+	return tdb.addBondErr
+}
+
+func (tdb *TDB) ConfirmBond(host string, assetID uint32, bondCoinID []byte) error {
+	return nil
+}
+func (tdb *TDB) BondRefunded(host string, assetID uint32, bondCoinID []byte) error {
+	return nil
 }
 
 func (tdb *TDB) DisableAccount(url string) error {
@@ -494,10 +513,10 @@ func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
 	return tdb.accountProof, tdb.accountProofErr
 }
 
-func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 	tdb.verifyAccountPaid = true
-	tdb.accountProofPersisted = proof
-	return tdb.accountPaidErr
+	// todo: save proof?
+	return tdb.storeAccountProofErr
 }
 
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
@@ -642,6 +661,11 @@ type TXCWallet struct {
 	ownsAddressErr      error
 	pubKeys             []dex.Bytes
 	sigs                []dex.Bytes
+	feeTxMade           []byte
+	feeCoin             []byte
+	makeRegFeeTxErr     error
+	feeCoinSent         []byte
+	sendTxnErr          error
 	contractExpired     bool
 	contractLockTime    time.Time
 	accelerationParams  *struct {
@@ -801,7 +825,11 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
+func (w *TXCWallet) LockTimeExpired(_ context.Context, lockTime time.Time) (bool, error) {
+	return w.contractExpired, nil
+}
+
+func (w *TXCWallet) ContractLockTimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	return w.contractExpired, w.contractLockTime, nil
 }
 
@@ -845,6 +873,14 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	w.sendFeeSuggestion = feeSuggestion
 	return w.sendCoin, w.sendErr
+}
+
+func (w *TXCWallet) MakeBondTx(address string, regFee uint64, acctID []byte) ([]byte, []byte, error) {
+	return w.feeTxMade, w.feeCoin, w.makeRegFeeTxErr
+}
+
+func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	return w.feeCoinSent, w.sendTxnErr
 }
 
 func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
@@ -1120,11 +1156,6 @@ func newTestRig() *testRig {
 		legacyKeyErr: tErr,
 	}
 
-	ai := &db.AccountInfo{
-		Host: "somedex.com",
-	}
-	tdb.acct = ai
-
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
 	ctx, cancel := context.WithCancel(tCtx)
@@ -1137,6 +1168,18 @@ func newTestRig() *testRig {
 
 	crypter := &tCrypter{}
 	dc, conn, acct := testDexConnection(ctx, crypter) // crypter makes acct.encKey consistent with privKey
+
+	ai := &db.AccountInfo{
+		Host:      "somedex.com",
+		Cert:      acct.cert,
+		DEXPubKey: acct.dexPubKey,
+		EncKeyV2:  acct.encKey,
+		// Bonds: nil,
+		// LegacyFeeCoin:    acct.feeCoin,
+		// LegacyFeeAssetID: acct.feeAssetID,
+		// LegacyFeePaid: true,
+	}
+	tdb.acct = ai
 
 	shutdown := func() {
 		cancel()
@@ -1255,6 +1298,10 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
 		if len(suspended) > 0 {
 			result.Suspended = &suspended[0]
+			if suspended[0] {
+				tier := int64(-1) // even <0 so keys cycle even with v1 api
+				result.Tier = &tier
+			}
 		}
 		var resp *msgjson.Message
 		if rpcErr != nil {
@@ -1737,6 +1784,42 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
+// TODO: TestGetDEXConfig
+/*
+func TestGetFee(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	cert := []byte{}
+
+	// DEX already registered
+	_, err := tCore.GetFee(tDexHost, cert)
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
+	// Lose the dexConnection
+	tCore.connMtx.Lock()
+	delete(tCore.conns, tDexHost)
+	tCore.connMtx.Unlock()
+
+	// connectDEX error
+	_, err = tCore.GetFee(tUnparseableHost, cert)
+	if !errorHasCode(err, addressParseErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
+	}
+
+	// Queue a config response for success
+	rig.queueConfig()
+
+	// Success
+	_, err = tCore.GetFee(tDexHost, cert)
+	if err != nil {
+		t.Fatalf("GetFee error: %v", err)
+	}
+}
+*/
+
 func TestRegister(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
@@ -1789,7 +1872,7 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
 						timeout.Stop()
-						tWallet.setConfs(tWallet.sendCoin.id, 0, nil)
+						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
 						tCore.tipChange(tUTXOAssetA.ID, nil)
 						return
 					}
@@ -5468,7 +5551,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(false) // Short path through initializeDEXConnections
+	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -5633,7 +5716,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(false) // Short path through initializeDEXConnections
+	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -8847,9 +8930,9 @@ func TestRefreshServerConfig(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 
-	// Add an API version to serverAPIVers to use in tests.
-	newAPIVer := ^uint16(0) - 1
-	serverAPIVers = append(serverAPIVers, int(newAPIVer))
+	// Add an API version to supportedAPIVers to use in tests.
+	const newAPIVer = ^uint16(0) - 1
+	supportedAPIVers = append(supportedAPIVers, int32(newAPIVer))
 
 	queueConfig := func(err *msgjson.Error, apiVer uint16) {
 		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -8889,7 +8972,7 @@ func TestRefreshServerConfig(t *testing.T) {
 	for _, test := range tests {
 		rig.dc.cfg.Markets[0].Base = test.marketBase
 		queueConfig(test.configErr, test.gotAPIVer)
-		err := rig.dc.refreshServerConfig()
+		_, err := rig.dc.refreshServerConfig()
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

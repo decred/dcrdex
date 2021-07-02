@@ -67,13 +67,13 @@ var (
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
 	// every syncTickerPeriod. var instead of const for testing purposes.
 	syncTickerPeriod = 3 * time.Second
-	// serverAPIVers are the DEX server API versions this client is capable
+	// supportedAPIVers are the DEX server API versions this client is capable
 	// of communicating with.
 	//
 	// NOTE: API version may change at any time. Keep this in mind when
 	// updating the API. Long-running operations may start and end with
 	// differing versions.
-	serverAPIVers = []int{serverdex.PreAPIVersion}
+	supportedAPIVers = []int32{serverdex.PreAPIVersion, serverdex.BondAPIVersion}
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
@@ -138,6 +138,8 @@ type dexConnection struct {
 	// connectionStatus is a best guess on the ws connection status.
 	connectionStatus uint32
 
+	// pendingFee is deprecated, and will be removed when v0 API support is
+	// dropped in favor of v1 with bonds. (V0PURGE)
 	pendingFeeMtx sync.RWMutex
 	pendingFee    *pendingFeeState
 
@@ -178,6 +180,15 @@ func (dc *dexConnection) feeAsset(assetID uint32) *msgjson.FeeAsset {
 	}
 	symb := unbip(assetID)
 	return dc.cfg.RegFees[symb]
+}
+
+func (dc *dexConnection) bondAsset(assetID uint32) (*msgjson.BondAsset, uint64) {
+	assetSymb := dex.BipIDSymbol(assetID)
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+	bondExpiry := dc.cfg.BondExpiry
+	bondAsset := dc.cfg.BondAssets[assetSymb]
+	return bondAsset, bondExpiry // bondAsset may be nil
 }
 
 // marketConfig is the market's configuration, as returned by the server in the
@@ -305,8 +316,14 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
-			PendingFee:       dc.getPendingFee(),
+			PendingFee:       dc.getPendingFee(), // V0PURGE - deprecated with bonds in v1
 		}
+	}
+
+	bondAssets := make(map[string]*BondAsset, len(cfg.BondAssets))
+	for symb, bondAsset := range cfg.BondAssets {
+		coreBondAsset := BondAsset(*bondAsset) // convert msgjson.BondAsset to core.BondAsset
+		bondAssets[symb] = &coreBondAsset
 	}
 
 	dc.assetsMtx.RLock()
@@ -326,6 +343,7 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	}
 	dcrAsset := feeAssets["dcr"]
 	if dcrAsset == nil { // should have happened in refreshServerConfig
+		// V0PURGE
 		dcrAsset = &FeeAsset{
 			ID:    42,
 			Amt:   cfg.Fee,
@@ -334,16 +352,29 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		feeAssets["dcr"] = dcrAsset
 	}
 
+	dc.acct.authMtx.RLock()
+	// TODO: List bonds in core.Exchange. For now, just tier.
+	bondsPending := len(dc.acct.pendingBonds) > 0
+	tier := dc.acct.tier
+	dc.acct.authMtx.RUnlock()
+
 	return &Exchange{
 		Host:             dc.acct.host,
 		AcctID:           acctID,
 		Markets:          dc.marketMap(),
 		Assets:           assets,
+		BondExpiry:       cfg.BondExpiry,
+		BondAssets:       bondAssets,
 		ConnectionStatus: dc.status(),
-		Fee:              dcrAsset,
-		RegFees:          feeAssets,
-		PendingFee:       dc.getPendingFee(),
 		CandleDurs:       cfg.BinSizes,
+		Tier:             tier,
+		BondsPending:     bondsPending,
+		// TODO: Bonds
+
+		// Legacy reg fee (V0PURGE)
+		Fee:        dcrAsset,
+		RegFees:    feeAssets,
+		PendingFee: dc.getPendingFee(),
 	}
 }
 
@@ -997,11 +1028,11 @@ func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
 	}
 
 	if dc.acct.locked() {
-		return nil, fmt.Errorf("cannot place order on a locked %s account. Are you logged in?", dc.acct.host)
+		return nil, fmt.Errorf("cannot operate on a locked %s account. Are you logged in?", dc.acct.host)
 	}
 
 	if !connected {
-		return nil, fmt.Errorf("currently disconnected from %s. Cannot place order", dc.acct.host)
+		return nil, fmt.Errorf("currently disconnected from %s", dc.acct.host)
 	}
 	return dc, nil
 }
@@ -1327,6 +1358,13 @@ func (c *Core) Run(ctx context.Context) {
 		}
 		c.ratesMtx.Unlock()
 	}
+
+	// Start bond supervisor.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.watchExpiredBonds(ctx)
+	}()
 
 	c.wg.Wait() // block here until all goroutines except DB complete
 
@@ -2513,7 +2551,11 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
 		state.Address)
 
-	go c.checkUnpaidFees(wallet)
+	c.wg.Add(1)
+	func() {
+		defer c.wg.Done()
+		go c.checkUnpaidFees(wallet)
+	}()
 
 	c.notify(newWalletStateNote(state))
 
@@ -3123,46 +3165,52 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 						"with the same credentials to complete registration with " +
 						"the previously-assigned fee address and asset ID.")
 				}
-				return false, nil // all good, just go register now
+				return false, nil // all good, just go register/postbond now
 			}
 			return false, newError(authErr, "unexpected authDEX error: %w", err)
 		}
-		if dc.acct.isSuspended {
-			c.log.Infof("HD account key for %s was reported as suspended. Deriving another account key.", dc.acct.host)
+
+		// do not skip key if tier is 0 and bonds will be used
+		if dc.acct.tier < 0 || (dc.acct.tier < 1 && dc.apiVersion() < serverdex.BondAPIVersion) {
+			c.log.Infof("HD account key for %s was has tier %d (not able to trade). Deriving another account key.",
+				dc.acct.host, dc.acct.tier)
 			keyIndex++
 			time.Sleep(200 * time.Millisecond) // don't hammer
 			continue
 		}
 
-		break // great, the account at this key index is paid and ready
+		break // great, the account at this key index exists
 	}
 
-	// Actual fee asset ID and coin are unknown, but paid.
-	dc.acct.isPaid = true
-	dc.acct.feeCoin = []byte("DUMMY COIN")
-	dc.acct.feeAssetID = 42
+	if dc.acct.legacyFeePaid {
+		// Actual fee asset ID and coin are unknown, but paid.
+		dc.acct.isPaid = true
+		dc.acct.feeCoin = []byte("DUMMY COIN")
+		dc.acct.feeAssetID = 42
+	}
 
 	err := c.db.CreateAccount(&db.AccountInfo{
-		Host:         dc.acct.host,
-		Cert:         dc.acct.cert,
-		DEXPubKey:    dc.acct.dexPubKey,
-		EncKeyV2:     dc.acct.encKey,
-		LegacyEncKey: nil,
-		FeeAssetID:   dc.acct.feeAssetID,
-		FeeCoin:      dc.acct.feeCoin,
-		// Paid set with AccountPaid below.
+		Host:             dc.acct.host,
+		Cert:             dc.acct.cert,
+		DEXPubKey:        dc.acct.dexPubKey,
+		EncKeyV2:         dc.acct.encKey,
+		Bonds:            dc.acct.bonds, // any reported by server
+		LegacyFeeAssetID: dc.acct.feeAssetID,
+		LegacyFeeCoin:    dc.acct.feeCoin,
 	})
 	if err != nil {
 		return false, fmt.Errorf("error saving restored account: %w", err)
 	}
 
-	err = c.db.AccountPaid(&db.AccountProof{
-		Host:  dc.acct.host,
-		Stamp: 54321,
-		Sig:   []byte("RECOVERY SIGNATURE"),
-	})
-	if err != nil {
-		return false, fmt.Errorf("error marking recovered account as paid: %w", err)
+	if dc.acct.legacyFeePaid {
+		err = c.db.StoreAccountProof(&db.AccountProof{
+			Host:  dc.acct.host,
+			Stamp: 54321,
+			Sig:   []byte("RECOVERY SIGNATURE"),
+		})
+		if err != nil {
+			return false, fmt.Errorf("error marking recovered account as paid: %w", err)
+		}
 	}
 
 	return true, nil // great, just stay connected
@@ -3210,6 +3258,10 @@ func (c *Core) upgradeConnection(dc *dexConnection) {
 // to register on a DEX, and Register may be called directly, although it requires
 // the expected fee amount as an additional input and it will pay the fee if the
 // account is not discovered and paid.
+//
+// The Tier and BondsPending fields may be consulted to determine if it is still
+// necessary to PostBond (i.e. Tier == 0 && !BondsPending) before trading. The
+// Connected field should be consulted first.
 func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) (*Exchange, bool, error) {
 	if !c.IsInitialized() {
 		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
@@ -3226,8 +3278,16 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	}
 	defer crypter.Close()
 
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found {
+		// Already registered, but connection may be down and/or PostBond needed.
+		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
+	}
+
 	var ready bool
-	dc, err := c.tempDexConnection(host, certI)
+	dc, err = c.tempDexConnection(host, certI)
 	if dc != nil { // (re)connect loop may be running even if err != nil
 		defer func() {
 			// Either disconnect or promote this connection.
@@ -3306,10 +3366,9 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 
 // Register registers an account with a new DEX. If an error occurs while
 // fetching the DEX configuration or creating the fee transaction, it will be
-// returned immediately.
-// A thread will be started to wait for the requisite confirmations and send
-// the fee notification to the server. Any error returned from that thread is
-// sent as a notification.
+// returned immediately. A goroutine will be started to wait for the requisite
+// confirmations and send the fee notification to the server. Any error returned
+// from that goroutine is sent as a notification.
 func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
@@ -3383,10 +3442,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Ensure this DEX supports this asset for registration fees, and get the
 	// required confirmations and fee amount.
-	dc.cfgMtx.RLock()
-	feeAsset, supported := dc.cfg.RegFees[regFeeAssetSymbol]
-	dc.cfgMtx.RUnlock()
-	if !supported || feeAsset == nil {
+	feeAsset := dc.feeAsset(regFeeAssetID) // dc.cfg.RegFees[regFeeAssetSymbol]
+	if feeAsset == nil {
 		return nil, newError(assetSupportErr, "dex server does not accept registration fees in asset %q", regFeeAssetSymbol)
 	}
 	if feeAsset.ID != regFeeAssetID {
@@ -3407,7 +3464,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		c.conns[dc.acct.host] = dc
 		c.connMtx.Unlock()
 
-		return &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}, nil
+		feeCoinStr := coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)
+		return &RegisterResult{FeeID: feeCoinStr, ReqConfirms: 0}, nil
 	}
 	// dc.acct is now configured with encKey, privKey, and id for a new
 	// (unregistered) account.
@@ -3439,7 +3497,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 		registrationComplete = true
 		// register already promoted the connection
-		return &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}, nil
+		feeCoinStr := coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)
+		return &RegisterResult{FeeID: feeCoinStr, ReqConfirms: 0}, nil
 	}
 	if suspended { // would have gotten this from discoverAccount
 		return nil, fmt.Errorf("unexpectedly tried to register a suspended account - try again")
@@ -3482,13 +3541,13 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.connMtx.Unlock()
 
 	err = c.db.CreateAccount(&db.AccountInfo{
-		Host:       dc.acct.host,
-		Cert:       dc.acct.cert,
-		DEXPubKey:  dc.acct.dexPubKey,
-		EncKeyV2:   dc.acct.encKey,
-		FeeAssetID: dc.acct.feeAssetID,
-		FeeCoin:    dc.acct.feeCoin,
-		// Paid set with AccountPaid after notifyFee.
+		Host:             dc.acct.host,
+		Cert:             dc.acct.cert,
+		DEXPubKey:        dc.acct.dexPubKey,
+		EncKeyV2:         dc.acct.encKey,
+		LegacyFeeAssetID: dc.acct.feeAssetID,
+		LegacyFeeCoin:    dc.acct.feeCoin,
+		// LegacyFeePaid set with AccountPaid after notifyFee.
 	})
 	if err != nil {
 		c.log.Errorf("error saving account: %v\n", err)
@@ -3581,13 +3640,13 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 			}
 
 			err = c.db.CreateAccount(&db.AccountInfo{
-				Host:       dc.acct.host,
-				Cert:       dc.acct.cert,
-				DEXPubKey:  dc.acct.dexPubKey,
-				EncKeyV2:   dc.acct.encKey,
-				FeeAssetID: dc.acct.feeAssetID,
-				FeeCoin:    dc.acct.feeCoin,
-				// Paid set with AccountPaid below.
+				Host:             dc.acct.host,
+				Cert:             dc.acct.cert,
+				DEXPubKey:        dc.acct.dexPubKey,
+				EncKeyV2:         dc.acct.encKey,
+				LegacyFeeAssetID: dc.acct.feeAssetID,
+				LegacyFeeCoin:    dc.acct.feeCoin,
+				// LegacyFeePaid set with AccountPaid below.
 			})
 			if err != nil {
 				// Shouldn't let the client trade with this server if we can't store
@@ -3597,7 +3656,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 				return nil, true, false, fmt.Errorf("error saving restored account: %w", err)
 			}
 
-			err = c.db.AccountPaid(&db.AccountProof{
+			err = c.db.StoreAccountProof(&db.AccountProof{
 				Host:  dc.acct.host,
 				Stamp: 54321,
 				Sig:   []byte("RECOVERY SIGNATURE"),
@@ -4194,11 +4253,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 }
 
 // initializeDEXConnections connects to the DEX servers in the conns map and
-// authenticates the connection. If registration is incomplete, reFee is run and
-// the connection will be authenticated once the `notifyfee` request is sent.
-// If an account is not found on the dex server upon dex authentication the
-// account is disabled and the corresponding entry in c.conns is removed
-// which will result in the user being prompted to register again.
+// authenticates the connection. This is done on Login.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
@@ -4210,6 +4265,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			tradeIDs = append(tradeIDs, tradeID.String())
 		}
 		dc.tradeMtx.RUnlock()
+
 		result := &DEXBrief{
 			Host:     dc.acct.host,
 			TradeIDs: tradeIDs,
@@ -4218,13 +4274,14 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			AcctID: dc.acct.ID().String(),
 		}
 		results = append(results, result)
+
 		// Unlock before checking auth and continuing, because if the user
 		// logged out and didn't shut down, the account is still authed, but
 		// locked, and needs unlocked.
 		err := dc.acct.unlock(crypter)
 		if err != nil {
 			subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
-			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
+			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
 			result.AuthErr = details
 			continue
 		}
@@ -4233,15 +4290,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			result.AcctID = dc.acct.ID().String()
 			continue // authDEX already done
 		}
+
 		result.AcctID = dc.acct.ID().String()
 
-		if !dc.acct.feePaid() {
-			if len(dc.acct.feeCoin) == 0 {
-				subject, details := c.formatDetails(TopicFeeCoinError, dc.acct.host)
-				c.notify(newFeePaymentNote(TopicFeeCoinError, subject, details, db.ErrorLevel, dc.acct.host))
-				result.AuthErr = details
-				continue
-			}
+		if dc.acct.feePending() { // V0PURGE
 			// Try to unlock the fee wallet, which should run the reFee cycle, and
 			// in turn will run authDEX.
 			feeWallet, err := c.connectedWallet(dc.acct.feeAssetID)
@@ -4265,6 +4317,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			continue
 		}
 
+		// Pending bonds will be handled by authDEX.
+
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
@@ -4278,7 +4332,9 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			result.Authed = true
 		}(dc)
 	}
+
 	wg.Wait()
+
 	return results
 }
 
@@ -4317,6 +4373,7 @@ func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error),
 	}
 }
 
+// V0PURGE
 func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	if dc.acct.locked() {
 		return fmt.Errorf("%s account locked. cannot notify fee. log in first", dc.acct.host)
@@ -4351,7 +4408,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		if err != nil {
 			c.log.Warnf("Account was registered, but DEX signature could not be verified: %v", err)
 		}
-		errChan <- c.db.AccountPaid(&db.AccountProof{
+		errChan <- c.db.StoreAccountProof(&db.AccountProof{
 			Host:  dc.acct.host,
 			Stamp: req.Time,
 			Sig:   ack.Sig,
@@ -5114,8 +5171,48 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	return fmt.Errorf("Cancel: failed to find order %s", oidB)
 }
 
+func convertBond(acctID account.AccountID, bond *db.Bond) *asset.Bond {
+	// All we need to do is recreate the BondAcctSig from BondPrivKey and the
+	// account ID.
+	priv := secp256k1.PrivKeyFromBytes(bond.BondPrivKey)
+	acctHash := sha256.Sum256(acctID[:])
+	bondAcctSig := ecdsa.SignCompact(priv, acctHash[:], true)
+
+	return &asset.Bond{
+		AssetID:     bond.AssetID,
+		CoinID:      bond.CoinID,
+		SignedTx:    bond.SignedTx,
+		UnsignedTx:  bond.UnsignedTx,
+		BondScript:  bond.Script,
+		RedeemTx:    bond.RefundTx,
+		BondPrivKey: bond.BondPrivKey,
+		BondAcctSig: bondAcctSig,
+	}
+}
+
+// bondKey creates a unique map key for a bond by its asset ID and coin ID.
+func bondKey(assetID uint32, coinID []byte) string {
+	return string(append(encode.Uint32Bytes(assetID), coinID...))
+}
+
 // authDEX authenticates the connection for a DEX.
 func (c *Core) authDEX(dc *dexConnection) error {
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
+	if cfg == nil { // reconnect loop may be running
+		return fmt.Errorf("dex connection not usable prior to config request")
+	}
+	bondAssets := cfg.BondAssets
+
+	// Copy the local bond slices since bondConfirmed will modify them.
+	dc.acct.authMtx.RLock()
+	localActiveBonds := make([]*db.Bond, len(dc.acct.bonds))
+	copy(localActiveBonds, dc.acct.bonds)
+	localPendingBonds := make([]*db.Bond, len(dc.acct.pendingBonds))
+	copy(localPendingBonds, dc.acct.pendingBonds)
+	dc.acct.authMtx.RUnlock()
+
 	// Prepare and sign the message for the 'connect' route.
 	acctID := dc.acct.ID()
 	payload := &msgjson.Connect{
@@ -5147,8 +5244,23 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	if err != nil {
 		return err
 	}
+
 	// Check the response error.
 	err = <-errChan
+	// AccountNotFoundError may signal we have an initial bond to post.
+	var mErr *msgjson.Error
+	if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
+		for _, dbBond := range localPendingBonds {
+			symb := dex.BipIDSymbol(dbBond.AssetID)
+			bondAsset := bondAssets[symb]
+			if bondAsset == nil {
+				c.log.Warnf("authDEX: No info on bond asset %s. Cannot start postbond waiter.", symb)
+				continue
+			}
+			assetBond := convertBond(acctID, dbBond)
+			c.monitorBondConfs(dc, assetBond, bondAsset.Confs)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("'connect' error: %w", err)
 	}
@@ -5159,15 +5271,141 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		return newError(signatureErr, "DEX signature validation error: %w", err)
 	}
 
-	var suspended bool
-	if result.Suspended != nil {
-		suspended = *result.Suspended
+	var tier int64
+	var legacyFeePaid bool
+	if result.Tier == nil { // legacy server (V0PURGE)
+		// A legacy server does not set ConnectResult.LegacyFeePaid, but unpaid
+		// legacy ('register') users get an UnpaidAccountError from Connect, so
+		// we know the account is paid and not suspended.
+		legacyFeePaid = true
+		if result.Suspended == nil || !*result.Suspended {
+			tier = 1
+		}
+	} else {
+		tier = *result.Tier
+		if result.LegacyFeePaid != nil {
+			legacyFeePaid = *result.LegacyFeePaid
+		}
 	}
 
 	// Set the account as authenticated.
-	c.log.Debugf("Authenticated connection to %s, acct %v, %d active orders, %d active matches, score %d (suspended = %v)",
-		dc.acct.host, acctID, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, suspended)
-	dc.acct.auth(suspended)
+	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
+		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, tier)
+	// Flag as authenticated before bondConfirmed / monitorBondConfs, which may
+	// call authDEX if not flagged as such.
+	dc.acct.auth(tier, legacyFeePaid)
+
+	// Check active and pending bonds, comparing against result.ActiveBonds. For
+	// pendingBonds, rebroadcast and start waiter to postBond. For
+	// (locally-confirmed) bonds that are not in connectResp.Bonds, postBond.
+
+	// Start by mapping the server-reported bonds:
+	remoteLiveBonds := make(map[string]*msgjson.Bond)
+	remotePendingBonds := make(map[string]*msgjson.Bond)
+	for _, bond := range result.ActiveBonds {
+		if bond.Pending {
+			remotePendingBonds[bondKey(bond.AssetID, bond.CoinID)] = bond
+		} else {
+			remoteLiveBonds[bondKey(bond.AssetID, bond.CoinID)] = bond
+		}
+	}
+
+	// Identify bonds we consider live that are either pending or missing from
+	// server. In either case, do c.monitorBondConfs (will be immediate postBond
+	// and bondConfirmed if at required confirmations).
+	for _, bond := range localActiveBonds {
+		key := bondKey(bond.AssetID, bond.CoinID)
+		symb := dex.BipIDSymbol(bond.AssetID)
+		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+
+		_, found := remoteLiveBonds[key]
+		if found {
+			continue // good, it's live server-side too
+		}
+
+		_, found = remotePendingBonds[key]
+		if !found {
+			c.log.Warnf("Locally-active bond %v (%s) not reported by server. Will repost...",
+				bondIDStr, symb) // unexpected, but postbond again
+		}
+
+		bondAsset := bondAssets[symb]
+		if bondAsset == nil {
+			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
+			continue
+		}
+
+		// Still pending or unknown on server. postBond at required confs.
+		c.log.Infof("Posting locally-confirmed bond %v (%s).", bondIDStr, symb)
+		assetBond := convertBond(acctID, bond)
+		c.monitorBondConfs(dc, assetBond, bondAsset.Confs)
+		continue
+	}
+
+	// Identify bonds we consider pending that are either live or missing from
+	// server. If live on server, do c.bondConfirmed. If missing, do
+	// c.monitorBondConfs.
+	for _, bond := range localPendingBonds {
+		key := bondKey(bond.AssetID, bond.CoinID)
+		symb := dex.BipIDSymbol(bond.AssetID)
+		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+
+		_, found := remoteLiveBonds[key]
+		if found {
+			// It's live server-side. Confirm it locally.
+			c.log.Debugf("Confirming pending bond %v that is confirmed server side", bondIDStr)
+			if err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, tier /* no change */); err != nil {
+				c.log.Errorf("Unable to confirm bond %s: %v", bondIDStr, err)
+			}
+			continue
+		}
+
+		_, found = remotePendingBonds[key]
+		c.log.Debugf("Starting coin waiter for pending bond %v (%s), (known to server = %v)",
+			bondIDStr, symb, found) // not found is normal
+		bondAsset := bondAssets[symb]
+		if bondAsset == nil {
+			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
+			continue
+		}
+
+		// Still pending on server. Start waiting for confs.
+		c.log.Debugf("Preparing to post pending bond %v (%s).", bondIDStr, symb, found)
+		assetBond := convertBond(acctID, bond)
+		c.monitorBondConfs(dc, assetBond, bondAsset.Confs)
+	}
+
+	localBondMap := make(map[string]struct{}, len(localActiveBonds)+len(localPendingBonds))
+	for _, dbBond := range localActiveBonds {
+		localBondMap[bondKey(dbBond.AssetID, dbBond.CoinID)] = struct{}{}
+	}
+	for _, dbBond := range localPendingBonds {
+		localBondMap[bondKey(dbBond.AssetID, dbBond.CoinID)] = struct{}{}
+	}
+
+	for _, bond := range result.ActiveBonds {
+		key := bondKey(bond.AssetID, bond.CoinID)
+		if _, found := localBondMap[key]; found {
+			continue
+		}
+		// Server knows of a bond we do not, store what we can for tier
+		// accounting, but we may not be able to redeem this.
+		dbBond := &db.Bond{
+			AssetID: bond.AssetID,
+			CoinID:  bond.CoinID,
+			// Script.  Where to get that?
+			Amount:   bond.Amount,
+			LockTime: bond.Expiry, // TODO: check units
+			// BondPrivKey. User better have another instance refund this or have stored the backup refund!
+			Confirmed: !bond.Pending, // ...check semantics
+		}
+
+		symb := dex.BipIDSymbol(bond.AssetID)
+		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+		c.log.Warnf("Known bond on server: %v (%d)", bondIDStr, symb) // TODO: store it or something!
+
+		dc.acct.bonds = append(dc.acct.bonds, dbBond) // for tier accounting, but we cannot redeem it
+	}
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
@@ -5383,13 +5621,13 @@ func (c *Core) initialize() {
 // retry / keepalive loop is active. If there was already a dexConnection, it is
 // first stopped.
 func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
-	if !acct.Paid && len(acct.FeeCoin) == 0 {
-		// Register should have set this when creating the account that was
-		// obtained via db.Accounts.
-		c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-			"Discarding account.", acct.Host)
-		return
-	}
+	// if !acct.Paid && len(acct.FeeCoin) == 0 {
+	// 	// Register should have set this when creating the account that was
+	// 	// obtained via db.Accounts.
+	// 	c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+	// 		"Discarding account.", acct.Host)
+	// 	return
+	// }
 
 	host, err := addrHost(acct.Host)
 	if err != nil {
@@ -5432,15 +5670,17 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
-// time.
+// time. (V0PURGE)
 var feeLock uint32
 
 // checkUnpaidFees checks whether the registration fee info has an acceptable
-// state, and tries to rectify any inconsistencies.
+// state, and tries to rectify any inconsistencies. (V0PURGE)
 func (c *Core) checkUnpaidFees(wallet *xcWallet) {
 	if !atomic.CompareAndSwapUint32(&feeLock, 0, 1) {
 		return
 	}
+	defer atomic.StoreUint32(&feeLock, 0)
+
 	var wg sync.WaitGroup
 	for _, dc := range c.dexConnections() {
 		if dc.acct.feePaid() {
@@ -5450,8 +5690,8 @@ func (c *Core) checkUnpaidFees(wallet *xcWallet) {
 			continue // different wallet
 		}
 		if len(dc.acct.feeCoin) == 0 {
-			c.log.Errorf("empty fee coin found for unpaid account")
-			continue
+			// c.log.Errorf("empty fee coin found for unpaid account")
+			continue // normal if this account is active with bonds
 		}
 		wg.Add(1)
 		go func(dc *dexConnection) {
@@ -5460,12 +5700,12 @@ func (c *Core) checkUnpaidFees(wallet *xcWallet) {
 		}(dc)
 	}
 	wg.Wait()
-	atomic.StoreUint32(&feeLock, 0)
 }
 
 // reFee attempts to finish the fee payment process for a DEX. reFee might be
 // called if the client was shutdown after a fee was paid, but before it had the
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
+// (V0PURGE)
 func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 	feeAsset := dc.feeAsset(wallet.AssetID)
 	if feeAsset == nil {
@@ -5486,27 +5726,27 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// A few sanity checks.
-	if !bytes.Equal(acctInfo.FeeCoin, dc.acct.feeCoin) {
-		c.log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.host, acctInfo.FeeCoin, dc.acct.feeCoin)
+	if !bytes.Equal(acctInfo.LegacyFeeCoin, dc.acct.feeCoin) {
+		c.log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.host, acctInfo.LegacyFeeCoin, dc.acct.feeCoin)
 		return
 	}
-	if acctInfo.FeeAssetID != dc.acct.feeAssetID {
-		c.log.Errorf("reFee %s - fee asset mismatch. %d != %d", dc.acct.host, acctInfo.FeeAssetID, dc.acct.feeAssetID)
+	if acctInfo.LegacyFeeAssetID != dc.acct.feeAssetID {
+		c.log.Errorf("reFee %s - fee asset mismatch. %d != %d", dc.acct.host, acctInfo.LegacyFeeAssetID, dc.acct.feeAssetID)
 		return
 	}
-	if acctInfo.Paid {
+	if acctInfo.LegacyFeePaid {
 		c.log.Errorf("reFee %s - account for %x already marked paid", dc.acct.host, dc.acct.feeCoin)
 		return
 	}
 	// Get the coin for the fee.
-	confs, err := wallet.RegFeeConfirmations(c.ctx, acctInfo.FeeCoin)
+	confs, err := wallet.RegFeeConfirmations(c.ctx, acctInfo.LegacyFeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
 	}
 
 	if confs >= reqConfs {
-		err := c.notifyFee(dc, acctInfo.FeeCoin)
+		err := c.notifyFee(dc, acctInfo.LegacyFeeCoin)
 		if err != nil {
 			c.log.Errorf("reFee %s - notifyfee error: %v", dc.acct.host, err)
 			subject, details := c.formatDetails(TopicFeePaymentError, dc.acct.host, err)
@@ -5524,7 +5764,7 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	c.verifyRegistrationFee(wallet.AssetID, dc, acctInfo.FeeCoin, confs, reqConfs)
+	c.verifyRegistrationFee(wallet.AssetID, dc, acctInfo.LegacyFeeCoin, confs, reqConfs)
 }
 
 func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
@@ -6376,15 +6616,57 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		return dc, err
 	}
 
+	// Categorize bonds now for sake of expired bonds that need to be refunded.
+	categorizeBonds := func(lockTimeThresh int64) {
+		for _, dbBond := range acctInfo.Bonds {
+			if dbBond.Refunded { // maybe don't even load these, but it may be of use for record keeping
+				continue
+			}
+
+			bondIDStr := coinIDString(dbBond.AssetID, dbBond.CoinID)
+
+			if int64(dbBond.LockTime) <= lockTimeThresh {
+				// for refundBond
+				c.log.Infof("Loaded expired bond %v. Refund tx: %x", bondIDStr, dbBond.RefundTx)
+				dc.acct.expiredBonds = append(dc.acct.expiredBonds, dbBond)
+				// TODO: start goroutine to regularly check the lockTime of each
+				// bond in expiredBonds and broadcast the refund tx.
+				continue
+			}
+
+			if dbBond.Confirmed {
+				// This bond has already been confirmed by the server.
+				c.log.Infof("Loaded active bond %v. BACKUP refund tx: %x", bondIDStr, dbBond.RefundTx)
+				dc.acct.bonds = append(dc.acct.bonds, dbBond)
+				continue
+			}
+
+			// Server has not yet confirmed this bond.
+			c.log.Infof("Loaded pending bond %v. Refund tx: %x", bondIDStr, dbBond.RefundTx)
+			dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
+
+			// We need to start monitorBondConfs on login since postbond
+			// requires the account keys.
+		}
+
+		// Now in authDEX, we must reconcile the above categorized bonds
+		// according to ConnectResult.Bonds slice.
+	}
+
 	// Request the market configuration.
-	err = dc.refreshServerConfig() // handleReconnect must too
+	cfg, err := dc.refreshServerConfig() // handleReconnect must too
 	if err != nil {
+		// Sort out the bonds with current time indicating refundable bonds.
+		categorizeBonds(time.Now().Unix())
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
 		}
-		return dc, err
+		return dc, err // no dc.acct.dexPubKey
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
+
+	// Given bond config, sort through our db.Bond slice.
+	categorizeBonds(time.Now().Unix() + int64(cfg.BondExpiry))
 
 	if listen {
 		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
@@ -6409,7 +6691,7 @@ func (c *Core) handleReconnect(host string) {
 
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
-	err := dc.refreshServerConfig()
+	cfg, err := dc.refreshServerConfig()
 	if err != nil {
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
@@ -6420,7 +6702,8 @@ func (c *Core) handleReconnect(host string) {
 
 	go dc.subPriceFeed()
 
-	if !dc.acct.locked() && dc.acct.feePaid() {
+	// If we are registered with this DEX, authenticate.
+	if !dc.acct.locked() /* && dc.acct.feePaid() */ {
 		err = c.authDEX(dc)
 		if err != nil {
 			c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
@@ -6473,16 +6756,14 @@ func (c *Core) handleReconnect(host string) {
 	}
 
 	// Create a list of books to check.
-	dc.cfgMtx.RLock()
-	mkts := make([]*market, 0, len(dc.cfg.Markets))
-	for _, m := range dc.cfg.Markets {
+	mkts := make([]*market, 0, len(cfg.Markets))
+	for _, m := range cfg.Markets {
 		mkts = append(mkts, &market{
 			name:  m.Name,
 			base:  m.Base,
 			quote: m.Quote,
 		})
 	}
-	dc.cfgMtx.RUnlock()
 
 	// For each market, resubscribe to any market books.
 	for _, mkt := range mkts {
@@ -6657,11 +6938,64 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %w", err)
 	}
 	t := time.UnixMilli(int64(note.Penalty.Time))
-	// d := time.Duration(note.Penalty.Duration) * time.Millisecond
 
 	subject, details := c.formatDetails(TopicPenalized, dc.acct.host, note.Penalty.Rule, t, note.Penalty.Details)
 	c.notify(newServerNotifyNote(TopicPenalized, subject, details, db.WarningLevel))
 	return nil
+}
+
+func handleBondConfirmedMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var bondConfirmed *msgjson.BondConfirmedNotification
+	err := msg.Unmarshal(&bondConfirmed)
+	if err != nil {
+		return fmt.Errorf("bond confirmed note unmarshal error: %w", err)
+	}
+	if bondConfirmed == nil {
+		return errors.New("empty message")
+	}
+	// Check the signature.
+	err = dc.acct.checkSig(bondConfirmed.Serialize(), bondConfirmed.Sig)
+	if err != nil {
+		return newError(signatureErr, "handleBondConfirmedMsg: DEX signature validation error: %v", err) // warn?
+	}
+
+	acctID := dc.acct.ID()
+	if !bytes.Equal(bondConfirmed.AccountID, acctID[:]) {
+		return fmt.Errorf("invalid account ID %v, expected %v", bondConfirmed.AccountID, acctID)
+	}
+
+	c.log.Infof("Received bondconfirmed notification from %v for account %v...", dc.acct.host, acctID)
+
+	dc.acct.authMtx.Lock()
+	dc.acct.tier = bondConfirmed.Tier
+	dc.acct.authMtx.Unlock()
+
+	return c.bondConfirmed(dc, bondConfirmed.AssetID, bondConfirmed.BondCoinID, bondConfirmed.Tier)
+}
+
+func handleBondExpiredMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var bondExpired *msgjson.BondExpiredNotification
+	err := msg.Unmarshal(&bondExpired)
+	if err != nil {
+		return fmt.Errorf("bond expired note unmarshal error: %w", err)
+	}
+	if bondExpired == nil {
+		return errors.New("empty message")
+	}
+	// Check the signature.
+	err = dc.acct.checkSig(bondExpired.Serialize(), bondExpired.Sig)
+	if err != nil {
+		return newError(signatureErr, "handleBondExpiredMsg: DEX signature validation error: %v", err) // warn?
+	}
+
+	acctID := dc.acct.ID()
+	if !bytes.Equal(bondExpired.AccountID, acctID[:]) {
+		return fmt.Errorf("invalid account ID %v, expected %v", bondExpired.AccountID, acctID)
+	}
+
+	c.log.Infof("Received bondexpired notification from %v for account %v...", dc.acct.host, acctID)
+
+	return c.bondExpired(dc, bondExpired.AssetID, bondExpired.BondCoinID, bondExpired.Tier)
 }
 
 // routeHandler is a handler for a message from the DEX.
@@ -6689,6 +7023,8 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
 	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
 	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
+	msgjson.BondConfirmedRoute:   handleBondConfirmedMsg,
+	msgjson.BondExpiredRoute:     handleBondExpiredMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -7295,7 +7631,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		c.log.Errorf("%s wallet is reporting a failed state: %v", unbip(assetID), nodeErr)
 		return
 	}
-	c.log.Tracef("processing tip change for %s", unbip(assetID))
+	c.log.Tracef("Processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
 	for id, waiter := range c.blockWaiters {
 		if waiter.assetID != assetID {
@@ -7306,6 +7642,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 			if err != nil {
 				waiter.action(err)
 				c.removeWaiter(id)
+				return
 			}
 			if ok {
 				waiter.action(nil)
@@ -7401,11 +7738,11 @@ func sendRequest(conn comms.WsConn, route string, request, response interface{},
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for %q response", route)
+		errChan <- fmt.Errorf("timed out waiting for %q response", route) // code this as a timeout!
 	})
 	// Check the request error.
 	if err != nil {
-		return err
+		return err // code this as a send error!
 	}
 
 	// Check the response error.

@@ -15,6 +15,7 @@ import (
 // Notifications should use the following note type strings.
 const (
 	NoteTypeFeePayment   = "feepayment"
+	NoteTypeBondPost     = "bondpost"
 	NoteTypeSend         = "send"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
@@ -167,6 +168,22 @@ func newSecurityNote(topic Topic, subject, details string, severity db.Severity)
 	}
 }
 
+const (
+	TopicFeePaymentInProgress    Topic = "FeePaymentInProgress"
+	TopicFeePaymentError         Topic = "FeePaymentError"
+	TopicFeeCoinError            Topic = "FeeCoinError"
+	TopicRegUpdate               Topic = "RegUpdate"
+	TopicBondConfirming          Topic = "BondConfirming"
+	TopicBondPostError           Topic = "BondPostError"
+	TopicBondCoinError           Topic = "BondCoinError"
+	TopicAccountRegistered       Topic = "AccountRegistered"
+	TopicAccountUnlockError      Topic = "AccountUnlockError"
+	TopicWalletConnectionWarning Topic = "WalletConnectionWarning"
+	TopicWalletUnlockError       Topic = "WalletUnlockError"
+	TopicWalletCommsWarning      Topic = "WalletCommsWarning"
+	TopicWalletPeersRestored     Topic = "WalletPeersRestored"
+)
+
 // FeePaymentNote is a notification regarding registration fee payment.
 type FeePaymentNote struct {
 	db.Notification
@@ -174,19 +191,6 @@ type FeePaymentNote struct {
 	Confirmations *uint32 `json:"confirmations,omitempty"`
 	Dex           string  `json:"dex,omitempty"`
 }
-
-const (
-	TopicFeePaymentInProgress    Topic = "FeePaymentInProgress"
-	TopicRegUpdate               Topic = "RegUpdate"
-	TopicFeePaymentError         Topic = "FeePaymentError"
-	TopicAccountRegistered       Topic = "AccountRegistered"
-	TopicAccountUnlockError      Topic = "AccountUnlockError"
-	TopicFeeCoinError            Topic = "FeeCoinError"
-	TopicWalletConnectionWarning Topic = "WalletConnectionWarning"
-	TopicWalletUnlockError       Topic = "WalletUnlockError"
-	TopicWalletCommsWarning      Topic = "WalletCommsWarning"
-	TopicWalletPeersRestored     Topic = "WalletPeersRestored"
-)
 
 func newFeePaymentNote(topic Topic, subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	host, _ := addrHost(dexAddr)
@@ -201,6 +205,36 @@ func newFeePaymentNoteWithConfirmations(topic Topic, subject, details string, se
 	feePmtNt.Asset = &asset
 	feePmtNt.Confirmations = &currConfs
 	return feePmtNt
+}
+
+// BondPostNote is a notification regarding bond posting.
+type BondPostNote struct {
+	db.Notification
+	Asset         *uint32 `json:"asset,omitempty"`
+	Confirmations *int32  `json:"confirmations,omitempty"`
+	Tier          *int64  `json:"tier,omitempty"`
+	Dex           string  `json:"dex,omitempty"`
+}
+
+func newBondPostNote(topic Topic, subject, details string, severity db.Severity, dexAddr string) *BondPostNote {
+	host, _ := addrHost(dexAddr)
+	return &BondPostNote{
+		Notification: db.NewNotification(NoteTypeBondPost, topic, subject, details, severity),
+		Dex:          host,
+	}
+}
+
+func newBondPostNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, asset uint32, currConfs int32, dexAddr string) *BondPostNote {
+	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
+	bondPmtNt.Asset = &asset
+	bondPmtNt.Confirmations = &currConfs
+	return bondPmtNt
+}
+
+func newBondPostNoteWithTier(topic Topic, subject, details string, severity db.Severity, dexAddr string, tier int64) *BondPostNote {
+	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
+	bondPmtNt.Tier = &tier
+	return bondPmtNt
 }
 
 // SendNote is a notification regarding a requested send or withdraw.
@@ -419,6 +453,8 @@ const (
 	TopicDexAuthError     Topic = "DexAuthError"
 	TopicUnknownOrders    Topic = "UnknownOrders"
 	TopicOrdersReconciled Topic = "OrdersReconciled"
+	TopicBondConfirmed    Topic = "BondConfirmed"
+	TopicBondExpired      Topic = "BondExpired"
 )
 
 func newDEXAuthNote(topic Topic, subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {

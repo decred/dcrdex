@@ -972,7 +972,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	wallet := t.wallets.toWallet
 	coin := match.counterSwap.Coin
 
-	_, lockTime, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.CounterContract)
+	_, lockTime, err := wallet.ContractLockTimeExpired(ctx, match.MetaData.Proof.CounterContract)
 	if err != nil {
 		return fail(fmt.Errorf("error checking if locktime has expired on taker's contract on order %s, "+
 			"match %s: %w", t.ID(), match, err))
@@ -1386,7 +1386,7 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.ContractData)
+	swapLocktimeExpired, contractExpiry, err := wallet.ContractLockTimeExpired(ctx, match.MetaData.Proof.ContractData)
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error as this is expected for newly

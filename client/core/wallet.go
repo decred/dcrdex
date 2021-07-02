@@ -376,6 +376,27 @@ func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contrac
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
 }
 
+// MakeBondTx authors a DEX time-locked fidelity bond transaction if the
+// asset.Wallet implementation is a Bonder.
+func (w *xcWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*asset.Bond, error) {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return nil, errors.New("wallet does not support making bond transactions")
+	}
+	return bonder.MakeBondTx(amt, lockTime, acctID)
+}
+
+// RefundBond will refund the bond if the asset.Wallet implementation is a
+// Bonder. The lock time must be passed to spend the bond. LockTimeExpired
+// should be used to check first.
+func (w *xcWallet) RefundBond(coinID, script []byte, privKey []byte) ([]byte, error) {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return nil, errors.New("wallet does not support refunding bond transactions")
+	}
+	return bonder.RefundBond(coinID, script, privKey)
+}
+
 // feeRater is identical to calling w.Wallet.(asset.FeeRater).
 func (w *xcWallet) feeRater() (asset.FeeRater, bool) {
 	rater, is := w.Wallet.(asset.FeeRater)

@@ -799,38 +799,43 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
+func (dc *dexConnection) apiVersion() int32 {
+	return atomic.LoadInt32(&dc.apiVer)
+}
+
 // refreshServerConfig fetches and replaces server configuration data. It also
 // initially checks that a server's API version is one of serverAPIVers.
-func (dc *dexConnection) refreshServerConfig() error {
+func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
-		return fmt.Errorf("unable to fetch server config: %w", err)
+		return nil, fmt.Errorf("unable to fetch server config: %w", err)
 	}
 
-	// Check that we are able to communicate with this DEX.
-	apiVer := atomic.LoadInt32(&dc.apiVer)
-	cfgAPIVer := int32(cfg.APIVersion)
+	// (V0PURGE) Infer if the server advertises API v0 but supports the upcoming
+	// v1 routes such as postbond. Server can only advertise a single version
+	// presently so we have to detect this indirectly.
+	apiVer := int32(cfg.APIVersion)
+	if apiVer == 0 && cfg.BondExpiry > 0 {
+		apiVer = 1
+	}
+	dc.log.Infof("Server %v supports API version %v.", dc.acct.host, apiVer)
+	atomic.StoreInt32(&dc.apiVer, apiVer)
 
-	if apiVer != cfgAPIVer {
-		if found := func() bool {
-			for _, version := range serverAPIVers {
-				ver := int32(version)
-				if cfgAPIVer == ver {
-					dc.log.Debugf("Setting server api version to %v.", ver)
-					atomic.StoreInt32(&dc.apiVer, ver)
-					return true
-				}
-			}
-			return false
-		}(); !found {
-			err := fmt.Errorf("unknown server API version: %v", cfgAPIVer)
-			if cfgAPIVer > apiVer {
-				err = fmt.Errorf("%v: %w", err, outdatedClientErr)
-			}
-			return err
+	// Check that we are able to communicate with this DEX.
+	var supported bool
+	for _, ver := range supportedAPIVers {
+		if apiVer == ver {
+			supported = true
 		}
+	}
+	if !supported {
+		err := fmt.Errorf("unsupported server API version %v", apiVer)
+		if apiVer > supportedAPIVers[len(supportedAPIVers)-1] {
+			err = fmt.Errorf("%v: %w", err, outdatedClientErr)
+		}
+		return nil, err
 	}
 
 	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)
@@ -839,6 +844,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 	if dc.ticker.Dur() != tickInterval {
 		dc.ticker.Reset(tickInterval)
 	}
+
 	getAsset := func(id uint32) *msgjson.Asset {
 		for _, asset := range cfg.Assets {
 			if id == asset.ID {
@@ -901,10 +907,10 @@ func (dc *dexConnection) refreshServerConfig() error {
 
 	assets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
 	if err != nil {
-		return fmt.Errorf("Inconsistent 'config' response: %w", err)
+		return nil, fmt.Errorf("Inconsistent 'config' response: %w", err)
 	}
 
-	// Update dc.{marketMap,epoch,assets}
+	// Update dc.{epoch,assets}
 	dc.assetsMtx.Lock()
 	dc.assets = assets
 	dc.assetsMtx.Unlock()
@@ -917,7 +923,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 	if dc.acct.dexPubKey == nil && len(cfg.DEXPubKey) > 0 {
 		dc.acct.dexPubKey, err = secp256k1.ParsePubKey(cfg.DEXPubKey)
 		if err != nil {
-			return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %w", err)
+			return nil, fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %w", err)
 		}
 	}
 
@@ -925,7 +931,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 	dc.epoch = epochs
 	dc.epochMtx.Unlock()
 
-	return nil
+	return cfg, nil
 }
 
 // subPriceFeed subscribes to the price_feed notification feed and primes the

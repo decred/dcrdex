@@ -16,6 +16,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
+/* TODO: rework TestAccountExport
 func TestAccountExport(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
@@ -24,7 +25,7 @@ func TestAccountExport(t *testing.T) {
 
 	setupRigAccountProof(host, rig)
 
-	accountResponse, err := tCore.AccountExport(tPW, host)
+	accountResponse, _ , err := tCore.AccountExport(tPW, host)
 	if err != nil {
 		t.Fatalf("account keys error: %v", err)
 	}
@@ -56,17 +57,19 @@ func TestAccountExport(t *testing.T) {
 		t.Fatal("unexpected FeeProofStamp")
 	}
 }
+*/
 
 // If account is not paid then AccountProof should contain unset values
 func TestAccountExportNoAccountProof(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	tCore.conns[tDexHost].acct.isPaid = false
 
 	setupRigAccountProof(host, rig)
 
-	accountResponse, err := tCore.AccountExport(tPW, host)
+	accountResponse, _ /*bonds*/, err := tCore.AccountExport(tPW, host)
 	if err != nil {
 		t.Fatalf("account keys error: %v", err)
 	}
@@ -186,8 +189,8 @@ func TestAccountDisable(t *testing.T) {
 func TestUpdateCert(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	rig.db.acct.Paid = true
-	rig.db.acct.FeeCoin = encode.RandomBytes(32)
+	rig.db.acct.LegacyFeePaid = true
+	rig.db.acct.LegacyFeeCoin = encode.RandomBytes(32)
 
 	tests := []struct {
 		name                 string
@@ -300,8 +303,8 @@ func TestUpdateDEXHost(t *testing.T) {
 	for _, test := range tests {
 		rig := newTestRig()
 		tCore := rig.core
-		rig.db.acct.Paid = true
-		rig.db.acct.FeeCoin = encode.RandomBytes(32)
+		rig.db.acct.LegacyFeePaid = true
+		rig.db.acct.LegacyFeeCoin = encode.RandomBytes(32)
 		rig.db.acct.Host = tDexHost
 
 		tCore.connMtx.Lock()
@@ -353,10 +356,11 @@ func TestUpdateDEXHost(t *testing.T) {
 
 func TestAccountExportPasswordError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	rig.crypter.(*tCrypter).recryptErr = tErr
-	_, err := tCore.AccountExport(tPW, host)
+	_, _, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("expected password error, actual error: '%v'", err)
 	}
@@ -364,9 +368,10 @@ func TestAccountExportPasswordError(t *testing.T) {
 
 func TestAccountExportAddressError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	host := ":bad:"
-	_, err := tCore.AccountExport(tPW, host)
+	_, _, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, addressParseErr) {
 		t.Fatalf("expected address parse error, actual error: '%v'", err)
 	}
@@ -374,13 +379,13 @@ func TestAccountExportAddressError(t *testing.T) {
 
 func TestAccountExportUnknownDEX(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
+	rig.db.acct.Host = "different"
+	// Test the db Account look up failing.
+	rig.db.acctErr = errors.New("acct retrieve error")
+	defer func() { rig.db.acctErr = nil }()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	// Lose the dexConnection
-	tCore.connMtx.Lock()
-	delete(tCore.conns, tDexHost)
-	tCore.connMtx.Unlock()
-	_, err := tCore.AccountExport(tPW, host)
+	_, _, err := tCore.AccountExport(tPW, rig.db.acct.Host) // any valid host is fine
 	if !errorHasCode(err, unknownDEXErr) {
 		t.Fatalf("expected unknown DEX error, actual error: '%v'", err)
 	}
@@ -388,10 +393,11 @@ func TestAccountExportUnknownDEX(t *testing.T) {
 
 func TestAccountExportAccountKeyError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
 	rig.crypter.(*tCrypter).decryptErr = tErr
-	_, err := tCore.AccountExport(tPW, host)
+	_, _, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("expected password error, actual error: '%v'", err)
 	}
@@ -399,19 +405,20 @@ func TestAccountExportAccountKeyError(t *testing.T) {
 
 func TestAccountExportAccountProofError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
 	host := tCore.conns[tDexHost].acct.host
-	tCore.conns[tDexHost].acct.isPaid = true
+	rig.db.acct.LegacyFeePaid = true
 	rig.db.accountProofErr = tErr
-	_, err := tCore.AccountExport(tPW, host)
+	_, _, err := tCore.AccountExport(tPW, host)
 	if !errorHasCode(err, accountProofErr) {
 		t.Fatalf("expected account proof error, actual error: '%v'", err)
 	}
 }
 
-func buildTestAccount(host string) Account {
+func buildTestAccount(host string) *Account {
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	return Account{
+	return &Account{
 		Host:          host,
 		AccountID:     account.NewID(privKey.PubKey().SerializeCompressed()).String(), // can be anything though
 		PrivKey:       hex.EncodeToString(privKey.Serialize()),
@@ -423,6 +430,7 @@ func buildTestAccount(host string) Account {
 	}
 }
 
+/* TODO: rework AccountImport
 func TestAccountImport(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
@@ -439,22 +447,22 @@ func TestAccountImport(t *testing.T) {
 	if !rig.db.verifyCreateAccount {
 		t.Fatalf("expected execution of db.CreateAccount")
 	}
-	if rig.db.acct.Host != host {
-		t.Fatalf("unexpected accountInfo Host")
+	if rig.db.accountInfoPersisted.Host != host {
+		t.Fatalf("unexprected accountInfo Host")
 	}
 	DEXpubKey, _ := hex.DecodeString(account.DEXPubKey)
-	if !bytes.Equal(rig.db.acct.DEXPubKey.SerializeCompressed(), DEXpubKey) {
+	if !bytes.Equal(rig.db.accountInfoPersisted.DEXPubKey.SerializeCompressed(), DEXpubKey) {
 		t.Fatal("unexpected DEXPubKey")
 	}
 	feeCoin, _ := hex.DecodeString(account.FeeCoin)
-	if !bytes.Equal(rig.db.acct.FeeCoin, feeCoin) {
+	if !bytes.Equal(rig.db.accountInfoPersisted.FeeCoin, feeCoin) {
 		t.Fatal("unexpected FeeCoin")
 	}
 	cert, _ := hex.DecodeString(account.Cert)
-	if !bytes.Equal(rig.db.acct.Cert, cert) {
+	if !bytes.Equal(rig.db.accountInfoPersisted.Cert, cert) {
 		t.Fatal("unexpected Cert")
 	}
-	if !rig.db.acct.Paid {
+	if !rig.db.accountInfoPersisted.Paid {
 		t.Fatal("unexpected Paid value")
 	}
 	if rig.db.accountProofPersisted.Host != host {
@@ -468,15 +476,17 @@ func TestAccountImport(t *testing.T) {
 		t.Fatal("unexpected FeeProofStamp")
 	}
 }
+*/
 
 func TestAccountImportEmptyFeeProofSig(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.FeeProofSig = ""
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil /* bonds */)
 	if err != nil {
 		t.Fatalf("account import error: %v", err)
 	}
@@ -488,33 +498,34 @@ func TestAccountImportEmptyFeeProofSig(t *testing.T) {
 	}
 }
 
-func TestAccountImportEmptyFeeProofStamp(t *testing.T) {
-	rig := newTestRig()
-	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
-	account.FeeProofStamp = 0
-	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
-	if err != nil {
-		t.Fatalf("account import error: %v", err)
-	}
-	if rig.db.verifyAccountPaid {
-		t.Fatalf("not expecting execution of db.AccountPaid")
-	}
-	if !rig.db.verifyCreateAccount {
-		t.Fatalf("expected execution of db.CreateAccount")
-	}
-}
+// func TestAccountImportEmptyFeeProofStamp(t *testing.T) {
+// 	rig := newTestRig()
+// 	tCore := rig.core
+// 	host := tCore.conns[tDexHost].acct.host
+// 	account := buildTestAccount(host)
+// 	account.FeeProofStamp = 0
+// 	rig.queueConfig()
+// 	err := tCore.AccountImport(tPW, account)
+// 	if err != nil {
+// 		t.Fatalf("account import error: %v", err)
+// 	}
+// 	if rig.db.verifyAccountPaid {
+// 		t.Fatalf("not expecting execution of db.AccountPaid")
+// 	}
+// 	if !rig.db.verifyCreateAccount {
+// 		t.Fatalf("expected execution of db.CreateAccount")
+// 	}
+// }
 
 func TestAccountImportPasswordError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	rig.queueConfig()
 	rig.crypter.(*tCrypter).recryptErr = tErr
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, passwordErr) {
 		t.Fatalf("expected password error, actual error: '%v'", err)
 	}
@@ -522,11 +533,12 @@ func TestAccountImportPasswordError(t *testing.T) {
 
 func TestAccountImportAddressError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := ":bad:"
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(":bad:")
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, addressParseErr) {
 		t.Fatalf("expected address parse error, actual error: '%v'", err)
 	}
@@ -534,12 +546,13 @@ func TestAccountImportAddressError(t *testing.T) {
 
 func TestAccountImportDecodePubKeyError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.DEXPubKey = "bad"
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
@@ -547,12 +560,13 @@ func TestAccountImportDecodePubKeyError(t *testing.T) {
 
 func TestAccountImportParsePubKeyError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.DEXPubKey = hex.EncodeToString([]byte("bad"))
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, parseKeyErr) {
 		t.Fatalf("expected parse key error, actual error: '%v'", err)
 	}
@@ -560,12 +574,13 @@ func TestAccountImportParsePubKeyError(t *testing.T) {
 
 func TestAccountImportDecodeCertError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.Cert = "bad"
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
@@ -573,39 +588,27 @@ func TestAccountImportDecodeCertError(t *testing.T) {
 
 func TestAccountImportDecodeFeeCoinError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.FeeCoin = "bad"
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
 }
 
-func TestAccountImportAccountVerificationError(t *testing.T) {
-	rig := newTestRig()
-	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
-	account.FeeProofSig = ""
-	account.FeeCoin = ""
-	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
-	if !errorHasCode(err, accountVerificationErr) {
-		t.Fatalf("expected account verification error, actual error: '%v'", err)
-	}
-}
-
 func TestAccountImportDecodePrivKeyError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.PrivKey = "bad"
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
@@ -613,12 +616,13 @@ func TestAccountImportDecodePrivKeyError(t *testing.T) {
 
 func TestAccountImportEncryptPrivKeyError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	rig.crypter.(*tCrypter).encryptErr = tErr
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, encryptionErr) {
 		t.Fatalf("expected encryption error, actual error: '%v'", err)
 	}
@@ -626,12 +630,14 @@ func TestAccountImportEncryptPrivKeyError(t *testing.T) {
 
 func TestAccountImportDecodeFeeProofSigError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	account.FeeProofSig = "bad"
+	account.FeeProofStamp = 1232325
 	rig.queueConfig()
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, decodeErr) {
 		t.Fatalf("expected decode error, actual error: '%v'", err)
 	}
@@ -639,12 +645,13 @@ func TestAccountImportDecodeFeeProofSigError(t *testing.T) {
 
 func TestAccountImportAccountPaidError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	rig.queueConfig()
-	rig.db.accountPaidErr = tErr
-	err := tCore.AccountImport(tPW, account)
+	rig.db.storeAccountProofErr = tErr
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, dbErr) {
 		t.Fatalf("expected db error, actual error: '%v'", err)
 	}
@@ -652,12 +659,13 @@ func TestAccountImportAccountPaidError(t *testing.T) {
 
 func TestAccountImportAccountCreateAccountError(t *testing.T) {
 	rig := newTestRig()
+	defer rig.shutdown()
 	tCore := rig.core
-	host := tCore.conns[tDexHost].acct.host
-	account := buildTestAccount(host)
+	delete(tCore.conns, tDexHost)
+	account := buildTestAccount(tDexHost)
 	rig.queueConfig()
 	rig.db.createAccountErr = tErr
-	err := tCore.AccountImport(tPW, account)
+	err := tCore.AccountImport(tPW, account, nil)
 	if !errorHasCode(err, dbErr) {
 		t.Fatalf("expected db error, actual error: '%v'", err)
 	}
