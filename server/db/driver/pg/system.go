@@ -108,6 +108,7 @@ type sqlExecutor interface {
 
 type sqlQueryer interface {
 	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
 // sqlExec executes the SQL statement string with any optional arguments, and
@@ -197,6 +198,16 @@ func schemaExists(db sqlQueryer, tableName string) (bool, error) {
 type sqlQueryExecutor interface {
 	sqlQueryer
 	sqlExecutor
+}
+
+func createIndexStmt(db sqlQueryExecutor, fmtStmt, indexName, fullTableName string) error {
+	stmt := fmt.Sprintf(fmtStmt, indexName, fullTableName)
+	log.Debugf("Creating index %q on the %q table.", indexName, fullTableName)
+	_, err := db.Exec(stmt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return err
 }
 
 // createTableStmt creates a table with the given name using the provided SQL
