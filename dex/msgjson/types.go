@@ -30,7 +30,7 @@ const (
 	RPCOpenWalletError                   // 12
 	RPCWalletExistsError                 // 13
 	RPCCloseWalletError                  // 14
-	RPCGetFeeError                       // 15
+	RPCGetFeeError                       // 15, obsolete, kept for order
 	RPCRegisterError                     // 16
 	RPCArgumentsError                    // 17
 	RPCTradeError                        // 18
@@ -72,7 +72,7 @@ const (
 	HTTPRouteError                       // 54
 	RouteUnavailableError                // 55
 	AccountExistsError                   // 56
-	AccountSuspendedError                // 57
+	AccountSuspendedError                // 57 deprecated, kept for order
 	RPCExportSeedError                   // 58
 	TooManyRequestsError                 // 59
 	RPCGetDEXConfigError                 // 60
@@ -80,6 +80,7 @@ const (
 	RPCWalletRescanError                 // 62
 	RPCDeleteArchivedRecordsError        // 63
 	DuplicateRequestError                // 64
+	BondError                            // 65
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -161,6 +162,21 @@ const (
 	// DEX that the fee has been paid and has the requisite number of
 	// confirmations.
 	NotifyFeeRoute = "notifyfee"
+	// PostBondRoute is the client-originating request used to post a new
+	// fidelity bond protocol. This can create a new account or it can add bond
+	// to an existing account.
+	PostBondRoute = "postbond"
+	// BondConfirmedRoute is a server-originating notification when a bond
+	// posted with postbond reaches the required confirmations. This
+	// notification is not sent if the bond is either not found on the network
+	// or is at the required confirmations when the postbond response is sent.
+	BondConfirmedRoute = "bondconfirmed"
+	// BondExpiredRoute is a server-originating notification when a bond expires
+	// according to the configure bond expiry duration and the bond's lock time.
+	BondExpiredRoute = "bondexpired"
+	// TierChange is a server-originating notification sent to a connected user
+	// who's tier changes for any reason.
+	TierChangeRoute = "tierchange" // (TODO: use in many auth mgr events)
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
@@ -280,6 +296,8 @@ type ResponsePayload struct {
 // decoded depends on its MessageType.
 type MessageType uint8
 
+// There are presently three recognized message types: request, response, and
+// notification.
 const (
 	InvalidMessageType MessageType = iota // 0
 	Request                               // 1
@@ -470,7 +488,7 @@ func (m *Match) Serialize() []byte {
 	return append(s, uint64Bytes(m.FeeRateQuote)...)
 }
 
-// Nomatch is the payload for a server-originating NoMatchRoute notification.
+// NoMatch is the payload for a server-originating NoMatchRoute notification.
 type NoMatch struct {
 	OrderID Bytes `json:"orderid"`
 }
@@ -483,7 +501,7 @@ type MatchRequest struct {
 	MatchID Bytes  `json:"matchid"`
 }
 
-// MatchStatus is the successful result for the MatchStatusRoute request.
+// MatchStatusResult is the successful result for the MatchStatusRoute request.
 type MatchStatusResult struct {
 	MatchID       Bytes `json:"matchid"`
 	Status        uint8 `json:"status"`
@@ -630,6 +648,9 @@ func (r *Redemption) Serialize() []byte {
 	return append(s, uint64Bytes(r.Time)...)
 }
 
+// Certain order properties are specified with the following constants. These
+// properties include buy/sell (side), standing/immediate (force),
+// limit/market/cancel (order type).
 const (
 	BuyOrderNum       = 1
 	SellOrderNum      = 2
@@ -810,12 +831,12 @@ type BookOrderNote struct {
 	TradeNote
 }
 
-// UnbookOrderRoute is the DEX-originating notification-type message informing
+// UnbookOrderNote is the DEX-originating notification-type message informing
 // the client to remove an order from the order book.
 type UnbookOrderNote OrderNote
 
-// EpochOrderRoute is the DEX-originating notification-type message informing
-// the client about an order added to the epoch queue.
+// EpochOrderNote is the DEX-originating notification-type message informing the
+// client about an order added to the epoch queue.
 type EpochOrderNote struct {
 	BookOrderNote
 	Commit    Bytes  `json:"com"`
@@ -903,6 +924,16 @@ func (c *Connect) Serialize() []byte {
 	return append(s, uint64Bytes(c.Time)...)
 }
 
+// Bond is information on a fidelity bond. This is part of the ConnectResult and
+// PostBondResult payloads.
+type Bond struct {
+	Amount  uint64 `json:"amt"`
+	Expiry  uint64 `json:"expiry"` // when it expires, not the lock time
+	CoinID  Bytes  `json:"coinid"`
+	AssetID uint32 `json:"assetid"`
+	Pending bool   `json:"pending,omitempty"` // omit when at required confs
+}
+
 // ConnectResult is the result for the ConnectRoute request.
 //
 // TODO: Include penalty data as specified in the spec.
@@ -911,7 +942,12 @@ type ConnectResult struct {
 	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
 	ActiveMatches       []*Match       `json:"activematches"`
 	Score               int32          `json:"score"`
-	Suspended           *bool          `json:"suspended,omitempty"` // will be implied (obsolete) with tiers and bonds
+	Tier                *int64         `json:"tier"` // 1+ means bonded and may trade, a function of active bond amounts and conduct, nil legacy
+	ActiveBonds         []*Bond        `json:"activeBonds"`
+	// Violations []Violation `json:"violations"` // TODO: active violations
+	LegacyFeePaid *bool `json:"legacyFeePaid"` // not set by legacy server
+
+	Suspended *bool `json:"suspended,omitempty"` // DEPRECATED - implied by tier<1
 }
 
 // PenaltyNote is the payload of a Penalty notification.
@@ -925,7 +961,7 @@ type PenaltyNote struct {
 type Penalty struct {
 	Rule     account.Rule `json:"rule"`
 	Time     uint64       `json:"timestamp"`
-	Duration uint64       `json:"duration"`
+	Duration uint64       `json:"duration,omitempty"` // DEPRECATED with bonding tiers, but must remain in serialization until v1 (V0PURGE)
 	Details  string       `json:"details"`
 }
 
@@ -940,6 +976,82 @@ func (n *PenaltyNote) Serialize() []byte {
 	b = append(b, uint64Bytes(p.Duration)...)
 	return append(b, []byte(p.Details)...)
 }
+
+// PostBond should include unsigned transaction for validation prior to
+// broadcasting the signed transaction so the client hasn't needlessly locked
+// funds if the transaction is rejected by the server.
+type PostBond struct {
+	Signature
+	AcctPubKey Bytes  `json:"acctPubKey"` // acctID = blake256(blake256(acctPubKey))
+	AssetID    uint32 `json:"assetID"`
+	BondTx     Bytes  `json:"bondTx"`
+	BondScript Bytes  `json:"bondScript"`
+	BondSig    Bytes  `json:"bondSig"` // account id signed by key from bond script's pubkey
+
+	// LegacyFeeRefundAddr is an optional field for the client to specify a
+	// return address so they may *request* a refund of their legacy
+	// registration fee, if they had paid it.
+	LegacyFeeRefundAddr string `json:"legacyFeeRefundAddress,omitempty"`
+}
+
+// Serialize serializes the PostBond data for the signature.
+func (pb *PostBond) Serialize() []byte {
+	// serialization: client pubkey (33) + asset ID (4) + raw tx (variable) +
+	// bond script (variable)
+	sz := len(pb.AcctPubKey) + 4 + len(pb.BondTx) + len(pb.BondScript)
+	b := make([]byte, 0, sz)
+	b = append(b, pb.AcctPubKey...)
+	b = append(b, uint32Bytes(pb.AssetID)...)
+	b = append(b, pb.BondTx...)
+	return append(b, pb.BondScript...) // BondSig not included
+}
+
+// PostBondResult is the response to the client's PostBond request. If Confs is
+// -1, the bond tx was not found on the network, but was otherwise validated.
+type PostBondResult struct {
+	Signature        // message is BondID | AccountID
+	AccountID Bytes  `json:"accountid"`
+	AssetID   uint32 `json:"assetID"`
+	Amt       uint64 `json:"amt"`
+	Expiry    int64  `json:"expiry"` // not locktime, but time when bond expires for dex
+	BondID    Bytes  `json:"bondID"`
+	Confs     int64  `json:"confs"`
+	Tier      int64  `json:"tier"`
+	// BondTotal uint64 `json:"bondTotal"`
+}
+
+// Serialize serializes the PostBondResult data for the signature.
+func (pbr *PostBondResult) Serialize() []byte {
+	sz := len(pbr.AccountID) + len(pbr.BondID)
+	b := make([]byte, 0, sz)
+	b = append(b, pbr.AccountID...)
+	return append(b, pbr.BondID...)
+}
+
+// BondConfirmedNotification is a courtesy notification when a bond tx reaches
+// the required number of confirmations. This will not be sent for postbond
+// requests for fully-confirmed txns.
+type BondConfirmedNotification struct {
+	Signature
+	AccountID  Bytes  `json:"accountid"`
+	AssetID    uint32 `json:"assetid"`
+	BondCoinID Bytes  `json:"coinid"`
+	Tier       int64  `json:"tier"`
+}
+
+// Serialize serializes the BondConfirmedNotification data.
+func (bc *BondConfirmedNotification) Serialize() []byte {
+	sz := 4 + len(bc.AccountID) + 4 + len(bc.BondCoinID) + 8
+	b := make([]byte, 0, sz)
+	b = append(b, bc.AccountID...)
+	b = append(b, uint32Bytes(bc.AssetID)...)
+	b = append(b, bc.BondCoinID...)
+	return append(b, uint64Bytes(uint64(bc.Tier))...) // correct bytes for int64 (signed)?
+}
+
+// BondExpiredNotification has the same structure and method (serialization) as
+// BondConfirmedNotification.
+type BondExpiredNotification = BondConfirmedNotification // alias to get methods without having to instantiate literals with BondConfirmedNotification
 
 // Register is the payload for the RegisterRoute request.
 type Register struct {
@@ -1075,19 +1187,43 @@ type FeeAsset struct {
 	Amt   uint64 `json:"amount"`
 }
 
-// ConfigResult is the successful result for the ConfigRoute.
+// BondAsset describes an asset for which fidelity bonds are supported.
+type BondAsset struct {
+	ID    uint32 `json:"id"`
+	Confs uint32 `json:"confs"`
+	Amt   uint64 `json:"amount"`
+	// Any reason to have expiry be asset-specific?
+}
+
+// Client should send bond info when their bond tx is fully-confirmed. Server
+// should start waiting for required confs when it receives the 'postbond'
+// request if the txn is found. Client is responsible for submitting 'postbond'
+// for their bond txns when they reach required confs, or when the client
+// restarts and finds bonds recorded in their DB that have are flagged as
+// neither accepted or expired (also maybe if not listed in the 'connect'
+// response).
+
+// ConfigResult is the successful result for the ConfigRoute. A bond expires
+// when the time remaining until lockTime is less than BondExpiry. As such,
+// bonds should be created with a considerably longer lockTime.
 type ConfigResult struct {
+	// APIVersion is the server's communications API version, but we may
+	// consider APIVersions []uint16, with versioned routes e.g. "initV2".
+	// APIVersions []uint16 `json:"apivers"`
+	APIVersion       uint16    `json:"apiver"`
+	DEXPubKey        dex.Bytes `json:"pubkey"`
 	CancelMax        float64   `json:"cancelmax"`
 	BroadcastTimeout uint64    `json:"btimeout"`
-	RegFeeConfirms   uint16    `json:"regfeeconfirms"` // DEPRECATED
 	Assets           []*Asset  `json:"assets"`
 	Markets          []*Market `json:"markets"`
-	Fee              uint64    `json:"fee"` // DEPRECATED
-	APIVersion       uint16    `json:"apiver"`
 	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
-	DEXPubKey        Bytes     `json:"pubkey"`
 
-	RegFees map[string]*FeeAsset `json:"regFees"`
+	BondExpiry uint64                `json:"bondExpiry"`
+	BondAssets map[string]*BondAsset `json:"bondAssets"`
+
+	RegFees        map[string]*FeeAsset `json:"regFees"`
+	Fee            uint64               `json:"fee"`            // DEPRECATED
+	RegFeeConfirms uint16               `json:"regfeeconfirms"` // DEPRECATED
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot
