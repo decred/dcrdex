@@ -39,10 +39,11 @@ func (s *WebServer) securityMiddleware(next http.Handler) http.Handler {
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), ctxKeyUserInfo, &userInfo{
-			User:       s.core.User(),
-			Authed:     s.isAuthed(r),
-			DarkMode:   extractBooleanCookie(r, darkModeCK, true),
-			ShowPopups: extractBooleanCookie(r, popupsCK, true),
+			User:             s.core.User(),
+			Authed:           s.isAuthed(r),
+			PasswordIsCached: s.isPasswordCached(r),
+			DarkMode:         extractBooleanCookie(r, darkModeCK, true),
+			ShowPopups:       extractBooleanCookie(r, popupsCK, true),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

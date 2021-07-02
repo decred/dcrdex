@@ -621,6 +621,10 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
+func (c *TCore) CacheAppPassword(pw []byte, mapping string) ([]byte, error) { return nil, nil }
+
+func (c *TCore) GetCachedPassword(mapping string, key []byte) ([]byte, error) { return nil, nil }
+
 func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, error) {
 	mktID, _ := dex.MarketName(base, quote)
 	c.mtx.Lock()

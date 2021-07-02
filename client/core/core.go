@@ -1039,6 +1039,9 @@ type Core struct {
 
 	sentCommitsMtx sync.Mutex
 	sentCommits    map[order.Commitment]chan struct{}
+
+	encPassMtx         sync.Mutex
+	encryptedPasswords map[string][]byte
 }
 
 // New is the constructor for a new Core.
@@ -1075,6 +1078,8 @@ func New(cfg *Config) (*Core, error) {
 		newCrypter:    encrypt.NewCrypter,
 		reCrypter:     encrypt.Deserialize,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
+
+		encryptedPasswords: make(map[string][]byte),
 	}
 
 	// Populate the initial user data. User won't include any DEX info yet, as
@@ -1253,6 +1258,58 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	defer c.walletMtx.RUnlock()
 	w, found := c.wallets[assetID]
 	return w, found
+}
+
+// GetCachedPassword takes the mapping string passed to CacheAppPassword and
+// the key returned from it to lookup and decrypt the app password.
+func (c *Core) GetCachedPassword(mapping string, key []byte) ([]byte, error) {
+	_, pushes, err := encode.DecodeBlob(key)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding blob: %v", err)
+	}
+
+	key, deserializedCrypter := pushes[0], pushes[1]
+	crypter, err := encrypt.Deserialize(key, deserializedCrypter)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing crypter: %v", err)
+	}
+
+	c.encPassMtx.Lock()
+	encryptedPassword, ok := c.encryptedPasswords[mapping]
+	c.encPassMtx.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("cached encrypted password not found for"+
+			" mapping: %v", mapping)
+	}
+
+	pw, err := crypter.Decrypt(encryptedPassword)
+	if err != nil {
+		return nil, fmt.Errorf("error decrypting password: %v", err)
+	}
+
+	return pw, nil
+}
+
+// CacheAppPassword encrypts the app password with a random key, caches it,
+// and returns the key. The mapping string argument is used to lookup the
+// cached password using the GetCachedPassword function.
+func (c *Core) CacheAppPassword(appPW []byte, mapping string) ([]byte, error) {
+	_, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, newError(authErr, "CacheAppPassword password error: %v", err)
+	}
+
+	key := encode.RandomBytes(16)
+	crypter := encrypt.NewCrypter(key)
+	encryptedPass, err := crypter.Encrypt(appPW)
+	if err != nil {
+		return nil, fmt.Errorf("error encrypting password: %v", err)
+	}
+
+	c.encPassMtx.Lock()
+	c.encryptedPasswords[mapping] = encryptedPass
+	c.encPassMtx.Unlock()
+	return encode.BuildyBytes{0}.AddData(key).AddData(crypter.Serialize()), nil
 }
 
 // encryptionKey retrieves the application encryption key. The key itself is
@@ -1863,6 +1920,11 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 			return codedError(dbErr, err)
 		}
 	}
+
+	// Clear incorrect encrypted passwords
+	c.encPassMtx.Lock()
+	c.encryptedPasswords = make(map[string][]byte)
+	c.encPassMtx.Unlock()
 
 	return nil
 }
@@ -2579,6 +2641,11 @@ func (c *Core) Logout() error {
 	for _, dc := range conns {
 		dc.acct.lock()
 	}
+
+	// Get rid of the cached encrypted passwords.
+	c.encPassMtx.Lock()
+	c.encryptedPasswords = make(map[string][]byte)
+	c.encPassMtx.Unlock()
 
 	return nil
 }

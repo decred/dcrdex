@@ -14,7 +14,7 @@ export default class WalletsPage extends BasePage {
     app = application
     this.body = body
     const page = this.page = Doc.parsePage(body, [
-      'rightBox',
+      'rightBox', 'rightBoxErr',
       // Table Rows
       'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable',
       // Available markets
@@ -124,7 +124,7 @@ export default class WalletsPage extends BasePage {
       bind(a.withdraw, 'click', e => { run(e, this.showWithdraw.bind(this)) })
       bind(a.deposit, 'click', e => { run(e, this.showDeposit.bind(this)) })
       bind(a.create, 'click', e => { run(e, this.showNewWallet.bind(this)) })
-      bind(a.unlock, 'click', e => { run(e, this.showOpen.bind(this)) })
+      bind(a.unlock, 'click', e => { run(e, this.openWallet.bind(this)) })
       bind(a.lock, 'click', async e => { run(e, this.lock.bind(this)) })
       bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
     }
@@ -193,6 +193,14 @@ export default class WalletsPage extends BasePage {
     this.displayed = box
   }
 
+  async showError (errorString) {
+    const page = this.page
+    await this.hideBox()
+    const box = page.rightBoxErr
+    box.textContent = errorString
+    this.animation = await this.showBox(box)
+  }
+
   /*
    * Show the markets box, which lists the markets available for a selected
    * asset.
@@ -243,6 +251,23 @@ export default class WalletsPage extends BasePage {
     this.walletForm.setAsset(asset)
     this.animation = this.showBox(box)
     await this.walletForm.loadDefaults()
+  }
+
+  async openWallet (assetID) {
+    if (!this.page.openForm.hidden) {
+      this.showOpen.bind(this)(assetID)
+    } else {
+      this.openAsset = assetID
+      const open = {
+        assetID: parseInt(assetID)
+      }
+      const res = await postJSON('/api/openwallet', open)
+      if (app.checkResponse(res)) {
+        this.openWalletSuccess.bind(this)()
+      } else {
+        this.showError(`Error opening wallet: ${res.msg}`)
+      }
+    }
   }
 
   /* Show the form used to unlock a wallet. */
@@ -401,7 +426,7 @@ export default class WalletsPage extends BasePage {
   async reconfig () {
     const page = this.page
     Doc.hide(page.reconfigErr)
-    if (!page.appPW.value) {
+    if (!page.appPW.value && !page.appPW.hidden) {
       page.reconfigErr.textContent = 'app password cannot be empty'
       Doc.show(page.reconfigErr)
       return

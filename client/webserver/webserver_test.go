@@ -162,6 +162,12 @@ func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
+func (c *TCore) CacheAppPassword(pw []byte, mapping string) ([]byte, error) {
+	return nil, nil
+}
+func (c *TCore) GetCachedPassword(mapping string, key []byte) ([]byte, error) {
+	return nil, nil
+}
 
 type TWriter struct {
 	b []byte

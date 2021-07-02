@@ -20,7 +20,7 @@ export class NewWalletForm {
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
 
     bind(form, fields.submitAdd, async () => {
-      if (fields.nwAppPass.value === '') {
+      if (fields.nwAppPass.value === '' && !fields.nwAppPass.hidden) {
         fields.newWalletErr.textContent = 'app password cannot be empty'
         Doc.show(fields.newWalletErr)
         return
