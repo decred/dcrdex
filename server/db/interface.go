@@ -212,31 +212,71 @@ type OrderArchiver interface {
 	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
 }
 
+// Account holds data returned by Accounts.
+type Account struct {
+	AccountID  account.AccountID `json:"accountid"`
+	Pubkey     dex.Bytes         `json:"pubkey"`
+	FeeAsset   uint32            `json:"feeasset"`
+	FeeAddress string            `json:"feeaddress"` // DEPRECATED
+	FeeCoin    dex.Bytes         `json:"feecoin"`    // DEPRECATED
+}
+
+// Bond represents a time-locked fidelity bond posted by a user.
+type Bond struct {
+	Version  uint16
+	AssetID  uint32
+	CoinID   []byte
+	Amount   int64
+	Strength uint32 // Amount / <bond increment at time of acceptance>
+	LockTime int64
+
+	// Will we need to store asset-specific data, like the redeem script for
+	// UTXO assets or a contract address or bond key for account assets? Or will
+	// that info be conveyed by Version and CoinID?
+	//
+	// Data []byte
+}
+
 // AccountArchiver is the interface required for storage and retrieval of all
 // account data.
 type AccountArchiver interface {
-	// CloseAccount closes an account for violating a rule of community conduct.
-	CloseAccount(account.AccountID, account.Rule) error
-
-	// RestoreAccount opens an account that was previously closed by CloseAccount.
-	RestoreAccount(account.AccountID) error
-
-	// Account retrieves the account information for the specified account ID.
-	// The registration fee payment status is returned as well. A nil pointer
-	// will be returned for unknown or closed accounts.
-	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	// Account retrieves the account information for the specified account ID. A
+	// nil pointer will be returned for unknown or closed accounts. Bond and
+	// registration fee payment status is returned as well. A bond is active if
+	// its lockTime is after the lockTimeThresh Time, which should be
+	// time.Now().Add(bondExpiry). The legacy bool return refers to the legacy
+	// registration fee system, and legacyPaid indicates if the account has a
+	// recorded fee coin (paid legacy fee).
+	Account(acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond, legacy, legacyPaid bool)
 
 	// CreateAccount stores a new account with an assigned registration address
 	// for a specific asset. The account is considered unpaid until PayAccount
-	// is used to set the payment transaction details.
+	// is used to set the payment transaction details. This is intended for use
+	// with the old registration fee system, since with the bond system,
+	// accounts are not to be created until a bond transaction is created and
+	// broadcasted. The account is considered unpaid until PayAccount is used to
+	// set the registration fee payment details. (V0PURGE)
 	CreateAccount(acct *account.Account, assetID uint32, regAddr string) error
 
-	// AccountRegAddr gets the registration fee address and the corresponding
-	// asset ID for the account.
+	// CreateAccountWithBond creates a new account with the given bond. This is
+	// used for the new postbond request protocol. The bond tx should be
+	// fully-confirmed.
+	CreateAccountWithBond(acct *account.Account, bond *Bond) error
+
+	// AddBond stores a new Bond, which is uniquely identified by (asset ID,
+	// coin ID), for an existing account.
+	AddBond(acct account.AccountID, bond *Bond) error
+
+	// DeleteBond deletes a bond which should generally be expired.
+	DeleteBond(assetID uint32, coinID []byte) error
+
+	// AccountRegAddr gets any legacy registration fee address and the
+	// corresponding asset ID for the account. (V0PURGE)
 	AccountRegAddr(account.AccountID) (string, uint32, error)
 
 	// PayAccount sets the registration fee payment transaction details for the
-	// account, completing the registration process.
+	// account, completing the registration process for old fee system.
+	// (V0PURGE)
 	PayAccount(account.AccountID, []byte) error
 
 	// Accounts returns data for all accounts.
