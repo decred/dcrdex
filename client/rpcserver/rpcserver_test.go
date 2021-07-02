@@ -46,6 +46,8 @@ type TCore struct {
 	initializeClientErr      error
 	registerResult           *core.RegisterResult
 	registerErr              error
+	postBondResult           *core.PostBondResult
+	postBondErr              error
 	exchanges                map[string]*core.Exchange
 	loginErr                 error
 	loginResult              *core.LoginResult
@@ -111,6 +113,9 @@ func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange,
 }
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 	return c.registerResult, c.registerErr
+}
+func (c *TCore) PostBond(*core.PostBondForm) (*core.PostBondResult, error) {
+	return c.postBondResult, c.postBondErr
 }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
 	return &tBookFeed{}, c.syncErr

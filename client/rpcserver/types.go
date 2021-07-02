@@ -48,6 +48,12 @@ type SemVersion struct {
 	BuildMetadata string `json:"buildMetadata,omitempty"`
 }
 
+// getBondAssetsResponse is the getbondassets response payload.
+type getBondAssetsResponse struct {
+	Expiry uint64                     `json:"expiry"`
+	Assets map[string]*core.BondAsset `json:"assets"`
+}
+
 // tradeResponse is used when responding to the trade route.
 type tradeResponse struct {
 	OrderID string `json:"orderID"`
@@ -362,17 +368,73 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	asset32 := uint32(asset)
+
 	var cert []byte
 	if len(params.Args) > 3 {
 		cert = []byte(params.Args[3])
 	}
+
+	asset32 := uint32(asset)
 	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],
 		Addr:    params.Args[0],
 		Fee:     fee,
 		Asset:   &asset32,
 		Cert:    cert,
+	}
+	return req, nil
+}
+
+func parseBondAssetsArgs(params *RawParams) (host string, cert []byte, err error) {
+	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
+		return "", nil, err
+	}
+	if len(params.Args) == 1 {
+		return params.Args[0], nil, nil
+	}
+	return params.Args[0], []byte(params.Args[1]), nil
+}
+
+func parsePostBondArgs(params *RawParams) (*core.PostBondForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{3, 5}); err != nil {
+		return nil, err
+	}
+	bond, err := checkUIntArg(params.Args[1], "bond", 64)
+	if err != nil {
+		return nil, err
+	}
+	asset, err := checkUIntArg(params.Args[2], "asset", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	var lockTimeEpoch uint64
+	if len(params.Args) > 3 {
+		lockTimeEpoch, err = checkUIntArg(params.Args[3], "locktime", 64)
+		if err != nil {
+			return nil, err
+		}
+		lockTime := time.Unix(int64(lockTimeEpoch), 0)
+		if time.Now().Before(lockTime) {
+			return nil, fmt.Errorf("locktime already passed")
+		}
+		if time.Until(lockTime) > 120*24*time.Hour {
+			return nil, fmt.Errorf("locktime is longer than 120 days")
+		}
+	}
+	var cert []byte
+	if len(params.Args) > 4 {
+		cert = []byte(params.Args[4])
+	}
+
+	asset32 := uint32(asset)
+	req := &core.PostBondForm{
+		AppPass:  params.PWArgs[0],
+		Addr:     params.Args[0],
+		Cert:     cert,
+		Bond:     bond,
+		Asset:    &asset32,
+		LockTime: lockTimeEpoch,
 	}
 	return req, nil
 }

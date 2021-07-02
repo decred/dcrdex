@@ -54,6 +54,7 @@ var promptPasswords = map[string][]string{
 	"newwallet":    {"App password:", "Wallet password:"},
 	"openwallet":   {"App password:"},
 	"register":     {"App password:"},
+	"postbond":     {"App password:"},
 	"trade":        {"App password:"},
 	"withdraw":     {"App password:"},
 	"send":         {"App password:"},
@@ -65,6 +66,8 @@ var promptPasswords = map[string][]string{
 // cmd args at the specified index.
 var optionalTextFiles = map[string]int{
 	"discoveracct": 1,
+	"bondassets":   1,
+	"postbond":     4,
 	"getdexconfig": 1,
 	"register":     3,
 	"newwallet":    2,
