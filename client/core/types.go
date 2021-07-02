@@ -122,12 +122,32 @@ type SupportedAsset struct {
 
 // RegisterForm is information necessary to register an account on a DEX.
 type RegisterForm struct {
-	Addr    string           `json:"url"`
-	AppPass encode.PassBytes `json:"appPass"`
-	Fee     uint64           `json:"fee"`
+	Addr     string           `json:"url"`
+	AppPass  encode.PassBytes `json:"appPass"`
+	Bond     uint64           `json:"bond"`
+	LockTime uint64           `json:"lockTime,omitempty"` // 0 means go with server-derived value
+	// TODO: MaintainBonds bool `json:"maintainBonds"` // auto-post new bonds when old ones expire
+	// TODO: BondAssetID uint32 `json:"assetid"`
+
 	// Cert can be a string, which is interpreted as a filepath, or a []byte,
 	// which is interpreted as the file contents of the certificate.
 	Cert interface{} `json:"cert"`
+}
+
+// BondOptionsForm is used from the settings page to change the auto-bond
+// maintenance setting for a DEX.
+// type BondOptionsForm struct {
+// 	MaintainBonds bool `json:"maintainbonds"` // auto-post new bonds when old ones expire
+// }
+
+// AddBondForm is information necessary to post a new bond for an existing DEX
+// account.
+type AddBondForm struct {
+	Addr     string           `json:"url"`
+	AppPass  encode.PassBytes `json:"appPass"`
+	Bond     uint64           `json:"bond"`
+	LockTime uint64           `json:"lockTime"` // 0 means go with server-derived value
+	// TODO: BondAssetID uint32 `json:"assetid"`
 }
 
 // Match represents a match on an order. An order may have many matches.
@@ -448,25 +468,35 @@ func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
 }
 
-// FeeAsset will also be a msgjson type with preregister/payfee PR 1017.
-type FeeAsset struct {
+// BondAsset describes the bond asset in terms of it's BIP-44 coin type,
+// required confirmations, and minimum bond amount.
+type BondAsset struct {
 	ID    uint32 `json:"id"`
 	Confs uint32 `json:"confs"`
 	Amt   uint64 `json:"amount"`
 }
 
+// FeeAsset is deprecated, but the same as BondAsset.
+// type FeeAsset BondAsset
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host          string                `json:"host"`
-	AcctID        string                `json:"acctID"`
-	Markets       map[string]*Market    `json:"markets"`
-	Assets        map[uint32]*dex.Asset `json:"assets"`
-	FeePending    bool                  `json:"feePending"`
-	Connected     bool                  `json:"connected"`
-	ConfsRequired uint32                `json:"confsrequired"` // DEPRECATED. RegFees will support multi-asset reg
-	RegConfirms   *uint32               `json:"confs,omitempty"`
-	Fee           *FeeAsset             `json:"feeAsset"` // DEPRECATED
-	// RegFees       map[string]*FeeAsset  `json:"regfees"`
+	Host         string                `json:"host"`
+	AcctID       string                `json:"acctID"`
+	Markets      map[string]*Market    `json:"markets"`
+	Assets       map[uint32]*dex.Asset `json:"assets"`
+	BondExpiry   uint64                `json:"bondExpiry"`
+	BondAssets   map[string]*BondAsset `json:"bondAssets"`
+	Connected    bool                  `json:"connected"`
+	Tier         int64                 `json:"tier"`
+	BondsPending bool                  `json:"bondsPending"`
+	// TODO: Bonds
+
+	// OLD fields for the legacy registration fee:
+	// Fee           *FeeAsset `json:"feeAsset"`
+	// ConfsRequired uint32    `json:"confsrequired"`
+	// RegConfirms   *uint32   `json:"confs,omitempty"`
+	// FeePending    bool      `json:"feePending"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.
@@ -529,28 +559,49 @@ type BookUpdate struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	host      string
-	encKey    []byte
-	keyMtx    sync.RWMutex
-	privKey   *secp256k1.PrivateKey
-	id        account.AccountID
+	host string
+	cert []byte
+	// dexPubKey is from config resp for HD acct generation.
 	dexPubKey *secp256k1.PublicKey
-	feeCoin   []byte
-	cert      []byte
-	isPaid    bool
-	authMtx   sync.RWMutex
-	isAuthed  bool
+
+	// account identify is from setupEncryption presently, will be derived from
+	// an hd seed and dexPubKey.
+	keyMtx  sync.RWMutex
+	encKey  []byte
+	privKey *secp256k1.PrivateKey
+	id      account.AccountID
+
+	authMtx      sync.RWMutex
+	isAuthed     bool
+	pendingBonds []*db.Bond // not yet confirmed
+	bonds        []*db.Bond // confirmed, and not yet expired
+	expiredBonds []*db.Bond // expired and needing refund
+	tier         int64
+
+	feeCoin []byte // legacy
+	isPaid  bool   // feeCoin fully confirmed
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
 		host:      acctInfo.Host,
-		encKey:    acctInfo.EncKey(),
-		dexPubKey: acctInfo.DEXPubKey,
-		isPaid:    acctInfo.Paid,
-		feeCoin:   acctInfo.FeeCoin,
 		cert:      acctInfo.Cert,
+		dexPubKey: acctInfo.DEXPubKey,
+		encKey:    acctInfo.EncKey(), // privKey and id on decrypt
+		feeCoin:   acctInfo.LegacyFeeCoin,
+		isPaid:    acctInfo.LegacyFeePaid,
+	}
+}
+
+func (a *dexAccount) dbInfo() *db.AccountInfo { // remove?
+	return &db.AccountInfo{
+		Host:          a.host,
+		Cert:          a.cert,
+		DEXPubKey:     a.dexPubKey,
+		EncKeyV2:      a.encKey,
+		LegacyFeeCoin: a.feeCoin,
+		LegacyFeePaid: a.isPaid,
 	}
 }
 
@@ -606,6 +657,10 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	root, err := hdkeychain.NewMaster(seed, &rootKeyParams{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewMaster error: %w", err)
+	}
+
+	if a.dexPubKey == nil {
+		return nil, nil, fmt.Errorf("unsupported DEX server")
 	}
 
 	dexPkB := a.dexPubKey.SerializeCompressed()
@@ -723,10 +778,22 @@ func (a *dexAccount) authed() bool {
 }
 
 // auth sets the account as authenticated.
-func (a *dexAccount) auth() {
+func (a *dexAccount) auth(tier int64) {
 	a.authMtx.Lock()
 	a.isAuthed = true
+	a.tier = tier
 	a.authMtx.Unlock()
+}
+
+func (a *dexAccount) bonding() (tier int64, pendingBond []*db.Bond) {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	pendingBonds := make([]*db.Bond, len(a.pendingBonds))
+	for i, bond := range a.pendingBonds {
+		bondCopy := *bond
+		pendingBonds[i] = &bondCopy
+	}
+	return a.tier, pendingBonds
 }
 
 // unauth sets the account as un-authenticated.
@@ -736,12 +803,10 @@ func (a *dexAccount) unauth() {
 	a.authMtx.Unlock()
 }
 
-// feePending checks whether the fee transaction has been broadcast, but the
-// notifyfee request has not been sent/accepted yet.
-func (a *dexAccount) feePending() bool {
+func (a *dexAccount) hasLegacyFee() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return !a.isPaid && len(a.feeCoin) > 0
+	return len(a.feeCoin) > 0
 }
 
 // feePaid returns true if the account regisration fee has been accepted by the
@@ -773,6 +838,12 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 
 // checkSig checks the signature against the message and the DEX pubkey.
 func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
+	if msg == nil {
+		return fmt.Errorf("no message to verify")
+	}
+	if sig == nil {
+		return fmt.Errorf("no signature to verify")
+	}
 	_, err := checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
 	return err
 }
@@ -833,9 +904,12 @@ type LoginResult struct {
 
 // RegisterResult holds data returned from Register.
 type RegisterResult struct {
-	FeeID       string `json:"feeID"`
-	ReqConfirms uint16 `json:"reqConfirms"`
+	BondID      string `json:"bondID"`
+	ReqConfirms uint16 `json:"reqConfirms"` // maybe change to uint32
 }
+
+// AddBondResult holds the data returned from AddBond.
+type AddBondResult RegisterResult
 
 // OrderFilter is almost the same as db.OrderFilter, except the Offset order ID
 // is a dex.Bytes instead of a order.OrderID.
@@ -854,9 +928,9 @@ type Account struct {
 	PrivKey       string `json:"privKey"`
 	DEXPubKey     string `json:"DEXPubKey"`
 	Cert          string `json:"cert"`
-	FeeCoin       string `json:"feeCoin"`
-	FeeProofSig   string `json:"feeProofSig"`
-	FeeProofStamp uint64 `json:"FeeProofStamp"`
+	FeeCoin       string `json:"feeCoin,omitempty"`       // DEPRECATED, remains for old accounts
+	FeeProofSig   string `json:"feeProofSig,omitempty"`   // DEPRECATED
+	FeeProofStamp uint64 `json:"feeProofStamp,omitempty"` // DEPRECATED
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

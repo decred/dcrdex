@@ -180,6 +180,8 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		},
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
+			APIVersion:       serverdex.PreAPIVersion,
+			DEXPubKey:        acct.dexPubKey.SerializeCompressed(),
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
 			Assets: []*msgjson.Asset{
@@ -202,8 +204,12 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 					},
 				},
 			},
-			Fee:       tFee,
-			DEXPubKey: acct.dexPubKey.SerializeCompressed(),
+			BondExpiry: 86400,
+			BondAssets: map[string]*msgjson.BondAsset{
+				"dcr": {ID: 42, Amt: tFee, Confs: 1},
+			},
+			Fee:            tFee,
+			RegFeeConfirms: 1, // remove?
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
@@ -261,7 +267,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 	}
 	return fmt.Errorf("no handler for route %q", msg.Route)
 }
-func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs } // use when Core.listen is running
 func (conn *TWebsocket) IsDown() bool {
 	return false
 }
@@ -301,6 +307,8 @@ type TDB struct {
 	verifyCreateAccount   bool
 	verifyUpdateAccount   bool
 	accountProofPersisted *db.AccountProof
+	confirmedAccount      string
+	confirmAccountErr     error
 	disabledAcct          *db.AccountInfo
 	disableAccountErr     error
 	creds                 *db.PrimaryCredentials
@@ -432,9 +440,9 @@ func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
 	return tdb.accountProof, tdb.accountProofErr
 }
 
-func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) StoreAccountProof(host string, sig []byte) error {
 	tdb.verifyAccountPaid = true
-	tdb.accountProofPersisted = proof
+	// todo: save sig
 	return tdb.accountPaidErr
 }
 
@@ -556,6 +564,11 @@ type TXCWallet struct {
 	preRedeem         *asset.PreRedeem
 	ownsAddress       bool
 	ownsAddressErr    error
+	feeTxMade         []byte
+	feeCoin           []byte
+	makeRegFeeTxErr   error
+	feeCoinSent       []byte
+	sendTxnErr        error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -699,7 +712,7 @@ func (w *TXCWallet) RefundAddress(contract dex.Bytes) (string, error) {
 	return "", nil
 }
 
-func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (w *TXCWallet) ContractLockTimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	return true, time.Now().Add(-time.Minute), nil
 }
 
@@ -739,6 +752,14 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 
 func (w *TXCWallet) PayFee(address string, fee uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
+}
+
+func (w *TXCWallet) MakeBondTx(address string, regFee uint64, acctID []byte) ([]byte, []byte, error) {
+	return w.feeTxMade, w.feeCoin, w.makeRegFeeTxErr
+}
+
+func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	return w.feeCoinSent, w.sendTxnErr
 }
 
 func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
@@ -1377,6 +1398,8 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
+// TODO: TestGetDEXConfig
+/*
 func TestGetFee(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
@@ -1409,6 +1432,7 @@ func TestGetFee(t *testing.T) {
 		t.Fatalf("GetFee error: %v", err)
 	}
 }
+*/
 
 func TestRegister(t *testing.T) {
 	t.Run("TestRegister_legacy", func(t *testing.T) {

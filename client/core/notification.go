@@ -12,7 +12,7 @@ import (
 
 // Notifications should use the following note type strings.
 const (
-	NoteTypeFeePayment   = "feepayment"
+	NoteTypeBondPost     = "bondpost"
 	NoteTypeWithdraw     = "withdraw"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
@@ -129,36 +129,44 @@ func newSecurityNote(subject, details string, severity db.Severity) *SecurityNot
 	}
 }
 
-// FeePaymentNote is a notification regarding registration fee payment.
-type FeePaymentNote struct {
+// BondPostNote is a notification regarding bond posting.
+type BondPostNote struct {
 	db.Notification
-	Confirmations *uint32 `json:"confirmations,omitempty"`
-	Dex           string  `json:"dex,omitempty"`
+	Confirmations *int32 `json:"confirmations,omitempty"`
+	Tier          *int64 `json:"tier,omitempty"`
+	Dex           string `json:"dex,omitempty"`
 }
 
 const (
-	SubjectFeePaymentInProgress    = "Fee payment in progress"
-	SubjectRegUpdate               = "regupdate"
-	SubjectFeePaymentError         = "Fee payment error"
-	SubjectAccountRegistered       = "Account registered"
-	SubjectAccountUnlockError      = "Account unlock error"
-	SubjectFeeCoinError            = "Fee coin error"
+	SubjectRegUpdate          = "regupdate"
+	SubjectBondConfirming     = "Bond confirmation in progress"
+	SubjectBondPostError      = "Bond post error"
+	SubjectBondCoinError      = "Bond coin error"
+	SubjectAccountRegistered  = "Account registered"
+	SubjectAccountUnlockError = "Account unlock error"
+
 	SubjectWalletConnectionWarning = "Wallet connection warning"
 	SubjectWalletUnlockError       = "Wallet unlock error"
 )
 
-func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
+func newBondPostNote(subject, details string, severity db.Severity, dexAddr string) *BondPostNote {
 	host, _ := addrHost(dexAddr)
-	return &FeePaymentNote{
-		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
+	return &BondPostNote{
+		Notification: db.NewNotification(NoteTypeBondPost, subject, details, severity),
 		Dex:          host,
 	}
 }
 
-func newFeePaymentNoteWithConfirmations(subject, details string, severity db.Severity, currConfs uint32, dexAddr string) *FeePaymentNote {
-	feePmtNt := newFeePaymentNote(subject, details, severity, dexAddr)
-	feePmtNt.Confirmations = &currConfs
-	return feePmtNt
+func newBondPostNoteWithConfirmations(subject, details string, severity db.Severity, currConfs int32, dexAddr string) *BondPostNote {
+	bondPmtNt := newBondPostNote(subject, details, severity, dexAddr)
+	bondPmtNt.Confirmations = &currConfs
+	return bondPmtNt
+}
+
+func newBondPostNoteWithTier(subject, details string, severity db.Severity, dexAddr string, tier int64) *BondPostNote {
+	bondPmtNt := newBondPostNote(subject, details, severity, dexAddr)
+	bondPmtNt.Tier = &tier
+	return bondPmtNt
 }
 
 // WithdrawNote is a notification regarding a requested withdraw.
@@ -332,6 +340,8 @@ const (
 	SubjectDexAuthError     = "DEX auth error"
 	SubjectUnknownOrders    = "DEX reported unknown orders"
 	SubjectOrdersReconciled = "Orders reconciled with DEX"
+	SubjectBondConfirmed    = "Bond confirmed"
+	SubjectBondExpired      = "Bond expired"
 )
 
 func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
