@@ -275,6 +275,14 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
+	}
 	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, "error importing account: %v", err)

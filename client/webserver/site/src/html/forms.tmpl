@@ -207,6 +207,7 @@
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
   Authorize Import
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
@@ -225,7 +226,7 @@
       <span class="ml-3 pointer" id="addAccount"><span class="ico-textfile mr-1"></span> load from file</span>
     </div>
   </div>
-  <div>
+  <div {{if $passwordIsCached}}class="d-hide"{{end}}>
     <label for="importAccountAppPass" class="pl-1 mb-1">Password</label>
     <input type="password" class="form-control select" id="importAccountAppPass" autocomplete="current-password">
   </div>
