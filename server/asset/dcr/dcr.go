@@ -19,8 +19,10 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
@@ -28,7 +30,9 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -121,6 +125,7 @@ type dcrNode interface {
 	GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error)
+	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 }
 
 // The rpcclient package functions will return a rpcclient.ErrRequestCanceled
@@ -130,6 +135,118 @@ func translateRPCCancelErr(err error) error {
 		err = asset.ErrRequestTimeout
 	}
 	return err
+}
+
+// ParseBondTx performs basic validation of a serialized time-locked fidelity
+// bond transaction given the bond's P2SH redeem script.
+//
+// The transaction must have at least two outputs: out 0 pays to a P2SH address
+// (the bond), and out 1 is a nulldata output that commits to an account ID.
+// There may also be a change output.
+//
+// Returned: The bond's coin ID (i.e. encoded UTXO) of the bond output. The bond
+// output's amount and P2SH address. The lockTime and pubkey data pushes from
+// the script. The account ID from the second output is also returned.
+//
+// Properly formed transactions:
+//
+//  1. The bond output (vout 0) must be a P2SH output.
+//  2. The bond's redeem script must be of the form:
+//     <lockTime[4]> OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
+//     A P2PK script is used since the pubkey must be revealed anyway.
+//  3. The null data output (vout 1) must have a 32-byte data push (account ID).
+//  4. The transaction must have a zero locktime and expiry.
+//  5. All inputs must have the max sequence num set (finalized).
+//  6. The transaction must pass the checks in the
+//     blockchain.CheckTransactionSanity function.
+//
+// TODO: Return fee rate, which is not important yet for DCR.
+func ParseBondTx(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAddr string,
+	bondPubKey []byte, lockTime int64, acct account.AccountID, err error) {
+	// While the dcr package uses a package-level chainParams variable, ensure
+	// that a backend has been instantiated (or loadConfig run another way).
+	if chainParams == nil {
+		err = errors.New("dcr asset package config not yet loaded")
+		return
+	}
+	msgTx := wire.NewMsgTx()
+	if err = msgTx.Deserialize(bytes.NewReader(rawTx)); err != nil {
+		return
+	}
+
+	if msgTx.LockTime != 0 {
+		err = errors.New("transaction locktime not zero")
+		return
+	}
+	if msgTx.Expiry != wire.NoExpiryValue {
+		err = errors.New("transaction has an expiration")
+		return
+	}
+
+	if err = blockchain.CheckTransactionSanity(msgTx, chainParams); err != nil {
+		return
+	}
+
+	if len(msgTx.TxOut) < 2 {
+		err = fmt.Errorf("expected at least 2 outputs, found %d", len(msgTx.TxOut))
+		return
+	}
+
+	for _, txIn := range msgTx.TxIn {
+		if txIn.Sequence != wire.MaxTxInSequenceNum {
+			err = errors.New("input has non-max sequence number")
+			return
+		}
+	}
+
+	// Fidelity bond output (output 0)
+	bondOut := msgTx.TxOut[0]
+
+	class, addrs := stdscript.ExtractAddrs(bondOut.Version, bondOut.PkScript, chainParams)
+	if class != stdscript.STScriptHash || len(addrs) != 1 { // addrs check is redundant for p2sh
+		err = fmt.Errorf("bad bond pkScript (class = %v)", class)
+		return
+	}
+
+	scriptHash := txscript.ExtractScriptHash(bondOut.PkScript)
+	if !bytes.Equal(dcrutil.Hash160(bondScript), scriptHash) {
+		err = fmt.Errorf("script hash check failed for output 0 of %s", msgTx.TxHash())
+		return
+	}
+
+	lock, pk, err := dexdcr.ExtractBondDetails(bondOut.Version, bondScript)
+	if err != nil {
+		err = fmt.Errorf("invalid bond redeem script: %w", err)
+		return
+	}
+	// NOTE: Caller should check ownership by verifying a message signed with
+	// the above pubkey. (get the pubkey from ecdsa.RecoverCompact(sig,
+	// messageHash) and verify it's the same pubkey)
+
+	// Ensure output 1 script is OP_RETURN <push data for account id>
+	acctCommitOut := msgTx.TxOut[1]
+	commitScript := acctCommitOut.PkScript
+	wantPushSize := account.HashSize
+	if acctCommitOut.Version != 0 || len(commitScript) != 2+wantPushSize || commitScript[0] != txscript.OP_RETURN {
+		fmt.Printf("ver = %d, len(commitScript) = %d, commitScript[0] = %v\n", acctCommitOut.Version, len(commitScript), commitScript[0])
+		err = errors.New("bad account commitment output")
+		return
+	}
+	if commitScript[1] != txscript.OP_DATA_32 {
+		fmt.Printf("commitScript[1] = %v\n", commitScript[1])
+		err = errors.New("invalid account commitment")
+		return
+	}
+	copy(acct[:], commitScript[2:]) // data after [OP_RETURN OP_DATA_32]
+
+	txid := msgTx.TxHash()
+	bondCoinID = toCoinID(&txid, 0)
+	amt = bondOut.Value
+	bondAddr = addrs[0].String() // don't convert address, must match type we specified
+	lockTime = int64(lock)
+	bondPubKey = pk
+
+	return
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching output
@@ -334,6 +451,22 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	return c
 }
 
+// SendRawTransaction broadcasts a raw transaction, returning a coin ID.
+func (dcr *Backend) SendRawTransaction(rawtx []byte) (coinID []byte, err error) {
+	msgTx := wire.NewMsgTx()
+	if err = msgTx.Deserialize(bytes.NewReader(rawtx)); err != nil {
+		return nil, err
+	}
+
+	var hash *chainhash.Hash
+	hash, err = dcr.node.SendRawTransaction(dcr.ctx, msgTx, false) // or allow high fees?
+	if err != nil {
+		return
+	}
+	coinID = toCoinID(hash, 0)
+	return
+}
+
 // Contract is part of the asset.Backend interface. An asset.Contract is an
 // output that has been validated as a swap contract for the passed redeem
 // script. A spendable output is one that can be spent in the next block. Every
@@ -421,7 +554,7 @@ func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 
 // ValidateXPub validates the base-58 encoded extended key, and ensures that it
 // is an extended public, not private, key.
-func (dcr *Backend) ValidateXPub(xpub string) error {
+func ValidateXPub(xpub string) error {
 	xp, err := hdkeychain.NewKeyFromString(xpub, chainParams)
 	if err != nil {
 		return err
@@ -514,13 +647,22 @@ func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64
 		return
 	}
 
+	// No stake outputs, and no multisig.
 	if len(txOut.addresses) != 1 || txOut.sigsRequired != 1 ||
-		txOut.scriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
 		txOut.scriptType&dexdcr.ScriptStake != 0 {
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
+
+	// Needs to work for legacy fee and new bond txns.
+	switch txOut.scriptType {
+	case dexdcr.ScriptP2SH, dexdcr.ScriptP2PKH:
+	default:
+		return "", 0, -1, dex.UnsupportedScriptError
+	}
+
 	addr = txOut.addresses[0]
 	val = txOut.value
+
 	return
 }
 
@@ -550,7 +692,7 @@ func (dcr *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *t
 	}
 
 	if int(vout) > len(verboseTx.Vout)-1 {
-		err = asset.CoinNotFoundError // should be something fatal?
+		err = fmt.Errorf("invalid output index for tx with %d outputs", len(verboseTx.Vout))
 		return
 	}
 
