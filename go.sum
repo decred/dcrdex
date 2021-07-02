@@ -119,7 +119,9 @@ github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210525214639-70483c835b7f/go
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210715032435-c9521b468f95 h1:y1XUDb5vPBcZB6A0AuGkaCk0my4FJOpYYKZtYKsq1mU=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210715032435-c9521b468f95/go.mod h1:l0WWtO2D4lhDJDWjFPFClNDBJ5gp6CI5dfk9QsWS59Q=
 github.com/decred/dcrd/blockchain/standalone/v2 v2.0.0/go.mod h1:t2qaZ3hNnxHZ5kzVJDgW5sp47/8T5hYJt7SR+/JtRhI=
+github.com/decred/dcrd/blockchain/standalone/v2 v2.0.1-0.20210525214639-70483c835b7f h1:U6KxL7cTlkqYGRnmMS6yn3h8vnUPCOBpXPFiZ7+iR8c=
 github.com/decred/dcrd/blockchain/standalone/v2 v2.0.1-0.20210525214639-70483c835b7f/go.mod h1:t2qaZ3hNnxHZ5kzVJDgW5sp47/8T5hYJt7SR+/JtRhI=
+github.com/decred/dcrd/blockchain/v4 v4.0.0-20210525214639-70483c835b7f h1:jIzjp2KFcBpzaRlGE/5krg8CERf+jVlcx6v3spF2QGI=
 github.com/decred/dcrd/blockchain/v4 v4.0.0-20210525214639-70483c835b7f/go.mod h1:9IU+i0k9FY68p7P21aFeOYSGTT4q87UxSLWb47NEegU=
 github.com/decred/dcrd/certgen v1.1.2-0.20210525214639-70483c835b7f/go.mod h1:ivkPLChfjdAgFh7ZQOtl6kJRqVkfrCq67dlq3AbZBQE=
 github.com/decred/dcrd/certgen v1.1.2-0.20210715032435-c9521b468f95 h1:ZGdWjeRWFdzKuckO0ONnyL5+oL+3+LGQyiU5+MZn8bA=
@@ -172,6 +174,7 @@ github.com/decred/dcrd/gcs/v3 v3.0.0-20210715032435-c9521b468f95/go.mod h1:LFTyj
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210525214639-70483c835b7f/go.mod h1:A9Aqp4kStmkAwbZeuIlS1hZjTeDkxgVXSg+nSo4FJCs=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95 h1:1RQbVRX/Si9OB2zb8VkB9bL40BVow+hQAjgsu8LNPRY=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95/go.mod h1:A9Aqp4kStmkAwbZeuIlS1hZjTeDkxgVXSg+nSo4FJCs=
+github.com/decred/dcrd/lru v1.1.0 h1:QwT6v8LFKOL3xQ3qtucgRk4pdiawrxIfCbUXWpm+JL4=
 github.com/decred/dcrd/lru v1.1.0/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210129200153-14fd1a785bf2/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210525214639-70483c835b7f/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=

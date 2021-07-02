@@ -10,6 +10,7 @@ require (
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210715032435-c9521b468f95
+	github.com/decred/dcrd/blockchain/v4 v4.0.0-20210525214639-70483c835b7f
 	github.com/decred/dcrd/certgen v1.1.2-0.20210715032435-c9521b468f95
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.3-0.20210715032435-c9521b468f95
 	github.com/decred/dcrd/chaincfg/v3 v3.0.1-0.20210715032435-c9521b468f95
