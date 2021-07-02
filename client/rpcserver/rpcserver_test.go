@@ -32,8 +32,8 @@ var (
 )
 
 type TCore struct {
-	regFee              uint64
-	getFeeErr           error
+	dexConfig           *core.Exchange
+	getDEXConfigErr     error
 	balanceErr          error
 	syncErr             error
 	createWalletErr     error
@@ -45,6 +45,8 @@ type TCore struct {
 	initializeClientErr error
 	registerResult      *core.RegisterResult
 	registerErr         error
+	addBondResult       *core.AddBondResult
+	addBondErr          error
 	exchanges           map[string]*core.Exchange
 	loginErr            error
 	loginResult         *core.LoginResult
@@ -93,11 +95,14 @@ func (c *TCore) Logout() error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) GetFee(url string, cert interface{}) (uint64, error) {
-	return c.regFee, c.getFeeErr
+func (c *TCore) GetDEXConfig(url string, cert interface{}) (*core.Exchange, error) {
+	return c.dexConfig, c.getDEXConfigErr
 }
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 	return c.registerResult, c.registerErr
+}
+func (c *TCore) AddBond(*core.AddBondForm) (*core.AddBondResult, error) {
+	return c.addBondResult, c.addBondErr
 }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
 	return core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr

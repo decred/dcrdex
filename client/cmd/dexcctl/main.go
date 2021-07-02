@@ -59,6 +59,7 @@ var promptPasswords = map[string][]string{
 	"newwallet":  {"App password:", "Wallet password:"},
 	"openwallet": {"App password:"},
 	"register":   {"App password:"},
+	"addbond":    {"App password:"},
 	"trade":      {"App password:"},
 	"withdraw":   {"App password:"},
 	"appseed":    {"App password:"},
@@ -68,9 +69,9 @@ var promptPasswords = map[string][]string{
 // the text content of a file, where the file path _may_ be found in the route's
 // cmd args at the specified index.
 var optionalTextFiles = map[string]int{
-	"getfee":    1,
-	"register":  2,
-	"newwallet": 1,
+	"bondassets": 1,
+	"register":   3,
+	"newwallet":  1,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting

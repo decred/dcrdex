@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -43,9 +44,10 @@ func (vr versionResponse) String() string {
 	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
 }
 
-// getFeeResponse is used when responding to the getfee route.
-type getFeeResponse struct {
-	Fee uint64 `json:"fee"`
+// getBondAssetsResponse is the getbondassets response payload.
+type getBondAssetsResponse struct {
+	Expiry uint64                     `json:"expiry"`
+	Assets map[string]*core.BondAsset `json:"assets"`
 }
 
 // tradeResponse is used when responding to the trade route.
@@ -298,7 +300,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parseGetFeeArgs(params *RawParams) (host string, cert []byte, err error) {
+func parseBondAssetArgs(params *RawParams) (host string, cert []byte, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return "", nil, err
 	}
@@ -309,22 +311,70 @@ func parseGetFeeArgs(params *RawParams) (host string, cert []byte, err error) {
 }
 
 func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{2, 4}); err != nil {
 		return nil, err
 	}
-	fee, err := checkUIntArg(params.Args[1], "fee", 64)
+	bond, err := checkUIntArg(params.Args[1], "bond", 64)
 	if err != nil {
 		return nil, err
 	}
-	var cert []byte
+	var lockTimeEpoch uint64
 	if len(params.Args) > 2 {
-		cert = []byte(params.Args[2])
+		lockTimeEpoch, err = checkUIntArg(params.Args[2], "locktime", 64)
+		if err != nil {
+			return nil, err
+		}
+		lockTime := time.Unix(int64(lockTimeEpoch), 0)
+		if time.Now().Before(lockTime) {
+			return nil, fmt.Errorf("locktime already passed")
+		}
+		if time.Until(lockTime) > 120*24*time.Hour {
+			return nil, fmt.Errorf("locktime is longer than 120 days")
+		}
+	}
+	// TODO: bondAssetID arg
+	var cert []byte
+	if len(params.Args) > 3 {
+		cert = []byte(params.Args[3])
 	}
 	req := &core.RegisterForm{
-		AppPass: params.PWArgs[0],
-		Addr:    params.Args[0],
-		Fee:     fee,
-		Cert:    cert,
+		AppPass:  params.PWArgs[0],
+		Addr:     params.Args[0],
+		Bond:     bond,
+		LockTime: lockTimeEpoch,
+		Cert:     cert,
+	}
+	return req, nil
+}
+
+func parseAddBondArgs(params *RawParams) (*core.AddBondForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
+		return nil, err
+	}
+	bond, err := checkUIntArg(params.Args[1], "bond", 64)
+	if err != nil {
+		return nil, err
+	}
+	var lockTimeEpoch uint64
+	if len(params.Args) > 2 {
+		lockTimeEpoch, err = checkUIntArg(params.Args[2], "locktime", 64)
+		if err != nil {
+			return nil, err
+		}
+		lockTime := time.Unix(int64(lockTimeEpoch), 0)
+		if time.Now().Before(lockTime) {
+			return nil, fmt.Errorf("locktime already passed")
+		}
+		if time.Until(lockTime) > 120*24*time.Hour {
+			return nil, fmt.Errorf("locktime is longer than 120 days")
+		}
+	}
+	// TODO: bondAssetID arg
+	req := &core.AddBondForm{
+		AppPass:  params.PWArgs[0],
+		Addr:     params.Args[0],
+		Bond:     bond,
+		LockTime: lockTimeEpoch,
 	}
 	return req, nil
 }

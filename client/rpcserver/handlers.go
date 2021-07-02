@@ -30,8 +30,9 @@ const (
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	orderBookRoute   = "orderbook"
-	getFeeRoute      = "getfee"
+	bondAssetsRoute  = "bondassets"
 	registerRoute    = "register"
+	addBondRoute     = "addbond"
 	tradeRoute       = "trade"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
@@ -80,8 +81,9 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	orderBookRoute:   handleOrderBook,
-	getFeeRoute:      handleGetFee,
 	registerRoute:    handleRegister,
+	addBondRoute:     handleAddBond,
+	bondAssetsRoute:  handleBondAssets,
 	tradeRoute:       handleTrade,
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
@@ -238,23 +240,28 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
-// handleGetFee handles requests for getfee.
+// handleBondAssets handles requests for bondassets.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns the dex fee.
-func handleGetFee(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseGetFeeArgs(params)
+// of a dex and returns the bond expiry and supported asset bond details.
+func handleBondAssets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	host, cert, err := parseBondAssetArgs(params)
 	if err != nil {
-		return usage(getFeeRoute, err)
+		return usage(bondAssetsRoute, err)
 	}
-	fee, err := s.core.GetFee(host, cert) // cert is file contents, not name
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetFeeError, err.Error())
-		return createResponse(getFeeRoute, nil, resErr)
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[host]
+	if exchCfg == nil {
+		exchCfg, err = s.core.GetDEXConfig(host, cert) // cert is file contents, not name
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDexConfError, err.Error())
+			return createResponse(bondAssetsRoute, nil, resErr)
+		}
 	}
-	res := &getFeeResponse{
-		Fee: fee,
+	res := &getBondAssetsResponse{
+		Expiry: exchCfg.BondExpiry,
+		Assets: exchCfg.BondAssets,
 	}
-	return createResponse(getFeeRoute, res, nil)
+	return createResponse(bondAssetsRoute, res, nil)
 }
 
 // handleRegister handles requests for register. *msgjson.ResponsePayload.Error
@@ -265,14 +272,23 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(registerRoute, err)
 	}
 	defer form.AppPass.Clear()
-	fee, err := s.core.GetFee(form.Addr, form.Cert)
+	exchCfg, err := s.core.GetDEXConfig(form.Addr, form.Cert)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetFeeError,
-			err.Error())
+		resErr := msgjson.NewError(msgjson.RPCGetDexConfError, err.Error())
 		return createResponse(registerRoute, nil, resErr)
 	}
-	if fee != form.Fee {
-		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.Addr, fee, form.Fee)
+	// Registration with different assets will be supported in the future, but
+	// for now, this requires DCR.
+	dcrAssetID := dex.BipIDSymbol(42) // matching core.bondAssetSymbol, which is currently hard-coded
+	dcrBondAsset, supported := exchCfg.BondAssets[dcrAssetID]
+	if !supported {
+		errMsg := fmt.Sprintf("DEX %s does not support registration with DCR", form.Addr)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(registerRoute, nil, resErr)
+	}
+	if dcrBondAsset.Amt > form.Bond || form.Bond%dcrBondAsset.Amt != 0 {
+		errMsg := fmt.Sprintf("DEX at %s expects a bond amount in multiples of %d but %d was offered",
+			form.Addr, dcrBondAsset.Amt, form.Bond)
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
 		return createResponse(registerRoute, nil, resErr)
 	}
@@ -282,6 +298,43 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return createResponse(registerRoute, nil, resErr)
 	}
 	return createResponse(registerRoute, res, nil)
+}
+
+// handleAddBond handles requests for addbond. *msgjson.ResponsePayload.Error is
+// empty if successful.
+func handleAddBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseAddBondArgs(params)
+	if err != nil {
+		return usage(addBondRoute, err)
+	}
+	defer form.AppPass.Clear()
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[form.Addr]
+	if exchCfg == nil {
+		resErr := msgjson.NewError(msgjson.RPCGetDexConfError, err.Error())
+		return createResponse(addBondRoute, nil, resErr)
+	}
+	// Registration with different assets will be supported in the future, but
+	// for now, this requires DCR.
+	dcrAssetID := dex.BipIDSymbol(42) // matching core.bondAssetSymbol, which is currently hard-coded
+	dcrBondAsset, supported := exchCfg.BondAssets[dcrAssetID]
+	if !supported {
+		errMsg := fmt.Sprintf("DEX %s does not support registration with DCR", form.Addr)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(addBondRoute, nil, resErr)
+	}
+	if dcrBondAsset.Amt > form.Bond || form.Bond%dcrBondAsset.Amt != 0 {
+		errMsg := fmt.Sprintf("DEX at %s expects a bond amount in multiples of %d but %d was offered",
+			form.Addr, dcrBondAsset.Amt, form.Bond)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(addBondRoute, nil, resErr)
+	}
+	res, err := s.core.AddBond(form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
+		return createResponse(addBondRoute, nil, resErr)
+	}
+	return createResponse(addBondRoute, res, nil)
 }
 
 // handleExchanges handles requests for exchangess. It takes no arguments and
@@ -685,16 +738,21 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
-	getFeeRoute: {
+	bondAssetsRoute: {
 		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get dex registration fee.`,
+		cmdSummary: `Get dex bond asset config.`,
 		argsLong: `Args:
-    dex (string): The dex address to get fee for.
+    dex (string): The dex address to get bond info for.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
-    obj: The getFee result.
+    obj: The getBondAssets result.
     {
-      "fee" (int): The DEX registration fee.
+      "expiry" (int): Bond expiry in seconds remaining until locktime.
+	  "assets" (object): {
+		"id" (int): The BIP-44 coin type for the asset.
+		"confs" (int): The required confirmations for the bond transaction.
+		"amount" (int): The minimum bond amount.
+	  }
     }`,
 	},
 	newWalletRoute: {
@@ -762,20 +820,36 @@ var helpMsgs = map[string]helpMsg{
 	},
 	registerRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" fee ("cert")`,
+		argsShort:   `"addr" bond ("cert")`,
 		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
-Registration is complete after the fee transaction has been confirmed.`,
+Registration is complete after the bond transaction has been confirmed and the server notified.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
     addr (string): The DEX address to register for.
-    fee (int): The DEX fee.
+    bond (int): The bond amount (in DCR presently).
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
     {
-      "feeID" (string): The fee transactions's txid and output index.
+      "bondID" (string): The bond transactions's txid and output index.
       "reqConfirms" (int): The number of confirmations required to start trading.
     }`,
+	},
+	addBondRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"addr" bond`,
+		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
+	Bond is active after the bond transaction has been confirmed and the server notified.`,
+		pwArgsLong: `Password Args:
+	appPass (string): The DEX client password.`,
+		argsLong: `Args:
+	addr (string): The DEX address to post bond for for.
+	bond (int): The bond amount (in DCR presently).`,
+		returns: `Returns:
+	{
+	  "bondID" (string): The bond transactions's txid and output index.
+	  "reqConfirms" (int): The number of confirmations required to start trading.
+	}`,
 	},
 	exchangesRoute: {
 		cmdSummary: `Detailed information about known exchanges and markets.`,
