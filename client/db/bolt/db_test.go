@@ -278,16 +278,19 @@ func TestAccounts(t *testing.T) {
 	// Test account proofs.
 	zerothHost := accts[0].Host
 	zerothAcct, _ := boltdb.Account(zerothHost)
-	if zerothAcct.Paid {
+	if zerothAcct.LegacyFeePaid {
 		t.Fatalf("Account marked as paid before account proof set")
 	}
-	boltdb.AccountPaid(&db.AccountProof{
+	err = boltdb.StoreAccountProof(&db.AccountProof{
 		Host:  zerothAcct.Host,
 		Stamp: 123456789,
 		Sig:   []byte("some signature here"),
 	})
+	if err != nil {
+		t.Fatalf("AccountPaid error: %v", err)
+	}
 	reAcct, _ := boltdb.Account(zerothHost)
-	if !reAcct.Paid {
+	if !reAcct.LegacyFeePaid {
 		t.Fatalf("Account not marked as paid after account proof set")
 	}
 }
@@ -340,11 +343,14 @@ func TestAccountProof(t *testing.T) {
 		t.Fatalf("Unexpected CreateAccount error: %v", err)
 	}
 
-	boltdb.AccountPaid(&db.AccountProof{
+	err = boltdb.StoreAccountProof(&db.AccountProof{
 		Host:  acct.Host,
 		Stamp: 123456789,
 		Sig:   []byte("some signature here"),
 	})
+	if err != nil {
+		t.Fatalf("AccountPaid error: %v", err)
+	}
 
 	accountProof, err := boltdb.AccountProof(host)
 	if err != nil {
