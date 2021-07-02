@@ -59,6 +59,7 @@ type TCore struct {
 	syncFeed         core.BookFeed
 	syncErr          error
 	regErr           error
+	postBondErr      error
 	loginErr         error
 	logoutErr        error
 	initErr          error
@@ -95,6 +96,9 @@ func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*
 	return nil, false, nil
 }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
+func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
+	return nil, c.postBondErr
+}
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	return 0, nil
 }
@@ -211,10 +215,10 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 	return nil, nil
 }
-func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
-	return nil, nil
+func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error) {
+	return nil, nil, nil
 }
-func (c *TCore) AccountImport(pw []byte, account core.Account) error {
+func (c *TCore) AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
