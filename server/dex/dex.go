@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/apidata"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
@@ -32,10 +33,11 @@ import (
 
 const (
 	// PreAPIVersion covers all API iterations before versioning started.
-	PreAPIVersion = iota
+	PreAPIVersion  = iota
+	BondAPIVersion // when we drop the legacy reg fee proto
 
 	// APIVersion is the current API version.
-	APIVersion = PreAPIVersion
+	APIVersion = PreAPIVersion // only advance server to BondAPIVersion with the V0PURGE
 )
 
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID and
@@ -74,6 +76,7 @@ type DexConf struct {
 	Markets           []*dex.MarketInfo
 	Assets            []*AssetConf
 	Network           dex.Network
+	BondIncrement     uint64
 	DBConf            *DBConf
 	BroadcastTimeout  time.Duration
 	CancelThreshold   float64
@@ -138,23 +141,32 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market, bondExpiry int64) (*configResponse, error) {
 	dcrAsset := regAssets["dcr"]
 	if dcrAsset == nil {
 		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
 	}
 
 	configMsg := &msgjson.ConfigResult{
+		APIVersion:       uint16(APIVersion),
+		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
-		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
-		Fee:              dcrAsset.Amt, // DEPRECATED - DCR only
-		APIVersion:       uint16(APIVersion),
-		BinSizes:         candles.BinSizes,
-		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
-		RegFees:          regAssets,
+		BondExpiry:       uint64(bondExpiry),
+		BondAssets: map[string]*msgjson.BondAsset{
+			"dcr": {
+				ID:    42,
+				Confs: dcrAsset.Confs,
+				Amt:   cfg.BondIncrement,
+			},
+		},
+		BinSizes: candles.BinSizes,
+		RegFees:  regAssets,
+
+		RegFeeConfirms: uint16(dcrAsset.Confs), // DEPRECATED - DCR only (V0PURGE)
+		Fee:            dcrAsset.Amt,           // DEPRECATED - DCR only
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -254,6 +266,18 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Disallow running without user penalization in a mainnet config.
 	if cfg.Anarchy && cfg.Network == dex.Mainnet {
 		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
+	}
+
+	var bondExpiry int64
+	switch cfg.Network {
+	case dex.Mainnet:
+		bondExpiry = dex.BondExpiryMainnet
+	case dex.Testnet:
+		bondExpiry = dex.BondExpiryTestnet
+	case dex.Simnet:
+		bondExpiry = dex.BondExpirySimnet
+	default:
+		return nil, fmt.Errorf("unrecognized network %v", cfg.Network)
 	}
 
 	var subsystems []subsystem
@@ -583,6 +607,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		FeeAddress:        feeAddresser,
 		FeeAssets:         feeAssets,
 		FeeChecker:        feeChecker,
+		BondConfs:         1, // TODO
+		BondIncrement:     cfg.BondIncrement,
+		BondTxParser:      dcr.ParseBondTx, // NOTE: backend instantiation sets the package-level network params
+		BondExpiry:        uint64(bondExpiry),
 		UserUnbooker:      userUnbookFun,
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
@@ -771,7 +799,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 
-	cfgResp, err := newConfigResponse(cfg, feeAssets, cfgAssets, cfgMarkets)
+	cfgResp, err := newConfigResponse(cfg, feeAssets, cfgAssets, cfgMarkets, bondExpiry)
 	if err != nil {
 		return nil, err
 	}
@@ -996,6 +1024,8 @@ func (dm *DEX) Accounts() ([]*db.Account, error) {
 
 // AccountInfo returns data for an account.
 func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	// TODO: consider asking the auth manager for account info, including tier.
+	// connected, tier := dm.authMgr.AcctStatus(aid)
 	return dm.storage.AccountInfo(aid)
 }
 

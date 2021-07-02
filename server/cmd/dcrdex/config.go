@@ -53,6 +53,7 @@ const (
 	defaultBanScore            = 20
 
 	defaultCancelThresh     = 0.95             // 19 cancels : 1 success
+	defaultBondIncrement    = 10e8             // 10 DCR (bond assets map todo)
 	defaultBroadcastTimeout = 12 * time.Minute // accommodate certain known long block download timeouts
 )
 
@@ -69,6 +70,7 @@ type procOpts struct {
 type dexConf struct {
 	DataDir           string
 	Network           dex.Network
+	BondIncrement     uint64
 	DBName            string
 	DBUser            string
 	DBPass            string
@@ -125,7 +127,7 @@ type flagsData struct {
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
-
+	BondIncrement    uint64        `long:"bondincrement" description:"Bond increment amount."`
 	// Deprecated fields that specify the Decred-specific registration fee
 	// config. This information is now specified per-asset in markets.json.
 	RegFeeXPub     string `long:"regfeexpub" description:"DEPRECATED - use markets.json instead. The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
@@ -262,6 +264,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		PGHost:           defaultPGHost,
 		MarketsConfPath:  defaultMarketsConfFilename,
 		DEXPrivKeyPath:   defaultDEXPrivKeyFilename,
+		BondIncrement:    defaultBondIncrement,
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
@@ -533,6 +536,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	dexCfg := &dexConf{
 		DataDir:           cfg.DataDir,
 		Network:           network,
+		BondIncrement:     cfg.BondIncrement,
 		DBName:            cfg.PGDBName,
 		DBHost:            dbHost,
 		DBPort:            dbPort,

@@ -317,7 +317,7 @@ func TestMarkets(t *testing.T) {
 
 	// No markets.
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/markets", nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/markets", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -342,7 +342,7 @@ func TestMarkets(t *testing.T) {
 	core.markets["dcr_btc"] = tMkt
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/markets", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/markets", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -396,7 +396,7 @@ func TestMarkets(t *testing.T) {
 	tMkt.persist = true
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/markets", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/markets", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -466,7 +466,7 @@ func TestMarketInfo(t *testing.T) {
 	// Request a non-existent market.
 	w := httptest.NewRecorder()
 	name := "dcr_btc"
-	r, _ := http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+name, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -484,7 +484,7 @@ func TestMarketInfo(t *testing.T) {
 
 	// Not running market.
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -508,7 +508,7 @@ func TestMarketInfo(t *testing.T) {
 	core.markets[name].running = true
 	core.markets[name].suspend = &market.SuspendEpoch{Idx: 1324, End: time.Now()}
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -571,7 +571,7 @@ func TestMarketOrderBook(t *testing.T) {
 		core.bookErr = test.bookErr
 		tMkt.running = test.running
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/orderbook", nil)
+		r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+test.mkt+"/orderbook", nil)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)
@@ -630,7 +630,7 @@ func TestMarketEpochOrders(t *testing.T) {
 		core.epochOrdersErr = test.epochOrdersErr
 		tMkt.running = test.running
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/epochorders", nil)
+		r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+test.mkt+"/epochorders", nil)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)
@@ -703,7 +703,7 @@ func TestMarketMatches(t *testing.T) {
 		core.marketMatchesErr = test.marketMatchesErr
 		tMkt.running = test.running
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/market/"+test.mkt+"/matches"+test.token, nil)
+		r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+test.mkt+"/matches"+test.token, nil)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)
@@ -746,7 +746,7 @@ func TestResume(t *testing.T) {
 	// Non-existent market
 	name := "dcr_btc"
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -763,7 +763,7 @@ func TestResume(t *testing.T) {
 	core.markets[name] = tMkt
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -779,7 +779,7 @@ func TestResume(t *testing.T) {
 	// Now stopped.
 	tMkt.running = false
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -809,7 +809,7 @@ func TestResume(t *testing.T) {
 
 	// Time in past
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume?t=12", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume?t=12", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -825,7 +825,7 @@ func TestResume(t *testing.T) {
 
 	// Bad suspend time (not a time)
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/resume?t=QWERT", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume?t=QWERT", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -854,7 +854,7 @@ func TestSuspend(t *testing.T) {
 	// Non-existent market
 	name := "dcr_btc"
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -870,7 +870,7 @@ func TestSuspend(t *testing.T) {
 	core.markets[name] = tMkt
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -886,7 +886,7 @@ func TestSuspend(t *testing.T) {
 	// Now running.
 	tMkt.running = true
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -918,7 +918,7 @@ func TestSuspend(t *testing.T) {
 
 	// Specify a time in the past.
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?t=12", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend?t=12", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -934,7 +934,7 @@ func TestSuspend(t *testing.T) {
 
 	// Bad suspend time (not a time)
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?t=QWERT", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend?t=QWERT", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -951,7 +951,7 @@ func TestSuspend(t *testing.T) {
 	// Good suspend time, one minute in the future
 	w = httptest.NewRecorder()
 	tMsFuture := time.Now().Add(time.Minute).UnixMilli()
-	r, _ = http.NewRequest("GET", fmt.Sprintf("https://localhost/market/%v/suspend?t=%d", name, tMsFuture), nil)
+	r, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("https://localhost/market/%v/suspend?t=%d", name, tMsFuture), nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -982,7 +982,7 @@ func TestSuspend(t *testing.T) {
 
 	// persist=true (OK)
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=true", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend?persist=true", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -997,7 +997,7 @@ func TestSuspend(t *testing.T) {
 
 	// persist=0 (OK)
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=0", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend?persist=0", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1012,7 +1012,7 @@ func TestSuspend(t *testing.T) {
 
 	// invalid persist
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=blahblahblah", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend?persist=blahblahblah", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1035,7 +1035,7 @@ func TestAuthMiddleware(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	r, _ := http.NewRequest("GET", "", nil)
+	r, _ := http.NewRequest(http.MethodGet, "", nil)
 	r.RemoteAddr = "localhost"
 
 	wantAuthError := func(name string, want bool) {
@@ -1098,7 +1098,7 @@ func TestAccounts(t *testing.T) {
 
 	// No accounts.
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/accounts", nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1130,14 +1130,14 @@ func TestAccounts(t *testing.T) {
 	acct := &db.Account{
 		AccountID:  accountID,
 		Pubkey:     dex.Bytes(pubkey),
+		FeeAsset:   42,
 		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
 		FeeCoin:    dex.Bytes(feeCoin),
-		BrokenRule: account.Rule(byte(255)),
 	}
 	core.accounts = append(core.accounts, acct)
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/accounts", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1150,9 +1150,9 @@ func TestAccounts(t *testing.T) {
     {
         "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
         "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
+        "feeasset": 42,
         "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005",
-        "brokenrule": 255
+        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005"
     }
 ]
 `
@@ -1164,7 +1164,7 @@ func TestAccounts(t *testing.T) {
 	core.accountsErr = errors.New("error")
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/accounts", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/accounts", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1189,7 +1189,7 @@ func TestAccountInfo(t *testing.T) {
 
 	// No account.
 	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
+	r, _ := http.NewRequest(http.MethodGet, "https://localhost/account/"+acctIDStr, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1221,13 +1221,13 @@ func TestAccountInfo(t *testing.T) {
 	core.account = &db.Account{
 		AccountID:  accountID,
 		Pubkey:     dex.Bytes(pubkey),
+		FeeAsset:   42,
 		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
 		FeeCoin:    dex.Bytes(feeCoin),
-		BrokenRule: account.Rule(byte(255)),
 	}
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/account/"+acctIDStr, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1239,9 +1239,9 @@ func TestAccountInfo(t *testing.T) {
 	exp := `{
     "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
     "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
+    "feeasset": 42,
     "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-    "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005",
-    "brokenrule": 255
+    "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005"
 }
 `
 	if exp != w.Body.String() {
@@ -1250,7 +1250,7 @@ func TestAccountInfo(t *testing.T) {
 
 	// ok, upper case account id
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+strings.ToUpper(acctIDStr), nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/account/"+strings.ToUpper(acctIDStr), nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1264,7 +1264,7 @@ func TestAccountInfo(t *testing.T) {
 
 	// acct id is not hex
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/nothex", nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/account/nothex", nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1275,7 +1275,7 @@ func TestAccountInfo(t *testing.T) {
 
 	// acct id wrong length
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr[2:], nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/account/"+acctIDStr[2:], nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
@@ -1288,7 +1288,7 @@ func TestAccountInfo(t *testing.T) {
 	core.accountErr = errors.New("error")
 
 	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/account/"+acctIDStr, nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)
