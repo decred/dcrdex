@@ -596,12 +596,12 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 // refreshServerConfig fetches and replaces server configuration data. It also
 // initially checks that a server's API version is one of serverAPIVers.
-func (dc *dexConnection) refreshServerConfig() error {
+func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
 	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
-		return fmt.Errorf("unable to fetch server config: %w", err)
+		return nil, fmt.Errorf("unable to fetch server config: %w", err)
 	}
 
 	// Check that we are able to communicate with this DEX.
@@ -624,7 +624,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 			if cfgAPIVer > apiVer {
 				err = fmt.Errorf("%v: %w", err, outdatedClientErr)
 			}
-			return err
+			return nil, err
 		}
 	}
 
@@ -643,10 +643,10 @@ func (dc *dexConnection) refreshServerConfig() error {
 
 	assets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
 	if err != nil {
-		return fmt.Errorf("Inconsistent 'config' response: %w", err)
+		return nil, fmt.Errorf("Inconsistent 'config' response: %w", err)
 	}
 
-	// Update dc.{marketMap,epoch,assets}
+	// Update dc.{epoch,assets}
 	dc.assetsMtx.Lock()
 	dc.assets = assets
 	dc.assetsMtx.Unlock()
@@ -655,7 +655,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 	dc.epoch = epochs
 	dc.epochMtx.Unlock()
 
-	return nil
+	return cfg, nil
 }
 
 // handleUnbookOrderMsg is called when an unbook_order notification is
