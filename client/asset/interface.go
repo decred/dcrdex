@@ -128,13 +128,13 @@ type Wallet interface {
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
 	// to properly handle network latency.
 	AuditContract(coinID, contract, txData dex.Bytes) (*AuditInfo, error)
-	// LocktimeExpired returns true if the specified contract's locktime has
-	// expired, making it possible to issue a Refund. The contract expiry time
-	// is also returned, but reaching this time does not necessarily mean the
-	// contract can be refunded since assets have different rules to satisfy the
-	// lock. For example, in Bitcoin the median of the last 11 blocks must be
-	// past the expiry time, not the current time.
-	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
+	// ContractLockTimeExpired returns true if the specified contract's locktime
+	// has expired, making it possible to issue a Refund. The contract expiry
+	// time is also returned, but reaching this time does not necessarily mean
+	// the contract can be refunded since assets have different rules to satisfy
+	// the lock. For example, in Bitcoin the median of the last 11 blocks must
+	// be past the expiry time, not the current time.
+	ContractLockTimeExpired(contract dex.Bytes) (bool, time.Time, error)
 	// FindRedemption watches for the input that spends the specified contract
 	// coin, and returns the spending input and the contract's secret key when
 	// it finds a spender.
@@ -169,6 +169,16 @@ type Wallet interface {
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)
+	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
+	// provided amount, lock time, and dex account ID.
+	MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*Bond, error)
+	// RefundBond will refund the bond given the redeem script and private key.
+	RefundBond(coinID, script []byte, privKey []byte) ([]byte, error)
+	// LockTimeExpired returns true if the specified locktime has expired,
+	// making it possible to redeem the locked coins.
+	LockTimeExpired(lockTime time.Time) (bool, error)
+	// SendTransaction broadcasts a raw transaction, returning its coin ID.
+	SendTransaction(rawTx []byte) ([]byte, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// If the coin is not unspent, and is not known to this wallet,
 	// Confirmations may return an error. The value of spent should be ignored
@@ -184,6 +194,17 @@ type Wallet interface {
 	SyncStatus() (synced bool, progress float32, err error)
 	// RefundAddress extracts and returns the refund address from a contract.
 	RefundAddress(contract dex.Bytes) (string, error)
+}
+
+// Bond is the fidelity bond info generated for a certain account ID, amount,
+// and lock time.
+type Bond struct {
+	AssetID               uint32 // could be inferred by caller
+	CoinID                []byte
+	SignedTx, UnsignedTx  []byte
+	BondScript            []byte
+	RedeemTx, BondPrivKey []byte
+	BondAcctSig           []byte // AcctID hash signed with bond BondPrivKey
 }
 
 // Balance is categorized information about a wallet's balance.

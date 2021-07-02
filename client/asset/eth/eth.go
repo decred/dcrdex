@@ -365,9 +365,15 @@ func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset
 	return nil, asset.ErrNotImplemented
 }
 
-// LocktimeExpired returns true if the specified contract's locktime has
+// LockTimeExpired returns true if the specified locktime has expired, making it
+// possible to redeem the locked coins.
+func (*ExchangeWallet) LockTimeExpired(lockTime time.Time) (bool, error) {
+	return false, asset.ErrNotImplemented
+}
+
+// ContractLockTimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (*ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (*ExchangeWallet) ContractLockTimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	return false, time.Time{}, asset.ErrNotImplemented
 }
 
@@ -440,6 +446,17 @@ func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error)
 	return nil, asset.ErrNotImplemented
 }
 
+// MakeBondTx creates a time-locked fidelity bond transaction.
+func (*ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*asset.Bond, error) {
+	return nil, asset.ErrNotImplemented
+}
+
+// RefundBond refunds a bond output to a new wallet address given the redeem
+// script and private key.
+func (*ExchangeWallet) RefundBond(coinID, script []byte, privKey []byte) ([]byte, error) {
+	return nil, asset.ErrNotImplemented
+}
+
 // sendToAddr sends funds from acct to addr.
 func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.Int) (common.Hash, error) {
 	tx := map[string]string{
@@ -449,6 +466,11 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.In
 		"gasPrice": fmt.Sprintf("0x%x", gasPrice),
 	}
 	return eth.node.sendTransaction(eth.ctx, tx)
+}
+
+// SendTransaction broadcasts the raw transaction.
+func (*ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	return nil, asset.ErrNotImplemented
 }
 
 // Withdraw withdraws funds to the specified address. Value is gwei.

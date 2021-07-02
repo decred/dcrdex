@@ -1721,24 +1721,35 @@ func (btc *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
 	return sender.String(), nil
 }
 
-// LocktimeExpired returns true if the specified contract's locktime has
+// LockTimeExpired returns true if the specified locktime has expired, making it
+// possible to redeem the locked coins.
+func (btc *ExchangeWallet) LockTimeExpired(lockTime time.Time) (bool, error) {
+	// lockTime := time.Unix(int64(lockTimeUnux), 0).UTC()
+	bestBlockHash, err := btc.node.GetBestBlockHash()
+	if err != nil {
+		return false, fmt.Errorf("get best block hash error: %w", err)
+	}
+	bestBlockHeader, err := btc.getBlockHeader(bestBlockHash.String())
+	if err != nil {
+		return false, fmt.Errorf("get best block header error: %w", err)
+	}
+	bestBlockMedianTime := time.Unix(bestBlockHeader.MedianTime, 0).UTC()
+	return bestBlockMedianTime.After(lockTime), nil
+}
+
+// ContractLockTimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (btc *ExchangeWallet) ContractLockTimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	bestBlockHash, err := btc.node.GetBestBlockHash()
+	expired, err := btc.LockTimeExpired(contractExpiry)
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("get best block hash error: %w", err)
+		return false, time.Time{}, err
 	}
-	bestBlockHeader, err := btc.getBlockHeader(bestBlockHash.String())
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("get best block header error: %w", err)
-	}
-	bestBlockMedianTime := time.Unix(bestBlockHeader.MedianTime, 0).UTC()
-	return bestBlockMedianTime.After(contractExpiry), contractExpiry, nil
+	return expired, contractExpiry, nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -2207,6 +2218,26 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 		return nil, err
 	}
 	return newOutput(txHash, vout, sent), nil
+}
+
+func (btc *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*asset.Bond, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (btc *ExchangeWallet) RefundBond(coinID, script []byte, privKey []byte) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (btc *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	msgTx, err := msgTxFromBytes(rawTx)
+	if err != nil {
+		return nil, err
+	}
+	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	if err != nil {
+		return nil, err
+	}
+	return toCoinID(txHash, 0), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
