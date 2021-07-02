@@ -247,7 +247,9 @@ func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db
 func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
 	return dcrLotSize * initLotLimit // everyone gets a clean slate
 }
-
+func (a *TAuth) AcctStatus(user account.AccountID) (connected bool, tier int64) {
+	return true, 1
+}
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
 func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, t time.Time) {
 	a.cancelOrder = coid

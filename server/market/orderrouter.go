@@ -28,7 +28,7 @@ import (
 type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
-	Suspended(user account.AccountID) (found, suspended bool)
+	AcctStatus(user account.AccountID) (connected bool, tier int64)
 	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message) error
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
@@ -218,8 +218,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return rpcErr
 	}
 
-	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
+	if _, tier := r.auth.AcctStatus(user); tier < 1 {
+		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
 	}
 
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
@@ -235,7 +235,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	// Check that OrderType is set correctly
 	if limit.OrderType != msgjson.LimitOrderNum {
-		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for limit order. wanted %d, got %d", msgjson.LimitOrderNum, limit.OrderType)
+		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for limit order. wanted %d, got %d",
+			msgjson.LimitOrderNum, limit.OrderType)
 	}
 
 	// Check that the rate is non-zero and obeys the rate step interval.
@@ -326,8 +327,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	if _, suspended := r.auth.Suspended(user); suspended {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account %v may not submit trade orders", user)
+	if _, tier := r.auth.AcctStatus(user); tier < 1 {
+		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
 	}
 
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
