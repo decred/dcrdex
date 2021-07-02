@@ -23,7 +23,7 @@ type DB interface {
 		walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
-	// URL.
+	// host.
 	ListAccounts() ([]string, error)
 	// Accounts retrieves all accounts.
 	Accounts() ([]*AccountInfo, error)
@@ -31,12 +31,17 @@ type DB interface {
 	Account(host string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
+	// AddBond saves a new Bond for a DEX.
+	AddBond(host string, bond *Bond) error
+	ConfirmBond(host string, assetID uint32, bondCoinID []byte) error
+	BondRefunded(host string, assetID uint32, bondCoinID []byte) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
-	// AccountProof retrieves the AccountPoof value specified by url.
+	// AccountProof retrieves the AccountPoof value specified by url. DEPRECATED
 	AccountProof(host string) (*AccountProof, error)
-	// AccountPaid marks the account as paid.
-	AccountPaid(proof *AccountProof) error
+	// StoreAccountProof stores an AccountProof, marking the account as paid
+	// with the legacy registration fee. DEPRECATED
+	StoreAccountProof(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error
