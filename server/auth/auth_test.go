@@ -53,7 +53,6 @@ type TStorage struct {
 	acctInfoErr         error
 	acct                *account.Account
 	matches             []*db.MatchData
-	closedID            account.AccountID
 	matchStatuses       []*db.MatchStatus
 	userPreimageResults []*db.PreimageResult
 	userMatchOutcomes   []*db.MatchOutcome
@@ -63,24 +62,21 @@ type TStorage struct {
 	regAsset            uint32
 	regErr              error
 	payErr              error
-	unpaid              bool
-	closed              bool
+	bonds               []*db.Bond
+	legacy              bool
+	legacyPaid          bool
 	ratio               ratioData
 }
 
-func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
-	s.closedID = id
-	return nil
-}
-func (s *TStorage) RestoreAccount(_ account.AccountID) error {
-	return nil
-}
 func (s *TStorage) AccountInfo(account.AccountID) (*db.Account, error) {
 	return s.acctInfo, s.acctInfoErr
 }
-func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
-	return s.acct, !s.unpaid, !s.closed
+func (s *TStorage) Account(acct account.AccountID, lockTimeThresh time.Time) (*account.Account, []*db.Bond, bool, bool) {
+	return s.acct, s.bonds, s.legacy, s.legacyPaid
 }
+func (s *TStorage) CreateAccountWithBond(acct *account.Account, bond *db.Bond) error { return nil }
+func (s *TStorage) AddBond(acct account.AccountID, bond *db.Bond) error              { return nil }
+func (s *TStorage) DeleteBond(assetID uint32, coinID []byte) error                   { return nil }
 func (s *TStorage) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	return s.userMatchOutcomes, nil
 }
@@ -137,10 +133,12 @@ func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (cancels
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
-	sig    *ecdsa.Signature
+	sig *ecdsa.Signature
+	//privKey *secp256k1.PrivateKey
 	pubkey *secp256k1.PublicKey
 }
 
+// Maybe actually change this to an ecdsa.Sign with a private key instead?
 func (s *TSigner) Sign(hash []byte) *ecdsa.Signature { return s.sig }
 func (s *TSigner) PubKey() *secp256k1.PublicKey      { return s.pubkey }
 
@@ -247,14 +245,15 @@ type tUser struct {
 	privKey *secp256k1.PrivateKey
 }
 
+// makes a new user with its own account ID, tRPCClient
 func tNewUser(t *testing.T) *tUser {
+	t.Helper()
 	conn := tNewRPCClient()
-	// register the RPCClient with a 'connect' Message
-	acctID := newAccountID()
 	privKey, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
 		t.Fatalf("error generating private key: %v", err)
 	}
+	acctID := account.NewID(privKey.PubKey().SerializeCompressed())
 	return &tUser{
 		conn:    conn,
 		acctID:  acctID,
@@ -379,6 +378,9 @@ var (
 	tCheckFeeVal   uint64 = 500_000_000
 	tCheckFeeConfs int64  = 5
 	tCheckFeeErr   error
+
+	tParseBondTxAcct account.AccountID
+	tParseBondTxErr  error
 )
 
 func tCheckFee(assetID uint32, coin []byte) (addr string, val uint64, confs int64, err error) {
@@ -387,6 +389,11 @@ func tCheckFee(assetID uint32, coin []byte) (addr string, val uint64, confs int6
 		return
 	}
 	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
+}
+
+func tParseBondTx(assetID uint32, ver uint16, rawTx []byte) (bondCoinID []byte, amt int64,
+	lockTime int64, acct account.AccountID, err error) {
+	return nil, 0, time.Now().Add(time.Minute).Unix(), tParseBondTxAcct, tParseBondTxErr
 }
 
 func tFeeAddress(assetID uint32) string {
@@ -408,7 +415,10 @@ var tDexPubKeyBytes = []byte{
 }
 
 func resetStorage() {
-	*rig.storage = TStorage{}
+	*rig.storage = TStorage{
+		legacy:     true,
+		legacyPaid: true,
+	}
 }
 
 func TestMain(m *testing.M) {
@@ -416,13 +426,27 @@ func TestMain(m *testing.M) {
 		UseLogger(dex.StdOutLogger("AUTH_TEST", dex.LevelTrace))
 		ctx, shutdown := context.WithCancel(context.Background())
 		defer shutdown()
-		storage := &TStorage{}
+		storage := &TStorage{
+			legacy:     true,
+			legacyPaid: true,
+		}
+		// secp256k1.PrivKeyFromBytes
 		dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
 		signer := &TSigner{pubkey: dexKey}
 		authMgr := NewAuthManager(&Config{
 			Storage:    storage,
 			Signer:     signer,
-			FeeAddress: tFeeAddress,
+			BondExpiry: 86400,
+			BondAssets: map[string]*msgjson.BondAsset{
+				"dcr": {
+					Version: 0,
+					ID:      42,
+					Confs:   uint32(tCheckFeeConfs),
+					Amt:     tRegFee * 10,
+				},
+			},
+			BondTxParser: tParseBondTx,
+			FeeAddress:   tFeeAddress,
 			FeeAssets: map[string]*msgjson.FeeAsset{
 				"dcr": {
 					ID:    42,
@@ -721,6 +745,14 @@ func TestConnect(t *testing.T) {
 	}) // 1:1 = 50%
 	defer rig.storage.setRatioData(&ratioData{}) // clean slate
 
+	// TODO: update tests now that there is are no close/ban and unban
+	// operations, instead an integral tier.
+
+	// TODO: update tests now that cancel ratio is part of the score equation
+	// rather than a hard close operation.
+
+	/* cancel ratio stuff
+
 	// Close account on connect with failing cancel ratio, and no grace period.
 	rig.mgr.cancelThresh = 0.2 // thresh below actual ratio, and no grace period with total/(1+total) = 2/3 = 0.66... > 0.2
 	tryConnectUser(t, user, false)
@@ -799,6 +831,8 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
 	}
 
+	*/
+
 	// Connect with a violation score above ban score.
 	wantScore := setViolations()
 	defer clearViolations()
@@ -819,10 +853,6 @@ func TestConnect(t *testing.T) {
 
 	// No error, but Penalize account that was not previously closed.
 	tryConnectUser(t, user, false)
-	if rig.storage.closedID != user.acctID {
-		t.Fatalf("penalty not stored")
-	}
-	rig.storage.closedID = account.AccountID{}
 
 	makerSwapCastIdx := 3
 	rig.storage.userMatchOutcomes = append(rig.storage.userMatchOutcomes[:makerSwapCastIdx], rig.storage.userMatchOutcomes[makerSwapCastIdx+1:]...)
@@ -840,9 +870,6 @@ func TestConnect(t *testing.T) {
 
 	// Connect the user.
 	respMsg := connectUser(t, user)
-	if rig.storage.closedID == user.acctID {
-		t.Fatalf("user unexpectedly penalized")
-	}
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.ActiveOrderStatuses) != 1 {
 		t.Fatalf("no active orders")
@@ -930,7 +957,10 @@ func TestConnect(t *testing.T) {
 	connectUser(t, reuser)
 	a10 := &tPayload{A: 10}
 	msg, _ = msgjson.NewRequest(comms.NextID(), "request", a10)
-	rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, time.Minute, func() {})
+	err = rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, time.Minute, func() {})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	// The a10 message should be in the new connection
 	if user.conn.getReq() != nil {
 		t.Fatalf("old connection received a request after reconnection")
@@ -991,10 +1021,10 @@ func TestAccountErrors(t *testing.T) {
 		t.Fatal("wrong match time: ", match.ServerTime, " != ", uint64(matchTime.UnixMilli()))
 	}
 
-	// unpaid account.
-	rig.storage.unpaid = true
+	// unpaid account. what should db.Account's legacyPaid bool affect?
+	rig.storage.legacyPaid = false
 	rpcErr := rig.mgr.handleConnect(user.conn, connect)
-	rig.storage.unpaid = false
+	rig.storage.legacyPaid = true
 	if rpcErr == nil {
 		t.Fatalf("no error for unpaid account")
 	}
@@ -1011,9 +1041,7 @@ func TestAccountErrors(t *testing.T) {
 
 	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
 	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID
-	rig.storage.closed = true
 	rpcErr = rig.mgr.handleConnect(user.conn, connect)
-	rig.storage.closed = false
 	if rpcErr != nil {
 		t.Fatalf("should be no error for closed account")
 	}
@@ -1021,8 +1049,8 @@ func TestAccountErrors(t *testing.T) {
 	if client == nil {
 		t.Fatalf("client not found")
 	}
-	if !client.isSuspended() {
-		t.Errorf("client should have been in suspended state")
+	if client.tier > 0 {
+		t.Errorf("client should have been tier 0")
 	}
 
 	// Raise the ban score threshold to ensure automatic reinstatement.
@@ -1032,9 +1060,7 @@ func TestAccountErrors(t *testing.T) {
 
 	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first, NOTE that link.Disconnect is async
 	user.conn = tNewRPCClient()                     // disconnect necessitates new conn ID
-	rig.storage.closed = true
 	rpcErr = rig.mgr.handleConnect(user.conn, connect)
-	rig.storage.closed = false
 	if rpcErr != nil {
 		t.Fatalf("should be no error for closed account")
 	}
@@ -1042,8 +1068,8 @@ func TestAccountErrors(t *testing.T) {
 	if client == nil {
 		t.Fatalf("client not found")
 	}
-	if client.isSuspended() {
-		t.Errorf("client should have unbaned automatically")
+	if client.tier < 1 {
+		t.Errorf("client should have unbanned automatically")
 	}
 
 }
@@ -1189,34 +1215,6 @@ func TestSend(t *testing.T) {
 	}
 }
 
-func TestPenalize(t *testing.T) {
-	user := tNewUser(t)
-	rig.signer.sig = user.randomSignature()
-	connectUser(t, user)
-	foreigner := tNewUser(t)
-
-	// Cannot set account as suspended in the clients map if they are not
-	// connected, but should still suspend in DB.
-	rig.mgr.Penalize(foreigner.acctID, 0, "details")
-	var zeroAcct account.AccountID
-	// if rig.storage.closedID != zeroAcct {
-	// 	t.Fatalf("foreigner penalty stored")
-	// }
-	rig.mgr.Penalize(user.acctID, 0, "details")
-	if rig.storage.closedID != user.acctID {
-		t.Fatalf("penalty not stored")
-	}
-	rig.storage.closedID = zeroAcct
-	if user.conn.banished {
-		t.Fatalf("penalized user should not be banished")
-	}
-
-	// The user should remain in the map to finish their work.
-	if rig.mgr.user(user.acctID) == nil {
-		t.Fatalf("penalized user should not be removed from map")
-	}
-}
-
 func TestConnectErrors(t *testing.T) {
 	user := tNewUser(t)
 	rig.storage.acct = nil
@@ -1253,12 +1251,12 @@ func TestConnectErrors(t *testing.T) {
 	ensureErr(rpcErr, "account unknown to storage", msgjson.AccountNotFoundError)
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 
-	// User unpaid
+	// *legacy* user unpaid
 	encodeMsg()
-	rig.storage.unpaid = true
+	rig.storage.legacyPaid = false
 	rpcErr = rig.mgr.handleConnect(user.conn, msg)
 	ensureErr(rpcErr, "account unpaid", msgjson.UnpaidAccountError)
-	rig.storage.unpaid = false
+	rig.storage.legacyPaid = true
 
 	// bad signature
 	connect.SetSig([]byte{0x09, 0x08})
@@ -1365,8 +1363,11 @@ func TestHandleResponse(t *testing.T) {
 	client.mtx.Unlock()
 }
 
+// TODO: TestHandlePostBond
+
 func TestHandleRegister(t *testing.T) {
 	user := tNewUser(t)
+	resetStorage()
 	dummyError := fmt.Errorf("test error")
 
 	rig.storage.acctInfoErr = db.ArchiveError{Code: db.ErrAccountUnknown}
@@ -1399,6 +1400,10 @@ func TestHandleRegister(t *testing.T) {
 	ensureErr := makeEnsureErr(t)
 
 	msg := newMsg(newReg())
+	msg.Payload = []byte(`null`)
+	ensureErr(do(msg), "null payload", msgjson.RPCParseError)
+
+	msg = newMsg(newReg())
 	msg.Payload = []byte(`?`)
 	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
 
@@ -1461,9 +1466,8 @@ func TestHandleNotifyFee(t *testing.T) {
 	user := tNewUser(t)
 	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	userDBAcct := &db.Account{
-		AccountID:  user.acctID,
-		BrokenRule: account.NoRule,
-		Pubkey:     user.privKey.PubKey().SerializeCompressed(),
+		AccountID: user.acctID,
+		Pubkey:    user.privKey.PubKey().SerializeCompressed(),
 	}
 	rig.storage.acct = userAcct
 	rig.storage.acctInfo = userDBAcct
@@ -1478,7 +1482,7 @@ func TestHandleNotifyFee(t *testing.T) {
 	rig.storage.regAddr = tCheckFeeAddr
 
 	defer func() {
-		rig.storage.unpaid = false
+		rig.storage.legacyPaid = true
 	}()
 	defer resetStorage()
 
@@ -1557,7 +1561,7 @@ func TestHandleNotifyFee(t *testing.T) {
 	userDBAcct.FeeCoin = nil
 
 	// Signature error
-	rig.storage.unpaid = true
+	rig.storage.legacyPaid = false
 	notify = newNotify()
 	notify.Sig = []byte{0x01, 0x02}
 	ensureErr(do(newMsg(notify)), "bad signature", msgjson.SignatureError)
@@ -1605,13 +1609,13 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		return
 	}
 
+	orderOutcomes := rig.mgr.orderOutcomes[user.acctID]
+
 	oid := newOrderID()
 	tCompleted := unixMsNow()
 	rig.mgr.RecordCompletedOrder(user.acctID, oid, tCompleted)
 
-	client.mtx.Lock()
-	total, cancels := client.recentOrders.counts()
-	client.mtx.Unlock()
+	total, cancels := orderOutcomes.counts()
 	if total != 1 {
 		t.Errorf("got %d total orders, expected %d", total, 1)
 	}
@@ -1634,9 +1638,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		}
 	}
 
-	client.mtx.Lock()
-	ord := client.recentOrders.orders[0]
-	client.mtx.Unlock()
+	ord := orderOutcomes.orders[0]
 	checkOrd(ord, oid, false, tCompleted.UnixMilli())
 
 	// another
@@ -1644,9 +1646,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	tCompleted = tCompleted.Add(time.Millisecond) // newer
 	rig.mgr.RecordCompletedOrder(user.acctID, oid, tCompleted)
 
-	client.mtx.Lock()
-	total, cancels = client.recentOrders.counts()
-	client.mtx.Unlock()
+	total, cancels = orderOutcomes.counts()
 	if total != 2 {
 		t.Errorf("got %d total orders, expected %d", total, 2)
 	}
@@ -1654,9 +1654,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		t.Errorf("got %d cancels, expected %d", cancels, 0)
 	}
 
-	client.mtx.Lock()
-	ord = client.recentOrders.orders[1]
-	client.mtx.Unlock()
+	ord = orderOutcomes.orders[1]
 	checkOrd(ord, oid, false, tCompleted.UnixMilli())
 
 	// now a cancel
@@ -1664,9 +1662,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	tCompleted = tCompleted.Add(time.Millisecond) // newer
 	rig.mgr.RecordCancel(user.acctID, coid, oid, 1, tCompleted)
 
-	client.mtx.Lock()
-	total, cancels = client.recentOrders.counts()
-	client.mtx.Unlock()
+	total, cancels = orderOutcomes.counts()
 	if total != 3 {
 		t.Errorf("got %d total orders, expected %d", total, 3)
 	}
@@ -1674,9 +1670,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		t.Errorf("got %d cancels, expected %d", cancels, 1)
 	}
 
-	client.mtx.Lock()
-	ord = client.recentOrders.orders[2]
-	client.mtx.Unlock()
+	ord = orderOutcomes.orders[2]
 	checkOrd(ord, coid, true, tCompleted.UnixMilli())
 }
 
