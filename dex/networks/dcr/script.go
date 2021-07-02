@@ -37,9 +37,9 @@ const (
 	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
 
-	// Overhead for a wire.TxIn with a scriptSig length < 254.
-	// prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes)
-	// + BlockIndex (4 bytes) + sig script var int (at least 1 byte)
+	// TxInOverhead is the overhead for a wire.TxIn with a scriptSig length <
+	// 254. prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes) +
+	// BlockIndex (4 bytes) + sig script var int (at least 1 byte)
 	TxInOverhead = 41 + 8 + 4 + 4 // 57 + at least 1 more
 
 	P2PKSigScriptSize = txsizes.RedeemP2PKSigScriptSize
@@ -59,7 +59,7 @@ const (
 	P2PKHOutputSize = TxOutOverhead + txsizes.P2PKHPkScriptSize // 36
 	P2SHOutputSize  = TxOutOverhead + txsizes.P2SHPkScriptSize  // 34
 
-	// MsgTx overhead is 4 bytes version (lower 2 bytes for the real transaction
+	// MsgTxOverhead is 4 bytes version (lower 2 bytes for the real transaction
 	// version and upper 2 bytes for the serialization type) + 4 bytes locktime
 	// + 4 bytes expiry + 3 bytes of varints for the number of transaction
 	// inputs (x2 for witness and prefix) and outputs
@@ -92,7 +92,7 @@ const (
 	//   - OP_1
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract script
-	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + SwapContractSize // 241
+	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 32 + 1 + 2 + SwapContractSize // 241
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
@@ -105,7 +105,17 @@ const (
 	//   - OP_0
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract script
-	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + SwapContractSize // 208
+	RefundSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 2 + SwapContractSize // 208
+
+	// BondScriptSize is the size of a DEX time-locked fidelity bond output
+	// script to which a bond P2SH pays (pre-year-2039):
+	//   OP_DATA_4 (4 bytes lockTime) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DATA_33 (33-byte compressed pubkey) OP_CHECKSIG
+	BondScriptSize = 1 + 4 + 1 + 1 + 1 + pubkeyLength + 1 // 42
+
+	// RedeemBondSigScriptSize is the size of a fidelity bond signature script
+	// for to spend a bond output. It includes a signature and the bond script.
+	// Each of said data pushes use an OP_DATA_ code.
+	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + BondScriptSize // 117
 )
 
 // ScriptType is a bitmask with information about a pubkey script and
@@ -314,6 +324,84 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		AddInt64(0).
 		AddData(contract).
 		Script()
+}
+
+// RefundBondScript builds the signature script to refund a time-locked fidelity
+// bond in a P2SH output paying to the provided P2PK bondScript.
+func RefundBondScript(bondScript, sig []byte) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(bondScript).
+		Script()
+}
+
+const ErrInvalidBondScript = dex.ErrorKind("invalid bond script")
+
+// ExtractBondDetails validates the provided bond redeem script, extracting the
+// lock time and pubkey. The format of the script must be as follows:
+//
+//	<lockTime[4] (scriptnum)> OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
+//
+// NOTE: lockTime needs to use a different type to work after 2039.
+func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint32, pubkey []byte, err error) {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, bondScript)
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	// lock time
+	lockTimePush := tokenizer.Data()
+	if len(lockTimePush) != 4 {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	for _, op := range []byte{
+		txscript.OP_CHECKLOCKTIMEVERIFY,
+		txscript.OP_DROP,
+	} {
+		if !tokenizer.Next() {
+			err = ErrInvalidBondScript
+			return
+		}
+		if tokenizer.Opcode() != op {
+			err = ErrInvalidBondScript
+			return
+		}
+	}
+
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+	// pubkey
+	const pubkeyCompLen = 33
+	bondPubKey := tokenizer.Data()
+	if len(bondPubKey) != pubkeyCompLen {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+	if tokenizer.Opcode() != txscript.OP_CHECKSIG {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	if !tokenizer.Done() {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	lockTime = binary.LittleEndian.Uint32(lockTimePush)
+	pubkey = make([]byte, pubkeyCompLen)
+	copy(pubkey, bondPubKey)
+
+	return
 }
 
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
