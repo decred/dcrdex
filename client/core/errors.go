@@ -48,6 +48,9 @@ const (
 	createWalletErr
 	activeOrdersErr
 	newAddrErr
+	bondAmtErr
+	bondTimeErr
+	bondPostErr // TODO
 )
 
 // Error is an error code and a wrapped error.

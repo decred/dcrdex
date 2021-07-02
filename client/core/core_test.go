@@ -335,7 +335,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 	}
 	return fmt.Errorf("no handler for route %q", msg.Route)
 }
-func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs } // use when Core.listen is running
 func (conn *TWebsocket) IsDown() bool {
 	return false
 }
@@ -351,7 +351,8 @@ type TDB struct {
 	acct                     *db.AccountInfo
 	acctErr                  error
 	createAccountErr         error
-	accountPaidErr           error
+	addBondErr               error
+	storeAccountProofErr     error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
 	matchesForOID            []*db.MetaMatch
@@ -374,7 +375,6 @@ type TDB struct {
 	verifyAccountPaid        bool
 	verifyCreateAccount      bool
 	verifyUpdateAccountInfo  bool
-	accountProofPersisted    *db.AccountProof
 	disabledHost             *string
 	disableAccountErr        error
 	creds                    *db.PrimaryCredentials
@@ -406,6 +406,21 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	tdb.verifyCreateAccount = true
 	tdb.acct = ai
 	return tdb.createAccountErr
+}
+
+func (tdb *TDB) NextBondKeyIndex(assetID uint32) (uint32, error) {
+	return 0, nil
+}
+
+func (tdb *TDB) AddBond(host string, bond *db.Bond) error {
+	return tdb.addBondErr
+}
+
+func (tdb *TDB) ConfirmBond(host string, assetID uint32, bondCoinID []byte) error {
+	return nil
+}
+func (tdb *TDB) BondRefunded(host string, assetID uint32, bondCoinID []byte) error {
+	return nil
 }
 
 func (tdb *TDB) DisableAccount(url string) error {
@@ -514,10 +529,10 @@ func (tdb *TDB) AccountProof(url string) (*db.AccountProof, error) {
 	return tdb.accountProof, tdb.accountProofErr
 }
 
-func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 	tdb.verifyAccountPaid = true
-	tdb.accountProofPersisted = proof
-	return tdb.accountPaidErr
+	// todo: save proof?
+	return tdb.storeAccountProofErr
 }
 
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
@@ -1849,6 +1864,42 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
+// TODO: TestGetDEXConfig
+/*
+func TestGetFee(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	cert := []byte{}
+
+	// DEX already registered
+	_, err := tCore.GetFee(tDexHost, cert)
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
+	// Lose the dexConnection
+	tCore.connMtx.Lock()
+	delete(tCore.conns, tDexHost)
+	tCore.connMtx.Unlock()
+
+	// connectDEX error
+	_, err = tCore.GetFee(tUnparseableHost, cert)
+	if !errorHasCode(err, addressParseErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
+	}
+
+	// Queue a config response for success
+	rig.queueConfig()
+
+	// Success
+	_, err = tCore.GetFee(tDexHost, cert)
+	if err != nil {
+		t.Fatalf("GetFee error: %v", err)
+	}
+}
+*/
+
 func TestRegister(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
@@ -1901,7 +1952,7 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
 						timeout.Stop()
-						tWallet.setConfs(tWallet.sendCoin.id, 0, nil)
+						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
 						tCore.tipChange(tUTXOAssetA.ID, nil)
 						return
 					}
@@ -2273,6 +2324,12 @@ func TestCredentialsUpgrade(t *testing.T) {
 	}
 }
 
+func unauth(a *dexAccount) {
+	a.authMtx.Lock()
+	a.isAuthed = false
+	a.authMtx.Unlock()
+}
+
 func TestLogin(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
@@ -2286,7 +2343,7 @@ func TestLogin(t *testing.T) {
 	}
 
 	// No encryption key.
-	rig.acct.unauth()
+	unauth(rig.acct)
 	creds := tCore.credentials
 	tCore.credentials = nil
 	err = tCore.Login(tPW)
@@ -2311,7 +2368,7 @@ func TestLogin(t *testing.T) {
 	rig = newTestRig()
 	defer rig.shutdown()
 	tCore = rig.core
-	rig.acct.unauth()
+	unauth(rig.acct)
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		resp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error"))
 		f(resp)
