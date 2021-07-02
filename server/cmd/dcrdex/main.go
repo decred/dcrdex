@@ -156,7 +156,6 @@ func mainCore(ctx context.Context) error {
 		BroadcastTimeout:  cfg.BroadcastTimeout,
 		TxWaitExpiration:  cfg.TxWaitExpiration,
 		CancelThreshold:   cfg.CancelThreshold,
-		Anarchy:           cfg.Anarchy,
 		FreeCancels:       cfg.FreeCancels,
 		BanScore:          cfg.BanScore,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,

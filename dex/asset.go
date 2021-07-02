@@ -16,6 +16,12 @@ const (
 
 	defaultLockTimeTaker = 8 * time.Hour
 	defaultlockTimeMaker = 20 * time.Hour
+
+	secondsPerMinute  int64 = 60
+	secondsPerDay           = 24 * 60 * secondsPerMinute
+	BondExpiryMainnet       = 30 * secondsPerDay    // 30 days
+	BondExpiryTestnet       = 90 * secondsPerMinute // 90 minutes
+	BondExpirySimnet        = 4 * secondsPerMinute  // 4 minutes
 )
 
 var (
@@ -71,6 +77,21 @@ func LockTimeMaker(network Network) time.Duration {
 		return defaultlockTimeMaker
 	}
 	return testLockTime.maker
+}
+
+// BondExpiry returns the bond expiry duration in seconds for a given network.
+// Once APIVersion reaches BondAPIVersion, clients should use this compiled
+// helper function. Until then, bonds are considered experimental and the
+// current value should be referenced from config response.
+func BondExpiry(net Network) int64 {
+	switch net {
+	case Mainnet:
+		return BondExpiryMainnet
+	case Testnet:
+		return BondExpiryTestnet
+	default: // Regtest, Simnet, other
+		return BondExpirySimnet
+	}
 }
 
 // Network flags passed to asset backends to signify which network to use.
