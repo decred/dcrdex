@@ -14,6 +14,12 @@ const (
 
 	defaultLockTimeTaker = 8 * time.Hour
 	defaultlockTimeMaker = 20 * time.Hour
+
+	secondsPerMinute  int64 = 60
+	secondsPerDay           = 24 * 60 * secondsPerMinute
+	BondExpiryMainnet       = 30 * secondsPerDay
+	BondExpiryTestnet       = 90 * secondsPerMinute
+	BondExpirySimnet        = 4 * secondsPerMinute
 )
 
 var (

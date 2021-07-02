@@ -66,8 +66,6 @@ type SvrCore interface {
 	MarketStatuses() map[string]*market.Status
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) (*market.SuspendEpoch, error)
 	ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error)
-	Penalize(aid account.AccountID, rule account.Rule, details string) error
-	Unban(aid account.AccountID) error
 	ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error)
 	BookOrders(base, quote uint32) (orders []*order.LimitOrder, err error)
 	EpochOrders(base, quote uint32) (orders []order.Order, err error)
@@ -152,8 +150,6 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/enabledataapi/{"+yesKey+"}", s.apiEnableDataAPI)
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
-			rm.Get("/ban", s.apiBan)
-			rm.Get("/unban", s.apiUnban)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})

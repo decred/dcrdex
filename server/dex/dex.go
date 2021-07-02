@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/apidata"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/asset/dcr"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
@@ -72,8 +73,9 @@ type DexConf struct {
 	Markets           []*dex.MarketInfo
 	Assets            []*AssetConf
 	Network           dex.Network
+	BondIncrement     uint64
 	DBConf            *DBConf
-	RegFeeXPub        string
+	RegFeeXPub        string // for register/notifyfee clients
 	RegFeeConfirms    int64
 	RegFeeAmount      uint64
 	BroadcastTimeout  time.Duration
@@ -139,17 +141,25 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market, bondExpiry int64) (*configResponse, error) {
 	configMsg := &msgjson.ConfigResult{
+		APIVersion:       uint16(APIVersion),
+		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
 		CancelMax:        cfg.CancelThreshold,
 		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
 		Fee:              cfg.RegFeeAmount,
-		APIVersion:       uint16(APIVersion),
-		BinSizes:         apidata.BinSizes,
-		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
+		BondExpiry:       uint64(bondExpiry),
+		BondAssets: map[string]*msgjson.BondAsset{
+			"dcr": {
+				ID:    42,
+				Confs: uint32(cfg.RegFeeConfirms),
+				Amt:   cfg.BondIncrement,
+			},
+		},
+		BinSizes: apidata.BinSizes,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -243,6 +253,18 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Disallow running without user penalization in a mainnet config.
 	if cfg.Anarchy && cfg.Network == dex.Mainnet {
 		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
+	}
+
+	var bondExpiry int64
+	switch cfg.Network {
+	case dex.Mainnet:
+		bondExpiry = dex.BondExpiryMainnet
+	case dex.Testnet:
+		bondExpiry = dex.BondExpiryTestnet
+	case dex.Simnet:
+		bondExpiry = dex.BondExpirySimnet
+	default:
+		return nil, fmt.Errorf("unrecognized network %v", cfg.Network)
 	}
 
 	var subsystems []subsystem
@@ -421,7 +443,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("no DCR backend configured")
 	}
 	// Validate the registration fee extended public key.
-	if err := dcrBackend.ValidateXPub(cfg.RegFeeXPub); err != nil {
+	if err := dcr.ValidateXPub(cfg.RegFeeXPub); err != nil {
 		return nil, fmt.Errorf("invalid regfeexpub: %w", err)
 	}
 
@@ -443,9 +465,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		ShowPGConfig: cfg.DBConf.ShowPGConfig,
 		QueryTimeout: 20 * time.Minute,
 		MarketCfg:    cfg.Markets,
-		//CheckedStores: true,
-		Net:    cfg.Network,
-		FeeKey: cfg.RegFeeXPub,
+		Net:          cfg.Network,
+		FeeKey:       cfg.RegFeeXPub,
 	}
 	// After DEX construction, the storage subsystem should be stopped
 	// gracefully with its Close method, and in coordination with other
@@ -479,8 +500,11 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		Storage:           storage,
 		Signer:            signer{cfg.DEXPrivKey},
 		RegistrationFee:   cfg.RegFeeAmount,
+		BondIncrement:     cfg.BondIncrement,
+		BondExpiry:        uint64(bondExpiry),
 		FeeConfs:          cfg.RegFeeConfirms,
 		FeeChecker:        dcrBackend.FeeCoin,
+		BondTxParser:      dcr.ParseBondTx, // NOTE: backend instantiation sets the package-level network params
 		UserUnbooker:      userUnbookFun,
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
@@ -636,7 +660,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 
-	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
+	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets, bondExpiry)
 	if err != nil {
 		return nil, err
 	}
@@ -862,17 +886,6 @@ func (dm *DEX) Accounts() ([]*db.Account, error) {
 // AccountInfo returns data for an account.
 func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	return dm.storage.AccountInfo(aid)
-}
-
-// Penalize bans an account by canceling the client's orders and setting their rule
-// status to rule.
-func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string) error {
-	return dm.authMgr.Penalize(aid, rule, details)
-}
-
-// Unban reverses a ban and allows a client to resume trading.
-func (dm *DEX) Unban(aid account.AccountID) error {
-	return dm.authMgr.Unban(aid)
 }
 
 // ForgiveMatchFail forgives a user for a specific match failure, potentially
