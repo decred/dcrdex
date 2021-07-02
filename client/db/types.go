@@ -59,28 +59,112 @@ func (s Severity) String() string {
 	return "unknown severity"
 }
 
+// BondUID generates a unique identifier from a bond's asset ID and coin ID.
+func BondUID(assetID uint32, bondCoinID []byte) []byte {
+	return hashKey(append(uint32Bytes(assetID), bondCoinID...))
+}
+
+// Bond is stored in a sub-bucket of an account bucket.
+type Bond struct {
+	AssetID     uint32
+	CoinID      []byte
+	UnsignedTx  []byte
+	SignedTx    []byte
+	Script      []byte
+	Amount      uint64
+	LockTime    uint64
+	BondPrivKey []byte // private key for the pkh to which the bond script pays, needed if not current wallet, could be derived from hd seed
+	RefundTx    []byte // pays to wallet that created it!
+
+	Confirmed bool // if reached required confs according to server, not in serialization
+	Refunded  bool // not in serialization
+}
+
+// UniqueID computes the bond's unique ID for keying purposes.
+func (b *Bond) UniqueID() []byte {
+	return BondUID(b.AssetID, b.CoinID)
+}
+
+// Encode serialized the Bond. Confirmed and Refund are not included.
+func (b *Bond) Encode() []byte {
+	return dbBytes{0}.
+		AddData(uint32Bytes(b.AssetID)).
+		AddData(b.CoinID).
+		AddData(b.UnsignedTx).
+		AddData(b.SignedTx).
+		AddData(b.Script).
+		AddData(encode.Uint64Bytes(b.Amount)).
+		AddData(encode.Uint64Bytes(b.LockTime)).
+		AddData(b.BondPrivKey).
+		AddData(b.RefundTx)
+	// Confirmed and Refunded are not part of the encoding.
+}
+
+// DecodeBond decodes the versioned blob into a *Bond.
+func DecodeBond(b []byte) (*Bond, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeBond_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown Bond version %d", ver)
+}
+
+func decodeBond_v0(pushes [][]byte) (*Bond, error) {
+	if len(pushes) != 9 {
+		return nil, fmt.Errorf("decodeBond_v0: expected 9 data pushes, got %d", len(pushes))
+	}
+	assetIDB, coinID, utx, stx := pushes[0], pushes[1], pushes[2], pushes[3]
+	script, amtB, lockTimeB := pushes[4], pushes[5], pushes[6]
+	bondPrivKey, refundTx := pushes[7], pushes[8]
+	return &Bond{
+		AssetID:    intCoder.Uint32(assetIDB),
+		CoinID:     coinID,
+		UnsignedTx: utx,
+		SignedTx:   stx,
+		Script:     script,
+		Amount:     intCoder.Uint64(amtB),
+		LockTime:   intCoder.Uint64(lockTimeB),
+		// Confirmed:   bytes.Equal(confirmedB, encode.ByteTrue),
+		BondPrivKey: bondPrivKey,
+		RefundTx:    refundTx,
+	}, nil
+}
+
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
-	Host string
-	Cert []byte
+	// Host, Cert, and DEXPubKey identify the DEX server.
+	Host      string
+	Cert      []byte
+	DEXPubKey *secp256k1.PublicKey
+
 	// EncKey should be an encrypted private key. The database itself does not
 	// handle encryption (yet?).
-	EncKey    []byte
-	DEXPubKey *secp256k1.PublicKey
-	FeeCoin   []byte
-	// Paid will be set on retrieval based on whether there is an AccountProof
-	// set.
-	Paid bool
+	EncKey []byte
+
+	Bonds []*Bond
+
+	// DEPRECATED reg fee data. Bond txns are in a sub-bucket.
+
+	// LegacyFeeCoin is the a legacy registration fee coin ID.
+	LegacyFeeCoin []byte
+	// LegacyFeePaid should be set on retrieval if there is an AccountProof set.
+	LegacyFeePaid bool // DEPRECATED
 }
 
-// Encode the AccountInfo as bytes.
+// Encode the AccountInfo as bytes. NOTE: remove deprecated fee fields and do a
+// DB upgrade at some point. But how to deal with old accounts needing to store
+// this data forever?
 func (ai *AccountInfo) Encode() []byte {
 	return dbBytes{0}.
 		AddData([]byte(ai.Host)).
 		AddData(ai.EncKey).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
-		AddData(ai.FeeCoin).
+		AddData(ai.LegacyFeeCoin). // should be empty when using bond
 		AddData(ai.Cert)
 }
 
@@ -93,7 +177,7 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 	}
 	switch ver {
 	case 0:
-		return decodeAccountInfo_v0(pushes)
+		return decodeAccountInfo_v0(pushes) // caller must decode account proof
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
@@ -110,16 +194,18 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 	}
 	return &AccountInfo{
 		Host:      string(hostB),
-		EncKey:    keyB,
-		DEXPubKey: pk,
-		FeeCoin:   coinB,
 		Cert:      certB,
+		DEXPubKey: pk,
+		EncKey:    keyB,
+		// Bonds decoded by DecodeBond from separate pushes.
+		LegacyFeeCoin: coinB, // NOTE: no longer in current serialization.
+		// LegacyFeePaid comes from AccountProof.
 	}, nil
 }
 
-// Account proof is information necessary to prove that the DEX server accepted
+// AccountProof is information necessary to prove that the DEX server accepted
 // the account's fee payment. The fee coin is not part of the proof, since it
-// is already stored as part of the AccountInfo blob.
+// is already stored as part of the AccountInfo blob. DEPRECATED.
 type AccountProof struct {
 	Host  string
 	Stamp uint64
