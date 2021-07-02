@@ -601,6 +601,9 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	c.reg = r
 	return nil, nil
 }
+func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
+	return nil, nil
+}
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	xc := tExchanges[host]
 	if xc == nil {
@@ -769,10 +772,10 @@ func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 	}, nil
 }
 
-func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, error) {
-	return nil, nil
+func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error) {
+	return nil, nil, nil
 }
-func (c *TCore) AccountImport(pw []byte, account core.Account) error {
+func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
