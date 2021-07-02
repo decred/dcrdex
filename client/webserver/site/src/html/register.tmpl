@@ -32,12 +32,12 @@
 
     {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="newWalletForm">
-      {{template "newWalletForm" "Your Decred wallet is required to pay registration fees."}}
+      {{template "newWalletForm" "Your Decred wallet is required to post bond."}}
     </form>
 
     {{- /* Unlock Decred wallet. Only shown if not already unlocked. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
-      {{template "unlockWalletForm" "Unlock your Decred wallet to pay registration fees."}}
+      {{template "unlockWalletForm" "Unlock your Decred wallet to post bond."}}
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}
@@ -50,8 +50,13 @@
       <div class="bg2 px-2 py-1 text-center fs18">Confirm Registration</div>
       <div class="p-4">
         <div class="fs16">
-          When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay registration fees.
+          When you submit this form, <span id="bondDisplay"></span> DCR will be spent from your Decred wallet to post a fidelity bond.
         </div>
+        <div class="fs16 mt-4">
+          This amount still belongs to you! It will just be locked on-chain by network consensus until <span id="bondExpirySpan"></span>.
+        </div>
+        <!-- here goes a field for number of bonds to post -->
+        <!-- here goes an option to maintain this target number of bonds -->
         <div class="fs16 mt-4">
           The lot size for the <span id="dcrBaseMarketName" class="mono"></span> market is <span id="dexDCRLotSize"></span> DCR.
           All trades on this market are in multiples of this lot size.

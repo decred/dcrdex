@@ -411,33 +411,41 @@ export default class Application {
   /*
    * updateExchangeRegistration updates the information for the exchange
    * registration payment
+   *
+   * TODO: update this mechanism! multiple bonds possible and confs for each may
+   * need to be in core.Exchange instead of just a BondsPending flag.
+   *
    */
-  updateExchangeRegistration (dexAddr, isPaid, confs) {
+  updateExchangeRegistration (dexAddr, confs, tier) {
+    // Setting the null value in the 'confs' field indicates that a bond payment
+    // is not confirming (completed or not yet started).
     const dex = this.exchanges[dexAddr]
-
-    if (isPaid) {
-      // setting the null value in the 'confs' field indicates that the fee
-      // payment was completed
-      dex.confs = null
-      return
-    }
-
-    dex.confs = confs
+    if (!dex) return // bondpost for initial registration before page reload
+    if (tier !== undefined) dex.tier = tier
+    if (confs === undefined) return // no confs change
+    // The following are only right if there is a single bond pending.
+    dex.lastConfs = confs // null ok, means not pending
+    dex.bondsPending = confs !== null
   }
 
   /*
-   * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
+   * handleBondPostNote is the handler for the 'bondpost'-type notification, which
    * is used to update the dex registration status.
    */
-  handleFeePaymentNote (note) {
+  handleBondPostNote (note) {
     switch (note.subject) {
-      case 'regupdate':
-        this.updateExchangeRegistration(note.dex, false, note.confirmations)
+      // With SubjectBondConfirming, we may not be on market page yet for
+      // initial registration, but it will be for AddBond top-ups.
+      case 'Bond confirmation in progress': // SubjectBondConfirming
+      case 'regupdate': // SubjectRegUpdate
+        this.updateExchangeRegistration(note.dex, note.confirmations) // no tier change
         break
-      case 'Account registered':
-        this.updateExchangeRegistration(note.dex, true)
+      // case 'Account registered': // SubjectAccountRegistered, redundant with SubjectBondConfirmed ui purposes
+      case 'Bond confirmed': // SubjectBondConfirmed
+        this.updateExchangeRegistration(note.dex, null, note.tier) // clear confs, set tier
         break
-      default:
+      case 'Bond expired': // SubjectBondExpired
+        this.updateExchangeRegistration(note.dex, undefined, note.tier) // don't update confs
         break
     }
   }
@@ -492,8 +500,8 @@ export default class Application {
         if (wallet) wallet.balance = note.balance
         break
       }
-      case 'feepayment':
-        this.handleFeePaymentNote(note)
+      case 'bondpost':
+        this.handleBondPostNote(note)
         break
       case 'walletstate':
       case 'walletconfig': {

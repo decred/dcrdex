@@ -18,8 +18,8 @@ export default class SettingsPage extends BasePage {
       'addADex',
       // Form to configure DEX server
       'dexAddrForm',
-      // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      // Form to confirm DEX registration and post bond
+      'forms', 'confirmRegForm', 'bondDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
       'exportAccountHost', 'exportAccountErr',
@@ -60,9 +60,13 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
 
     this.dexAddrForm = new forms.DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      this.fee = xc.feeAsset.amount
+      this.bond = xc.bondAssets.dcr.amount
+      // Set bond lockTime to double the bondExpiry so it is an active bond for
+      // half of it's locked time.
+      this.lockTime = new Date(Date.now() + 2 * xc.bondExpiry * 1e3)
+      page.bondDisplay.textContent = Doc.formatCoinValue(this.bond / 1e8)
+      page.bondExpirySpan.textContent = this.lockTime.toString()
 
-      page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
       // Assume there is at least one DCR base market since we're assuming DCR for
       // registration anyway.
       for (const market of Object.values(xc.markets)) {
@@ -300,7 +304,7 @@ export default class SettingsPage extends BasePage {
     const registration = {
       addr: this.dexAddrForm.page.dexAddr.value,
       pass: page.appPass.value,
-      fee: this.fee,
+      bond: this.bond,
       cert: cert
     }
     page.appPass.value = ''

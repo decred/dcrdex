@@ -2,7 +2,7 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, DEXAddressForm, bind as bindForm } from './forms'
-import { feeSendErr } from './constants'
+import { bondPostErr } from './constants'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -26,8 +26,8 @@ export default class RegistrationPage extends BasePage {
       'unlockWalletForm',
       // Form 4: Configure DEX server
       'dexAddrForm',
-      // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      // Form 5: Confirm DEX registration and post bond
+      'confirmRegForm', 'bondDisplay', 'bondExpirySpan', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       'dexCertBox', 'failedRegForm', 'regFundsErr'
     ])
 
@@ -57,21 +57,27 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      this.fee = xc.feeAsset.amount
-      const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
-      if (balanceFeeRegistration < this.fee) {
+      this.bond = xc.bondAssets.dcr.amount
+      const balanceForBond = app.user.assets[DCR_ID].wallet.balance.available
+      if (balanceForBond < this.bond) {
         await this.changeForm(page.dexAddrForm, page.failedRegForm)
-        page.regFundsErr.textContent = `Looks like there is not enough funds for
-        paying the registration fee. Amount needed:
-        ${Doc.formatCoinValue(this.fee / 1e8)} Amount available:
-        ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
+        page.regFundsErr.textContent = `Looks like there is not enough funds to
+        post a bond. Amount needed:
+        ${Doc.formatCoinValue(this.bond / 1e8)} Amount available:
+        ${Doc.formatCoinValue(balanceForBond / 1e8)}.
 
         Deposit funds and try again.`
         Doc.show(page.regFundsErr)
         return
       }
 
-      page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+      // Set bond lockTime to double the bondExpiry so it is an active bond for
+      // half of it's locked time.
+      this.lockTime = new Date(Date.now() + 2 * xc.bondExpiry * 1e3)
+
+      page.bondDisplay.textContent = Doc.formatCoinValue(this.bond / 1e8)
+      page.bondExpirySpan.textContent = this.lockTime.toString()
+
       // Assume there is at least one DCR base market since we're assuming DCR for
       // registration anyway.
       for (const market of Object.values(xc.markets)) {
@@ -166,7 +172,7 @@ export default class RegistrationPage extends BasePage {
     await this.changeForm(page.appPWForm, page.newWalletForm)
   }
 
-  /* Authorize DEX registration. */
+  /* Get the bond amount for the DEX. */
   async registerDEX () {
     const page = this.page
     const pw = page.appPass.value || this.pwCache.pw
@@ -184,7 +190,8 @@ export default class RegistrationPage extends BasePage {
     const registration = {
       addr: this.dexAddrForm.page.dexAddr.value,
       pass: pw,
-      fee: this.fee,
+      lockTime: Math.round(this.lockTime.valueOf() / 1e3), // unix epoch in seconds
+      bond: this.bond,
       cert: cert
     }
     page.appPass.value = ''
@@ -193,7 +200,7 @@ export default class RegistrationPage extends BasePage {
     loaded()
     if (!app.checkResponse(res)) {
       // show different form with no passphrase input in case of no funds.
-      if (res.code === feeSendErr) {
+      if (res.code === bondPostErr) {
         await this.changeForm(page.confirmRegForm, page.failedRegForm)
         page.regFundsErr.textContent = res.msg
         Doc.show(page.regFundsErr)

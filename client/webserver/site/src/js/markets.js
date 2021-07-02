@@ -330,7 +330,7 @@ export default class MarketsPage extends BasePage {
       epoch: note => { this.handleEpochNote(note) },
       conn: note => { this.handleConnNote(note) },
       balance: note => { this.handleBalanceNote(note) },
-      feepayment: note => { this.handleFeePayment(note) },
+      bondpost: note => { this.handleBondPost(note) },
       walletstate: note => { this.handleWalletStateNote(note) }
     }
 
@@ -368,12 +368,6 @@ export default class MarketsPage extends BasePage {
   /* isLimit is true if the user has selected the "limit order" tab. */
   isLimit () {
     return this.page.limitBttn.classList.contains('selected')
-  }
-
-  /* hasFeePending is true if the fee payment is pending */
-  hasFeePending () {
-    const dex = this.market.dex
-    return typeof dex.confs === 'number' && dex.confs < dex.confsrequired
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
@@ -416,13 +410,13 @@ export default class MarketsPage extends BasePage {
     // By default the order form should be hidden, and only if market is set
     // and ready for trading the form should show up.
     Doc.hide(page.orderForm)
-    const feePaid = !this.hasFeePending()
+    const tier = this.market.dex.tier
     const assetsAreSupported = this.assetsAreSupported()
     const base = this.market.base
     const quote = this.market.quote
     const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
 
-    if (feePaid && assetsAreSupported && hasWallets) {
+    if (tier > 0 && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
     }
   }
@@ -460,20 +454,27 @@ export default class MarketsPage extends BasePage {
    * updateRegistrationStatusView updates the view based on the current
    * registration status
    */
-  updateRegistrationStatusView (dexAddr, feePaid, confirmationsRequired, confirmations) {
+  updateRegistrationStatusView (dexAddr, tier, bondsPending, lastConfs, confirmationsRequired) {
     const page = this.page
 
     page.confReq.textContent = confirmationsRequired
     page.regStatusDex.textContent = dexAddr
 
-    if (feePaid) {
-      this.setRegistrationStatusView('Registration fee payment successful!', '', 'completed')
+    if (tier > 0) { // only shown briefly on account of toggle timeout after SubjectBondConfirmed
+      this.setRegistrationStatusView('Posted bond accepted!', '', 'completed')
       return
     }
-
-    const confStatusMsg = `${confirmations} / ${confirmationsRequired}`
-
-    this.setRegistrationStatusView('Waiting for confirmations...', confStatusMsg, 'waiting')
+    if (!bondsPending) { // SubjectBondExpired will hit here if tier < 1
+      this.setRegistrationStatusView('No bonds pending and account tier < 1. Post a bond to trade!', '', 'error')
+      return
+    }
+    // SubjectBondConfirming and SubjectRegUpdate:
+    // lastConfs may be undefined for initial bondpost during registration,
+    // before app had the dex in the exchanges map to update. Set to zero.
+    // This is a hack because core.Exchange no longer has a confs field.
+    if (lastConfs === undefined) lastConfs = 0
+    const confStatusMsg = `${lastConfs} / ${confirmationsRequired} required confirmations`
+    this.setRegistrationStatusView('One or more bond transactions are pending.', confStatusMsg, 'waiting')
   }
 
   /*
@@ -482,17 +483,18 @@ export default class MarketsPage extends BasePage {
    */
   setRegistrationStatusVisibility () {
     const { page, market: { dex } } = this
-    const { confs, confsrequired } = dex
-    const feePending = this.hasFeePending()
 
-    // If dex is not connected to server, is not possible to know fee
-    // registration status.
+    // If dex is not connected to server, is not possible to know bond status.
     if (!dex.connected) return
 
-    this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
+    const confsRequired = dex.bondAssets.dcr.confs
+    const { bondsPending, tier, lastConfs } = dex
 
-    if (feePending) {
+    this.updateRegistrationStatusView(dex.host, tier, bondsPending, lastConfs, confsRequired)
+
+    if (tier < 1) { // may or may not have bonds pending, but cannot trade
       Doc.show(page.registrationStatus)
+      this.resolveOrderFormVisibility()
     } else {
       const toggle = () => {
         Doc.hide(page.registrationStatus)
@@ -501,7 +503,7 @@ export default class MarketsPage extends BasePage {
       if (Doc.isHidden(page.orderForm)) {
         // wait a couple of seconds before showing the form so the success
         // message is shown to the user
-        setTimeout(toggle, 5000)
+        setTimeout(toggle, 3000)
         return
       }
       toggle()
@@ -1224,10 +1226,10 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * handleFeePayment is the handler for the 'feepayment' notification type.
+   * handleBondPost is the handler for the 'bondpost' notification type.
    * This is used to update the registration status of the current exchange.
    */
-  handleFeePayment (note) {
+  handleBondPost (note) {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
     // update local dex

@@ -407,7 +407,7 @@ export class DEXAddressForm {
       return
     }
 
-    if (res.paid) {
+    if (res.xc.tier > 0 || res.xc.bondsPending) {
       await app.fetchUser()
       app.loadPage('markets')
       return
