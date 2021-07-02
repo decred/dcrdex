@@ -1858,9 +1858,20 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 	}, nil
 }
 
-// LocktimeExpired returns true if the specified contract's locktime has
+// LockTimeExpired returns true if the specified locktime has expired, making it
+// possible to redeem the locked coins.
+func (w *assetWallet) LockTimeExpired(ctx context.Context, lockTime time.Time) (bool, error) {
+	header, err := w.node.bestHeader(ctx)
+	if err != nil {
+		return false, fmt.Errorf("unable to retrieve block header: %w", err)
+	}
+	blockTime := time.Unix(int64(header.Time), 0)
+	return lockTime.Before(blockTime), nil
+}
+
+// ContractLockTimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (w *assetWallet) LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
+func (w *assetWallet) ContractLockTimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return false, time.Time{}, err
@@ -1876,12 +1887,11 @@ func (w *assetWallet) LocktimeExpired(ctx context.Context, contract dex.Bytes) (
 		return false, time.Time{}, asset.ErrSwapNotInitiated
 	}
 
-	header, err := w.node.bestHeader(ctx)
+	expired, err := w.LockTimeExpired(ctx, swap.LockTime)
 	if err != nil {
 		return false, time.Time{}, err
 	}
-	blockTime := time.Unix(int64(header.Time), 0)
-	return swap.LockTime.Before(blockTime), swap.LockTime, nil
+	return expired, swap.LockTime, nil
 }
 
 // findRedemptionResult is used internally for queued findRedemptionRequests.
@@ -2078,6 +2088,19 @@ func (eth *TokenWallet) Lock() error {
 // Locked will be true if the wallet is currently locked.
 func (eth *baseWallet) Locked() bool {
 	return eth.node.locked()
+}
+
+// SendTransaction broadcasts a valid fully-signed transaction.
+func (eth *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	tx := new(types.Transaction)
+	err := tx.UnmarshalBinary(rawTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal transaction: %w", err)
+	}
+	if err := eth.node.sendSignedTransaction(eth.ctx, tx); err != nil {
+		return nil, err
+	}
+	return tx.Hash().Bytes(), nil
 }
 
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to

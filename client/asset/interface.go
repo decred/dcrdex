@@ -303,13 +303,13 @@ type Wallet interface {
 	// the tx exists on the blockchain, use SwapConfirmations to ensure
 	// the tx is mined.
 	AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*AuditInfo, error)
-	// LocktimeExpired returns true if the specified contract's locktime has
-	// expired, making it possible to issue a Refund. The contract expiry time
-	// is also returned, but reaching this time does not necessarily mean the
-	// contract can be refunded since assets have different rules to satisfy the
-	// lock. For example, in Bitcoin the median of the last 11 blocks must be
-	// past the expiry time, not the current time.
-	LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
+	// ContractLockTimeExpired returns true if the specified contract's locktime
+	// has expired, making it possible to issue a Refund. The contract expiry
+	// time is also returned, but reaching this time does not necessarily mean
+	// the contract can be refunded since assets have different rules to satisfy
+	// the lock. For example, in Bitcoin the median of the last 11 blocks must
+	// be past the expiry time, not the current time.
+	ContractLockTimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
 	// FindRedemption watches for the input that spends the specified
 	// coin and contract, and returns the spending input and the
 	// secret key when it finds a spender.
@@ -354,6 +354,11 @@ type Wallet interface {
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
+	// LockTimeExpired returns true if the specified locktime has expired,
+	// making it possible to redeem the locked coins.
+	LockTimeExpired(ctx context.Context, lockTime time.Time) (bool, error)
+	// SendTransaction broadcasts a raw transaction, returning its coin ID.
+	SendTransaction(rawTx []byte) ([]byte, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -379,6 +384,16 @@ type Wallet interface {
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
+}
+
+// Bonder is a wallet capable of creating and redeeming time-locked fidelity
+// bond transaction outputs.
+type Bonder interface {
+	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
+	// provided amount, lock time, and dex account ID.
+	MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*Bond, error)
+	// RefundBond will refund the bond given the redeem script and private key.
+	RefundBond(coinID, script []byte, privKey []byte) ([]byte, error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
@@ -556,6 +571,17 @@ type LiveReconfigurer interface {
 	// requires a restart, the Wallet should still validate as much
 	// configuration as possible.
 	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+// Bond is the fidelity bond info generated for a certain account ID, amount,
+// and lock time.
+type Bond struct {
+	AssetID               uint32 // could be inferred by caller
+	CoinID                []byte
+	SignedTx, UnsignedTx  []byte
+	BondScript            []byte
+	RedeemTx, BondPrivKey []byte
+	BondAcctSig           []byte // AcctID hash signed with bond BondPrivKey, [recoveryCode | R | S]
 }
 
 // Balance is categorized information about a wallet's balance.

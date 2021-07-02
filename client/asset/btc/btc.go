@@ -3317,19 +3317,29 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	}, nil
 }
 
-// LocktimeExpired returns true if the specified contract's locktime has
+// LockTimeExpired returns true if the specified locktime has expired, making it
+// possible to redeem the locked coins.
+func (btc *baseWallet) LockTimeExpired(_ context.Context, lockTime time.Time) (bool, error) {
+	medianTime, err := btc.node.medianTime() // TODO: pass ctx
+	if err != nil {
+		return false, fmt.Errorf("error getting median time: %w", err)
+	}
+	return medianTime.After(medianTime), nil
+}
+
+// ContractLockTimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (btc *baseWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
+func (btc *baseWallet) ContractLockTimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	medianTime, err := btc.node.medianTime() // TODO: pass ctx
+	expired, err := btc.LockTimeExpired(ctx, contractExpiry)
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("error getting median time: %w", err)
+		return false, time.Time{}, err
 	}
-	return medianTime.After(contractExpiry), contractExpiry, nil
+	return expired, contractExpiry, nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -3767,6 +3777,19 @@ func (btc *baseWallet) Send(address string, value, feeRate uint64) (asset.Coin, 
 		return nil, err
 	}
 	return newOutput(txHash, vout, sent), nil
+}
+
+// SendTransaction broadcasts a valid fully-signed transaction.
+func (btc *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	msgTx, err := msgTxFromBytes(rawTx)
+	if err != nil {
+		return nil, err
+	}
+	txHash, err := btc.node.sendRawTransaction(msgTx)
+	if err != nil {
+		return nil, err
+	}
+	return toCoinID(txHash, 0), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.

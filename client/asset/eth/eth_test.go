@@ -3002,11 +3002,11 @@ func TestLocktimeExpired(t *testing.T) {
 
 	ensureResult := func(tag string, expErr, expExpired bool) {
 		t.Helper()
-		expired, _, err := eth.LocktimeExpired(context.Background(), contract)
+		expired, _, err := eth.ContractLockTimeExpired(context.Background(), contract)
 		switch {
 		case err != nil:
 			if !expErr {
-				t.Fatalf("%s: LocktimeExpired error existing expired swap: %v", tag, err)
+				t.Fatalf("%s: ContractLockTimeExpired error existing expired swap: %v", tag, err)
 			}
 		case expErr:
 			t.Fatalf("%s: expected error, got none", tag)
