@@ -85,6 +85,7 @@ const (
 	BondAlreadyConfirmingError           // 67
 	RPCWalletPeersError                  // 68
 	RPCNotificationsError                // 69
+	RPCPostBondError                     // 70
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

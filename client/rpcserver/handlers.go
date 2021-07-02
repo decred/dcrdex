@@ -32,8 +32,10 @@ const (
 	openWalletRoute            = "openwallet"
 	toggleWalletStatusRoute    = "togglewalletstatus"
 	orderBookRoute             = "orderbook"
-	getDEXConfRoute            = "getdexconfig" // consider a getfees route
+	getDEXConfRoute            = "getdexconfig"
+	bondAssetsRoute            = "bondassets"
 	registerRoute              = "register"
+	postBondRoute              = "postbond"
 	tradeRoute                 = "trade"
 	versionRoute               = "version"
 	walletsRoute               = "wallets"
@@ -93,6 +95,8 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	orderBookRoute:             handleOrderBook,
 	getDEXConfRoute:            handleGetDEXConfig,
 	registerRoute:              handleRegister,
+	postBondRoute:              handlePostBond,
+	bondAssetsRoute:            handleBondAssets,
 	tradeRoute:                 handleTrade,
 	versionRoute:               handleVersion,
 	walletsRoute:               handleWallets,
@@ -283,6 +287,30 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
+// handleBondAssets handles requests for bondassets.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns the bond expiry and supported asset bond details.
+func handleBondAssets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	host, cert, err := parseBondAssetsArgs(params)
+	if err != nil {
+		return usage(bondAssetsRoute, err)
+	}
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[host]
+	if exchCfg == nil {
+		exchCfg, err = s.core.GetDEXConfig(host, cert) // cert is file contents, not name
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, err.Error())
+			return createResponse(bondAssetsRoute, nil, resErr)
+		}
+	}
+	res := &getBondAssetsResponse{
+		Expiry: exchCfg.BondExpiry,
+		Assets: exchCfg.BondAssets,
+	}
+	return createResponse(bondAssetsRoute, res, nil)
+}
+
 // handleGetDEXConfig handles requests for getdexconfig.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
 // of a dex and returns its config..
@@ -316,7 +344,7 @@ func handleDiscoverAcct(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 }
 
 // handleRegister handles requests for register. *msgjson.ResponsePayload.Error
-// is empty if successful.
+// is empty if successful. DEPRECATED BY postbond. (V0PURGE)
 func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	form, err := parseRegisterArgs(params)
 	if err != nil {
@@ -352,6 +380,54 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return createResponse(registerRoute, nil, resErr)
 	}
 	return createResponse(registerRoute, res, nil)
+}
+
+// handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parsePostBondArgs(params)
+	if err != nil {
+		return usage(postBondRoute, err)
+	}
+	defer form.AppPass.Clear()
+	// Get the exchange config with Exchanges(), not GetDEXConfig, since we may
+	// already be connected and even with an existing account.
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[form.Addr]
+	if exchCfg == nil {
+		// Not already registered.
+		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
+		if err != nil {
+			resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
+			return createResponse(registerRoute, nil, resErr)
+		}
+	}
+	// Registration with different assets will be supported in the future, but
+	// for now, this requires DCR.
+	assetID := uint32(42)
+	if form.Asset != nil {
+		assetID = *form.Asset
+	}
+	symb := dex.BipIDSymbol(assetID)
+
+	bondAsset, supported := exchCfg.BondAssets[symb]
+	if !supported {
+		errMsg := fmt.Sprintf("DEX %s does not support registration with %s", form.Addr, symb)
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, errMsg)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
+		errMsg := fmt.Sprintf("DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
+			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, errMsg)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	res, err := s.core.PostBond(form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	return createResponse(postBondRoute, res, nil)
 }
 
 // handleExchanges handles requests for exchanges. It takes no arguments and
@@ -900,6 +976,23 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     Nothing.`,
 	},
+	bondAssetsRoute: {
+		argsShort:  `"dex" ("cert")`,
+		cmdSummary: `Get dex bond asset config.`,
+		argsLong: `Args:
+    dex (string): The dex address to get bond info for.
+    cert (string): Optional. The TLS certificate path.`,
+		returns: `Returns:
+    obj: The getBondAssets result.
+    {
+      "expiry" (int): Bond expiry in seconds remaining until locktime.
+	  "assets" (object): {
+		"id" (int): The BIP-44 coin type for the asset.
+		"confs" (int): The required confirmations for the bond transaction.
+		"amount" (int): The minimum bond amount.
+	  }
+    }`,
+	},
 	getDEXConfRoute: {
 		argsShort:  `"dex" ("cert")`,
 		cmdSummary: `Get a DEX configuration.`,
@@ -1004,6 +1097,25 @@ Registration is complete after the fee transaction has been confirmed.`,
       "feeID" (string): The fee transactions's txid and output index.
       "reqConfirms" (int): The number of confirmations required to start trading.
     }`,
+	},
+	postBondRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"addr" bond assetID (lockTime "cert")`,
+		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
+	Bond is active after the bond transaction has been confirmed and the server notified.`,
+		pwArgsLong: `Password Args:
+	appPass (string): The DEX client password.`,
+		argsLong: `Args:
+	addr (string): The DEX address to post bond for for.
+	bond (int): The bond amount (in DCR presently).
+	assetID (int): The asset ID with which to pay the fee.
+	lockTime (int): The bond's lockTime as UNIX epoch time (seconds).
+    cert (string): Optional. The TLS certificate path.`,
+		returns: `Returns:
+	{
+	  "bondID" (string): The bond transactions's txid and output index.
+	  "reqConfirms" (int): The number of confirmations required to start trading.
+	}`,
 	},
 	exchangesRoute: {
 		cmdSummary: `Detailed information about known exchanges and markets.`,
