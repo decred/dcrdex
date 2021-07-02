@@ -56,6 +56,7 @@ type Config struct {
 type archiverTables struct {
 	feeKeys  string
 	accounts string
+	bonds    string
 }
 
 // Archiver must implement server/db.DEXArchivist.
@@ -151,6 +152,7 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 		tables: archiverTables{
 			feeKeys:  fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),
+			bonds:    fullTableName(cfg.DBName, publicSchema, bondsTableName),
 		},
 		fatal: make(chan struct{}),
 	}, nil

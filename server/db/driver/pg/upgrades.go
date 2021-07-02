@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 4
+const dbVersion = 5
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -39,6 +39,11 @@ var upgrades = []func(db *sql.Tx) error{
 	// v4 upgrade updates the markets tables to use a integer type that can
 	// accommodate a 32-bit unsigned integer.
 	v4Upgrade,
+
+	// v5 upgrade creates the bonds table. A future upgrade may add a new
+	// old_fee_coin column to the accounts table for when a manual refund is
+	// processed.
+	v5Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -289,6 +294,39 @@ func v4Upgrade(tx *sql.Tx) (err error) {
 	}
 	_, err = tx.Exec("ALTER TABLE markets ALTER COLUMN quote TYPE INT8;")
 	return err
+}
+
+// v5Upgrade creates the bonds table and its indexes on account_id and lockTime.
+func v5Upgrade(tx *sql.Tx) error {
+	bondsCreated, err := createTableStmt(tx, internal.CreateBondsTableV0, publicSchema, bondsTableName)
+	if err != nil {
+		return fmt.Errorf("failed to create bonds table: %w", err)
+	}
+	if bondsCreated {
+		log.Infof("Created new %q table", bondsTableName)
+	} else {
+		log.Warnf("Unexpected existing %q table!", bondsTableName)
+	}
+
+	namespacedBondsTable := publicSchema + "." + bondsTableName
+	err = createIndexStmt(tx, internal.CreateBondsAcctIndexV0, indexBondsOnAccountName, namespacedBondsTable)
+	if err != nil {
+		return fmt.Errorf("failed to index bonds table on account: %w", err)
+	}
+
+	err = createIndexStmt(tx, internal.CreateBondsLockTimeIndexV0, indexBondsOnLockTimeName, namespacedBondsTable)
+	if err != nil {
+		return fmt.Errorf("failed to index bonds table on lock time: %w", err)
+	}
+
+	// drop the accounts.broken_rule column
+	namespacedAccountsTable := publicSchema + "." + accountsTableName
+	_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS broken_rule;", namespacedAccountsTable))
+	if err != nil {
+		return fmt.Errorf("failed to drop the accounts.broken_rule column: %w", err)
+	}
+
+	return nil
 }
 
 // DBVersion retrieves the database version from the meta table.

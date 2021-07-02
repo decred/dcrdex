@@ -9,7 +9,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/slog"
 )
 
@@ -41,7 +40,7 @@ func randomBytes(len int) []byte {
 }
 
 func randomAccountID() account.AccountID {
-	pk := randomBytes(pki.PubKeySize) // size is not important since it is going to be hashed
+	pk := randomBytes(account.PubKeySize) // size is not important since it is going to be hashed
 	return account.NewID(pk)
 }
 
