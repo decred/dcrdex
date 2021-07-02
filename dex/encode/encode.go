@@ -18,14 +18,16 @@ var (
 	// IntCoder is the DEX-wide integer byte-encoding order. IntCoder must be
 	// BigEndian so that variable length data encodings work as intended.
 	IntCoder = binary.BigEndian
-	// A byte-slice representation of boolean false.
+	// ByteFalse is a byte-slice representation of boolean false.
 	ByteFalse = []byte{0}
-	// A byte-slice representation of boolean true.
+	// ByteTrue is a byte-slice representation of boolean true.
 	ByteTrue = []byte{1}
 	// MaxDataLen is the largest byte slice that can be stored when using
 	// (BuildyBytes).AddData.
 	MaxDataLen = 0x00fe_ffff // top two bytes in big endian stop at 254, signalling 32-bit len
 )
+
+const maxU16 = int(^uint16(0))
 
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
 func Uint16Bytes(i uint16) []byte {

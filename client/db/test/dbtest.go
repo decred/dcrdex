@@ -42,11 +42,11 @@ func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
 		Host: ordertest.RandomAddress(),
 		// LegacyEncKey: randBytes(32),
-		EncKeyV2:   randBytes(32),
-		DEXPubKey:  randomPubKey(),
-		FeeAssetID: uint32(rand.Intn(64)),
-		FeeCoin:    randBytes(32),
-		Cert:       randBytes(100),
+		EncKeyV2:         randBytes(32),
+		DEXPubKey:        randomPubKey(),
+		LegacyFeeAssetID: uint32(rand.Intn(64)),
+		LegacyFeeCoin:    randBytes(32),
+		Cert:             randBytes(100),
 	}
 }
 
@@ -167,6 +167,7 @@ func RandomNotification(maxTime uint64) *db.Notification {
 }
 
 type testKiller interface {
+	Helper()
 	Fatalf(string, ...interface{})
 }
 
@@ -256,6 +257,7 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 // MustCompareAccountInfo ensures the two AccountInfo are identical, calling the
 // Fatalf method of the testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
+	t.Helper()
 	if a1.Host != a2.Host {
 		t.Fatalf("Host mismatch. %s != %s", a1.Host, a2.Host)
 	}
@@ -269,8 +271,8 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 		t.Fatalf("EncKey mismatch. %x != %x",
 			a1.DEXPubKey.SerializeCompressed(), a2.DEXPubKey.SerializeCompressed())
 	}
-	if !bytes.Equal(a1.FeeCoin, a2.FeeCoin) {
-		t.Fatalf("EncKey mismatch. %x != %x", a1.FeeCoin, a2.FeeCoin)
+	if !bytes.Equal(a1.LegacyFeeCoin, a2.LegacyFeeCoin) {
+		t.Fatalf("EncKey mismatch. %x != %x", a1.LegacyFeeCoin, a2.LegacyFeeCoin)
 	}
 }
 

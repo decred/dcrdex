@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -52,8 +53,11 @@ var (
 // Bolt works on []byte keys and values. These are some commonly used key and
 // value encodings.
 var (
+	// bucket keys
 	appBucket              = []byte("appBucket")
 	accountsBucket         = []byte("accounts")
+	bondIndexesBucket      = []byte("bondIndexes")
+	bondsSubBucket         = []byte("bonds") // sub bucket of accounts
 	disabledAccountsBucket = []byte("disabledAccounts")
 	activeOrdersBucket     = []byte("activeOrders")
 	archivedOrdersBucket   = []byte("orders")
@@ -62,54 +66,66 @@ var (
 	botProgramsBucket      = []byte("botPrograms")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
-	versionKey             = []byte("version")
-	linkedKey              = []byte("linked")
-	feeProofKey            = []byte("feecoin")
-	statusKey              = []byte("status")
-	baseKey                = []byte("base")
-	quoteKey               = []byte("quote")
-	orderKey               = []byte("order")
-	matchKey               = []byte("match")
-	orderIDKey             = []byte("orderID")
-	matchIDKey             = []byte("matchID")
-	proofKey               = []byte("proof")
-	activeKey              = []byte("active")
-	dexKey                 = []byte("dex")
-	updateTimeKey          = []byte("utime")
-	accountKey             = []byte("account")
-	balanceKey             = []byte("balance")
-	walletKey              = []byte("wallet")
-	changeKey              = []byte("change")
-	noteKey                = []byte("note")
-	stampKey               = []byte("stamp")
-	severityKey            = []byte("severity")
-	ackKey                 = []byte("ack")
-	swapFeesKey            = []byte("swapFees")
-	maxFeeRateKey          = []byte("maxFeeRate")
-	redeemMaxFeeRateKey    = []byte("redeemMaxFeeRate")
-	redemptionFeesKey      = []byte("redeemFees")
-	accelerationsKey       = []byte("accelerations")
-	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
-	seedGenTimeKey         = []byte("seedGenTime")
-	encSeedKey             = []byte("encSeed")
-	encInnerKeyKey         = []byte("encInnerKey")
-	innerKeyParamsKey      = []byte("innerKeyParams")
-	outerKeyParamsKey      = []byte("outerKeyParams")
-	legacyKeyParamsKey     = []byte("keyParams")
-	epochDurKey            = []byte("epochDur")
-	fromVersionKey         = []byte("fromVersion")
-	toVersionKey           = []byte("toVersion")
-	fromSwapConfKey        = []byte("fromSwapConf")
-	toSwapConfKey          = []byte("toSwapConf")
-	optionsKey             = []byte("options")
-	redemptionReservesKey  = []byte("redemptionReservesKey")
-	refundReservesKey      = []byte("refundReservesKey")
-	byteTrue               = encode.ByteTrue
-	backupDir              = "backup"
-	disabledRateSourceKey  = []byte("disabledRateSources")
-	walletDisabledKey      = []byte("walletDisabled")
-	programKey             = []byte("program")
+
+	// value keys
+	versionKey            = []byte("version")
+	linkedKey             = []byte("linked")
+	feeProofKey           = []byte("feecoin")
+	statusKey             = []byte("status")
+	baseKey               = []byte("base")
+	quoteKey              = []byte("quote")
+	orderKey              = []byte("order")
+	matchKey              = []byte("match")
+	orderIDKey            = []byte("orderID")
+	matchIDKey            = []byte("matchID")
+	proofKey              = []byte("proof")
+	activeKey             = []byte("active")
+	bondKey               = []byte("bond")
+	confirmedKey          = []byte("confirmed")
+	refundedKey           = []byte("refunded")
+	lockTimeKey           = []byte("lockTime")
+	dexKey                = []byte("dex")
+	updateTimeKey         = []byte("utime")
+	accountKey            = []byte("account")
+	balanceKey            = []byte("balance")
+	walletKey             = []byte("wallet")
+	changeKey             = []byte("change")
+	noteKey               = []byte("note")
+	stampKey              = []byte("stamp")
+	severityKey           = []byte("severity")
+	ackKey                = []byte("ack")
+	swapFeesKey           = []byte("swapFees")
+	maxFeeRateKey         = []byte("maxFeeRate")
+	redeemMaxFeeRateKey   = []byte("redeemMaxFeeRate")
+	redemptionFeesKey     = []byte("redeemFees")
+	accelerationsKey      = []byte("accelerations")
+	typeKey               = []byte("type")
+	seedGenTimeKey        = []byte("seedGenTime")
+	encSeedKey            = []byte("encSeed")
+	encInnerKeyKey        = []byte("encInnerKey")
+	innerKeyParamsKey     = []byte("innerKeyParams")
+	outerKeyParamsKey     = []byte("outerKeyParams")
+	legacyKeyParamsKey    = []byte("keyParams")
+	epochDurKey           = []byte("epochDur")
+	fromVersionKey        = []byte("fromVersion")
+	toVersionKey          = []byte("toVersion")
+	fromSwapConfKey       = []byte("fromSwapConf")
+	toSwapConfKey         = []byte("toSwapConf")
+	optionsKey            = []byte("options")
+	redemptionReservesKey = []byte("redemptionReservesKey")
+	refundReservesKey     = []byte("refundReservesKey")
+	disabledRateSourceKey = []byte("disabledRateSources")
+	walletDisabledKey     = []byte("walletDisabled")
+	programKey            = []byte("program")
+
+	// values
+	byteTrue   = encode.ByteTrue
+	byteFalse  = encode.ByteFalse
+	byteEpoch  = uint16Bytes(uint16(order.OrderStatusEpoch))
+	byteBooked = uint16Bytes(uint16(order.OrderStatusBooked))
+
+	backupDir = "backup"
 )
 
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
@@ -139,7 +155,7 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	}
 
 	if err = bdb.makeTopLevelBuckets([][]byte{
-		appBucket, accountsBucket, disabledAccountsBucket,
+		appBucket, accountsBucket, bondIndexesBucket, disabledAccountsBucket,
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
@@ -456,27 +472,57 @@ func (db *BoltDB) ListAccounts() ([]string, error) {
 	})
 }
 
+func loadAccountInfo(acct *bbolt.Bucket, log dex.Logger) (*db.AccountInfo, error) {
+	acctB := getCopy(acct, accountKey)
+	if acctB == nil {
+		return nil, fmt.Errorf("empty account")
+	}
+	acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+	if err != nil {
+		return nil, err
+	}
+	acctInfo.LegacyFeePaid = len(acct.Get(feeProofKey)) > 0
+
+	bondsBkt := acct.Bucket(bondsSubBucket)
+	if bondsBkt == nil {
+		return acctInfo, nil // no bonds, OK for legacy account
+	}
+
+	c := bondsBkt.Cursor()
+	for bondUID, _ := c.First(); bondUID != nil; bondUID, _ = c.Next() {
+		bond := bondsBkt.Bucket(bondUID)
+		if acct == nil {
+			return nil, fmt.Errorf("bond sub-bucket %x not a nested bucket", bondUID)
+		}
+		dbBond, err := dexdb.DecodeBond(getCopy(bond, bondKey))
+		if err != nil {
+			log.Errorf("Invalid bond data encoding: %v", err)
+			continue
+		}
+		dbBond.Confirmed = bEqual(bond.Get(confirmedKey), byteTrue)
+		dbBond.Refunded = bEqual(bond.Get(refundedKey), byteTrue)
+		acctInfo.Bonds = append(acctInfo.Bonds, dbBond)
+	}
+
+	return acctInfo, nil
+}
+
 // Accounts returns a list of DEX Accounts. The DB is designed to have a single
-// account per DEX, so the account itself is identified by the DEX URL.
+// account per DEX, so the account itself is identified by the DEX host. TODO:
+// allow bonds filter based on lockTime.
 func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 	var accounts []*dexdb.AccountInfo
 	return accounts, db.acctsView(func(accts *bbolt.Bucket) error {
 		c := accts.Cursor()
-		// key, _ := c.First()
 		for acctKey, _ := c.First(); acctKey != nil; acctKey, _ = c.Next() {
 			acct := accts.Bucket(acctKey)
 			if acct == nil {
 				return fmt.Errorf("account bucket %s value not a nested bucket", string(acctKey))
 			}
-			acctB := getCopy(acct, accountKey)
-			if acctB == nil {
-				return fmt.Errorf("empty account found for %s", string(acctKey))
-			}
-			acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+			acctInfo, err := loadAccountInfo(acct, db.log)
 			if err != nil {
 				return err
 			}
-			acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
 			accounts = append(accounts, acctInfo)
 		}
 		return nil
@@ -487,23 +533,13 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 func (db *BoltDB) Account(url string) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	acctKey := []byte(url)
-	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) error {
+	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) (err error) {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
-			return fmt.Errorf("account not found for %s", url)
+			return dexdb.ErrAcctNotFound
 		}
-		acctB := getCopy(acct, accountKey)
-		if acctB == nil {
-			return fmt.Errorf("empty account found for %s", url)
-		}
-		var err error
-		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
-		if err != nil {
-			return err
-		}
-		acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
-
-		return nil
+		acctInfo, err = loadAccountInfo(acct, db.log)
+		return
 	})
 }
 
@@ -529,11 +565,49 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		if err != nil {
 			return fmt.Errorf("accountKey put error: %w", err)
 		}
-		err = acct.Put(activeKey, byteTrue)
+		err = acct.Put(activeKey, byteTrue) // huh?
 		if err != nil {
 			return fmt.Errorf("activeKey put error: %w", err)
 		}
+
+		bonds, err := acct.CreateBucket(bondsSubBucket)
+		if err != nil {
+			return fmt.Errorf("unable to create bonds sub-bucket for account for %s: %w", ai.Host, err)
+		}
+
+		for _, bond := range ai.Bonds {
+			bondUID := bond.UniqueID()
+			bondBkt, err := bonds.CreateBucketIfNotExists(bondUID)
+			if err != nil {
+				return fmt.Errorf("failed to create bond %x bucket: %w", bondUID, err)
+			}
+
+			err = db.storeBond(bondBkt, bond)
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
+	})
+}
+
+// NextBondKeyIndex returns the next bond key index and increments the stored
+// value so that subsequent calls will always return a higher index.
+func (db *BoltDB) NextBondKeyIndex(assetID uint32) (uint32, error) {
+	var bondIndex uint32
+	return bondIndex, db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(bondIndexesBucket)
+		if bkt == nil {
+			return errors.New("no bond indexes bucket")
+		}
+
+		thisBondIdxKey := uint32Bytes(assetID)
+		bondIndexB := bkt.Get(thisBondIdxKey)
+		if len(bondIndexB) != 0 {
+			bondIndex = intCoder.Uint32(bondIndexB)
+		}
+		return bkt.Put(thisBondIdxKey, uint32Bytes(bondIndex+1))
 	})
 }
 
@@ -625,8 +699,9 @@ func (db *BoltDB) AccountProof(url string) (*dexdb.AccountProof, error) {
 	})
 }
 
-// AccountPaid marks the account as paid by setting the "fee proof".
-func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
+// StoreAccountProof marks the account as paid with the legacy registration fee
+// by setting the "fee proof".
+func (db *BoltDB) StoreAccountProof(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
@@ -655,6 +730,95 @@ func (db *BoltDB) disabledAcctsView(f bucketFunc) error {
 // disabledAcctsUpdate is a convenience function for inserting into the disabledAccounts bucket.
 func (db *BoltDB) disabledAcctsUpdate(f bucketFunc) error {
 	return db.withBucket(disabledAccountsBucket, db.Update, f)
+}
+
+func (db *BoltDB) storeBond(bondBkt *bbolt.Bucket, bond *db.Bond) error {
+	err := bondBkt.Put(bondKey, bond.Encode())
+	if err != nil {
+		return fmt.Errorf("bondKey put error: %w", err)
+	}
+
+	confirmed := encode.ByteFalse
+	if bond.Confirmed {
+		confirmed = encode.ByteTrue
+	}
+	err = bondBkt.Put(confirmedKey, confirmed)
+	if err != nil {
+		return fmt.Errorf("confirmedKey put error: %w", err)
+	}
+
+	refunded := encode.ByteFalse
+	if bond.Refunded {
+		refunded = encode.ByteTrue
+	}
+	err = bondBkt.Put(refundedKey, refunded)
+	if err != nil {
+		return fmt.Errorf("refundedKey put error: %w", err)
+	}
+
+	err = bondBkt.Put(lockTimeKey, uint64Bytes(bond.LockTime)) // also in bond encoding
+	if err != nil {
+		return fmt.Errorf("lockTimeKey put error: %w", err)
+	}
+
+	return nil
+}
+
+// AddBond saves a new Bond for an existing DEX account.
+func (db *BoltDB) AddBond(host string, bond *db.Bond) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", host)
+		}
+
+		bonds, err := acct.CreateBucketIfNotExists(bondsSubBucket)
+		if err != nil {
+			return fmt.Errorf("unable to access bonds sub-bucket for account for %s: %w", host, err)
+		}
+
+		bondUID := bond.UniqueID()
+		bondBkt, err := bonds.CreateBucketIfNotExists(bondUID)
+		if err != nil {
+			return fmt.Errorf("failed to create bond %x bucket: %w", bondUID, err)
+		}
+
+		return db.storeBond(bondBkt, bond)
+	})
+}
+
+func (db *BoltDB) setBondFlag(host string, assetID uint32, bondCoinID []byte, flagKey []byte) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", host)
+		}
+
+		bonds := acct.Bucket(bondsSubBucket)
+		if bonds == nil {
+			return fmt.Errorf("bonds sub-bucket not found for account for %s", host)
+		}
+
+		bondUID := dexdb.BondUID(assetID, bondCoinID)
+		bondBkt := bonds.Bucket(bondUID)
+		if bondBkt == nil {
+			return fmt.Errorf("bond bucket does not exist: %x", bondUID)
+		}
+
+		return bondBkt.Put(flagKey, byteTrue)
+	})
+}
+
+// ConfirmBond marks a DEX account bond as confirmed by the DEX.
+func (db *BoltDB) ConfirmBond(host string, assetID uint32, bondCoinID []byte) error {
+	return db.setBondFlag(host, assetID, bondCoinID, confirmedKey)
+}
+
+// BondRefunded marks a DEX account bond as refunded by the client wallet.
+func (db *BoltDB) BondRefunded(host string, assetID uint32, bondCoinID []byte) error {
+	return db.setBondFlag(host, assetID, bondCoinID, refundedKey)
 }
 
 // UpdateOrder saves the order information in the database. Any existing order
