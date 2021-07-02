@@ -177,7 +177,9 @@ cat << EOF >> "./markets.json"
             "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf",
             "regConfs": 1,
             "regFee": 100000000,
-            "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE"
+            "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE",
+            "bondAmt": 1000000000,
+            "bondConfs": 1
         },
         "BTC_simnet": {
             "bip44symbol": "btc",

@@ -32,10 +32,11 @@ import (
 
 const (
 	// PreAPIVersion covers all API iterations before versioning started.
-	PreAPIVersion = iota
+	PreAPIVersion  = iota
+	BondAPIVersion // when we drop the legacy reg fee proto
 
 	// APIVersion is the current API version.
-	APIVersion = PreAPIVersion
+	APIVersion = PreAPIVersion // only advance server to BondAPIVersion with the V0PURGE
 )
 
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID and
@@ -52,6 +53,8 @@ type AssetConf struct {
 	RegFee      uint64 `json:"regFee,omitempty"`
 	RegConfs    uint32 `json:"regConfs,omitempty"`
 	RegXPub     string `json:"regXPub,omitempty"`
+	BondAmt     uint64 `json:"bondAmt,omitempty"`
+	BondConfs   uint32 `json:"bondConfs,omitempty"`
 }
 
 // DBConf groups the database configuration parameters.
@@ -78,7 +81,6 @@ type DexConf struct {
 	BroadcastTimeout  time.Duration
 	TxWaitExpiration  time.Duration
 	CancelThreshold   float64
-	Anarchy           bool
 	FreeCancels       bool
 	BanScore          uint32
 	InitTakerLotLimit uint32
@@ -139,23 +141,27 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bondAssets map[string]*msgjson.BondAsset,
+	cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
 	dcrAsset := regAssets["dcr"]
 	if dcrAsset == nil {
 		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
 	}
 
 	configMsg := &msgjson.ConfigResult{
+		APIVersion:       uint16(APIVersion),
+		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
-		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
-		Fee:              dcrAsset.Amt, // DEPRECATED - DCR only
-		APIVersion:       uint16(APIVersion),
+		BondAssets:       bondAssets,
+		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)), // temporary while we figure it out
 		BinSizes:         candles.BinSizes,
-		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		RegFees:          regAssets,
+
+		RegFeeConfirms: uint16(dcrAsset.Confs), // DEPRECATED - DCR only (V0PURGE)
+		Fee:            dcrAsset.Amt,           // DEPRECATED - DCR only
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -240,6 +246,16 @@ type FeeCoiner interface {
 	FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error)
 }
 
+// Bonder describes a type that supports parsing raw bond transactions and
+// locating them on-chain via coin ID.
+type Bonder interface {
+	BondVer() uint16
+	BondCoin(ctx context.Context, ver uint16, coinID []byte) (amt, lockTime, confs int64,
+		acct account.AccountID, err error)
+	ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
+		bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error)
+}
+
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly. The Context is used to abort setup.
 //  1. Validate each specified asset.
@@ -252,11 +268,6 @@ type FeeCoiner interface {
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
 func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
-	// Disallow running without user penalization in a mainnet config.
-	if cfg.Anarchy && cfg.Network == dex.Mainnet {
-		return nil, fmt.Errorf("user penalties may not be disabled on mainnet")
-	}
-
 	var subsystems []subsystem
 	startSubSys := func(name string, rc interface{}) (err error) {
 		subsys := subsystem{name: name}
@@ -388,6 +399,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	feeCoiners := make(map[uint32]FeeCoiner)
 	feeAddressers := make(map[uint32]asset.Addresser)
 	xpubs := make(map[string]string) // to enforce uniqueness
+	bondAssets := make(map[string]*msgjson.BondAsset)
+	bonders := make(map[uint32]Bonder)
 
 	// Start asset backends.
 	lockableAssets := make(map[uint32]*swap.SwapperAsset, len(cfg.Assets))
@@ -434,6 +447,23 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		err = startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
 		if err != nil {
 			return fmt.Errorf("failed to start asset %q: %w", symbol, err)
+		}
+
+		if assetConf.BondAmt > 0 && assetConf.BondConfs > 0 {
+			// Make sure we can check on fee transactions.
+			bc, ok := be.(Bonder)
+			if !ok {
+				return fmt.Errorf("asset %v is not a Bonder", symbol)
+			}
+			bondAssets[symbol] = &msgjson.BondAsset{
+				Version: bc.BondVer(),
+				ID:      assetID,
+				Amt:     assetConf.BondAmt,
+				Confs:   assetConf.BondConfs,
+			}
+			bonders[assetID] = bc
+			log.Infof("Bonds accepted using %s: amount %d, confs %d",
+				symbol, assetConf.RegFee, assetConf.RegConfs)
 		}
 
 		if assetConf.RegFee > 0 {
@@ -578,16 +608,40 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return fc.FeeCoin(coinID)
 	}
 
+	bondChecker := func(ctx context.Context, assetID uint32, version uint16, coinID []byte) (amt, lockTime, confs int64,
+		acct account.AccountID, err error) {
+		bc := bonders[assetID]
+		if bc == nil {
+			err = fmt.Errorf("unsupported bond asset")
+			return
+		}
+		return bc.BondCoin(ctx, version, coinID)
+	}
+
+	bondTxParser := func(assetID uint32, version uint16, rawTx []byte) (bondCoinID []byte,
+		amt, lockTime int64, acct account.AccountID, err error) {
+		bc := bonders[assetID]
+		if bc == nil {
+			err = fmt.Errorf("unsupported bond asset")
+			return
+		}
+		bondCoinID, amt, _, _, lockTime, acct, err = bc.ParseBondTx(version, rawTx)
+		return
+	}
+
 	authCfg := auth.Config{
 		Storage:           storage,
 		Signer:            signer{cfg.DEXPrivKey},
 		FeeAddress:        feeAddresser,
 		FeeAssets:         feeAssets,
 		FeeChecker:        feeChecker,
+		BondAssets:        bondAssets,
+		BondTxParser:      bondTxParser,
+		BondChecker:       bondChecker,
+		BondExpiry:        uint64(dex.BondExpiry(cfg.Network)),
 		UserUnbooker:      userUnbookFun,
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
-		Anarchy:           cfg.Anarchy,
 		FreeCancels:       cfg.FreeCancels,
 		BanScore:          cfg.BanScore,
 		InitTakerLotLimit: cfg.InitTakerLotLimit,
@@ -773,7 +827,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 
-	cfgResp, err := newConfigResponse(cfg, feeAssets, cfgAssets, cfgMarkets)
+	cfgResp, err := newConfigResponse(cfg, feeAssets, bondAssets, cfgAssets, cfgMarkets)
 	if err != nil {
 		return nil, err
 	}
@@ -998,6 +1052,8 @@ func (dm *DEX) Accounts() ([]*db.Account, error) {
 
 // AccountInfo returns data for an account.
 func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	// TODO: consider asking the auth manager for account info, including tier.
+	// connected, tier := dm.authMgr.AcctStatus(aid)
 	return dm.storage.AccountInfo(aid)
 }
 

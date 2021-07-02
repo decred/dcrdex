@@ -26,14 +26,20 @@
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
             "regConfs": 2,
             "regFee": 10000000,
-            "regXPub": "xpubdecredonlyadsf"
+            "regXPub": "xpubdecredonlyadsf",
+            "bondAmt": 100000000,
+            "bondConfs": 1
         },
         "DCR_testnet": {
             "bip44symbol": "dcr",
             "network": "testnet",
             "maxFeeRate": 10,
             "swapConf": 1,
-            "configPath": "/home/dcrd/.dcrd/dcrd.conf"
+            "configPath": "/home/dcrd/.dcrd/dcrd.conf",
+            "regFee": 10000000,
+            "regXPub": "tpubdecredonlyadsf",
+            "bondAmt": 100000000,
+            "bondConfs": 1
         },
         "BTC_mainnet": {
             "bip44symbol": "btc",
