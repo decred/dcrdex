@@ -1,5 +1,6 @@
 {{define "settings"}}
 {{template "top" .}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="settings" class="main align-items-center justify-content-center flex-column">
 
   <span class="settings-gear ico-settings"></span>
@@ -67,13 +68,13 @@
     </form>
 
     {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
-    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+    <form class="card bg1 d-hide" id="authorizeAccountExportForm" {{if $passwordIsCached}}hidden{{end}}>
       {{template "authorizeAccountExportForm"}}
     </form>
 
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
     <form class="card bg1" id="authorizeAccountImportForm">
-      {{template "authorizeAccountImportForm"}}
+      {{template "authorizeAccountImportForm" .}}
     </form>
 
     {{- /* DISABLE ACCOUNT */ -}}

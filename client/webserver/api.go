@@ -4,6 +4,7 @@
 package webserver
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"time"
@@ -104,6 +105,14 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "already have a wallet for %s", unbip(form.AssetID))
 		return
 	}
+	if len(form.AppPW) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.AppPW = cachedPass
+		}
+	}
 	// Wallet does not exist yet. Try to create it.
 	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
@@ -129,6 +138,14 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	if status == nil {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
 		return
+	}
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
 	}
 	err := s.core.OpenWallet(form.AssetID, form.Pass)
 	if err != nil {
@@ -194,6 +211,14 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
+	}
 	ord, err := s.core.Trade(form.Pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
@@ -218,6 +243,14 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
+	}
 	account, err := s.core.AccountExport(form.Pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, "error exporting account: %v", err)
@@ -242,6 +275,14 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
+	}
 	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, "error importing account: %v", err)
@@ -275,6 +316,14 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
+	}
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
 	}
 	err := s.core.Cancel(form.Pass, form.OrderID)
 	if err != nil {
@@ -356,6 +405,14 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCK,
+		Path:     "/",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     pwKeyCK,
 		Path:     "/",
 		Value:    "",
 		Expires:  time.Unix(0, 0),
@@ -516,11 +573,48 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// This must be done first, because core.ChangeAppPass clears the password
+	// cache.
+	passwordIsCached := s.isPasswordCached(r)
+
 	// Update application password.
 	err := s.core.ChangeAppPass(form.AppPW, form.NewAppPW)
 	if err != nil {
 		s.writeAPIError(w, "change app pass error: %v", err)
 		return
+	}
+
+	// Force other sessions to login again. Without this, any sessions that
+	// had a cached password will no longer work. However, we assign a new auth
+	// token and cache the new password (if it was previously cached) for this
+	// session.
+	s.deauth()
+	authToken := s.authorize()
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCK,
+		Value:    authToken,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+	})
+	if passwordIsCached {
+		key, err := s.core.CacheAppPassword(form.NewAppPW, authToken)
+		if err != nil {
+			log.Errorf("unable to cache password: %v", err)
+			http.SetCookie(w, &http.Cookie{
+				Name:     pwKeyCK,
+				Value:    "",
+				Path:     "/",
+				SameSite: http.SameSiteStrictMode,
+				Expires:  time.Unix(0, 0),
+			})
+		} else {
+			http.SetCookie(w, &http.Cookie{
+				Name:     pwKeyCK,
+				Value:    hex.EncodeToString(key),
+				Path:     "/",
+				SameSite: http.SameSiteStrictMode,
+			})
+		}
 	}
 
 	writeJSON(w, simpleAck(), s.indent)
@@ -542,7 +636,14 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-
+	if len(form.AppPW) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.AppPW = cachedPass
+		}
+	}
 	// Update wallet settings.
 	err := s.core.ReconfigureWallet(form.AppPW, form.NewWalletPW, form.AssetID,
 		form.Config)
@@ -565,6 +666,14 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	if state == nil {
 		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
 		return
+	}
+	if len(form.Pass) == 0 {
+		cachedPass, err := s.getCachedPassword(r)
+		if err != nil {
+			log.Errorf("unable to get cached pw: %v", err)
+		} else {
+			form.Pass = cachedPass
+		}
 	}
 	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value, form.Address)
 	if err != nil {
@@ -653,6 +762,20 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 			SameSite: http.SameSiteStrictMode,
 			// Secure: false, // while false we require SameSite set
 		})
+
+		if login.RememberPass {
+			key, err := s.core.CacheAppPassword([]byte(login.Pass), authToken)
+			if err != nil {
+				s.writeAPIError(w, "login error: %v", err)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name:     pwKeyCK,
+				Value:    hex.EncodeToString(key),
+				Path:     "/",
+				SameSite: http.SameSiteStrictMode,
+			})
+		}
 	}
 
 	writeJSON(w, struct {

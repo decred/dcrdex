@@ -871,6 +871,8 @@ func newTestRig() *testRig {
 			},
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
+
+			encryptedPasswords: make(map[string][]byte),
 		},
 		db:      tdb,
 		queue:   queue,
@@ -6710,5 +6712,63 @@ func TestRefreshServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
+	}
+}
+
+func TestSessionAuth(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	key1, err := tCore.CacheAppPassword(tPW, "key1")
+	if err != nil {
+		t.Fatalf("error caching password: %v", err)
+	}
+
+	key2, err := tCore.CacheAppPassword(tPW, "key2")
+	if err != nil {
+		t.Fatalf("error caching password: %v", err)
+	}
+
+	pw1, err := tCore.GetCachedPassword("key1", key1)
+	if err != nil {
+		t.Fatalf("error getting cached password: %v", err)
+	}
+
+	pw2, err := tCore.GetCachedPassword("key2", key2)
+	if err != nil {
+		t.Fatalf("error getting cached password: %v", err)
+	}
+
+	if !bytes.Equal(pw1, tPW) {
+		t.Fatalf("deserialized password != original: %v - %v", pw1, tPW)
+	}
+
+	if !bytes.Equal(pw2, tPW) {
+		t.Fatalf("deserialized password != original: %v - %v", pw2, tPW)
+	}
+
+	newTPW := []byte("newdexpw")
+	tCore.ChangeAppPass(tPW, newTPW)
+
+	key3, err := tCore.CacheAppPassword(newTPW, "key1")
+	if err != nil {
+		t.Fatalf("error caching password: %v", err)
+	}
+
+	pw3, err := tCore.GetCachedPassword("key1", key3)
+	if err != nil {
+		t.Fatalf("error getting cached password: %v", err)
+	}
+
+	if !bytes.Equal(pw3, newTPW) {
+		t.Fatalf("deserialized password != original: %v - %v", pw3, newTPW)
+	}
+
+	tCore.Logout()
+
+	_, err = tCore.GetCachedPassword("key1", key1)
+	if err == nil {
+		t.Fatalf("should not be able to get cached password after logging out")
 	}
 }

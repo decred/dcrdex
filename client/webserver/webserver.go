@@ -44,6 +44,8 @@ const (
 	authCK = "dexauth"
 	// popupsCK is the cookie key for the user's preference for showing popups.
 	popupsCK = "popups"
+	// pwKeyCK is the cookie used to unencrypt the user's password.
+	pwKeyCK = "sessionkey"
 	// ctxKeyUserInfo is used in the authorization middleware for saving user
 	// info in http request contexts.
 	ctxKeyUserInfo = contextKey("userinfo")
@@ -96,6 +98,8 @@ type clientCore interface {
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() (bool, error)
+	GetCachedPassword(string, []byte) ([]byte, error)
+	CacheAppPassword([]byte, string) ([]byte, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -383,10 +387,9 @@ func (s *WebServer) deauth() {
 	s.mtx.Unlock()
 }
 
-// isAuthed checks if the incoming request is from an authorized user/device.
-// Requires the auth token cookie to be set in the request and for the token
-// to match `WebServer.validAuthToken`.
-func (s *WebServer) isAuthed(r *http.Request) bool {
+// getAuthToken checks the request for an auth token cookie and returns it.
+// An empty string is returned if there is no auth token cookie.
+func getAuthToken(r *http.Request) string {
 	var authToken string
 	cookie, err := r.Cookie(authCK)
 	switch {
@@ -397,9 +400,56 @@ func (s *WebServer) isAuthed(r *http.Request) bool {
 		log.Errorf("authToken retrieval error: %v", err)
 	}
 
+	return authToken
+}
+
+// getPWKey checks the request for a password key cookie. Returns an error
+// if it does not exist or it is not a valid.
+func getPWKey(r *http.Request) ([]byte, error) {
+	cookie, err := r.Cookie(pwKeyCK)
+	switch {
+	case err == nil:
+		sessionKey, err := hex.DecodeString(cookie.Value)
+		if err != nil {
+			return nil, err
+		}
+		return sessionKey, nil
+	default:
+		return nil, err
+	}
+}
+
+// isAuthed checks if the incoming request is from an authorized user/device.
+// Requires the auth token cookie to be set in the request and for the token
+// to match `WebServer.validAuthToken`.
+func (s *WebServer) isAuthed(r *http.Request) bool {
+	authToken := getAuthToken(r)
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.authTokens[authToken]
+}
+
+// getCachedPassword uses the auth token and session key in the cookies
+// retrieve the cached password from core. An error is returned if the
+// password cannot be retrieved.
+func (s *WebServer) getCachedPassword(r *http.Request) ([]byte, error) {
+	authToken := getAuthToken(r)
+	sessionKey, err := getPWKey(r)
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve password key: %v", err)
+	}
+
+	pw, err := s.core.GetCachedPassword(authToken, sessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("unabled to get cached password: %v", err)
+	}
+
+	return pw, nil
+}
+
+func (s *WebServer) isPasswordCached(r *http.Request) bool {
+	_, err := s.getCachedPassword(r)
+	return err == nil
 }
 
 // readNotifications reads from the Core notification channel and relays to
@@ -439,9 +489,10 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 // and cookies.
 type userInfo struct {
 	*core.User
-	Authed     bool
-	DarkMode   bool
-	ShowPopups bool
+	Authed           bool
+	PasswordIsCached bool
+	DarkMode         bool
+	ShowPopups       bool
 }
 
 // Extract the userInfo from the request context. This should be used with

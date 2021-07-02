@@ -45,6 +45,7 @@
 {{define "wallets"}}
 {{template "top" .}}
 <div id="main" data-handler="wallets" class="main">
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 
   {{- /* LEFT SIDE */ -}}
   <div class="col-14">
@@ -88,6 +89,8 @@
   {{- /* RIGHT SIDE */ -}}
   <div id="rightBox" class="col-10 px-2 py-5 d-flex justify-content-center align-items-start overflow-auto">
 
+    <div class="fs14 pt-3 text-center d-hide errcolor" id="rightBoxErr"></div>
+
     {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
     <div id="marketsBox" class="d-hide">
       <div class="fs22 text-center py-1"><span id="marketsFor"></span> Markets</div>
@@ -104,11 +107,11 @@
 
     {{- /* NEW WALLET */ -}}
     <form class="card bg1 m-auto d-hide" id="walletForm" autocomplete="off">
-      {{template "newWalletForm"}}
+      {{template "newWalletForm" .}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="card bg1 position-relative d-hide" id="openForm" {{if $passwordIsCached}}hidden{{end}} autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
@@ -153,13 +156,13 @@
       </div>
       <hr class="dashed my-4 mx-4">
       <div class="fs16 px-4 text-center">Authorize the withdraw with your app password.</div>
-      <div class="d-flex px-4 mt-3">
-        <div class="col-12 p-0">
+      <div class="d-flex px-4 mt-3 {{if $passwordIsCached}}justify-content-end{{end}}">
+        <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
           <label for="withdrawPW" class="pl-1 mb-1">Password</label>
           <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
         </div>
         <div class="col-12 p-0 text-right">
-          <div>&nbsp;</div>
+          <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
           <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Withdraw</button>
         </div>
       </div>
@@ -198,10 +201,10 @@
       <div class="px-4 my-2">
         Note: Changing to a different wallet while having active trades might cause funds to be lost. 
       </div>
-      <div class="d-flex px-4 mt-1">
-        <div class="col-12 p-0">
+      <div class="d-flex px-4 mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+        <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
           <label for="appPW" class="pl-1 mb-1">App Password</label>
-          <input type="password" class="form-control select" id="appPW" autocomplete="off">
+          <input type="password" class="form-control select" id="appPW" autocomplete="off" {{if $passwordIsCached}}hidden{{end}}>
         </div>
         <div class="col-12 p-0 text-right">
           <div>&nbsp;</div>

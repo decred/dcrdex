@@ -62,14 +62,15 @@
     {{end}}
     <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
   </div>
-  <div>
+  {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+  <div {{if $passwordIsCached}}class="d-hide"{{end}}>
     {{if .}}
     <label for="nwAppPass" class="pt-3 pl-1 mb-0">App Password</label>
     <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
     {{else}}
     <label for="nwAppPass" class="pt-3 pl-1 mb-1">App Password</label>
     {{end}}
-    <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
+    <input type="password" class="form-control select" id="nwAppPass" autocomplete="off" {{if $passwordIsCached}}hidden{{end}}>
   </div>
   <div class="d-flex justify-content-end mt-4">
     <button id="submitAdd" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Add</button>
@@ -206,6 +207,7 @@
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
   Authorize Import
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
@@ -224,7 +226,7 @@
       <span class="ml-3 pointer" id="addAccount"><span class="ico-textfile mr-1"></span> load from file</span>
     </div>
   </div>
-  <div>
+  <div {{if $passwordIsCached}}class="d-hide"{{end}}>
     <label for="importAccountAppPass" class="pl-1 mb-1">Password</label>
     <input type="password" class="form-control select" id="importAccountAppPass" autocomplete="current-password">
   </div>
@@ -261,6 +263,7 @@
 {{end}}
 
 {{define "cancelOrderForm"}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center fs18 position-relative">
   Cancel Order
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
@@ -272,12 +275,12 @@
   The remaining amount may change before the cancel order is matched.
 </div>
 <hr class="dashed mt-2">
-<div class="d-flex flex-row align-items-end pb-4 px-3">
-  <div class="col-12 p-0">
+<div class="d-flex flex-row {{if $passwordIsCached}}justify-content-center{{else}}align-items-end{{end}} pb-4 px-3">
+  <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
     <label for="cancelPass" class="pt-3 pl-1 mb-0">Password</label>
-    <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
+    <input type="password" class="form-control select" id="cancelPass" {{if $passwordIsCached}}hidden{{end}} autocomplete="off">
   </div>
-  <div class="col-12 py-1 pl-5">
+  <div class="col-12 py-1 {{if not $passwordIsCached}}pl-5{{end}}">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Submit</button>
   </div>
 </div>

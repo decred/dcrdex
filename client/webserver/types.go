@@ -30,7 +30,8 @@ func simpleAck() *standardResponse {
 
 // The loginForm is sent by the client to log in to a DEX.
 type loginForm struct {
-	Pass encode.PassBytes `json:"pass"`
+	Pass         encode.PassBytes `json:"pass"`
+	RememberPass bool             `json:"rememberPass"`
 }
 
 // registrationForm is used to register a new DEX account.
