@@ -327,7 +327,7 @@ export default class MarketsPage extends BasePage {
       epoch: note => { this.handleEpochNote(note) },
       conn: note => { this.handleConnNote(note) },
       balance: note => { this.handleBalanceNote(note) },
-      feepayment: note => { this.handleFeePayment(note) },
+      bondpost: note => { this.handleBondPost(note) },
       walletstate: note => { this.handleWalletStateNote(note) }
     }
 
@@ -367,10 +367,10 @@ export default class MarketsPage extends BasePage {
     return this.page.limitBttn.classList.contains('selected')
   }
 
-  /* hasFeePending is true if the fee payment is pending */
-  hasFeePending () {
+  /* hasBondPending is true if the bond payment is pending */
+  hasBondPending () {
     const dex = this.market.dex
-    return typeof dex.confs === 'number' && dex.confs < dex.confsrequired
+    return dex.bondsPending
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
@@ -410,13 +410,13 @@ export default class MarketsPage extends BasePage {
    */
   resolveOrderFormVisibility () {
     const page = this.page
-    const feePaid = !this.hasFeePending()
+    const bondConfirmed = !this.hasBondPending()
     const assetsAreSupported = this.assetsAreSupported()
     const base = this.market.base
     const quote = this.market.quote
     const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
 
-    if (feePaid && assetsAreSupported && hasWallets) {
+    if (bondConfirmed && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
       return
     }
@@ -457,14 +457,14 @@ export default class MarketsPage extends BasePage {
    * updateRegistrationStatusView updates the view based on the current
    * registration status
    */
-  updateRegistrationStatusView (dexAddr, feePaid, confirmationsRequired, confirmations) {
+  updateRegistrationStatusView (dexAddr, bondConfirmed, confirmationsRequired, confirmations) {
     const page = this.page
 
     page.confReq.textContent = confirmationsRequired
     page.regStatusDex.textContent = dexAddr
 
-    if (feePaid) {
-      this.setRegistrationStatusView('Registration fee payment successful!', '', 'completed')
+    if (bondConfirmed) {
+      this.setRegistrationStatusView('Registration bond payment successful!', '', 'completed')
       return
     }
 
@@ -480,15 +480,14 @@ export default class MarketsPage extends BasePage {
   setRegistrationStatusVisibility () {
     const { page, market: { dex } } = this
     const { confs, confsrequired } = dex
-    const feePending = this.hasFeePending()
+    const bondPending = this.hasBondPending()
 
-    // If dex is not connected to server, is not possible to know fee
-    // registration status.
+    // If dex is not connected to server, is not possible to know bond status.
     if (!dex.connected) return
 
-    this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
+    this.updateRegistrationStatusView(dex.host, !bondPending, confsrequired, confs)
 
-    if (feePending) {
+    if (bondPending) {
       Doc.show(page.registrationStatus)
     } else {
       const toggle = () => {
@@ -1195,10 +1194,10 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * handleFeePayment is the handler for the 'feepayment' notification type.
+   * handleBondPost is the handler for the 'bondpost' notification type.
    * This is used to update the registration status of the current exchange.
    */
-  handleFeePayment (note) {
+  handleBondPost (note) {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
     // update local dex

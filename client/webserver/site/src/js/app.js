@@ -412,12 +412,12 @@ export default class Application {
    * updateExchangeRegistration updates the information for the exchange
    * registration payment
    */
-  updateExchangeRegistration (dexAddr, isPaid, confs) {
+  updateExchangeRegistration (dexAddr, isPaid, confs) { // update !
     const dex = this.exchanges[dexAddr]
 
     if (isPaid) {
-      // setting the null value in the 'confs' field indicates that the fee
-      // payment was completed
+      // setting the null value in the 'confs' field indicates that the bond
+      // payment was completed.
       dex.confs = null
       return
     }
@@ -426,10 +426,10 @@ export default class Application {
   }
 
   /*
-   * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
+   * handleBondPostNote is the handler for the 'bondpost'-type notification, which
    * is used to update the dex registration status.
    */
-  handleFeePaymentNote (note) {
+  handleBondPostNote (note) {
     switch (note.subject) {
       case 'regupdate':
         this.updateExchangeRegistration(note.dex, false, note.confirmations)
@@ -492,8 +492,8 @@ export default class Application {
         if (wallet) wallet.balance = note.balance
         break
       }
-      case 'feepayment':
-        this.handleFeePaymentNote(note)
+      case 'bondpost':
+        this.handleBondPostNote(note)
         break
       case 'walletstate':
       case 'walletconfig': {
