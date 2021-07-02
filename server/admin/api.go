@@ -493,61 +493,6 @@ func decodeAcctID(acctIDStr string) (account.AccountID, error) {
 	return acctID, nil
 }
 
-// apiBan is the handler for the '/account/{accountID}/ban?rule=RULE' API request.
-func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
-	acctIDStr := chi.URLParam(r, accountIDKey)
-	acctID, err := decodeAcctID(acctIDStr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	ruleStr := r.URL.Query().Get(ruleKey)
-	if ruleStr == "" {
-		http.Error(w, "rule not specified", http.StatusBadRequest)
-		return
-	}
-	ruleInt, err := strconv.Atoi(ruleStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("bad rule: %v", err), http.StatusBadRequest)
-		return
-	}
-	if !account.Rule(ruleInt).Punishable() {
-		msg := fmt.Sprintf("bad rule (%d): not known or not punishable", ruleInt)
-		http.Error(w, msg, http.StatusBadRequest)
-		return
-	}
-	// TODO: Allow operator supplied details to go with the ban.
-	if err := s.core.Penalize(acctID, account.Rule(ruleInt), ""); err != nil {
-		http.Error(w, fmt.Sprintf("failed to ban account: %v", err), http.StatusInternalServerError)
-		return
-	}
-	res := BanResult{
-		AccountID:  acctIDStr,
-		BrokenRule: byte(ruleInt),
-		BanTime:    APITime{time.Now()},
-	}
-	writeJSON(w, res)
-}
-
-// apiUnBan is the handler for the '/account/{accountID}/unban' API request.
-func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
-	acctIDStr := chi.URLParam(r, accountIDKey)
-	acctID, err := decodeAcctID(acctIDStr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := s.core.Unban(acctID); err != nil {
-		http.Error(w, fmt.Sprintf("failed to unban account: %v", err), http.StatusInternalServerError)
-		return
-	}
-	res := UnbanResult{
-		AccountID: acctIDStr,
-		UnbanTime: APITime{time.Now()},
-	}
-	writeJSON(w, res)
-}
-
 // apiForgiveMatchFail is the handler for the '/account/{accountID}/forgive_match/{matchID}' API request.
 func (s *Server) apiForgiveMatchFail(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
