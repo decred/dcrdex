@@ -20,7 +20,6 @@ import (
 	"decred.org/dcrdex/server/db"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrutil/v4" // for hash160, might eliminate
 )
 
 var (
@@ -62,9 +61,9 @@ func (auth *AuthManager) removeBondWaiter(key string) {
 // redeem script pays to demonstrate ownership of the bond by the account.
 //
 // The parseBondTx function is used to validate the transaction, and extract
-// bond details (amount, locktime, pubkey hash, etc.) and the account ID to
-// which it commits. This also checks that the account commitment corresponds to
-// the user's public key provided in the payload. If these requirements are
+// bond details (amount, locktime, pubkey, etc.) and the account ID to which it
+// commits. This also checks that the account commitment corresponds to the
+// user's public key provided in the payload. If these requirements are
 // satisfied, the client will receive a PostBondResult in the response.
 //
 // Once the raw transaction is validated, the relevant asset node is used to
@@ -117,7 +116,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	lockTimeThresh := time.Now().Add(auth.bondExpiry)
 
 	// Decode raw tx, check fee output (0) and account commitment output (1).
-	bondCoinID, amt, bondAddr, bondPKH, lockTime, commitAcct, err := auth.parseBondTx(postBond.BondTx, postBond.BondScript) // i.e. dcr.ParseBondTx presently, but should switch on asset
+	bondCoinID, amt, bondAddr, bondPK, lockTime, commitAcct, err := auth.parseBondTx(postBond.BondTx, postBond.BondScript) // i.e. dcr.ParseBondTx presently, but should switch on asset
 	if err != nil {
 		return msgjson.NewError(msgjson.BondError, "invalid bond transaction: %v", err)
 	}
@@ -140,11 +139,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	if err != nil {
 		return msgjson.NewError(msgjson.BondError, "invalid bond signature: %v", err)
 	}
-	// This uses dcrutil's hash160, which is different from other coins... maybe
-	// have a p2pk redeem script instead? Or switch to asset-specific pk-hashing
-	// function? Or require bond scripts to pay to the *account* pubkey?
-	sigPKH := dcrutil.Hash160(sigPK.SerializeCompressed())
-	if !bytes.Equal(bondPKH, sigPKH) {
+	if !bytes.Equal(bondPK, sigPK.SerializeCompressed()) {
 		return msgjson.NewError(msgjson.BondError, "bond signature does not match bond pubkey")
 	}
 
