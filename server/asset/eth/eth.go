@@ -33,7 +33,9 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	requiredNPeers    = 2
+	// maxBlockInterval is the number of seconds since the last header came
+	// in over which we consider the chain to be out of sync.
+	maxBlockInterval = 180
 )
 
 var (
@@ -64,6 +66,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
 	bestBlockHash(ctx context.Context) (common.Hash, error)
+	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	connect(ctx context.Context, IPC string) error
 	shutdown()
@@ -210,21 +213,22 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 func (eth *Backend) Synced() (bool, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// ensure we are connected to at least requiredNPeers, assume the node
-	// has started syncing from those peers were they ahead, and then defer
-	// to syncProgress.
-	peers, err := eth.node.peers(eth.ctx)
-	if err != nil {
-		return false, err
-	}
-	if len(peers) < requiredNPeers {
-		return false, nil
-	}
+	// check that the best header came in under maxBlockInterval.
 	sp, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
 		return false, err
 	}
-	return sp == nil, nil
+	if sp != nil {
+		return false, nil
+	}
+	bh, err := eth.node.bestHeader(eth.ctx)
+	if err != nil {
+		return false, err
+	}
+	// Time in the header is in seconds.
+	nowInSecs := time.Now().Unix() / 1000
+	timeDiff := nowInSecs - int64(bh.Time)
+	return timeDiff < maxBlockInterval, nil
 }
 
 // Redemption is an input that redeems a swap contract.

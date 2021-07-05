@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"github.com/ethereum/go-ethereum"
@@ -29,6 +30,8 @@ type testNode struct {
 	bestBlkHashErr error
 	blk            *types.Block
 	blkErr         error
+	bestHdr        *types.Header
+	bestHdrErr     error
 	blkNum         uint64
 	blkNumErr      error
 	syncProg       *ethereum.SyncProgress
@@ -47,6 +50,10 @@ func (n *testNode) shutdown() {}
 
 func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return n.bestBlkHash, n.bestBlkHashErr
+}
+
+func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
+	return n.bestHdr, n.bestHdrErr
 }
 
 func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
@@ -332,40 +339,38 @@ func TestFeeRate(t *testing.T) {
 
 func TestSynced(t *testing.T) {
 	tests := []struct {
-		name                  string
-		syncProg              *ethereum.SyncProgress
-		peerInfo              []*p2p.PeerInfo
-		peersErr, syncProgErr error
-		wantErr, wantSynced   bool
+		name                    string
+		syncProg                *ethereum.SyncProgress
+		subSecs                 uint64
+		bestHdrErr, syncProgErr error
+		wantErr, wantSynced     bool
 	}{{
 		name:       "ok synced",
-		peerInfo:   make([]*p2p.PeerInfo, 2),
 		wantSynced: true,
 	}, {
-		name:     "ok not enough peers",
-		peerInfo: make([]*p2p.PeerInfo, 1),
-	}, {
 		name:     "ok syncing",
-		peerInfo: make([]*p2p.PeerInfo, 2),
 		syncProg: new(ethereum.SyncProgress),
 	}, {
-		name:     "peers error",
-		peersErr: errors.New(""),
-		wantErr:  true,
+		name:    "ok header too old",
+		subSecs: maxBlockInterval,
+	}, {
+		name:       "best header",
+		bestHdrErr: errors.New(""),
+		wantErr:    true,
 	}, {
 		name:        "sync progress error",
-		peerInfo:    make([]*p2p.PeerInfo, 2),
 		syncProgErr: errors.New(""),
 		wantErr:     true,
 	}}
 
 	for _, test := range tests {
+		nowInSecs := uint64(time.Now().Unix() / 1000)
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
 			syncProg:    test.syncProg,
 			syncProgErr: test.syncProgErr,
-			peerInfo:    test.peerInfo,
-			peersErr:    test.peersErr,
+			bestHdr:     &types.Header{Time: nowInSecs - test.subSecs},
+			bestHdrErr:  test.bestHdrErr,
 		}
 		eth := &Backend{
 			node: node,
