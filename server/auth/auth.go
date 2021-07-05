@@ -82,7 +82,7 @@ type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err e
 // the first output of the transaction, which must be the actual bond output.
 // The returned account ID is from the second output.
 type BondTxParser func(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAddr string,
-	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error)
+	bondPubKey []byte, lockTime int64, acct account.AccountID, err error)
 
 // TxDataSource retrieves the raw transaction for a coin ID.
 type TxDataSource func(coinID []byte) (rawTx []byte, err error)

@@ -2329,13 +2329,14 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 // MakeBondTx creates a time-locked fidelity bond transaction. The bond output's
 // redeem script, which is needed to spend the bond output and which the server
 // will need to verify that the bond is redeemable by the account owner, is
-// returned. The first tx output is redeemable with the returned redeemTx after
-// locktime passes. The bond output pays to a pubkey hash redeem script for to a
-// wallet change address, and the corresponding private key is used to sign a
-// message (sha256(account ID)). The private keys is returned in case the
-// underlying wallet is changed and the redeem tx needs to be recreated. This
-// signature is returned, which the server should verify using the account ID
-// and pubkey recovered from the signature via ecdsa.RecoverCompact(sign, msg).
+// returned. The bond output pays to a pubkey script for a wallet change
+// address, and the corresponding private key is used to sign a message,
+// sha256(account ID). This is the Bond.BondAcctSig field, which the server
+// should verify using the account ID and pubkey recovered from the signature
+// via ecdsa.RecoverCompact(sig, msg). Bond.RedeemTx is a backup transaction
+// that spends the bond output after lockTime passes, paying to an address for
+// the current underlying wallet; the bond private key (BondPrivKey) should
+// normally be used to author a new transaction paying to a new address instead.
 func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []byte) (*asset.Bond, error) {
 	if until := time.Until(lockTime); until >= 365*12*time.Hour /* 6 months */ {
 		return nil, fmt.Errorf("that lock time is nuts: %v", lockTime)
@@ -2345,9 +2346,9 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 
 	// Get an address to which the time-locked fidelity bond should pay. This
 	// address' keys are also used to sign a message (sha256 of account ID) for
-	// the server to verify the acct owns this bond.
-	// CONSIDER: instead of a wallet key pair for the bond script, pay to the
-	// account pubkey?
+	// the server to verify the acct owns this bond. NOTE: Instead of a wallet
+	// key pair for the bond script, we could pay to the account pubkey, but
+	// that would be poor security. A random keypair could also be generated.
 	addr, err := dcr.node.GetRawChangeAddress(dcr.ctx, dcr.acct, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error getting address for TL fidelity bond output: %w", translateRPCCancelErr(err))
@@ -2360,8 +2361,7 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 	if err != nil {
 		return nil, err
 	}
-	pk := pub.SerializeCompressed() // for the bond redeem tx input script
-	pkh := addr.Hash160()           // hash160(pk) for the bond script
+	pk := pub.SerializeCompressed()
 
 	baseTx := wire.NewMsgTx()
 
@@ -2370,10 +2370,7 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 		AddInt64(lockTime.Unix()).
 		AddOp(txscript.OP_CHECKLOCKTIMEVERIFY).
 		AddOp(txscript.OP_DROP).
-		AddOp(txscript.OP_DUP).
-		AddOp(txscript.OP_HASH160).
-		AddData(pkh[:]).
-		AddOp(txscript.OP_EQUALVERIFY).
+		AddData(pk[:]).
 		AddOp(txscript.OP_CHECKSIG).
 		Script()
 	if err != nil {
@@ -2461,7 +2458,7 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 	}
 	txid := signedMsgTx.TxHash()
 
-	// prep the redeem tx
+	// Prep the redeem / refund tx.
 	redeemMsgTx := wire.NewMsgTx()
 	redeemMsgTx.LockTime = uint32(lockTime.Unix()) // match locktime types between tx and stack locktime, and >= cltv lock time
 	bondPrevOut := wire.NewOutPoint(&txid, 0, wire.TxTreeRegular)
@@ -2495,7 +2492,7 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 		return nil, fmt.Errorf("error creating signature for bond redeem input script '%v': %w", redeemAddr, err)
 	}
 
-	bondRedeemSigScript, err := dexdcr.RefundBond(bondScript, redeemInSig, pk)
+	bondRedeemSigScript, err := dexdcr.RefundBondScript(bondScript, redeemInSig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build bond redeem input script: %w", err)
 	}
@@ -2507,8 +2504,8 @@ func (dcr *ExchangeWallet) MakeBondTx(amt uint64, lockTime time.Time, acctID []b
 	}
 
 	acctHash := sha256.Sum256(acctID)
-	// signature := ecdsa.Sign(priv, acctHash[:])
-	// bondAcctSig = signature.Serialize()
+	// Instead of ecdsa.Sign(priv, acctHash[:]), make a compact signature so the
+	// pubkey can be more easily recovered for validation.
 
 	bond := &asset.Bond{
 		AssetID:     BipID,
@@ -2550,9 +2547,15 @@ func (dcr *ExchangeWallet) RefundBond(coinID, script []byte, privKey []byte) ([]
 }
 
 func (dcr *ExchangeWallet) refundBond(txid *chainhash.Hash, vout uint32, amt uint64, script []byte, privKey []byte) ([]byte, error) {
-	lockTime, _ /* pkh */, err := dexdcr.ExtractBondDetails(0, script)
+	lockTime, pkPush, err := dexdcr.ExtractBondDetails(0, script)
 	if err != nil {
 		return nil, err
+	}
+
+	priv := secp256k1.PrivKeyFromBytes(privKey)
+	pk := priv.PubKey().SerializeCompressed()
+	if !bytes.Equal(pk, pkPush) {
+		return nil, fmt.Errorf("incorrect private key to spend the bond output")
 	}
 
 	redeemMsgTx := wire.NewMsgTx()
@@ -2585,9 +2588,8 @@ func (dcr *ExchangeWallet) refundBond(txid *chainhash.Hash, vout uint32, amt uin
 		return nil, fmt.Errorf("error creating signature for bond redeem input script '%v': %w", redeemAddr, err)
 	}
 
-	priv := secp256k1.PrivKeyFromBytes(privKey)
-	pk := priv.PubKey().SerializeCompressed()
-	bondRedeemSigScript, err := dexdcr.RefundBond(script, redeemInSig, pk)
+	// priv := secp256k1.PrivKeyFromBytes(privKey); pk := priv.PubKey().SerializeCompressed()
+	bondRedeemSigScript, err := dexdcr.RefundBondScript(script, redeemInSig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build bond redeem input script: %w", err)
 	}

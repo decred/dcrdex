@@ -106,13 +106,14 @@ const (
 	RefundSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 2 + SwapContractSize // 208
 
 	// BondScriptSize is the size of a DEX time-locked fidelity bond output
-	// script to which a bond P2SH pays.
-	BondScriptSize = 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 + 1 + 1
+	// script to which a bond P2SH pays (pre-year-2039):
+	//   OP_DATA_4 (4 bytes lockTime) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DATA_33 (33-byte compressed pubkey) OP_CHECKSIG
+	BondScriptSize = 1 + 4 + 1 + 1 + 1 + pubkeyLength + 1 // 42
 
 	// RedeemBondSigScriptSize is the size of a fidelity bond signature script
-	// for to spend a bond output. It includes a signature, a compressed pubkey,
-	// and the bond script. Each of said data pushes use an OP_DATA_ code.
-	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + BondScriptSize
+	// for to spend a bond output. It includes a signature and the bond script.
+	// Each of said data pushes use an OP_DATA_ code.
+	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + BondScriptSize // 117
 )
 
 // DCRScriptType is a bitmask with information about a pubkey script and
@@ -464,12 +465,11 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		Script()
 }
 
-// RefundBond builds the signature script to refund a time-locked fidelity bond
-// in a P2SH output paying to the provided bondScript.
-func RefundBond(bondScript, sig, pubkey []byte) ([]byte, error) {
+// RefundBondScript builds the signature script to refund a time-locked fidelity
+// bond in a P2SH output paying to the provided P2PK bondScript.
+func RefundBondScript(bondScript, sig []byte) ([]byte, error) {
 	return txscript.NewScriptBuilder().
 		AddData(sig).
-		AddData(pubkey).
 		AddData(bondScript).
 		Script()
 }
@@ -477,15 +477,12 @@ func RefundBond(bondScript, sig, pubkey []byte) ([]byte, error) {
 const ErrInvalidBondScript = dex.ErrorKind("invalid bond script")
 
 // ExtractBondDetails validates the provided bond redeem script, extracting the
-// lock time and pubkey hash. The format of the script must be as follows:
+// lock time and pubkey. The format of the script must be as follows:
 //
-// (locktime 4-bytes) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
+//   <lockTime[4] (scriptnum)> OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
 //
-// NOTE: maybe this should be a p2pk script (not hash):
-//   (locktime 4-bytes) OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
-func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint32, pkh []byte, err error) {
-	// (locktime 4-bytes) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
-
+// NOTE: lockTime needs to use a different type to work after 2039.
+func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint32, pubkey []byte, err error) {
 	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, bondScript)
 	if !tokenizer.Next() {
 		err = ErrInvalidBondScript
@@ -502,8 +499,6 @@ func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint3
 	for _, op := range []byte{
 		txscript.OP_CHECKLOCKTIMEVERIFY,
 		txscript.OP_DROP,
-		txscript.OP_DUP,
-		txscript.OP_HASH160,
 	} {
 		if !tokenizer.Next() {
 			err = ErrInvalidBondScript
@@ -519,25 +514,21 @@ func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint3
 		err = ErrInvalidBondScript
 		return
 	}
-	// pubkeyhash
-	bondPubKeyHash := tokenizer.Data()
-	if len(bondPubKeyHash) != 20 {
+	// pubkey
+	const pubkeyCompLen = 33
+	bondPubKey := tokenizer.Data()
+	if len(bondPubKey) != pubkeyCompLen {
 		err = ErrInvalidBondScript
 		return
 	}
 
-	for _, op := range []byte{
-		txscript.OP_EQUALVERIFY,
-		txscript.OP_CHECKSIG,
-	} {
-		if !tokenizer.Next() {
-			err = ErrInvalidBondScript
-			return
-		}
-		if tokenizer.Opcode() != op {
-			err = ErrInvalidBondScript
-			return
-		}
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+	if tokenizer.Opcode() != txscript.OP_CHECKSIG {
+		err = ErrInvalidBondScript
+		return
 	}
 
 	if !tokenizer.Done() {
@@ -546,8 +537,8 @@ func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint3
 	}
 
 	lockTime = binary.LittleEndian.Uint32(lockTimePush)
-	pkh = make([]byte, 20)
-	copy(pkh, bondPubKeyHash)
+	pubkey = make([]byte, pubkeyCompLen)
+	copy(pubkey, bondPubKey)
 
 	return
 }

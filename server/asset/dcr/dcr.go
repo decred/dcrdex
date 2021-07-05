@@ -107,26 +107,24 @@ func translateRPCCancelErr(err error) error {
 // There may also be a change output.
 //
 // Returned: The bond's coin ID (i.e. encoded UTXO) of the bond output. The bond
-// output's amount and P2SH address. The lockTime and pubkey hash data pushes
-// from the script. The account ID from the second output is also returned.
+// output's amount and P2SH address. The lockTime and pubkey data pushes from
+// the script. The account ID from the second output is also returned.
 //
 // Properly formed transactions:
 //
 //  1. The bond output (vout 0) must be a P2SH output.
 //  2. The bond's redeem script must be of the form:
-//     (locktime 4-bytes) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
-//     NOTE: Considering "OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[32]> OP_CHECKSIG"
-//     since the pubkey must be revealed anyway. Also maybe have this be the
-//     *account* pubkey rather than an arbitrary one that the client controls.
+//     <lockTime[4]> OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
+//     A P2PK script is used since the pubkey must be revealed anyway.
 //  3. The null data output (vout 1) must have a 32-byte data push (account ID).
 //  4. The transaction must have a zero locktime and expiry.
 //  5. All inputs must have the max sequence num set (finalized).
 //  6. The transaction must pass the checks in the
 //     blockchain.CheckTransactionSanity function.
 //
-// TODO: consider fee rate, which is not important yet for DCR.
+// TODO: Return fee rate, which is not important yet for DCR.
 func ParseBondTx(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAddr string,
-	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
+	bondPubKey []byte, lockTime int64, acct account.AccountID, err error) {
 	// While the dcr package uses a package-level chainParams variable, ensure
 	// that a backend has been instantiated (or loadConfig run another way).
 	if chainParams == nil {
@@ -163,9 +161,10 @@ func ParseBondTx(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAd
 		}
 	}
 
-	feeOut := msgTx.TxOut[0]
+	// Fidelity bond output (output 0)
+	bondOut := msgTx.TxOut[0]
 
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(feeOut.Version, feeOut.PkScript, chainParams, true)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(bondOut.Version, bondOut.PkScript, chainParams, true)
 	if err != nil {
 		err = fmt.Errorf("bad bond pkScript: %v", err)
 		return
@@ -175,21 +174,19 @@ func ParseBondTx(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAd
 		return
 	}
 
-	scriptHash := txscript.ExtractScriptHash(feeOut.PkScript)
+	scriptHash := txscript.ExtractScriptHash(bondOut.PkScript)
 	if !bytes.Equal(dcrutil.Hash160(bondScript), scriptHash) {
 		err = fmt.Errorf("script hash check failed for output 0 of %s", msgTx.TxHash())
 		return
 	}
 
-	// Fidelity bond output (output 0)
-	lock, pkh, err := dexdcr.ExtractBondDetails(feeOut.Version, bondScript)
+	lock, pk, err := dexdcr.ExtractBondDetails(bondOut.Version, bondScript)
 	if err != nil {
 		err = fmt.Errorf("invalid bond redeem script: %w", err)
 		return
 	}
-
 	// NOTE: Caller should check ownership by verifying a message signed with
-	// the correspond pubkey. (get the pubkey from ecdsa.RecoverCompact(sig,
+	// the above pubkey. (get the pubkey from ecdsa.RecoverCompact(sig,
 	// messageHash) and verify it's the same pubkey)
 
 	// Ensure output 1 script is OP_RETURN <push data for account id>
@@ -210,10 +207,10 @@ func ParseBondTx(rawTx, bondScript []byte) (bondCoinID []byte, amt int64, bondAd
 
 	txid := msgTx.TxHash()
 	bondCoinID = toCoinID(&txid, 0)
-	amt = feeOut.Value
+	amt = bondOut.Value
 	bondAddr = addrs[0].String() // don't convert address, must match type we specified
 	lockTime = int64(lock)
-	bondPubKeyHash = pkh
+	bondPubKey = pk
 
 	return
 }

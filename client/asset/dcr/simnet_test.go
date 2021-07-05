@@ -30,7 +30,6 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrutil/v4"
 )
 
 const (
@@ -195,15 +194,13 @@ func TestMakeBondTx(t *testing.T) {
 		pkB = pubkey.SerializeUncompressed()
 	}
 
-	pkh := dcrutil.Hash160(pkB)
-
-	lockTimeUint, pkhPush, err := dexdcr.ExtractBondDetails(bondOutVersion, bond.BondScript)
+	lockTimeUint, pkPush, err := dexdcr.ExtractBondDetails(bondOutVersion, bond.BondScript)
 	if err != nil {
 		t.Fatalf("ExtractBondDetails: %v", err)
 	}
 
-	if !bytes.Equal(pkh, pkhPush) {
-		t.Fatalf("mismatching pubkeyhash in bond script and signature (%x != %x)", pkh, pkhPush)
+	if !bytes.Equal(pkB, pkPush) {
+		t.Fatalf("mismatching pubkeyhash in bond script and signature (%x != %x)", pkB, pkPush)
 	}
 	// That verifies the message by recovering the correct pubkey.
 

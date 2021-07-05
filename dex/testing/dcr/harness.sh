@@ -48,7 +48,7 @@ MINE_SLEEP=3
 if [ -f ./harnesschain.tar.gz ]; then
   echo "Seeding blockchain from compressed file"
   MINE=0
-  MINE_SLEEP=0.5
+  MINE_SLEEP=0.75
   mkdir -p "${NODES_ROOT}/alpha/data"
   mkdir -p "${NODES_ROOT}/beta/data"
   tar -xzf ./harnesschain.tar.gz -C ${NODES_ROOT}/alpha/data
