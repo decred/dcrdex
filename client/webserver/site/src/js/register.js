@@ -25,8 +25,8 @@ export default class RegistrationPage extends BasePage {
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert',
       'addCert', 'submitDEXAddr', 'dexAddrErr', 'dexCertFile', 'dexNeedCert',
       'dexShowMore',
-      // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      // Form 5: Confirm DEX registration and post bond
+      'confirmRegForm', 'bondDisplay', 'bondExpirySpan', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       'dexCertBox'
     ])
 
@@ -129,7 +129,7 @@ export default class RegistrationPage extends BasePage {
     this.changeForm(page.appPWForm, page.newWalletForm)
   }
 
-  /* Get the reg fees for the DEX. */
+  /* Get the bond amount for the DEX. */
   async checkDEX () {
     const page = this.page
     Doc.hide(page.dexAddrErr)
@@ -162,9 +162,13 @@ export default class RegistrationPage extends BasePage {
 
       return
     }
-    this.fee = res.xc.feeAsset.amount
+    this.bond = res.xc.bondAssets.dcr.amount
+    // Set bond lockTime to double the bondExpiry so it is an active bond for
+    // half of it's locked time.
+    this.lockTime = new Date(Date.now() + 2 * res.xc.bondExpiry * 1e3)
 
-    page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    page.bondDisplay.textContent = Doc.formatCoinValue(this.bond / 1e8)
+    page.bondExpirySpan.textContent = this.lockTime.toString()
     const dcrAsset = res.xc.assets['42']
     if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
     await this.changeForm(page.dexAddrForm, page.confirmRegForm)
@@ -181,7 +185,8 @@ export default class RegistrationPage extends BasePage {
     const registration = {
       addr: page.dexAddr.value,
       pass: page.appPass.value,
-      fee: this.fee,
+      lockTime: Math.round(this.lockTime.valueOf() / 1e3), // unix epoch in seconds
+      bond: this.bond,
       cert: cert
     }
     page.appPass.value = ''

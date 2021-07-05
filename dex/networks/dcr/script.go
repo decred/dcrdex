@@ -36,9 +36,9 @@ const (
 	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
 
-	// Overhead for a wire.TxIn with a scriptSig length < 254.
-	// prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes)
-	// + BlockIndex (4 bytes) + sig script var int (at least 1 byte)
+	// TxInOverhead is the overhead for a wire.TxIn with a scriptSig length <
+	// 254. prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes) +
+	// BlockIndex (4 bytes) + sig script var int (at least 1 byte)
 	TxInOverhead = 41 + 8 + 4 + 4 // 57 + at least 1 more
 
 	P2PKHSigScriptSize = txsizes.RedeemP2PKHSigScriptSize
@@ -56,7 +56,7 @@ const (
 	P2PKHOutputSize = TxOutOverhead + txsizes.P2PKHPkScriptSize // 36
 	P2SHOutputSize  = TxOutOverhead + txsizes.P2SHPkScriptSize  // 34
 
-	// MsgTx overhead is 4 bytes version (lower 2 bytes for the real transaction
+	// MsgTxOverhead is 4 bytes version (lower 2 bytes for the real transaction
 	// version and upper 2 bytes for the serialization type) + 4 bytes locktime
 	// + 4 bytes expiry + 3 bytes of varints for the number of transaction
 	// inputs (x2 for witness and prefix) and outputs
@@ -89,7 +89,7 @@ const (
 	//   - OP_1
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract script
-	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + SwapContractSize // 241
+	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 32 + 1 + 2 + SwapContractSize // 241
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
@@ -102,7 +102,17 @@ const (
 	//   - OP_0
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract script
-	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + SwapContractSize // 208
+	RefundSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 2 + SwapContractSize // 208
+
+	// BondScriptSize is the size of a DEX time-locked fidelity bond output
+	// script to which a bond P2SH pays (pre-year-2039):
+	//   OP_DATA_4 (4 bytes lockTime) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DATA_33 (33-byte compressed pubkey) OP_CHECKSIG
+	BondScriptSize = 1 + 4 + 1 + 1 + 1 + pubkeyLength + 1 // 42
+
+	// RedeemBondSigScriptSize is the size of a fidelity bond signature script
+	// for to spend a bond output. It includes a signature and the bond script.
+	// Each of said data pushes use an OP_DATA_ code.
+	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + BondScriptSize // 117
 )
 
 // DCRScriptType is a bitmask with information about a pubkey script and
@@ -190,7 +200,7 @@ func IsScriptHashScript(script []byte) bool {
 	return ExtractScriptHash(script) != nil
 }
 
-// isStakePubkeyHashScript returns whether or not the passed script is a
+// IsStakePubkeyHashScript returns whether or not the passed script is a
 // stake-related P2PKH script. Script is assumed to be version 0.
 func IsStakePubkeyHashScript(script []byte) bool {
 	opcode := stakeOpcode(script)
@@ -200,7 +210,7 @@ func IsStakePubkeyHashScript(script []byte) bool {
 	return ExtractStakePubKeyHash(script, opcode) != nil
 }
 
-// IsStakePubkeyHashScript returns whether or not the passed script is a
+// IsStakeScriptHashScript returns whether or not the passed script is a
 // stake-related P2SH script. Script is assumed to be version 0.
 func IsStakeScriptHashScript(script []byte) bool {
 	opcode := stakeOpcode(script)
@@ -415,6 +425,84 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		Script()
 }
 
+// RefundBondScript builds the signature script to refund a time-locked fidelity
+// bond in a P2SH output paying to the provided P2PK bondScript.
+func RefundBondScript(bondScript, sig []byte) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(bondScript).
+		Script()
+}
+
+const ErrInvalidBondScript = dex.ErrorKind("invalid bond script")
+
+// ExtractBondDetails validates the provided bond redeem script, extracting the
+// lock time and pubkey. The format of the script must be as follows:
+//
+//   <lockTime[4] (scriptnum)> OP_CHECKLOCKTIMEVERIFY OP_DROP <pubkey[33]> OP_CHECKSIG
+//
+// NOTE: lockTime needs to use a different type to work after 2039.
+func ExtractBondDetails(scriptVersion uint16, bondScript []byte) (lockTime uint32, pubkey []byte, err error) {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, bondScript)
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	// lock time
+	lockTimePush := tokenizer.Data()
+	if len(lockTimePush) != 4 {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	for _, op := range []byte{
+		txscript.OP_CHECKLOCKTIMEVERIFY,
+		txscript.OP_DROP,
+	} {
+		if !tokenizer.Next() {
+			err = ErrInvalidBondScript
+			return
+		}
+		if tokenizer.Opcode() != op {
+			err = ErrInvalidBondScript
+			return
+		}
+	}
+
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+	// pubkey
+	const pubkeyCompLen = 33
+	bondPubKey := tokenizer.Data()
+	if len(bondPubKey) != pubkeyCompLen {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	if !tokenizer.Next() {
+		err = ErrInvalidBondScript
+		return
+	}
+	if tokenizer.Opcode() != txscript.OP_CHECKSIG {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	if !tokenizer.Done() {
+		err = ErrInvalidBondScript
+		return
+	}
+
+	lockTime = binary.LittleEndian.Uint32(lockTimePush)
+	pubkey = make([]byte, pubkeyCompLen)
+	copy(pubkey, bondPubKey)
+
+	return
+}
+
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
 // contract. If the provided script is not a swap contract, an error will be
 // returned.
@@ -547,7 +635,8 @@ func isSmallInt(op byte) bool {
 	return op == txscript.OP_0 || (op >= txscript.OP_1 && op <= txscript.OP_16)
 }
 
-// Grab the script hash based on the dcrScriptType.
+// ExtractScriptHashByType extracts the script hash from the payment script
+// based on the DCRScriptType.
 func ExtractScriptHashByType(scriptType DCRScriptType, pkScript []byte) ([]byte, error) {
 	var redeemScript []byte
 	// Stake related scripts will start with OP_SSGEN or OP_SSRTX.
@@ -643,9 +732,9 @@ func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Par
 // SpendInfo is information about an input and it's previous outpoint.
 type SpendInfo struct {
 	SigScriptSize     uint32
-	ScriptAddrs       *DCRScriptAddrs
 	ScriptType        DCRScriptType
 	NonStandardScript bool
+	ScriptAddrs       *DCRScriptAddrs
 }
 
 // DataPrefixSize returns the size of the size opcodes that would precede the
@@ -668,7 +757,7 @@ func (nfo *SpendInfo) Size() uint32 {
 
 // InputInfo is some basic information about the input required to spend an
 // output. The pubkey script of the output is provided. If the pubkey script
-// parses as P2SH or P2WSH, the redeem script must be provided.
+// parses as P2SH, the redeem script must be provided.
 func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*SpendInfo, error) {
 	scriptType := ParseScriptType(version, pkScript, redeemScript)
 	if scriptType == ScriptUnsupported {

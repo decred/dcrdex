@@ -1,6 +1,7 @@
 package encode
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -39,7 +40,7 @@ func TestBuildyBytes(t *testing.T) {
 		for _, p := range tt.pushes {
 			b = b.AddData(p)
 		}
-		if !bEqual(b, tt.exp) {
+		if !bytes.Equal(b, tt.exp) {
 			t.Fatalf("test %d failed", i)
 		}
 	}
@@ -90,7 +91,7 @@ func TestDecodeBlob(t *testing.T) {
 		}
 		for j, push := range pushes {
 			check := tt.exp[j]
-			if !bEqual(check, push) {
+			if !bytes.Equal(check, push) {
 				t.Fatalf("push %d:%d incorrect. wanted %x, got %x", i, j, check, push)
 			}
 		}

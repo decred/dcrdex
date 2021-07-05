@@ -54,11 +54,6 @@ type Config struct {
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
 	MarketCfg []*dex.MarketInfo
 
-	// CheckedStores checks the tables for existing identical entires before
-	// attempting to store new data. This will should not be needed if there are
-	// no bugs...
-	//CheckedStores bool
-
 	// Net is the current network, and can be one of mainnet, testnet, or simnet.
 	Net dex.Network
 
@@ -71,6 +66,7 @@ type Config struct {
 type archiverTables struct {
 	feeKeys  string
 	accounts string
+	bonds    string
 }
 
 // Archiver must implement server/db.DEXArchivist.
@@ -80,12 +76,14 @@ type Archiver struct {
 	queryTimeout time.Duration
 	db           *sql.DB
 	dbName       string
-	//checkedStores bool
 	markets      map[string]*dex.MarketInfo
-	feeKeyBranch *hdkeychain.ExtendedKey
-	keyHash      []byte // Store the hash to ref the counter table.
-	keyParams    *chaincfg.Params
 	tables       archiverTables
+
+	// These fee key fields are used with the legacy register/notifyfee
+	// requests. The newer postbond request involves no fee addresses.
+	feeKeyBranch *hdkeychain.ExtendedKey
+	keyHash      []byte // specifies the rows of the fee_keys table used by the Archiver internally
+	keyParams    *chaincfg.Params
 
 	fatalMtx sync.RWMutex
 	fatal    chan struct{}
@@ -165,10 +163,10 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		dbName:       cfg.DBName,
 		queryTimeout: queryTimeout,
 		markets:      mktMap,
-		//checkedStores: cfg.CheckedStores,
 		tables: archiverTables{
 			feeKeys:  fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),
+			bonds:    fullTableName(cfg.DBName, publicSchema, bondsTableName),
 		},
 		fatal: make(chan struct{}),
 	}
@@ -208,7 +206,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 
 	// Get a unique ID to serve as an ID for this key in the child counter table.
 	archiver.keyHash = dcrutil.Hash160([]byte(cfg.FeeKey))
-	if err = archiver.CreateKeyEntry(archiver.keyHash); err != nil {
+	if err = archiver.createKeyEntry(archiver.keyHash); err != nil {
 		return nil, err
 	}
 

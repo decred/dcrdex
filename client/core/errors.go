@@ -40,6 +40,8 @@ const (
 	unknownDEXErr
 	accountRetrieveErr
 	accountDisableErr
+	bondAmtErr
+	bondTimeErr
 )
 
 // Error is an error message and an error code.

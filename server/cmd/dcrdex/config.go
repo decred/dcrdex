@@ -52,8 +52,9 @@ const (
 	defaultBanScore            = 20
 
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
-	defaultRegFeeConfirms   = 4
-	defaultRegFeeAmount     = 1e8
+	defaultRegFeeConfirms   = 2
+	defaultRegFeeAmount     = 1e7              // 0.1 DCR
+	defaultBondIncrement    = 10e8             // 10 DCR
 	defaultBroadcastTimeout = 12 * time.Minute // accommodate certain known long block download timeouts
 )
 
@@ -70,6 +71,7 @@ type procOpts struct {
 type dexConf struct {
 	DataDir           string
 	Network           dex.Network
+	BondIncrement     uint64
 	DBName            string
 	DBUser            string
 	DBPass            string
@@ -124,6 +126,7 @@ type flagsData struct {
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
+	BondIncrement    uint64        `long:"bondincrement" description:"Bond increment amount."`
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
@@ -313,6 +316,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		DEXPrivKeyPath:   defaultDEXPrivKeyFilename,
 		RegFeeConfirms:   defaultRegFeeConfirms,
 		RegFeeAmount:     defaultRegFeeAmount,
+		BondIncrement:    defaultBondIncrement,
 		BroadcastTimeout: defaultBroadcastTimeout,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
@@ -577,6 +581,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	dexCfg := &dexConf{
 		DataDir:           cfg.DataDir,
 		Network:           network,
+		BondIncrement:     cfg.BondIncrement,
 		DBName:            cfg.PGDBName,
 		DBHost:            dbHost,
 		DBPort:            dbPort,

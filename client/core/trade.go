@@ -997,7 +997,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(match.MetaData.Proof.Script)
+	swapLocktimeExpired, contractExpiry, err := wallet.ContractLockTimeExpired(match.MetaData.Proof.Script)
 	if err != nil {
 		t.dc.log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
 			match.Side, t.ID(), match, err)

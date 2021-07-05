@@ -4,7 +4,6 @@
 package encode
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -17,13 +16,13 @@ import (
 var (
 	// IntCoder is the DEX-wide integer byte-encoding order.
 	IntCoder = binary.BigEndian
-	// A byte-slice representation of boolean false.
+	// ByteFalse is a byte-slice representation of boolean false.
 	ByteFalse = []byte{0}
-	// A byte-slice representation of boolean true.
+	// ByteTrue is a byte-slice representation of boolean true.
 	ByteTrue = []byte{1}
-	maxU16   = int(^uint16(0))
-	bEqual   = bytes.Equal
 )
+
+const maxU16 = int(^uint16(0))
 
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
 func Uint16Bytes(i uint16) []byte {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
@@ -61,39 +62,36 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 }
 
 // AccountExport is used to retrieve account by host for export.
-func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
+func (c *Core) AccountExport(pw []byte, host string) (*Account, []*db.Bond, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, codedError(passwordErr, err)
+		return nil, nil, codedError(passwordErr, err)
 	}
 	host, err = addrHost(host)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
 
-	// Get the dexConnection and the dex.Asset for each asset.
-	c.connMtx.RLock()
-	dc, found := c.conns[host]
-	c.connMtx.RUnlock()
-	if !found {
-		return nil, newError(unknownDEXErr, "DEX: %s", host)
+	// Load account info, including all bonds, from DB.
+	acctInf, err := c.db.Account(host)
+	if err != nil {
+		return nil, nil, newError(unknownDEXErr, "dex db load error: %v", err)
 	}
 
-	// Unlock account if it is locked so that account id and privKey can be retrieved.
-	if err = dc.acct.unlock(crypter); err != nil {
-		return nil, codedError(acctKeyErr, err)
+	keyB, err := crypter.Decrypt(acctInf.EncKey)
+	if err != nil {
+		return nil, nil, err
 	}
-	dc.acct.keyMtx.RLock()
-	accountID := dc.acct.id.String()
-	privKey := hex.EncodeToString(dc.acct.privKey.Serialize())
-	dc.acct.keyMtx.RUnlock()
+	privKey := secp256k1.PrivKeyFromBytes(keyB)
+	pubKey := privKey.PubKey()
+	accountID := account.NewID(pubKey.SerializeCompressed())
 
-	feeProofSig := ""
+	var feeProofSig string
 	var feeProofStamp uint64
-	if dc.acct.isPaid {
+	if acctInf.LegacyFeePaid {
 		accountProof, err := c.db.AccountProof(host)
 		if err != nil {
-			return nil, codedError(accountProofErr, err)
+			return nil, nil, codedError(accountProofErr, err)
 		}
 		feeProofSig = hex.EncodeToString(accountProof.Sig)
 		feeProofStamp = accountProof.Stamp
@@ -102,19 +100,19 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	// Account ID is exported for informational purposes only, it is not used during import.
 	acct := &Account{
 		Host:          host,
-		AccountID:     accountID,
-		PrivKey:       privKey,
-		DEXPubKey:     hex.EncodeToString(dc.acct.dexPubKey.SerializeCompressed()),
-		Cert:          hex.EncodeToString(dc.acct.cert),
-		FeeCoin:       hex.EncodeToString(dc.acct.feeCoin),
+		AccountID:     accountID.String(),
+		PrivKey:       hex.EncodeToString(keyB),
+		DEXPubKey:     hex.EncodeToString(acctInf.DEXPubKey.SerializeCompressed()),
+		Cert:          hex.EncodeToString(acctInf.Cert),
+		FeeCoin:       hex.EncodeToString(acctInf.LegacyFeeCoin),
 		FeeProofSig:   feeProofSig,
 		FeeProofStamp: feeProofStamp,
 	}
-	return acct, nil
+	return acct, acctInf.Bonds, nil
 }
 
 // AccountImport is used import an existing account into the db.
-func (c *Core) AccountImport(pw []byte, acct Account) error {
+func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return codedError(passwordErr, err)
@@ -124,7 +122,10 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 	if err != nil {
 		return newError(addressParseErr, "error parsing address: %v", err)
 	}
-	accountInfo := db.AccountInfo{Host: host}
+	accountInfo := db.AccountInfo{
+		Host:  host,
+		Bonds: bonds,
+	}
 
 	DEXpubKey, err := hex.DecodeString(acct.DEXPubKey)
 	if err != nil {
@@ -140,7 +141,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(decodeErr, err)
 	}
 
-	accountInfo.FeeCoin, err = hex.DecodeString(acct.FeeCoin)
+	accountInfo.LegacyFeeCoin, err = hex.DecodeString(acct.FeeCoin)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
@@ -154,7 +155,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(encryptionErr, err)
 	}
 
-	accountInfo.Paid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
+	accountInfo.LegacyFeePaid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
 
 	// Make a connection to the DEX.
 	if dc, connected := c.connectAccount(&accountInfo); !connected {
@@ -172,7 +173,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		return codedError(dbErr, err)
 	}
 
-	if accountInfo.Paid {
+	if accountInfo.LegacyFeePaid {
 		sig, err := hex.DecodeString(acct.FeeProofSig)
 		if err != nil {
 			return codedError(decodeErr, err)
@@ -182,7 +183,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 			Stamp: acct.FeeProofStamp,
 			Sig:   sig,
 		}
-		err = c.db.AccountPaid(&accountProof)
+		err = c.db.StoreAccountProof(&accountProof)
 		if err != nil {
 			return codedError(dbErr, err)
 		}

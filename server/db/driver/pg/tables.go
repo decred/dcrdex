@@ -18,6 +18,10 @@ const (
 	metaTableName     = "meta"
 	feeKeysTableName  = "fee_keys"
 	accountsTableName = "accounts"
+	bondsTableName    = "bonds"
+
+	indexBondsOnAccountName  = "idx_bonds_on_acct"
+	indexBondsOnLockTimeName = "idx_bonds_on_locktime"
 
 	// market schema tables
 	matchesTableName         = "matches"
@@ -42,6 +46,17 @@ var createDEXTableStatements = []tableStmt{
 var createAccountTableStatements = []tableStmt{
 	{feeKeysTableName, internal.CreateFeeKeysTable},
 	{accountsTableName, internal.CreateAccountsTable},
+	{bondsTableName, internal.CreateBondsTable},
+}
+
+type indexStmt struct {
+	idxName string
+	stmt    string
+}
+
+var createBondIndexesStatements = []indexStmt{
+	{indexBondsOnAccountName, internal.CreateBondsAcctIndex},
+	{indexBondsOnLockTimeName, internal.CreateBondsLockTimeIndex},
 }
 
 var createMarketTableStatements = []tableStmt{

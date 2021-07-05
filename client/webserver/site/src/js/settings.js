@@ -19,8 +19,8 @@ export default class SettingsPage extends BasePage {
       // Form to configure DEX server
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
-      // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      // Form to confirm DEX registration and post bond
+      'forms', 'confirmRegForm', 'bondDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
       'exportAccountHost', 'exportAccountErr',
@@ -276,7 +276,7 @@ export default class SettingsPage extends BasePage {
     Doc.show(page.addCert)
   }
 
-  /* Get the reg fees for the DEX. */
+  /* Get the bond amount for the DEX. */
   async verifyDEX () {
     const page = this.page
     Doc.hide(page.dexAddrErr)
@@ -303,9 +303,9 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.dexAddrErr)
       return
     }
-    this.fee = res.xc.feeAsset.amount
+    this.bond = res.xc.bondAssets.dcr.amount
 
-    page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    page.bondDisplay.textContent = Doc.formatCoinValue(this.bond / 1e8)
     const dcrAsset = res.xc.assets['42']
     if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
     await this.showForm(page.confirmRegForm)
@@ -322,7 +322,7 @@ export default class SettingsPage extends BasePage {
     const registration = {
       addr: page.dexAddr.value,
       pass: page.appPass.value,
-      fee: this.fee,
+      bond: this.bond,
       cert: cert
     }
     page.appPass.value = ''
