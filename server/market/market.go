@@ -1533,6 +1533,11 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 			"error parsing preimage notification response")
 		return
 	}
+	if resp.Error != nil {
+		log.Warnf("Client failed to handle preimage request: %v", resp.Error)
+		sendPI(nil)
+		return
+	}
 	err = json.Unmarshal(resp.Result, &piResp)
 	if err != nil {
 		sendPI(nil)

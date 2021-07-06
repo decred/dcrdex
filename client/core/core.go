@@ -5080,17 +5080,22 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
 
-	// Record the commitment checksum so we can verify that the subsequent
-	// match_proof with this order has the same checksum. If it does not, the
-	// server may have used the knowledge of this preimage we are sending them
-	// now to alter the epoch shuffle.
-	tracker.mtx.Lock()
-	if isCancel {
-		tracker.cancel.csum = commitChecksum
-	} else {
-		tracker.csum = commitChecksum
+	// Record the csum if this preimage request is novel, and deny it if this is
+	// a duplicate request with an altered csum.
+	if !acceptCsum(tracker, isCancel, commitChecksum) {
+		csumErr := errors.New("invalid csum in duplicate preimage request")
+		resp, err := msgjson.NewResponse(reqID, nil,
+			msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+		if err != nil {
+			c.log.Errorf("Failed to encode response to denied preimage request: %v", err)
+			return csumErr
+		}
+		err = dc.Send(resp)
+		if err != nil {
+			c.log.Errorf("Failed to send response to denied preimage request: %v", err)
+		}
+		return csumErr
 	}
-	tracker.mtx.Unlock()
 
 	// Clean up the sentCommits now that we loaded the commitment. This can be
 	// removed when the old piSyncers method is removed.
@@ -5116,6 +5121,33 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	}
 	c.notify(newOrderNote(subject, "", db.Data, tracker.coreOrder()))
 	return nil
+}
+
+// acceptCsum will record the commitment checksum so we can verify that the
+// subsequent match_proof with this order has the same checksum. If it does not,
+// the server may have used the knowledge of this preimage we are sending them
+// now to alter the epoch shuffle. The return value is false if a previous
+// checksum has been recorded that differs from the provided one.
+func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) bool {
+	// Do not allow csum to be changed once it has been committed to
+	// (initialized to something other than `nil`) because it is probably a
+	// malicious behavior by the server.
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
+	if isCancel {
+		if tracker.cancel.csum == nil {
+			tracker.cancel.csum = commitChecksum
+			return true
+		}
+		return bytes.Equal(commitChecksum, tracker.cancel.csum)
+	}
+	if tracker.csum == nil {
+		tracker.csum = commitChecksum
+		return true
+	}
+
+	return bytes.Equal(commitChecksum, tracker.csum)
 }
 
 // handleMatchRoute processes the DEX-originating match route request,
