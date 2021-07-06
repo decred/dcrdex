@@ -595,6 +595,18 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("Decred Wallet connect error: %w", err)
 	}
 
+	// The websocket client is connected now, so if any of the following checks
+	// fails and we return with a non-nil error, we must shutdown the rpc client
+	// or subsequent reconnect attempts will be met with "websocket client has
+	// already connected".
+	var success bool
+	defer func() {
+		if !success {
+			dcr.client.Shutdown()
+			dcr.client.WaitForShutdown()
+		}
+	}()
+
 	// Check the required API versions.
 	versions, err := dcr.client.Version(ctx)
 	if err != nil {
@@ -636,6 +648,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 		walletSemver, nodeSemver, curnet)
+	success = true
 
 	var wg sync.WaitGroup
 	wg.Add(1)
