@@ -2,6 +2,7 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import { feeSendErr } from './constants'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -27,7 +28,7 @@ export default class RegistrationPage extends BasePage {
       'dexShowMore',
       // Form 5: Confirm DEX registration and pay fee
       'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
-      'dexCertBox'
+      'dexCertBox', 'failedRegForm', 'regFundsErr'
     ])
 
     // Hide the form closers for the registration process.
@@ -86,7 +87,9 @@ export default class RegistrationPage extends BasePage {
     form1.style.right = '0'
     form2.style.right = -shift
     Doc.show(form2)
-    form2.querySelector('input').focus()
+    if (form2.querySelector('input')) {
+      form2.querySelector('input').focus()
+    }
     await Doc.animate(animationLength, progress => {
       form2.style.right = `${-shift + progress * shift}px`
     }, 'easeOutHard')
@@ -163,6 +166,18 @@ export default class RegistrationPage extends BasePage {
       return
     }
     this.fee = res.xc.feeAsset.amount
+    const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
+    if (balanceFeeRegistration < this.fee) {
+      await this.changeForm(page.dexAddrForm, page.failedRegForm)
+      page.regFundsErr.textContent = `Looks like there is not enough funds for
+       paying the registration fee. Amount needed:
+       ${Doc.formatCoinValue(this.fee / 1e8)} Amount available:
+       ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
+
+       Deposit funds and try again.`
+      Doc.show(page.regFundsErr)
+      return
+    }
 
     page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
     const dcrAsset = res.xc.assets['42']
@@ -189,6 +204,14 @@ export default class RegistrationPage extends BasePage {
     const res = await postJSON('/api/register', registration)
     loaded()
     if (!app.checkResponse(res)) {
+      // show different form with no passphrase input in case of no funds.
+      if (res.code === feeSendErr) {
+        await this.changeForm(page.confirmRegForm, page.failedRegForm)
+        page.regFundsErr.textContent = res.msg
+        Doc.show(page.regFundsErr)
+        return
+      }
+
       page.regErr.textContent = res.msg
       Doc.show(page.regErr)
       return

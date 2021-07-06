@@ -344,7 +344,7 @@ func TestAPIRegister(t *testing.T) {
 
 	// Registration error
 	tCore.regErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"registration error: %s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.regErr = nil
 }
 

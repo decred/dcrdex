@@ -8,6 +8,8 @@ import (
 	"fmt"
 )
 
+// errors used on client/webserver/site/js/constants.js
+// need to be careful for not going out of sync.
 const (
 	walletErr = iota
 	walletAuthErr
@@ -51,6 +53,10 @@ type Error struct {
 // Error returns the error string. Satisfies the error interface.
 func (e *Error) Error() string {
 	return e.s
+}
+
+func (e *Error) Code() *int {
+	return &e.code
 }
 
 // newError is a constructor for a new Error.

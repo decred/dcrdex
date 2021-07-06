@@ -4,6 +4,7 @@
 package webserver
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -24,7 +25,7 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	cert := []byte(form.Cert)
 	fee, err := s.core.GetFee(form.Addr, cert)
 	if err != nil {
-		s.writeAPIError(w, err.Error())
+		s.writeAPIError(w, err)
 		return
 	}
 	resp := struct {
@@ -46,7 +47,7 @@ func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	cert := []byte(form.Cert)
 	exchangeInfo, err := s.core.GetDEXConfig(form.Addr, cert)
 	if err != nil {
-		s.writeAPIError(w, err.Error())
+		s.writeAPIError(w, err)
 		return
 	}
 	resp := struct {
@@ -69,7 +70,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	dcrID, _ := dex.BipSymbolID("dcr")
 	wallet := s.core.WalletState(dcrID)
 	if wallet == nil {
-		s.writeAPIError(w, "No Decred wallet")
+		s.writeAPIError(w, errors.New("No Decred wallet"))
 		return
 	}
 
@@ -80,7 +81,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		Fee:     reg.Fee,
 	})
 	if err != nil {
-		s.writeAPIError(w, "registration error: %v", err)
+		s.writeAPIError(w, err)
 		return
 	}
 	// There was no error paying the fee, but we must wait on confirmations
@@ -101,7 +102,8 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	has := s.core.WalletState(form.AssetID) != nil
 	if has {
-		s.writeAPIError(w, "already have a wallet for %s", unbip(form.AssetID))
+
+		s.writeAPIError(w, fmt.Errorf("already have a wallet for %s", unbip(form.AssetID)))
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
@@ -110,7 +112,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		Config:  form.Config,
 	})
 	if err != nil {
-		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
+		s.writeAPIError(w, fmt.Errorf("error creating %s wallet: %w", unbip(form.AssetID), err))
 		return
 	}
 
@@ -127,12 +129,12 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	status := s.core.WalletState(form.AssetID)
 	if status == nil {
-		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
+		s.writeAPIError(w, fmt.Errorf("No wallet for %d -> %s", form.AssetID, unbip(form.AssetID)))
 		return
 	}
 	err := s.core.OpenWallet(form.AssetID, form.Pass)
 	if err != nil {
-		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
+		s.writeAPIError(w, fmt.Errorf("error unlocking %s wallet: %w", unbip(form.AssetID), err))
 		return
 	}
 
@@ -148,14 +150,14 @@ func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if form.AssetID == nil {
-		s.writeAPIError(w, "missing asset ID")
+		s.writeAPIError(w, errors.New("missing asset ID"))
 		return
 	}
 	assetID := *form.AssetID
 
 	addr, err := s.core.NewDepositAddress(assetID)
 	if err != nil {
-		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(assetID), err)
+		s.writeAPIError(w, fmt.Errorf("error connecting to %s wallet: %w", unbip(assetID), err))
 		return
 	}
 
@@ -179,7 +181,7 @@ func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.ConnectWallet(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
+		s.writeAPIError(w, fmt.Errorf("error connecting to %s wallet: %v", unbip(form.AssetID), err))
 		return
 	}
 
@@ -196,7 +198,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	ord, err := s.core.Trade(form.Pass, form.Order)
 	if err != nil {
-		s.writeAPIError(w, "error placing order: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error placing order: %w", err))
 		return
 	}
 	resp := &struct {
@@ -220,7 +222,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	account, err := s.core.AccountExport(form.Pass, form.Host)
 	if err != nil {
-		s.writeAPIError(w, "error exporting account: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error exporting account: %w", err))
 		return
 	}
 	w.Header().Set("Connection", "close")
@@ -244,7 +246,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	err := s.core.AccountImport(form.Pass, form.Account)
 	if err != nil {
-		s.writeAPIError(w, "error importing account: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
 		return
 	}
 	w.Header().Set("Connection", "close")
@@ -262,7 +264,7 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 	// Disable account.
 	err := s.core.AccountDisable(form.Pass, form.Host)
 	if err != nil {
-		s.writeAPIError(w, "error disabling account: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error disabling account: %w", err))
 		return
 	}
 	w.Header().Set("Connection", "close")
@@ -278,7 +280,7 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.Cancel(form.Pass, form.OrderID)
 	if err != nil {
-		s.writeAPIError(w, "error cancelling order %s: %v", form.OrderID, err)
+		s.writeAPIError(w, fmt.Errorf("error cancelling order %s: %w", form.OrderID, err))
 		return
 	}
 	writeJSON(w, simpleAck(), s.indent)
@@ -294,7 +296,7 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.CloseWallet(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, "error locking %s wallet: %v", unbip(form.AssetID), err)
+		s.writeAPIError(w, fmt.Errorf("error locking %s wallet: %w", unbip(form.AssetID), err))
 		return
 	}
 
@@ -310,7 +312,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.InitializeClient(login.Pass)
 	if err != nil {
-		s.writeAPIError(w, "initialization error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
 	s.actuallyLogin(w, r, login)
@@ -320,7 +322,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	inited, err := s.core.IsInitialized()
 	if err != nil {
-		s.writeAPIError(w, "isinitialized error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("isinitialized error: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -346,7 +348,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	err := s.core.Logout()
 	if err != nil {
-		s.writeAPIError(w, "logout error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("logout error: %w", err))
 		return
 	}
 
@@ -380,7 +382,7 @@ func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	bal, err := s.core.AssetBalance(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, "balance error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("balance error: %w", err))
 		return
 	}
 	resp := &struct {
@@ -404,7 +406,7 @@ func (s *WebServer) apiParseConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	configMap, err := config.Parse([]byte(form.ConfigText))
 	if err != nil {
-		s.writeAPIError(w, "parse error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("parse error: %w", err))
 		return
 	}
 	resp := &struct {
@@ -427,7 +429,7 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, err := s.core.WalletSettings(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, "error setting wallet settings: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error setting wallet settings: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -450,7 +452,7 @@ func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) 
 	}
 	cfg, err := s.core.AutoWalletConfig(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, "error getting wallet config: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error getting wallet config: %w", err))
 		return
 	}
 	writeJSON(w, struct {
@@ -471,7 +473,7 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 
 	ords, err := s.core.Orders(filter)
 	if err != nil {
-		s.writeAPIError(w, "Orders error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("Orders error: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -492,7 +494,7 @@ func (s *WebServer) apiOrder(w http.ResponseWriter, r *http.Request) {
 
 	ord, err := s.core.Order(oid)
 	if err != nil {
-		s.writeAPIError(w, "Order error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("Order error: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -519,7 +521,7 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 	// Update application password.
 	err := s.core.ChangeAppPass(form.AppPW, form.NewAppPW)
 	if err != nil {
-		s.writeAPIError(w, "change app pass error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("change app pass error: %w", err))
 		return
 	}
 
@@ -547,7 +549,7 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	err := s.core.ReconfigureWallet(form.AppPW, form.NewWalletPW, form.AssetID,
 		form.Config)
 	if err != nil {
-		s.writeAPIError(w, "reconfig error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("reconfig error: %w", err))
 		return
 	}
 
@@ -563,12 +565,12 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	}
 	state := s.core.WalletState(form.AssetID)
 	if state == nil {
-		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
+		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))
 		return
 	}
 	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value, form.Address)
 	if err != nil {
-		s.writeAPIError(w, "withdraw error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("withdraw error: %w", err))
 		return
 	}
 	resp := struct {
@@ -594,7 +596,7 @@ func (s *WebServer) apiMaxBuy(w http.ResponseWriter, r *http.Request) {
 	}
 	maxBuy, err := s.core.MaxBuy(form.Host, form.Base, form.Quote, form.Rate)
 	if err != nil {
-		s.writeAPIError(w, "max order estimation error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("max order estimation error: %w", err))
 		return
 	}
 	resp := struct {
@@ -619,7 +621,7 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 	}
 	maxSell, err := s.core.MaxSell(form.Host, form.Base, form.Quote)
 	if err != nil {
-		s.writeAPIError(w, "max order estimation error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("max order estimation error: %w", err))
 		return
 	}
 	resp := struct {
@@ -636,7 +638,7 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
 	loginResult, err := s.core.Login(login.Pass)
 	if err != nil {
-		s.writeAPIError(w, "login error: %v", err)
+		s.writeAPIError(w, fmt.Errorf("login error: %w", err))
 		return
 	}
 
@@ -681,12 +683,17 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
-func (s *WebServer) writeAPIError(w http.ResponseWriter, format string, a ...interface{}) {
-	errMsg := fmt.Sprintf(format, a...)
-	log.Error(errMsg)
-	resp := &standardResponse{
-		OK:  false,
-		Msg: errMsg,
+func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
+	var cErr *core.Error
+	var code *int
+	if errors.As(err, &cErr) {
+		code = cErr.Code()
 	}
+	resp := &standardResponse{
+		OK:   false,
+		Msg:  err.Error(),
+		Code: code,
+	}
+	log.Error(err.Error())
 	writeJSON(w, resp, s.indent)
 }
