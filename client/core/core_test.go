@@ -3134,7 +3134,6 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	matchSize := 4 * dcrBtcLotSize
 	cancelledQty := dcrBtcLotSize
 	qty := 2*matchSize + cancelledQty
-	//rate := dcrBtcRateStep * 10
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
 	lo.Coins = []order.CoinID{fundCoinDcrID}
 	dbOrder.MetaData.Status = order.OrderStatusBooked

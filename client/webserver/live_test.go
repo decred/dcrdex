@@ -192,14 +192,10 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 
 func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
-	// assetOrder := rand.Intn(5) + 6
-	// lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
 	a := &dex.Asset{
-		ID:      assetID,
-		Symbol:  symbol,
-		Version: uint32(rand.Intn(12)),
-		// LotSize:      lotSize,
-		// RateStep:     lotSize / 1e3,
+		ID:           assetID,
+		Symbol:       symbol,
+		Version:      uint32(rand.Intn(12)),
 		MaxFeeRate:   uint64(rand.Intn(10) + 1),
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),

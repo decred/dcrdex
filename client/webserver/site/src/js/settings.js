@@ -20,7 +20,7 @@ export default class SettingsPage extends BasePage {
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      'forms', 'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
       // Export Account
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
       'exportAccountHost', 'exportAccountErr',
@@ -306,8 +306,15 @@ export default class SettingsPage extends BasePage {
     this.fee = res.xc.feeAsset.amount
 
     page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-    // const dcrAsset = res.xc.assets['42']
-    page.dexDCRLotSize.textContent = '<depends on market>' // Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
+    // Assume there is at least one DCR base market since we're assuming DCR for
+    // registration anyway.
+    for (const market of Object.values(res.xc.markets)) {
+      if (market.baseid === 42) {
+        page.dexDCRLotSize.textContent = Doc.formatCoinValue(market.lotsize / 1e8)
+        page.dcrBaseMarketName.textContent = market.name.toUpperCase()
+        if (market.quoteid === 0) break // prefer dcr-btc
+      }
+    }
     await this.showForm(page.confirmRegForm)
   }
 
