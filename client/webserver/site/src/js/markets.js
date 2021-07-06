@@ -1569,18 +1569,25 @@ export default class MarketsPage extends BasePage {
     const tr = this.page.rowTemplate.cloneNode(true)
     const { rate, sell } = orderBin[0]
     const isEpoch = !!orderBin[0].epoch
-    const qty = orderBin.reduce((total, curr) => total + curr.qty, 0)
     tr.orderBin = orderBin
     bind(tr, 'click', () => {
       this.reportClick(rate)
     })
     let qtyTD
-    let ordersTD
+    const updateQtyTD = () => {
+      const mainDiv = qtyTD.children[0]
+      const [qtyDiv, ordersDiv] = mainDiv.children
+      const qty = tr.orderBin.reduce((total, curr) => total + curr.qty, 0)
+      qtyDiv.innerText = qty.toFixed(8)
+      ordersDiv.innerText = tr.orderBin.length
+      ordersDiv.title = `quantity comprised of ${tr.orderBin.length} ` +
+        (tr.orderBin.length > 1 ? 'orders' : 'order')
+    }
     tr.querySelectorAll('td').forEach(td => {
       switch (td.dataset.type) {
         case 'qty':
           qtyTD = td
-          td.innerText = qty.toFixed(8)
+          updateQtyTD()
           break
         case 'rate':
           if (rate === 0) {
@@ -1599,29 +1606,20 @@ export default class MarketsPage extends BasePage {
             })
           }
           break
-        case 'orders':
-          ordersTD = td
-          td.innerText = orderBin.length
-          break
         case 'epoch':
           if (isEpoch) td.appendChild(check.cloneNode())
           break
       }
     })
-    tr.updateQtyAndNumOrders = () => {
-      const qty = tr.orderBin.reduce((total, curr) => total + curr.qty, 0)
-      qtyTD.innerText = qty.toFixed(8)
-      ordersTD.innerText = tr.orderBin.length
-    }
     tr.insertOrder = (order) => {
       tr.orderBin.push(order)
-      tr.updateQtyAndNumOrders()
+      updateQtyTD()
     }
     tr.updateOrderQty = (token, qty) => {
       for (let i = 0; i < tr.orderBin.length; i++) {
         if (tr.orderBin[i].token === token) {
           tr.orderBin[i].qty = qty
-          tr.updateQtyAndNumOrders()
+          updateQtyTD()
           return true
         }
       }
@@ -1632,7 +1630,7 @@ export default class MarketsPage extends BasePage {
       if (index < 0) return false
       tr.orderBin.splice(index, 1)
       if (!tr.orderBin.length) tr.remove()
-      else tr.updateQtyAndNumOrders()
+      else updateQtyTD()
       return true
     }
     tr.removeEpochOrders = (newEpoch) => {
@@ -1640,7 +1638,7 @@ export default class MarketsPage extends BasePage {
         return !(order.epoch && order.epoch !== newEpoch)
       })
       if (!tr.orderBin.length) tr.remove()
-      else tr.updateQtyAndNumOrders()
+      else updateQtyTD()
     }
     tr.getRate = () => {
       return tr.orderBin[0].rate
