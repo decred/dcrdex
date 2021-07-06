@@ -56,7 +56,7 @@ func (f *BookFeed) Close() {
 // subscribe before the timer expires, then the bookie will invoke it's caller
 // supplied close() callback.
 type bookie struct {
-	orderbook.OrderBook
+	*orderbook.OrderBook
 	log         dex.Logger
 	mtx         sync.Mutex
 	feeds       map[uint32]*BookFeed
@@ -70,7 +70,7 @@ type bookie struct {
 // expired.
 func newBookie(base, quote uint32, logger dex.Logger, close func()) *bookie {
 	return &bookie{
-		OrderBook: *orderbook.NewOrderBook(logger.SubLogger("book")),
+		OrderBook: orderbook.NewOrderBook(logger.SubLogger("book")),
 		log:       logger,
 		feeds:     make(map[uint32]*BookFeed, 1),
 		close:     close,
@@ -84,7 +84,7 @@ func newBookie(base, quote uint32, logger dex.Logger, close func()) *bookie {
 func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	b.OrderBook = *orderbook.NewOrderBook(b.log)
+	b.OrderBook = orderbook.NewOrderBook(b.log)
 	return b.OrderBook.Sync(snapshot)
 }
 
@@ -361,7 +361,7 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 			return nil, fmt.Errorf("unable to sync book: %w", err)
 		}
 	} else {
-		ob = &book.OrderBook
+		ob = book.OrderBook
 	}
 
 	buys, sells, epoch := ob.Orders()
