@@ -1474,8 +1474,14 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		}
 	}
 
-	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v. Refund Txs: {%s}",
-		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts, refundTxs)
+	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v.",
+		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts)
+	c.log.Infof("The following are coin id mapped to raw refund transactions "+
+		"that are only valid after the swap contract expires. They can "+
+		"be used to return funds to your wallet in the case dexc no "+
+		"longer functions. They SHOULD NOT be used if dexc is running "+
+		"without error. dexc will refund failed contracts "+
+		"automatically.\nRefund Txs: {%s}", refundTxs)
 
 	// If this is the first swap (and even if not), the funding coins
 	// would have been spent and unlocked.

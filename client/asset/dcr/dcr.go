@@ -1361,8 +1361,8 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Add the contract outputs.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
-		// revokeAddrV2 is the address that will receive the refund if the
-		// contract is abandoned.
+		// revokeAddrV2 is the address belonging to the key that will be
+		// used to sign and refund a swap past its encoded refund locktime.
 		revokeAddrV2, err := dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", translateRPCCancelErr(err))

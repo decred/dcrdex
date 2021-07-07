@@ -1355,8 +1355,8 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// legacy/non-segwit swap contracts pkScripts.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
-		// revokeAddr is the address that will receive the refund if the contract is
-		// abandoned.
+		// revokeAddr is the address belonging to the key that will be
+		// used to sign and refund a swap past its encoded refund locktime.
 		revokeAddr, err := btc.externalAddress()
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
