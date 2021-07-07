@@ -767,6 +767,10 @@ func (btc *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 // []*compositeUTXO to be used for further order estimation without additional
 // calls to listunspent.
 func (btc *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
+	if lotSize == 0 {
+		return nil, nil, errors.New("cannot divide by lotSize zero")
+	}
+
 	btc.fundingMtx.RLock()
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	btc.fundingMtx.RUnlock()

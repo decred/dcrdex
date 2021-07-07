@@ -93,8 +93,8 @@ type Wallet interface {
 	// associated fees that the wallet can support for the specified DEX. The
 	// fees are an estimate based on current network conditions, and will be <=
 	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
-	// will be an estimate based on current market conditions. lotSize must
-	// not be zero and will cause a panic if so.
+	// will be an estimate based on current market conditions. lotSize should
+	// not be zero.
 	MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*SwapEstimate, error)
 	// PreSwap gets a pre-swap estimate for the specified order size.
 	PreSwap(*PreSwapForm) (*PreSwap, error)

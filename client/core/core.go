@@ -2702,6 +2702,11 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, err
 	}
 
+	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
+	if quoteLotEst == 0 {
+		return nil, errors.New("cannot divide by lot size zero")
+	}
+
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
@@ -2715,12 +2720,6 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	redeemFeeSuggestion := c.feeSuggestion(dc, base, false)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
-	}
-
-	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
-
-	if quoteLotEst == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
 	}
 
 	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, swapFeeSuggestion, quoteAsset)
@@ -2751,6 +2750,10 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, err
 	}
 
+	if baseAsset.LotSize == 0 {
+		return nil, errors.New("cannot divide by lot size zero")
+	}
+
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
@@ -2771,10 +2774,6 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	redeemFeeSuggestion := c.feeSuggestion(dc, quote, false)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
-	}
-
-	if baseAsset.LotSize == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
 	}
 
 	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, swapFeeSuggestion, baseAsset)
