@@ -4,7 +4,6 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"math"
 	"net"
 	"net/url"
-	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -72,6 +70,9 @@ var (
 	// updating the API. Long-running operations may start and end with
 	// differing versions.
 	serverAPIVers = []int{serverdex.PreAPIVersion}
+	// ActiveOrdersLogoutErr is returned from logout when there are active
+	// orders.
+	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
 )
 
 type dexTicker struct {
@@ -2561,7 +2562,7 @@ func (c *Core) Logout() error {
 	conns := c.dexConnections()
 	for _, dc := range conns {
 		if dc.hasActiveOrders() {
-			return fmt.Errorf("cannot log out with active orders")
+			return ActiveOrdersLogoutErr
 		}
 	}
 
@@ -5372,43 +5373,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	// status changes.
 	assets.count(assetID)
 	c.updateBalances(assets)
-}
-
-// PromptShutdown checks if there are active orders and asks confirmation to
-// shutdown if there are. The return value indicates if it is safe to stop Core
-// or if the user has confirmed they want to shutdown with active orders.
-func (c *Core) PromptShutdown() bool {
-	conns := c.dexConnections()
-	var haveActiveOrders bool
-	for _, dc := range conns {
-		if dc.hasActiveOrders() {
-			haveActiveOrders = true
-			break
-		}
-	}
-
-	if !haveActiveOrders {
-		return true
-	}
-
-	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
-		"Do you want to quit anyway? ('yes' to quit, or enter to abort shutdown): ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan() // waiting for user input
-	if err := scanner.Err(); err != nil {
-		fmt.Printf("Input error: %v", err)
-		return false
-	}
-
-	switch resp := strings.ToLower(scanner.Text()); resp {
-	case "y", "yes":
-		return true
-	case "n", "no", "":
-	default: // anything else aborts, but warn about it
-		fmt.Printf("Unrecognized response %q. ", resp)
-	}
-	fmt.Println("Shutdown aborted.")
-	return false
 }
 
 // cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the

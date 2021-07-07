@@ -4,12 +4,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,7 +97,7 @@ func mainCore() error {
 	signal.Notify(killChan, os.Interrupt)
 	go func() {
 		for range killChan {
-			if clientCore.PromptShutdown() {
+			if promptShutdown(clientCore) {
 				log.Infof("Shutting down...")
 				cancel()
 				return
@@ -174,4 +177,37 @@ func mainCore() error {
 	wg.Wait()
 
 	return nil
+}
+
+// promptShutdown checks if there are active orders and asks confirmation to
+// shutdown if there are. The return value indicates if it is safe to stop Core
+// or if the user has confirmed they want to shutdown with active orders.
+func promptShutdown(clientCore *core.Core) bool {
+	err := clientCore.Logout()
+	if err == nil {
+		return true
+	}
+	if !errors.Is(err, core.ActiveOrdersLogoutErr) {
+		log.Errorf("unable to logout: %v", err)
+		return true
+	}
+
+	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
+		"Do you want to quit anyway? ('yes' to quit, or enter to abort shutdown): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan() // waiting for user input
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Input error: %v", err)
+		return false
+	}
+
+	switch resp := strings.ToLower(scanner.Text()); resp {
+	case "y", "yes":
+		return true
+	case "n", "no", "":
+	default: // anything else aborts, but warn about it
+		fmt.Printf("Unrecognized response %q. ", resp)
+	}
+	fmt.Println("Shutdown aborted.")
+	return false
 }
