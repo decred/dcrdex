@@ -189,7 +189,7 @@ func promptShutdown(clientCore *core.Core) bool {
 	}
 	if !errors.Is(err, core.ActiveOrdersLogoutErr) {
 		log.Errorf("unable to logout: %v", err)
-		return false
+		return true
 	}
 
 	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
