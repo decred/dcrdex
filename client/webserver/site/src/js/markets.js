@@ -1998,12 +1998,12 @@ function cleanTemplates (...tmpls) {
 
 // OrderTableRowManager manages the data within a row in an order table.
 class OrderTableRowManager {
-  constructor (tableRow, ordersBin, cssClass) {
+  constructor (tableRow, orderBin, cssClass) {
     this.tableRow = tableRow
-    this.ordersBin = ordersBin
-    this.sell = ordersBin[0].sell
-    this.rate = ordersBin[0].rate
-    this.isEpoch = !!ordersBin[0].epoch
+    this.orderBin = orderBin
+    this.sell = orderBin[0].sell
+    this.rate = orderBin[0].rate
+    this.isEpoch = !!orderBin[0].epoch
     this.setRateEl(cssClass)
     this.setEpochEl()
     this.updateQtyNumOrdersEl()
@@ -2025,8 +2025,8 @@ class OrderTableRowManager {
   }
 
   updateQtyNumOrdersEl () {
-    const qty = this.ordersBin.reduce((total, curr) => total + curr.qty, 0)
-    const numOrders = this.ordersBin.length
+    const qty = this.orderBin.reduce((total, curr) => total + curr.qty, 0)
+    const numOrders = this.orderBin.length
     const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
     const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
     qtyEl.innerText = qty.toFixed(8)
@@ -2040,14 +2040,14 @@ class OrderTableRowManager {
   }
 
   insertOrder (order) {
-    this.ordersBin.push(order)
+    this.orderBin.push(order)
     this.updateQtyNumOrdersEl()
   }
 
   updateOrderQty (token, qty) {
-    for (let i = 0; i < this.ordersBin.length; i++) {
-      if (this.ordersBin[i].token === token) {
-        this.ordersBin[i].qty = qty
+    for (let i = 0; i < this.orderBin.length; i++) {
+      if (this.orderBin[i].token === token) {
+        this.orderBin[i].qty = qty
         this.updateQtyNumOrdersEl()
         return true
       }
@@ -2056,19 +2056,19 @@ class OrderTableRowManager {
   }
 
   removeOrder (token) {
-    const index = this.ordersBin.findIndex(order => order.token === token)
+    const index = this.orderBin.findIndex(order => order.token === token)
     if (index < 0) return false
-    this.ordersBin.splice(index, 1)
-    if (!this.ordersBin.length) this.tableRow.remove()
+    this.orderBin.splice(index, 1)
+    if (!this.orderBin.length) this.tableRow.remove()
     else this.updateQtyNumOrdersEl()
     return true
   }
 
   removeEpochOrders (newEpoch) {
-    this.ordersBin = this.ordersBin.filter((order) => {
+    this.orderBin = this.orderBin.filter((order) => {
       return !(order.epoch && order.epoch !== newEpoch)
     })
-    if (!this.ordersBin.length) this.tableRow.remove()
+    if (!this.orderBin.length) this.tableRow.remove()
     else this.updateQtyNumOrdersEl()
   }
 
