@@ -319,7 +319,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		lotSize, found := lotSizes[mktInfo.Base]
 		if !found {
 			lotSizes[mktInfo.Base] = mktInfo.LotSize
-		} else if lotSize != mktInfo.LotSize {
+		} else if lotSize > 0 && lotSize != mktInfo.LotSize {
 			lotSizes[mktInfo.Base] = 0
 			log.Warnf("Asset %d (%s) has multiple lot sizes. Old clients will not work with this asset.",
 				mktInfo.Base, dex.BipIDSymbol(mktInfo.Base))
@@ -328,7 +328,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		rateStep, found := rateSteps[mktInfo.Quote]
 		if !found {
 			rateSteps[mktInfo.Quote] = mktInfo.RateStep
-		} else if rateStep != mktInfo.RateStep {
+		} else if rateStep > 0 && rateStep != mktInfo.RateStep {
 			rateSteps[mktInfo.Quote] = 0
 			log.Warnf("Asset %d (%s) has multiple rate steps. Old clients will not work with this asset.",
 				mktInfo.Quote, dex.BipIDSymbol(mktInfo.Quote))
