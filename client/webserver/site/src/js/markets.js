@@ -1493,8 +1493,8 @@ export default class MarketsPage extends BasePage {
     // Handle market order differently.
     if (order.rate === 0) {
       // This is a market order.
-      if (row && row.getRate() === 0) {
-        row.insertOrder(order)
+      if (row && row.manager.getRate() === 0) {
+        row.manager.insertOrder(order)
       } else {
         row = this.orderTableRow([order], cssClass)
         tbody.insertBefore(row, tbody.firstChild)
@@ -1502,12 +1502,12 @@ export default class MarketsPage extends BasePage {
       return
     }
     // Must be a limit order. Sort by rate. Skip the market order row.
-    if (row && row.getRate() === 0) row = row.nextSibling
+    if (row && row.manager.getRate() === 0) row = row.nextSibling
     while (row) {
-      if (row.compare(order) === 0) {
-        row.insertOrder(order)
+      if (row.manager.compare(order) === 0) {
+        row.manager.insertOrder(order)
         return
-      } else if (row.compare(order) > 0) {
+      } else if (row.manager.compare(order) > 0) {
         const tr = this.orderTableRow([order], cssClass)
         tbody.insertBefore(tr, row)
         return
@@ -1523,7 +1523,7 @@ export default class MarketsPage extends BasePage {
     const token = order.token
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
-        if (tr.removeOrder(token)) {
+        if (tr.manager.removeOrder(token)) {
           return
         }
       }
@@ -1536,7 +1536,7 @@ export default class MarketsPage extends BasePage {
     const qty = update.qty
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
-        if (tr.updateOrderQty(token, qty)) {
+        if (tr.manager.updateOrderQty(token, qty)) {
           return
         }
       }
@@ -1557,7 +1557,7 @@ export default class MarketsPage extends BasePage {
    */
   clearOrderTableEpochSide (tbody, newEpoch) {
     for (const tr of Array.from(tbody.children)) {
-      tr.removeEpochOrders()
+      tr.manager.removeEpochOrders()
     }
   }
 
@@ -1567,93 +1567,20 @@ export default class MarketsPage extends BasePage {
    */
   orderTableRow (orderBin, cssClass) {
     const tr = this.page.rowTemplate.cloneNode(true)
-    const { rate, sell } = orderBin[0]
-    const isEpoch = !!orderBin[0].epoch
-    tr.orderBin = orderBin
+    const manager = new OrderTableRowManager(tr, orderBin, cssClass)
+    tr.manager = manager
     bind(tr, 'click', () => {
-      this.reportClick(rate)
+      this.reportClick(tr.manager.getRate())
     })
-    let qtyTD
-    const updateQtyTD = () => {
-      const mainDiv = qtyTD.children[0]
-      const [qtyDiv, ordersDiv] = mainDiv.children
-      const qty = tr.orderBin.reduce((total, curr) => total + curr.qty, 0)
-      qtyDiv.innerText = qty.toFixed(8)
-      ordersDiv.innerText = tr.orderBin.length
-      ordersDiv.title = `quantity comprised of ${tr.orderBin.length} ` +
-        (tr.orderBin.length > 1 ? 'orders' : 'order')
-    }
-    tr.querySelectorAll('td').forEach(td => {
-      switch (td.dataset.type) {
-        case 'qty':
-          qtyTD = td
-          updateQtyTD()
-          break
-        case 'rate':
-          if (rate === 0) {
-            td.innerText = 'market'
-          } else {
-            td.innerText = rate.toFixed(8)
-            td.classList.add(cssClass)
-            // Draw a line on the chart on hover.
-            Doc.bind(tr, 'mouseenter', e => {
-              const chart = this.chart
-              this.depthLines.hover = [{
-                rate: rate,
-                color: sell ? chart.theme.sellLine : chart.theme.buyLine
-              }]
-              this.drawChartLines()
-            })
-          }
-          break
-        case 'epoch':
-          if (isEpoch) td.appendChild(check.cloneNode())
-          break
-      }
-    })
-    tr.insertOrder = (order) => {
-      tr.orderBin.push(order)
-      updateQtyTD()
-    }
-    tr.updateOrderQty = (token, qty) => {
-      for (let i = 0; i < tr.orderBin.length; i++) {
-        if (tr.orderBin[i].token === token) {
-          tr.orderBin[i].qty = qty
-          updateQtyTD()
-          return true
-        }
-      }
-      return false
-    }
-    tr.removeOrder = (token) => {
-      const index = tr.orderBin.findIndex(order => order.token === token)
-      if (index < 0) return false
-      tr.orderBin.splice(index, 1)
-      if (!tr.orderBin.length) tr.remove()
-      else updateQtyTD()
-      return true
-    }
-    tr.removeEpochOrders = (newEpoch) => {
-      tr.orderBin = tr.orderBin.filter((order) => {
-        return !(order.epoch && order.epoch !== newEpoch)
+    if (tr.manager.getRate() !== 0) {
+      Doc.bind(tr, 'mouseenter', e => {
+        const chart = this.chart
+        this.depthLines.hover = [{
+          rate: tr.manager.getRate(),
+          color: tr.manager.isSell() ? chart.theme.sellLine : chart.theme.buyLine
+        }]
+        this.drawChartLines()
       })
-      if (!tr.orderBin.length) tr.remove()
-      else updateQtyTD()
-    }
-    tr.getRate = () => {
-      return tr.orderBin[0].rate
-    }
-    tr.getEpoch = () => {
-      return tr.orderBin[0].epoch
-    }
-    tr.compare = (order) => {
-      if (tr.getRate() === order.rate && !!tr.getEpoch() === !!order.epoch) {
-        return 0
-      } else if (tr.getRate() !== order.rate) {
-        return (tr.getRate() > order.rate) === order.sell ? 1 : -1
-      } else {
-        return tr.getEpoch() ? 1 : -1
-      }
     }
     return tr
   }
@@ -2067,4 +1994,103 @@ function cleanTemplates (...tmpls) {
     tmpl.remove()
     tmpl.removeAttribute('id')
   })
+}
+
+// OrderTableRowManager manages the data within a row in an order table.
+class OrderTableRowManager {
+  constructor (tableRow, ordersBin, cssClass) {
+    this.tableRow = tableRow
+    this.ordersBin = ordersBin
+    this.sell = ordersBin[0].sell
+    this.rate = ordersBin[0].rate
+    this.isEpoch = !!ordersBin[0].epoch
+    this.setRateEl(cssClass)
+    this.setEpochEl()
+    this.updateQtyNumOrdersEl()
+  }
+
+  setEpochEl () {
+    const epochEl = Doc.tmplElement(this.tableRow, 'epoch')
+    if (this.isEpoch) epochEl.appendChild(check.cloneNode())
+  }
+
+  setRateEl (cssClass) {
+    const rateEl = Doc.tmplElement(this.tableRow, 'rate')
+    if (this.rate === 0) {
+      rateEl.innerText = 'market'
+    } else {
+      rateEl.innerText = this.rate.toFixed(8)
+      rateEl.classList.add(cssClass)
+    }
+  }
+
+  updateQtyNumOrdersEl () {
+    const qty = this.ordersBin.reduce((total, curr) => total + curr.qty, 0)
+    const numOrders = this.ordersBin.length
+    const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
+    const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
+    qtyEl.innerText = qty.toFixed(8)
+    if (numOrders > 1) {
+      numOrdersEl.removeAttribute('hidden')
+      numOrdersEl.innerText = numOrders
+      numOrdersEl.title = `quantity is comprised of ${numOrders} orders`
+    } else {
+      numOrdersEl.setAttribute('hidden', true)
+    }
+  }
+
+  insertOrder (order) {
+    this.ordersBin.push(order)
+    this.updateQtyNumOrdersEl()
+  }
+
+  updateOrderQty (token, qty) {
+    for (let i = 0; i < this.ordersBin.length; i++) {
+      if (this.ordersBin[i].token === token) {
+        this.ordersBin[i].qty = qty
+        this.updateQtyNumOrdersEl()
+        return true
+      }
+    }
+    return false
+  }
+
+  removeOrder (token) {
+    const index = this.ordersBin.findIndex(order => order.token === token)
+    if (index < 0) return false
+    this.ordersBin.splice(index, 1)
+    if (!this.ordersBin.length) this.tableRow.remove()
+    else this.updateQtyNumOrdersEl()
+    return true
+  }
+
+  removeEpochOrders (newEpoch) {
+    this.ordersBin = this.ordersBin.filter((order) => {
+      return !(order.epoch && order.epoch !== newEpoch)
+    })
+    if (!this.ordersBin.length) this.tableRow.remove()
+    else this.updateQtyNumOrdersEl()
+  }
+
+  getRate () {
+    return this.rate
+  }
+
+  getEpoch () {
+    return this.epoch
+  }
+
+  isSell () {
+    return this.sell
+  }
+
+  compare (order) {
+    if (this.getRate() === order.rate && !!this.getEpoch() === !!order.epoch) {
+      return 0
+    } else if (this.getRate() !== order.rate) {
+      return (this.getRate() > order.rate) === order.sell ? 1 : -1
+    } else {
+      return this.getEpoch() ? 1 : -1
+    }
+  }
 }

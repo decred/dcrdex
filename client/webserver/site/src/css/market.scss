@@ -428,9 +428,11 @@ table.balance-table button:hover {
 }
 
 div.numorders {
-  color: white;
-  background-color: rgb(94, 94, 130);
+  background-color: #c5c5e6;
   border-radius: 3px;
+  line-height: 1;
+  padding: 1px;
+  font-size: 0.9em;
 }
 
 #liveTable {
