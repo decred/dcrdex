@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -253,16 +254,17 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		"Host",
 		"Base",
 		"Quote",
-		"Ask",
-		"Offer",
+		"Base Quantity",
+		"Order Rate",
+		"Actual Rate",
+		"Base Fees",
+		"Quote Fees",
 		"Type",
 		"Side",
 		"Time in Force",
 		"Status",
-		"Rate",
 		"Filled (%)",
 		"Settled (%)",
-		"Quantity",
 		"Time",
 	})
 	if err != nil {
@@ -279,27 +281,24 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 
 	for _, ord := range ords {
 		ordReader := orderReader{ord}
-		timestamp, err := encode.UnixTimeMilliLocal(int64(ord.Stamp)).MarshalText()
-		if err != nil {
-			log.Errorf("error writing CSV: %v", err)
-			return
-		}
 
+		timestamp := encode.UnixTimeMilli(int64(ord.Stamp)).Local().Format(time.RFC3339Nano)
 		err = csvWriter.Write([]string{
-			ord.Host,                     // Host
-			ord.BaseSymbol,               // Base
-			ord.QuoteSymbol,              // Quote
-			ordReader.AskString(),        // Ask
-			ordReader.OfferString(),      // Offer
-			ordReader.Type.String(),      // Type
-			ordReader.SideString(),       // Side
-			ord.TimeInForce.String(),     // Time in Force
-			ordReader.StatusString(),     // Status
-			ordReader.SimpleRateString(), // Rate
-			ordReader.FilledPercent(),    // Filled
-			ordReader.SettledPercent(),   // Settled
-			ordReader.OfferString(),      // Quantity
-			string(timestamp[:]),         // Time
+			ord.Host,                      // Host
+			ord.BaseSymbol,                // Base
+			ord.QuoteSymbol,               // Quote
+			ordReader.BaseQtyString(),     // Base Quantity
+			ordReader.SimpleRateString(),  // Order Rate
+			ordReader.AverageRateString(), // Actual Rate
+			ordReader.BaseAssetFees(),     // Base Fees
+			ordReader.QuoteAssetFees(),    // Quote Fees
+			ordReader.Type.String(),       // Type
+			ordReader.SideString(),        // Side
+			ord.TimeInForce.String(),      // Time in Force
+			ordReader.StatusString(),      // Status
+			ordReader.FilledPercent(),     // Filled
+			ordReader.SettledPercent(),    // Settled
+			timestamp,                     // Time
 		})
 		if err != nil {
 			log.Errorf("error writing CSV: %v", err)

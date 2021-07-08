@@ -95,14 +95,6 @@ func UnixTimeMilli(msEpoch int64) time.Time {
 	return time.Unix(sec, msec*1e6).UTC()
 }
 
-// UnixTimeMilliLocal returns a Time for an elapsed time in milliseconds since
-// the Unix Epoch. The time will have Location set to the local machine time.
-func UnixTimeMilliLocal(msEpoch int64) time.Time {
-	sec := msEpoch / 1000
-	msec := msEpoch % 1000
-	return time.Unix(sec, msec*1e6).Local()
-}
-
 // DropMilliseconds returns the time truncated to the previous second.
 func DropMilliseconds(t time.Time) time.Time {
 	return t.Truncate(time.Second)

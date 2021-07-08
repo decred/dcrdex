@@ -152,6 +152,11 @@ func (ord *orderReader) TypeString() string {
 	return s
 }
 
+// BaseQtyString formats the order quantity in units of the base asset.
+func (ord *orderReader) BaseQtyString() string {
+	return precision8(ord.Qty)
+}
+
 // OfferString formats the order quantity in units of the outgoing asset,
 // performing a conversion if necessary.
 func (ord *orderReader) OfferString() string {
@@ -348,6 +353,21 @@ func (ord *orderReader) RateString() string {
 	return fmt.Sprintf("%s %s/%s", precision8(ord.Rate), ord.QuoteSymbol, ord.BaseSymbol)
 }
 
+// AverageRateString returns a formatting string containing the average rate of
+// the matches that have been filled in an order.
+func (ord *orderReader) AverageRateString() string {
+	if len(ord.Matches) == 0 {
+		return "0"
+	}
+	var totalQty, totalRate uint64
+	for _, match := range ord.Matches {
+		totalQty += match.Qty
+		totalRate += match.Rate * match.Qty
+	}
+	averageRate := totalRate / totalQty
+	return precision8(averageRate)
+}
+
 // MatchReaders creates a slice of *matchReader for the order's matches.
 func (ord *orderReader) MatchReaders() []*matchReader {
 	readers := make([]*matchReader, 0, len(ord.Matches))
@@ -365,6 +385,22 @@ func (ord *orderReader) SwapFeesString() string {
 // RedemptionFeesString is a formatted string of the paid redemption fees.
 func (ord *orderReader) RedemptionFeesString() string {
 	return precision8(ord.FeesPaid.Redemption)
+}
+
+// BaseAssetFees is a formatted string of the fees paid in the base asset.
+func (ord *orderReader) BaseAssetFees() string {
+	if ord.Sell {
+		return ord.SwapFeesString()
+	}
+	return ord.RedemptionFeesString()
+}
+
+// QuoteAssetFees is a formatted string of the fees paid in the quote asset.
+func (ord *orderReader) QuoteAssetFees() string {
+	if ord.Sell {
+		return ord.RedemptionFeesString()
+	}
+	return ord.SwapFeesString()
 }
 
 func (ord *orderReader) FundingCoinIDs() []string {
