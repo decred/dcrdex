@@ -328,9 +328,10 @@ func convertAuditInfo(ai *asset.AuditInfo, chainParams *chaincfg.Params) (*audit
 // swapReceipt is information about a swap contract that was broadcast by this
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
-	output     *output
-	contract   []byte
-	expiration time.Time
+	output       *output
+	contract     []byte
+	signedRefund []byte
+	expiration   time.Time
 }
 
 // Expiration is the time that the contract will expire, allowing the user to
@@ -353,6 +354,12 @@ func (r *swapReceipt) Coin() asset.Coin {
 // String provides a human-readable representation of the contract's Coin.
 func (r *swapReceipt) String() string {
 	return r.output.String()
+}
+
+// SignedRefund is a signed refund script that can be used to return
+// funds to the user in the case a contract expires.
+func (r *swapReceipt) SignedRefund() dex.Bytes {
+	return r.signedRefund
 }
 
 // fundingCoin is similar to output, but also stores the address. The
@@ -1355,15 +1362,17 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, err
 	}
 	contracts := make([][]byte, 0, len(swaps.Contracts))
+	refundAddrs := make([]dcrutil.Address, 0, len(swaps.Contracts))
 	// Add the contract outputs.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
-		// revokeAddrV2 is the address that will receive the refund if the
-		// contract is abandoned.
+		// revokeAddrV2 is the address belonging to the key that will be
+		// used to sign and refund a swap past its encoded refund locktime.
 		revokeAddrV2, err := dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", translateRPCCancelErr(err))
 		}
+		refundAddrs = append(refundAddrs, revokeAddrV2)
 		// Create the contract, a P2SH redeem script.
 		contractScript, err := dexdcr.MakeContract(contract.Address, revokeAddrV2.String(), contract.SecretHash, int64(contract.LockTime), dcr.chainParams)
 		if err != nil {
@@ -1422,10 +1431,20 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
+		output := newOutput(&txHash, uint32(i), contract.Value, wire.TxTreeRegular)
+		signedRefundTx, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i])
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
+		}
+		refundB, err := signedRefundTx.Bytes()
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error serializing refund tx: %w", err)
+		}
 		receipts = append(receipts, &swapReceipt{
-			output:     newOutput(&txHash, uint32(i), contract.Value, wire.TxTreeRegular),
-			contract:   contracts[i],
-			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
+			output:       output,
+			contract:     contracts[i],
+			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
+			signedRefund: refundB,
 		})
 	}
 
@@ -2019,19 +2038,42 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // was created. The client should store this information for persistence across
 // sessions.
 func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
+	msgTx, err := dcr.refundTx(coinID, contract, 0, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating refund tx: %w", err)
+	}
+
+	checkHash := msgTx.TxHash()
+	refundHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	if *refundHash != checkHash {
+		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s", *refundHash, checkHash)
+	}
+	return toCoinID(refundHash, 0), nil
+}
+
+// refundTx crates and signs a contract`s refund transaction. If refundAddr is
+// not supplied, one will be requested from the wallet. If val is not supplied
+// it will be retrieved with gettxout.
+func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr dcrutil.Address) (*wire.MsgTx, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+	// Grab the unspent output to make sure it's good and to get the value if not supplied.
+	if val == 0 {
+		utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
+		if err != nil {
+			return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+		}
+		if utxo == nil {
+			return nil, asset.CoinNotFoundError
+		}
+		val = toAtoms(utxo.Value)
 	}
-	if utxo == nil {
-		return nil, asset.CoinNotFoundError
-	}
-	val := toAtoms(utxo.Value)
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -2052,9 +2094,11 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 
-	refundAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
-	if err != nil {
-		return nil, fmt.Errorf("error getting new address from the wallet: %w", translateRPCCancelErr(err))
+	if refundAddr == nil {
+		refundAddr, err = dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
+		if err != nil {
+			return nil, fmt.Errorf("error getting new address from the wallet: %w", translateRPCCancelErr(err))
+		}
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
@@ -2076,17 +2120,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, err
 	}
 	txIn.SignatureScript = redeemSigScript
-	// Send it.
-	checkHash := msgTx.TxHash()
-	refundHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
-	if err != nil {
-		return nil, translateRPCCancelErr(err)
-	}
-	if *refundHash != checkHash {
-		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
-	}
-	return toCoinID(refundHash, 0), nil
+	return msgTx, nil
 }
 
 // Address returns an address for the exchange wallet.

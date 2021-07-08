@@ -1183,6 +1183,14 @@ func TestSwap(t *testing.T) {
 		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
 	}
 
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+
+	node.changeAddr = tPKHAddr
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
+
 	node.newAddr = tPKHAddr
 	node.changeAddr = tPKHAddr
 
