@@ -36,11 +36,13 @@ const (
 	// maxBlockInterval is the number of seconds since the last header came
 	// in over which we consider the chain to be out of sync.
 	maxBlockInterval = 180
+	gweiFactor       = 1e9
 )
 
 var (
 	zeroHash                       = common.Hash{}
 	notImplementedErr              = errors.New("not implemented")
+	gweiFactorBig                  = big.NewInt(gweiFactor)
 	_                 asset.Driver = (*Driver)(nil)
 )
 
@@ -76,14 +78,27 @@ type ethFetcher interface {
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 }
 
+// toGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
+// Errors if the amount of gwei is too big to fit fully into a uint64.
+func toGwei(wei *big.Int) (uint64, error) {
+	wei.Div(wei, gweiFactorBig)
+	if !wei.IsUint64() {
+		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
+	}
+	return wei.Uint64(), nil
+}
+
 // Backend is an asset backend for Ethereum. It has methods for fetching output
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	ctx  context.Context
-	cfg  *config
-	node ethFetcher
+	// A connection-scoped Context is used to cancel active RPCs on
+	// connection shutdown.
+	rpcCtx     context.Context
+	cancelRPCs context.CancelFunc
+	cfg        *config
+	node       ethFetcher
 	// The backend provides block notification channels through the BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx  sync.RWMutex
@@ -102,7 +117,10 @@ var _ asset.Backend = (*Backend)(nil)
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
 func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Backend{
+		rpcCtx:     ctx,
+		cancelRPCs: cancel,
 		cfg:        cfg,
 		blockCache: newBlockCache(logger),
 		log:        logger,
@@ -148,14 +166,12 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		eth.log.Errorf("error adding new best block to cache: %v", err)
 	}
 
-	running := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		eth.run(ctx, running)
+		eth.run(ctx)
 		wg.Done()
 	}()
-	<-running
 	return &wg, nil
 }
 
@@ -177,15 +193,11 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in gwei / gas.
 func (eth *Backend) FeeRate() (uint64, error) {
-	bigGP, err := eth.node.suggestGasPrice(eth.ctx)
+	bigGP, err := eth.node.suggestGasPrice(eth.rpcCtx)
 	if err != nil {
 		return 0, err
 	}
-	bigGP.Div(bigGP, gweiFactorBig)
-	if !bigGP.IsUint64() {
-		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", bigGP)
-	}
-	return bigGP.Uint64(), nil
+	return toGwei(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -214,14 +226,14 @@ func (eth *Backend) Synced() (bool, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
 	// check that the best header came in under maxBlockInterval.
-	sp, err := eth.node.syncProgress(eth.ctx)
+	sp, err := eth.node.syncProgress(eth.rpcCtx)
 	if err != nil {
 		return false, err
 	}
 	if sp != nil {
 		return false, nil
 	}
-	bh, err := eth.node.bestHeader(eth.ctx)
+	bh, err := eth.node.bestHeader(eth.rpcCtx)
 	if err != nil {
 		return false, err
 	}
@@ -265,17 +277,13 @@ func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 // run processes the queue and monitors the application context. The supplied
 // running channel will be closed upon setting the context which is used by the
 // rpcclient.
-func (eth *Backend) run(ctx context.Context, running chan struct{}) {
-	eth.ctx = ctx
-
-	// Indicate the backend is ready to accept commands.
-	close(running)
-
+func (eth *Backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().
 	go func() {
 		<-ctx.Done()
+		eth.cancelRPCs()
 		eth.shutdown()
 		wg.Done()
 	}()

@@ -355,7 +355,7 @@ func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
 	}
 	baseSynced, err := b.Backend.Synced()
 	if err != nil {
-		return false, fmt.Errorf("Error checking sync status for %d: %v", base, err)
+		return false, fmt.Errorf("Error checking sync status for %d: %w", base, err)
 	}
 	if !baseSynced {
 		return false, nil
@@ -366,7 +366,7 @@ func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
 	}
 	quoteSynced, err := q.Backend.Synced()
 	if err != nil {
-		return false, fmt.Errorf("Error checking sync status for %d: %v", quote, err)
+		return false, fmt.Errorf("Error checking sync status for %d: %w", quote, err)
 	}
 	return quoteSynced, nil
 }

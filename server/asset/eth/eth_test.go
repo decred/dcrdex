@@ -248,19 +248,18 @@ func TestRun(t *testing.T) {
 	header1 := &types.Header{Number: big.NewInt(1)}
 	block1 := types.NewBlockWithHeader(header1)
 	blockHash1 := block1.Hash()
-	node := &testNode{}
-	node.bestBlkHash = blockHash1
-	node.blk = block1
+	node := &testNode{
+		bestBlkHash: blockHash1,
+		blk:         block1,
+	}
 	backend := unconnectedETH(tLogger, nil)
 	ch := backend.BlockChannel(1)
-	running := make(chan struct{})
 	backend.node = node
 	go func() {
 		<-ch
 		cancel()
 	}()
-	backend.run(ctx, running)
-	<-running
+	backend.run(ctx)
 	backend.blockCache.mtx.Lock()
 	best := backend.blockCache.best
 	backend.blockCache.mtx.Unlock()
@@ -316,9 +315,9 @@ func TestFeeRate(t *testing.T) {
 			sugGasPriceErr: test.gasErr,
 		}
 		eth := &Backend{
-			node: node,
-			ctx:  ctx,
-			log:  tLogger,
+			node:   node,
+			rpcCtx: ctx,
+			log:    tLogger,
 		}
 		fee, err := eth.FeeRate()
 		cancel()
@@ -354,7 +353,7 @@ func TestSynced(t *testing.T) {
 		name:    "ok header too old",
 		subSecs: maxBlockInterval,
 	}, {
-		name:       "best header",
+		name:       "best header error",
 		bestHdrErr: errors.New(""),
 		wantErr:    true,
 	}, {
@@ -373,9 +372,9 @@ func TestSynced(t *testing.T) {
 			bestHdrErr:  test.bestHdrErr,
 		}
 		eth := &Backend{
-			node: node,
-			ctx:  ctx,
-			log:  tLogger,
+			node:   node,
+			rpcCtx: ctx,
+			log:    tLogger,
 		}
 		synced, err := eth.Synced()
 		cancel()
