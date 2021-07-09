@@ -4,23 +4,29 @@
 package webserver
 
 import (
+	"encoding/csv"
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
 
 const (
-	homeRoute     = "/"
-	registerRoute = "/register"
-	loginRoute    = "/login"
-	marketsRoute  = "/markets"
-	walletsRoute  = "/wallets"
-	settingsRoute = "/settings"
-	ordersRoute   = "/orders"
+	homeRoute        = "/"
+	registerRoute    = "/register"
+	loginRoute       = "/login"
+	marketsRoute     = "/markets"
+	walletsRoute     = "/wallets"
+	settingsRoute    = "/settings"
+	ordersRoute      = "/orders"
+	exportOrderRoute = "/orders/export"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -188,6 +194,124 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 		Hosts:           hosts,
 		Statuses:        allStatuses,
 	})
+}
+
+// handleExportOrders is the handler for the /orders/export page request.
+func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
+	wf, ok := w.(http.Flusher)
+	if !ok {
+		log.Errorf("unable to flush streamed data")
+		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
+		return
+	}
+
+	filter := new(core.OrderFilter)
+	err := r.ParseForm()
+	if err != nil {
+		log.Errorf("error parsing form for export order: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	filter.Hosts = r.Form["hosts"]
+	assets := r.Form["assets"]
+	filter.Assets = make([]uint32, len(assets))
+	for k, assetStrID := range assets {
+		assetNumID, err := strconv.ParseUint(assetStrID, 10, 32)
+		if err != nil {
+			log.Errorf("error parsing asset id: %v", err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		filter.Assets[k] = uint32(assetNumID)
+	}
+	statuses := r.Form["statuses"]
+	filter.Statuses = make([]order.OrderStatus, len(statuses))
+	for k, statusStrID := range statuses {
+		statusNumID, err := strconv.ParseUint(statusStrID, 10, 16)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			log.Errorf("error parsing status id: %v", err)
+			return
+		}
+		filter.Statuses[k] = order.OrderStatus(statusNumID)
+	}
+
+	ords, err := s.core.Orders(filter)
+	if err != nil {
+		log.Errorf("error retrieving order: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename=orders.csv")
+	w.Header().Set("Content-Type", "text/csv")
+	w.WriteHeader(http.StatusOK)
+	csvWriter := csv.NewWriter(w)
+	csvWriter.UseCRLF = strings.Contains(r.UserAgent(), "Windows")
+
+	err = csvWriter.Write([]string{
+		"Host",
+		"Base",
+		"Quote",
+		"Base Quantity",
+		"Order Rate",
+		"Actual Rate",
+		"Base Fees",
+		"Quote Fees",
+		"Type",
+		"Side",
+		"Time in Force",
+		"Status",
+		"Filled (%)",
+		"Settled (%)",
+		"Time",
+	})
+	if err != nil {
+		log.Errorf("error writing CSV: %v", err)
+		return
+	}
+	csvWriter.Flush()
+	err = csvWriter.Error()
+	if err != nil {
+		log.Errorf("error writing CSV: %v", err)
+		return
+	}
+	wf.Flush()
+
+	for _, ord := range ords {
+		ordReader := orderReader{ord}
+
+		timestamp := encode.UnixTimeMilli(int64(ord.Stamp)).Local().Format(time.RFC3339Nano)
+		err = csvWriter.Write([]string{
+			ord.Host,                      // Host
+			ord.BaseSymbol,                // Base
+			ord.QuoteSymbol,               // Quote
+			ordReader.BaseQtyString(),     // Base Quantity
+			ordReader.SimpleRateString(),  // Order Rate
+			ordReader.AverageRateString(), // Actual Rate
+			ordReader.BaseAssetFees(),     // Base Fees
+			ordReader.QuoteAssetFees(),    // Quote Fees
+			ordReader.Type.String(),       // Type
+			ordReader.SideString(),        // Side
+			ord.TimeInForce.String(),      // Time in Force
+			ordReader.StatusString(),      // Status
+			ordReader.FilledPercent(),     // Filled
+			ordReader.SettledPercent(),    // Settled
+			timestamp,                     // Time
+		})
+		if err != nil {
+			log.Errorf("error writing CSV: %v", err)
+			return
+		}
+		csvWriter.Flush()
+		err = csvWriter.Error()
+		if err != nil {
+			log.Errorf("error writing CSV: %v", err)
+			return
+		}
+		wf.Flush()
+	}
 }
 
 type orderTmplData struct {
