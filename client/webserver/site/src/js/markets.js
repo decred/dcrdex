@@ -410,6 +410,9 @@ export default class MarketsPage extends BasePage {
    */
   resolveOrderFormVisibility () {
     const page = this.page
+    // By default the order form should be hidden, and only if market is set
+    // and ready for trading the form should show up.
+    Doc.hide(page.orderForm)
     const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported()
     const base = this.market.base
@@ -418,10 +421,7 @@ export default class MarketsPage extends BasePage {
 
     if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
-      return
     }
-
-    Doc.hide(page.orderForm)
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not
@@ -514,23 +514,24 @@ export default class MarketsPage extends BasePage {
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
+    const page = this.page
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
     if (!dex.connected) {
       this.market = { dex: dex }
-      this.page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
+      page.chartErrMsg.textContent = 'Connection to dex server failed. ' +
         'You can close dexc and try again later or wait for it to reconnect.'
-      Doc.show(this.page.chartErrMsg)
+      Doc.show(page.chartErrMsg)
       this.loaded()
       this.main.style.opacity = 1
-      Doc.hide(this.page.marketLoader)
+      Doc.hide(page.marketLoader)
       return
     }
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
-    Doc.hide(this.page.maxOrd, this.page.chartErrMsg)
+    Doc.hide(page.maxOrd, page.chartErrMsg)
     if (this.preorderTimer) {
       window.clearTimeout(this.preorderTimer)
       this.preorderTimer = null
@@ -550,7 +551,7 @@ export default class MarketsPage extends BasePage {
       maxBuys: {}
     }
 
-    this.page.marketLoader.classList.remove('d-none')
+    page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
@@ -1266,10 +1267,8 @@ export default class MarketsPage extends BasePage {
   setBalanceVisibility () {
     if (this.market.dex.connected) {
       Doc.show(this.page.balanceTable)
-      Doc.show(this.page.orderForm)
     } else {
       Doc.hide(this.page.balanceTable)
-      Doc.hide(this.page.orderForm)
     }
   }
 
