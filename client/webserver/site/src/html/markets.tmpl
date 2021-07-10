@@ -89,9 +89,14 @@
                 <tbody id="buyRows">
                   {{- /* This row is used by the app as a template. */ -}}
                   <tr id="rowTemplate">
-                    <td class="text-left pl-2" data-type="qty">-</td>
-                    <td class="text-right pr-2" data-type="rate">-</td>
-                    <td class="text-right pr-3" data-type="epoch"></td>
+                    <td class="pl-2">
+                      <div class="d-flex justify-content-start align-items-center">
+                        <div data-tmpl="qty">-</div>
+                        <div class="numorders text-center ml-2" data-tmpl="numorders">-</div>
+                      </div>
+                    </td>
+                    <td class="text-right pr-2" data-tmpl="rate">-</td>
+                    <td class="text-right pr-3" data-tmpl="epoch"></td>
                   </tr>
                 </tbody>
               </table>
