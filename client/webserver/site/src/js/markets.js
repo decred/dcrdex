@@ -1478,17 +1478,15 @@ export default class MarketsPage extends BasePage {
   loadTableSide (sell) {
     const bookSide = sell ? this.book.sells : this.book.buys
     const tbody = sell ? this.page.sellRows : this.page.buyRows
-    const cssClass = sell ? 'sellcolor' : 'buycolor'
     Doc.empty(tbody)
     if (!bookSide || !bookSide.length) return
     const orderBins = this.binOrdersByRateAndEpoch(bookSide)
-    orderBins.forEach(bin => { tbody.appendChild(this.orderTableRow(bin, cssClass)) })
+    orderBins.forEach(bin => { tbody.appendChild(this.orderTableRow(bin)) })
   }
 
   /* addTableOrder adds a single order to the appropriate table. */
   addTableOrder (order) {
     const tbody = order.sell ? this.page.sellRows : this.page.buyRows
-    const cssClass = order.sell ? 'sellcolor' : 'buycolor'
     let row = tbody.firstChild
     // Handle market order differently.
     if (order.rate === 0) {
@@ -1496,7 +1494,7 @@ export default class MarketsPage extends BasePage {
       if (row && row.manager.getRate() === 0) {
         row.manager.insertOrder(order)
       } else {
-        row = this.orderTableRow([order], cssClass)
+        row = this.orderTableRow([order])
         tbody.insertBefore(row, tbody.firstChild)
       }
       return
@@ -1508,13 +1506,13 @@ export default class MarketsPage extends BasePage {
         row.manager.insertOrder(order)
         return
       } else if (row.manager.compare(order) > 0) {
-        const tr = this.orderTableRow([order], cssClass)
+        const tr = this.orderTableRow([order])
         tbody.insertBefore(tr, row)
         return
       }
       row = row.nextSibling
     }
-    const tr = this.orderTableRow([order], cssClass)
+    const tr = this.orderTableRow([order])
     tbody.appendChild(tr)
   }
 
@@ -1565,9 +1563,9 @@ export default class MarketsPage extends BasePage {
    * orderTableRow creates a new <tr> element to insert into an order table.
      Takes a bin of orders with the same rate, and displays the total quantity.
    */
-  orderTableRow (orderBin, cssClass) {
+  orderTableRow (orderBin) {
     const tr = this.page.rowTemplate.cloneNode(true)
-    const manager = new OrderTableRowManager(tr, orderBin, cssClass)
+    const manager = new OrderTableRowManager(tr, orderBin)
     tr.manager = manager
     bind(tr, 'click', () => {
       this.reportClick(tr.manager.getRate())
@@ -1996,34 +1994,43 @@ function cleanTemplates (...tmpls) {
   })
 }
 
-// OrderTableRowManager manages the data within a row in an order table.
+// OrderTableRowManager manages the data within a row in an order table. Each row
+// represents all the orders in the order book with the same rate, but orders that
+// are booked or still in the epoch queue are displayed in separate rows.
 class OrderTableRowManager {
-  constructor (tableRow, orderBin, cssClass) {
+  constructor (tableRow, orderBin) {
     this.tableRow = tableRow
     this.orderBin = orderBin
     this.sell = orderBin[0].sell
     this.rate = orderBin[0].rate
-    this.isEpoch = !!orderBin[0].epoch
-    this.setRateEl(cssClass)
+    this.epoch = !!orderBin[0].epoch
+    this.setRateEl()
     this.setEpochEl()
     this.updateQtyNumOrdersEl()
   }
 
+  // setEpochEl displays a checkmark in the row if the orders represented by
+  // this row are in the epoch queue.
   setEpochEl () {
     const epochEl = Doc.tmplElement(this.tableRow, 'epoch')
-    if (this.isEpoch) epochEl.appendChild(check.cloneNode())
+    if (this.isEpoch()) epochEl.appendChild(check.cloneNode())
   }
 
-  setRateEl (cssClass) {
+  // setRateEl popuplates the rate element in the row.
+  setRateEl () {
     const rateEl = Doc.tmplElement(this.tableRow, 'rate')
     if (this.rate === 0) {
       rateEl.innerText = 'market'
     } else {
+      const cssClass = this.isSell() ? 'sellcolor' : 'buycolor'
       rateEl.innerText = this.rate.toFixed(8)
       rateEl.classList.add(cssClass)
     }
   }
 
+  // updateQtyNumOrdersEl populates the quantity element in the row, and also
+  // displays the number of orders if there is more than one order in the order
+  // bin.
   updateQtyNumOrdersEl () {
     const qty = this.orderBin.reduce((total, curr) => total + curr.qty, 0)
     const numOrders = this.orderBin.length
@@ -2039,11 +2046,16 @@ class OrderTableRowManager {
     }
   }
 
+  // insertOrder adds an order to the order bin and updates the row elements
+  // accordingly.
   insertOrder (order) {
     this.orderBin.push(order)
     this.updateQtyNumOrdersEl()
   }
 
+  // updateOrderQuantity updates the quantity of the order identified by a token,
+  // if it exists in the row, and updates the row elements accordingly. The function
+  // returns true if the order is in the bin, and false otherwise.
   updateOrderQty (token, qty) {
     for (let i = 0; i < this.orderBin.length; i++) {
       if (this.orderBin[i].token === token) {
@@ -2055,6 +2067,10 @@ class OrderTableRowManager {
     return false
   }
 
+  // removeOrder removes the order identified by the token, if it exists in the row,
+  // and updates the row elements accordingly. If the order bin is empty, the row is
+  // removed from the screen. The function returns true if an order was removed, and
+  // false otherwise.
   removeOrder (token) {
     const index = this.orderBin.findIndex(order => order.token === token)
     if (index < 0) return false
@@ -2064,6 +2080,8 @@ class OrderTableRowManager {
     return true
   }
 
+  // removeEpochOrders removes all the orders from the row that are not in the
+  // new epoch's epoch queue and updates the elements accordingly.
   removeEpochOrders (newEpoch) {
     this.orderBin = this.orderBin.filter((order) => {
       return !(order.epoch && order.epoch !== newEpoch)
@@ -2072,25 +2090,33 @@ class OrderTableRowManager {
     else this.updateQtyNumOrdersEl()
   }
 
+  // getRate returns the rate of the orders in the row.
   getRate () {
     return this.rate
   }
 
-  getEpoch () {
+  // isEpoch returns whether the orders in this row are in the epoch queue.
+  isEpoch () {
     return this.epoch
   }
 
+  // isSell returns whether the orders in this row are sell orders.
   isSell () {
     return this.sell
   }
 
+  // compare takes an order and returns 0 if the order belongs in this row,
+  // 1 if the order should go after this row in the table, and -1 if it should
+  // be before this row in the table. Sell orders are displayed in ascending order,
+  // buy orders are displayed in descending order, and epoch orders always come
+  // after booked orders.
   compare (order) {
-    if (this.getRate() === order.rate && !!this.getEpoch() === !!order.epoch) {
+    if (this.getRate() === order.rate && this.isEpoch() === !!order.epoch) {
       return 0
     } else if (this.getRate() !== order.rate) {
       return (this.getRate() > order.rate) === order.sell ? 1 : -1
     } else {
-      return this.getEpoch() ? 1 : -1
+      return this.isEpoch() ? 1 : -1
     }
   }
 }
