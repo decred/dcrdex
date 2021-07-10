@@ -26,6 +26,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/text/language"
 )
 
 // contextKey is the key param type used when saving values to a context using
@@ -100,6 +101,16 @@ type clientCore interface {
 
 var _ clientCore = (*core.Core)(nil)
 
+type Config struct {
+	Core          clientCore
+	Addr          string
+	CustomSiteDir string
+	Language      string
+	Logger        dex.Logger
+	ReloadHTML    bool
+	HttpProf      bool
+}
+
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
@@ -110,6 +121,8 @@ type WebServer struct {
 	csp        string
 	srv        *http.Server
 	html       *templates
+	siteDir    string
+	reloadHTML bool
 	indent     bool
 	mtx        sync.RWMutex
 	authTokens map[string]bool
@@ -118,8 +131,8 @@ type WebServer struct {
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
 // in which case a handful of default locations will be checked. This will work
 // in most cases.
-func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadHTML, httpProf bool) (*WebServer, error) {
-	log = logger
+func New(cfg *Config) (*WebServer, error) {
+	log = cfg.Logger
 
 	folderExists := func(fp string) bool {
 		stat, err := os.Stat(fp)
@@ -142,7 +155,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	var siteDir string
 	absDir, _ := filepath.Abs("site")
 	for _, dir := range []string{
-		customSiteDir,
+		cfg.CustomSiteDir,
 		filepath.Join(execPath, "site"),
 		absDir,
 		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
@@ -162,21 +175,6 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	}
 	log.Infof("Located \"site\" folder at %v", siteDir)
 
-	// Prepare the templates.
-	bb := "bodybuilder"
-	tmpl := newTemplates(filepath.Join(siteDir, "src/html"), reloadHTML).
-		addTemplate("login", bb).
-		addTemplate("register", bb, "forms").
-		addTemplate("markets", bb, "forms").
-		addTemplate("wallets", bb, "forms").
-		addTemplate("settings", bb, "forms").
-		addTemplate("orders", bb).
-		addTemplate("order", bb, "forms")
-	err = tmpl.buildErr()
-	if err != nil {
-		return nil, err
-	}
-
 	// Create an HTTP router.
 	mux := chi.NewRouter()
 	httpServer := &http.Server{
@@ -187,13 +185,23 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:       core,
+		core:       cfg.Core,
 		mux:        mux,
 		srv:        httpServer,
-		addr:       addr,
-		html:       tmpl,
-		wsServer:   websocket.New(core, log.SubLogger("WS")),
+		addr:       cfg.Addr,
+		siteDir:    siteDir,
+		reloadHTML: cfg.ReloadHTML,
+		wsServer:   websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens: make(map[string]bool),
+	}
+
+	lang := cfg.Language
+	if lang == "" {
+		lang = "en-US"
+	}
+
+	if err := s.buildTemplates(lang); err != nil {
+		return nil, fmt.Errorf("error loading en localized templates: %v", err)
 	}
 
 	// Middleware
@@ -205,7 +213,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	mux.Use(s.authMiddleware)
 
 	// HTTP profiler
-	if httpProf {
+	if cfg.HttpProf {
 		profPath := "/debug/pprof"
 		log.Infof("Mounting the HTTP profiler on %s", profPath)
 		// Option A: mount each httpprof handler directly. The caveat with this
@@ -307,6 +315,56 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 	fileServer(mux, "/font", filepath.Join(siteDir, "src/font"), "")
 
 	return s, nil
+}
+
+func (s *WebServer) buildTemplates(lang string) error {
+	langs := make([]language.Tag, 0, 1)
+	dirs := make([]string, 0, 1)
+	var match string
+
+	htmlDir := filepath.Join(s.siteDir, "src", "localized_html")
+
+	fileInfos, err := ioutil.ReadDir(htmlDir)
+	if err != nil {
+		return fmt.Errorf("ReadDir error: %w", err)
+	}
+
+	for _, fi := range fileInfos {
+		if !fi.IsDir() {
+			continue
+		}
+		if fi.Name() == lang {
+			match = fi.Name()
+			break
+		}
+
+		tag, err := language.Parse(fi.Name())
+		if err != nil {
+			log.Debugf("error parsing language tag %q: %v", fi.Name(), err)
+			continue
+		}
+		langs = append(langs, tag)
+		dirs = append(dirs, fi.Name())
+	}
+
+	if match == "" {
+		matcher := language.NewMatcher(langs)
+		_, idx := language.MatchStrings(matcher, lang)
+		match = dirs[idx]
+	}
+
+	tmplDir := filepath.Join(htmlDir, match)
+
+	bb := "bodybuilder"
+	s.html = newTemplates(tmplDir, s.reloadHTML).
+		addTemplate("login", bb).
+		addTemplate("register", bb, "forms").
+		addTemplate("markets", bb, "forms").
+		addTemplate("wallets", bb, "forms").
+		addTemplate("settings", bb, "forms").
+		addTemplate("orders", bb).
+		addTemplate("order", bb, "forms")
+	return s.html.buildErr()
 }
 
 // Connect starts the web server. Satisfies the dex.Connector interface.

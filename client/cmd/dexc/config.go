@@ -84,6 +84,7 @@ type Config struct {
 	RPCCert      string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
 	WebAddr      string `long:"webaddr" description:"HTTP server address"`
+	Language     string `long:"lang" description:"BCP 47 tag for preferred language, e.g. en-GB, fr, zh-CN"`
 	NoWeb        bool   `long:"noweb" description:"disable the web server."`
 	Testnet      bool   `long:"testnet" description:"use testnet"`
 	Simnet       bool   `long:"simnet" description:"use simnet"`
