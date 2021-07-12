@@ -956,6 +956,24 @@ export default class MarketsPage extends BasePage {
     if (this.book) this.chart.draw()
   }
 
+  /* updateTitle update the browser title based on the midgap value and the
+   * selected assets.
+   */
+  updateTitle () {
+    // gets first price value from buy or from sell, so we can show it on
+    // title.
+    const midGapValue = this.midGap()
+
+    const market = this.market
+    const [b, q] = [market.baseCfg, market.quoteCfg]
+    const firstSymbol = b.symbol.toUpperCase()
+    const secondSybol = q.symbol.toUpperCase()
+    if (midGapValue) {
+      // more than 6 numbers it gets too big for the title.
+      document.title = `${midGapValue.toFixed(5)} ${firstSymbol}/${secondSybol}`
+    }
+  }
+
   /* handleBookRoute is the handler for the 'book' notification, which is sent
    * in response to a new market subscription. The data received will contain
    * the entire order book.
@@ -963,16 +981,6 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (note) {
     app.log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
-    const { book } = mktBook
-    // gets first price value from buy or from sell, so we can show it on
-    // title.
-    const firstKnownValue = book.buys[0] ? book.buys[0] : book.sells[0]
-    if (firstKnownValue) {
-      // remove rate from title if already have it.
-      document.title = (document.title).replace(/\d+([.])?/g, '')
-      // more than 6 numbers it gets too big for the title.
-      document.title = `${firstKnownValue.rate.toFixed(6)} ${document.title}`
-    }
     const market = this.market
     const page = this.page
     const host = market.dex.host
@@ -980,6 +988,7 @@ export default class MarketsPage extends BasePage {
     if (mktBook.base !== b.id || mktBook.quote !== q.id) return
     this.refreshActiveOrders()
     this.handleBook(mktBook)
+    this.updateTitle()
     page.marketLoader.classList.add('d-none')
     this.marketList.select(host, b.id, q.id)
 
@@ -1012,6 +1021,7 @@ export default class MarketsPage extends BasePage {
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
+    this.updateTitle()
     this.chart.draw()
   }
 
@@ -1022,6 +1032,7 @@ export default class MarketsPage extends BasePage {
     const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
+    this.updateTitle()
     this.chart.draw()
   }
 
