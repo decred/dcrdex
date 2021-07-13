@@ -721,11 +721,19 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
   const tick = tickGuess + step - (tickGuess % step)
   let x = min + tick - (min % tick)
   const absMax = Math.max(Math.abs(max), Math.abs(min))
+  const pts = []
+  let widest = 0
+  // if absMax < 1 we can ignore the changes, as it will not have enough
+  // precision for recalculating it.
+  if (absMax < 1) {
+    return {
+      widest: widest,
+      lbls: pts
+    }
+  }
   // The Math.round part is the minimum precision required to see the change in the numbers.
   // The 2 accounts for the precision of the tick.
   const sigFigs = Math.round(Math.log10(absMax / tick)) + 2
-  const pts = []
-  let widest = 0
   while (x < max) {
     x = Number(x.toPrecision(sigFigs))
     const lbl = formatLabelValue(x)
