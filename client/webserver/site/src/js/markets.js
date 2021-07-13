@@ -536,17 +536,19 @@ export default class MarketsPage extends BasePage {
       window.clearTimeout(this.preorderTimer)
       this.preorderTimer = null
     }
+    const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
     this.market = {
       dex: dex,
-      sid: marketID(baseCfg.symbol, quoteCfg.symbol), // A string market identifier used by the DEX.
+      sid: mktId, // A string market identifier used by the DEX.
+      cfg: dex.markets[mktId],
       // app.assets is a map of core.SupportedAsset type, which can be found at
       // client/core/types.go.
       base: app.assets[base],
       quote: app.assets[quote],
       // dex.assets is a map of dex.Asset type, which is defined at
       // dex/asset.go.
-      baseCfg: dex.assets[base],
-      quoteCfg: dex.assets[quote],
+      baseCfg: baseCfg,
+      quoteCfg: quoteCfg,
       maxSell: null,
       maxBuys: {}
     }
@@ -681,7 +683,7 @@ export default class MarketsPage extends BasePage {
   preSell () {
     const mkt = this.market
     const baseWallet = app.assets[mkt.base.id].wallet
-    if (baseWallet.available < mkt.baseCfg.lotSize) {
+    if (baseWallet.available < mkt.cfg.lotsize) {
       this.setMaxOrder(0, this.adjustedRate() / 1e8)
       return
     }
@@ -704,7 +706,7 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const rate = this.adjustedRate()
     const quoteWallet = app.assets[mkt.quote.id].wallet
-    const aLot = mkt.baseCfg.lotSize * (rate / 1e8)
+    const aLot = mkt.cfg.lotsize * (rate / 1e8)
     if (quoteWallet.balance.available < aLot) {
       this.setMaxOrder(0, 1e8 / rate)
       return
@@ -817,7 +819,7 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
-    this.chart.set(this.book, b.lotSize, q.rateStep)
+    this.chart.set(this.book, this.market.cfg.lotsize, this.market.cfg.ratestep)
   }
 
   /*
@@ -847,7 +849,7 @@ export default class MarketsPage extends BasePage {
    */
   setMarketBuyOrderEstimate () {
     const market = this.market
-    const lotSize = market.baseCfg.lotSize
+    const lotSize = market.cfg.lotsize
     const xc = app.user.exchanges[market.dex.host]
     const buffer = xc.markets[market.sid].buybuffer
     const gap = this.midGap()
@@ -977,8 +979,8 @@ export default class MarketsPage extends BasePage {
       quote: mktBook.quote
     })
 
-    page.lotSize.textContent = Doc.formatCoinValue(market.baseCfg.lotSize / 1e8)
-    page.rateStep.textContent = market.quoteCfg.rateStep / 1e8
+    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize / 1e8)
+    page.rateStep.textContent = market.cfg.ratestep / 1e8
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     this.balanceWgt.setWallets(host, b.id, q.id)
@@ -1092,7 +1094,7 @@ export default class MarketsPage extends BasePage {
       const gap = this.midGap()
       if (gap) {
         const received = order.sell ? order.qty * gap : order.qty / gap
-        const lotSize = this.market.baseCfg.lotSize
+        const lotSize = this.market.cfg.lotsize
         const lots = order.sell ? order.qty / lotSize : received / lotSize
         // TODO: Some kind of adjustment to align with lot sizes for market buy?
         page.vmTotal.textContent = Doc.formatCoinValue(received / 1e8)
@@ -1358,7 +1360,7 @@ export default class MarketsPage extends BasePage {
       page.qtyField.value = ''
       return
     }
-    const lotSize = this.market.baseCfg.lotSize
+    const lotSize = this.market.cfg.lotsize
     page.lotField.value = lots
     page.qtyField.value = (lots * lotSize / 1e8)
     this.previewQuoteAmt(true)
@@ -1376,7 +1378,7 @@ export default class MarketsPage extends BasePage {
       page.qtyField.value = ''
       return
     }
-    const lotSize = this.market.baseCfg.lotSize
+    const lotSize = this.market.cfg.lotsize
     const lots = Math.floor(order.qty / lotSize)
     const adjusted = lots * lotSize
     page.lotField.value = lots
@@ -1398,7 +1400,7 @@ export default class MarketsPage extends BasePage {
       page.mktBuyScore.textContent = '0'
       return
     }
-    const lotSize = this.market.baseCfg.lotSize
+    const lotSize = this.market.cfg.lotsize
     const received = qty / gap
     page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
     page.mktBuyScore.textContent = Doc.formatCoinValue(received / 1e8)
@@ -1436,7 +1438,7 @@ export default class MarketsPage extends BasePage {
     const v = this.page.rateField.value
     if (!v) return null
     const rate = asAtoms(v)
-    const rateStep = this.market.quoteCfg.rateStep
+    const rateStep = this.market.cfg.ratestep
     return rate - (rate % rateStep)
   }
 
@@ -1784,6 +1786,8 @@ class MarketRow {
     this.name = mkt.name
     this.baseID = mkt.baseid
     this.quoteID = mkt.quoteid
+    this.lotSize = mkt.lotsize
+    this.rateStep = mkt.ratestep
     const row = tmpl.cloneNode(true)
     this.row = row
     Doc.tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)

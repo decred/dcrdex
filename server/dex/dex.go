@@ -43,13 +43,13 @@ const (
 // implementation version, has Network and ConfigPath strings, and has JSON
 // tags.
 type AssetConf struct {
-	Symbol     string `json:"bip44symbol"`
-	Network    string `json:"network"`
-	LotSize    uint64 `json:"lotSize"`
-	RateStep   uint64 `json:"rateStep"`
-	MaxFeeRate uint64 `json:"maxFeeRate"`
-	SwapConf   uint32 `json:"swapConf"`
-	ConfigPath string `json:"configPath"`
+	Symbol      string `json:"bip44symbol"`
+	Network     string `json:"network"`
+	LotSizeOLD  uint64 `json:"lotSize,omitempty"`
+	RateStepOLD uint64 `json:"rateStep,omitempty"`
+	MaxFeeRate  uint64 `json:"maxFeeRate"`
+	SwapConf    uint32 `json:"swapConf"`
+	ConfigPath  string `json:"configPath"`
 }
 
 // DBConf groups the database configuration parameters.
@@ -268,13 +268,17 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Do not wrap the caller's context for the DB since we must coordinate it's
 	// shutdown in sequence with the other subsystems.
 	ctxDB, cancelDB := context.WithCancel(context.Background())
-	abort := func() {
+	var ready bool
+	defer func() {
+		if ready {
+			return
+		}
 		for _, ss := range subsystems {
 			ss.stop()
 		}
 		// If the DB is running, kill it too.
 		cancelDB()
-	}
+	}()
 
 	// Check each configured asset.
 	assetIDs := make([]uint32, len(cfg.Assets))
@@ -305,6 +309,32 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		assetIDs[i] = ID
 	}
 
+	// Check each market's base lot size to see if any asset has different base
+	// lots sizes, which will break older clients. In this case, set
+	// msgjson.Asset.LotSize 0 so older clients cannot use the market. Do the
+	// same for rate step.
+	lotSizes := make(map[uint32]uint64)
+	rateSteps := make(map[uint32]uint64)
+	for _, mktInfo := range cfg.Markets {
+		lotSize, found := lotSizes[mktInfo.Base]
+		if !found {
+			lotSizes[mktInfo.Base] = mktInfo.LotSize
+		} else if lotSize > 0 && lotSize != mktInfo.LotSize {
+			lotSizes[mktInfo.Base] = 0
+			log.Warnf("Asset %d (%s) has multiple lot sizes. Old clients will not work with this asset.",
+				mktInfo.Base, dex.BipIDSymbol(mktInfo.Base))
+		}
+
+		rateStep, found := rateSteps[mktInfo.Quote]
+		if !found {
+			rateSteps[mktInfo.Quote] = mktInfo.RateStep
+		} else if rateStep > 0 && rateStep != mktInfo.RateStep {
+			rateSteps[mktInfo.Quote] = 0
+			log.Warnf("Asset %d (%s) has multiple rate steps. Old clients will not work with this asset.",
+				mktInfo.Quote, dex.BipIDSymbol(mktInfo.Quote))
+		}
+	}
+
 	// Create a MasterCoinLocker for each asset.
 	dexCoinLocker := coinlock.NewDEXCoinLocker(assetIDs)
 
@@ -322,7 +352,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 		assetVer, err := asset.Version(symbol)
 		if err != nil {
-			abort()
 			return nil, fmt.Errorf("failed to retrieve asset %q version: %w", symbol, err)
 		}
 
@@ -332,7 +361,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		logger := assetLogger.SubLogger(symbol)
 		be, err := asset.Setup(symbol, assetConf.ConfigPath, logger, cfg.Network)
 		if err != nil {
-			abort()
 			return nil, fmt.Errorf("failed to setup asset %q: %w", symbol, err)
 		}
 
@@ -340,14 +368,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			var ok bool
 			dcrBackend, ok = be.(*dcrasset.Backend)
 			if !ok {
-				abort()
 				return nil, fmt.Errorf("dcr backend is invalid")
 			}
 		}
 
 		err = startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
 		if err != nil {
-			abort()
 			return nil, fmt.Errorf("failed to start asset %q: %w", symbol, err)
 		}
 
@@ -358,8 +384,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				ID:           assetID,
 				Symbol:       symbol,
 				Version:      assetVer,
-				LotSize:      assetConf.LotSize,
-				RateStep:     assetConf.RateStep,
 				MaxFeeRate:   assetConf.MaxFeeRate,
 				SwapSize:     initTxSize,
 				SwapSizeBase: initTxSizeBase,
@@ -380,8 +404,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			Symbol:       assetConf.Symbol,
 			ID:           assetID,
 			Version:      assetVer,
-			LotSize:      assetConf.LotSize,
-			RateStep:     assetConf.RateStep,
+			LotSize:      lotSizes[assetID],
+			RateStep:     rateSteps[assetID],
 			MaxFeeRate:   assetConf.MaxFeeRate,
 			SwapSize:     initTxSize,
 			SwapSizeBase: initTxSizeBase,
@@ -393,7 +417,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	// Ensure their is a DCR asset backend.
 	if dcrBackend == nil {
-		abort()
 		return nil, fmt.Errorf("no DCR backend configured")
 	}
 	// Validate the registration fee extended public key.
@@ -406,7 +429,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	if err := ctx.Err(); err != nil {
-		abort()
 		return nil, err
 	}
 
@@ -439,7 +461,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}()
 	storage, err := db.Open(ctxDB, "pg", pgCfg)
 	if err != nil {
-		abort()
 		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
@@ -505,12 +526,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	swapper, err := swap.NewSwapper(swapperCfg)
 	if err != nil {
-		abort()
 		return nil, fmt.Errorf("NewSwapper: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
-		abort()
 		return nil, err
 	}
 
@@ -531,14 +550,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			DataCollector:   dataAPI,
 		})
 		if err != nil {
-			abort()
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
 		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
 		err = dataAPI.AddMarketSource(mkt)
 		if err != nil {
-			abort()
 			return nil, fmt.Errorf("DataSource.AddMarket: %w", err)
 		}
 
@@ -577,6 +594,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			Name:            name,
 			Base:            mkt.Base(),
 			Quote:           mkt.Quote(),
+			LotSize:         mkt.LotSize(),
+			RateStep:        mkt.RateStep(),
 			EpochLen:        mkt.EpochDuration(),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
 			MarketStatus: msgjson.MarketStatus{
@@ -607,20 +626,17 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	startSubSys("OrderRouter", orderRouter)
 
 	if err := ctx.Err(); err != nil {
-		abort()
 		return nil, err
 	}
 
 	// Client comms RPC server.
 	server, err := comms.NewServer(cfg.CommsCfg)
 	if err != nil {
-		abort()
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 
 	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
 	if err != nil {
-		abort()
 		return nil, err
 	}
 
@@ -641,6 +657,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 
 	startSubSys("Comms Server", server)
+
+	ready = true // don't shut down on return
 
 	return dexMgr, nil
 }
@@ -677,7 +695,7 @@ func (dm *DEX) ScaleFeeRate(assetID uint32, rate uint64) uint64 {
 	return rate
 }
 
-// Config returns the current dex configuration.
+// ConfigMsg returns the current dex configuration, marshalled to JSON.
 func (dm *DEX) ConfigMsg() json.RawMessage {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()

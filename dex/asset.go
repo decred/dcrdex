@@ -80,7 +80,7 @@ const (
 	Regtest
 )
 
-// The DEX recognizes only three networks. Simnet is an alias of Regtest.
+// Simnet is an alias of Regtest.
 const Simnet = Regtest
 
 // String returns the string representation of a Network.
@@ -114,8 +114,6 @@ type Asset struct {
 	ID           uint32 `json:"id"`
 	Symbol       string `json:"symbol"`
 	Version      uint32 `json:"version"`
-	LotSize      uint64 `json:"lotSize"`
-	RateStep     uint64 `json:"rateStep"`
 	MaxFeeRate   uint64 `json:"maxFeeRate"`
 	SwapSize     uint64 `json:"swapSize"`
 	SwapSizeBase uint64 `json:"swapSizeBase"`

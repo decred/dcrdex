@@ -114,7 +114,7 @@ type Contract struct {
 	// LockTime is the refund locktime.
 	LockTime time.Time
 	// TxData is raw transaction data. This data is provided for some assets
-	// to aid in SPV compatiblity.
+	// to aid in SPV compatibility.
 	TxData []byte
 }
 

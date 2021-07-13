@@ -510,6 +510,16 @@ func (m *Market) MarketBuyBuffer() float64 {
 	return m.marketInfo.MarketBuyBuffer
 }
 
+// LotSize returns the market's lot size in units of the base asset.
+func (m *Market) LotSize() uint64 {
+	return m.marketInfo.LotSize
+}
+
+// RateStep returns the market's rate step in units of the quote asset.
+func (m *Market) RateStep() uint64 {
+	return m.marketInfo.RateStep
+}
+
 // Base is the base asset ID.
 func (m *Market) Base() uint32 {
 	return m.marketInfo.Base

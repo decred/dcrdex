@@ -74,9 +74,9 @@ func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 // }
 
 func (p *pingPonger) sell(m *Mantle) {
-	m.order(true, dcrAssetCfg.LotSize, m.truncatedMidGap())
+	m.order(true, lotSize, m.truncatedMidGap())
 }
 
 func (p *pingPonger) buy(m *Mantle) {
-	m.order(false, dcrAssetCfg.LotSize, m.truncatedMidGap())
+	m.order(false, lotSize, m.truncatedMidGap())
 }

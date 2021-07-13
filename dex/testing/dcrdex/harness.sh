@@ -53,6 +53,8 @@ cat > "./markets.json" <<EOF
         {
             "base": "DCR_simnet",
             "quote": "BTC_simnet",
+            "lotSize": 1000000000,
+            "rateStep": 100,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
@@ -63,6 +65,8 @@ if [ $LTC_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "LTC_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
@@ -75,6 +79,8 @@ if [ $BCH_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "BCH_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
@@ -87,6 +93,8 @@ if [ $ETH_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "ETH_simnet",
+            "lotSize": 1000000000,
+            "rateStep": 1000000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
@@ -100,8 +108,6 @@ cat << EOF >> "./markets.json"
         "DCR_simnet": {
             "bip44symbol": "dcr",
             "network": "simnet",
-            "lotSize": 1000000000,
-            "rateStep": 100000,
             "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf"
@@ -109,8 +115,6 @@ cat << EOF >> "./markets.json"
         "BTC_simnet": {
             "bip44symbol": "btc",
             "network": "simnet",
-            "lotSize": 100000,
-            "rateStep": 100,
             "maxFeeRate": 100,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf"
@@ -122,8 +126,6 @@ if [ $LTC_ON -eq 0 ]; then
         "LTC_simnet": {
             "bip44symbol": "ltc",
             "network": "simnet",
-            "lotSize": 1000000,
-            "rateStep": 1000000,
             "maxFeeRate": 20,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf"
@@ -136,8 +138,6 @@ if [ $BCH_ON -eq 0 ]; then
         "BCH_simnet": {
             "bip44symbol": "bch",
             "network": "simnet",
-            "lotSize": 1000000,
-            "rateStep": 1000000,
             "maxFeeRate": 20,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf"
@@ -150,8 +150,6 @@ if [ $ETH_ON -eq 0 ]; then
         "ETH_simnet": {
             "bip44symbol": "eth",
             "network": "simnet",
-            "lotSize": 1000000000,
-            "rateStep": 1000000000,
             "maxFeeRate": 200,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"

@@ -180,6 +180,8 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 			BaseSymbol:      base.Symbol,
 			QuoteID:         quote.ID,
 			QuoteSymbol:     quote.Symbol,
+			LotSize:         mkt.LotSize,
+			RateStep:        mkt.RateStep,
 			EpochLen:        mkt.EpochLen,
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
@@ -2698,19 +2700,26 @@ func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset
 // for trading will vary based on the rate for a buy order (unlike a sell
 // order).
 func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
-	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	_, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
-	}
-
-	quoteLotEst := calc.BaseToQuote(rate, baseAsset.LotSize)
-	if quoteLotEst == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
 	}
 
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
+	}
+
+	mktID := marketName(base, quote)
+	mktConf := dc.marketConfig(mktID)
+	if mktConf == nil {
+		return nil, newError(marketErr, "unknown market %q", mktID)
+	}
+
+	lotSize := mktConf.LotSize
+	quoteLotEst := calc.BaseToQuote(rate, lotSize)
+	if quoteLotEst == 0 {
+		return nil, errors.New("cannot divide by lot size zero")
 	}
 
 	swapFeeSuggestion := c.feeSuggestion(dc, quote, false)
@@ -2729,7 +2738,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       baseAsset.LotSize,
+		LotSize:       lotSize,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 	})
@@ -2751,17 +2760,21 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, err
 	}
 
-	if baseAsset.LotSize == 0 {
-		return nil, errors.New("cannot divide by lot size zero")
-	}
-
 	dc, _, err := c.dex(host)
 	if err != nil {
 		return nil, err
 	}
+	mktID := marketName(base, quote)
+	mktConf := dc.marketConfig(mktID)
+	if mktConf == nil {
+		return nil, newError(marketErr, "unknown market %q", mktID)
+	}
+	lotSize := mktConf.LotSize
+	if lotSize == 0 {
+		return nil, errors.New("cannot divide by lot size zero")
+	}
 
 	// Estimate a quote-converted lot size.
-	mktID := marketName(base, quote)
 	book := dc.bookie(mktID)
 	if book == nil {
 		return nil, fmt.Errorf("no book synced for %s at %s", mktID, host)
@@ -2777,7 +2790,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
 	}
 
-	maxSell, err := baseWallet.MaxOrder(baseAsset.LotSize, swapFeeSuggestion, baseAsset)
+	maxSell, err := baseWallet.MaxOrder(lotSize, swapFeeSuggestion, baseAsset)
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
@@ -2786,7 +2799,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	if err != nil {
 		return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
 	}
-	lotSize := calc.BaseToQuote(midGap, baseAsset.LotSize)
+	lotSize = calc.BaseToQuote(midGap, lotSize)
 
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
 		LotSize:       lotSize,
@@ -3065,6 +3078,12 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, err
 	}
 
+	mktID := marketName(form.Base, form.Quote)
+	mktConf := dc.marketConfig(mktID)
+	if mktConf == nil {
+		return nil, newError(marketErr, "unknown market %q", mktID)
+	}
+
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, err
@@ -3093,7 +3112,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	// Fund the order and prepare the coins.
-	lotSize := wallets.baseAsset.LotSize
+	lotSize := mktConf.LotSize
 	lots := form.Qty / lotSize
 	rate := form.Rate
 
@@ -3195,7 +3214,8 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 // Send an order, process result, prepare and store the trackedTrade.
 func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
-	if dc.marketConfig(mktID) == nil {
+	mktConf := dc.marketConfig(mktID)
+	if mktConf == nil {
 		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
@@ -3251,8 +3271,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Fund the order and prepare the coins.
+	lotSize := mktConf.LotSize
 	fundQty := qty
-	lots := qty / wallets.baseAsset.LotSize
+	lots := qty / lotSize
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
@@ -3277,13 +3298,13 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			// In that case, fall back to the 1 lot estimate for now.
 			if err == nil {
 				baseQty := calc.QuoteToBase(midGap, fundQty)
-				lots = baseQty / wallets.baseAsset.LotSize
+				lots = baseQty / lotSize
 				if lots == 0 {
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
 							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
 						qty, wallets.quoteAsset.Symbol, midGap, baseQty,
-						wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
+						wallets.baseAsset.Symbol, lotSize)
 					return nil, 0, err
 				}
 			}
@@ -3292,7 +3313,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	if lots == 0 {
 		return nil, 0, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
-			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
+			qty, wallets.baseAsset.Symbol, rate, lotSize)
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
@@ -3359,7 +3380,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			},
 		}
 	}
-	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)
+	err = order.ValidateOrder(ord, order.OrderStatusEpoch, lotSize)
 	if err != nil {
 		unlockCoins()
 		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
@@ -5409,8 +5430,6 @@ func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 		ID:           asset.ID,
 		Symbol:       asset.Symbol,
 		Version:      asset.Version,
-		LotSize:      asset.LotSize,
-		RateStep:     asset.RateStep,
 		MaxFeeRate:   asset.MaxFeeRate,
 		SwapSize:     asset.SwapSize,
 		SwapSizeBase: asset.SwapSizeBase,

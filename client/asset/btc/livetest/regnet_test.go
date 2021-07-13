@@ -23,15 +23,14 @@ var (
 		SwapSize:     dexbtc.InitTxSizeSegwit,
 		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
 		MaxFeeRate:   10,
-		LotSize:      1e6,
-		RateStep:     10,
 		SwapConf:     1,
 	}
 )
 
 func TestWallet(t *testing.T) {
+	const lotSize = 1e6
 	fmt.Println("////////// WITHOUT SPLIT FUNDING TRANSACTIONS //////////")
-	Run(t, btc.NewWallet, alphaAddress, tBTC, false)
+	Run(t, btc.NewWallet, alphaAddress, lotSize, tBTC, false)
 	fmt.Println("////////// WITH SPLIT FUNDING TRANSACTIONS //////////")
-	Run(t, btc.NewWallet, alphaAddress, tBTC, true)
+	Run(t, btc.NewWallet, alphaAddress, lotSize, tBTC, true)
 }
