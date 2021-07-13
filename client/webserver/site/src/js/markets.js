@@ -65,7 +65,7 @@ export default class MarketsPage extends BasePage {
       'hoverVolume', 'chartLegend', 'chartErrMsg',
       // Max order section
       'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
-      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
+      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxNotEnough', 'maxLotBox', 'maxFromLotsLbl',
       'maxBox'
     ])
     this.main = main
@@ -675,6 +675,8 @@ export default class MarketsPage extends BasePage {
     const quoteAsset = app.assets[order.quote]
     const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
     page.orderPreview.textContent = `Total: ${total} ${quoteAsset.symbol.toUpperCase()}`
+    const isSell = this.isSell()
+    isSell ? this.preSell() : this.preBuy()
   }
 
   /**
@@ -684,7 +686,7 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const baseWallet = app.assets[mkt.base.id].wallet
     if (baseWallet.available < mkt.cfg.lotsize) {
-      this.setMaxOrder(0, this.adjustedRate() / 1e8)
+      this.setMaxOrder({ lots: 0 }, this.adjustedRate() / 1e8)
       return
     }
     if (mkt.maxSell) {
@@ -708,7 +710,7 @@ export default class MarketsPage extends BasePage {
     const quoteWallet = app.assets[mkt.quote.id].wallet
     const aLot = mkt.cfg.lotsize * (rate / 1e8)
     if (quoteWallet.balance.available < aLot) {
-      this.setMaxOrder(0, 1e8 / rate)
+      this.setMaxOrder({ lots: 0 }, 1e8 / rate)
       return
     }
     if (mkt.maxBuys[rate]) {
@@ -740,6 +742,7 @@ export default class MarketsPage extends BasePage {
 
     Doc.show(page.maxOrd, page.maxLotBox)
     Doc.hide(page.maxAboveZero)
+    Doc.hide(page.maxNotEnough)
     page.maxFromLots.textContent = 'calculating...'
     page.maxFromLotsLbl.textContent = ''
     this.preorderTimer = window.setTimeout(async () => {
@@ -773,6 +776,8 @@ export default class MarketsPage extends BasePage {
     page.maxFromLots.textContent = maxOrder.lots.toString()
     page.maxFromLotsLbl.textContent = maxOrder.lots === 1 ? 'lot' : 'lots'
     if (maxOrder.lots === 0) {
+      // show not enough funds for purchasing.
+      Doc.show(page.maxNotEnough)
       Doc.hide(page.maxAboveZero)
       return
     }
