@@ -24,18 +24,20 @@ import (
 
 const alphaAddress = "bchreg:qqnm4z2tftyyeu3kvzzepmlp9mj3g6fvxgft570vll"
 
-var tBCH = &dex.Asset{
-	ID:           2,
-	Symbol:       "bch",
-	Version:      version,
-	SwapSize:     dexbtc.InitTxSize,
-	SwapSizeBase: dexbtc.InitTxSizeBase,
-	MaxFeeRate:   10,
-	LotSize:      1e6,
-	RateStep:     10,
-	SwapConf:     1,
-}
+var (
+	tLotSize  uint64 = 1e6
+	tRateStep uint64 = 10
+	tBCH             = &dex.Asset{
+		ID:           2,
+		Symbol:       "bch",
+		Version:      version,
+		SwapSize:     dexbtc.InitTxSize,
+		SwapSizeBase: dexbtc.InitTxSizeBase,
+		MaxFeeRate:   10,
+		SwapConf:     1,
+	}
+)
 
 func TestWallet(t *testing.T) {
-	livetest.Run(t, NewWallet, alphaAddress, tBCH, false)
+	livetest.Run(t, NewWallet, alphaAddress, tLotSize, tBCH, false)
 }

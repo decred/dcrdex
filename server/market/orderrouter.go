@@ -61,6 +61,10 @@ type MarketTunnel interface {
 	// MarketBuyBuffer is a coefficient that when multiplied by the market's lot
 	// size specifies the minimum required amount for a market buy order.
 	MarketBuyBuffer() float64
+	// LotSize is the market's lot size in units of the base asset.
+	LotSize() uint64
+	// RateStep is the market's rate step in units of the quote asset.
+	RateStep() uint64
 	// CoinLocked should return true if the CoinID is currently a funding Coin
 	// for an active DEX order. This is required for Coin validation to prevent
 	// a user from submitting multiple orders spending the same Coin. This
@@ -232,12 +236,13 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	if limit.Rate == 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "rate = 0 not allowed")
 	}
-	if limit.Rate%coins.quote.RateStep != 0 {
+	if rateStep := tunnel.RateStep(); limit.Rate%rateStep != 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "rate (%d) not a multiple of ratestep (%d)",
-			limit.Rate, coins.quote.RateStep)
+			limit.Rate, rateStep)
 	}
 
-	rpcErr = r.checkPrefixTrade(coins, &limit.Prefix, &limit.Trade, true)
+	lotSize := tunnel.LotSize()
+	rpcErr = r.checkPrefixTrade(coins, lotSize, &limit.Prefix, &limit.Trade, true)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -310,7 +315,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	swapVal := limit.Quantity
-	lots := swapVal / coins.base.LotSize
+	lots := swapVal / lotSize
 	if !sell {
 		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
@@ -452,7 +457,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 	// Passing sell as the checkLot parameter causes the lot size check to be
 	// ignored for market buy orders.
-	rpcErr = r.checkPrefixTrade(assets, &market.Prefix, &market.Trade, sell)
+	lotSize := tunnel.LotSize()
+	rpcErr = r.checkPrefixTrade(assets, lotSize, &market.Prefix, &market.Trade, sell)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -557,7 +563,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		// Calculate the fees and check that the utxo sum is enough.
 		var reqVal uint64
 		if sell {
-			lots := market.Quantity / assets.base.LotSize
+			lots := market.Quantity / lotSize
 			reqVal = calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), lots, &assets.funding.Asset)
 		} else {
 			// This is a market buy order, so the quantity gets special handling.
@@ -565,10 +571,10 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			// 2. The quantity has to satisfy the market buy buffer.
 			midGap := tunnel.MidGap()
 			if midGap == 0 {
-				midGap = assets.quote.RateStep
+				midGap = tunnel.RateStep()
 			}
 			buyBuffer := tunnel.MarketBuyBuffer()
-			lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
+			lotWithBuffer := uint64(float64(lotSize) * buyBuffer)
 			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
 			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
 
@@ -853,7 +859,7 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 
 // checkPrefixTrade validates the information in the prefix and trade portions
 // of an order.
-func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
+func (r *OrderRouter) checkPrefixTrade(assets *assetSet, lotSize uint64, prefix *msgjson.Prefix,
 	trade *msgjson.Trade, checkLot bool) *msgjson.Error {
 	// Check that the client's timestamp is still valid.
 	rpcErr := checkTimes(prefix)
@@ -868,7 +874,7 @@ func (r *OrderRouter) checkPrefixTrade(assets *assetSet, prefix *msgjson.Prefix,
 	if trade.Quantity == 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "zero quantity not allowed")
 	}
-	if checkLot && trade.Quantity%assets.base.LotSize != 0 {
+	if checkLot && trade.Quantity%lotSize != 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "order quantity not a multiple of lot size")
 	}
 	// Validate UTXOs

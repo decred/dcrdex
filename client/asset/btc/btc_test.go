@@ -30,18 +30,17 @@ import (
 )
 
 var (
-	tLogger  dex.Logger
-	tCtx     context.Context
-	tLotSize uint64 = 1e6 // 0.01 BTC
-	tBTC            = &dex.Asset{
+	tLogger   dex.Logger
+	tCtx      context.Context
+	tLotSize  uint64 = 1e6 // 0.01 BTC
+	tRateStep uint64 = 10
+	tBTC             = &dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
 		Version:      version,
 		SwapSize:     dexbtc.InitTxSize,
 		SwapSizeBase: dexbtc.InitTxSizeBase,
 		MaxFeeRate:   34,
-		LotSize:      tLotSize,
-		RateStep:     10,
 		SwapConf:     1,
 	}
 	optimalFeeRate uint64 = 24
@@ -574,7 +573,7 @@ func TestAvailableFund(t *testing.T) {
 
 	setOrderValue := func(v uint64) {
 		ord.Value = v
-		ord.MaxSwapCount = v / tBTC.LotSize
+		ord.MaxSwapCount = v / tLotSize
 	}
 
 	// Zero value
@@ -925,7 +924,7 @@ func TestFundingCoins(t *testing.T) {
 
 func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
-	maxOrder, err := wallet.MaxOrder(tBTC.LotSize, feeSuggestion, tBTC)
+	maxOrder, err := wallet.MaxOrder(tLotSize, feeSuggestion, tBTC)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
@@ -961,7 +960,7 @@ func TestFundEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	swapVal := uint64(1e7)
-	lots := swapVal / tBTC.LotSize
+	lots := swapVal / tLotSize
 	node.rawRes[methodLockUnspent] = []byte(`true`)
 
 	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
@@ -1020,7 +1019,7 @@ func TestFundEdges(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
+	checkMax(lots-1, swapVal-tLotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
 		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+backingFees-1)
 
 	_, _, err = wallet.FundOrder(ord)
@@ -1182,7 +1181,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 		t.Fatal(err)
 	}
 	swapVal := uint64(1e7)
-	lots := swapVal / tBTC.LotSize
+	lots := swapVal / tLotSize
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 
 	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
@@ -1240,7 +1239,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMax(lots-1, swapVal-tBTC.LotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
+	checkMax(lots-1, swapVal-tLotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
 		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+backingFees-1)
 
 	_, _, err = wallet.FundOrder(ord)
@@ -2357,7 +2356,7 @@ func TestPreSwap(t *testing.T) {
 	// See math from TestFundEdges. 10 lots with max fee rate of 34 sats/vbyte.
 
 	swapVal := uint64(1e7)
-	lots := swapVal / tBTC.LotSize // 10 lots
+	lots := swapVal / tLotSize // 10 lots
 
 	const swapSize = 225
 	const totalBytes = 2250
@@ -2384,7 +2383,7 @@ func TestPreSwap(t *testing.T) {
 	}
 
 	form := &asset.PreSwapForm{
-		LotSize:       tBTC.LotSize,
+		LotSize:       tLotSize,
 		Lots:          lots,
 		AssetConfig:   tBTC,
 		Immediate:     false,

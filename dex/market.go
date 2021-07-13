@@ -15,6 +15,7 @@ type MarketInfo struct {
 	Base                   uint32
 	Quote                  uint32
 	LotSize                uint64
+	RateStep               uint64
 	EpochDuration          uint64 // msec
 	MarketBuyBuffer        float64
 	MaxUserCancelsPerEpoch uint32
@@ -47,7 +48,7 @@ func MarketName(base, quote uint32) (string, error) {
 // NewMarketInfo creates a new market configuration (MarketInfo) from the given
 // base and quote asset indexes, order lot size, and epoch duration in
 // milliseconds. See also MarketName.
-func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
+func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
 	name, err := MarketName(base, quote)
 	if err != nil {
 		return nil, err
@@ -57,6 +58,7 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyB
 		Base:                   base,
 		Quote:                  quote,
 		LotSize:                lotSize,
+		RateStep:               rateStep,
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,
@@ -67,7 +69,7 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyB
 // NewMarketInfoFromSymbols is like NewMarketInfo, but the base and quote assets
 // are identified by their symbols as defined in the
 // decred.org/dcrdex/server/asset package.
-func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
+func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
 	base = strings.ToLower(base)
 	baseID, found := BipSymbolID(base)
 	if !found {
@@ -85,6 +87,7 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64,
 		Base:                   baseID,
 		Quote:                  quoteID,
 		LotSize:                lotSize,
+		RateStep:               rateStep,
 		EpochDuration:          epochDuration,
 		MarketBuyBuffer:        marketBuyBuffer,
 		MaxUserCancelsPerEpoch: math.MaxUint32,

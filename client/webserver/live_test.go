@@ -141,11 +141,12 @@ func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
 	mktID := base + "_" + quote
+	assetOrder := rand.Intn(5) + 6
+	lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
+	rateStep := lotSize / 1e3
 	if _, exists := marketStats[mktID]; !exists {
-		baseAsset := dexAssets[baseID]
-		quoteAsset := dexAssets[quoteID]
-		midGap := float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
-		maxQty := float64(baseAsset.LotSize) / 1e8 * float64(rand.Intn(1e3))
+		midGap := float64(rateStep) / 1e8 * float64(rand.Intn(1e6))
+		maxQty := float64(lotSize) / 1e8 * float64(rand.Intn(1e3))
 		marketStats[mktID] = [2]float64{midGap, maxQty}
 	}
 
@@ -155,6 +156,8 @@ func mkMrkt(base, quote string) *core.Market {
 		BaseSymbol:      base,
 		QuoteID:         quoteID,
 		QuoteSymbol:     quote,
+		LotSize:         lotSize,
+		RateStep:        rateStep,
 		MarketBuyBuffer: rand.Float64() + 1,
 		EpochLen:        uint64(epochDuration.Milliseconds()),
 		Orders:          userOrders(mktID),
@@ -189,14 +192,10 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 
 func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
-	assetOrder := rand.Intn(5) + 6
-	lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
 	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
 		Version:      uint32(rand.Intn(12)),
-		LotSize:      lotSize,
-		RateStep:     lotSize / 1e3,
 		MaxFeeRate:   uint64(rand.Intn(10) + 1),
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
@@ -426,13 +425,14 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 
 func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error) {
 	mktID, _ := dex.MarketName(base, quote)
+	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
 	qty := toAtoms(ord.Qty)
 	quoteQty := calc.BaseToQuote(rate, qty)
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
-			Lots:               qty / tExchanges[host].Assets[base].LotSize,
+			Lots:               qty / lotSize,
 			Value:              quoteQty,
 			MaxFees:            quoteQty / 100,
 			RealisticWorstCase: quoteQty / 200,
@@ -448,6 +448,7 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 
 func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error) {
 	mktID, _ := dex.MarketName(base, quote)
+	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
 	qty := toAtoms(ord.Qty)
@@ -456,7 +457,7 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
-			Lots:               qty / tExchanges[host].Assets[base].LotSize,
+			Lots:               qty / lotSize,
 			Value:              qty,
 			MaxFees:            qty / 100,
 			RealisticWorstCase: qty / 200,
@@ -507,8 +508,9 @@ func makeCoreOrder() *core.Order {
 	quoteSymbol := orderAssets[(baseIdx+1)%len(orderAssets)]
 	baseID, _ := dex.BipSymbolID(baseSymbol)
 	quoteID, _ := dex.BipSymbolID(quoteSymbol)
-	lotSize := tExchanges[host].Assets[baseID].LotSize
-	rateStep := tExchanges[host].Assets[quoteID].RateStep
+	mktID, _ := dex.MarketName(baseID, quoteID)
+	lotSize := tExchanges[host].Markets[mktID].LotSize
+	rateStep := tExchanges[host].Markets[mktID].RateStep
 	rate := uint64(rand.Intn(1e3)) * rateStep
 	baseQty := uint64(rand.Intn(1e3)) * lotSize
 	isMarket := rand.Float32() > 0.5

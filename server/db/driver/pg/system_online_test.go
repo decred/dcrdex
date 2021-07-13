@@ -46,12 +46,12 @@ func TestMain(m *testing.M) {
 
 func openDB() (func() error, error) {
 	var err error
-	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration, MarketBuyBuffer)
+	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
 
-	mktInfo2, err = dex.NewMarketInfoFromSymbols("btc", "ltc", LotSize, EpochDuration, MarketBuyBuffer)
+	mktInfo2, err = dex.NewMarketInfoFromSymbols("btc", "ltc", LotSize, RateStep, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}

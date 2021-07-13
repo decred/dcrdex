@@ -24,18 +24,20 @@ import (
 
 const alphaAddress = "mt9hgfXXbM3x7hewgEAovBwqoMAAnctJ4V"
 
-var tLTC = &dex.Asset{
-	ID:           2,
-	Symbol:       "ltc",
-	Version:      version,
-	SwapSize:     dexbtc.InitTxSize,
-	SwapSizeBase: dexbtc.InitTxSizeBase,
-	MaxFeeRate:   10,
-	LotSize:      1e6,
-	RateStep:     10,
-	SwapConf:     1,
-}
+var (
+	tLotSize  uint64 = 1e6
+	tRateStep uint64 = 10
+	tLTC             = &dex.Asset{
+		ID:           2,
+		Symbol:       "ltc",
+		Version:      version,
+		SwapSize:     dexbtc.InitTxSize,
+		SwapSizeBase: dexbtc.InitTxSizeBase,
+		MaxFeeRate:   10,
+		SwapConf:     1,
+	}
+)
 
 func TestWallet(t *testing.T) {
-	livetest.Run(t, NewWallet, alphaAddress, tLTC, false)
+	livetest.Run(t, NewWallet, alphaAddress, tLotSize, tLTC, false)
 }

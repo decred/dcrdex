@@ -367,6 +367,8 @@ type Market struct {
 	BaseSymbol      string   `json:"basesymbol"`
 	QuoteID         uint32   `json:"quoteid"`
 	QuoteSymbol     string   `json:"quotesymbol"`
+	LotSize         uint64   `json:"lotsize"`
+	RateStep        uint64   `json:"ratestep"`
 	EpochLen        uint64   `json:"epochlen"`
 	StartEpoch      uint64   `json:"startepoch"`
 	MarketBuyBuffer float64  `json:"buybuffer"`

@@ -252,6 +252,8 @@ type TMarketTunnel struct {
 	added      chan struct{}
 	auth       *TAuth
 	midGap     uint64
+	lotSize    uint64
+	rateStep   uint64
 	mbBuffer   float64
 	epochIdx   uint64
 	epochDur   uint64
@@ -287,6 +289,14 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 
 func (m *TMarketTunnel) MidGap() uint64 {
 	return m.midGap
+}
+
+func (m *TMarketTunnel) LotSize() uint64 {
+	return m.lotSize
+}
+
+func (m *TMarketTunnel) RateStep() uint64 {
+	return m.rateStep
 }
 
 func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
@@ -459,8 +469,6 @@ var assetBTC = &asset.BackedAsset{
 	Asset: dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
-		LotSize:      btcLotSize,
-		RateStep:     btcRateStep,
 		MaxFeeRate:   14,
 		SwapSize:     dummySize,
 		SwapSizeBase: dummySize / 2,
@@ -472,8 +480,6 @@ var assetDCR = &asset.BackedAsset{
 	Asset: dex.Asset{
 		ID:           42,
 		Symbol:       "dcr",
-		LotSize:      dcrLotSize,
-		RateStep:     dcrRateStep,
 		MaxFeeRate:   10,
 		SwapSize:     dummySize,
 		SwapSizeBase: dummySize / 2,
@@ -485,8 +491,6 @@ var assetUnknown = &asset.BackedAsset{
 	Asset: dex.Asset{
 		ID:           54321,
 		Symbol:       "buk",
-		LotSize:      1000,
-		RateStep:     100,
 		MaxFeeRate:   10,
 		SwapSize:     2,
 		SwapSizeBase: 1,
@@ -549,6 +553,8 @@ func TestMain(m *testing.M) {
 			adds:       make([]*orderRecord, 0),
 			auth:       auth,
 			midGap:     dcrRateStep * 1000,
+			lotSize:    dcrLotSize,
+			rateStep:   btcRateStep,
 			mbBuffer:   1.5, // 150% of lot size
 			cancelable: true,
 			epochIdx:   1573773894,

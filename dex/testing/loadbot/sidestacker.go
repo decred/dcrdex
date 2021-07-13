@@ -117,7 +117,7 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 
 func (s *sideStacker) stack(m *Mantle) {
 	book := m.book()
-	rateStep := btcAssetCfg.RateStep
+	rateStep := rateStep
 	midGap := midGap(book, rateStep)
 	rateTweak := func() int64 {
 		return int64(rand.Float64() * stackerSpread * float64(midGap))
@@ -162,7 +162,7 @@ func (s *sideStacker) stack(m *Mantle) {
 		s.seller, numNewStanding, numMatchers, activeOrders)
 
 	qty := func() uint64 {
-		return uint64(rand.Intn(maxOrderLots-1)+1) * dcrAssetCfg.LotSize
+		return uint64(rand.Intn(maxOrderLots-1)+1) * lotSize
 	}
 
 	ords := make([]*orderReq, 0, numNewStanding+numMatchers)
@@ -213,8 +213,8 @@ func (s *sideStacker) cancellableOrders(m *Mantle) (
 
 func walletConfig(maxLots, maxActiveOrds int, sell bool) (baseCoins, quoteCoins int, minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 	numCoins := maxActiveOrds
-	maxBaseQty = uint64(maxLots) * uint64(numCoins) * dcrAssetCfg.LotSize
-	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(btcAssetCfg.RateStep))
+	maxBaseQty = uint64(maxLots) * uint64(numCoins) * lotSize
+	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
 	maxQuoteQty = calc.BaseToQuote(defaultRate, maxBaseQty)
 	minBaseQty = 2e8 // At least have to cover the registration fee.
 	if sell {
@@ -222,7 +222,7 @@ func walletConfig(maxLots, maxActiveOrds int, sell bool) (baseCoins, quoteCoins 
 		baseCoins = numCoins
 	} else {
 		// Convert the quantities to the quote asset
-		defaultRate := truncate(defaultBtcPerDcr*1e8, int64(btcAssetCfg.RateStep))
+		defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
 		maxQuoteQty := calc.BaseToQuote(defaultRate, maxBaseQty)
 		minQuoteQty = maxQuoteQty / 2
 		baseCoins = 1 // Gotta pay fees.

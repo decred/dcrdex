@@ -110,7 +110,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset, splitTx bool) {
+func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint64, dexAsset *dex.Asset, splitTx bool) {
 	tLogger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
@@ -136,7 +136,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc, splitTx)
 	defer rig.close()
 	var lots uint64 = 2
-	contractValue := lots * dexAsset.LotSize
+	contractValue := lots * lotSize
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
 		for _, u := range utxos {
@@ -170,7 +170,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	setOrderValue := func(v uint64) {
 		ord.Value = v
-		ord.MaxSwapCount = v / dexAsset.LotSize
+		ord.MaxSwapCount = v / lotSize
 	}
 
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only

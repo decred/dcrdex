@@ -1002,6 +1002,8 @@ type Market struct {
 	Base            uint32  `json:"base"`
 	Quote           uint32  `json:"quote"`
 	EpochLen        uint64  `json:"epochlen"`
+	LotSize         uint64  `json:"lotsize"`
+	RateStep        uint64  `json:"ratestep"`
 	MarketBuyBuffer float64 `json:"buybuffer"`
 	MarketStatus    `json:"status"`
 }
@@ -1022,8 +1024,8 @@ type Asset struct {
 	Symbol       string `json:"symbol"`
 	ID           uint32 `json:"id"`
 	Version      uint32 `json:"version"`
-	LotSize      uint64 `json:"lotsize"`
-	RateStep     uint64 `json:"ratestep"`
+	LotSize      uint64 `json:"lotsize,omitempty"`
+	RateStep     uint64 `json:"ratestep,omitempty"`
 	MaxFeeRate   uint64 `json:"maxfeerate"`
 	SwapSize     uint64 `json:"swapsize"`
 	SwapSizeBase uint64 `json:"swapsizebase"`

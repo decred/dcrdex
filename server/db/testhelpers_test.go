@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	LotSize         = uint64(10_000_000_000)
+	LotSize         = uint64(100_0000_0000) // 100
+	RateStep        = uint64(10_0000)       // 0.001
 	EpochDuration   = uint64(10_000)
 	MarketBuyBuffer = 1.1
 )

@@ -91,7 +91,7 @@ func (s *sniper) snipe(m *Mantle) {
 	for _, ord := range targets {
 		qty := toAtoms(ord.Qty)
 		if !sell {
-			if qty/dcrAssetCfg.LotSize == 1 {
+			if qty/lotSize == 1 {
 				qty *= 2
 			}
 			qty = calc.BaseToQuote(toAtoms(ord.Rate), qty)
@@ -104,9 +104,9 @@ func (s *sniper) snipe(m *Mantle) {
 func symmetricWalletConfig(numCoins int) (
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 
-	maxBaseQty = maxOrderLots * uint64(numCoins) * dcrAssetCfg.LotSize
+	maxBaseQty = maxOrderLots * uint64(numCoins) * lotSize
 	minBaseQty = maxBaseQty / 2
-	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(btcAssetCfg.RateStep))
+	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
 	maxQuoteQty = calc.BaseToQuote(defaultRate, maxBaseQty)
 	minQuoteQty = maxQuoteQty / 2
 	return
