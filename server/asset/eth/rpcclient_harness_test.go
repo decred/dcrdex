@@ -59,3 +59,31 @@ func TestBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBlockNumber(t *testing.T) {
+	_, err := ethClient.blockNumber(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPeers(t *testing.T) {
+	_, err := ethClient.peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSyncProgress(t *testing.T) {
+	_, err := ethClient.syncProgress(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSuggestGasPrice(t *testing.T) {
+	_, err := ethClient.suggestGasPrice(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

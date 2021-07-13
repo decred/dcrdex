@@ -21,6 +21,9 @@ const (
 
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
+	// It is expected that Connect from dex.Connector is called and returns
+	// before use of the asset, and that it is only called once for the life
+	// of the asset.
 	dex.Connector
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to

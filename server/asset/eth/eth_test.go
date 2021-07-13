@@ -6,13 +6,17 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/p2p"
 )
 
 var (
@@ -26,6 +30,16 @@ type testNode struct {
 	bestBlkHashErr error
 	blk            *types.Block
 	blkErr         error
+	bestHdr        *types.Header
+	bestHdrErr     error
+	blkNum         uint64
+	blkNumErr      error
+	syncProg       *ethereum.SyncProgress
+	syncProgErr    error
+	sugGasPrice    *big.Int
+	sugGasPriceErr error
+	peerInfo       []*p2p.PeerInfo
+	peersErr       error
 }
 
 func (n *testNode) connect(ctx context.Context, IPC string) error {
@@ -38,8 +52,28 @@ func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return n.bestBlkHash, n.bestBlkHashErr
 }
 
+func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
+	return n.bestHdr, n.bestHdrErr
+}
+
 func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return n.blk, n.blkErr
+}
+
+func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
+	return n.blkNum, n.blkNumErr
+}
+
+func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return n.syncProg, n.syncProgErr
+}
+
+func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	return n.peerInfo, n.peersErr
+}
+
+func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
+	return n.sugGasPrice, n.sugGasPriceErr
 }
 
 func TestLoad(t *testing.T) {
@@ -214,20 +248,18 @@ func TestRun(t *testing.T) {
 	header1 := &types.Header{Number: big.NewInt(1)}
 	block1 := types.NewBlockWithHeader(header1)
 	blockHash1 := block1.Hash()
-	node := &testNode{}
-	node.bestBlkHash = blockHash1
-	node.blk = block1
+	node := &testNode{
+		bestBlkHash: blockHash1,
+		blk:         block1,
+	}
 	backend := unconnectedETH(tLogger, nil)
 	ch := backend.BlockChannel(1)
-	blocker := make(chan struct{})
 	backend.node = node
 	go func() {
 		<-ch
 		cancel()
-		close(blocker)
 	}()
 	backend.run(ctx)
-	<-blocker
 	backend.blockCache.mtx.Lock()
 	best := backend.blockCache.best
 	backend.blockCache.mtx.Unlock()
@@ -235,4 +267,128 @@ func TestRun(t *testing.T) {
 		t.Fatalf("want header hash %x but got %x", blockHash1, best.hash)
 	}
 	cancel()
+}
+
+func TestFeeRate(t *testing.T) {
+	maxInt := ^uint64(0)
+	maxWei := new(big.Int).SetUint64(maxInt)
+	maxWei.Mul(maxWei, gweiFactorBig)
+	overMaxWei := new(big.Int).Set(maxWei)
+	overMaxWei.Add(overMaxWei, gweiFactorBig)
+	tests := []struct {
+		name    string
+		gas     *big.Int
+		gasErr  error
+		wantFee uint64
+		wantErr bool
+	}{{
+		name:    "ok zero",
+		gas:     big.NewInt(0),
+		wantFee: 0,
+	}, {
+		name:    "ok rounded down",
+		gas:     big.NewInt(gweiFactor - 1),
+		wantFee: 0,
+	}, {
+		name:    "ok one",
+		gas:     big.NewInt(gweiFactor),
+		wantFee: 1,
+	}, {
+		name:    "ok max int",
+		gas:     maxWei,
+		wantFee: maxInt,
+	}, {
+		name:    "over max int",
+		gas:     overMaxWei,
+		wantErr: true,
+	}, {
+		name:    "node suggest gas fee error",
+		gas:     big.NewInt(0),
+		gasErr:  errors.New(""),
+		wantErr: true,
+	}}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{
+			sugGasPrice:    test.gas,
+			sugGasPriceErr: test.gasErr,
+		}
+		eth := &Backend{
+			node:   node,
+			rpcCtx: ctx,
+			log:    tLogger,
+		}
+		fee, err := eth.FeeRate()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if fee != test.wantFee {
+			t.Fatalf("want fee %v got %v for test %q", test.wantFee, fee, test.name)
+		}
+	}
+}
+
+func TestSynced(t *testing.T) {
+	tests := []struct {
+		name                    string
+		syncProg                *ethereum.SyncProgress
+		subSecs                 uint64
+		bestHdrErr, syncProgErr error
+		wantErr, wantSynced     bool
+	}{{
+		name:       "ok synced",
+		wantSynced: true,
+	}, {
+		name:     "ok syncing",
+		syncProg: new(ethereum.SyncProgress),
+	}, {
+		name:    "ok header too old",
+		subSecs: maxBlockInterval,
+	}, {
+		name:       "best header error",
+		bestHdrErr: errors.New(""),
+		wantErr:    true,
+	}, {
+		name:        "sync progress error",
+		syncProgErr: errors.New(""),
+		wantErr:     true,
+	}}
+
+	for _, test := range tests {
+		nowInSecs := uint64(time.Now().Unix() / 1000)
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{
+			syncProg:    test.syncProg,
+			syncProgErr: test.syncProgErr,
+			bestHdr:     &types.Header{Time: nowInSecs - test.subSecs},
+			bestHdrErr:  test.bestHdrErr,
+		}
+		eth := &Backend{
+			node:   node,
+			rpcCtx: ctx,
+			log:    tLogger,
+		}
+		synced, err := eth.Synced()
+		cancel()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if synced != test.wantSynced {
+			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
+		}
+	}
 }

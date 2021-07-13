@@ -8,13 +8,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/p2p"
 )
 
 func init() {
@@ -30,11 +33,16 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
+	// maxBlockInterval is the number of seconds since the last header came
+	// in over which we consider the chain to be out of sync.
+	maxBlockInterval = 180
+	gweiFactor       = 1e9
 )
 
 var (
 	zeroHash                       = common.Hash{}
 	notImplementedErr              = errors.New("not implemented")
+	gweiFactorBig                  = big.NewInt(gweiFactor)
 	_                 asset.Driver = (*Driver)(nil)
 )
 
@@ -59,10 +67,25 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
-	shutdown()
-	connect(ctx context.Context, IPC string) error
 	bestBlockHash(ctx context.Context) (common.Hash, error)
+	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
+	connect(ctx context.Context, IPC string) error
+	shutdown()
+	suggestGasPrice(ctx context.Context) (*big.Int, error)
+	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
+	blockNumber(ctx context.Context) (uint64, error)
+	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
+}
+
+// toGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
+// Errors if the amount of gwei is too big to fit fully into a uint64.
+func toGwei(wei *big.Int) (uint64, error) {
+	wei.Div(wei, gweiFactorBig)
+	if !wei.IsUint64() {
+		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
+	}
+	return wei.Uint64(), nil
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -70,8 +93,12 @@ type ethFetcher interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	cfg  *config
-	node ethFetcher
+	// A connection-scoped Context is used to cancel active RPCs on
+	// connection shutdown.
+	rpcCtx     context.Context
+	cancelRPCs context.CancelFunc
+	cfg        *config
+	node       ethFetcher
 	// The backend provides block notification channels through the BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx  sync.RWMutex
@@ -90,7 +117,10 @@ var _ asset.Backend = (*Backend)(nil)
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
 func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Backend{
+		rpcCtx:     ctx,
+		cancelRPCs: cancel,
 		cfg:        cfg,
 		blockCache: newBlockCache(logger),
 		log:        logger,
@@ -112,7 +142,7 @@ func (eth *Backend) shutdown() {
 	eth.node.shutdown()
 }
 
-// Connect connects to the node RPC server. A dex.Connector.
+// Connect connects to the node RPC server and initializes some variables.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
 	if err := c.connect(ctx, eth.cfg.IPC); err != nil {
@@ -161,9 +191,13 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 	return 0
 }
 
-// FeeRate returns the current optimal fee rate in atoms / byte.
+// FeeRate returns the current optimal fee rate in gwei / gas.
 func (eth *Backend) FeeRate() (uint64, error) {
-	return 0, notImplementedErr
+	bigGP, err := eth.node.suggestGasPrice(eth.rpcCtx)
+	if err != nil {
+		return 0, err
+	}
+	return toGwei(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -189,7 +223,24 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (eth *Backend) Synced() (bool, error) {
-	return false, notImplementedErr
+	// node.SyncProgress will return nil both before syncing has begun and
+	// after it has finished. In order to discern when syncing has begun,
+	// check that the best header came in under maxBlockInterval.
+	sp, err := eth.node.syncProgress(eth.rpcCtx)
+	if err != nil {
+		return false, err
+	}
+	if sp != nil {
+		return false, nil
+	}
+	bh, err := eth.node.bestHeader(eth.rpcCtx)
+	if err != nil {
+		return false, err
+	}
+	// Time in the header is in seconds.
+	nowInSecs := time.Now().Unix() / 1000
+	timeDiff := nowInSecs - int64(bh.Time)
+	return timeDiff < maxBlockInterval, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -223,13 +274,16 @@ func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	return notImplementedErr
 }
 
-// run processes the queue and monitors the application context.
+// run processes the queue and monitors the application context. The supplied
+// running channel will be closed upon setting the context which is used by the
+// rpcclient.
 func (eth *Backend) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// Shut down the RPC client on ctx.Done().
 	go func() {
 		<-ctx.Done()
+		eth.cancelRPCs()
 		eth.shutdown()
 		wg.Done()
 	}()

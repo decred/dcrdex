@@ -81,6 +81,18 @@ EOF
 else echo "WARNING: Bitcoin Cash is not running. Configuring dcrdex markets without BCH."
 fi
 
+if [ $ETH_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "ETH_simnet",
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
+fi
+
 cat << EOF >> "./markets.json"
     }
     ],
@@ -138,9 +150,9 @@ if [ $ETH_ON -eq 0 ]; then
         "ETH_simnet": {
             "bip44symbol": "eth",
             "network": "simnet",
-            "lotSize": 1000000,
-            "rateStep": 1000000,
-            "maxFeeRate": 20,
+            "lotSize": 1000000000,
+            "rateStep": 1000000000,
+            "maxFeeRate": 200,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
 EOF
