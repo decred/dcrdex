@@ -29,10 +29,7 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	// maxBlockInterval is the number of seconds since the last header came
-	// in over which we consider the chain to be out of sync.
-	maxBlockInterval = 180
-	gweiFactor       = 1e9
+	gweiFactor        = 1e9
 )
 
 var (
@@ -221,7 +218,7 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 func (eth *Backend) Synced() (bool, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// check that the best header came in under maxBlockInterval.
+	// check that the best header came in under MaxBlockInterval.
 	sp, err := eth.node.syncProgress(eth.rpcCtx)
 	if err != nil {
 		return false, err
@@ -236,7 +233,7 @@ func (eth *Backend) Synced() (bool, error) {
 	// Time in the header is in seconds.
 	nowInSecs := time.Now().Unix() / 1000
 	timeDiff := nowInSecs - int64(bh.Time)
-	return timeDiff < maxBlockInterval, nil
+	return timeDiff < MaxBlockInterval, nil
 }
 
 // Redemption is an input that redeems a swap contract.

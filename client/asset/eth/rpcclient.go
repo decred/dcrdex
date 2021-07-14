@@ -194,16 +194,6 @@ func (c *rpcclient) importAccount(pw string, privKeyB []byte) (*accounts.Account
 	return &acct, nil
 }
 
-// wallet returns a wallet that owns acct from an ethereum wallet.
-// accounts.Wallet is an interface.
-func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
-	wallet, err := c.n.AccountManager().Find(acct)
-	if err != nil {
-		return nil, fmt.Errorf("error finding wallet for account %s: %v \n", acct.Address, err)
-	}
-	return wallet, nil
-}
-
 // peers returns connected peers.
 func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	var peers []*p2p.PeerInfo

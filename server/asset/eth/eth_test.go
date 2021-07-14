@@ -351,7 +351,7 @@ func TestSynced(t *testing.T) {
 		syncProg: new(ethereum.SyncProgress),
 	}, {
 		name:    "ok header too old",
-		subSecs: maxBlockInterval,
+		subSecs: MaxBlockInterval,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),

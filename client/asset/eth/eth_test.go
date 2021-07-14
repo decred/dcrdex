@@ -9,8 +9,10 @@ import (
 	"errors"
 	"math/big"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
+	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -26,6 +28,8 @@ var (
 
 type testNode struct {
 	connectErr     error
+	bestHdr        *types.Header
+	bestHdrErr     error
 	bestBlkHash    common.Hash
 	bestBlkHashErr error
 	blk            *types.Block
@@ -42,6 +46,9 @@ func (n *testNode) connect(ctx context.Context, node *node.Node, addr common.Add
 	return n.connectErr
 }
 func (n *testNode) shutdown() {}
+func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
+	return n.bestHdr, n.bestHdrErr
+}
 func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return n.bestBlkHash, n.bestBlkHashErr
 }
@@ -197,44 +204,41 @@ func TestSyncStatus(t *testing.T) {
 		HighestBlock: 100,
 	}
 	tests := []struct {
-		name                  string
-		syncProg              *ethereum.SyncProgress
-		peerInfo              []*p2p.PeerInfo
-		peersErr, syncProgErr error
-		wantErr, wantSynced   bool
-		wantRatio             float32
+		name                    string
+		syncProg                *ethereum.SyncProgress
+		subSecs                 uint64
+		bestHdrErr, syncProgErr error
+		wantErr, wantSynced     bool
+		wantRatio               float32
 	}{{
 		name:       "ok synced",
-		peerInfo:   make([]*p2p.PeerInfo, 2),
 		wantRatio:  1,
 		wantSynced: true,
 	}, {
-		name:       "ok syncing",
-		peerInfo:   make([]*p2p.PeerInfo, 2),
-		syncProg:   fourthSyncProg,
-		wantRatio:  0.25,
-		wantSynced: false,
+		name:      "ok syncing",
+		syncProg:  fourthSyncProg,
+		wantRatio: 0.25,
 	}, {
-		name:     "ok not enough peers",
-		peerInfo: make([]*p2p.PeerInfo, 1),
+		name:    "ok header too old",
+		subSecs: dexeth.MaxBlockInterval,
 	}, {
-		name:     "peers error",
-		peersErr: errors.New(""),
-		wantErr:  true,
+		name:       "best header error",
+		bestHdrErr: errors.New(""),
+		wantErr:    true,
 	}, {
 		name:        "sync progress error",
-		peerInfo:    make([]*p2p.PeerInfo, 2),
 		syncProgErr: errors.New(""),
 		wantErr:     true,
 	}}
 
 	for _, test := range tests {
+		nowInSecs := uint64(time.Now().Unix() / 1000)
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
 			syncProg:    test.syncProg,
 			syncProgErr: test.syncProgErr,
-			peerInfo:    test.peerInfo,
-			peersErr:    test.peersErr,
+			bestHdr:     &types.Header{Time: nowInSecs - test.subSecs},
+			bestHdrErr:  test.bestHdrErr,
 		}
 		eth := &ExchangeWallet{
 			node: node,

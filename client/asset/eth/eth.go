@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,9 +33,8 @@ func init() {
 const (
 	// BipID is the BIP-0044 asset ID.
 	BipID              = 60
-	defaultGasFee      = 8.2e10
-	defaultGasFeeLimit = 2e11
-	requiredNPeers     = 2
+	defaultGasFee      = 82_000_000_000
+	defaultGasFeeLimit = 200_000_000_000
 )
 
 var (
@@ -59,12 +58,6 @@ var (
 			Description:  "Location of the ethereum client data. This SHOULD NOT be a directory used by other ethereum applications. The default is recommended.",
 			DefaultValue: defaultAppDir,
 		},
-		{
-			Key:          "nodelistenaddr",
-			DisplayName:  "Node Listening Address.",
-			Description:  "The address the node will listen on when connecting to other ethereum nodes.",
-			DefaultValue: "0.0.0.0:30303",
-		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -73,7 +66,6 @@ var (
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
 	}
-	notImplementedErr   = errors.New("not implemented")
 	mainnetContractAddr = common.HexToAddress("")
 )
 
@@ -114,6 +106,7 @@ type ethFetcher interface {
 	addPeer(ctx context.Context, peer string) error
 	balance(ctx context.Context, acct *accounts.Account) (*big.Int, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
+	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	connect(ctx context.Context, node *node.Node, contractAddr common.Address) error
@@ -151,8 +144,7 @@ type ExchangeWallet struct {
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
 
-	acctMtx sync.RWMutex
-	acct    *accounts.Account
+	acct *accounts.Account
 }
 
 // Info returns basic information about the wallet and asset.
@@ -168,9 +160,8 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		return nil, err
 	}
 	nodeCFG := &nodeConfig{
-		net:        network,
-		listenAddr: cfg.NodeListenAddr,
-		appDir:     cfg.AppDir,
+		net:    network,
+		appDir: cfg.AppDir,
 	}
 	node, err := runNode(nodeCFG)
 	if err != nil {
@@ -211,8 +202,9 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	eth.tipMtx.Lock()
 	eth.currentTip = block
 	eth.tipMtx.Unlock()
-	atomic.StoreInt64(&eth.tipAtConnect, int64(eth.currentTip.NumberU64()))
-	eth.log.Infof("Connected to geth.")
+	height := eth.currentTip.NumberU64()
+	atomic.StoreInt64(&eth.tipAtConnect, int64(height))
+	eth.log.Infof("Connected to geth, at height %d", height)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -230,9 +222,7 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 //
 // TODO: Consider adding multiple accounts.
 func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
-	return eth.acct.Address.String() == address, nil
+	return strings.ToLower(eth.acct.Address.String()) == strings.ToLower(address), nil
 }
 
 // Balance returns the total available funds in the account.
@@ -240,10 +230,8 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 // NOTE: Ethereum balance does not return Immature or Locked values.
 //
 // TODO: Ethereum balances can easily go over the max value of a uint64.
-// asset.Balance must be changed in a way to accomodate this.
+// asset.Balance must be changed in a way to accommodate this.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	bigbal, err := eth.node.balance(eth.ctx, eth.acct)
 	if err != nil {
 		return nil, err
@@ -262,19 +250,19 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 func (*ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
 // configuration.
 func (*ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // FundOrder selects coins for use in an order. The coins will be locked, and
@@ -285,20 +273,20 @@ func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
 func (*ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-	return nil, nil, notImplementedErr
+	return nil, nil, asset.ErrNotImplemented
 }
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
 func (*ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
-	return notImplementedErr
+	return asset.ErrNotImplemented
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
 // This method will only return funding coins, e.g. unspent transaction outputs.
 func (*ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
@@ -306,33 +294,33 @@ func (*ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 // because they're not auto-unlocked by the wallet and therefore inaccurately
 // included as part of the locked balance despite being spent.
 func (*ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
-	return nil, nil, 0, notImplementedErr
+	return nil, nil, 0, asset.ErrNotImplemented
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
 func (*ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
-	return nil, nil, 0, notImplementedErr
+	return nil, nil, 0, asset.ErrNotImplemented
 }
 
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. A slice of pubkeys required to spend the Coin and a
 // signature for each pubkey are returned.
 func (*ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	return nil, nil, notImplementedErr
+	return nil, nil, asset.ErrNotImplemented
 }
 
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
 func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
 func (*ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
-	return false, time.Time{}, notImplementedErr
+	return false, time.Time{}, asset.ErrNotImplemented
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -342,7 +330,7 @@ func (*ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, err
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
 func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
-	return nil, nil, notImplementedErr
+	return nil, nil, asset.ErrNotImplemented
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -352,27 +340,21 @@ func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (re
 // was created. The client should store this information for persistence across
 // sessions.
 func (*ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // Address returns an address for the exchange wallet.
 func (eth *ExchangeWallet) Address() (string, error) {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	return eth.acct.Address.String(), nil
 }
 
 // Unlock unlocks the exchange wallet.
 func (eth *ExchangeWallet) Unlock(pw string) error {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	return eth.node.unlock(eth.ctx, pw, eth.acct)
 }
 
 // Lock locks the exchange wallet.
 func (eth *ExchangeWallet) Lock() error {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	return eth.node.lock(eth.ctx, eth.acct)
 }
 
@@ -383,8 +365,6 @@ func (eth *ExchangeWallet) Locked() bool {
 		eth.log.Errorf("list wallets error: %v", err)
 		return false
 	}
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	var wallet rawWallet
 	findWallet := func() bool {
 		for _, w := range wallets {
@@ -409,7 +389,7 @@ func (eth *ExchangeWallet) Locked() bool {
 //
 // NOTE: PayFee is not intended to be used with Ethereum at this time.
 func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
-	return nil, notImplementedErr
+	return nil, asset.ErrNotImplemented
 }
 
 // sendToAddr sends funds from acct to addr.
@@ -429,8 +409,6 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasFee *big.Int)
 // TODO: Value could be larger than a uint64. Deal with it...
 // TODO: Return the asset.Coin.
 func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
-	eth.acctMtx.RLock()
-	defer eth.acctMtx.RUnlock()
 	_, err := eth.sendToAddr(common.HexToAddress(addr),
 		big.NewInt(0).SetUint64(value), big.NewInt(0).SetUint64(defaultGasFee))
 	if err != nil {
@@ -447,37 +425,39 @@ func (*ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 
 // Confirmations gets the number of confirmations for the specified coin ID.
 func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	return 0, false, notImplementedErr
+	return 0, false, asset.ErrNotImplemented
 }
 
 // SyncStatus is information about the blockchain sync status.
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// ensure we are connected to at least requiredNPeers, assume the node
-	// has started syncing from those peers were they ahead, and then defer
-	// to syncProgress.
-	peers, err := eth.node.peers(eth.ctx)
-	if err != nil {
-		return false, 0, err
-	}
-	if len(peers) < requiredNPeers {
-		return false, 0, nil
-	}
+	// check that the best header came in under dexeth.MaxBlockInterval.
 	sp, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
 		return false, 0, err
 	}
-	if sp == nil {
-		return true, 1, nil
+	if sp != nil {
+		ratio := float32(sp.CurrentBlock) / float32(sp.HighestBlock)
+		return false, ratio, nil
 	}
-	ratio := float32(sp.CurrentBlock) / float32(sp.HighestBlock)
-	return false, ratio, nil
+	bh, err := eth.node.bestHeader(eth.ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	// Time in the header is in seconds.
+	nowInSecs := time.Now().Unix() / 1000
+	timeDiff := nowInSecs - int64(bh.Time)
+	var progress float32
+	if timeDiff < dexeth.MaxBlockInterval {
+		progress = 1
+	}
+	return progress == 1, progress, nil
 }
 
 // RefundAddress extracts and returns the refund address from a contract.
 func (eth *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
-	return "", notImplementedErr
+	return "", asset.ErrNotImplemented
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

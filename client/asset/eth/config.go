@@ -26,8 +26,7 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
 	switch network {
-	case dex.Simnet:
-	case dex.Testnet:
+	case dex.Simnet, dex.Testnet:
 	case dex.Mainnet:
 		// TODO: Allow.
 		return nil, fmt.Errorf("eth cannot be used on mainnet")

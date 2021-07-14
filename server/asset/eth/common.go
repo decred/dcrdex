@@ -12,7 +12,12 @@ import (
 
 // coinIdSize = flags (2) + smart contract address where funds are locked (20) + secret
 // hash map key (32)
-const coinIDSize = 54
+const (
+	coinIDSize = 54
+	// MaxBlockInterval is the number of seconds since the last header came
+	// in over which we consider the chain to be out of sync.
+	MaxBlockInterval = 180
+)
 
 // DecodeCoinID decodes the coin ID into flags, a contract address, and secret hash.
 func DecodeCoinID(coinID []byte) (uint16, common.Address, []byte, error) {

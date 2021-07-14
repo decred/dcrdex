@@ -104,17 +104,17 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 			genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
 			genBytes, err := ioutil.ReadFile(genesisFile)
 			if err != nil {
-				return nil, fmt.Errorf("error reading genesis file: %v\n", err)
+				return nil, fmt.Errorf("error reading genesis file: %v", err)
 			}
 			genLen := len(genBytes)
 			if genLen == 0 {
-				return nil, fmt.Errorf("no genesis found at %v\n", genesisFile)
+				return nil, fmt.Errorf("no genesis found at %v", genesisFile)
 			}
 			genBytes = genBytes[:genLen-1]
 			SetSimnetGenesis(string(genBytes))
 		}
 		if err := json.Unmarshal([]byte(simnetGenesis), &sp); err != nil {
-			return nil, fmt.Errorf("unable to unmarshal simnent genesis: %v", err)
+			return nil, fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
 		}
 		ethCfg.Genesis = &sp
 		ethCfg.NetworkId = 42
