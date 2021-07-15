@@ -1398,9 +1398,9 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error encoding script address: %w", err)
 		}
-		_, p2shScript := scriptAddr.PaymentScript()
+		p2shScriptVer, p2shScript := scriptAddr.PaymentScript()
 		// Add the transaction output.
-		txOut := wire.NewTxOut(int64(contract.Value), p2shScript)
+		txOut := newTxOut(int64(contract.Value), p2shScriptVer, p2shScript)
 		baseTx.AddTxOut(txOut)
 	}
 	if totalIn < totalOut {
@@ -2116,8 +2116,8 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", translateRPCCancelErr(err))
 		}
 	}
-	_, pkScript := refundAddr.PaymentScript()
-	txOut := wire.NewTxOut(int64(val-fee), pkScript)
+	pkScriptVer, pkScript := refundAddr.PaymentScript()
+	txOut := newTxOut(int64(val-fee), pkScriptVer, pkScript)
 	// One last check for dust.
 	if dexdcr.IsDust(txOut, feeRate) {
 		return nil, fmt.Errorf("refund output is dust")
@@ -2489,8 +2489,8 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 	if err != nil {
 		return nil, 0, err
 	}
-	_, payScript := addr.PaymentScript()
-	txOut := wire.NewTxOut(int64(val), payScript)
+	payScriptVer, payScript := addr.PaymentScript()
+	txOut := newTxOut(int64(val), payScriptVer, payScript)
 	baseTx.AddTxOut(txOut)
 
 	var feeSource int32 // subtract from vout 0
@@ -2500,6 +2500,15 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 
 	tx, _, _, _, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
 	return tx, uint64(txOut.Value), err
+}
+
+// newTxOut returns a new transaction output with the given parameters.
+func newTxOut(amount int64, pkScriptVer uint16, pkScript []byte) *wire.TxOut {
+	return &wire.TxOut{
+		Value:    amount,
+		Version:  pkScriptVer,
+		PkScript: pkScript,
+	}
 }
 
 // msgTxFromHex creates a wire.MsgTx by deserializing the hex transaction.
@@ -2558,8 +2567,8 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Addre
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", translateRPCCancelErr(err))
 	}
-	_, changeScript := changeAddr.PaymentScript()
-	return wire.NewTxOut(int64(val), changeScript), changeAddr, nil
+	changeScriptVersion, changeScript := changeAddr.PaymentScript()
+	return newTxOut(int64(val), changeScriptVersion, changeScript), changeAddr, nil
 }
 
 // sendWithReturn sends the unsigned transaction, adding a change output unless
