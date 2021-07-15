@@ -1976,7 +1976,8 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 		if err != nil {
 			return nil, nil, err
 		}
-		secret, err := dexdcr.FindKeyPush(sigScript, contractHash, dcr.chainParams)
+		// tx.Vin[vin] doesnt have a version field, assume 0
+		secret, err := dexdcr.FindKeyPush(0, sigScript, contractHash, dcr.chainParams)
 		if err != nil {
 			return nil, nil, err
 		}

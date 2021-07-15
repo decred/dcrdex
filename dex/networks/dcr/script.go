@@ -784,41 +784,53 @@ func ExtractContractHash(scriptHex string) ([]byte, error) {
 // contract must be provided for the search algorithm to verify the correct data
 // push. Only contracts of length SwapContractSize that can be validated by
 // ExtractSwapDetails are recognized.
-func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
-	dataPushes, err := txscript.PushedData(sigScript)
-	if err != nil {
-		return nil, err
-	}
-	if len(dataPushes) == 0 {
-		return nil, fmt.Errorf("no data pushes in in the signature script")
-	}
-	// The key must be the last data push, but iterate through all of the pushes
-	// backwards to ensure it not hidden behind some non-standard script.
-	var keyHash []byte
-	for i := len(dataPushes) - 1; i >= 0; i-- {
-		push := dataPushes[i]
+func FindKeyPush(scriptVersion uint16, sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, sigScript)
 
-		// First locate the swap contract.
-		if len(keyHash) == 0 {
-			// Skip hashing if ExtractSwapDetails will not recognize it.
-			if len(push) != SwapContractSize {
-				continue
-			}
+	// The contract is pushed after the key, find the contract starting with the
+	// first data push and record all data pushes encountered before the contract
+	// push. One of those preceding pushes should be the key push.
+	var dataPushesUpTillContract [][]byte
+	var keyHash []byte
+	var err error
+	for tokenizer.Next() {
+		push := tokenizer.Data()
+
+		// Only hash if ExtractSwapDetails will recognize it.
+		if len(push) == SwapContractSize {
 			h := dcrutil.Hash160(push)
 			if bytes.Equal(h, contractHash) {
 				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 				if err != nil {
 					return nil, fmt.Errorf("error extracting atomic swap details: %w", err)
 				}
+				break // contract is pushed after the key, if we've encountered the contract, we must have just passed the key
 			}
-			continue
 		}
 
-		// We have the key hash from the contract. See if this is the key.
-		h := sha256.Sum256(push)
-		if bytes.Equal(h[:], keyHash) {
-			return push, nil
+		// Save this push as preceding the contract push.
+		if push != nil {
+			dataPushesUpTillContract = append(dataPushesUpTillContract, push)
 		}
 	}
+	if tokenizer.Err() != nil {
+		return nil, tokenizer.Err()
+	}
+
+	if len(keyHash) > 0 {
+		// The key push should be the data push immediately preceding the contract
+		// push, but iterate through all of the preceding pushes backwards to ensure
+		// it is not hidden behind some non-standard script.
+		for i := len(dataPushesUpTillContract) - 1; i >= 0; i-- {
+			push := dataPushesUpTillContract[i]
+
+			// We have the key hash from the contract. See if this is the key.
+			h := sha256.Sum256(push)
+			if bytes.Equal(h[:], keyHash) {
+				return push, nil
+			}
+		}
+	}
+
 	return nil, fmt.Errorf("key not found")
 }
