@@ -439,7 +439,10 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 		return false, 0, err
 	}
 	if sp != nil {
-		ratio := float32(sp.CurrentBlock) / float32(sp.HighestBlock)
+		var ratio float32
+		if sp.HighestBlock != 0 {
+			ratio = float32(sp.CurrentBlock) / float32(sp.HighestBlock)
+		}
 		return false, ratio, nil
 	}
 	bh, err := eth.node.bestHeader(eth.ctx)
