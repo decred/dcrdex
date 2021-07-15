@@ -18,6 +18,7 @@ const (
 	CoinNotFoundError = dex.ErrorKind("coin not found")
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 	ErrConnectionDown = dex.ErrorKind("wallet not connected")
+	ErrNotImplemented = dex.ErrorKind("not implemented")
 )
 
 // WalletInfo is auxiliary information about an ExchangeWallet.

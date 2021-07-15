@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Tmux script that sets up a simnet harness.
+# tmux script that sets up an eth simnet harness. It sets up four separate nodes.
+# alpha and beta nodes are synced in snap mode. They emulate nodes used by the
+# dcrdex server. Either has the authority to mine blocks. They start with
+# pre-allocated funds. gamma and delta are synced in light mode and emulate
+# nodes used by dexc. They are sent some funds after being created. The harness
+# waits for all nodes to sync before allowing tmux input.
 set -ex
 
 SESSION="eth-harness"
@@ -60,7 +65,8 @@ echo "Writing ctl scripts"
 # can be mined per second with a signature belonging to the address in
 # "extradata". The addresses in the "alloc" field are allocated "balance".
 # Values are in wei. 1*10^18 wei is equal to one eth. Addresses are allocated
-# 11,000 eth.
+# 11,000 eth. The addresses belong to alpha and beta nodes and two others are
+# used in tests.
 cat > "${NODES_ROOT}/genesis.json" <<EOF
 {
   "config": {
@@ -86,6 +92,12 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     },
     "4f8ef3892b65ed7fc356ff473a2ef2ae5ec27a06": {
         "balance": "11000000000000000000000"
+    },
+    "2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27": {
+        "balance": "11000000000000000000000"
+    },
+    "345853e21b1d475582E71cC269124eD5e2dD3422": {
+        "balance": "11000000000000000000000"
     }
   }
 }
@@ -93,7 +105,7 @@ EOF
 
 cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
 function send(from, to, amt) {
-  personal.sendTransaction({from:"0x"+from,to:"0x"+to,value:amt,gasPrice:81000000000}, "${PASSWORD}")
+  personal.sendTransaction({from:"0x"+from,to:"0x"+to,value:amt,gasPrice:82000000000}, "${PASSWORD}")
   return true;
 }
 EOF
@@ -165,13 +177,15 @@ echo "Connecting nodes"
 sleep 1
 
 SEND_AMT=5000000000000000000000
-echo "Sending 5000 eth to beta and gamma."
+echo "Sending 5000 eth to delta and gamma."
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${GAMMA_ADDRESS}\",${SEND_AMT})"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${DELTA_ADDRESS}\",${SEND_AMT})"
 
 # Our transactions will PROBABLY appear in one of these blocks.
 echo "Mining some blocks"
-"${NODES_ROOT}/harness-ctl/mine-alpha" "15"
+"${NODES_ROOT}/harness-ctl/mine-beta" "1"
+"${NODES_ROOT}/harness-ctl/mine-alpha" "1"
+"${NODES_ROOT}/harness-ctl/mine-beta" "5"
 
 # Initial sync for light nodes takes quite a while. Wait for them to show
 # blocks on the network.
@@ -182,7 +196,21 @@ do
     break
   fi
   echo "Waiting for light nodes to sync."
-  sleep 5
+  # Although not necessary here, mine while waiting so that transactions are
+  # mined if not mined yet.
+  "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
+done
+
+# Transactions can take an eternity to be mined...
+# TODO: Determine why this is.
+while true
+do
+  TXSLEN=$("${NODES_ROOT}/harness-ctl/alpha" "attach --exec eth.pendingTransactions.length")
+  if [ "$TXSLEN" -eq 0 ]; then
+    break
+  fi
+  echo "Waiting for transactions to be mined."
+  "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
 done
 
 # Reenable history and attach to the control session.

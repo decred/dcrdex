@@ -19,6 +19,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/bch" // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
+	_ "decred.org/dcrdex/client/asset/eth" // register eth asset
 	_ "decred.org/dcrdex/client/asset/ltc" // register ltc asset
 	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/client/core"

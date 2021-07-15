@@ -5,7 +5,6 @@ package eth
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,16 +26,10 @@ func init() {
 const (
 	version   = 0
 	assetName = "eth"
-	// coinIdSize = flags (2) + smart contract address where funds are locked (20) + secret
-	// hash map key (32)
-	coinIDSize = 54
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	// maxBlockInterval is the number of seconds since the last header came
-	// in over which we consider the chain to be out of sync.
-	maxBlockInterval = 180
-	gweiFactor       = 1e9
+	gweiFactor        = 1e9
 )
 
 var (
@@ -61,7 +54,7 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	return coinIDToString(coinID)
+	return CoinIDToString(coinID)
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
@@ -225,7 +218,7 @@ func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
 func (eth *Backend) Synced() (bool, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// check that the best header came in under maxBlockInterval.
+	// check that the best header came in under MaxBlockInterval.
 	sp, err := eth.node.syncProgress(eth.rpcCtx)
 	if err != nil {
 		return false, err
@@ -240,7 +233,7 @@ func (eth *Backend) Synced() (bool, error) {
 	// Time in the header is in seconds.
 	nowInSecs := time.Now().Unix() / 1000
 	timeDiff := nowInSecs - int64(bh.Time)
-	return timeDiff < maxBlockInterval, nil
+	return timeDiff < MaxBlockInterval, nil
 }
 
 // Redemption is an input that redeems a swap contract.
@@ -255,7 +248,7 @@ func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
-	return coinIDToString(coinID)
+	return CoinIDToString(coinID)
 }
 
 // ValidateContract ensures that the swap contract is constructed properly, and
@@ -413,33 +406,4 @@ out:
 	}
 	// Wait for the RPC client to shut down.
 	wg.Wait()
-}
-
-// decodeCoinID decodes the coin ID into flags, a contract address, and secret hash.
-func decodeCoinID(coinID []byte) (uint16, common.Address, []byte, error) {
-	if len(coinID) != coinIDSize {
-		return 0, common.Address{}, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
-			coinIDSize, len(coinID))
-	}
-	secretHash := make([]byte, 32)
-	copy(secretHash, coinID[22:])
-	return binary.BigEndian.Uint16(coinID[:2]), common.BytesToAddress(coinID[2:22]), secretHash, nil
-}
-
-func coinIDToString(coinID []byte) (string, error) {
-	flags, addr, secretHash, err := decodeCoinID(coinID)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x:%x:%x", flags, addr, secretHash), nil
-}
-
-// toCoinID converts the address and secret hash to a coin ID.
-func toCoinID(flags uint16, addr *common.Address, secretHash []byte) []byte {
-	b := make([]byte, coinIDSize)
-	b[0] = byte(flags)
-	b[1] = byte(flags >> 8)
-	copy(b[2:], addr[:])
-	copy(b[22:], secretHash[:])
-	return b
 }
