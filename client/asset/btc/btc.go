@@ -30,6 +30,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/dcrjson/v3" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v6"
 )
 
@@ -581,10 +582,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 	// Check for method unknown error for feeRate method.
 	_, err = btc.estimateFee(ctx, btc.node.requester, 1)
-	var rpcErr *btcjson.RPCError
-	if errors.As(err, &rpcErr) &&
-		(rpcErr.Code == btcjson.ErrRPCMethodNotFound.Code || rpcErr.Message == "Method not found") {
-
+	if isMethodNotFoundErr(err) {
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
 
@@ -2752,10 +2750,26 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 }
 
 // isTxNotFoundErr will return true if the error indicates that the requested
-// transaction is not known.
+// transaction is not known. The error must be dcrjson.RPCError with a numeric
+// code equal to btcjson.ErrRPCNoTxInfo.
 func isTxNotFoundErr(err error) bool {
-	var rpcErr *btcjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
+	// We are using dcrd's client with Bitcoin Core, so errors will be of type
+	// dcrjson.RPCError, but numeric codes should come from btcjson.
+	const errRPCNoTxInfo = int(btcjson.ErrRPCNoTxInfo)
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && int(rpcErr.Code) == errRPCNoTxInfo
+}
+
+// isMethodNotFoundErr will return true if the error indicates that the RPC
+// method was not found by the RPC server. The error must be dcrjson.RPCError
+// with a numeric code equal to btcjson.ErrRPCMethodNotFound.Code or a message
+// containing "method not found".
+func isMethodNotFoundErr(err error) bool {
+	var errRPCMethodNotFound = int(btcjson.ErrRPCMethodNotFound.Code)
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) &&
+		(int(rpcErr.Code) == errRPCMethodNotFound ||
+			strings.Contains(strings.ToLower(rpcErr.Message), "method not found"))
 }
 
 // toBTC returns a float representation in conventional units for the sats.
