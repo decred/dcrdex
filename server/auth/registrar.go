@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
 )
 
@@ -196,6 +198,10 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, notifyFee *msgjson.NotifyFee, msgID uint64, coinID []byte, regAddr string) bool {
 	addr, val, confs, err := auth.checkFee(coinID)
 	if err != nil || confs < auth.feeConfs {
+		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+			log.Warnf("Unexpected error checking fee coin confirmations: %v", err)
+			// return wait.DontTryAgain // maybe
+		}
 		return wait.TryAgain
 	}
 	var msgErr *msgjson.Error

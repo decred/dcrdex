@@ -164,10 +164,10 @@ out:
 	}
 
 	pubKeyBytes := childExtKey.SerializedPubKey()
-	addr, err := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(pubKeyBytes, a.keyParams)
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(stdaddr.Hash160(pubKeyBytes), a.keyParams)
 	if err != nil {
-		log.Errorf("error creating new AddressSecpPubKey: %v", err)
-		return "", fmt.Errorf("error encoding fee address")
+		log.Errorf("Failed to create creating new pubkey hash address: %v", err)
+		return "", fmt.Errorf("error encoding fee address: %w", err)
 	}
 
 	return addr.String(), nil

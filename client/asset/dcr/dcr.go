@@ -438,9 +438,10 @@ type block struct {
 // which is added to the findRedemptionQueue with the contract outpoint as
 // key.
 type findRedemptionReq struct {
-	ctx          context.Context
-	contractHash []byte
-	resultChan   chan *findRedemptionResult
+	ctx                     context.Context
+	contractHash            []byte
+	contractOutputScriptVer uint16
+	resultChan              chan *findRedemptionResult
 }
 
 func (frr *findRedemptionReq) canceled() bool {
@@ -1825,9 +1826,10 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 
 	resultChan := make(chan *findRedemptionResult, 1)
 	dcr.findRedemptionQueue[contractOutpoint] = &findRedemptionReq{
-		ctx:          ctx,
-		contractHash: contractHash,
-		resultChan:   resultChan,
+		ctx:                     ctx,
+		contractHash:            contractHash,
+		contractOutputScriptVer: msgTx.TxOut[vout].Version,
+		resultChan:              resultChan,
 	}
 	return resultChan, contractBlock, nil
 }
@@ -1964,7 +1966,7 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 	dcr.findRedemptionMtx.Lock()
 	defer dcr.findRedemptionMtx.Unlock()
 
-	extractSecret := func(vin int, contractHash []byte) (*chainhash.Hash, []byte, error) {
+	extractSecret := func(vin int, contractHash []byte, contractOutputScriptVer uint16) (*chainhash.Hash, []byte, error) {
 		redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
 		if err != nil {
 			return nil, nil, err
@@ -1976,8 +1978,7 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 		if err != nil {
 			return nil, nil, err
 		}
-		// tx.Vin[vin] doesnt have a version field, assume 0
-		secret, err := dexdcr.FindKeyPush(0, sigScript, contractHash, dcr.chainParams)
+		secret, err := dexdcr.FindKeyPush(contractOutputScriptVer, sigScript, contractHash, dcr.chainParams)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2002,7 +2003,7 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 			}
 			found++
 
-			redeemTxHash, secret, err := extractSecret(i, req.contractHash)
+			redeemTxHash, secret, err := extractSecret(i, req.contractHash, req.contractOutputScriptVer)
 			if err != nil {
 				dcr.log.Errorf("Error parsing contract secret for %s from tx input %s:%d in %s: %v",
 					contractOutpoint.String(), tx.Txid, i, scanPoint, err)
