@@ -29,6 +29,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -50,7 +51,7 @@ var (
 	tErr                  = fmt.Errorf("test error")
 	tTxID                 = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
 	tTxHash        *chainhash.Hash
-	tPKHAddr       dcrutil.Address
+	tPKHAddr       stdaddr.Address
 	tP2PKHScript   []byte
 	tChainParams          = chaincfg.MainNetParams()
 	feeSuggestion  uint64 = 10
@@ -193,9 +194,9 @@ type tRPCClient struct {
 	balanceResult            *walletjson.GetBalanceResult
 	balanceErr               error
 	lockUnspentErr           error
-	changeAddr               dcrutil.Address
+	changeAddr               stdaddr.Address
 	changeAddrErr            error
-	newAddr                  dcrutil.Address
+	newAddr                  stdaddr.Address
 	newAddrErr               error
 	signFunc                 func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
 	privWIF                  *dcrutil.WIF
@@ -368,15 +369,15 @@ func (c *tRPCClient) LockUnspent(_ context.Context, unlock bool, ops []*wire.Out
 	return c.lockUnspentErr
 }
 
-func (c *tRPCClient) GetRawChangeAddress(_ context.Context, account string, net dcrutil.AddressParams) (dcrutil.Address, error) {
+func (c *tRPCClient) GetRawChangeAddress(_ context.Context, account string, net stdaddr.AddressParams) (stdaddr.Address, error) {
 	return c.changeAddr, c.changeAddrErr
 }
 
-func (c *tRPCClient) GetNewAddressGapPolicy(_ context.Context, account string, gapPolicy dcrwallet.GapPolicy) (dcrutil.Address, error) {
+func (c *tRPCClient) GetNewAddressGapPolicy(_ context.Context, account string, gapPolicy dcrwallet.GapPolicy) (stdaddr.Address, error) {
 	return c.newAddr, c.newAddrErr
 }
 
-func (c *tRPCClient) DumpPrivKey(_ context.Context, address dcrutil.Address) (*dcrutil.WIF, error) {
+func (c *tRPCClient) DumpPrivKey(_ context.Context, address stdaddr.Address) (*dcrutil.WIF, error) {
 	return c.privWIF, c.privWIFErr
 }
 
@@ -405,7 +406,7 @@ func (c *tRPCClient) WalletInfo(_ context.Context) (*walletjson.WalletInfoResult
 	}, nil
 }
 
-func (c *tRPCClient) ValidateAddress(_ context.Context, address dcrutil.Address) (*walletjson.ValidateAddressWalletResult, error) {
+func (c *tRPCClient) ValidateAddress(_ context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
 	return &walletjson.ValidateAddressWalletResult{
 		IsMine: true,
 	}, nil
@@ -532,7 +533,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
-	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
+	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
 	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -1534,11 +1535,8 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	addr, _ := dcrutil.NewAddressScriptHash(contract, tChainParams)
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		t.Fatalf("bad address %s (%T)", addr, addr)
-	}
+	addr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
+	_, pkScript := addr.PaymentScript()
 
 	txoutRes := makeGetTxOutRes(1, 5, pkScript) // 1 conf
 	node.txOutRes[newOutPoint(tTxHash, vout)] = txoutRes
@@ -1584,11 +1582,8 @@ func TestAuditContract(t *testing.T) {
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
-	wrongAddr, _ := dcrutil.NewAddressPubKeyHash(pkh, tChainParams, dcrec.STEcdsaSecp256k1)
-	badContract, err := txscript.PayToAddrScript(wrongAddr)
-	if err != nil {
-		t.Fatalf("bad address %s (%T)", wrongAddr, wrongAddr)
-	}
+	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
+	_, badContract := wrongAddr.PaymentScript()
 	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
@@ -1631,17 +1626,11 @@ func TestFindRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
-	contractAddr, _ := dcrutil.NewAddressScriptHash(contract, tChainParams)
-	pkScript, err := txscript.PayToAddrScript(contractAddr)
-	if err != nil {
-		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
-	}
+	contractAddr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
+	_, pkScript := contractAddr.PaymentScript()
 
-	tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), tChainParams)
-	otherScript, err := txscript.PayToAddrScript(tPKHAddrV3)
-	if err != nil {
-		t.Fatalf("bad address %s (%T)", tPKHAddrV3, tPKHAddrV3)
-	}
+	tPKHAddrV3, _ := stdaddr.DecodeAddress(tPKHAddr.String(), tChainParams)
+	_, otherScript := tPKHAddrV3.PaymentScript()
 
 	redemptionScript, _ := dexdcr.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
 	otherSpendScript, _ := txscript.NewScriptBuilder().
@@ -1931,7 +1920,7 @@ func Test_sendMinusFees(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 
-	addr, err := dcrutil.DecodeAddress(address, tChainParams)
+	addr, err := stdaddr.DecodeAddress(address, tChainParams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2069,15 +2058,12 @@ func TestSendEdges(t *testing.T) {
 
 	const swapVal = 2e8 // leaving untyped. NewTxOut wants int64
 
-	contractAddr, _ := dcrutil.NewAddressScriptHash(randBytes(20), tChainParams)
+	contractAddr, _ := stdaddr.NewAddressScriptHashV0(randBytes(20), tChainParams)
 	// See dexdcr.IsDust for the source of this dustCoverage voodoo.
 	dustCoverage := (dexdcr.P2PKHOutputSize + 165) * feeRate * 3
 	dexReqFees := dexdcr.InitTxSize * feeRate
 
-	pkScript, err := txscript.PayToAddrScript(contractAddr)
-	if err != nil {
-		t.Fatalf("bad address %s (%T)", contractAddr, contractAddr)
-	}
+	_, pkScript := contractAddr.PaymentScript()
 
 	newBaseTx := func(funding uint64) *wire.MsgTx {
 		baseTx := wire.NewMsgTx()
@@ -2119,7 +2105,7 @@ func TestSendEdges(t *testing.T) {
 		},
 	}
 
-	// tPKHAddrV3, _ := dcrutil.DecodeAddress(tPKHAddr.String(), tChainParams)
+	// tPKHAddrV3, _ := stdaddr.DecodeAddress(tPKHAddr.String(), tChainParams)
 	node.changeAddr = tPKHAddr
 
 	for _, tt := range tests {

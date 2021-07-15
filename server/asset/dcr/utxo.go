@@ -15,7 +15,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 )
 
 const ErrReorgDetected = dex.ErrorKind("reorg detected")
@@ -274,7 +274,7 @@ func (output *Output) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if err != nil {
 		return fmt.Errorf("error during pubkey matching: %w", err)
 	}
-	m, err := pkMatches(pubkeys, scriptAddrs.PkHashes, dcrutil.Hash160)
+	m, err := pkMatches(pubkeys, scriptAddrs.PkHashes, stdaddr.Hash160)
 	if err != nil {
 		return fmt.Errorf("error during pubkey hash matching: %w", err)
 	}
@@ -329,32 +329,27 @@ type pkMatch struct {
 
 // pkMatches looks through a set of addresses and a returns a set of match
 // structs with details about the match.
-func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []byte) ([]pkMatch, error) {
+func pkMatches(pubkeys [][]byte, addrs []stdaddr.Address, hasher func([]byte) []byte) ([]pkMatch, error) {
 	matches := make([]pkMatch, 0, len(pubkeys))
 	if hasher == nil {
 		hasher = func(a []byte) []byte { return a }
 	}
 	matchIndex := make(map[string]struct{})
 	for _, addr := range addrs {
+		addrStr := addr.String()
+		addrScript, err := dexdcr.AddressScript(addr)
+		if err != nil {
+			return nil, err
+		}
+		sigType, err := dexdcr.AddressSigType(addr)
+		if err != nil {
+			return nil, err
+		}
 		for i, pubkey := range pubkeys {
-			if bytes.Equal(addr.ScriptAddress(), hasher(pubkey)) {
-				addrStr := addr.String()
+			if bytes.Equal(addrScript, hasher(pubkey)) {
 				_, alreadyFound := matchIndex[addrStr]
 				if alreadyFound {
 					continue
-				}
-				var sigType dcrec.SignatureType
-				switch a := addr.(type) {
-				case *dcrutil.AddressPubKeyHash:
-					sigType = a.DSA()
-				case *dcrutil.AddressSecpPubKey:
-					sigType = dcrec.STEcdsaSecp256k1
-				case *dcrutil.AddressEdwardsPubKey:
-					sigType = dcrec.STEd25519
-				case *dcrutil.AddressSecSchnorrPubKey:
-					sigType = dcrec.STSchnorrSecp256k1
-				default:
-					return nil, fmt.Errorf("unsupported signature type")
 				}
 				matchIndex[addrStr] = struct{}{}
 				matches = append(matches, pkMatch{
@@ -387,7 +382,7 @@ func auditContract(op *Output) (*asset.Contract, error) {
 	if scriptHash == nil {
 		return nil, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, op.vout)
 	}
-	if !bytes.Equal(dcrutil.Hash160(op.redeemScript), scriptHash) {
+	if !bytes.Equal(stdaddr.Hash160(op.redeemScript), scriptHash) {
 		return nil, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, op.vout)
 	}
 	_, receiver, lockTime, _, err := dexdcr.ExtractSwapDetails(op.redeemScript, chainParams)

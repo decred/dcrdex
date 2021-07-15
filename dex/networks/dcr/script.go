@@ -16,6 +16,7 @@ import (
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -331,32 +332,71 @@ func ExtractStakeScriptHash(script []byte, stakeOpcode byte) []byte {
 	return nil
 }
 
+// AddressScript returns the raw bytes of the address to be used when inserting
+// the address into a txout's script. This is currently the address' pubkey or
+// script hash160. Other address types are unsupported.
+func AddressScript(addr stdaddr.Address) ([]byte, error) {
+	switch addr := addr.(type) {
+	case stdaddr.SerializedPubKeyer:
+		return addr.SerializedPubKey(), nil
+	case stdaddr.Hash160er:
+		return addr.Hash160()[:], nil
+	default:
+		return nil, fmt.Errorf("unsupported address type %T", addr)
+	}
+}
+
+// AddressSigType returns the digital signature algorithm for the specified
+// address.
+func AddressSigType(addr stdaddr.Address) (sigType dcrec.SignatureType, err error) {
+	switch addr.(type) {
+	case *stdaddr.AddressPubKeyEcdsaSecp256k1V0:
+		sigType = dcrec.STEcdsaSecp256k1
+	case *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0:
+		sigType = dcrec.STEcdsaSecp256k1
+
+	case *stdaddr.AddressPubKeyEd25519V0:
+		sigType = dcrec.STEd25519
+	case *stdaddr.AddressPubKeyHashEd25519V0:
+		sigType = dcrec.STEd25519
+
+	case *stdaddr.AddressPubKeySchnorrSecp256k1V0:
+		sigType = dcrec.STSchnorrSecp256k1
+	case *stdaddr.AddressPubKeyHashSchnorrSecp256k1V0:
+		sigType = dcrec.STSchnorrSecp256k1
+
+	default:
+		err = fmt.Errorf("unsupported signature type")
+	}
+	return sigType, err
+}
+
 // MakeContract creates an atomic swap contract. The secretHash MUST be computed
 // from a secret of length SecretKeySize bytes or the resulting contract will be
 // invalid.
 func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
-	rAddr, err := dcrutil.DecodeAddress(recipient, chainParams)
+	parseAddress := func(address string) (*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0, error) {
+		addr, err := stdaddr.DecodeAddress(address, chainParams)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding address %s: %w", address, err)
+		}
+		if addr, ok := addr.(*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0); ok {
+			return addr, nil
+		} else {
+			return nil, fmt.Errorf("address %s is not a pubkey-hash address or "+
+				"signature algorithm is unsupported", address)
+		}
+	}
+
+	rAddr, err := parseAddress(recipient)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding recipient address %s: %w", recipient, err)
+		return nil, fmt.Errorf("invalid recipient address: %w", err)
 	}
-	a, ok := rAddr.(*dcrutil.AddressPubKeyHash)
-	if !ok {
-		return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", recipient)
-	}
-	if a.DSA() != dcrec.STEcdsaSecp256k1 {
-		return nil, fmt.Errorf("recipient address signature algorithm unsupported")
-	}
-	sAddr, err := dcrutil.DecodeAddress(sender, chainParams)
+	sAddr, err := parseAddress(sender)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding sender address %s: %w", sender, err)
+		return nil, fmt.Errorf("invalid sender address: %w", err)
 	}
-	a, ok = sAddr.(*dcrutil.AddressPubKeyHash)
-	if !ok {
-		return nil, fmt.Errorf("sender address %s is not a pubkey-hash address", recipient)
-	}
-	if a.DSA() != dcrec.STEcdsaSecp256k1 {
-		return nil, fmt.Errorf("sender address signature algorithm unsupported")
-	}
+
 	if len(secretHash) != SecretHashSize {
 		return nil, fmt.Errorf("secret hash of length %d not supported", len(secretHash))
 	}
@@ -374,7 +414,7 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 			txscript.OP_EQUALVERIFY,
 			txscript.OP_DUP,
 			txscript.OP_HASH160,
-		}).AddData(rAddr.ScriptAddress()).
+		}).AddData(rAddr.Hash160()[:]).
 		AddOp(txscript.OP_ELSE).
 		AddInt64(lockTime).
 		AddOps([]byte{
@@ -382,7 +422,7 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 			txscript.OP_DROP,
 			txscript.OP_DUP,
 			txscript.OP_HASH160,
-		}).AddData(sAddr.ScriptAddress()).
+		}).AddData(sAddr.Hash160()[:]).
 		AddOps([]byte{
 			txscript.OP_ENDIF,
 			txscript.OP_EQUALVERIFY,
@@ -419,7 +459,7 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 // contract. If the provided script is not a swap contract, an error will be
 // returned.
 func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
-	sender, receiver dcrutil.Address, lockTime uint64, secretHash []byte, err error) {
+	sender, receiver stdaddr.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
 	// following swap contract, allowing only for a secret of size
 	//
@@ -476,12 +516,12 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 			return nil, nil, 0, nil, fmt.Errorf("invalid secret size %d", ssz)
 		}
 
-		receiver, err = dcrutil.NewAddressPubKeyHash(pkScript[43:63], chainParams, dcrec.STEcdsaSecp256k1)
+		receiver, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkScript[43:63], chainParams)
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
 		}
 
-		sender, err = dcrutil.NewAddressPubKeyHash(pkScript[74:94], chainParams, dcrec.STEcdsaSecp256k1)
+		sender, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkScript[74:94], chainParams)
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
 		}
@@ -596,9 +636,9 @@ func ExtractScriptData(version uint16, script []byte, chainParams *chaincfg.Para
 // used to estimate the spend script size, e.g. pubkeys in a redeem script don't
 // require pubkeys in the scriptSig, but pubkey hashes do.
 type DCRScriptAddrs struct {
-	PubKeys   []dcrutil.Address
+	PubKeys   []stdaddr.Address
 	NumPK     int
-	PkHashes  []dcrutil.Address
+	PkHashes  []stdaddr.Address
 	NumPKH    int
 	NRequired int
 }
@@ -610,8 +650,8 @@ type DCRScriptAddrs struct {
 // processed with ExtractScriptAddrs. The returned bool indicates if the script
 // is non-standard.
 func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, bool, error) {
-	pubkeys := make([]dcrutil.Address, 0)
-	pkHashes := make([]dcrutil.Address, 0)
+	pubkeys := make([]stdaddr.Address, 0)
+	pkHashes := make([]stdaddr.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
 	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(version, script, chainParams, false)
 	nonStandard := class == txscript.NonStandardTy
@@ -624,7 +664,7 @@ func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Par
 	for _, addr := range addrs {
 		// If the address is an unhashed public key, is won't need a pubkey as
 		// part of its sigScript, so count them separately.
-		_, isPubkey := addr.(*dcrutil.AddressSecpPubKey)
+		_, isPubkey := addr.(stdaddr.SerializedPubKeyer)
 		if isPubkey {
 			pubkeys = append(pubkeys, addr)
 		} else {
@@ -744,41 +784,53 @@ func ExtractContractHash(scriptHex string) ([]byte, error) {
 // contract must be provided for the search algorithm to verify the correct data
 // push. Only contracts of length SwapContractSize that can be validated by
 // ExtractSwapDetails are recognized.
-func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
-	dataPushes, err := txscript.PushedData(sigScript)
-	if err != nil {
-		return nil, err
-	}
-	if len(dataPushes) == 0 {
-		return nil, fmt.Errorf("no data pushes in in the signature script")
-	}
-	// The key must be the last data push, but iterate through all of the pushes
-	// backwards to ensure it not hidden behind some non-standard script.
-	var keyHash []byte
-	for i := len(dataPushes) - 1; i >= 0; i-- {
-		push := dataPushes[i]
+func FindKeyPush(scriptVersion uint16, sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, sigScript)
 
-		// First locate the swap contract.
-		if len(keyHash) == 0 {
-			// Skip hashing if ExtractSwapDetails will not recognize it.
-			if len(push) != SwapContractSize {
-				continue
-			}
+	// The contract is pushed after the key, find the contract starting with the
+	// first data push and record all data pushes encountered before the contract
+	// push. One of those preceding pushes should be the key push.
+	var dataPushesUpTillContract [][]byte
+	var keyHash []byte
+	var err error
+	for tokenizer.Next() {
+		push := tokenizer.Data()
+
+		// Only hash if ExtractSwapDetails will recognize it.
+		if len(push) == SwapContractSize {
 			h := dcrutil.Hash160(push)
 			if bytes.Equal(h, contractHash) {
 				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 				if err != nil {
 					return nil, fmt.Errorf("error extracting atomic swap details: %w", err)
 				}
+				break // contract is pushed after the key, if we've encountered the contract, we must have just passed the key
 			}
-			continue
 		}
 
-		// We have the key hash from the contract. See if this is the key.
-		h := sha256.Sum256(push)
-		if bytes.Equal(h[:], keyHash) {
-			return push, nil
+		// Save this push as preceding the contract push.
+		if push != nil {
+			dataPushesUpTillContract = append(dataPushesUpTillContract, push)
 		}
 	}
+	if tokenizer.Err() != nil {
+		return nil, tokenizer.Err()
+	}
+
+	if len(keyHash) > 0 {
+		// The key push should be the data push immediately preceding the contract
+		// push, but iterate through all of the preceding pushes backwards to ensure
+		// it is not hidden behind some non-standard script.
+		for i := len(dataPushesUpTillContract) - 1; i >= 0; i-- {
+			push := dataPushesUpTillContract[i]
+
+			// We have the key hash from the contract. See if this is the key.
+			h := sha256.Sum256(push)
+			if bytes.Equal(h[:], keyHash) {
+				return push, nil
+			}
+		}
+	}
+
 	return nil, fmt.Errorf("key not found")
 }

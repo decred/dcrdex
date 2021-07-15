@@ -27,6 +27,7 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -384,7 +385,7 @@ func (dcr *Backend) ValidateContract(contract []byte) error {
 
 // CheckAddress checks that the given address is parseable.
 func (dcr *Backend) CheckAddress(addr string) bool {
-	_, err := dcrutil.DecodeAddress(addr, chainParams)
+	_, err := stdaddr.DecodeAddress(addr, chainParams)
 	if err != nil {
 		dcr.log.Errorf("DecodeAddress error for %s: %v", addr, err)
 	}
@@ -399,14 +400,14 @@ func (dcr *Backend) TxData(coinID []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	dcrutilTx, err := dcr.node.GetRawTransaction(dcr.ctx, txHash)
+	stdaddrTx, err := dcr.node.GetRawTransaction(dcr.ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
 		}
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
-	return dcrutilTx.MsgTx().Bytes()
+	return stdaddrTx.MsgTx().Bytes()
 }
 
 // VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
@@ -778,7 +779,7 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 		if err != nil {
 			return nil, fmt.Errorf("utxo error: %w", err)
 		}
-		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
+		if !bytes.Equal(stdaddr.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 		}
 	}
@@ -895,7 +896,7 @@ func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 		if err != nil {
 			return nil, fmt.Errorf("output error: %w", err)
 		}
-		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
+		if !bytes.Equal(stdaddr.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for output %s:%d", txHash, vout)
 		}
 	}

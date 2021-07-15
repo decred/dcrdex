@@ -31,6 +31,7 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -296,7 +297,7 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 
 		addrStrs := make([]string, len(addrs))
 		for i, addr := range addrs {
-			addrStrs[i] = addr.Address()
+			addrStrs[i] = addr.String()
 		}
 
 		vouts = append(vouts, chainjson.Vout{
@@ -465,24 +466,29 @@ func schnorrAuth(msg []byte) *testAuth {
 // A pay-to-script-hash pubkey script.
 func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
 	var auth *testAuth
+	var addr stdaddr.Address
+	var err error
 	switch sigType {
 	case dcrec.STEcdsaSecp256k1:
 		auth = s256Auth(nil)
+		addr, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(auth.pkHash, chainParams)
 	case dcrec.STEd25519:
 		auth = edwardsAuth(nil)
+		addr, err = stdaddr.NewAddressPubKeyHashEd25519V0(auth.pkHash, chainParams)
 	case dcrec.STSchnorrSecp256k1:
 		auth = schnorrAuth(nil)
+		addr, err = stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(auth.pkHash, chainParams)
 	default:
-		fmt.Printf("NewAddressPubKeyHash unknown sigType")
+		fmt.Printf("newP2PKHScript unknown sigType")
+		return nil, nil
 	}
-	addr, err := dcrutil.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
 	if err != nil {
 		fmt.Printf("NewAddressPubKeyHash error: %v\n", err)
 		return nil, nil
 	}
-	pkScript, err := txscript.PayToAddrScript(addr)
+	_, pkScript := addr.PaymentScript()
 	if err != nil {
-		fmt.Printf("PayToAddrScript error: %v\n", err)
+		fmt.Printf("addr PaymentScript error: %v\n", err)
 	}
 	return pkScript, auth
 }
@@ -514,13 +520,13 @@ func testMsgTxRegular(sigType dcrec.SignatureType) *testMsgTx {
 type testMsgTxSwap struct {
 	tx        *wire.MsgTx
 	contract  []byte
-	recipient dcrutil.Address
-	refund    dcrutil.Address
+	recipient stdaddr.Address
+	refund    stdaddr.Address
 }
 
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
-func testSwapContract() ([]byte, dcrutil.Address, dcrutil.Address) {
+func testSwapContract() ([]byte, stdaddr.Address, stdaddr.Address) {
 	lockTime := time.Now().Add(time.Hour * 8).Unix()
 	secretKey := randomBytes(32)
 	_, receiverPKH := genPubkey()
@@ -554,8 +560,8 @@ func testSwapContract() ([]byte, dcrutil.Address, dcrutil.Address) {
 	if err != nil {
 		fmt.Printf("testSwapContract error: %v\n", err)
 	}
-	receiverAddr, _ := dcrutil.NewAddressPubKeyHash(receiverPKH, chainParams, dcrec.STEcdsaSecp256k1)
-	refundAddr, _ := dcrutil.NewAddressPubKeyHash(senderPKH, chainParams, dcrec.STEcdsaSecp256k1)
+	receiverAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(receiverPKH, chainParams)
+	refundAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(senderPKH, chainParams)
 	return contract, receiverAddr, refundAddr
 }
 
@@ -563,7 +569,7 @@ func testSwapContract() ([]byte, dcrutil.Address, dcrutil.Address) {
 func testMsgTxSwapInit(val int64) *testMsgTxSwap {
 	msgTx := wire.NewMsgTx()
 	contract, recipient, refund := testSwapContract()
-	scriptHash := dcrutil.Hash160(contract)
+	scriptHash := stdaddr.Hash160(contract)
 	pkScript, err := txscript.NewScriptBuilder().
 		AddOp(txscript.OP_HASH160).
 		AddData(scriptHash).
@@ -632,10 +638,10 @@ type testMsgTxP2SH struct {
 	m      int
 }
 
-func multiSigScript(pubkeys []*dcrutil.AddressSecpPubKey, numReq int64) ([]byte, error) {
+func multiSigScript(pubkeys []*stdaddr.AddressPubKeyEcdsaSecp256k1V0, numReq int64) ([]byte, error) {
 	builder := txscript.NewScriptBuilder().AddInt64(numReq)
 	for _, key := range pubkeys {
-		builder.AddData(key.ScriptAddress())
+		builder.AddData(key.SerializedPubKey())
 	}
 	builder.AddInt64(int64(len(pubkeys))).AddOp(txscript.OP_CHECKMULTISIG)
 	return builder.Script()
@@ -644,7 +650,7 @@ func multiSigScript(pubkeys []*dcrutil.AddressSecpPubKey, numReq int64) ([]byte,
 // An M-of-N mutli-sig script. This script is pay-to-pubkey.
 func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 	// serialized compressed pubkey used for multisig
-	addrs := make([]*dcrutil.AddressSecpPubKey, 0, n)
+	addrs := make([]*stdaddr.AddressPubKeyEcdsaSecp256k1V0, 0, n)
 	auth := &testMultiSigAuth{
 		msg: randomBytes(32),
 	}
@@ -654,7 +660,7 @@ func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 		auth.pubkeys = append(auth.pubkeys, a.pubkey)
 		auth.pkHashes = append(auth.pkHashes, a.pkHash)
 		auth.sigs = append(auth.sigs, a.sig)
-		addr, err := dcrutil.NewAddressSecpPubKey(a.pubkey, chainParams)
+		addr, err := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(a.pubkey, chainParams)
 		if err != nil {
 			fmt.Printf("error creating AddressSecpPubKey: %v", err)
 			return nil, nil
@@ -701,7 +707,7 @@ func testMsgTxP2SHVote() *testMsgTx {
 	pkScript = append(pkScript, txscript.OP_SSGEN)
 	pkScript = append(pkScript, txscript.OP_HASH160)
 	pkScript = append(pkScript, txscript.OP_DATA_20)
-	scriptHash := dcrutil.Hash160(ogScript)
+	scriptHash := stdaddr.Hash160(ogScript)
 	pkScript = append(pkScript, scriptHash...)
 	pkScript = append(pkScript, txscript.OP_EQUAL)
 	msg.tx.TxOut[msg.vout].PkScript = pkScript
