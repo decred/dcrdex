@@ -23,7 +23,8 @@ const (
 )
 
 // RawRequester is for sending context-aware RPC requests, and has methods for
-// shutting down the underlying connection.
+// shutting down the underlying connection. The returned error should be of type
+// dcrjson.RPCError if non-nil.
 type RawRequester interface {
 	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
 	Shutdown()

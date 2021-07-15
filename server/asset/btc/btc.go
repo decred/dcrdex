@@ -24,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
+	"github.com/decred/dcrd/dcrjson/v3" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
 )
 
@@ -719,11 +720,8 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, *btcjson.TxRawResult, []byte, error) {
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		var rpcErr *btcjson.RPCError
-		if errors.As(err, &rpcErr) {
-			if rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey {
-				return nil, nil, nil, asset.CoinNotFoundError
-			}
+		if isTxNotFoundErr(err) {
+			return nil, nil, nil, asset.CoinNotFoundError
 		}
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err)
 	}
@@ -974,8 +972,11 @@ func toSat(v float64) uint64 {
 // isTxNotFoundErr will return true if the error indicates that the requested
 // transaction is not known.
 func isTxNotFoundErr(err error) bool {
-	var rpcErr *btcjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
+	// We are using dcrd's client with Bitcoin Core, so errors will be of type
+	// dcrjson.RPCError, but numeric codes should come from btcjson.
+	const errRPCNoTxInfo = int(btcjson.ErrRPCNoTxInfo)
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && int(rpcErr.Code) == errRPCNoTxInfo
 }
 
 // feeRate returns the current optimal fee rate in sat / byte using the
