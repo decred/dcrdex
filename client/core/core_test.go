@@ -276,7 +276,6 @@ type TDB struct {
 	updateWalletErr       error
 	acct                  *db.AccountInfo
 	acctErr               error
-	coreVersion           uint8
 	createAccountErr      error
 	accountPaidErr        error
 	updateOrderErr        error
@@ -306,9 +305,8 @@ type TDB struct {
 	disableAccountErr     error
 	creds                 *db.PrimaryCredentials
 	setCredsErr           error
-	legacyKeyParams       []byte
 	legacyKeyErr          error
-	upLegacyErr           error
+	recryptErr            error
 	updatedCreds          *db.PrimaryCredentials
 }
 
@@ -448,7 +446,6 @@ func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials, coreVersion 
 	if tdb.setCredsErr != nil {
 		return tdb.setCredsErr
 	}
-	tdb.coreVersion = coreVersion
 	tdb.creds = creds
 	return nil
 }
@@ -457,21 +454,12 @@ func (tdb *TDB) PrimaryCredentials() (*db.PrimaryCredentials, error) {
 	return tdb.creds, nil
 }
 
-func (tdb *TDB) LegacyKeyParams() ([]byte, error) {
-	if tdb.legacyKeyErr != nil {
-		return nil, tdb.legacyKeyErr
+func (tdb *TDB) Recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
+	walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
+
+	if tdb.recryptErr != nil {
+		return nil, nil, tdb.recryptErr
 	}
-	return tdb.legacyKeyParams, nil
-}
-
-func (tdb *TDB) UpgradeLegacyCredentials(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter,
-	coreVersion uint8) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
-
-	if tdb.upLegacyErr != nil {
-		return nil, nil, tdb.upLegacyErr
-	}
-
-	tdb.coreVersion = coreVersion
 
 	return nil, nil, nil
 }
@@ -479,10 +467,6 @@ func (tdb *TDB) UpgradeLegacyCredentials(creds *db.PrimaryCredentials, oldCrypte
 func (tdb *TDB) UpdatePrimaryCredentials(creds *db.PrimaryCredentials) error {
 	tdb.updatedCreds = creds
 	return nil
-}
-
-func (tdb *TDB) CoreVersion() (ver uint8, err error) {
-	return tdb.coreVersion, nil
 }
 
 func (tdb *TDB) Backup() error {
@@ -871,7 +855,6 @@ func newTestRig() *testRig {
 		existValues: map[string]bool{
 			keyParamsKey: true,
 		},
-		coreVersion:  0,
 		legacyKeyErr: tErr,
 	}
 
@@ -1804,9 +1787,8 @@ func TestCoreUpgradeV1(t *testing.T) {
 	rig.db.legacyKeyErr = nil
 
 	clearUpgrade := func() {
-		rig.db.coreVersion = 0
-		rig.db.creds = nil
-		tCore.setCredentials(nil)
+		rig.db.creds.EncInnerKey = nil
+		tCore.credentials.EncInnerKey = nil
 	}
 
 	clearUpgrade()
@@ -1819,21 +1801,13 @@ func TestCoreUpgradeV1(t *testing.T) {
 
 	clearUpgrade()
 
-	// LegacyKeyParams error
-	rig.db.legacyKeyErr = tErr
+	// Recrypt error
+	rig.db.recryptErr = tErr
 	_, err = tCore.Login(tPW)
 	if err == nil {
-		t.Fatalf("no error for legacyKeyErr")
+		t.Fatalf("no error for recryptErr")
 	}
-	rig.db.legacyKeyErr = nil
-
-	// UpgradeLegacyCredentials error
-	rig.db.upLegacyErr = tErr
-	_, err = tCore.Login(tPW)
-	if err == nil {
-		t.Fatalf("no error for upLegacyErr")
-	}
-	rig.db.upLegacyErr = nil
+	rig.db.recryptErr = nil
 
 	// final success
 	_, err = tCore.Login(tPW)

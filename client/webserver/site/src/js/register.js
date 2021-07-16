@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
+import { NewWalletForm, UnlockWalletForm, DEXAddressForm, bind as bindForm } from './forms'
 import { feeSendErr } from './constants'
 
 const DCR_ID = 42
@@ -58,11 +58,29 @@ export default class RegistrationPage extends BasePage {
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
       this.fee = xc.feeAsset.amount
+      const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
+      if (balanceFeeRegistration < this.fee) {
+        await this.changeForm(page.dexAddrForm, page.failedRegForm)
+        page.regFundsErr.textContent = `Looks like there is not enough funds for
+        paying the registration fee. Amount needed:
+        ${Doc.formatCoinValue(this.fee / 1e8)} Amount available:
+        ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
+
+        Deposit funds and try again.`
+        Doc.show(page.regFundsErr)
+        return
+      }
+
       page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-      const dcrAsset = xc.assets['42']
-      if (dcrAsset) page.dexDCRLotSize.textContent = Doc.formatCoinValue(dcrAsset.lotSize / 1e8)
-      if (this.pwCache.pw) Doc.hide(page.appPassBox)
-      else Doc.show(page.appPassBox)
+      // Assume there is at least one DCR base market since we're assuming DCR for
+      // registration anyway.
+      for (const market of Object.values(xc.markets)) {
+        if (market.baseid === 42) {
+          page.dexDCRLotSize.textContent = Doc.formatCoinValue(market.lotsize / 1e8)
+          page.dcrBaseMarketName.textContent = market.name.toUpperCase()
+          if (market.quoteid === 0) break // prefer dcr-btc
+        }
+      }
       await this.changeForm(page.dexAddrForm, page.confirmRegForm)
     }, this.pwCache)
 
@@ -155,32 +173,6 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.regErr)
       return
     }
-    this.fee = res.xc.feeAsset.amount
-    const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
-    if (balanceFeeRegistration < this.fee) {
-      await this.changeForm(page.dexAddrForm, page.failedRegForm)
-      page.regFundsErr.textContent = `Looks like there is not enough funds for
-       paying the registration fee. Amount needed:
-       ${Doc.formatCoinValue(this.fee / 1e8)} Amount available:
-       ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
-
-       Deposit funds and try again.`
-      Doc.show(page.regFundsErr)
-      return
-    }
-
-    page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-    // Assume there is at least one DCR base market since we're assuming DCR for
-    // registration anyway.
-    for (const market of Object.values(res.xc.markets)) {
-      if (market.baseid === 42) {
-        page.dexDCRLotSize.textContent = Doc.formatCoinValue(market.lotsize / 1e8)
-        page.dcrBaseMarketName.textContent = market.name.toUpperCase()
-        if (market.quoteid === 0) break // prefer dcr-btc
-      }
-    }
-    await this.changeForm(page.dexAddrForm, page.confirmRegForm)
-  }
 
     Doc.hide(page.regErr)
     let cert = ''

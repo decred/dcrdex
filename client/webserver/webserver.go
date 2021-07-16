@@ -96,7 +96,7 @@ type clientCore interface {
 	AccountExport(pw []byte, host string) (*core.Account, error)
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
-	IsInitialized() (bool, error)
+	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
 }
 

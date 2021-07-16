@@ -1055,19 +1055,14 @@ func (c *tCrypter) Serialize() []byte {
 
 func (c *tCrypter) Close() {}
 
-func TestUpgradeLegacyCredentials(t *testing.T) {
+func TestRecrypt(t *testing.T) {
 	boltdb := newTestDB(t)
 	tester := func(walletID []byte, host string, creds *db.PrimaryCredentials) error {
-		ver := randBytes(1)[0]
 		encPW := randBytes(5)
 		oldCrypter, newCrypter := &tCrypter{}, &tCrypter{encPW}
-		walletUpdates, acctUpdates, err := boltdb.UpgradeLegacyCredentials(creds, oldCrypter, newCrypter, ver)
+		walletUpdates, acctUpdates, err := boltdb.Recrypt(creds, oldCrypter, newCrypter)
 		if err != nil {
 			return err
-		}
-		coreVer, _ := boltdb.CoreVersion()
-		if coreVer != ver {
-			return fmt.Errorf("core version not updated. %d != %d", coreVer, ver)
 		}
 
 		if len(walletUpdates) != 1 {

@@ -51,7 +51,6 @@ var (
 // value encodings.
 var (
 	appBucket              = []byte("appBucket")
-	coreVersionKey         = []byte("coreVersion")
 	accountsBucket         = []byte("accounts")
 	disabledAccountsBucket = []byte("disabledAccounts")
 	activeOrdersBucket     = []byte("activeOrders")
@@ -174,36 +173,10 @@ func (db *BoltDB) appView(f bucketFunc) error {
 	return db.withBucket(appBucket, db.View, f)
 }
 
-// CoreVersion gets the currently stored core version.
-func (db *BoltDB) CoreVersion() (ver uint8, err error) {
-	return ver, db.appView(func(bkt *bbolt.Bucket) error {
-		versionB := bkt.Get(coreVersionKey)
-		if len(versionB) == 0 {
-			// No entry is version 0.
-			return nil
-		}
-		ver = versionB[0]
-		return nil
-	})
-}
-
-// LegacyKeyParams retrieves the old app key parameters stored using the removed
-// Store method.
-func (db *BoltDB) LegacyKeyParams() ([]byte, error) {
-	var keyParams []byte
-	return keyParams, db.appView(func(bkt *bbolt.Bucket) error {
-		keyParams = getCopy(bkt, legacyKeyParamsKey)
-		if len(keyParams) == 0 {
-			return fmt.Errorf("no legacy key params stored")
-		}
-		return nil
-	})
-}
-
-// UpgradeLegacyCredentials updates the stored credentials to the new
-// *PrimaryCredentials format and updates the stored core version.
-func (db *BoltDB) UpgradeLegacyCredentials(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter,
-	newCoreVersion uint8) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
+// Recrypt re-encrypts the wallet passwords and account private keys. As a
+// convenience, the provided *PrimaryCredentials are stored under the same
+// transaction.
+func (db *BoltDB) Recrypt(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
 
 	currentCreds, _ := db.primaryCreds()
 	if currentCreds != nil {
@@ -272,7 +245,7 @@ func (db *BoltDB) UpgradeLegacyCredentials(creds *dexdb.PrimaryCredentials, oldC
 				return err
 			}
 			if len(acctInfo.LegacyEncKey) == 0 {
-				db.log.Warnf("no LegacyEncKey for %s during UpgradeLegacyCredentials?", string(hostB))
+				db.log.Warnf("no LegacyEncKey for %s during Recrypt?", string(hostB))
 				return nil
 			}
 			privB, err := oldCrypter.Decrypt(acctInfo.LegacyEncKey)
@@ -292,26 +265,9 @@ func (db *BoltDB) UpgradeLegacyCredentials(creds *dexdb.PrimaryCredentials, oldC
 			return fmt.Errorf("accounts update error: %w", err)
 		}
 
-		if err := db.updateCoreVersion(tx, newCoreVersion); err != nil {
-			return err
-		}
-
 		// Store the new credentials.
 		return db.setCreds(tx, creds)
 	})
-}
-
-func (db *BoltDB) updateCoreVersion(tx *bbolt.Tx, newCoreVersion uint8) error {
-	// Update the stored core version.
-	appBkt := tx.Bucket(appBucket)
-	if appBkt == nil {
-		return fmt.Errorf("no app bucket")
-	}
-	err := appBkt.Put(coreVersionKey, []byte{newCoreVersion})
-	if err != nil {
-		return fmt.Errorf("error updating core version: %w", err)
-	}
-	return nil
 }
 
 // UpdatePrimaryCredentials sets the *PrimaryCredentials and the core version
@@ -340,10 +296,6 @@ func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials, newCore
 	}
 
 	return db.Update(func(tx *bbolt.Tx) error {
-		if err := db.updateCoreVersion(tx, newCoreVersion); err != nil {
-			return err
-		}
-
 		return db.setCreds(tx, creds)
 	})
 }

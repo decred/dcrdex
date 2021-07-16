@@ -77,7 +77,7 @@ func TestUpgrades(t *testing.T) {
 					return doUpgrade(dbtx, tc.upgrade, tc.newVersion)
 				})
 				if err != nil {
-					t.Fatalf("Upgrade failed: %v", err)
+					t.Fatalf("Upgrade %d -> %d failed: %v", tc.newVersion-1, tc.newVersion, err)
 				}
 				tc.verify(t, db)
 			})

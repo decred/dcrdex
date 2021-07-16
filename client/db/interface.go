@@ -20,16 +20,10 @@ type DB interface {
 	UpdatePrimaryCredentials(creds *PrimaryCredentials) error
 	// PrimaryCredentials fetches the *PrimaryCredentials.
 	PrimaryCredentials() (*PrimaryCredentials, error)
-	// LegacyKeyParams get the app key parameters stored using the deprecated
-	// Store method.
-	LegacyKeyParams() ([]byte, error)
-	// UpgradeLegacyCredentials updates the stored credentials to the new
-	// *PrimaryCredentials format and updates the stored core version.
-	UpgradeLegacyCredentials(creds *PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter,
-		coreVersion uint8) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error)
-	// CoreVersion is the core version. If no core version has been set, the
-	// value 0 is returned without an error.
-	CoreVersion() (ver uint8, err error)
+	// Recrypt re-encrypts the wallet passwords and account private keys, and
+	// stores the new *PrimaryCredentials.
+	Recrypt(creds *PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
+		walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.

@@ -509,7 +509,6 @@ func (c *Core) register(dc *dexConnection, crypter encrypt.Crypter) (regRes *msg
 	regV2 := dc.acct.dexPubKey != nil
 
 	var accountSuspended bool
-newkey:
 	for {
 		if regV2 && !accountSuspended {
 			encKey, acctPubB, err = dc.acct.setupCryptoV2(creds, crypter)
@@ -531,31 +530,31 @@ newkey:
 		}
 		regRes = new(msgjson.RegisterResult)
 		err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
-		if err != nil {
-			var msgErr *msgjson.Error
-			if errors.As(err, &msgErr) {
-				switch msgErr.Code {
-				case msgjson.AccountExistsError:
-					// Server provides fee coin as the error message.
-					dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
-					if err != nil {
-						err = fmt.Errorf("error decoding coin ID from message %q", msgErr.Message)
-					} else {
-						paid = true
-					}
-					return
-				case msgjson.AccountSuspendedError:
-					// Retry with a legacy-style key.
-					c.log.Infof("HD account key for %s was reported as suspended. Generating a legacy-style key instead.", dc.acct.host)
-					accountSuspended = true
-					dc.acct.resetKeys()
-					continue newkey
-				}
-			}
-
-			return nil, nil, nil, nil, false, codedError(registerErr, err)
+		if err == nil {
+			break
 		}
-		break newkey
+		var msgErr *msgjson.Error
+		if errors.As(err, &msgErr) {
+			switch msgErr.Code {
+			case msgjson.AccountExistsError:
+				// Server provides fee coin as the error message.
+				dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
+				if err != nil {
+					err = fmt.Errorf("error decoding coin ID from message %q", msgErr.Message)
+				} else {
+					paid = true
+				}
+				return
+			case msgjson.AccountSuspendedError:
+				// Retry with a legacy-style key.
+				c.log.Infof("HD account key for %s was reported as suspended. Generating a legacy-style key instead.", dc.acct.host)
+				accountSuspended = true
+				dc.acct.resetKeys()
+				continue
+			}
+		}
+
+		return nil, nil, nil, nil, false, codedError(registerErr, err)
 	}
 
 	// If we already had a DEX pubkey from the 'config' response, check for
@@ -1329,6 +1328,13 @@ func addrHost(addr string) (string, error) {
 func (c *Core) creds() *db.PrimaryCredentials {
 	c.credMtx.RLock()
 	defer c.credMtx.RUnlock()
+	if c.credentials == nil {
+		return nil
+	}
+	if len(c.credentials.EncInnerKey) == 0 {
+		// database upgraded, but Core hasn't updated the PrimaryCredentials.
+		return nil
+	}
 	return c.credentials
 }
 
@@ -1672,14 +1678,10 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
-	initialized, err := c.IsInitialized()
-	if err != nil {
-		c.log.Errorf("User: error checking if app is initialized: %v", err)
-	}
 	return &User{
 		Assets:      c.assetMap(),
 		Exchanges:   c.exchangeMap(),
-		Initialized: initialized,
+		Initialized: c.IsInitialized(),
 	}
 }
 
@@ -2350,9 +2352,7 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 // recognized and has completed registration, paid will be true and the account
 // will be ready for immediate use.
 func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc *Exchange, paid bool, err error) {
-	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, false, fmt.Errorf("error checking if app is initialized: %w", err)
-	} else if !initialized {
+	if !c.IsInitialized() {
 		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
 
@@ -2436,9 +2436,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
-	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
-	} else if !initialized {
+	if !c.IsInitialized() {
 		return nil, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
 
@@ -2711,26 +2709,14 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 }
 
 // IsInitialized checks if the app is already initialized.
-func (c *Core) IsInitialized() (bool, error) {
-	if c.creds() != nil {
-		return true, nil
-	}
-	// Handle the case of a Core version 0 with legacy credentials, before
-	// the login-upgrade.
-	if ver, err := c.db.CoreVersion(); err == nil && ver == 0 {
-		if _, err := c.db.LegacyKeyParams(); err == nil {
-			return true, nil
-		}
-	}
-	return false, nil
+func (c *Core) IsInitialized() bool {
+	return c.creds() != nil
 }
 
 // InitializeClient sets the initial app-wide password and app seed for the
 // client. The seed argument should be left nil unless restoring from seed.
 func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
-	if initialized, err := c.IsInitialized(); err != nil {
-		return fmt.Errorf("error checking if app is already initialized: %w", err)
-	} else if initialized {
+	if c.IsInitialized() {
 		return fmt.Errorf("already initialized, login instead")
 	}
 
@@ -2775,8 +2761,9 @@ func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
 }
 
 // generateCredentials generates a new set of *PrimaryCredentials. The
-// credentials are not stored to the database.
-func (c *Core) generateCredentials(pw, restorationSeed []byte) (encrypt.Crypter, *db.PrimaryCredentials, error) {
+// credentials are not stored to the database. A restoration seed can be
+// provided, otherwise should be nil.
+func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.PrimaryCredentials, error) {
 	if len(pw) == 0 {
 		return nil, nil, fmt.Errorf("empty password not allowed")
 	}
@@ -2793,7 +2780,6 @@ func (c *Core) generateCredentials(pw, restorationSeed []byte) (encrypt.Crypter,
 	}
 
 	// Generate a seed to use as the root for all future key generation.
-	seed := restorationSeed
 	const seedLen = 64
 	if len(seed) == 0 {
 		seed = encode.RandomBytes(seedLen)
@@ -2821,21 +2807,16 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
-	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
-	} else if !initialized {
+	c.credMtx.RLock()
+	creds := c.credentials
+	c.credMtx.RUnlock()
+
+	if creds == nil {
 		return nil, fmt.Errorf("cannot log in because app has not been initialized")
 	}
 
-	// Check for necessary authenticated updates.
-	coreVersion, err := c.db.CoreVersion()
-	if err != nil {
-		return nil, fmt.Errorf("CoreVersion error: %v", err)
-	}
-
-	switch coreVersion {
-	case 0:
-		err := c.upgradeCoreToV1(pw)
+	if len(creds.EncInnerKey) == 0 {
+		err := c.initializePrimaryCredentials(pw, creds.OuterKeyParams)
 		if err != nil {
 			// It's tempting to panic here, since Core and the db are probably
 			// out of sync and the client shouldn't be doing anything else.
@@ -2898,16 +2879,11 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	return result, nil
 }
 
-// upgradeCoreToV1 performs an authenticated upgrade.
-func (c *Core) upgradeCoreToV1(pw []byte) error {
-	const newVersion = 1
-
+// initializePrimaryCredentials sets the PrimaryCredential fields after the DB
+// upgrade.
+func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) error {
 	c.log.Infof("Upgrading to core version 1")
 
-	oldKeyParams, err := c.db.LegacyKeyParams()
-	if err != nil {
-		return err
-	}
 	oldCrypter, err := c.reCrypter(pw, oldKeyParams)
 	if err != nil {
 		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
@@ -2918,7 +2894,7 @@ func (c *Core) upgradeCoreToV1(pw []byte) error {
 		return err
 	}
 
-	walletUpdates, acctUpdates, err := c.db.UpgradeLegacyCredentials(creds, oldCrypter, newCrypter, newVersion)
+	walletUpdates, acctUpdates, err := c.db.Recrypt(creds, oldCrypter, newCrypter)
 	if err != nil {
 		return err
 	}

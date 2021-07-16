@@ -210,13 +210,13 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 		return err
 	}
 
-	master := dbtx.Bucket(accountsBucket)
-	if master == nil {
+	acctsBkt := dbtx.Bucket(accountsBucket)
+	if acctsBkt == nil {
 		return fmt.Errorf("failed to open accounts bucket")
 	}
 
-	return master.ForEach(func(hostB, _ []byte) error {
-		acctBkt := master.Bucket(hostB)
+	if err := acctsBkt.ForEach(func(hostB, _ []byte) error {
+		acctBkt := acctsBkt.Bucket(hostB)
 		if acctBkt == nil {
 			return fmt.Errorf("account %s bucket is not a bucket", string(hostB))
 		}
@@ -229,7 +229,33 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 			return err
 		}
 		return acctBkt.Put(accountKey, acctInfo.Encode())
-	})
+	}); err != nil {
+		return fmt.Errorf("error updating account buckets: %w", err)
+	}
+
+	appBkt := dbtx.Bucket(appBucket)
+	if appBkt == nil {
+		return fmt.Errorf("no app bucket")
+	}
+
+	legacyKeyParams := appBkt.Get(legacyKeyParamsKey)
+	if len(legacyKeyParams) == 0 {
+		// Database is uninitialized. Nothing to do.
+		return nil
+	}
+
+	// Really, we should just be able to dbtx.Bucket here, since actual upgrades
+	// are performed after calling NewDB, which runs makeTopLevelBuckets
+	// internally before the upgrade. But the TestUpgrades runs the test on the
+	// bbolt.DB directly, so the bucket won't have been created during that
+	// test. That makes me think that we should be running those upgrade tests
+	// on DB, not bbolt.DB. TODO?
+	credsBkt, err := dbtx.CreateBucketIfNotExists(credentialsBucket)
+	if err != nil {
+		return fmt.Errorf("error creating credentials bucket: %w", err)
+	}
+
+	return credsBkt.Put(outerKeyParamsKey, legacyKeyParams)
 }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {

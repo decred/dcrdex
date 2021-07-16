@@ -47,7 +47,7 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 	cert := []byte(form.Cert)
 	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, form.Password, cert)
 	if err != nil {
-		s.writeAPIError(w, err.Error())
+		s.writeAPIError(w, err)
 		return
 	}
 	resp := struct {
@@ -271,7 +271,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	seed, err := s.core.ExportSeed(form.Pass)
 	if err != nil {
-		s.writeAPIError(w, "error exporting seed: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error exporting seed: %v", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -367,17 +367,12 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 
 // apiIsInitialized is the handler for the '/isinitialized' request.
 func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
-	inited, err := s.core.IsInitialized()
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("isinitialized error: %w", err))
-		return
-	}
 	writeJSON(w, &struct {
 		OK          bool `json:"ok"`
 		Initialized bool `json:"initialized"`
 	}{
 		OK:          true,
-		Initialized: inited,
+		Initialized: s.core.IsInitialized(),
 	}, s.indent)
 }
 
