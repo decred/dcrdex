@@ -91,6 +91,8 @@ export default class MarketsPage extends BasePage {
     this.ordersSortKey = 'stamp'
     // 1 if sorting ascendingly, -1 if sorting descendingly.
     this.ordersSortDirection = 1
+    // store original title so we can re-append it when updating market value.
+    this.ogTitle = document.title
 
     const reporters = {
       click: p => { this.reportClick(p) },
@@ -966,11 +968,11 @@ export default class MarketsPage extends BasePage {
 
     const market = this.market
     const [b, q] = [market.baseCfg, market.quoteCfg]
-    const firstSymbol = b.symbol.toUpperCase()
-    const secondSybol = q.symbol.toUpperCase()
+    const baseSymb = b.symbol.toUpperCase()
+    const quoteSymb = q.symbol.toUpperCase()
     if (midGapValue) {
       // more than 6 numbers it gets too big for the title.
-      document.title = `${midGapValue.toFixed(5)} ${firstSymbol}/${secondSybol}`
+      document.title = `${midGapValue.toFixed(6)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
     }
   }
 
