@@ -81,6 +81,7 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "istanbulBlock": 0,
     "muirGlacierBlock": 0,
     "berlinBlock": 0,
+    "londonBlock": 0,
     "clique": {
       "period": 1,
       "epoch": 30000
@@ -202,8 +203,6 @@ do
   "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
 done
 
-# Transactions can take an eternity to be mined...
-# TODO: Determine why this is.
 while true
 do
   TXSLEN=$("${NODES_ROOT}/harness-ctl/alpha" "attach --exec eth.pendingTransactions.length")

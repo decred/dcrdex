@@ -31,6 +31,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
+  # The mining script may end up mining more or less blocks than specified.
   cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
 #!/usr/bin/env bash
   NUM=1
@@ -38,25 +39,16 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
       ''|*[!0-9]*)  ;;
       *) NUM=\$1 ;;
   esac
-  for i in \$(seq \$NUM) ; do
-    "${NODES_ROOT}/harness-ctl/${NAME}" attach --preload "${MINE_JS}" --exec 'mine()'
-  done
+  echo "Mining..."
+  BEFORE=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
+  "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.start()' > /dev/null
+  sleep \$(echo "\$NUM-0.9" | bc)
+  "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.stop()' > /dev/null
+  AFTER=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
+  DIFF=\$((AFTER-BEFORE))
+  echo "Mined \$DIFF blocks."
 EOF
   chmod +x "${NODES_ROOT}/harness-ctl/mine-${NAME}"
-
-  # Write mining javascript.
-  # NOTE: This sometimes mines more than one block. It is a race. This returns
-  # the number of blocks mined within the lifespan of the function, but one more
-  # MAY be mined after returning.
-  cat > "${MINE_JS}" <<EOF
-function mine() {
-  blkN = eth.blockNumber;
-  miner.start();
-  miner.stop();
-  admin.sleep(1.1);
-  return eth.blockNumber - blkN;
-}
-EOF
 
   # Write password file to unlock accounts later.
   cat > "${GROUP_DIR}/password" <<EOF
