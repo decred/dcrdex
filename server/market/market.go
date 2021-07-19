@@ -60,6 +60,7 @@ type Swapper interface {
 	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 	ChainsSynced(base, quote uint32) (bool, error)
+	ProcessCancelMatchDuringSuspendedMarket(*order.Match) error
 }
 
 type DataCollector interface {
@@ -587,6 +588,79 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
 }
 
+// processCancelOrderWhileSuspended is called when cancelling an order while
+// the market is suspended and Run is not runnning.
+//
+// This function:
+// 1. Removes the target order from the book.
+// 2. Unlocks the order coins.
+// 3. Updates the storage with the new cancel order and cancels the existing limit order.
+// 3. Responds to the client that the order was recieved.
+// 4. Sends the unbooked order to the order feeds.
+// 5. Creates a match object and sends it to the swapper to notify the client of the match.
+func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord) error {
+	co, ok := rec.order.(*order.CancelOrder)
+	if !ok {
+		return ErrInvalidOrder
+	}
+
+	lo, ok := m.book.Remove(co.TargetOrderID)
+	if !ok {
+		return ErrTargetNotCancelable
+	}
+
+	m.unlockOrderCoins(lo)
+	delete(m.settling, co.TargetOrderID)
+
+	sTime := time.Now().Truncate(time.Millisecond).UTC()
+	co.SetTime(sTime)
+
+	dur := int64(m.EpochDuration())
+	now := encode.UnixMilli(time.Now())
+	epochIdx := now / dur
+	if err := m.storage.NewArchivedCancel(co, epochIdx, int64(m.EpochDuration())); err != nil {
+		return err
+	}
+	if err := m.storage.CancelOrder(lo); err != nil {
+		return err
+	}
+
+	respMsg, err := m.orderResponse(rec)
+	if err != nil {
+		return fmt.Errorf("error creating order response: %v", err)
+	}
+	if err := m.auth.Send(rec.order.User(), respMsg); err != nil {
+		return fmt.Errorf("error sending response: %v", err)
+	}
+
+	sig := &updateSignal{
+		action: unbookAction,
+		data: sigDataUnbookedOrder{
+			order:    lo,
+			epochIdx: 0,
+		},
+	}
+	m.sendToFeeds(sig)
+
+	match := order.Match{
+		Taker:    co,
+		Maker:    lo,
+		Quantity: lo.Remaining(),
+		Rate:     lo.Rate,
+		Epoch: order.EpochID{
+			Idx: uint64(epochIdx),
+			Dur: m.EpochDuration(),
+		},
+		FeeRateBase:  m.getFeeRate(m.Base(), m.baseFeeFetcher),
+		FeeRateQuote: m.getFeeRate(m.Quote(), m.quoteFeeFetcher),
+	}
+	if err := m.swapper.ProcessCancelMatchDuringSuspendedMarket(&match); err != nil {
+		return fmt.Errorf("error processing cancel match: %v", err)
+	}
+
+	return nil
+}
+
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
 // When submission is completed, an error value will be sent on the channel.
 // This is the asynchronous version of SubmitOrder.
@@ -614,6 +688,10 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	select {
 	case <-m.running:
 	default:
+		if rec.order.Type() == order.CancelOrderType {
+			err := m.processCancelOrderWhileSuspended(rec)
+			return sendErr(err)
+		}
 		// m.orderRouter is closed
 		log.Infof("SubmitOrderAsync: Market stopped with an order in submission (commitment %v).",
 			rec.order.Commitment()) // The order is not time stamped, so no OrderID.
@@ -1839,6 +1917,15 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	})
 }
 
+// getFeeRate gets the fee rate for an asset.
+func (m *Market) getFeeRate(assetID uint32, f FeeFetcher) uint64 {
+	rate := m.ScaleFeeRate(assetID, f.FeeRate())
+	if rate > f.MaxFeeRate() || rate == 0 {
+		rate = f.MaxFeeRate()
+	}
+	return rate
+}
+
 // processReadyEpoch performs the following operations for a closed epoch that
 // has finished preimage collection via collectPreimages:
 //  1. Perform matching with the order book.
@@ -1874,15 +1961,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	// fallback MaxFeeRate when the justifiable network rate is much lower. I do
 	// remember some minor discussion of this at some point in the past, but I'd
 	// like to bring it back.
-	getFeeRate := func(assetID uint32, f FeeFetcher) uint64 {
-		rate := m.ScaleFeeRate(assetID, f.FeeRate())
-		if rate > f.MaxFeeRate() || rate == 0 {
-			rate = f.MaxFeeRate()
-		}
-		return rate
-	}
-	feeRateBase := getFeeRate(m.Base(), m.baseFeeFetcher)
-	feeRateQuote := getFeeRate(m.Quote(), m.quoteFeeFetcher)
+	feeRateBase := m.getFeeRate(m.Base(), m.baseFeeFetcher)
+	feeRateQuote := m.getFeeRate(m.Quote(), m.quoteFeeFetcher)
 
 	// Data from preimage collection
 	ordersRevealed := epoch.ordersRevealed

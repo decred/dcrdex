@@ -188,6 +188,31 @@ func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) erro
 	return a.storeOrder(ord, epochIdx, epochDur, orderStatusEpoch)
 }
 
+// NewArchivedCancel stores a cancel order directly in the executed state. This
+// is used for orders that are canceled when the market is suspended, and therefore
+// do not need to be matched.
+func (a *Archiver) NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur int64) error {
+	marketSchema, err := a.marketSchema(ord.Base(), ord.Quote())
+	if err != nil {
+		return err
+	}
+	status := orderStatusExecuted
+	tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
+	N, err := storeCancelOrder(a.db, tableName, ord, status, epochID, epochDur)
+	if err != nil {
+		a.fatalBackendErr(err)
+		return fmt.Errorf("storeCancelOrder failed: %w", err)
+	}
+	if N != 1 {
+		err = fmt.Errorf("failed to store order %v: %d rows affected, expected 1",
+			ord.UID(), N)
+		a.fatalBackendErr(err)
+		return err
+	}
+
+	return nil
+}
+
 func makePseudoCancel(target order.OrderID, user account.AccountID, base, quote uint32, timeStamp time.Time) *order.CancelOrder {
 	// Create a server-generated cancel order to record the server's revoke
 	// order action.

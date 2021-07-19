@@ -127,6 +127,7 @@ type TAuth struct {
 	preimagesByMsgID   map[uint64]order.Preimage
 	preimagesByOrdID   map[string]order.Preimage
 	handlePreimageDone chan struct{}
+	handleMatchDone    chan *msgjson.Message
 	suspensions        map[account.AccountID]bool
 	canceledOrder      order.OrderID
 	cancelOrder        order.OrderID
@@ -227,6 +228,10 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 				a.handlePreimageDone <- struct{}{}
 			}
 		}()
+	} else if msg.Route == msgjson.MatchRoute {
+		if a.handleMatchDone != nil {
+			a.handleMatchDone <- msg
+		}
 	}
 	return nil
 }

@@ -2023,6 +2023,34 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 		}
 }
 
+// matchToMatchTracker converts a match object to a match tracker.
+func matchToMatchTracker(match *order.Match, nowMs time.Time) *matchTracker {
+	maker := match.Maker
+	base, quote := maker.BaseAsset, maker.QuoteAsset
+	var makerSwapAsset, takerSwapAsset uint32
+	if maker.Sell {
+		makerSwapAsset = base
+		takerSwapAsset = quote
+	} else {
+		makerSwapAsset = quote
+		takerSwapAsset = base
+	}
+
+	return &matchTracker{
+		Match:     match,
+		time:      nowMs,
+		matchTime: match.Epoch.End(),
+		makerStatus: &swapStatus{
+			swapAsset:   makerSwapAsset,
+			redeemAsset: takerSwapAsset,
+		},
+		takerStatus: &swapStatus{
+			swapAsset:   takerSwapAsset,
+			redeemAsset: makerSwapAsset,
+		},
+	}
+}
+
 // readMatches translates a slice of raw matches from the market manager into
 // a slice of matchTrackers.
 func readMatches(matchSets []*order.MatchSet) []*matchTracker {
@@ -2032,30 +2060,7 @@ func readMatches(matchSets []*order.MatchSet) []*matchTracker {
 	matches := make([]*matchTracker, 0, len(matchSets))
 	for _, matchSet := range matchSets {
 		for _, match := range matchSet.Matches() {
-			maker := match.Maker
-			base, quote := maker.BaseAsset, maker.QuoteAsset
-			var makerSwapAsset, takerSwapAsset uint32
-			if maker.Sell {
-				makerSwapAsset = base
-				takerSwapAsset = quote
-			} else {
-				makerSwapAsset = quote
-				takerSwapAsset = base
-			}
-
-			matches = append(matches, &matchTracker{
-				Match:     match,
-				time:      nowMs,
-				matchTime: match.Epoch.End(),
-				makerStatus: &swapStatus{
-					swapAsset:   makerSwapAsset,
-					redeemAsset: takerSwapAsset,
-				},
-				takerStatus: &swapStatus{
-					swapAsset:   takerSwapAsset,
-					redeemAsset: makerSwapAsset,
-				},
-			})
+			matches = append(matches, matchToMatchTracker(match, nowMs))
 		}
 	}
 	return matches
@@ -2217,4 +2222,41 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 
 func idToBytes(id [order.OrderIDSize]byte) []byte {
 	return id[:]
+}
+
+// ProcessCancelMatchDuringSuspendedMarket is called by market to process a match
+// for a cancel order that was made while the market was suspended. This function
+// stores the match in the db and sends a match request to the client.
+func (s *Swapper) ProcessCancelMatchDuringSuspendedMarket(match *order.Match) error {
+	s.storage.InsertMatch(match)
+
+	matchTracker := matchToMatchTracker(match, time.Now())
+	makerMsg, takerMsg := matchNotifications(matchTracker)
+	s.authMgr.Sign(makerMsg)
+	s.authMgr.Sign(takerMsg)
+	msgs := []msgjson.Signable{makerMsg, takerMsg}
+	req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
+	if err != nil {
+		return err
+	}
+	user := match.Taker.User()
+	messageAckers := []*messageAcker{
+		{
+			user:    user,
+			match:   matchTracker,
+			params:  makerMsg,
+			isMaker: true,
+		},
+		{
+			user:    user,
+			match:   matchTracker,
+			params:  takerMsg,
+			isMaker: false,
+		},
+	}
+	s.authMgr.Request(user, req, func(_ comms.Link, resp *msgjson.Message) {
+		s.processMatchAcks(user, resp, messageAckers)
+	})
+
+	return nil
 }

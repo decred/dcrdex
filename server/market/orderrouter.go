@@ -673,11 +673,6 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	if !tunnel.Running() {
-		mktName, _ := dex.MarketName(cancel.Base, cancel.Quote)
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market closed to new orders: %s", mktName)
-	}
-
 	if len(cancel.TargetID) != order.OrderIDSize {
 		return msgjson.NewError(msgjson.OrderParameterError, "invalid target ID format")
 	}
