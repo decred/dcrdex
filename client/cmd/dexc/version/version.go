@@ -25,7 +25,7 @@ const (
 	AppName  string = "dexc"
 	AppMajor uint   = 0
 	AppMinor uint   = 2
-	AppPatch uint   = 0
+	AppPatch uint   = 1
 )
 
 // go build -v -ldflags "-X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=$(git rev-parse --short HEAD)"
