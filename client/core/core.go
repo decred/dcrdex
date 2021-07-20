@@ -1,9 +1,9 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package core
+ core
 
-import (
+ (
 	"bytes"
 	"context"
 	"errors"
@@ -39,7 +39,7 @@ import (
 	"github.com/decred/go-socks/socks"
 )
 
-const (
+ (
 	keyParamsKey      = "keyParams"
 	conversionFactor  = 1e8
 	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
@@ -56,7 +56,8 @@ const (
 	defaultTickInterval = 30 * time.Second
 )
 
-var (
+
+ (
 	unbip = dex.BipIDSymbol
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
@@ -72,27 +73,23 @@ var (
 	serverAPIVers = []int{serverdex.PreAPIVersion}
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
-	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
-)
-
-type dexTicker struct {
+	ActiveOrdersLogoutErr = errors.New("can log out with active orders")
+) dexTicker struct {
 	dur int64 // atomic
 	*time.Ticker
-}
-
-func newDexTicker(dur time.Duration) *dexTicker {
-	return &dexTicker{
+}newDexTicker(dur time.Duration) *dexTicker {
+	 &dexTicker{
 		dur:    int64(dur),
 		Ticker: time.NewTicker(dur),
 	}
 }
 
-func (dt *dexTicker) Reset(dur time.Duration) {
+ (dt *dexTicker) Reset(dur time.Duration) {
 	atomic.StoreInt64(&dt.dur, int64(dur))
 	dt.Ticker.Reset(dur)
 }
 
-func (dt *dexTicker) Dur() time.Duration {
+ (dt *dexTicker) Dur() time.Duration {
 	return time.Duration(atomic.LoadInt64(&dt.dur))
 }
 
