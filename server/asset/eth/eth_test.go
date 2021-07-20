@@ -272,6 +272,7 @@ func TestRun(t *testing.T) {
 func TestFeeRate(t *testing.T) {
 	maxInt := ^uint64(0)
 	maxWei := new(big.Int).SetUint64(maxInt)
+	gweiFactorBig := big.NewInt(GweiFactor)
 	maxWei.Mul(maxWei, gweiFactorBig)
 	overMaxWei := new(big.Int).Set(maxWei)
 	overMaxWei.Add(overMaxWei, gweiFactorBig)
@@ -287,11 +288,11 @@ func TestFeeRate(t *testing.T) {
 		wantFee: 0,
 	}, {
 		name:    "ok rounded down",
-		gas:     big.NewInt(gweiFactor - 1),
+		gas:     big.NewInt(GweiFactor - 1),
 		wantFee: 0,
 	}, {
 		name:    "ok one",
-		gas:     big.NewInt(gweiFactor),
+		gas:     big.NewInt(GweiFactor),
 		wantFee: 1,
 	}, {
 		name:    "ok max int",
