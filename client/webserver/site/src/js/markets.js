@@ -965,15 +965,14 @@ export default class MarketsPage extends BasePage {
     // gets first price value from buy or from sell, so we can show it on
     // title.
     const midGapValue = this.midGap()
+    if (!midGapValue) return
 
     const market = this.market
     const [b, q] = [market.baseCfg, market.quoteCfg]
     const baseSymb = b.symbol.toUpperCase()
     const quoteSymb = q.symbol.toUpperCase()
-    if (midGapValue) {
-      // more than 6 numbers it gets too big for the title.
-      document.title = `${midGapValue.toFixed(6)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
-    }
+    // more than 6 numbers it gets too big for the title.
+    document.title = `${midGapValue.toFixed(6)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent
