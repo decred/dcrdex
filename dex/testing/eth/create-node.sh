@@ -42,7 +42,7 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   echo "Mining..."
   BEFORE=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
   "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.start()' > /dev/null
-  sleep \$(echo "\$NUM-0.9" | bc)
+  sleep \$(echo "\$NUM-0.5" | bc)
   "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.stop()' > /dev/null
   AFTER=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
   DIFF=\$((AFTER-BEFORE))

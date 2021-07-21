@@ -185,9 +185,9 @@ echo "Sending 5000 eth to delta and gamma."
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${GAMMA_ADDRESS}\",${SEND_AMT})"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${DELTA_ADDRESS}\",${SEND_AMT})"
 
-# Our transactions will PROBABLY appear in one of these blocks.
 echo "Mining some blocks"
-"${NODES_ROOT}/harness-ctl/mine-beta" "15"
+"${NODES_ROOT}/harness-ctl/mine-alpha" "2"
+"${NODES_ROOT}/harness-ctl/mine-beta" "2"
 
 # Initial sync for light nodes takes quite a while. Wait for them to show
 # blocks on the network.
