@@ -56,7 +56,10 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 			txio.lastLookup = &tipHash
 			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(ctx, &txio.tx.hash)
 			if err != nil {
-				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, translateRPCCancelErr(err))
+				if isTxNotFoundErr(err) {
+					return -1, asset.CoinNotFoundError
+				}
+				return -1, fmt.Errorf("confirmations: GetRawTransactionVerbose for txid %s: %w", txio.tx.hash, translateRPCCancelErr(err))
 			}
 			// More than zero confirmations would indicate that the transaction has
 			// been mined. Collect the block info and update the tx fields.

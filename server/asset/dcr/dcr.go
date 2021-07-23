@@ -345,6 +345,9 @@ func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 	}
 	utxo, err := dcr.utxo(ctx, txHash, vout, redeemScript)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, err
 	}
 	if utxo.nonStandardScript {
@@ -405,7 +408,7 @@ func (dcr *Backend) TxData(coinID []byte) ([]byte, error) {
 		if isTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
 		}
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, fmt.Errorf("TxData: GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	return stdaddrTx.MsgTx().Bytes()
 }
@@ -484,7 +487,7 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	}
 
 	if int(vout) > len(verboseTx.Vout)-1 {
-		err = asset.CoinNotFoundError
+		err = asset.CoinNotFoundError // should be something fatal?
 		return
 	}
 
@@ -836,7 +839,7 @@ func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
 		if isTxNotFoundErr(err) {
 			return nil, 0, asset.CoinNotFoundError
 		}
-		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
+		return nil, 0, fmt.Errorf("newTXIO: GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
 	tx, err := dcr.transaction(txHash, verboseTx)
 	if err != nil {
@@ -963,7 +966,10 @@ func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash,
 func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
+		if isTxNotFoundErr(err) { // since we're calling gettxout after this, check now
+			return nil, nil, nil, asset.CoinNotFoundError
+		}
+		return nil, nil, nil, fmt.Errorf("getTxOutInfo: GetRawTransactionVerbose for txid %s: %w", txHash, translateRPCCancelErr(err))
 	}
 	msgTx, err := msgTxFromHex(verboseTx.Hex)
 	if err != nil {
@@ -981,7 +987,7 @@ func determineTxTree(msgTx *wire.MsgTx) int8 {
 	// stake.DetermineTxType will produce correct results if we pass true for
 	// isTreasuryEnabled regardless of whether the treasury vote has activated
 	// or not.
-	// The only possiblity for wrong results is passing isTreasuryEnabled=false
+	// The only possibility for wrong results is passing isTreasuryEnabled=false
 	// _after_ the treasury vote activates - some stake tree votes may identify
 	// as regular tree transactions.
 	// Could try with isTreasuryEnabled false, then true and if neither comes up
