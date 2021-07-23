@@ -720,7 +720,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, *btcjson.TxRawResult, []byte, error) {
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		if isTxNotFoundErr(err) {
+		if isTxNotFoundErr(err) { // should be txOut==nil, but checking anyway
 			return nil, nil, nil, asset.CoinNotFoundError
 		}
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w", txHash, vout, err)
@@ -734,6 +734,9 @@ func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.
 	}
 	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, nil, nil, asset.CoinNotFoundError // shouldn't happen if gettxout found it
+		}
 		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
 	}
 	return txOut, verboseTx, pkScript, nil
