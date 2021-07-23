@@ -91,6 +91,8 @@ export default class MarketsPage extends BasePage {
     this.ordersSortKey = 'stamp'
     // 1 if sorting ascendingly, -1 if sorting descendingly.
     this.ordersSortDirection = 1
+    // store original title so we can re-append it when updating market value.
+    this.ogTitle = document.title
 
     const reporters = {
       click: p => { this.reportClick(p) },
@@ -956,6 +958,23 @@ export default class MarketsPage extends BasePage {
     if (this.book) this.chart.draw()
   }
 
+  /* updateTitle update the browser title based on the midgap value and the
+   * selected assets.
+   */
+  updateTitle () {
+    // gets first price value from buy or from sell, so we can show it on
+    // title.
+    const midGapValue = this.midGap()
+    if (!midGapValue) return
+
+    const market = this.market
+    const [b, q] = [market.baseCfg, market.quoteCfg]
+    const baseSymb = b.symbol.toUpperCase()
+    const quoteSymb = q.symbol.toUpperCase()
+    // more than 6 numbers it gets too big for the title.
+    document.title = `${midGapValue.toFixed(6)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
+  }
+
   /* handleBookRoute is the handler for the 'book' notification, which is sent
    * in response to a new market subscription. The data received will contain
    * the entire order book.
@@ -970,6 +989,7 @@ export default class MarketsPage extends BasePage {
     if (mktBook.base !== b.id || mktBook.quote !== q.id) return
     this.refreshActiveOrders()
     this.handleBook(mktBook)
+    this.updateTitle()
     page.marketLoader.classList.add('d-none')
     this.marketList.select(host, b.id, q.id)
 
@@ -1002,6 +1022,7 @@ export default class MarketsPage extends BasePage {
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
+    this.updateTitle()
     this.chart.draw()
   }
 
@@ -1012,6 +1033,7 @@ export default class MarketsPage extends BasePage {
     const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
+    this.updateTitle()
     this.chart.draw()
   }
 
