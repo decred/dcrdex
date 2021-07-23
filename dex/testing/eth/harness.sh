@@ -81,6 +81,7 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "istanbulBlock": 0,
     "muirGlacierBlock": 0,
     "berlinBlock": 0,
+    "londonBlock": 0,
     "clique": {
       "period": 1,
       "epoch": 30000
@@ -184,9 +185,9 @@ echo "Sending 5000 eth to delta and gamma."
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${GAMMA_ADDRESS}\",${SEND_AMT})"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"${DELTA_ADDRESS}\",${SEND_AMT})"
 
-# Our transactions will PROBABLY appear in one of these blocks.
 echo "Mining some blocks"
-"${NODES_ROOT}/harness-ctl/mine-beta" "15"
+"${NODES_ROOT}/harness-ctl/mine-alpha" "2"
+"${NODES_ROOT}/harness-ctl/mine-beta" "2"
 
 # Initial sync for light nodes takes quite a while. Wait for them to show
 # blocks on the network.
@@ -202,8 +203,6 @@ do
   "${NODES_ROOT}/harness-ctl/mine-alpha" "5"
 done
 
-# Transactions can take an eternity to be mined...
-# TODO: Determine why this is.
 while true
 do
   TXSLEN=$("${NODES_ROOT}/harness-ctl/alpha" "attach --exec eth.pendingTransactions.length")

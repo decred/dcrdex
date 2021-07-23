@@ -8,6 +8,8 @@ sandboxed environment for testing dex swap transactions.
 The harness depends on [geth](https://github.com/ethereum/go-ethereum/tree/master/cmd/geth)
 to run.
 
+It also requires tmux and bc.
+
 ## Using
 
 You must have `geth` in `PATH` to use the harness.
