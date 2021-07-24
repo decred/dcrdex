@@ -589,7 +589,8 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 }
 
 // processCancelOrderWhileSuspended is called when cancelling an order while
-// the market is suspended and Run is not runnning.
+// the market is suspended and Run is not runnning. The error sent on errChan
+// is returned to the client.
 //
 // This function:
 // 1. Removes the target order from the book.
@@ -598,39 +599,59 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 // 3. Responds to the client that the order was recieved.
 // 4. Sends the unbooked order to the order feeds.
 // 5. Creates a match object and sends it to the swapper to notify the client of the match.
-func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord) error {
+func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan<- error) {
 	co, ok := rec.order.(*order.CancelOrder)
 	if !ok {
-		return ErrInvalidOrder
+		errChan <- ErrInvalidOrder
+		return
 	}
 
+	if cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID); !cancelable {
+		errChan <- err
+		return
+	}
+
+	m.bookMtx.Lock()
 	lo, ok := m.book.Remove(co.TargetOrderID)
 	if !ok {
-		return ErrTargetNotCancelable
+		errChan <- ErrTargetNotCancelable
+		return
 	}
+	delete(m.settling, co.TargetOrderID)
+	m.bookMtx.Unlock()
 
 	m.unlockOrderCoins(lo)
-	delete(m.settling, co.TargetOrderID)
 
 	sTime := time.Now().Truncate(time.Millisecond).UTC()
 	co.SetTime(sTime)
+
+	// Create the client response here, but don't send it until the order has been
+	// commited to the storage.
+	respMsg, err := m.orderResponse(rec)
+	if err != nil {
+		errChan <- fmt.Errorf("error creating order response: %v", err)
+		return
+	}
 
 	dur := int64(m.EpochDuration())
 	now := encode.UnixMilli(time.Now())
 	epochIdx := now / dur
 	if err := m.storage.NewArchivedCancel(co, epochIdx, int64(m.EpochDuration())); err != nil {
-		return err
+		errChan <- err
+		return
 	}
 	if err := m.storage.CancelOrder(lo); err != nil {
-		return err
+		errChan <- err
+		return
 	}
 
-	respMsg, err := m.orderResponse(rec)
-	if err != nil {
-		return fmt.Errorf("error creating order response: %v", err)
-	}
-	if err := m.auth.Send(rec.order.User(), respMsg); err != nil {
-		return fmt.Errorf("error sending response: %v", err)
+	// If we fail to send the response, then we send this error at the end of
+	// the function. If we send the error here and return the function, then
+	// the match will not be recorded and the server DB will be in an inconsistent
+	// state.
+	sendResponseErr := m.auth.Send(rec.order.User(), respMsg)
+	if sendResponseErr != nil {
+		log.Errorf("error sending response: %v", err)
 	}
 
 	sig := &updateSignal{
@@ -655,10 +676,12 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord) error {
 		FeeRateQuote: m.getFeeRate(m.Quote(), m.quoteFeeFetcher),
 	}
 	if err := m.swapper.ProcessCancelMatchDuringSuspendedMarket(&match); err != nil {
-		return fmt.Errorf("error processing cancel match: %v", err)
+		// Cannot send an error here since we already sent the order response.
+		log.Errorf("error processing cancel match: %v", err)
 	}
 
-	return nil
+	errChan <- sendResponseErr
+	return
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
@@ -689,8 +712,9 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	case <-m.running:
 	default:
 		if rec.order.Type() == order.CancelOrderType {
-			err := m.processCancelOrderWhileSuspended(rec)
-			return sendErr(err)
+			errChan := make(chan error, 1)
+			go m.processCancelOrderWhileSuspended(rec, errChan)
+			return errChan
 		}
 		// m.orderRouter is closed
 		log.Infof("SubmitOrderAsync: Market stopped with an order in submission (commitment %v).",
