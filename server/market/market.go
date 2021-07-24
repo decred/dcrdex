@@ -681,7 +681,6 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	}
 
 	errChan <- sendResponseErr
-	return
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
