@@ -65,7 +65,7 @@ export default class MarketsPage extends BasePage {
       'hoverVolume', 'chartLegend', 'chartErrMsg',
       // Max order section
       'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
-      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxNotEnough', 'maxLotBox', 'maxFromLotsLbl',
+      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
       'maxBox'
     ])
     this.main = main
@@ -742,7 +742,6 @@ export default class MarketsPage extends BasePage {
 
     Doc.show(page.maxOrd, page.maxLotBox)
     Doc.hide(page.maxAboveZero)
-    Doc.hide(page.maxNotEnough)
     page.maxFromLots.textContent = 'calculating...'
     page.maxFromLotsLbl.textContent = ''
     this.preorderTimer = window.setTimeout(async () => {
@@ -776,8 +775,6 @@ export default class MarketsPage extends BasePage {
     page.maxFromLots.textContent = maxOrder.lots.toString()
     page.maxFromLotsLbl.textContent = maxOrder.lots === 1 ? 'lot' : 'lots'
     if (maxOrder.lots === 0) {
-      // show not enough funds for purchasing.
-      Doc.show(page.maxNotEnough)
       Doc.hide(page.maxAboveZero)
       return
     }
