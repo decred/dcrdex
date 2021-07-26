@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/les"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
@@ -32,7 +33,67 @@ var simnetGenesis string
 type nodeConfig struct {
 	net                dex.Network
 	listenAddr, appDir string
+	logger             dex.Logger
 }
+
+// ethLogger satisifies geth's logger interface.
+type ethLogger struct {
+	dl dex.Logger
+}
+
+// New returns a new Logger that has this logger's context plus the given
+// context.
+func (el *ethLogger) New(ctx ...interface{}) log.Logger {
+	s := ""
+	for _, v := range ctx {
+		s = fmt.Sprintf("%s:%s", s, v)
+	}
+	l := el.dl.SubLogger(s)
+	return &ethLogger{dl: l}
+}
+
+// GetHandler gets the handler associated with the logger. Unused in geth. Does
+// nothing and returns a nil interface here.
+func (el *ethLogger) GetHandler() log.Handler {
+	return nil
+}
+
+// SetHandler updates the logger to write records to the specified handler.
+// Used during setup in geth when a logger is not supplied. Does nothing here.
+func (el *ethLogger) SetHandler(h log.Handler) {}
+
+// Trace logs at Trace level.
+func (el *ethLogger) Trace(msg string, ctx ...interface{}) {
+	el.dl.Trace(append([]interface{}{msg}, ctx...))
+}
+
+// Debug logs at debug level.
+func (el *ethLogger) Debug(msg string, ctx ...interface{}) {
+	el.dl.Debug(append([]interface{}{msg}, ctx...))
+}
+
+// Info logs at info level.
+func (el *ethLogger) Info(msg string, ctx ...interface{}) {
+	el.dl.Info(append([]interface{}{msg}, ctx...))
+}
+
+// Warn logs at warn level.
+func (el *ethLogger) Warn(msg string, ctx ...interface{}) {
+	el.dl.Warn(append([]interface{}{msg}, ctx...))
+}
+
+// Error logs at error level.
+func (el *ethLogger) Error(msg string, ctx ...interface{}) {
+	el.dl.Error(append([]interface{}{msg}, ctx...))
+}
+
+// Crit logs at critical level.
+func (el *ethLogger) Crit(msg string, ctx ...interface{}) {
+	el.dl.Critical(append([]interface{}{msg}, ctx...))
+}
+
+// Check that *ethLogger satisfies the log.Logger interface.
+var _ log.Logger = (*ethLogger)(nil)
 
 // SetSimnetGenesis should be set before using on simnet. It must be set before
 // calling runNode, or a default will be used if found.
@@ -42,6 +103,8 @@ func SetSimnetGenesis(sng string) {
 
 func runNode(cfg *nodeConfig) (*node.Node, error) {
 	stackConf := &node.Config{DataDir: cfg.appDir}
+
+	stackConf.Logger = &ethLogger{dl: cfg.logger}
 
 	stackConf.P2P.MaxPeers = maxPeers
 	var key *ecdsa.PrivateKey
