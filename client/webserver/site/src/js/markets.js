@@ -51,7 +51,8 @@ export default class MarketsPage extends BasePage {
       'forms', 'openForm', 'uwAppPass',
       // Order submission is verified with the user's password.
       'verifyForm', 'vHeader', 'vSideHeader', 'vSide', 'vQty', 'vBase', 'vRate',
-      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit', 'verifyLimit', 'verifyMarket',
+      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit',
+      'vLoader', 'verifyLimit', 'verifyMarket',
       'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore', 'vErr',
       // Create wallet form
       'walletForm',
@@ -1326,7 +1327,6 @@ export default class MarketsPage extends BasePage {
    */
   async submitOrder () {
     const page = this.page
-    page.vSubmit.disabled = true
     Doc.hide(page.orderErr, page.vErr)
     const order = this.parseOrder()
     const pw = page.vPass.value
@@ -1336,17 +1336,21 @@ export default class MarketsPage extends BasePage {
       pw: pw
     }
     if (!this.validateOrder(order)) return
+    // Show loader and hide submit button.
+    page.vSubmit.classList.add('d-hide')
+    page.vLoader.classList.remove('d-hide')
     const res = await postJSON('/api/trade', req)
+    // Hide loader and show submit button.
+    page.vSubmit.classList.remove('d-hide')
+    page.vLoader.classList.add('d-hide')
     // If errors display error on confirmation modal.
     if (!app.checkResponse(res, true)) {
       page.vErr.textContent = res.msg
       Doc.show(page.vErr)
-      page.vSubmit.disabled = false
       return
     }
     // Hide confirmation modal only on success.
     Doc.hide(page.forms)
-    page.vSubmit.disabled = false
     this.refreshActiveOrders()
     this.chart.draw()
   }
