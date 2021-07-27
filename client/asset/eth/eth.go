@@ -162,6 +162,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 	nodeCFG := &nodeConfig{
 		net:    network,
 		appDir: cfg.AppDir,
+		logger: logger.SubLogger("NODE"),
 	}
 	node, err := runNode(nodeCFG)
 	if err != nil {
