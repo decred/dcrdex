@@ -675,8 +675,8 @@ export default class MarketsPage extends BasePage {
     const quoteAsset = app.assets[order.quote]
     const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
     page.orderPreview.textContent = `Total: ${total} ${quoteAsset.symbol.toUpperCase()}`
-    const isSell = this.isSell()
-    isSell ? this.preSell() : this.preBuy()
+    if (this.isSell()) this.preSell()
+    else this.preBuy()
   }
 
   /**
