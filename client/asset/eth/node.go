@@ -46,50 +46,80 @@ type ethLogger struct {
 func (el *ethLogger) New(ctx ...interface{}) log.Logger {
 	s := ""
 	for _, v := range ctx {
-		s = fmt.Sprintf("%s:%s", s, v)
+		if s == "" {
+			s = fmt.Sprintf("%s", v)
+			continue
+		}
+		s = fmt.Sprintf("%s: %s", s, v)
 	}
 	l := el.dl.SubLogger(s)
 	return &ethLogger{dl: l}
 }
 
+// dummyHandler is used to return from the logger's GetHandler method in order
+// to avoid null pointer errors in case geth ever uses that function.
+type dummyHandler struct{}
+
+// Log does nothing and return nil.
+func (dummyHandler) Log(r *log.Record) error {
+	return nil
+}
+
+// Check that *dummyHandler satisfies the log.Handler interface.
+var _ log.Handler = (*dummyHandler)(nil)
+
 // GetHandler gets the handler associated with the logger. Unused in geth. Does
 // nothing and returns a nil interface here.
 func (el *ethLogger) GetHandler() log.Handler {
-	return nil
+	return new(dummyHandler)
 }
 
 // SetHandler updates the logger to write records to the specified handler.
 // Used during setup in geth when a logger is not supplied. Does nothing here.
 func (el *ethLogger) SetHandler(h log.Handler) {}
 
+func formatEthLog(msg string, ctx ...interface{}) []interface{} {
+	msgs := []interface{}{msg, "         "}
+	alternator := 0
+	for _, v := range ctx {
+		deliminator := "="
+		if alternator == 0 {
+			deliminator = " "
+		}
+		alternator = 1 - alternator
+		msgs = append(msgs, deliminator, v)
+	}
+	return msgs
+}
+
 // Trace logs at Trace level.
 func (el *ethLogger) Trace(msg string, ctx ...interface{}) {
-	el.dl.Trace(append([]interface{}{msg}, ctx...))
+	el.dl.Trace(formatEthLog(msg, ctx...)...)
 }
 
 // Debug logs at debug level.
 func (el *ethLogger) Debug(msg string, ctx ...interface{}) {
-	el.dl.Debug(append([]interface{}{msg}, ctx...))
+	el.dl.Debug(formatEthLog(msg, ctx...)...)
 }
 
 // Info logs at info level.
 func (el *ethLogger) Info(msg string, ctx ...interface{}) {
-	el.dl.Info(append([]interface{}{msg}, ctx...))
+	el.dl.Info(formatEthLog(msg, ctx...)...)
 }
 
 // Warn logs at warn level.
 func (el *ethLogger) Warn(msg string, ctx ...interface{}) {
-	el.dl.Warn(append([]interface{}{msg}, ctx...))
+	el.dl.Warn(formatEthLog(msg, ctx...)...)
 }
 
 // Error logs at error level.
 func (el *ethLogger) Error(msg string, ctx ...interface{}) {
-	el.dl.Error(append([]interface{}{msg}, ctx...))
+	el.dl.Error(formatEthLog(msg, ctx...)...)
 }
 
 // Crit logs at critical level.
 func (el *ethLogger) Crit(msg string, ctx ...interface{}) {
-	el.dl.Critical(append([]interface{}{msg}, ctx...))
+	el.dl.Critical(formatEthLog(msg, ctx...))
 }
 
 // Check that *ethLogger satisfies the log.Logger interface.
