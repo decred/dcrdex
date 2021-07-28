@@ -4911,6 +4911,11 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						defer tracker.mtx.Unlock()
 						if err != nil {
 							match.swapErr = fmt.Errorf("audit error: %w", err)
+							// NOTE: This behaviour differs from the audit request handler behaviour for failed audits.
+							// handleAuditRoute does NOT set a swapErr in case a revised audit request is received from
+							// the server. Audit requests are currently NOT resent, so this difference is trivial. IF
+							// a revised audit request did come through though, no further actions will be taken for this
+							// match even if the revised audit passes validation.
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)

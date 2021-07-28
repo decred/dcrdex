@@ -1524,29 +1524,8 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 	// Verify that the output of interest pays to the hash of the provided contract.
 	// Output script must be P2SH, with 1 address and 1 required signature.
 	contractTxOut := contractTx.TxOut[vout]
-	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams, false)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", contractTxOut.PkScript, err)
-	}
-	if scriptClass != txscript.ScriptHashTy {
-		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
-	}
-	if len(addrs) != 1 {
-		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
-	}
-	if sigsReq != 1 {
-		return nil, fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
-	}
-	// Compare the contract hash to the P2SH address.
-	contractHash := dcrutil.Hash160(contract)
-	addr := addrs[0]
-	addrScript, err := dexdcr.AddressScript(addr)
-	if err != nil {
+	if err = dcr.validateContractOutputScript(contractTxOut.PkScript, contractTxOut.Version, contract); err != nil {
 		return nil, err
-	}
-	if !bytes.Equal(contractHash, addrScript) {
-		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
-			contractHash, addrScript)
 	}
 
 	// SPV clients don't check tx sanity before broadcasting, so do that here.
@@ -1556,25 +1535,51 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 
 	// The counter-party should have broadcasted the contract tx but
 	// rebroadcast just in case to ensure that the tx is sent to the
-	// network and so this wallet records the tx and can treat it just
-	// like any other of its own.
+	// network.
 	dcr.log.Debugf("Rebroadcasting contract tx %v.", txData)
 	allowHighFees := true // high fees shouldn't prevent this tx from being bcast
 	finalTxHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, allowHighFees)
 	if err != nil {
-		// TODO: Check if the error indicates that the tx is mined and
-		// use cfilters to find and validate the contract.
-		// If the error indicates that the tx is in mempool, how do we
-		// confirm that the rawtx we just valided is the same as the one
-		// in mempool?
-		return nil, translateRPCCancelErr(err)
+		dcr.log.Errorf("Error rebroadcasting contract tx %v: %v", txData, translateRPCCancelErr(err))
+
+		if !dcr.spvMode {
+			// The broadcast may have failed because the tx was already broadcasted (and maybe
+			// even mined). Full node wallets can verify this by calling gettxout. If the tx
+			// is not found by gettxout, it's possible that the tx isn't yet broadcasted. An
+			// asset.CoinNotFoundError is returned which signals callers to repeat this audit
+			// (including the tx rebroadcast attempt) until the tx is found or the match is
+			// revoked by the server.
+			dcr.log.Debugf("Attempting to find and audit contract using dcrd.")
+			txOut, _, err := dcr.getTxOut(txHash, vout, true)
+			if err != nil {
+				return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+			}
+			if txOut == nil {
+				return nil, asset.CoinNotFoundError
+			}
+			pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
+			if err != nil {
+				return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
+					txOut.ScriptPubKey.Hex, err)
+			}
+			if err = dcr.validateContractOutputScript(pkScript, txOut.ScriptPubKey.Version, contract); err != nil {
+				return nil, err
+			}
+		}
+
+		// SPV wallets do not produce sendrawtransaction errors for already broadcasted
+		// txs. This must be some other unexpected/undesired error.
+		// Do NOT return an asset.CoinNotFoundError so callers do not recall this method
+		// as there's no gaurantee that re-attempting the broadcast will succeed.
+		// Return a successful audit response because it is possible that the tx was
+		// already broadcasted and the caller can safely begin waiting for confirmations.
+		// Granted, this wait would be futile if the tx was never broadcasted but as
+		// explained above, retrying the broadcast isn't a better course of action, neither
+		// is returning an error here because that would cause the caller to potentially
+		// give up on this match prematurely.
 	}
-	// TODO: SPV wallets broadcasts without any error. What if the tx was actually
-	// invalid? Do we later re-validate the contract once it is observed on the
-	// blockchain? Err, if the tx is later found in a block with the same fullhash
-	// as this audited tx, the audited tx very, very likley coudn't have been invalid.
-	// Perhaps safe to re-audit the mined tx before acting.
-	if !finalTxHash.IsEqual(txHash) {
+
+	if err == nil && !finalTxHash.IsEqual(txHash) {
 		return nil, fmt.Errorf("broadcasted contract tx, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", txHash, finalTxHash)
 	}
@@ -1592,6 +1597,34 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		Recipient:  receiver.String(),
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
+}
+
+func (dcr *ExchangeWallet) validateContractOutputScript(pkScript []byte, scriptVer uint16, contract []byte) error {
+	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(scriptVer, pkScript, dcr.chainParams, false)
+	if err != nil {
+		return fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
+	}
+	if scriptClass != txscript.ScriptHashTy {
+		return fmt.Errorf("unexpected script class %d", scriptClass)
+	}
+	if len(addrs) != 1 {
+		return fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
+	}
+	if sigsReq != 1 {
+		return fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
+	}
+	// Compare the contract hash to the P2SH address.
+	contractHash := dcrutil.Hash160(contract)
+	addr := addrs[0]
+	addrScript, err := dexdcr.AddressScript(addr)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(contractHash, addrScript) {
+		return fmt.Errorf("contract hash doesn't match script address. %x != %x",
+			contractHash, addrScript)
+	}
+	return nil
 }
 
 func determineTxTree(msgTx *wire.MsgTx) int8 {
