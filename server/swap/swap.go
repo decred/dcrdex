@@ -1819,16 +1819,6 @@ func (s *Swapper) revoke(match *matchTracker) {
 	sendRev(mid, match.Maker)
 }
 
-// extractAddress extracts the address from the order. If the order is a cancel
-// order, an empty string is returned.
-func extractAddress(ord order.Order) string {
-	trade := ord.Trade()
-	if trade == nil {
-		return ""
-	}
-	return trade.Address
-}
-
 // For the 'match' request, the user returns a msgjson.Acknowledgement array
 // with signatures for each match ID. The match acknowledgements were requested
 // from each matched user in Negotiate.
@@ -2005,7 +1995,7 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:      idToBytes(match.ID()),
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			Address:      extractAddress(match.Taker),
+			Address:      order.ExtractAddress(match.Taker),
 			ServerTime:   stamp,
 			FeeRateBase:  match.FeeRateBase,
 			FeeRateQuote: match.FeeRateQuote,
@@ -2015,40 +2005,12 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:      idToBytes(match.ID()),
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			Address:      extractAddress(match.Maker),
+			Address:      order.ExtractAddress(match.Maker),
 			ServerTime:   stamp,
 			FeeRateBase:  match.FeeRateBase,
 			FeeRateQuote: match.FeeRateQuote,
 			Side:         uint8(order.Taker),
 		}
-}
-
-// matchToMatchTracker converts a match object to a match tracker.
-func matchToMatchTracker(match *order.Match, nowMs time.Time) *matchTracker {
-	maker := match.Maker
-	base, quote := maker.BaseAsset, maker.QuoteAsset
-	var makerSwapAsset, takerSwapAsset uint32
-	if maker.Sell {
-		makerSwapAsset = base
-		takerSwapAsset = quote
-	} else {
-		makerSwapAsset = quote
-		takerSwapAsset = base
-	}
-
-	return &matchTracker{
-		Match:     match,
-		time:      nowMs,
-		matchTime: match.Epoch.End(),
-		makerStatus: &swapStatus{
-			swapAsset:   makerSwapAsset,
-			redeemAsset: takerSwapAsset,
-		},
-		takerStatus: &swapStatus{
-			swapAsset:   takerSwapAsset,
-			redeemAsset: makerSwapAsset,
-		},
-	}
 }
 
 // readMatches translates a slice of raw matches from the market manager into
@@ -2060,7 +2022,30 @@ func readMatches(matchSets []*order.MatchSet) []*matchTracker {
 	matches := make([]*matchTracker, 0, len(matchSets))
 	for _, matchSet := range matchSets {
 		for _, match := range matchSet.Matches() {
-			matches = append(matches, matchToMatchTracker(match, nowMs))
+			maker := match.Maker
+			base, quote := maker.BaseAsset, maker.QuoteAsset
+			var makerSwapAsset, takerSwapAsset uint32
+			if maker.Sell {
+				makerSwapAsset = base
+				takerSwapAsset = quote
+			} else {
+				makerSwapAsset = quote
+				takerSwapAsset = base
+			}
+
+			matches = append(matches, &matchTracker{
+				Match:     match,
+				time:      nowMs,
+				matchTime: match.Epoch.End(),
+				makerStatus: &swapStatus{
+					swapAsset:   makerSwapAsset,
+					redeemAsset: takerSwapAsset,
+				},
+				takerStatus: &swapStatus{
+					swapAsset:   takerSwapAsset,
+					redeemAsset: makerSwapAsset,
+				},
+			})
 		}
 	}
 	return matches
@@ -2222,41 +2207,4 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 
 func idToBytes(id [order.OrderIDSize]byte) []byte {
 	return id[:]
-}
-
-// ProcessCancelMatchDuringSuspendedMarket is called by market to process a match
-// for a cancel order that was made while the market was suspended. This function
-// stores the match in the db and sends a match request to the client.
-func (s *Swapper) ProcessCancelMatchDuringSuspendedMarket(match *order.Match) error {
-	s.storage.InsertMatch(match)
-
-	matchTracker := matchToMatchTracker(match, time.Now())
-	makerMsg, takerMsg := matchNotifications(matchTracker)
-	s.authMgr.Sign(makerMsg)
-	s.authMgr.Sign(takerMsg)
-	msgs := []msgjson.Signable{makerMsg, takerMsg}
-	req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
-	if err != nil {
-		return err
-	}
-	user := match.Taker.User()
-	messageAckers := []*messageAcker{
-		{
-			user:    user,
-			match:   matchTracker,
-			params:  makerMsg,
-			isMaker: true,
-		},
-		{
-			user:    user,
-			match:   matchTracker,
-			params:  takerMsg,
-			isMaker: false,
-		},
-	}
-	s.authMgr.Request(user, req, func(_ comms.Link, resp *msgjson.Message) {
-		s.processMatchAcks(user, resp, messageAckers)
-	})
-
-	return nil
 }

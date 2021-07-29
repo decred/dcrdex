@@ -752,6 +752,16 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 	return nil
 }
 
+// ExtractAddress extracts the address from the order. If the order is a cancel
+// order, an empty string is returned.
+func ExtractAddress(ord Order) string {
+	trade := ord.Trade()
+	if trade == nil {
+		return ""
+	}
+	return trade.Address
+}
+
 // Some commonly used time transformations.
 var unixMilli = encode.UnixMilli
 var unixMilliU = encode.UnixMilliU

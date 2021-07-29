@@ -60,7 +60,6 @@ type Swapper interface {
 	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64)
 	ChainsSynced(base, quote uint32) (bool, error)
-	ProcessCancelMatchDuringSuspendedMarket(*order.Match) error
 }
 
 type DataCollector interface {
@@ -166,6 +165,7 @@ type Storage interface {
 	Close() error
 	InsertEpoch(ed *db.EpochResults) error
 	MarketMatches(base, quote uint32) ([]*db.MatchDataWithCoins, error)
+	InsertMatch(match *order.Match) error
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with
@@ -589,16 +589,16 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 }
 
 // processCancelOrderWhileSuspended is called when cancelling an order while
-// the market is suspended and Run is not runnning. The error sent on errChan
+// the market is suspended and Run is not running. The error sent on errChan
 // is returned to the client.
 //
 // This function:
 // 1. Removes the target order from the book.
 // 2. Unlocks the order coins.
 // 3. Updates the storage with the new cancel order and cancels the existing limit order.
-// 3. Responds to the client that the order was recieved.
+// 3. Responds to the client that the order was received.
 // 4. Sends the unbooked order to the order feeds.
-// 5. Creates a match object and sends it to the swapper to notify the client of the match.
+// 5. Creates a match object, stores it, and notifies the client of the match.
 func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan<- error) {
 	co, ok := rec.order.(*order.CancelOrder)
 	if !ok {
@@ -612,13 +612,13 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	}
 
 	m.bookMtx.Lock()
+	delete(m.settling, co.TargetOrderID)
 	lo, ok := m.book.Remove(co.TargetOrderID)
+	m.bookMtx.Unlock()
 	if !ok {
 		errChan <- ErrTargetNotCancelable
 		return
 	}
-	delete(m.settling, co.TargetOrderID)
-	m.bookMtx.Unlock()
 
 	m.unlockOrderCoins(lo)
 
@@ -626,10 +626,10 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	co.SetTime(sTime)
 
 	// Create the client response here, but don't send it until the order has been
-	// commited to the storage.
+	// committed to the storage.
 	respMsg, err := m.orderResponse(rec)
 	if err != nil {
-		errChan <- fmt.Errorf("error creating order response: %v", err)
+		errChan <- fmt.Errorf("Failed to create order response: %v", err)
 		return
 	}
 
@@ -651,7 +651,7 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	// state.
 	sendResponseErr := m.auth.Send(rec.order.User(), respMsg)
 	if sendResponseErr != nil {
-		log.Errorf("error sending response: %v", err)
+		log.Errorf("Failed to send cancel order response: %v", err)
 	}
 
 	sig := &updateSignal{
@@ -675,12 +675,74 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 		FeeRateBase:  m.getFeeRate(m.Base(), m.baseFeeFetcher),
 		FeeRateQuote: m.getFeeRate(m.Quote(), m.quoteFeeFetcher),
 	}
-	if err := m.swapper.ProcessCancelMatchDuringSuspendedMarket(&match); err != nil {
-		// Cannot send an error here since we already sent the order response.
-		log.Errorf("error processing cancel match: %v", err)
+	m.storage.InsertMatch(&match)
+	makerMsg, takerMsg := matchNotifications(&match)
+	m.auth.Sign(makerMsg)
+	m.auth.Sign(takerMsg)
+	msgs := []msgjson.Signable{makerMsg, takerMsg}
+	req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
+	if err != nil {
+		log.Errorf("Failed to create match reqeust: %v", err)
+	} else {
+		err = m.auth.Request(rec.order.User(), req, func(_ comms.Link, resp *msgjson.Message) {
+			m.processMatchAcksForCancel(rec.order.User(), resp)
+		})
+		if err != nil {
+			log.Errorf("Failed to send match reqeust: %v", err)
+		}
 	}
 
 	errChan <- sendResponseErr
+}
+
+// matchNotifications creates a pair of msgjson.Match from a match.
+func matchNotifications(match *order.Match) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
+	stamp := encode.UnixMilliU(time.Now())
+	return &msgjson.Match{
+			OrderID:      idToBytes(match.Maker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      order.ExtractAddress(match.Taker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Maker),
+		}, &msgjson.Match{
+			OrderID:      idToBytes(match.Taker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      order.ExtractAddress(match.Maker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Taker),
+		}
+}
+
+// processMatchAcksForCancel is called when receiving a response to a match
+// request for a cancel order. Nothing is done other than logging and verifying
+// that the response is in the correct format.
+//
+// This is currently only used for cancel orders that happen while the market is
+// suspended, but may be later used for all cancel orders.
+func (m *Market) processMatchAcksForCancel(user account.AccountID, msg *msgjson.Message) {
+	var acks []msgjson.Acknowledgement
+	err := msg.UnmarshalResult(&acks)
+	if err != nil {
+		m.respondError(msg.ID, user, msgjson.RPCParseError,
+			"error parsing match request acknowledgment")
+		return
+	}
+	// The acknowledgment for both the taker and maker should come from the same user
+	expectedNumAcks := 2
+	if len(acks) != expectedNumAcks {
+		m.respondError(msg.ID, user, msgjson.AckCountError,
+			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), expectedNumAcks))
+		return
+	}
+	log.Debugf("processMatchAcksForCancel: 'match' ack recieived from %v", user)
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.

@@ -206,7 +206,6 @@ func (a *Archiver) NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur i
 	if N != 1 {
 		err = fmt.Errorf("failed to store order %v: %d rows affected, expected 1",
 			ord.UID(), N)
-		a.fatalBackendErr(err)
 		return err
 	}
 
