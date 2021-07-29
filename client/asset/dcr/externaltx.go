@@ -102,6 +102,40 @@ func (dcr *ExchangeWallet) externalTx(hash *chainhash.Hash) (*externalTx, bool) 
 	return tx, tracked
 }
 
+func (dcr *ExchangeWallet) externalTxOut(hash *chainhash.Hash, vout uint32) (*wire.TxOut, int8, bool, error) {
+	tx, tracked := dcr.externalTx(hash)
+	if !tracked {
+		return nil, 0, false, asset.CoinNotFoundError
+	}
+
+	// Lock the scanMtx to prevent attempted rescans from
+	// mutating the tx block, outputs map or tree field.
+	tx.scanMtx.RLock()
+	txBlockHash, err := tx.relevantBlockHash(dcr.getBlockHash)
+	if err != nil {
+		tx.scanMtx.RUnlock()
+		return nil, 0, false, err
+	}
+	if txBlockHash == nil {
+		tx.scanMtx.RUnlock()
+		return nil, 0, false, asset.CoinNotFoundError
+	}
+	output := tx.outputs[vout]
+	txTree := tx.tree
+	tx.scanMtx.RUnlock()
+
+	if output == nil {
+		return nil, 0, false, fmt.Errorf("tx %s has no output at index %d", hash, vout)
+	}
+
+	isSpent, err := dcr.findExternalTxOutputSpender(output, txBlockHash)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	return output.TxOut, txTree, isSpent, nil
+}
+
 // externalTxOutConfirmations uses the script(s) associated with an externalTx
 // to find the block in which the tx is mined and checks if the specified tx
 // output is spent by a mined transaction. This tx must have been previously

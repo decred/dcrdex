@@ -896,7 +896,18 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
-			return ready
+			if !ready {
+				return false
+			}
+			// Re-audit the contract now that we know it is mined
+			// and has the required confirmations.
+			if err := t.reAuditContract(match); err != nil {
+				t.dc.log.Errorf("Match %s not swappable: repeat audit of maker's contract failed: %v",
+					match, err)
+				match.swapErr = fmt.Errorf("Counter-party contract repeat audit error: %v", err)
+				return false
+			}
+			return true
 		}
 		// If we're the maker, check the confirmations anyway so we can notify.
 		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
@@ -956,7 +967,18 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
-			return ready
+			if !ready {
+				return false
+			}
+			// Re-audit the contract now that we know it is mined
+			// and has the required confirmations.
+			if err := t.reAuditContract(match); err != nil {
+				t.dc.log.Errorf("Match %s not redeemable: repeat audit of taker's contract failed: %v",
+					match, err)
+				match.swapErr = fmt.Errorf("Repeat counter-party contract audit error: %v", err)
+				return false
+			}
+			return true
 		}
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
@@ -2141,6 +2163,70 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 	if err != nil {
 		return err
 	}
+
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	err = t.validateAuditInfo(auditInfo, match, coinID, contract)
+	if err != nil {
+		return err
+	}
+	// Audit successful. Update status and other match data.
+	proof := &match.MetaData.Proof
+	if match.Side == order.Maker {
+		match.Status = order.TakerSwapCast
+		proof.TakerSwap = coinID
+	} else {
+		proof.SecretHash = auditInfo.SecretHash
+		match.Status = order.MakerSwapCast
+		proof.MakerSwap = coinID
+	}
+	proof.CounterTxData = txData
+	proof.CounterContract = contract
+	match.counterSwap = auditInfo
+
+	err = t.db.UpdateMatch(&match.MetaMatch)
+	if err != nil {
+		t.dc.log.Errorf("Error updating database for match %v: %s", match, err)
+	}
+
+	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
+
+	return nil
+}
+
+// reAuditContract performs a repeat contract audit for the specified match and
+// returns an error if the repeat audit fails. This does NOT update match fields
+// but the trackedTrade mtx MUST be locked for reading mutable match fields.
+func (t *trackedTrade) reAuditContract(match *matchTracker) error {
+	if match.Side == order.Maker && match.Status != order.TakerSwapCast {
+		return fmt.Errorf("Invalid repeat audit request for maker at status %s.", match.Status)
+	}
+	if match.Side == order.Taker && match.Status != order.MakerSwapCast {
+		return fmt.Errorf("Invalid repeat audit request for taker at status %s.", match.Status)
+	}
+
+	proof := &match.MetaData.Proof
+	coinID, contract, txData := match.counterSwap.Coin.ID(), proof.CounterContract, proof.CounterTxData
+	auditInfo, err := t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp))) // why not match.matchTime()?
+	if err != nil {
+		return err
+	}
+	if err = t.validateAuditInfo(auditInfo, match, coinID, contract); err != nil {
+		return err
+	}
+	// Audit successful.
+	t.dc.log.Infof("Re audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
+	return nil
+}
+
+// validateAuditInfo checks the audit info of a contract for validity, ensuring
+// that the contract pays the right amount to the right address and if maker,
+// also ensures that the secret hash is as expected.
+// The trackedTrade mtx MUST be locked for reading mutable match fields.
+func (t *trackedTrade) validateAuditInfo(auditInfo *asset.AuditInfo, match *matchTracker, coinID, contract []byte) error {
 	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
 
 	// Audit the contract.
@@ -2179,8 +2265,6 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 		return fmt.Errorf("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration)
 	}
 
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	proof := &match.MetaData.Proof
 	if match.Side == order.Maker {
 		// Check that the secret hash is correct.
@@ -2188,25 +2272,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 			return fmt.Errorf("secret hash mismatch for contract coin %v (%s), contract %v. expected %x, got %v",
 				auditInfo.Coin, t.wallets.toAsset.Symbol, contract, proof.SecretHash, auditInfo.SecretHash)
 		}
-		// Audit successful. Update status and other match data.
-		match.Status = order.TakerSwapCast
-		proof.TakerSwap = coinID
-	} else {
-		proof.SecretHash = auditInfo.SecretHash
-		match.Status = order.MakerSwapCast
-		proof.MakerSwap = coinID
 	}
-	proof.CounterTxData = txData
-	proof.CounterContract = contract
-	match.counterSwap = auditInfo
-
-	err = t.db.UpdateMatch(&match.MetaMatch)
-	if err != nil {
-		t.dc.log.Errorf("Error updating database for match %v: %s", match, err)
-	}
-
-	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
-		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
 
 	return nil
 }

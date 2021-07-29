@@ -2228,7 +2228,10 @@ func TestCoinConfirmations(t *testing.T) {
 	if wallet.wallet.SpvMode() {
 		node.walletTx = &walletjson.GetTransactionResult{}
 	} else {
-		node.blockchain.addRawTx(&chainjson.TxRawResult{Txid: tTxHash.String()})
+		node.blockchain.addRawTx(&chainjson.TxRawResult{
+			Txid: tTxHash.String(),
+			Vout: []chainjson.Vout{{}}, // rawTx must have an output at index 0 to be considered spent
+		})
 	}
 	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err != nil {
