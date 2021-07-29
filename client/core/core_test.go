@@ -307,7 +307,6 @@ type TDB struct {
 	setCredsErr           error
 	legacyKeyErr          error
 	recryptErr            error
-	updatedCreds          *db.PrimaryCredentials
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -442,7 +441,7 @@ func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
 
-func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials, coreVersion uint8) error {
+func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	if tdb.setCredsErr != nil {
 		return tdb.setCredsErr
 	}
@@ -462,11 +461,6 @@ func (tdb *TDB) Recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter enc
 	}
 
 	return nil, nil, nil
-}
-
-func (tdb *TDB) UpdatePrimaryCredentials(creds *db.PrimaryCredentials) error {
-	tdb.updatedCreds = creds
-	return nil
 }
 
 func (tdb *TDB) Backup() error {
@@ -1780,7 +1774,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	}
 }
 
-func TestCoreUpgradeV1(t *testing.T) {
+func TestCredentialsUpgrade(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
@@ -5730,6 +5724,7 @@ func TestChangeAppPass(t *testing.T) {
 
 	oldCreds := tCore.credentials
 
+	rig.db.creds = nil
 	err = tCore.ChangeAppPass(tPW, newTPW)
 	if err != nil {
 		t.Fatal(err)
@@ -5739,7 +5734,7 @@ func TestChangeAppPass(t *testing.T) {
 		t.Fatalf("credentials not updated in Core")
 	}
 
-	if rig.db.updatedCreds == nil || !bytes.Equal(tCore.credentials.OuterKeyParams, rig.db.updatedCreds.OuterKeyParams) {
+	if rig.db.creds == nil || !bytes.Equal(tCore.credentials.OuterKeyParams, rig.db.creds.OuterKeyParams) {
 		t.Fatalf("credentials not updated in DB")
 	}
 }

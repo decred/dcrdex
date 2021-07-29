@@ -55,8 +55,6 @@ const (
 	// defaultTickInterval is the tick interval used before the broadcast
 	// timeout is known (e.g. startup with down server).
 	defaultTickInterval = 30 * time.Second
-	// Version is the core version.
-	Version = 1
 )
 
 var (
@@ -1944,9 +1942,9 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 		OuterKeyParams: newOuterCrypter.Serialize(),
 	}
 
-	err = c.db.UpdatePrimaryCredentials(newCreds)
+	err = c.db.SetPrimaryCredentials(newCreds)
 	if err != nil {
-		return fmt.Errorf("UpdatePrimaryCredentials error: %w", err)
+		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
 
 	c.setCredentials(newCreds)
@@ -2710,7 +2708,9 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 
 // IsInitialized checks if the app is already initialized.
 func (c *Core) IsInitialized() bool {
-	return c.creds() != nil
+	c.credMtx.RLock()
+	defer c.credMtx.RUnlock()
+	return c.credentials != nil
 }
 
 // InitializeClient sets the initial app-wide password and app seed for the
@@ -2725,7 +2725,7 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 		return err
 	}
 
-	err = c.db.SetPrimaryCredentials(creds, Version)
+	err = c.db.SetPrimaryCredentials(creds)
 	if err != nil {
 		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
@@ -2741,7 +2741,6 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 
 // ExportSeed exports the application seed.
 func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
-
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("ExportSeed password error: %w", err)
@@ -2882,8 +2881,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 // initializePrimaryCredentials sets the PrimaryCredential fields after the DB
 // upgrade.
 func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) error {
-	c.log.Infof("Upgrading to core version 1")
-
 	oldCrypter, err := c.reCrypter(pw, oldKeyParams)
 	if err != nil {
 		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
@@ -2900,6 +2897,9 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 	}
 
 	c.setCredentials(creds)
+
+	msg := "The client has been upgraded to use an application seed. Back up the seed now in the settings view."
+	c.notify(newSecurityNote(SubjectUpgradedToSeed, msg, db.WarningLevel))
 
 	for assetID, newEncPW := range walletUpdates {
 		w, found := c.wallet(assetID)

@@ -13,11 +13,8 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// SetPrimaryCredentials sets the initial *PrimaryCredentials and core
-	// version for the client.
-	SetPrimaryCredentials(creds *PrimaryCredentials, coreVersion uint8) error
-	// UpdatePrimaryCredentials updates the *PrimaryCredentials.
-	UpdatePrimaryCredentials(creds *PrimaryCredentials) error
+	// SetPrimaryCredentials sets the initial *PrimaryCredentials.
+	SetPrimaryCredentials(creds *PrimaryCredentials) error
 	// PrimaryCredentials fetches the *PrimaryCredentials.
 	PrimaryCredentials() (*PrimaryCredentials, error)
 	// Recrypt re-encrypts the wallet passwords and account private keys, and

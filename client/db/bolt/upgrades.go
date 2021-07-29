@@ -203,6 +203,11 @@ func v4Upgrade(dbtx *bbolt.Tx) error {
 	return moveActiveOrders(dbtx)
 }
 
+// v5Upgrade changes the database structure to accomodate PrimaryCredentials.
+// The OuterKeyParams bucket is populated with the existing application
+// serialized Crypter, but other fields are not populated since the password
+// would be required. The caller should generate new PrimaryCredentials and
+// call Recrypt during the next login.
 func v5Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 4
 

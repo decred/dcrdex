@@ -110,7 +110,7 @@ func TestStorePrimaryCredentials(t *testing.T) {
 	}
 
 	ensureErr := func(tag string, creds *db.PrimaryCredentials) {
-		if err := boltdb.SetPrimaryCredentials(creds, 1); err == nil {
+		if err := boltdb.SetPrimaryCredentials(creds); err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
 	}
@@ -122,15 +122,9 @@ func TestStorePrimaryCredentials(t *testing.T) {
 
 	// Success
 	goodCreds := newCreds(true, true, true, true)
-	err = boltdb.SetPrimaryCredentials(goodCreds, 1)
+	err = boltdb.SetPrimaryCredentials(goodCreds)
 	if err != nil {
 		t.Fatalf("SetPrimaryCredentials error: %v", err)
-	}
-
-	// Trying again should be an error.
-	err = boltdb.SetPrimaryCredentials(goodCreds, 1)
-	if err == nil {
-		t.Fatalf("no error for double-stored credentials")
 	}
 
 	// Retrieve the credentials and check for consistency.
@@ -1105,15 +1099,6 @@ func TestRecrypt(t *testing.T) {
 		}
 
 		return nil
-	}
-	testCredentialsUpdate(t, boltdb, tester)
-}
-
-func TestUpdatePrimaryCredentials(t *testing.T) {
-	boltdb := newTestDB(t)
-	tester := func(_ []byte, _ string, creds *db.PrimaryCredentials) error {
-		err := boltdb.UpdatePrimaryCredentials(creds)
-		return err
 	}
 	testCredentialsUpdate(t, boltdb, tester)
 }

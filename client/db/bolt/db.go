@@ -177,12 +177,6 @@ func (db *BoltDB) appView(f bucketFunc) error {
 // convenience, the provided *PrimaryCredentials are stored under the same
 // transaction.
 func (db *BoltDB) Recrypt(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
-
-	currentCreds, _ := db.primaryCreds()
-	if currentCreds != nil {
-		return nil, nil, fmt.Errorf("PrimaryCredentials already stored")
-	}
-
 	if err := validateCreds(creds); err != nil {
 		return nil, nil, err
 	}
@@ -270,29 +264,10 @@ func (db *BoltDB) Recrypt(creds *dexdb.PrimaryCredentials, oldCrypter, newCrypte
 	})
 }
 
-// UpdatePrimaryCredentials sets the *PrimaryCredentials and the core version
-// for the client.
-func (db *BoltDB) UpdatePrimaryCredentials(creds *dexdb.PrimaryCredentials) error {
+// SetPrimaryCredentials validates and stores the PrimaryCredentials.
+func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials) error {
 	if err := validateCreds(creds); err != nil {
 		return err
-	}
-
-	return db.Update(func(tx *bbolt.Tx) error {
-		return db.setCreds(tx, creds)
-	})
-}
-
-// SetPrimaryCredentials validates and stores the PrimaryCredentials and sets
-// the core version. For general updates e.g. password changes, use
-// UpdatePrimaryCredentials.
-func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials, newCoreVersion uint8) error {
-	if err := validateCreds(creds); err != nil {
-		return err
-	}
-
-	currentCreds, _ := db.primaryCreds()
-	if currentCreds != nil {
-		return fmt.Errorf("PrimaryCredentials already stored")
 	}
 
 	return db.Update(func(tx *bbolt.Tx) error {

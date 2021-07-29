@@ -120,6 +120,7 @@ type SecurityNote struct {
 
 const (
 	SubjectSeedNeedsSaving = "Don't forget to back up your application seed"
+	SubjectUpgradedToSeed  = "Back up your new application seed"
 )
 
 func newSecurityNote(subject, details string, severity db.Severity) *SecurityNote {
