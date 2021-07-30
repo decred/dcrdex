@@ -1068,6 +1068,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				client.psMTX.Unlock()
 				continue
 			}
+			lastStatus := client.processedStatus[match.MatchID]
 			client.processedStatus[match.MatchID] = status
 			client.psMTX.Unlock()
 			client.log("NOW =====> %s", status)
@@ -1089,8 +1090,8 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				// Our toAsset == counter-party's fromAsset.
 				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
 
-			case status == order.MatchComplete, // maker normally jumps MakerRedeemed if 'redeem' succeeds
-				side == order.Maker && status == order.MakerRedeemed:
+			case side == order.Maker && status == order.MakerRedeemed,
+				status == order.MatchComplete && (side == order.Taker || lastStatus != order.MakerRedeemed): // allow MatchComplete for Maker if lastStatus != order.MakerRedeemed
 				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Quantity, match.Rate)
 				// Mine blocks for redemption since counter-party does not wait
 				// for redeem tx confirmations before performing follow-up action.
