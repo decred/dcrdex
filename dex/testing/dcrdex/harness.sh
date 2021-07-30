@@ -10,11 +10,22 @@ rm -rf "${DCRDEX_DATA_DIR}"
 mkdir -p "${DCRDEX_DATA_DIR}"
 
 # Rebuild dcrdex with the required simnet locktime settings.
-HARNESS_DIR=$(dirname "$0")
+HARNESS_DIR=$(
+  cd $(dirname "$0")
+  pwd
+)
+
+# Build script
+cat > "${DCRDEX_DATA_DIR}/build" <<EOF
+#!/usr/bin/env bash
+cd ${HARNESS_DIR}/../../../server/cmd/dcrdex/
 go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
     "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' \
-    -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'" \
-    ${HARNESS_DIR}/../../../server/cmd/dcrdex/
+    -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
+EOF
+chmod +x "${DCRDEX_DATA_DIR}/build"
+
+"${DCRDEX_DATA_DIR}/build"
 
 cd "${DCRDEX_DATA_DIR}"
 
@@ -242,8 +253,15 @@ tmux kill-session -t $SESSION
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/quit"
 
+# Shutdown script
+cat > "${DCRDEX_DATA_DIR}/run" <<EOF
+#!/usr/bin/env bash
+${DCRDEX_DATA_DIR}/dcrdex --appdata=$(pwd) $*; tmux wait-for -S donedex
+EOF
+chmod +x "${DCRDEX_DATA_DIR}/run"
+
 echo "Starting dcrdex"
 tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'dcrdex'
-tmux send-keys -t $SESSION:0 "${DCRDEX_DATA_DIR}/dcrdex --appdata=$(pwd) $*; tmux wait-for -S donedex" C-m
+tmux send-keys -t $SESSION:0 "${DCRDEX_DATA_DIR}/run" C-m
 tmux attach-session -t $SESSION
