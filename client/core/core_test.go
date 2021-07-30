@@ -168,6 +168,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 	connMaster := dex.NewConnectionMaster(conn)
 	connMaster.Connect(ctx)
 	acct := tNewAccount()
+	var reporting uint32 = 1
 	return &dexConnection{
 		WsConn:     conn,
 		log:        tLogger,
@@ -205,11 +206,12 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 			Fee:       tFee,
 			DEXPubKey: acct.dexPubKey.SerializeCompressed(),
 		},
-		notify:    func(Notification) {},
-		trades:    make(map[order.OrderID]*trackedTrade),
-		epoch:     map[string]uint64{tDcrBtcMktName: 0},
-		apiVer:    serverdex.PreAPIVersion,
-		connected: 1,
+		notify:            func(Notification) {},
+		trades:            make(map[order.OrderID]*trackedTrade),
+		epoch:             map[string]uint64{tDcrBtcMktName: 0},
+		apiVer:            serverdex.PreAPIVersion,
+		connected:         1,
+		reportingConnects: &reporting,
 	}, conn, acct
 }
 
@@ -229,7 +231,6 @@ func (conn *TWebsocket) NextID() uint64 {
 	conn.id++
 	return conn.id
 }
-func (conn *TWebsocket) SetCallbacks(connectCB func(bool), reconnectCB func()) {}
 func (conn *TWebsocket) Send(msg *msgjson.Message) error {
 	if conn.sendMsgErrChan != nil {
 		resp, err := msg.Response()

@@ -129,6 +129,8 @@ type dexConnection struct {
 
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
+
+	reportingConnects *uint32
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -2394,9 +2396,7 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc 
 			return nil, false, fmt.Errorf("error authorizing pre-paid account: %v", err)
 		}
 
-		dc.SetCallbacks(dc.handleConnectEvent, func() {
-			go c.handleReconnect(host)
-		})
+		atomic.StoreUint32(dc.reportingConnects, 1)
 		c.wg.Add(1)
 		go c.listen(dc)
 
@@ -4848,18 +4848,24 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		return nil, newError(addressParseErr, "error parsing ws address %s: %v", wsAddr, err)
 	}
 
-	dc := &dexConnection{
-		log:    c.log,
-		acct:   newDEXAccount(acctInfo),
-		notify: c.notify,
-		ticker: newDexTicker(defaultTickInterval), // updated when server config obtained
-		books:  make(map[string]*bookie),
-		trades: make(map[order.OrderID]*trackedTrade),
-		apiVer: -1,
-		// On connect, must set: cfg, epoch, and assets.
+	listen := len(temporary) == 0 || !temporary[0]
+
+	var reporting uint32
+	if listen {
+		reporting = 1
 	}
 
-	listen := len(temporary) == 0 || !temporary[0]
+	dc := &dexConnection{
+		log:               c.log,
+		acct:              newDEXAccount(acctInfo),
+		notify:            c.notify,
+		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
+		books:             make(map[string]*bookie),
+		trades:            make(map[order.OrderID]*trackedTrade),
+		apiVer:            -1,
+		reportingConnects: &reporting,
+		// On connect, must set: cfg, epoch, and assets.
+	}
 
 	wsCfg := comms.WsCfg{
 		URL:      wsURL.String(),
@@ -4875,14 +4881,10 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		wsCfg.NetDialContext = proxy.DialContext
 	}
 
-	if listen {
-		wsCfg.ReconnectSync = func() {
-			go c.handleReconnect(host)
-		}
-		wsCfg.ConnectEventFunc = dc.handleConnectEvent
-	} else {
-		wsCfg.ConnectEventFunc = dc.handleTempConnectEvent
+	wsCfg.ReconnectSync = func() {
+		go c.handleReconnect(host)
 	}
+	wsCfg.ConnectEventFunc = dc.handleConnectEvent
 
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&wsCfg)
@@ -5017,6 +5019,10 @@ func (c *Core) handleReconnect(host string) {
 	}
 }
 
+func (dc *dexConnection) broadcastingConnect() bool {
+	return atomic.LoadUint32(dc.reportingConnects) == 1
+}
+
 // handleConnectEvent is called when a WsConn indicates that a connection was
 // lost or established.
 //
@@ -5029,16 +5035,11 @@ func (dc *dexConnection) handleConnectEvent(connected bool) {
 		statusStr = "connected"
 	}
 	atomic.StoreUint32(&dc.connected, v)
-	details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
-	dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
-}
-
-func (dc *dexConnection) handleTempConnectEvent(connected bool) {
-	var v uint32
-	if connected {
-		v = 1
+	if dc.broadcastingConnect() {
+		details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
+		dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
 	}
-	atomic.StoreUint32(&dc.connected, v)
+
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.
