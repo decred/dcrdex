@@ -2111,32 +2111,6 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	}
 }
 
-func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
-	rig.acct.markFeePaid()
-	expectedErrorMessage := "test account not found error"
-	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil, nil)
-
-	dexStats := tCore.initializeDEXConnections(rig.crypter)
-
-	if dexStats == nil {
-		t.Fatal("initializeDEXConnections failure")
-	}
-	for _, dexStat := range dexStats {
-		if dexStat.AuthErr == "" {
-			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
-		}
-		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
-			t.Fatalf("expected account not found error")
-		}
-	}
-	if len(rig.core.conns) > 0 {
-		t.Fatalf("expected rig.core.conns to be empty due to disabling the account")
-	}
-}
-
 func TestConnectDEX(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()

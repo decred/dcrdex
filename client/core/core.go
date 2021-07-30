@@ -3431,31 +3431,6 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 // account is disabled and the corresponding entry in c.conns is removed
 // which will result in the user being prompted to register again.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
-	// Connections will be attempted in parallel, so we'll need to protect the
-	// errorSet.
-	var reconcileConnectionsWg sync.WaitGroup
-	reconcileConnectionsWg.Add(1)
-	disabledAccountHostChan := make(chan string)
-	// If an account has been disabled the entry is removed from c.conns.
-	go func() {
-		defer reconcileConnectionsWg.Done()
-		var disabledAccountHosts []string
-		for disabledAccountHost := range disabledAccountHostChan {
-			disabledAccountHosts = append(disabledAccountHosts, disabledAccountHost)
-		}
-		if len(disabledAccountHosts) > 0 {
-			c.connMtx.Lock()
-			for _, disabledAccountHost := range disabledAccountHosts {
-				c.conns[disabledAccountHost].connMaster.Disconnect()
-				delete(c.conns, disabledAccountHost)
-				c.log.Warnf("Account at dex %v not found. The account has been disabled. "+
-					"It is disconnected and has been removed from core connections.",
-					disabledAccountHost)
-			}
-			c.connMtx.Unlock()
-		}
-	}()
-
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
 	results := make([]*DEXBrief, 0, len(conns))
@@ -3529,26 +3504,12 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
 				c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
 				result.AuthErr = details
-				// Disable account on AccountNotFoundError.
-				var mErr *msgjson.Error
-				if errors.As(err, &mErr) &&
-					mErr.Code == msgjson.AccountNotFoundError {
-					err = c.db.DisableAccount(dc.acct.host)
-					if err != nil {
-						c.log.Errorf("Error disabling account: %v", err)
-						return
-					}
-					disabledAccountHostChan <- dc.acct.host
-					return
-				}
 				return
 			}
 			result.Authed = true
 		}(dc)
 	}
 	wg.Wait()
-	close(disabledAccountHostChan)
-	reconcileConnectionsWg.Wait()
 	return results
 }
 
