@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -106,7 +107,7 @@ type rawWallet struct {
 type ethFetcher interface {
 	accounts() []*accounts.Account
 	addPeer(ctx context.Context, peer string) error
-	balance(ctx context.Context, acct *accounts.Account) (*big.Int, error)
+	balance(ctx context.Context, addr common.Address) (*big.Int, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
@@ -235,7 +236,10 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 //
 // TODO: Return Immature and Locked values.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
-	bigBal, err := eth.node.balance(eth.ctx, eth.acct)
+	if eth.acct == nil {
+		return nil, errors.New("account not set")
+	}
+	bigBal, err := eth.node.balance(eth.ctx, eth.acct.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -400,12 +404,12 @@ func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error)
 }
 
 // sendToAddr sends funds from acct to addr.
-func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasFee *big.Int) (common.Hash, error) {
+func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.Int) (common.Hash, error) {
 	tx := map[string]string{
 		"from":     fmt.Sprintf("0x%x", eth.acct.Address),
 		"to":       fmt.Sprintf("0x%x", addr),
 		"value":    fmt.Sprintf("0x%x", amt),
-		"gasPrice": fmt.Sprintf("0x%x", gasFee),
+		"gasPrice": fmt.Sprintf("0x%x", gasPrice),
 	}
 	return eth.node.sendTransaction(eth.ctx, tx)
 }

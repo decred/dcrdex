@@ -62,7 +62,7 @@ func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, e
 func (n *testNode) accounts() []*accounts.Account {
 	return nil
 }
-func (n *testNode) balance(ctx context.Context, acct *accounts.Account) (*big.Int, error) {
+func (n *testNode) balance(ctx context.Context, acct common.Address) (*big.Int, error) {
 	return n.bal, n.balErr
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
@@ -330,6 +330,7 @@ func TestBalance(t *testing.T) {
 			node: node,
 			ctx:  ctx,
 			log:  tLogger,
+			acct: new(accounts.Account),
 		}
 		bal, err := eth.Balance()
 		cancel()

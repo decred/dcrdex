@@ -103,9 +103,9 @@ func (c *rpcclient) accounts() []*accounts.Account {
 	return accts
 }
 
-// balance gets the current balance of an account.
-func (c *rpcclient) balance(ctx context.Context, acct *accounts.Account) (*big.Int, error) {
-	return c.ec.BalanceAt(ctx, acct.Address, nil)
+// balance gets the current balance of an address.
+func (c *rpcclient) balance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	return c.ec.BalanceAt(ctx, addr, nil)
 }
 
 // unlock uses a raw request to unlock an account indefinitely.
@@ -234,16 +234,24 @@ func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
 	return wallet, nil
 }
 
+func (c *rpcclient) addSignerToOpts(txOpts *bind.TransactOpts, netID int64) error {
+	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	if err != nil {
+		return err
+	}
+	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
+	}
+	return nil
+}
+
 // initiate creates a swap contract. The initiator will be the account at
 // txOpts.From. Any on-chain failure, such as this secret hash already existing
 // in the swaps map, will not cause this to error.
 func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error) {
-	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
-	}
-	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
 	}
 	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, participant)
 }
@@ -252,12 +260,9 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 // Any on-chain failure, such as this secret not matching the hash, will not cause
 // this to error.
 func (c *rpcclient) redeem(txOpts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
-	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
-	}
-	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
 	}
 	return c.es.Redeem(txOpts, secret, secretHash)
 }
@@ -266,12 +271,9 @@ func (c *rpcclient) redeem(txOpts *bind.TransactOpts, netID int64, secret, secre
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
 func (c *rpcclient) refund(txOpts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error) {
-	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
+	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
-	}
-	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		return wallet.SignTx(accounts.Account{Address: addr}, tx, big.NewInt(netID))
 	}
 	return c.es.Refund(txOpts, secretHash)
 }

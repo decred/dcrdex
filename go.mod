@@ -2,6 +2,8 @@ module decred.org/dcrdex
 
 go 1.15
 
+replace decred.org/dcrdex/internal/eth/reentryattack => ./internal/eth/reentryattack
+
 require (
 	decred.org/dcrwallet/v2 v2.0.0-20210714172147-8815838443cd
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
