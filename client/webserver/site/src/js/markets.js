@@ -51,8 +51,9 @@ export default class MarketsPage extends BasePage {
       'forms', 'openForm', 'uwAppPass',
       // Order submission is verified with the user's password.
       'verifyForm', 'vHeader', 'vSideHeader', 'vSide', 'vQty', 'vBase', 'vRate',
-      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit', 'verifyLimit', 'verifyMarket',
-      'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
+      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit',
+      'vLoader', 'verifyLimit', 'verifyMarket',
+      'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore', 'vErr',
       // Create wallet form
       'walletForm',
       // Active orders
@@ -1328,8 +1329,7 @@ export default class MarketsPage extends BasePage {
    */
   async submitOrder () {
     const page = this.page
-    const market = this.market
-    Doc.hide(page.forms)
+    Doc.hide(page.orderErr, page.vErr)
     const order = this.parseOrder()
     const pw = page.vPass.value
     page.vPass.value = ''
@@ -1338,16 +1338,21 @@ export default class MarketsPage extends BasePage {
       pw: pw
     }
     if (!this.validateOrder(order)) return
+    // Show loader and hide submit button.
+    page.vSubmit.classList.add('d-hide')
+    page.vLoader.classList.remove('d-hide')
     const res = await postJSON('/api/trade', req)
-    if (!app.checkResponse(res)) return
-    // If the wallets are not open locally, they must have been opened during
-    // ordering. Grab updated info.
-    const baseWallet = app.walletMap[market.base.id]
-    const quoteWallet = app.walletMap[market.quote.id]
-    if (!baseWallet.open || !quoteWallet.open) {
-      this.balanceWgt.updateAsset(market.base.id)
-      this.balanceWgt.updateAsset(market.quote.id)
+    // Hide loader and show submit button.
+    page.vSubmit.classList.remove('d-hide')
+    page.vLoader.classList.add('d-hide')
+    // If errors display error on confirmation modal.
+    if (!app.checkResponse(res, true)) {
+      page.vErr.textContent = res.msg
+      Doc.show(page.vErr)
+      return
     }
+    // Hide confirmation modal only on success.
+    Doc.hide(page.forms)
     this.refreshActiveOrders()
     this.chart.draw()
   }
