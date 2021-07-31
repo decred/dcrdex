@@ -477,7 +477,10 @@ func (c *tRPCClient) DumpPrivKey(_ context.Context, address stdaddr.Address) (*d
 }
 
 func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
-	return c.walletTx, c.walletTxErr
+	if c.walletTx != nil || c.walletTxErr != nil {
+		return c.walletTx, c.walletTxErr
+	}
+	return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test transaction")
 }
 
 func (c *tRPCClient) AccountUnlocked(_ context.Context, acct string) (*walletjson.AccountUnlockedResult, error) {
@@ -2225,13 +2228,18 @@ func TestCoinConfirmations(t *testing.T) {
 		node.rawTxErr = nil
 	}
 
-	if wallet.wallet.SpvMode() {
-		node.walletTx = &walletjson.GetTransactionResult{}
-	} else {
-		node.blockchain.addRawTx(&chainjson.TxRawResult{
-			Txid: tTxHash.String(),
-			Vout: []chainjson.Vout{{}}, // rawTx must have an output at index 0 to be considered spent
-		})
+	// wallet.Confirmations will check if the tx hex is valid
+	// and contains an output at index 0, for the output to be
+	// considered spent.
+	tx := wire.NewMsgTx()
+	tx.AddTxIn(&wire.TxIn{})
+	tx.AddTxOut(&wire.TxOut{})
+	txHex, err := msgTxToHex(tx)
+	if err != nil {
+		t.Fatalf("error preparing tx hex with 1 output: %v", err)
+	}
+	node.walletTx = &walletjson.GetTransactionResult{
+		Hex: txHex,
 	}
 	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err != nil {

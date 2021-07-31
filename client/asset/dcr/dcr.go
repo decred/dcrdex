@@ -1661,22 +1661,25 @@ func (dcr *ExchangeWallet) findContractInBlockchain(txHash *chainhash.Hash, vout
 		return nil, nil, 0, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
 	if txOut == nil {
-		// Output does not exist or has been spent. Use getrawtransaction
-		// to confirm if this tx exists and has an output at `vout`. If it
-		// does, then it must have been spent for gettxout to return a nil
-		// response.
-		tx, err := dcr.wallet.GetRawTransactionVerbose(dcr.ctx, txHash)
-		if err != nil {
-			if isTxNotFoundErr(err) {
-				return nil, nil, 0, nil
-			}
-			return nil, nil, 0, fmt.Errorf("error looking up contract tx %s: %w", txHash, translateRPCCancelErr(err))
-		}
-		if len(tx.Vout) <= int(vout) {
-			return nil, nil, 0, fmt.Errorf("tx %s has no output at index %d", txHash, vout)
-		}
-		// Tx found and contains the requested output.
-		return nil, nil, 0, fmt.Errorf("contract output %s:%d is spent", txHash, vout)
+		// Output does not exist or has been spent.
+		// We can try to look up the tx to determine if the output exists
+		// and return a 'output is spent' error, but the getrawtransaction
+		// rpc requires txindex to be enabled which may not be enabled by
+		// the client. We also can't use the gettransaction rpc because
+		// contract outputs that we audit are typically NOT indexed by the
+		// wallet and gettransaction only returns data for wallet txs.
+		//
+		// It is safe to assume that this output does not yet exist since
+		// contracts we audit can only be spent when we redeem them or
+		// when they are refunded (after the contract locktime expires).
+		// Worst case scenario is that the contract was refunded and the
+		// client keeps fruitlessly trying to find and audit the contract
+		// until the client refunds their own swap contract or the match
+		// is revoked by the server. E.g. maker keeps checking for taker's
+		// contract after taker has refunded it; until maker's own contract
+		// locktime expires and maker refunds self or the match is revoked
+		// by the server.
+		return nil, nil, 0, nil
 	}
 
 	txOutAmt, err := dcrutil.NewAmount(txOut.Value)
@@ -2362,8 +2365,10 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 }
 
 // coinConfirmations gets the number of confirmations for the specified coin by
-// first checking for a unspent output, and if not found, searching transactions
-// indexed by the node (if connected) or the wallet.
+// first checking for an unspent output, and if not found, searching indexed
+// wallet transactions. Additionally, in spv mode, if the output is not found
+// in the wallet and a script referenced by the tx is known, the script is used
+// to search block filters to attempt finding the tx.
 func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
@@ -2379,50 +2384,38 @@ func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) 
 		return uint32(txOut.Confirmations), false, nil
 	}
 
-	// Unspent output not found. Using wallet tx lookup for spv
-	// wallets and getrawtransaction for non-spv wallets, check
-	// if the transaction exists and has an output at `vout`.
-
-	if dcr.wallet.SpvMode() {
-		tx, err := dcr.wallet.GetTransaction(ctx, txHash)
-		if err == nil {
-			// Tx found, check if it contains the requested output.
-			msgTx, err := msgTxFromHex(tx.Hex)
-			if err != nil {
-				return 0, false, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
-			}
-			if len(msgTx.TxOut) <= int(vout) {
-				return 0, false, fmt.Errorf("tx %s has no output at index %d", txHash, vout)
-			}
-			// Tx found and contains the requested output.
-			return uint32(tx.Confirmations), true, nil
+	// Unspent output not found. Check if this tx is indexed by the
+	// wallet and has an output at `vout`.
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err == nil {
+		// Tx found, check if it contains the requested output.
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			return 0, false, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
 		}
-		if !isTxNotFoundErr(err) {
-			return 0, false, translateRPCCancelErr(err)
+		if len(msgTx.TxOut) <= int(vout) {
+			return 0, false, fmt.Errorf("tx %s has no output at index %d", txHash, vout)
 		}
-		// Tx not found by wallet. Attempt using cfilters to find
-		// the tx in a block and determine if the requested output
-		// is spent. This tx must have been previously associated
-		// with a script using dcr.trackExternalTx otherwise, the
-		// tx cannot be located in a mined block using cfitler and
-		// an asset.CoinNotFoundError will be returned.
-		return dcr.externalTxOutConfirmations(txHash, vout)
+		// Tx found and contains the requested output. The output
+		// must be spent since it is known by the wallet but gettxout
+		// returned a nil result for it.
+		return uint32(tx.Confirmations), true, nil
 	}
-
-	// Node-backed wallets can look up any transaction. Check if this
-	// tx output can be found.
-	tx, err := dcr.wallet.GetRawTransactionVerbose(ctx, txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return 0, false, asset.CoinNotFoundError
-		}
+	if !isTxNotFoundErr(err) {
 		return 0, false, translateRPCCancelErr(err)
 	}
-	if len(tx.Vout) <= int(vout) {
-		return 0, false, fmt.Errorf("tx %s has no output at index %d", txHash, vout)
+
+	// Tx not found by wallet.
+	if !dcr.wallet.SpvMode() {
+		return 0, false, asset.CoinNotFoundError
 	}
-	// Tx found and contains the requested output.
-	return uint32(tx.Confirmations), true, nil
+
+	// In spv mode, attempt using cfilters to find the tx in a block and
+	// to determine if the requested output is spent. This tx must have
+	// been previously associated with a script using dcr.trackExternalTx
+	// otherwise, the tx cannot be located in a mined block using cfilters
+	// and an asset.CoinNotFoundError will be returned.
+	return dcr.externalTxOutConfirmations(txHash, vout)
 }
 
 // SwapConfirmations gets the number of confirmations for the specified coin ID
