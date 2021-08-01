@@ -77,7 +77,7 @@ a.logo {
 div.main {
   display: flex;
   flex-grow: 1;
-  min-height: min-content;
+  min-height: 0;
   position: relative;
 }
 

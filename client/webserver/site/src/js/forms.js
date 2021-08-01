@@ -15,7 +15,7 @@ export class NewWalletForm {
     const fields = this.fields = Doc.parsePage(form, [
       'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
       'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
-      'newWalletAppPWBox'
+      'newWalletAppPWBox', 'nwRegMsg'
     ])
 
     // WalletConfigForm will set the global app variable.
@@ -87,6 +87,10 @@ export class NewWalletForm {
       return
     }
     this.subform.setLoadedConfig(res.config)
+  }
+
+  setRegMsg (msg) {
+    this.fields.nwRegMsg.textContent = msg
   }
 }
 

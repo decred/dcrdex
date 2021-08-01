@@ -147,16 +147,18 @@ export default class RegistrationPage extends BasePage {
     page.appPW.value = ''
     page.appPWAgain.value = ''
     const loaded = app.loading(page.appPWForm)
+    const seed = page.seedInput.value
     const res = await postJSON('/api/init', {
       pass: pw,
-      seed: page.seedInput.value
+      seed: seed
     })
     loaded()
     if (!app.checkResponse(res)) {
-      page.appErrMsg.textContent = res.msg
-      Doc.show(page.appErrMsg)
+      page.appPWErrMsg.textContent = res.msg
+      Doc.show(page.appPWErrMsg)
       return
     }
+    if (seed) this.walletForm.setRegMsg('Your Decred wallet is required')
     this.pwCache.pw = pw
     this.auth()
     app.updateMenuItemsDisplay()

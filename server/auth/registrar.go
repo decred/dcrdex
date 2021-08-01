@@ -59,7 +59,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	// Register account and get a fee payment address.
 	feeAddr, err := auth.storage.CreateAccount(acct)
 	if err != nil {
-		log.Debugf("CreateAccount(%v) failed: %v", acct, err)
+		log.Debugf("CreateAccount(%s) failed: %v", acct.ID, err)
 		var archiveErr *db.ArchiveError
 		if errors.As(err, &archiveErr) {
 			switch archiveErr.Code {
