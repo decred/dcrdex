@@ -130,7 +130,7 @@ type dexConnection struct {
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
 
-	reportingConnects *uint32
+	reportingConnects uint32
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -2396,7 +2396,7 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc 
 			return nil, false, fmt.Errorf("error authorizing pre-paid account: %v", err)
 		}
 
-		atomic.StoreUint32(dc.reportingConnects, 1)
+		atomic.StoreUint32(&dc.reportingConnects, 1)
 		c.wg.Add(1)
 		go c.listen(dc)
 
@@ -4863,7 +4863,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		books:             make(map[string]*bookie),
 		trades:            make(map[order.OrderID]*trackedTrade),
 		apiVer:            -1,
-		reportingConnects: &reporting,
+		reportingConnects: reporting,
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -5020,7 +5020,7 @@ func (c *Core) handleReconnect(host string) {
 }
 
 func (dc *dexConnection) broadcastingConnect() bool {
-	return atomic.LoadUint32(dc.reportingConnects) == 1
+	return atomic.LoadUint32(&dc.reportingConnects) == 1
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was

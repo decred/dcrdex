@@ -168,7 +168,6 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 	connMaster := dex.NewConnectionMaster(conn)
 	connMaster.Connect(ctx)
 	acct := tNewAccount()
-	var reporting uint32 = 1
 	return &dexConnection{
 		WsConn:     conn,
 		log:        tLogger,
@@ -211,7 +210,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
 		apiVer:            serverdex.PreAPIVersion,
 		connected:         1,
-		reportingConnects: &reporting,
+		reportingConnects: 1,
 	}, conn, acct
 }
 

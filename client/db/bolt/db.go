@@ -441,7 +441,7 @@ func (db *BoltDB) deleteAccount(host string) error {
 	})
 }
 
-// DisableAccount disables the account assocaited with the given host
+// DisableAccount disables the account associated with the given host
 // and archives it. The Accounts and Account methods will no longer find
 // the disabled account.
 //
