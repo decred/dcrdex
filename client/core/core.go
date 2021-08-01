@@ -2547,6 +2547,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	} else {
 		dc.acct.encKey = reg.encKey
+		if len(reg.encKey) == 0 {
+			dc.acct.encKey = reg.encKeyLegacy
+		}
+
 		if err := dc.acct.unlock(crypter); err != nil {
 			return nil, newError(authErr, "failed to unlock account: %v", err)
 		}
