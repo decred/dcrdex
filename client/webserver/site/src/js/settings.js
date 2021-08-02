@@ -99,10 +99,10 @@ export default class SettingsPage extends BasePage {
 
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())
     Doc.bind(page.removeAccount, 'click', () => this.clearAccountFile())
-    Doc.bind(page.addAccount, 'click', () => this.page.accountFile.click())
+    Doc.bind(page.addAccount, 'click', () => page.accountFile.click())
 
-    Doc.bind(page.exportSeed, 'click', () => this.showForm(this.page.exportSeedAuth))
-    Doc.bind(page.exportSeedSubmit, 'click', () => this.submitExportSeedReq())
+    Doc.bind(page.exportSeed, 'click', () => this.showForm(page.exportSeedAuth))
+    forms.bind(page.exportSeedAuth, page.exportSeedSubmit, () => this.submitExportSeedReq())
 
     const closePopups = () => {
       Doc.hide(page.forms)
