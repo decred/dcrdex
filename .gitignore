@@ -24,4 +24,4 @@ docs/examples/rpcclient/rpcclient
 wiki
 dex/testing/loadbot/loadbot
 bin/
-localized_html/
+client/webserver/site/template-builder/template-builder

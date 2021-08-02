@@ -17,8 +17,13 @@ var (
 )
 
 func main() {
-	templateDir := filepath.Join(workingDirectory, "src", "html")
-	outputDirectory := filepath.Join(workingDirectory, "src", "localized_html")
+	siteDir := workingDirectory
+	if filepath.Base(workingDirectory) == "template-builder" {
+		siteDir = filepath.Dir(workingDirectory)
+	}
+
+	templateDir := filepath.Join(siteDir, "src", "html")
+	outputDirectory := filepath.Join(siteDir, "src", "localized_html")
 
 	fmt.Println("Creating output directory:", outputDirectory)
 	err := os.MkdirAll(outputDirectory, 0755)
@@ -37,6 +42,9 @@ func main() {
 	}
 
 	err = filepath.Walk(templateDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 		if fi.IsDir() {
 			return nil
 		}
