@@ -1570,9 +1570,10 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	piCommit := pi.Commit()
 	if reqData.ord.Commitment() != piCommit {
 		sendPI(nil)
+		oc := reqData.ord.Commitment()
 		m.respondError(msg.ID, reqData.ord.User(), msgjson.PreimageCommitmentMismatch,
 			fmt.Sprintf("preimage hash %x does not match order commitment %x",
-				piCommit, reqData.ord.Commitment()))
+				piCommit[:], oc[:]))
 		return
 	}
 
