@@ -6,6 +6,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -128,6 +129,8 @@ type dexConnection struct {
 
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
+
+	reportingConnects uint32
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -492,6 +495,86 @@ func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjs
 		return fmt.Errorf("Send error - %w", err)
 	}
 	return nil
+}
+
+// register submits a new 'register' request to the server. Depending on the
+// server version, either encKey or encKeyLegacy will be set, but not both.
+func (c *Core) register(dc *dexConnection, crypter encrypt.Crypter) (regRes *msgjson.RegisterResult,
+	acctPubB, encKey, encKeyLegacy []byte, paid bool, err error) {
+
+	creds := c.creds()
+
+	// register is called before the *dexConnection is in the Core.conns map,
+	// so no risk of concurrent access.
+	regV2 := dc.acct.dexPubKey != nil
+
+	var accountSuspended bool
+	for {
+		if regV2 && !accountSuspended {
+			encKey, acctPubB, err = dc.acct.setupCryptoV2(creds, crypter)
+			if err != nil {
+				return nil, nil, nil, nil, false, newError(acctKeyErr, "setupCryptoV2 error: %v", err)
+			}
+		} else {
+			encKey = nil
+			// This is an old-style DEX that doesn't provide their pubkey in the
+			// config response. Gotta use a legacy-style key.
+			encKeyLegacy, acctPubB, err = dc.acct.setupCryptoLegacy(crypter)
+			if err != nil {
+				return nil, nil, nil, nil, false, codedError(acctKeyErr, err)
+			}
+		}
+		dexReg := &msgjson.Register{
+			PubKey: acctPubB,
+			Time:   encode.UnixMilliU(time.Now()),
+		}
+		regRes = new(msgjson.RegisterResult)
+		err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
+		if err == nil {
+			break
+		}
+		var msgErr *msgjson.Error
+		if errors.As(err, &msgErr) {
+			switch msgErr.Code {
+			case msgjson.AccountExistsError:
+				// Server provides fee coin as the error message.
+				dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
+				if err != nil {
+					err = fmt.Errorf("error decoding coin ID from message %q", msgErr.Message)
+				} else {
+					paid = true
+				}
+				return
+			case msgjson.AccountSuspendedError:
+				// Retry with a legacy-style key.
+				c.log.Infof("HD account key for %s was reported as suspended. Generating a legacy-style key instead.", dc.acct.host)
+				accountSuspended = true
+				dc.acct.resetKeys()
+				continue
+			}
+		}
+
+		return nil, nil, nil, nil, false, codedError(registerErr, err)
+	}
+
+	// If we already had a DEX pubkey from the 'config' response, check for
+	// discrepancies.
+	if dc.acct.dexPubKey != nil && !bytes.Equal(dc.acct.dexPubKey.SerializeCompressed(), regRes.DEXPubKey) {
+		return nil, nil, nil, nil, false, fmt.Errorf("different pubkeys reported by dex in 'config' and 'register' responses")
+	}
+
+	// Check the DEX server's signature.
+	msg := regRes.Serialize()
+
+	// If this was a legacy registration, we'll be setting the pubkey here. For
+	// v2 registrations, we're overwriting the existing key, but whatever. We
+	// already checked that they're identical a few lines up.
+	dc.acct.dexPubKey, err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
+	if err != nil {
+		return nil, nil, nil, nil, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
+	}
+
+	return
 }
 
 // serverMatches are an intermediate structure used by the dexConnection to
@@ -988,6 +1071,15 @@ type blockWaiter struct {
 	action  func(error)
 }
 
+// inProcessRegistration is used internally to Register, and to cache info
+// during the PreRegister -> Register sequence.
+type inProcessRegistration struct {
+	host                          string
+	regRes                        *msgjson.RegisterResult
+	acctPub, encKey, encKeyLegacy []byte
+	stamp                         time.Time
+}
+
 // Config is the configuration for the Core.
 type Config struct {
 	// DBPath is a filepath to use for the client database. If the database does
@@ -1017,6 +1109,9 @@ type Core struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 
+	credMtx     sync.RWMutex
+	credentials *db.PrimaryCredentials
+
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func([]byte) encrypt.Crypter
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
@@ -1042,6 +1137,9 @@ type Core struct {
 
 	sentCommitsMtx sync.Mutex
 	sentCommits    map[order.Commitment]chan struct{}
+
+	preRegisterMtx  sync.RWMutex
+	preRegistration *inProcessRegistration
 }
 
 // New is the constructor for a new Core.
@@ -1049,7 +1147,7 @@ func New(cfg *Config) (*Core, error) {
 	if cfg.Logger == nil {
 		return nil, fmt.Errorf("Core.Config must specify a Logger")
 	}
-	db, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
+	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %w", err)
 	}
@@ -1059,11 +1157,19 @@ func New(cfg *Config) (*Core, error) {
 		}
 	}
 
+	// Try to get the primary credentials, but ignore no-credentials error here
+	// because the client may not be initialized.
+	creds, err := boltDB.PrimaryCredentials()
+	if err != nil && !errors.Is(err, db.ErrNoCredentials) {
+		return nil, err
+	}
+
 	core := &Core{
 		cfg:           cfg,
+		credentials:   creds,
 		ready:         make(chan struct{}),
 		log:           cfg.Logger,
-		db:            db,
+		db:            boltDB,
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
 		net:           cfg.Net,
@@ -1218,6 +1324,27 @@ func addrHost(addr string) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
+// creds returns the *PrimaryCredentials.
+func (c *Core) creds() *db.PrimaryCredentials {
+	c.credMtx.RLock()
+	defer c.credMtx.RUnlock()
+	if c.credentials == nil {
+		return nil
+	}
+	if len(c.credentials.EncInnerKey) == 0 {
+		// database upgraded, but Core hasn't updated the PrimaryCredentials.
+		return nil
+	}
+	return c.credentials
+}
+
+// setCredentials stores the *PrimaryCredentials.
+func (c *Core) setCredentials(creds *db.PrimaryCredentials) {
+	c.credMtx.Lock()
+	c.credentials = creds
+	c.credMtx.Unlock()
+}
+
 // Network returns the current DEX network.
 func (c *Core) Network() dex.Network {
 	return c.net
@@ -1258,18 +1385,27 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	return w, found
 }
 
-// encryptionKey retrieves the application encryption key. The key itself is
-// encrypted using an encryption key derived from the user's password.
+// encryptionKey retrieves the application encryption key. The password is used
+// to recreate the outer key/crypter, which is then used to decode and recreate
+// the inner key/crypter.
 func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
-	keyParams, err := c.db.Get(keyParamsKey)
-	if err != nil {
-		return nil, fmt.Errorf("key retrieval error: %w", err)
+	creds := c.creds()
+	if creds == nil {
+		return nil, fmt.Errorf("primary credentials not retrieved. Is the client initialized?")
 	}
-	crypter, err := c.reCrypter(pw, keyParams)
+	outerCrypter, err := c.reCrypter(pw, creds.OuterKeyParams)
 	if err != nil {
-		return nil, fmt.Errorf("encryption key deserialization error: %w", err)
+		return nil, fmt.Errorf("outer key deserialization error: %w", err)
 	}
-	return crypter, nil
+	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
+	if err != nil {
+		return nil, fmt.Errorf("inner key decryption error: %w", err)
+	}
+	innerCrypter, err := c.reCrypter(innerKey, creds.InnerKeyParams)
+	if err != nil {
+		return nil, fmt.Errorf("inner key deserialization error: %w", err)
+	}
+	return innerCrypter, nil
 }
 
 func (c *Core) storeDepositAddress(wdbID []byte, addr string) error {
@@ -1542,14 +1678,10 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
-	initialized, err := c.IsInitialized()
-	if err != nil {
-		c.log.Errorf("User: error checking if app is initialized: %v", err)
-	}
 	return &User{
 		Assets:      c.assetMap(),
 		Exchanges:   c.exchangeMap(),
-		Initialized: initialized,
+		Initialized: c.IsInitialized(),
 	}
 }
 
@@ -1727,7 +1859,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
 		state.Address)
 
-	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
+	if dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
 	}
 
@@ -1780,92 +1912,44 @@ func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
 	return dbWallet.Settings, nil
 }
 
-func (c *Core) setAppPass(pw []byte) (encrypt.Crypter, error) {
-	if len(pw) == 0 {
-		return nil, fmt.Errorf("empty password not allowed")
-	}
-
-	crypter := c.newCrypter(pw)
-	err := c.db.Store(keyParamsKey, crypter.Serialize())
-	if err != nil {
-		return nil, fmt.Errorf("error storing key parameters: %w", err)
-	}
-
-	return crypter, nil
-}
-
-func (c *Core) updateWalletsEncPW(oldCrypter, newCrypter encrypt.Crypter) error {
-	updateWalletPW := func(w *xcWallet) error {
-		// If encrypted password set, decrypt using old app pw then encrypt again
-		// using new app pw.
-		oldEncPW := w.encPW()
-		if len(oldEncPW) == 0 {
-			return nil
-		}
-
-		// Decrypt with old app pw.
-		pwB, err := oldCrypter.Decrypt(oldEncPW)
-		if err != nil {
-			return err
-		}
-		// Re-encrypt with new app pw.
-		encPW, err := newCrypter.Encrypt(pwB)
-		if err != nil {
-			return err
-		}
-		// Store encrypted pw.
-		w.setEncPW(encPW)
-		err = c.db.SetWalletPassword(w.dbID, encPW)
-		if err != nil {
-			return codedError(dbErr, err)
-		}
-		return nil
-	}
-
-	for _, w := range c.xcWallets() {
-		err := updateWalletPW(w)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // ChangeAppPass updates the application password to the provided new password
 // after validating the current password.
 func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 	// Validate current password.
-	oldCrypter, err := c.encryptionKey(appPW)
+	if len(newAppPW) == 0 {
+		return fmt.Errorf("application password cannot be empty")
+	}
+	creds := c.creds()
+	if creds == nil {
+		return fmt.Errorf("no primary credentials. Is the client initialized?")
+	}
+
+	outerCrypter, err := c.reCrypter(appPW, creds.OuterKeyParams)
 	if err != nil {
-		return newError(authErr, "ChangeAppPass password error: %v", err)
+		return newError(authErr, "old password error: %v", err)
 	}
-	// Set new password.
-	newCrypter, err := c.setAppPass(newAppPW)
+	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("inner key decryption error: %w", err)
 	}
-	// Update xcWallets' encrypted passwords.
-	err = c.updateWalletsEncPW(oldCrypter, newCrypter)
+	newOuterCrypter := c.newCrypter(newAppPW)
+	newEncInnerKey, err := newOuterCrypter.Encrypt(innerKey)
 	if err != nil {
-		return fmt.Errorf("failed to update encrypted wallet password: %w", err)
+		return fmt.Errorf("encryption error: %v", err)
 	}
-	// Update dexConnections' dexAccount key encryption.
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-	for _, dc := range c.conns {
-		// Re-encrypt private keys.
-		err = dc.acct.updateKeysEncryption(oldCrypter, newCrypter)
-		if err != nil {
-			return fmt.Errorf("ChangeAppPass error updating account's keys"+
-				" encryption: %v", err)
-		}
-		// Update account's db entry.
-		err = c.db.UpdateAccount(dc.acct.dbInfo())
-		if err != nil {
-			return codedError(dbErr, err)
-		}
+	newCreds := &db.PrimaryCredentials{
+		EncSeed:        creds.EncSeed,
+		EncInnerKey:    newEncInnerKey,
+		InnerKeyParams: creds.InnerKeyParams,
+		OuterKeyParams: newOuterCrypter.Serialize(),
 	}
+
+	err = c.db.SetPrimaryCredentials(newCreds)
+	if err != nil {
+		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
+	}
+
+	c.setCredentials(newCreds)
 
 	return nil
 }
@@ -2221,13 +2305,9 @@ func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
 	return xc.Fee.Amt, nil
 }
 
-// GetDEXConfig creates a temporary connection to the specified DEX Server and
-// fetches the full exchange config. The connection is closed after the config
-// is retrieved. An error is returned if user is already registered to the DEX
-// since a DEX connection is already established and the config is accessible
-// via the User or Exchanges methods. A TLS certificate, certI, can be provided
-// as either a string filename, or []byte file contents.
-func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
+// tempDexConnection creates an unauthenticated dexConnection. The caller must
+// dc.connMaster.Disconnect when done with the connection.
+func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnection, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
@@ -2240,21 +2320,108 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 		return nil, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 
-	dc, err := c.connectDEX(&db.AccountInfo{
+	return c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: cert,
 	}, true)
+}
+
+// GetDEXConfig creates a temporary connection to the specified DEX Server and
+// fetches the full exchange config. The connection is closed after the config
+// is retrieved. An error is returned if user is already registered to the DEX
+// since a DEX connection is already established and the config is accessible
+// via the User or Exchanges methods. A TLS certificate, certI, can be provided
+// as either a string filename, or []byte file contents.
+func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
+	dc, err := c.tempDexConnection(dexAddr, certI)
 	if dc != nil {
 		// Stop (re)connect loop, which may be running even if err != nil.
 		defer dc.connMaster.Disconnect()
 	}
 	if err != nil {
-		return nil, codedError(connectionErr, err)
+		return nil, err
 	}
 
 	// Since connectDEX succeeded, we have the server config. exchangeInfo is
-	// guaranteed to return and *Exchange with full asset and market info.
+	// guaranteed to return an *Exchange with full asset and market info.
 	return dc.exchangeInfo(), nil
+}
+
+// PreRegister fetches the DEXConfig and a registration address. If the host
+// supports the v2 registration protocol, and the generated account key is
+// recognized and has completed registration, paid will be true and the account
+// will be ready for immediate use.
+func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc *Exchange, paid bool, err error) {
+	if !c.IsInitialized() {
+		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
+	}
+
+	host, err := addrHost(dexAddr)
+	if err != nil {
+		return nil, false, newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, false, codedError(passwordErr, err)
+	}
+
+	dc, err := c.tempDexConnection(host, certI)
+	if dc != nil {
+		// Stop (re)connect loop, which may be running even if err != nil.
+		defer func() {
+			if !paid {
+				dc.connMaster.Disconnect()
+			}
+		}()
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Older DEX server.
+	if dc.acct.dexPubKey == nil {
+		return dc.exchangeInfo(), false, nil
+	}
+
+	regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
+	if err != nil {
+		return nil, false, err
+	}
+	if paid {
+		// It's an AccountExistsError. This is now account recovery, which is
+		// great news since we don't have to pay the fee.
+		err = c.authDEX(dc)
+		if err != nil {
+			return nil, false, fmt.Errorf("error authorizing pre-paid account: %v", err)
+		}
+
+		atomic.StoreUint32(&dc.reportingConnects, 1)
+		c.wg.Add(1)
+		go c.listen(dc)
+
+		err = c.markAccountPrePaid(dc, encKey, nil)
+		if err != nil {
+			return nil, false, err
+		}
+
+		c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+		return dc.exchangeInfo(), true, nil
+	}
+
+	c.preRegisterMtx.Lock()
+	c.preRegistration = &inProcessRegistration{
+		host:         dc.acct.host,
+		regRes:       regRes,
+		acctPub:      acctPubB,
+		encKey:       encKey,
+		encKeyLegacy: encKeyLegacy,
+		stamp:        time.Now(),
+	}
+	c.preRegisterMtx.Unlock()
+
+	return dc.exchangeInfo(), false, nil
+
 }
 
 // Register registers an account with a new DEX. If an error occurs while
@@ -2267,9 +2434,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
-	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
-	} else if !initialized {
+	if !c.IsInitialized() {
 		return nil, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
 
@@ -2336,68 +2501,97 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
-	privKey, err := dc.acct.setupEncryption(crypter)
-	if err != nil {
-		return nil, codedError(acctKeyErr, err)
-	}
+	var reg *inProcessRegistration
 
 	// Prepare and sign the registration payload.
-	// The account ID is generated from the public key.
-	pkBytes := privKey.PubKey().SerializeCompressed()
-	dexReg := &msgjson.Register{
-		PubKey: pkBytes,
-		Time:   encode.UnixMilliU(time.Now()),
-	}
-	regRes := new(msgjson.RegisterResult)
-	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
-	if err != nil {
-		return nil, codedError(registerErr, err)
-	}
-
-	// Check the DEX server's signature.
-	msg := regRes.Serialize()
-	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
-	if err != nil {
-		return nil, newError(signatureErr, "DEX signature validation error: %v", err)
+	storeAccount := func() error {
+		return c.db.CreateAccount(&db.AccountInfo{
+			Host:         dc.acct.host,
+			Cert:         dc.acct.cert,
+			LegacyEncKey: reg.encKeyLegacy,
+			EncKeyV2:     reg.encKey,
+			DEXPubKey:    dc.acct.dexPubKey,
+			FeeCoin:      dc.acct.feeCoin,
+		})
 	}
 
-	dc.cfgMtx.RLock()
-	fee, requiredConfs := dc.cfg.Fee, dc.cfg.RegFeeConfirms
-	dc.cfgMtx.RUnlock()
+	c.preRegisterMtx.RLock()
+	reg = c.preRegistration
+	c.preRegisterMtx.RUnlock()
+
+	if reg == nil || reg.host != host || time.Since(reg.stamp) >= time.Minute*5 {
+		// c.register must be called before the *dexConnection is added to the
+		// c.conns map.
+		regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
+		if err != nil {
+			return nil, err
+		}
+		if paid {
+			// It's an AccountExistsError. This is now account recovery, which is
+			// great news since we don't have to pay the fee.
+			err = c.authDEX(dc)
+			if err != nil {
+				return nil, fmt.Errorf("error authorizing pre-paid account: %v", err)
+			}
+			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+			res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}
+			return res, c.markAccountPrePaid(dc, encKey, encKeyLegacy)
+		}
+		reg = &inProcessRegistration{
+			host:         host,
+			regRes:       regRes,
+			acctPub:      acctPubB,
+			encKey:       encKey,
+			encKeyLegacy: encKeyLegacy,
+			stamp:        time.Now(),
+		}
+	} else {
+		dc.acct.encKey = reg.encKey
+		if len(reg.encKey) == 0 {
+			dc.acct.encKey = reg.encKeyLegacy
+		}
+
+		if err := dc.acct.unlock(crypter); err != nil {
+			return nil, newError(authErr, "failed to unlock account: %v", err)
+		}
+	}
+
+	fee := dc.cfg.Fee
 
 	// Check that the fee is non-zero.
-	if regRes.Fee == 0 {
+	if reg.regRes.Fee == 0 {
 		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
-	if regRes.Fee != fee {
-		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, fee)
+	if reg.regRes.Fee != fee {
+		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", reg.regRes.Fee, fee)
 	}
-	if regRes.Fee != form.Fee {
-		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
+	if reg.regRes.Fee != form.Fee {
+		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, reg.regRes.Fee)
 	}
 
 	// Pay the registration fee.
-	acctID := account.NewID(pkBytes)
+	acctID := account.NewID(reg.acctPub)
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
-		regRes.Address, acctID, regRes.Fee, regAsset.Symbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
+		reg.regRes.Address, acctID, reg.regRes.Fee, regAsset.Symbol)
+	coin, err := wallet.PayFee(reg.regRes.Address, reg.regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
 
 	// Registration complete.
 	registrationComplete = true
+	requiredConfs := dc.cfg.RegFeeConfirms
 	c.connMtx.Lock()
 	c.conns[host] = dc
 	c.connMtx.Unlock()
 
 	// Set the dexConnection account fields and save account info to db.
-	dc.acct.dexPubKey = dexPubKey
 	dc.acct.feeCoin = coin.ID()
-	err = c.db.CreateAccount(dc.acct.dbInfo())
+
+	err = storeAccount()
 	if err != nil {
-		c.log.Errorf("error saving account: %v", err)
+		c.log.Errorf("error saving account: %v\n", err)
 		// Don't abandon registration. The fee is already paid.
 	}
 
@@ -2411,8 +2605,50 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 
+	c.preRegisterMtx.Lock()
+	c.preRegistration = nil
+	c.preRegisterMtx.Unlock()
+
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
 	return res, nil
+}
+
+// markAccountPrePaid takes an unauthorized *dexConnection and completes the
+// process of storing the account info in the db and adding the connection to
+// the conns map.
+func (c *Core) markAccountPrePaid(dc *dexConnection, encKey, encKeyLegacy []byte) error {
+	c.connMtx.Lock()
+	c.conns[dc.acct.host] = dc
+	c.connMtx.Unlock()
+
+	dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	cid, _ := asset.DecodeCoinID(dcrID, dc.acct.feeCoin)
+	c.log.Infof("Recovered paid account for %s. Fee previously paid with %s", dc.acct.host, cid)
+
+	err := c.db.CreateAccount(&db.AccountInfo{
+		Host:         dc.acct.host,
+		Cert:         dc.acct.cert,
+		LegacyEncKey: encKeyLegacy,
+		EncKeyV2:     encKey,
+		DEXPubKey:    dc.acct.dexPubKey,
+		FeeCoin:      dc.acct.feeCoin,
+	})
+	if err != nil {
+		return fmt.Errorf("Error saving restored account: %w", err)
+	}
+
+	err = c.db.AccountPaid(&db.AccountProof{
+		Host:  dc.acct.host,
+		Stamp: 54321,
+		Sig:   []byte("RECOVERY SIGNATURE"),
+	})
+	if err != nil {
+		return fmt.Errorf("Error marking recovered account as paid: %w", err)
+	}
+
+	dc.acct.markFeePaid()
+
+	return nil
 }
 
 // verifyRegistrationFee waits the required amount of confirmations for the
@@ -2475,21 +2711,98 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 }
 
 // IsInitialized checks if the app is already initialized.
-func (c *Core) IsInitialized() (bool, error) {
-	return c.db.ValueExists(keyParamsKey)
+func (c *Core) IsInitialized() bool {
+	c.credMtx.RLock()
+	defer c.credMtx.RUnlock()
+	return c.credentials != nil
 }
 
-// InitializeClient sets the initial app-wide password for the client.
-func (c *Core) InitializeClient(pw []byte) error {
-	if initialized, err := c.IsInitialized(); err != nil {
-		return fmt.Errorf("error checking if app is already initialized: %w", err)
-	} else if initialized {
+// InitializeClient sets the initial app-wide password and app seed for the
+// client. The seed argument should be left nil unless restoring from seed.
+func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
+	if c.IsInitialized() {
 		return fmt.Errorf("already initialized, login instead")
 	}
 
-	// Set app password.
-	_, err := c.setAppPass(pw)
-	return err
+	_, creds, err := c.generateCredentials(pw, restorationSeed)
+	if err != nil {
+		return err
+	}
+
+	err = c.db.SetPrimaryCredentials(creds)
+	if err != nil {
+		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
+	}
+	c.setCredentials(creds)
+
+	if len(restorationSeed) == 0 {
+		msg := "A new application seed has been created. Make a back up now in the settings view."
+		c.notify(newSecurityNote(SubjectSeedNeedsSaving, msg, db.Success))
+	}
+
+	return nil
+}
+
+// ExportSeed exports the application seed.
+func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
+	crypter, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("ExportSeed password error: %w", err)
+	}
+
+	creds := c.creds()
+	if creds == nil {
+		return nil, fmt.Errorf("no v2 credentials stored")
+	}
+
+	seed, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, fmt.Errorf("seed decryption error: %w", err)
+	}
+
+	return seed, nil
+}
+
+// generateCredentials generates a new set of *PrimaryCredentials. The
+// credentials are not stored to the database. A restoration seed can be
+// provided, otherwise should be nil.
+func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.PrimaryCredentials, error) {
+	if len(pw) == 0 {
+		return nil, nil, fmt.Errorf("empty password not allowed")
+	}
+
+	// Generate an inner key and it's Crypter.
+	innerKey := encode.RandomBytes(32)
+	innerCrypter := c.newCrypter(innerKey)
+
+	// Generate the outer key.
+	outerCrypter := c.newCrypter(pw)
+	encInnerKey, err := outerCrypter.Encrypt(innerKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("inner key encryption error: %w", err)
+	}
+
+	// Generate a seed to use as the root for all future key generation.
+	const seedLen = 64
+	if len(seed) == 0 {
+		seed = encode.RandomBytes(seedLen)
+	} else if len(seed) != seedLen {
+		return nil, nil, fmt.Errorf("invalid seed length %d. expected %d", len(seed), seedLen)
+	}
+
+	encSeed, err := innerCrypter.Encrypt(seed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("client seed encryption error: %w", err)
+	}
+
+	creds := &db.PrimaryCredentials{
+		EncSeed:        encSeed,
+		EncInnerKey:    encInnerKey,
+		InnerKeyParams: innerCrypter.Serialize(),
+		OuterKeyParams: outerCrypter.Serialize(),
+	}
+
+	return innerCrypter, creds, nil
 }
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
@@ -2497,10 +2810,22 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
-	if initialized, err := c.IsInitialized(); err != nil {
-		return nil, fmt.Errorf("error checking if app is initialized: %w", err)
-	} else if !initialized {
+	c.credMtx.RLock()
+	creds := c.credentials
+	c.credMtx.RUnlock()
+
+	if creds == nil {
 		return nil, fmt.Errorf("cannot log in because app has not been initialized")
+	}
+
+	if len(creds.EncInnerKey) == 0 {
+		err := c.initializePrimaryCredentials(pw, creds.OuterKeyParams)
+		if err != nil {
+			// It's tempting to panic here, since Core and the db are probably
+			// out of sync and the client shouldn't be doing anything else.
+			c.log.Criticalf("v1 upgrade failed: %v", err)
+			return nil, err
+		}
 	}
 
 	crypter, err := c.encryptionKey(pw)
@@ -2555,6 +2880,53 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		DEXes:         dexStats,
 	}
 	return result, nil
+}
+
+// initializePrimaryCredentials sets the PrimaryCredential fields after the DB
+// upgrade.
+func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) error {
+	oldCrypter, err := c.reCrypter(pw, oldKeyParams)
+	if err != nil {
+		return fmt.Errorf("legacy encryption key deserialization error: %w", err)
+	}
+
+	newCrypter, creds, err := c.generateCredentials(pw, nil)
+	if err != nil {
+		return err
+	}
+
+	walletUpdates, acctUpdates, err := c.db.Recrypt(creds, oldCrypter, newCrypter)
+	if err != nil {
+		return err
+	}
+
+	c.setCredentials(creds)
+
+	msg := "The client has been upgraded to use an application seed. Back up the seed now in the settings view."
+	c.notify(newSecurityNote(SubjectUpgradedToSeed, msg, db.WarningLevel))
+
+	for assetID, newEncPW := range walletUpdates {
+		w, found := c.wallet(assetID)
+		if !found {
+			c.log.Errorf("no wallet found for v1 upgrade asset ID %d", assetID)
+			continue
+		}
+		w.setEncPW(newEncPW)
+	}
+
+	for host, newEncKey := range acctUpdates {
+		dc, _, err := c.dex(host)
+		if err != nil {
+			c.log.Warnf("no %s dexConnection to update", host)
+			continue
+		}
+		acct := dc.acct
+		acct.keyMtx.Lock()
+		acct.encKey = newEncKey
+		acct.keyMtx.Unlock()
+	}
+
+	return nil
 }
 
 // Logout logs the user out
@@ -2882,7 +3254,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			continue // authDEX already done
 		}
 		result.AcctID = dc.acct.ID().String()
-		dcrID, _ := dex.BipSymbolID("dcr")
+		dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 		if !dc.acct.feePaid() {
 			if len(dc.acct.feeCoin) == 0 {
 				details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.host)
@@ -3852,6 +4224,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 	}
 
 	c.connMtx.Lock()
+
 	c.conns[host] = dc
 	c.connMtx.Unlock()
 
@@ -4476,21 +4849,27 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	wsAddr := "wss://" + host + "/ws"
 	wsURL, err := url.Parse(wsAddr)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing ws address %s: %w", wsAddr, err)
-	}
-
-	dc := &dexConnection{
-		log:    c.log,
-		acct:   newDEXAccount(acctInfo),
-		notify: c.notify,
-		ticker: newDexTicker(defaultTickInterval), // updated when server config obtained
-		books:  make(map[string]*bookie),
-		trades: make(map[order.OrderID]*trackedTrade),
-		apiVer: -1,
-		// On connect, must set: cfg, epoch, and assets.
+		return nil, newError(addressParseErr, "error parsing ws address %s: %v", wsAddr, err)
 	}
 
 	listen := len(temporary) == 0 || !temporary[0]
+
+	var reporting uint32
+	if listen {
+		reporting = 1
+	}
+
+	dc := &dexConnection{
+		log:               c.log,
+		acct:              newDEXAccount(acctInfo),
+		notify:            c.notify,
+		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
+		books:             make(map[string]*bookie),
+		trades:            make(map[order.OrderID]*trackedTrade),
+		apiVer:            -1,
+		reportingConnects: reporting,
+		// On connect, must set: cfg, epoch, and assets.
+	}
 
 	wsCfg := comms.WsCfg{
 		URL:      wsURL.String(),
@@ -4506,12 +4885,10 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		wsCfg.NetDialContext = proxy.DialContext
 	}
 
-	if listen {
-		wsCfg.ReconnectSync = func() {
-			go c.handleReconnect(host)
-		}
-		wsCfg.ConnectEventFunc = dc.handleConnectEvent
+	wsCfg.ReconnectSync = func() {
+		go c.handleReconnect(host)
 	}
+	wsCfg.ConnectEventFunc = dc.handleConnectEvent
 
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&wsCfg)
@@ -4646,6 +5023,10 @@ func (c *Core) handleReconnect(host string) {
 	}
 }
 
+func (dc *dexConnection) broadcastingConnect() bool {
+	return atomic.LoadUint32(&dc.reportingConnects) == 1
+}
+
 // handleConnectEvent is called when a WsConn indicates that a connection was
 // lost or established.
 //
@@ -4658,8 +5039,11 @@ func (dc *dexConnection) handleConnectEvent(connected bool) {
 		statusStr = "connected"
 	}
 	atomic.StoreUint32(&dc.connected, v)
-	details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
-	dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
+	if dc.broadcastingConnect() {
+		details := fmt.Sprintf("DEX at %s has %s", dc.acct.host, statusStr)
+		dc.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), dc.acct.host, connected, details, db.Poke))
+	}
+
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.

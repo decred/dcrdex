@@ -202,13 +202,15 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 					},
 				},
 			},
-			Fee: tFee,
+			Fee:       tFee,
+			DEXPubKey: acct.dexPubKey.SerializeCompressed(),
 		},
-		notify:    func(Notification) {},
-		trades:    make(map[order.OrderID]*trackedTrade),
-		epoch:     map[string]uint64{tDcrBtcMktName: 0},
-		apiVer:    serverdex.PreAPIVersion,
-		connected: 1,
+		notify:            func(Notification) {},
+		trades:            make(map[order.OrderID]*trackedTrade),
+		epoch:             map[string]uint64{tDcrBtcMktName: 0},
+		apiVer:            serverdex.PreAPIVersion,
+		connected:         1,
+		reportingConnects: 1,
 	}, conn, acct
 }
 
@@ -274,9 +276,6 @@ type TDB struct {
 	updateWalletErr       error
 	acct                  *db.AccountInfo
 	acctErr               error
-	getErr                error
-	storeErr              error
-	encKeyErr             error
 	createAccountErr      error
 	accountPaidErr        error
 	updateOrderErr        error
@@ -301,10 +300,13 @@ type TDB struct {
 	verifyAccountPaid     bool
 	verifyCreateAccount   bool
 	verifyUpdateAccount   bool
-	accountInfoPersisted  *db.AccountInfo
 	accountProofPersisted *db.AccountProof
 	disabledAcct          *db.AccountInfo
 	disableAccountErr     error
+	creds                 *db.PrimaryCredentials
+	setCredsErr           error
+	legacyKeyErr          error
+	recryptErr            error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -323,7 +325,7 @@ func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
 
 func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	tdb.verifyCreateAccount = true
-	tdb.accountInfoPersisted = ai
+	tdb.acct = ai
 	return tdb.createAccountErr
 }
 
@@ -336,7 +338,6 @@ func (tdb *TDB) DisableAccount(url string) error {
 func (tdb *TDB) UpdateAccount(ai *db.AccountInfo) error {
 	tdb.verifyUpdateAccount = true
 	tdb.acct = ai
-	tdb.accountInfoPersisted = ai
 	return nil
 }
 
@@ -440,19 +441,26 @@ func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
 func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
 
-func (tdb *TDB) Store(k string, b []byte) error {
-	return tdb.storeErr
-}
-
-func (tdb *TDB) ValueExists(k string) (bool, error) {
-	return tdb.existValues[k], nil
-}
-
-func (tdb *TDB) Get(k string) ([]byte, error) {
-	if k == keyParamsKey {
-		return nil, tdb.encKeyErr
+func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
+	if tdb.setCredsErr != nil {
+		return tdb.setCredsErr
 	}
-	return nil, tdb.getErr
+	tdb.creds = creds
+	return nil
+}
+
+func (tdb *TDB) PrimaryCredentials() (*db.PrimaryCredentials, error) {
+	return tdb.creds, nil
+}
+
+func (tdb *TDB) Recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
+	walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
+
+	if tdb.recryptErr != nil {
+		return nil, nil, tdb.recryptErr
+	}
+
+	return nil, nil, nil
 }
 
 func (tdb *TDB) Backup() error {
@@ -761,9 +769,16 @@ func (w *TXCWallet) Confirmations(ctx context.Context, coinID dex.Bytes) (uint32
 }
 
 type tCrypterSmart struct {
+	params     []byte
 	encryptErr error
 	decryptErr error
 	recryptErr error
+}
+
+func newTCrypterSmart() *tCrypterSmart {
+	return &tCrypterSmart{
+		params: encode.RandomBytes(5),
+	}
 }
 
 // Encrypt appends 8 random bytes to given []byte to mock.
@@ -779,7 +794,7 @@ func (c *tCrypterSmart) Decrypt(b []byte) ([]byte, error) {
 	return b[:len(b)-8], c.decryptErr
 }
 
-func (c *tCrypterSmart) Serialize() []byte { return nil }
+func (c *tCrypterSmart) Serialize() []byte { return c.params }
 
 func (c *tCrypterSmart) Close() {}
 
@@ -834,6 +849,7 @@ func newTestRig() *testRig {
 		existValues: map[string]bool{
 			keyParamsKey: true,
 		},
+		legacyKeyErr: tErr,
 	}
 
 	ai := &db.AccountInfo{
@@ -895,6 +911,8 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
+
+	rig.core.InitializeClient(tPW, nil)
 
 	return rig
 }
@@ -1304,9 +1322,10 @@ func TestCreateWallet(t *testing.T) {
 	delete(tCore.wallets, tILT.ID)
 
 	// Failure to retrieve encryption key params.
-	rig.db.encKeyErr = tErr
+	creds := tCore.credentials
+	tCore.credentials = nil
 	ensureErr("db.Get")
-	rig.db.encKeyErr = nil
+	tCore.credentials = creds
 
 	// Crypter error.
 	rig.crypter.(*tCrypter).encryptErr = tErr
@@ -1377,7 +1396,7 @@ func TestGetFee(t *testing.T) {
 
 	// connectDEX error
 	_, err = tCore.GetFee(tUnparseableHost, cert)
-	if !errorHasCode(err, connectionErr) {
+	if !errorHasCode(err, addressParseErr) {
 		t.Fatalf("wrong connectDEX error: %v", err)
 	}
 
@@ -1392,13 +1411,31 @@ func TestGetFee(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
+	t.Run("TestRegister_legacy", func(t *testing.T) {
+		testRegister(t, true)
+	})
+	t.Run("TestRegister_v2", func(t *testing.T) {
+		testRegister(t, false)
+	})
+}
+
+func testRegister(t *testing.T, legacyKeys bool) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
-	delete(tCore.conns, tDexHost)
+	clearConn := func() {
+		tCore.connMtx.Lock()
+		delete(tCore.conns, tDexHost)
+		tCore.connMtx.Unlock()
+	}
+	clearConn()
+
+	if legacyKeys {
+		dc.cfg.DEXPubKey = nil
+	}
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
@@ -1466,9 +1503,7 @@ func TestRegister(t *testing.T) {
 	var err error
 	run := func() {
 		// Register method will error if url is already in conns map.
-		tCore.connMtx.Lock()
-		delete(tCore.conns, tDexHost)
-		tCore.connMtx.Unlock()
+		clearConn()
 
 		tWallet.setConfs(tWallet.payFeeCoin.id, 0, nil)
 		_, err = tCore.Register(form)
@@ -1694,6 +1729,85 @@ func TestRegister(t *testing.T) {
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
+
+	// Account recovery testing below doesn't apply to legacy servers.
+	if legacyKeys {
+		return
+	}
+
+	// Test the account recovery path.
+	clearConn()
+	rig.queueConfig()
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountExistsError, "abcdef"))
+		f(accountExistsResp)
+		return nil
+	})
+	rig.queueConnect(nil, nil, nil)
+
+	_, err = tCore.Register(form)
+	if err != nil {
+		t.Fatalf("Pre-paid Register error: %v", err)
+	}
+
+	// Account suspended should force legacy credentials..
+	clearConn()
+	rig.queueConfig()
+	dc.acct.keyMtx.Lock()
+	dc.acct.encKey = nil
+	dc.acct.privKey = nil
+	dc.acct.keyMtx.Unlock()
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountSuspendedError, ""))
+		f(accountExistsResp)
+		return nil
+	})
+	queueResponses() // Queing an extra config response here, but we're done anyway.
+
+	_, err = tCore.Register(form)
+	if err != nil {
+		t.Fatalf("Suspended Register error: %v", err)
+	}
+
+	if len(rig.db.acct.EncKeyV2) != 0 || len(rig.db.acct.LegacyEncKey) == 0 {
+		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
+	}
+}
+
+func TestCredentialsUpgrade(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	rig.db.legacyKeyErr = nil
+
+	clearUpgrade := func() {
+		rig.db.creds.EncInnerKey = nil
+		tCore.credentials.EncInnerKey = nil
+	}
+
+	clearUpgrade()
+
+	// initial success
+	_, err := tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("initial Login error: %v", err)
+	}
+
+	clearUpgrade()
+
+	// Recrypt error
+	rig.db.recryptErr = tErr
+	_, err = tCore.Login(tPW)
+	if err == nil {
+		t.Fatalf("no error for recryptErr")
+	}
+	rig.db.recryptErr = nil
+
+	// final success
+	_, err = tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("final Login error: %v", err)
+	}
 }
 
 func TestLogin(t *testing.T) {
@@ -1710,12 +1824,13 @@ func TestLogin(t *testing.T) {
 
 	// No encryption key.
 	rig.acct.unauth()
-	rig.db.encKeyErr = tErr
+	creds := tCore.credentials
+	tCore.credentials = nil
 	_, err = tCore.Login(tPW)
 	if err == nil || rig.acct.authed() {
 		t.Fatalf("no error for missing app key")
 	}
-	rig.db.encKeyErr = nil
+	tCore.credentials = creds
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
@@ -2022,28 +2137,37 @@ func TestInitializeClient(t *testing.T) {
 	tCore := rig.core
 	rig.db.existValues[keyParamsKey] = false
 
-	err := tCore.InitializeClient(tPW)
+	clearCreds := func() {
+		tCore.credentials = nil
+		rig.db.creds = nil
+	}
+
+	clearCreds()
+
+	err := tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
 
+	clearCreds()
+
 	// Empty password.
 	emptyPass := []byte("")
-	err = tCore.InitializeClient(emptyPass)
+	err = tCore.InitializeClient(emptyPass, nil)
 	if err == nil {
 		t.Fatalf("no error for empty password")
 	}
 
 	// Store error. Use a non-empty password to pass empty password check.
-	rig.db.storeErr = tErr
-	err = tCore.InitializeClient(tPW)
+	rig.db.setCredsErr = tErr
+	err = tCore.InitializeClient(tPW, nil)
 	if err == nil {
 		t.Fatalf("no error for StoreEncryptedKey error")
 	}
-	rig.db.storeErr = nil
+	rig.db.setCredsErr = nil
 
 	// Success again
-	err = tCore.InitializeClient(tPW)
+	err = tCore.InitializeClient(tPW, nil)
 	if err != nil {
 		t.Fatalf("final InitializeClient error: %v", err)
 	}
@@ -5582,13 +5706,12 @@ func TestChangeAppPass(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	// Use the smarter crypter.
-	smartCrypter := &tCrypterSmart{}
+	smartCrypter := newTCrypterSmart()
 	rig.crypter = smartCrypter
-	rig.core.newCrypter = func([]byte) encrypt.Crypter { return smartCrypter }
-	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return smartCrypter, smartCrypter.recryptErr }
+	rig.core.newCrypter = func([]byte) encrypt.Crypter { return newTCrypterSmart() }
+	rig.core.reCrypter = func([]byte, []byte) (encrypt.Crypter, error) { return rig.crypter, smartCrypter.recryptErr }
 
 	tCore := rig.core
-	var assetID uint32 = 54322
 	newTPW := []byte("apppass")
 
 	// App Password error
@@ -5599,33 +5722,20 @@ func TestChangeAppPass(t *testing.T) {
 	}
 	rig.crypter.(*tCrypterSmart).recryptErr = nil
 
-	wallet, _ := newTWallet(assetID)
-	encPW, _ := rig.crypter.Encrypt([]byte{0x01})
-	wallet.setEncPW(encPW)
-	tCore.wallets[assetID] = wallet
+	oldCreds := tCore.credentials
 
-	acctEncKey := make([]byte, len(tCore.conns[tDexHost].acct.encKey))
-	copy(acctEncKey, tCore.conns[tDexHost].acct.encKey)
-	origPass := make([]byte, len(wallet.encPW()))
-	copy(origPass, wallet.encPW())
+	rig.db.creds = nil
 	err = tCore.ChangeAppPass(tPW, newTPW)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Ensure db's UpdateAccount func was called.
-	if !rig.db.verifyUpdateAccount {
-		t.Fatal("expected execution of db.UpdateAccount")
+	if bytes.Equal(oldCreds.OuterKeyParams, tCore.credentials.OuterKeyParams) {
+		t.Fatalf("credentials not updated in Core")
 	}
-	// Ensure db's account encrypted key changed.
-	if bytes.Equal(rig.db.accountInfoPersisted.EncKey, acctEncKey) {
-		t.Fatalf("expected db account EncKey to change, old: %x new: %x",
-			acctEncKey, rig.db.accountInfoPersisted.EncKey)
-	}
-	// Ensure xcWallet encrypted password updated.
-	if bytes.Equal(origPass, wallet.encPW()) {
-		t.Fatalf("expected xcwallet encPW to change: old %x new %x",
-			origPass, wallet.encPW())
+
+	if rig.db.creds == nil || !bytes.Equal(tCore.credentials.OuterKeyParams, rig.db.creds.OuterKeyParams) {
+		t.Fatalf("credentials not updated in DB")
 	}
 }
 
@@ -7033,5 +7143,32 @@ func TestRefreshServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
+	}
+}
+
+func TestCredentialHandling(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	clearCreds := func() {
+		tCore.credentials = nil
+		rig.db.creds = nil
+	}
+
+	clearCreds()
+	tCore.newCrypter = encrypt.NewCrypter
+	tCore.reCrypter = encrypt.Deserialize
+
+	err := tCore.InitializeClient(tPW, nil)
+	if err != nil {
+		t.Fatalf("InitializeClient error: %v", err)
+	}
+
+	tCore.Logout()
+
+	_, err = tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("Login error: %v", err)
 	}
 }

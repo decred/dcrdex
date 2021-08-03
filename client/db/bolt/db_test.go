@@ -3,6 +3,7 @@ package bolt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -82,37 +83,67 @@ func TestBackup(t *testing.T) {
 	}
 }
 
-func TestStore(t *testing.T) {
-	k := "some random key"
+func TestStorePrimaryCredentials(t *testing.T) {
 	boltdb := newTestDB(t)
-	// Check no key
-	exists, err := boltdb.ValueExists(k)
+
+	// Trying to fetch credentials before storing should be an error.
+	_, err := boltdb.PrimaryCredentials()
+	if err == nil {
+		t.Fatalf("no error for missing credentials: %v", err)
+	}
+
+	newCreds := func(seed, inner, innerParams, outerParams bool) *db.PrimaryCredentials {
+		creds := &db.PrimaryCredentials{}
+		if seed {
+			creds.EncSeed = []byte("EncSeed")
+		}
+		if inner {
+			creds.EncInnerKey = []byte("EncInnerKey")
+		}
+		if innerParams {
+			creds.InnerKeyParams = []byte("InnerKeyParams")
+		}
+		if outerParams {
+			creds.OuterKeyParams = []byte("OuterKeyParams")
+		}
+		return creds
+	}
+
+	ensureErr := func(tag string, creds *db.PrimaryCredentials) {
+		if err := boltdb.SetPrimaryCredentials(creds); err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+	}
+
+	ensureErr("no EncSeed", newCreds(false, true, true, true))
+	ensureErr("no EncInnerKey", newCreds(true, false, true, true))
+	ensureErr("no InnerKeyParams", newCreds(true, true, false, true))
+	ensureErr("no OuterKeyParams", newCreds(true, true, true, false))
+
+	// Success
+	goodCreds := newCreds(true, true, true, true)
+	err = boltdb.SetPrimaryCredentials(goodCreds)
 	if err != nil {
-		t.Fatalf("error checking if value exists for key: %v", err)
+		t.Fatalf("SetPrimaryCredentials error: %v", err)
 	}
-	if exists {
-		t.Fatalf("value exists for missing key")
-	}
-	v := randBytes(50)
-	err = boltdb.Store(k, v)
+
+	// Retrieve the credentials and check for consistency.
+	reCreds, err := boltdb.PrimaryCredentials()
 	if err != nil {
-		t.Fatalf("error storing value: %v", err)
+		t.Fatalf("PrimaryCredentials error: %v", err)
 	}
-	// Confirm value exists for key
-	exists, err = boltdb.ValueExists(k)
-	if err != nil {
-		t.Fatalf("error checking if value exists for key: %v", err)
+
+	if !bytes.Equal(reCreds.EncSeed, goodCreds.EncSeed) {
+		t.Fatalf("EncSeed wrong, wanted %x, got %x", goodCreds.EncSeed, reCreds.EncSeed)
 	}
-	if !exists {
-		t.Fatalf("no value found for stored key")
+	if !bytes.Equal(reCreds.EncInnerKey, goodCreds.EncInnerKey) {
+		t.Fatalf("EncInnerKey wrong, wanted %x, got %x", goodCreds.EncInnerKey, reCreds.EncInnerKey)
 	}
-	// Confirm db value for key matches what was stored.
-	reV, err := boltdb.Get(k)
-	if err != nil {
-		t.Fatalf("error storing value: %v", err)
+	if !bytes.Equal(reCreds.InnerKeyParams, goodCreds.InnerKeyParams) {
+		t.Fatalf("InnerKeyParams wrong, wanted %x, got %x", goodCreds.InnerKeyParams, reCreds.InnerKeyParams)
 	}
-	if !bEqual(v, reV) {
-		t.Fatalf("value mismatch %x != %x", v, reV)
+	if !bytes.Equal(reCreds.OuterKeyParams, goodCreds.OuterKeyParams) {
+		t.Fatalf("OuterKeyParams wrong, wanted %x, got %x", goodCreds.OuterKeyParams, reCreds.OuterKeyParams)
 	}
 }
 
@@ -148,7 +179,7 @@ func TestAccounts(t *testing.T) {
 		ai := accts[i]
 		reAI, err := boltdb.Account(ai.Host)
 		if err != nil {
-			t.Fatalf("error fetching AccountInfo")
+			t.Fatalf("error fetching AccountInfo: %v", err)
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
@@ -195,10 +226,10 @@ func TestAccounts(t *testing.T) {
 	ensureErr("DEX key")
 	acct.DEXPubKey = dexKey
 
-	encKey := acct.EncKey
-	acct.EncKey = nil
-	ensureErr("private key")
-	acct.EncKey = encKey
+	encKey := acct.EncKeyV2
+	acct.EncKeyV2 = nil
+	ensureErr("no private key")
+	acct.EncKeyV2 = encKey
 
 	err = boltdb.CreateAccount(acct)
 	if err != nil {
@@ -230,7 +261,7 @@ func TestDisableAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected CreateAccount error: %v", err)
 	}
-	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey)
+	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey())
 	if err == nil {
 		t.Fatalf("Expected disabledAccount error but there was none.")
 	}
@@ -247,45 +278,12 @@ func TestDisableAccount(t *testing.T) {
 	if actualAcct != nil {
 		t.Fatalf("Expected retrieval of deleted account to be nil")
 	}
-	actualDisabledAccount, err = boltdb.disabledAccount(acct.EncKey)
+	actualDisabledAccount, err = boltdb.disabledAccount(acct.EncKey())
 	if err != nil {
 		t.Fatalf("Unexpected disabledAccount error: %v", err)
 	}
 	if actualDisabledAccount == nil {
 		t.Fatalf("Expected to retrieve a disabledAccount.")
-	}
-}
-
-func TestUpdateAccount(t *testing.T) {
-	boltdb := newTestDB(t)
-	acct := dbtest.RandomAccountInfo()
-	host := acct.Host
-
-	err := boltdb.CreateAccount(acct)
-	if err != nil {
-		t.Fatalf("Unexpected CreateAccount error: %v", err)
-	}
-
-	oldAcct, err := boltdb.Account(host)
-	if err != nil {
-		t.Fatalf("Unexpected Account error: %v", err)
-	}
-
-	// Change account's enc key & update account entry
-	acct.EncKey = randBytes(32)
-	err = boltdb.UpdateAccount(acct)
-	if err != nil {
-		t.Fatalf("Unexpected UpdateAccount error: %v", err)
-	}
-
-	newAcct, err := boltdb.Account(host)
-	if err != nil {
-		t.Fatalf("Unexpected Account error: %v", err)
-	}
-
-	// Ensure enc key was updated.
-	if bytes.Equal(oldAcct.EncKey, newAcct.EncKey) {
-		t.Fatalf("Expected to get updated account's enc key")
 	}
 }
 
@@ -1031,4 +1029,114 @@ func TestNotifications(t *testing.T) {
 			t.Fatalf("order acknowledgement not recorded")
 		}
 	}
+}
+
+type tCrypter struct {
+	enc []byte
+}
+
+func (c *tCrypter) Encrypt(b []byte) ([]byte, error) {
+	return c.enc, nil
+}
+
+func (c *tCrypter) Decrypt(b []byte) ([]byte, error) {
+	return b, nil
+}
+
+func (c *tCrypter) Serialize() []byte {
+	return nil
+}
+
+func (c *tCrypter) Close() {}
+
+func TestRecrypt(t *testing.T) {
+	boltdb := newTestDB(t)
+	tester := func(walletID []byte, host string, creds *db.PrimaryCredentials) error {
+		encPW := randBytes(5)
+		oldCrypter, newCrypter := &tCrypter{}, &tCrypter{encPW}
+		walletUpdates, acctUpdates, err := boltdb.Recrypt(creds, oldCrypter, newCrypter)
+		if err != nil {
+			return err
+		}
+
+		if len(walletUpdates) != 1 {
+			return fmt.Errorf("expected 1 wallet update, got %d", len(walletUpdates))
+		}
+		for _, newEncPW := range walletUpdates {
+			if len(newEncPW) == 0 {
+				return errors.New("no updated key")
+			}
+			if !bytes.Equal(newEncPW, encPW) {
+				return fmt.Errorf("wrong encrypted password. wanted %x, got %x", encPW, newEncPW)
+			}
+		}
+
+		w, err := boltdb.Wallet(walletID)
+		if err != nil {
+			return fmt.Errorf("error retrieving wallet: %v", err)
+		}
+		if !bytes.Equal(w.EncryptedPW, encPW) {
+			return fmt.Errorf("wallet not wallet updated")
+		}
+
+		if len(acctUpdates) != 1 {
+			return fmt.Errorf("expected 1 account update, got %d", len(acctUpdates))
+		}
+		newEncPW := acctUpdates[host]
+		if len(newEncPW) == 0 {
+			return fmt.Errorf("no account update")
+		}
+		if !bytes.Equal(newEncPW, encPW) {
+			return fmt.Errorf("wrong encrypted account password")
+		}
+
+		acct, err := boltdb.Account(host)
+		if err != nil {
+			return fmt.Errorf("error retrieving account: %v", err)
+		}
+		if !bytes.Equal(acct.LegacyEncKey, encPW) {
+			return fmt.Errorf("account not updated")
+		}
+
+		return nil
+	}
+	testCredentialsUpdate(t, boltdb, tester)
+}
+
+func testCredentialsUpdate(t *testing.T, boltdb *BoltDB, tester func([]byte, string, *db.PrimaryCredentials) error) {
+	w := dbtest.RandomWallet()
+	w.EncryptedPW = randBytes(6)
+	walletID := w.ID()
+	boltdb.UpdateWallet(w)
+
+	acct := dbtest.RandomAccountInfo()
+	acct.LegacyEncKey = acct.EncKeyV2
+	acct.EncKeyV2 = nil
+	boltdb.CreateAccount(acct)
+	host := acct.Host
+
+	clearCreds := func() {
+		boltdb.Update(func(tx *bbolt.Tx) error {
+			credsBkt := tx.Bucket(credentialsBucket)
+			credsBkt.Delete(encSeedKey)
+			credsBkt.Delete(encInnerKeyKey)
+			credsBkt.Delete(innerKeyParamsKey)
+			credsBkt.Delete(outerKeyParamsKey)
+			return nil
+		})
+	}
+
+	numToDo := 100
+	if testing.Short() {
+		numToDo = 5
+	}
+
+	nTimes(numToDo, func(int) {
+		clearCreds()
+		creds := dbtest.RandomPrimaryCredentials()
+		err := tester(walletID, host, creds)
+		if err != nil {
+			t.Fatalf("%T error: %v", tester, err)
+		}
+	})
 }

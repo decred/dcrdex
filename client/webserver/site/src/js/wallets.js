@@ -1,7 +1,7 @@
 import Doc, { WalletIcons } from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, WalletConfigForm, bindOpenWallet, bind as bindForm } from './forms'
+import { NewWalletForm, WalletConfigForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as ntfn from './notifications'
 
 const bind = Doc.bind
@@ -84,7 +84,7 @@ export default class WalletsPage extends BasePage {
     this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs, false)
 
     // Bind the wallet unlock form.
-    bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
+    this.unlockForm = new UnlockWalletForm(app, page.openForm, () => { this.openWalletSuccess() })
 
     // Bind the withdraw form.
     bindForm(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })

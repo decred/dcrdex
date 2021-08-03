@@ -215,14 +215,22 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 	}, nil
 }
 
-func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
-	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
-		return nil, err
+func parseInitArgs(params *RawParams) (encode.PassBytes, encode.PassBytes, error) {
+	if err := checkNArgs(params, []int{1}, []int{0, 1}); err != nil {
+		return nil, nil, err
 	}
 	if len(params.PWArgs[0]) == 0 {
-		return nil, fmt.Errorf("app password cannot be empty")
+		return nil, nil, fmt.Errorf("app password cannot be empty")
 	}
-	return params.PWArgs[0], nil
+	var seed encode.PassBytes
+	if len(params.Args) == 1 {
+		var err error
+		seed, err = hex.DecodeString(params.Args[0])
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid seed format")
+		}
+	}
+	return params.PWArgs[0], seed, nil
 }
 
 func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {

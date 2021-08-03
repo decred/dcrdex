@@ -59,7 +59,7 @@ type clientCore interface {
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
 	Exchanges() (exchanges map[string]*core.Exchange)
-	InitializeClient(appPass []byte) error
+	InitializeClient(appPass, seed []byte) error
 	Login(appPass []byte) (*core.LoginResult, error)
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error

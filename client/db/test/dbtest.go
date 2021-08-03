@@ -32,8 +32,9 @@ func randString(maxLen int) string {
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		Host:      ordertest.RandomAddress(),
-		EncKey:    randBytes(32),
+		Host: ordertest.RandomAddress(),
+		// LegacyEncKey: randBytes(32),
+		EncKeyV2:  randBytes(32),
 		DEXPubKey: randomPubKey(),
 		FeeCoin:   randBytes(32),
 		Cert:      randBytes(100),
@@ -46,6 +47,15 @@ func RandomBalance() *asset.Balance {
 		Available: rand.Uint64(),
 		Immature:  rand.Uint64(),
 		Locked:    rand.Uint64(),
+	}
+}
+
+func RandomPrimaryCredentials() *db.PrimaryCredentials {
+	return &db.PrimaryCredentials{
+		EncSeed:        randBytes(10),
+		EncInnerKey:    randBytes(10),
+		InnerKeyParams: randBytes(10),
+		OuterKeyParams: randBytes(10),
 	}
 }
 
@@ -240,8 +250,11 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	if a1.Host != a2.Host {
 		t.Fatalf("Host mismatch. %s != %s", a1.Host, a2.Host)
 	}
-	if !bytes.Equal(a1.EncKey, a2.EncKey) {
-		t.Fatalf("EncKey mismatch. %x != %x", a1.EncKey, a2.EncKey)
+	if !bytes.Equal(a1.LegacyEncKey, a2.LegacyEncKey) {
+		t.Fatalf("LegacyEncKey mismatch. %x != %x", a1.LegacyEncKey, a2.LegacyEncKey)
+	}
+	if !bytes.Equal(a1.EncKeyV2, a2.EncKeyV2) {
+		t.Fatalf("EncKeyV2 mismatch. %x != %x", a1.EncKeyV2, a2.EncKeyV2)
 	}
 	if !bytes.Equal(a1.DEXPubKey.SerializeCompressed(), a2.DEXPubKey.SerializeCompressed()) {
 		t.Fatalf("EncKey mismatch. %x != %x",
@@ -333,5 +346,20 @@ func MustCompareNotifications(t testKiller, n1, n2 *db.Notification) {
 	}
 	if n1.ID().String() != n2.ID().String() {
 		t.Fatalf("ID mismatch. %s != %s", n1.ID(), n2.ID())
+	}
+}
+
+func MustComparePrimaryCredentials(t testKiller, c1, c2 *db.PrimaryCredentials) {
+	if !bytes.Equal(c1.EncSeed, c2.EncSeed) {
+		t.Fatalf("EncSeed mismatch. %x != %x", c1.EncSeed, c2.EncSeed)
+	}
+	if !bytes.Equal(c1.EncInnerKey, c2.EncInnerKey) {
+		t.Fatalf("EncInnerKey mismatch. %x != %x", c1.EncInnerKey, c2.EncInnerKey)
+	}
+	if !bytes.Equal(c1.InnerKeyParams, c2.InnerKeyParams) {
+		t.Fatalf("InnerKeyParams mismatch. %x != %x", c1.InnerKeyParams, c2.InnerKeyParams)
+	}
+	if !bytes.Equal(c1.OuterKeyParams, c2.OuterKeyParams) {
+		t.Fatalf("OuterKeyParams mismatch. %x != %x", c1.OuterKeyParams, c2.OuterKeyParams)
 	}
 }

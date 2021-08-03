@@ -28,6 +28,10 @@ var upgrades = [...]upgradefunc{
 	v3Upgrade,
 	// v3 => v4 splits orders into active and archived.
 	v4Upgrade,
+	// v4 => v5 adds PrimaryCredentials with determinstic client seed, but the
+	// only thing we need to do during the DB upgrade is to update the
+	// db.AccountInfo to differentiate legacy vs. new-style key.
+	v5Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -182,12 +186,88 @@ func v3Upgrade(dbtx *bbolt.Tx) error {
 	return reloadMatchProofs(dbtx, skipCancels)
 }
 
+// v4Upgrade moves active orders from what will become the archivedOrdersBucket
+// to a new ordersBucket. This is done in order to make searching active orders
+// faster, as they do not need to be pulled out of all orders any longer. This
+// upgrade moves active orders as opposed to inactive orders under the
+// assumption that there are less active orders to move, and so a smaller
+// database transaction occurs.
+func v4Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 3
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	// Move any inactive orders to the new archivedOrdersBucket.
+	return moveActiveOrders(dbtx)
+}
+
+// v5Upgrade changes the database structure to accomodate PrimaryCredentials.
+// The OuterKeyParams bucket is populated with the existing application
+// serialized Crypter, but other fields are not populated since the password
+// would be required. The caller should generate new PrimaryCredentials and
+// call Recrypt during the next login.
+func v5Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 4
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	acctsBkt := dbtx.Bucket(accountsBucket)
+	if acctsBkt == nil {
+		return fmt.Errorf("failed to open accounts bucket")
+	}
+
+	if err := acctsBkt.ForEach(func(hostB, _ []byte) error {
+		acctBkt := acctsBkt.Bucket(hostB)
+		if acctBkt == nil {
+			return fmt.Errorf("account %s bucket is not a bucket", string(hostB))
+		}
+		acctB := getCopy(acctBkt, accountKey)
+		if acctB == nil {
+			return fmt.Errorf("empty account found for %s", (hostB))
+		}
+		acctInfo, err := dexdb.DecodeAccountInfo(acctB)
+		if err != nil {
+			return err
+		}
+		return acctBkt.Put(accountKey, acctInfo.Encode())
+	}); err != nil {
+		return fmt.Errorf("error updating account buckets: %w", err)
+	}
+
+	appBkt := dbtx.Bucket(appBucket)
+	if appBkt == nil {
+		return fmt.Errorf("no app bucket")
+	}
+
+	legacyKeyParams := appBkt.Get(legacyKeyParamsKey)
+	if len(legacyKeyParams) == 0 {
+		// Database is uninitialized. Nothing to do.
+		return nil
+	}
+
+	// Really, we should just be able to dbtx.Bucket here, since actual upgrades
+	// are performed after calling NewDB, which runs makeTopLevelBuckets
+	// internally before the upgrade. But the TestUpgrades runs the test on the
+	// bbolt.DB directly, so the bucket won't have been created during that
+	// test. That makes me think that we should be running those upgrade tests
+	// on DB, not bbolt.DB. TODO?
+	credsBkt, err := dbtx.CreateBucketIfNotExists(credentialsBucket)
+	if err != nil {
+		return fmt.Errorf("error creating credentials bucket: %w", err)
+	}
+
+	return credsBkt.Put(outerKeyParamsKey, legacyKeyParams)
+}
+
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
 	dbVersion, err := getVersionTx(tx)
 	if err != nil {
 		return fmt.Errorf("error fetching database version: %w", err)
 	}
-
 	if dbVersion != ver {
 		return fmt.Errorf("wrong version for upgrade. expected %d, got %d", ver, dbVersion)
 	}
@@ -233,23 +313,6 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
 		}
 		return nil
 	})
-}
-
-// v4Upgrade moves active orders from what will become the archivedOrdersBucket
-// to a new ordersBucket. This is done in order to make searching active orders
-// faster, as they do not need to be pulled out of all orders any longer. This
-// upgrade moves active orders as opposed to inactive orders under the
-// assumption that there are less active orders to move, and so a smaller
-// database transaction occurs.
-func v4Upgrade(dbtx *bbolt.Tx) error {
-	const oldVersion = 3
-
-	if err := ensureVersion(dbtx, oldVersion); err != nil {
-		return err
-	}
-
-	// Move any inactive orders to the new archivedOrdersBucket.
-	return moveActiveOrders(dbtx)
 }
 
 // moveActiveOrders searches the v1 ordersBucket for orders that are inactive,

@@ -66,7 +66,7 @@ type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
-	InitializeClient(pw []byte) error
+	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -82,6 +82,7 @@ type clientCore interface {
 	User() *core.User
 	GetFee(url string, cert interface{}) (uint64, error)
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
+	PreRegister(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
@@ -95,7 +96,8 @@ type clientCore interface {
 	AccountExport(pw []byte, host string) (*core.Account, error)
 	AccountImport(pw []byte, account core.Account) error
 	AccountDisable(pw []byte, host string) error
-	IsInitialized() (bool, error)
+	IsInitialized() bool
+	ExportSeed(pw []byte) ([]byte, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -269,6 +271,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 			apiInit.Post("/login", s.apiLogin)
 			apiInit.Post("/getfee", s.apiGetFee)
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
+			apiInit.Post("/preregister", s.apiPreRegister)
 		})
 
 		r.Group(func(apiAuth chi.Router) {
@@ -295,6 +298,7 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
 			apiAuth.Post("/exportaccount", s.apiAccountExport)
+			apiAuth.Post("/exportseed", s.apiExportSeed)
 			apiAuth.Post("/importaccount", s.apiAccountImport)
 			apiAuth.Post("/disableaccount", s.apiAccountDisable)
 		})

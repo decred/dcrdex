@@ -131,9 +131,13 @@ func TestAccountsBackupAndRestore(t *testing.T) {
 			t.Fatalf("no account found with url %s", dexAcct.Host)
 		}
 
-		if !bytes.Equal(dexAcct.EncKey, acct.EncKey) {
+		if !bytes.Equal(dexAcct.LegacyEncKey, acct.LegacyEncKey) {
 			t.Fatalf("expected restored account %s with encryption key %x, "+
-				"got %x", dexAcct.Host, dexAcct.EncKey, acct.EncKey)
+				"got %x", dexAcct.Host, dexAcct.LegacyEncKey, acct.LegacyEncKey)
+		}
+		if !bytes.Equal(dexAcct.EncKeyV2, acct.EncKeyV2) {
+			t.Fatalf("expected restored account %s (v2) with encryption key %x, "+
+				"got %x", dexAcct.Host, dexAcct.EncKeyV2, acct.EncKeyV2)
 		}
 
 		if !dexAcct.DEXPubKey.IsEqual(acct.DEXPubKey) {

@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 )
 
 var (
@@ -58,7 +59,22 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	// Register account and get a fee payment address.
 	feeAddr, err := auth.storage.CreateAccount(acct)
 	if err != nil {
-		log.Debugf("CreateAccount(%v) failed: %v", acct, err)
+		log.Debugf("CreateAccount(%s) failed: %v", acct.ID, err)
+		var archiveErr *db.ArchiveError
+		if errors.As(err, &archiveErr) {
+			switch archiveErr.Code {
+			case db.ErrAccountExists:
+				return &msgjson.Error{
+					Code:    msgjson.AccountExistsError,
+					Message: archiveErr.Detail, // Fee coin
+				}
+			case db.ErrAccountSuspended:
+				return &msgjson.Error{
+					Code:    msgjson.AccountSuspendedError,
+					Message: "account exists and is suspended",
+				}
+			}
+		}
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "failed to create new account (already registered?)",

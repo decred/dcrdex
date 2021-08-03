@@ -410,7 +410,6 @@ div.form-closer {
   position: absolute;
   right: 0;
   top: 0;
-  bottom: 0;
   display: flex;
   align-items: center;
   padding: 10px;
@@ -441,4 +440,8 @@ div.form-closer {
 
 div.border1 {
   border: 1px solid #aaa;
+}
+
+#submitDEXAddr {
+  max-height: 3em;
 }

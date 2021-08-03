@@ -72,6 +72,8 @@ const (
 	OrderQuantityTooHigh              // 53
 	HTTPRouteError                    // 54
 	RouteUnavailableError             // 55
+	AccountExistsError                // 56
+	AccountSuspendedError             // 57
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -1042,6 +1044,7 @@ type ConfigResult struct {
 	Fee              uint64    `json:"fee"`
 	APIVersion       uint16    `json:"apiver"`
 	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
+	DEXPubKey        Bytes     `json:"pubkey"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot

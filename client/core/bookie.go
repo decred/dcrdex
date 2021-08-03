@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 var (
@@ -676,6 +677,18 @@ func (dc *dexConnection) refreshServerConfig() error {
 	dc.assetsMtx.Lock()
 	dc.assets = assets
 	dc.assetsMtx.Unlock()
+
+	// If we're fetching config and the server sends the pubkey in config, set
+	// the dexPubKey now. We also know that we're fetching the config for the
+	// first time (via connectDEX), and the dexConnection has not been assigned
+	// to dc.conns yet, so we can still update the acct.dexPubKey field without
+	// a data race.
+	if dc.acct.dexPubKey == nil && len(cfg.DEXPubKey) > 0 {
+		dc.acct.dexPubKey, err = secp256k1.ParsePubKey(cfg.DEXPubKey)
+		if err != nil {
+			return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %w", err)
+		}
+	}
 
 	dc.epochMtx.Lock()
 	dc.epoch = epochs

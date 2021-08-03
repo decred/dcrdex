@@ -4,6 +4,7 @@
 package core
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -19,7 +20,13 @@ import (
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/dcrd/hdkeychain/v3"
 )
+
+// HDKeyPurpose is here because we're high-jacking the BIP-32 + BIP-43 HD key
+// system to create child keys, so we must set a the purpose field to create an
+// hdkeychain.ExtendedKey.
+var HDKeyPurpose uint32 = hdkeychain.HardenedKeyStart + 0x646578 // ASCII "dex"
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.
 type errorSet struct {
@@ -539,21 +546,11 @@ type dexAccount struct {
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
 		host:      acctInfo.Host,
-		encKey:    acctInfo.EncKey,
+		encKey:    acctInfo.EncKey(),
 		dexPubKey: acctInfo.DEXPubKey,
 		isPaid:    acctInfo.Paid,
 		feeCoin:   acctInfo.FeeCoin,
 		cert:      acctInfo.Cert,
-	}
-}
-
-func (a *dexAccount) dbInfo() *db.AccountInfo {
-	return &db.AccountInfo{
-		Host:      a.host,
-		Cert:      a.cert,
-		EncKey:    a.encKey,
-		DEXPubKey: a.dexPubKey,
-		FeeCoin:   a.feeCoin,
 	}
 }
 
@@ -564,60 +561,128 @@ func (a *dexAccount) ID() account.AccountID {
 	return a.id
 }
 
-// updateKeysEncryption decrypts account's EncKey with given oldCrypter,
-// re-encrypts it with the given newCrypter, then stores the new EncKey on
-// the dexaccount struct.
-func (a *dexAccount) updateKeysEncryption(oldCrypter, newCrypter encrypt.Crypter) error {
-	a.keyMtx.Lock()
-	defer a.keyMtx.Unlock()
-	// Decrypt the encrypted key with old crypter.
-	key, err := oldCrypter.Decrypt(a.encKey)
-	if err != nil {
-		return fmt.Errorf("error decrypting acct enc key: %w", err)
-	}
-	// Encrypt the private key with new crypter.
-	newEncKey, err := newCrypter.Encrypt(key)
-	if err != nil {
-		return fmt.Errorf("error encrypting acct private key: %w", err)
-	}
-
-	a.encKey = newEncKey
-
-	return nil
-}
-
-// setupEncryption creates and returns a new privkey for the account.
+// setupCryptoLegacy creates and returns a new privkey for the account.
 // Returns existing privkey if previously set up.
-func (a *dexAccount) setupEncryption(crypter encrypt.Crypter) (*secp256k1.PrivateKey, error) {
+func (a *dexAccount) setupCryptoLegacy(crypter encrypt.Crypter) (encPriv, pubB []byte, err error) {
 	// Check if privKey exists. Check a.encKey instead of a.privKey
 	// as a.privKey will be nil if the account is locked.
 	a.keyMtx.RLock()
-	if a.encKey != nil {
-		defer a.keyMtx.RUnlock()
-		// no need to generate a new privKey, return existing privKey AFTER unlocking.
-		err := a.unlock(crypter)
-		return a.privKey, err
-	}
+	encKey := a.encKey
 	a.keyMtx.RUnlock()
+	if encKey != nil {
+		return nil, nil, fmt.Errorf("key already set")
+	}
 
 	// Create a new private key for the account.
 	privKey, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("error creating acct private key: %w", err)
+		return nil, nil, fmt.Errorf("error creating acct private key: %w", err)
 	}
 	// Encrypt the private key.
-	encKey, err := crypter.Encrypt(privKey.Serialize())
+	encPriv, err = crypter.Encrypt(privKey.Serialize())
 	if err != nil {
-		return nil, fmt.Errorf("error encrypting acct private key: %w", err)
+		return nil, nil, fmt.Errorf("error encrypting acct private key: %w", err)
 	}
 
 	a.keyMtx.Lock()
-	a.encKey = encKey
+	a.encKey = encPriv
 	a.privKey = privKey
 	a.id = account.NewID(privKey.PubKey().SerializeCompressed())
 	a.keyMtx.Unlock()
 
-	return privKey, nil
+	return encPriv, privKey.PubKey().SerializeCompressed(), nil
+}
+
+// setupCryptoV2 generates a hierarchical deterministic key for the account.
+// setupCryptoV2 should be called before adding the account's *dexConnection
+// to the Core.conns map.
+func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt.Crypter) (encKey, pkBytes []byte, err error) {
+	seed, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("seed decryption error: %w", err)
+	}
+
+	// Get the root key.
+	root, err := hdkeychain.NewMaster(seed, &rootKeyParams{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("NewMaster error: %w", err)
+	}
+
+	dexPkB := a.dexPubKey.SerializeCompressed()
+	// And because I'm neurotic.
+	if len(dexPkB) != 33 {
+		return nil, nil, fmt.Errorf("invalid dex pubkey length %d", len(dexPkB))
+	}
+
+	// Deterministically generate the DEX private key using a chain of extended
+	// keys. We could surmise a hundred different algorithms to derive the DEX
+	// key, and there's nothing particularly special about doing it this way,
+	// but it works.
+
+	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
+		err := hdkeychain.ErrUnusableSeed
+		for err == hdkeychain.ErrUnusableSeed {
+			var kid *hdkeychain.ExtendedKey
+			// Hardened child by modding i first, technically doubling the
+			// collision rate, but OK.
+			kid, err = parent.Child(childIdx%hdkeychain.HardenedKeyStart + hdkeychain.HardenedKeyStart)
+			if err == nil {
+				return kid, nil
+			}
+			childIdx++
+		}
+		return nil, err
+	}
+
+	// Prepare the chain of child indices.
+	kids := make([]uint32, 0, 10) // 1 x purpose, 1 x version (incl. oddness), 8 x 4-byte uint32s.
+	// Hardened "purpose" key.
+	kids = append(kids, HDKeyPurpose)
+	// Second child is the the format/oddness byte.
+	kids = append(kids, uint32(dexPkB[0]))
+	byteSeq := dexPkB[1:]
+	// Generate uint32's from the 4-byte chunks of the pubkey.
+	for i := 0; i < 8; i++ {
+		kids = append(kids, binary.LittleEndian.Uint32(byteSeq[i*4:i*4+4]))
+	}
+
+	// Start with the root key
+	extKey := root
+
+	for _, childIdx := range kids {
+		extKey, err = genChild(extKey, childIdx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("genChild error: %w", err)
+		}
+	}
+
+	privB, err := extKey.SerializedPrivKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("SerializedPrivKey error: %w", err)
+	}
+
+	encKey, err = crypter.Encrypt(privB)
+	if err != nil {
+		return nil, nil, fmt.Errorf("key Encrypt error: %w", err)
+	}
+
+	pubB := extKey.SerializedPubKey()
+	priv := secp256k1.PrivKeyFromBytes(privB)
+
+	a.keyMtx.Lock()
+	a.encKey = encKey
+	a.privKey = priv
+	a.id = account.NewID(pubB)
+	a.keyMtx.Unlock()
+
+	return encKey, pubB, nil
+}
+
+func (a *dexAccount) resetKeys() {
+	a.keyMtx.Lock()
+	a.encKey = nil
+	a.privKey = nil
+	a.keyMtx.Unlock()
 }
 
 // unlock decrypts the account private key.
@@ -821,4 +886,15 @@ type MaxOrderEstimate struct {
 type OrderEstimate struct {
 	Swap   *asset.PreSwap   `json:"swap"`
 	Redeem *asset.PreRedeem `json:"redeem"`
+}
+
+// RootKeyParams implements hdkeychain.NetworkParams for master
+// hdkeychain.ExtendedKey creation.
+type rootKeyParams struct{}
+
+func (*rootKeyParams) HDPrivKeyVersion() [4]byte {
+	return [4]byte{0x74, 0x61, 0x63, 0x6f} // ASCII "taco"
+}
+func (*rootKeyParams) HDPubKeyVersion() [4]byte {
+	return [4]byte{0x64, 0x65, 0x78, 0x63} // ASCII "dexc"
 }

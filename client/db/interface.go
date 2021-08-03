@@ -5,6 +5,7 @@ package db
 
 import (
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -12,12 +13,14 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// Store allows the storage of arbitrary data.
-	Store(string, []byte) error
-	// Get retrieves values stored with Store.
-	Get(string) ([]byte, error)
-	// ValueExists checks if a value was previously stored.
-	ValueExists(k string) (bool, error)
+	// SetPrimaryCredentials sets the initial *PrimaryCredentials.
+	SetPrimaryCredentials(creds *PrimaryCredentials) error
+	// PrimaryCredentials fetches the *PrimaryCredentials.
+	PrimaryCredentials() (*PrimaryCredentials, error)
+	// Recrypt re-encrypts the wallet passwords and account private keys, and
+	// stores the new *PrimaryCredentials.
+	Recrypt(creds *PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
+		walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.
@@ -30,11 +33,6 @@ type DB interface {
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
-	// UpdateAccount updates account's info blob.
-	//
-	// It is almost certainly incorrect to change any of the keys since changing
-	// the key pair itself effectively creates a new account.
-	UpdateAccount(ai *AccountInfo) error
 	// AccountProof retrieves the AccountPoof value specified by url.
 	AccountProof(host string) (*AccountProof, error)
 	// AccountPaid marks the account as paid.

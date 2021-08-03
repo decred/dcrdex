@@ -4,7 +4,7 @@ import BasePage from './basepage'
 import OrderBook from './orderbook'
 import { DepthChart } from './charts'
 import { postJSON } from './http'
-import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as Order from './orderutil'
 import ws from './ws'
 
@@ -193,7 +193,7 @@ export default class MarketsPage extends BasePage {
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, data => { this.handleEpochOrderRoute(data) })
     // Bind the wallet unlock form.
-    bindOpenWallet(app, page.openForm, async () => { this.openFunc() })
+    this.unlockForm = new UnlockWalletForm(app, page.openForm, async () => { this.openFunc() })
     // Create a wallet
     this.walletForm = new NewWalletForm(app, page.walletForm, async () => { this.createWallet() })
     // Main order form.
