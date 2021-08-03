@@ -3,15 +3,15 @@
 // This test requires that the testnet harness be running and the unix socket
 // be located at $HOME/dextest/eth/gamma/node/geth.ipc
 //
-// These tests are expected to be run in descending as some depend on the tests
-// before. They cannot be run in parallel.
+// These tests are expected to be run in descending order as some depend on the
+// tests before. They cannot be run in parallel.
 //
 // NOTE: These test reuse a light node that lives in the dextest folders.
 // However, when recreating the test database for every test, the nonce used
 // for imported accounts is sometimes, randomly, off, which causes transactions
 // to not be mined and effectively makes the node unuseable (at least before
 // restarting). It also seems to have caused getting balance of an account to
-// fail, and sometime the redeem and refund functions to also fail. This could
+// fail, and sometimes the redeem and refund functions to also fail. This could
 // be a problem in the future if a user restores from seed. Punting on this
 // particular problem for now.
 //
@@ -716,7 +716,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Deploy the fund reentry contract.
+	// Deploy the reentry attack contract.
 	_, _, reentryContract, err := reentryattack.DeployReentryAttack(txOpts, ethClient.ec)
 	if err != nil {
 		t.Fatal(err)
@@ -732,7 +732,8 @@ func TestReplayAttack(t *testing.T) {
 
 	txOpts.Value = amt
 	var secretHash [32]byte
-	// Make four swaps that should be locked and refundable and one that is soon refundable.
+	// Make four swaps that should be locked and refundable and one that is
+	// soon refundable.
 	for i := 0; i < 5; i++ {
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
@@ -752,7 +753,7 @@ func TestReplayAttack(t *testing.T) {
 		}
 
 		inLocktime := time.Now().Add(-1 * time.Second).Unix()
-		// Set some variables in the contract use for the exploit. This
+		// Set some variables in the contract used for the exploit. This
 		// will fail (silently) due to require(msg.origin == msg.sender)
 		// in the real contract.
 		_, err := reentryContract.SetUsUpTheBomb(txOpts, contractAddr, secretHash, big.NewInt(inLocktime), participantAddr)
@@ -809,15 +810,16 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// If the exploit worked, the test will fail here, with all funds
-	// drained from the contract.
+	// If the exploit worked, the test will fail here, with 4 ether we
+	// shouldn't be able to touch drained from the contract.
 	if bal.Cmp(wantBal) != 0 {
 		diff := big.NewInt(0).Sub(bal, wantBal)
 		t.Fatalf("unexpected balance change of account: want %v got %v "+
 			"or a difference of %v", wantBal, bal, diff)
 	}
 
-	// The exploit failed and status should not have changed.
+	// The exploit failed and status should be None because initiation also
+	// failed.
 	swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
 	if err != nil {
 		t.Fatal(err)

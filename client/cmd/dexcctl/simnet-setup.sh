@@ -11,6 +11,9 @@ LTC_ON=$?
 ~/dextest/bch/harness-ctl/alpha getblockchaininfo > /dev/null
 BCH_ON=$?
 
+~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
+ETH_ON=$?
+
 set -e
 
 echo initializing
@@ -30,6 +33,11 @@ fi
 if [ $BCH_ON -eq 0 ]; then
 	echo configuring Bitcoin Cash wallet
 	./dexcctl -p abc -p "" --simnet newwallet 145 ~/dextest/bch/alpha/alpha.conf '{"walletname":"gamma"}'
+fi
+
+if [ $ETH_ON -eq 0 ]; then
+	echo configuring Eth wallet
+	./dexcctl -p abc -p "" --simnet newwallet 60 "" '{"appDir":"~/dextest/eth/testnode"}'
 fi
 
 echo registering with DEX

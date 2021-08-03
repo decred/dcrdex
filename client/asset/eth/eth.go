@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -179,7 +180,6 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		log:          logger,
 		tipChange:    assetCFG.TipChange,
 		internalNode: node,
-		acct:         new(accounts.Account),
 	}, nil
 }
 
@@ -192,11 +192,17 @@ func (eth *ExchangeWallet) shutdown() {
 // Connect connects to the node RPC server. A dex.Connector.
 func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	if err := c.connect(ctx, eth.internalNode, mainnetContractAddr); err != nil {
+	err := c.connect(ctx, eth.internalNode, mainnetContractAddr)
+	if err != nil {
 		return nil, err
 	}
 	eth.node = &c
 	eth.ctx = ctx
+
+	eth.acct, err = eth.initAccount()
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize the best block.
 	bestHash, err := eth.node.bestBlockHash(ctx)
@@ -222,6 +228,37 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		eth.shutdown()
 	}()
 	return &wg, nil
+}
+
+// initAccount checks to see if the internal client has an account. If found
+// returns the account. If not it imports the account via private key.
+//
+// Currently this only imports a test account. However, in the future this will
+// need to be created deterministically from the app seed.
+func (eth *ExchangeWallet) initAccount() (*accounts.Account, error) {
+	testAcctAddr := common.HexToAddress("b6de8bb5ed28e6be6d671975cad20c03931be981")
+	accts := eth.node.accounts()
+	for _, acct := range accts {
+		if bytes.Equal(acct.Address[:], testAcctAddr[:]) {
+			return acct, nil
+		}
+	}
+	testAcctPrivHex := "0695b9347a4dc096ae5c6f1935380ceba550c70b112f1323c211bade4d11651b"
+	pw := "abc"
+	privB, err := hex.DecodeString(testAcctPrivHex)
+	if err != nil {
+		return nil, err
+	}
+	acct, err := eth.node.importAccount(pw, privB)
+	if err != nil {
+		return nil, err
+	}
+	// core expects an account to be unlocked during initialization.
+	err = eth.node.unlock(eth.ctx, pw, acct)
+	if err != nil {
+		return nil, err
+	}
+	return acct, nil
 }
 
 // OwnsAddress indicates if an address belongs to the wallet.
