@@ -2882,51 +2882,67 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 		return
 	}
 
-	// Use the previous tip hash to determine the starting point for
-	// the redemption search. If there was a re-org, the starting point
-	// would be the common ancestor of the previous tip and the new tip.
-	// Otherwise, the starting point would be the block at previous tip
-	// height + 1.
-	var startPoint *block
-	var startPointErr error
-	prevTipBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, prevTip.hash, false)
-	switch {
-	case err != nil:
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w", prevTip.hash, translateRPCCancelErr(err))
-	case prevTipBlock.Confirmations < 0:
-		// There's been a re-org, common ancestor will be height
-		// plus negative confirmation e.g. 155 + (-3) = 152.
-		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
-		dcr.log.Debugf("reorg detected from height %d to %d", reorgHeight, newTip.height)
-		reorgHash, err := dcr.node.GetBlockHash(dcr.ctx, reorgHeight)
-		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w", reorgHeight, translateRPCCancelErr(err))
-		} else {
-			startPoint = &block{hash: reorgHash, height: reorgHeight}
-		}
-	case newTip.height-prevTipBlock.Height > 1:
-		// 2 or more blocks mined since last tip, start at prevTip height + 1.
-		afterPrivTip := prevTipBlock.Height + 1
-		hashAfterPrevTip, err := dcr.node.GetBlockHash(dcr.ctx, afterPrivTip)
-		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w", afterPrivTip, translateRPCCancelErr(err))
-		} else {
-			startPoint = &block{hash: hashAfterPrevTip, height: afterPrivTip}
-		}
-	default:
-		// Just 1 new block since last tip report, search the lone block.
-		startPoint = newTip
+	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
+		dcr.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), contractOutpoints)
 	}
 
-	// Redemption search would be compromised if the starting point cannot
-	// be determined, as searching just the new tip might result in blocks
-	// being omitted from the search operation. If that happens, cancel all
-	// find redemption requests in queue.
-	if startPointErr != nil {
-		dcr.fatalFindRedemptionsError(fmt.Errorf("new blocks handler error: %w", startPointErr), contractOutpoints)
-	} else {
-		go dcr.findRedemptionsInBlockRange(startPoint.height, newTip.height, contractOutpoints)
+	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
+	// Redemption search would typically resume from prevTipHeight + 1 unless the
+	// previous tip was re-orged out of the mainchain, in which case redemption
+	// search will resume from the mainchain ancestor of the previous tip.
+	prevTipHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, prevTip.hash)
+	if err != nil {
+		// Redemption search cannot continue reliably without knowing if there
+		// was a reorg, cancel all find redemption requests in queue.
+		notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for prev tip hash %s: %w",
+			prevTip.hash, translateRPCCancelErr(err))
+		return
 	}
+
+	startHeight := int64(prevTipHeader.Height + 1)
+	if prevTipHeader.Confirmations < 0 {
+		// The previous tip is no longer part of the mainchain. Crawl blocks
+		// backwards until finding a mainchain block. Start with the block
+		// that is the immediate ancestor to the previous tip.
+		ancestorBlockHash, err := chainhash.NewHashFromStr(prevTipHeader.PreviousHash)
+		if err != nil {
+			// Redemption search cannot continue reliably without knowing the mainchain
+			// ancestor of the previous tip, cancel all find redemption requests in queue.
+			notifyFatalFindRedemptionError("error decoding previous hash %s for orphaned block %s: %w",
+				prevTipHeader.PreviousHash, prevTipHeader.Hash, err)
+			return
+		}
+
+		for {
+			aBlock, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, ancestorBlockHash)
+			if err != nil {
+				notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for block %s: %w", ancestorBlockHash, translateRPCCancelErr(err))
+				return
+			}
+			if aBlock.Confirmations > -1 {
+				// Found the mainchain ancestor of previous tip.
+				startHeight = int64(aBlock.Height)
+				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)
+				break
+			}
+			if aBlock.Height == 0 {
+				// Crawled back to genesis block without finding a mainchain ancestor
+				// for the previous tip. Should never happen!
+				notifyFatalFindRedemptionError("no mainchain ancestor for orphaned block %s", prevTipHeader.Hash)
+				return
+			}
+			ancestorBlockHash, err = chainhash.NewHashFromStr(aBlock.PreviousHash)
+			if err != nil {
+				notifyFatalFindRedemptionError("error decoding previous hash %s for orphaned block %s: %w",
+					aBlock.PreviousHash, aBlock.Hash, err)
+				return
+			}
+		}
+	}
+
+	// Run the redemption search from the startHeight determined above up
+	// till the current tip height.
+	go dcr.findRedemptionsInBlockRange(startHeight, newTip.height, contractOutpoints)
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {

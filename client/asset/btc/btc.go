@@ -2350,55 +2350,68 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		return
 	}
 
-	// Use the previous tip hash to determine the starting point for
-	// the redemption search. If there was a re-org, the starting point
-	// would be the common ancestor of the previous tip and the new tip.
-	// Otherwise, the starting point would be the block at previous tip
-	// height + 1.
+	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
+		btc.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), contractOutpoints)
+	}
+
 	var startPoint *block
-	var startPointErr error
-	prevTipBlock, err := btc.getBlockHeader(prevTip.hash)
+	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
+	// Redemption search would typically resume from prevTipHeight + 1 unless the
+	// previous tip was re-orged out of the mainchain, in which case redemption
+	// search will resume from the mainchain ancestor of the previous tip.
+	prevTipHeader, err := btc.getBlockHeader(prevTip.hash)
 	switch {
 	case err != nil:
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w",
+		// Redemption search cannot continue reliably without knowing if there
+		// was a reorg, cancel all find redemption requests in queue.
+		notifyFatalFindRedemptionError("getBlockHeader error for prev tip hash %s: %w",
 			prevTip.hash, err)
-	case prevTipBlock.Confirmations < 0:
-		// There's been a re-org, common ancestor will be height
-		// plus negative confirmation e.g. 155 + (-3) = 152.
-		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
-		btc.log.Debugf("reorg detected from height %d to %d", reorgHeight,
-			newTip.height)
-		reorgHash, err := btc.node.GetBlockHash(reorgHeight)
-		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %w",
-				reorgHeight, err)
-		} else {
-			startPoint = &block{hash: reorgHash.String(), height: reorgHeight}
+		return
+
+	case prevTipHeader.Confirmations < 0:
+		// The previous tip is no longer part of the mainchain. Crawl blocks
+		// backwards until finding a mainchain block. Start with the block
+		// that is the immediate ancestor to the previous tip.
+		ancestorBlockHash := prevTipHeader.PreviousBlockHash
+		for {
+			aBlock, err := btc.getBlockHeader(ancestorBlockHash)
+			if err != nil {
+				notifyFatalFindRedemptionError("getBlockHeader error for block %s: %w", ancestorBlockHash, err)
+				return
+			}
+			if aBlock.Confirmations > -1 {
+				// Found the mainchain ancestor of previous tip.
+				startPoint = &block{height: aBlock.Height, hash: aBlock.Hash}
+				btc.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)
+				break
+			}
+			if aBlock.Height == 0 {
+				// Crawled back to genesis block without finding a mainchain ancestor
+				// for the previous tip. Should never happen!
+				notifyFatalFindRedemptionError("no mainchain ancestor for orphaned block %s", prevTipHeader.Hash)
+				return
+			}
+			ancestorBlockHash = aBlock.PreviousBlockHash
 		}
-	case newTip.height-prevTipBlock.Height > 1:
+
+	case newTip.height-prevTipHeader.Height > 1:
 		// 2 or more blocks mined since last tip, start at prevTip height + 1.
-		afterPrivTip := prevTipBlock.Height + 1
+		afterPrivTip := prevTipHeader.Height + 1
 		hashAfterPrevTip, err := btc.node.GetBlockHash(afterPrivTip)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w",
-				afterPrivTip, err)
-		} else {
-			startPoint = &block{hash: hashAfterPrevTip.String(), height: afterPrivTip}
+			notifyFatalFindRedemptionError("getBlockHash error for height %d: %w", afterPrivTip, err)
+			return
 		}
+		startPoint = &block{hash: hashAfterPrevTip.String(), height: afterPrivTip}
+
 	default:
 		// Just 1 new block since last tip report, search the lone block.
 		startPoint = newTip
 	}
 
-	// Redemption search would be compromised if the starting point cannot
-	// be determined, as searching just the new tip might result in blocks
-	// being omitted from the search operation. If that happens, cancel all
-	// find redemption requests in queue.
-	if startPointErr != nil {
-		btc.fatalFindRedemptionsError(fmt.Errorf("new blocks handler error: %w", startPointErr), contractOutpoints)
-	} else {
-		go btc.findRedemptionsInBlockRange(startPoint, newTip, contractOutpoints)
-	}
+	// Run the redemption search from the startHeight determined above up
+	// till the current tip height.
+	go btc.findRedemptionsInBlockRange(startPoint, newTip, contractOutpoints)
 }
 
 func (btc *ExchangeWallet) blockFromHash(hash string) (*block, error) {
@@ -2693,11 +2706,12 @@ func toSatoshi(v float64) uint64 {
 // blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime
 // included.
 type blockHeader struct {
-	Hash          string `json:"hash"`
-	Confirmations int64  `json:"confirmations"`
-	Height        int64  `json:"height"`
-	Time          int64  `json:"time"`
-	MedianTime    int64  `json:"mediantime"`
+	Hash              string `json:"hash"`
+	Confirmations     int64  `json:"confirmations"`
+	Height            int64  `json:"height"`
+	Time              int64  `json:"time"`
+	MedianTime        int64  `json:"mediantime"`
+	PreviousBlockHash string `json:"previousblockhash"`
 }
 
 // getBlockHeader gets the block header for the specified block hash.
