@@ -60,7 +60,7 @@ func (el *ethLogger) New(ctx ...interface{}) log.Logger {
 // to avoid null pointer errors in case geth ever uses that function.
 type dummyHandler struct{}
 
-// Log does nothing and return nil.
+// Log does nothing and returns nil.
 func (dummyHandler) Log(r *log.Record) error {
 	return nil
 }
@@ -119,7 +119,7 @@ func (el *ethLogger) Error(msg string, ctx ...interface{}) {
 
 // Crit logs at critical level.
 func (el *ethLogger) Crit(msg string, ctx ...interface{}) {
-	el.dl.Critical(formatEthLog(msg, ctx...))
+	el.dl.Critical(formatEthLog(msg, ctx...)...)
 }
 
 // Check that *ethLogger satisfies the log.Logger interface.

@@ -2,6 +2,8 @@ module decred.org/dcrdex
 
 go 1.15
 
+replace decred.org/dcrdex/internal/eth/reentryattack => ./internal/eth/reentryattack
+
 require (
 	decred.org/dcrwallet/v2 v2.0.0-20210714172147-8815838443cd
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
@@ -24,7 +26,7 @@ require (
 	github.com/decred/dcrd/wire v1.4.1-0.20210715032435-c9521b468f95
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
-	github.com/ethereum/go-ethereum v1.10.6-0.20210715235240-f05419f0fb8c
+	github.com/ethereum/go-ethereum v1.10.6
 	github.com/gcash/bchd v0.17.2-0.20201218180520-5708823e0e99
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
 	github.com/go-chi/chi/v5 v5.0.1
