@@ -36,6 +36,13 @@ type Driver struct{}
 
 // Setup creates the DCR backend. Start the backend with its Run method.
 func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	// With a websocket RPC client with auto-reconnect, setup a logging
+	// subsystem for the rpcclient.
+	logger = logger.SubLogger("RPC")
+	if logger.Level() == dex.LevelTrace {
+		logger.SetLevel(dex.LevelDebug)
+	}
+	rpcclient.UseLogger(logger)
 	return NewBackend(configPath, logger, network)
 }
 
