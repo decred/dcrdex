@@ -472,3 +472,10 @@ func parseMyOrdersArgs(params *RawParams) (*myOrdersForm, error) {
 	}
 	return req, nil
 }
+
+func parseAppSeedArgs(params *RawParams) (encode.PassBytes, error) {
+	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
+		return nil, err
+	}
+	return params.PWArgs[0], nil
+}

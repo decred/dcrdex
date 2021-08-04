@@ -36,9 +36,12 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	// RPC version
+	// RPC version. Move major up one for breaking changes. Move minor for
+	// backwards compatible features. Move patch for bug fixes. It is
+	// intended that this always match dexcctl's version, so also update
+	// there accordingly.
 	rpcSemverMajor = 0
-	rpcSemverMinor = 0
+	rpcSemverMinor = 4
 	rpcSemverPatch = 0
 )
 
@@ -69,6 +72,7 @@ type clientCore interface {
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
+	ExportSeed(pw []byte) ([]byte, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

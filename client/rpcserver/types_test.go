@@ -60,14 +60,14 @@ func TestCheckNArgs(t *testing.T) {
 			pwArgs[i] = encode.PassBytes(testValue)
 		}
 		err := checkNArgs(&RawParams{PWArgs: pwArgs, Args: test.have}, test.wantNArgs, test.wantNArgs)
-		if err != nil {
-			if test.wantErr {
+		if test.wantErr {
+			if err != nil {
 				continue
 			}
-			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+			t.Fatalf("expected error for test %v", test.name)
 		}
-		if test.wantErr {
-			t.Fatalf("expected error for test %s", test.name)
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 	}
 }
@@ -96,12 +96,14 @@ func TestParseNewWalletArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		nwf, err := parseNewWalletArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(nwf.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
@@ -143,12 +145,14 @@ func TestParseOpenWalletArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		owf, err := parseOpenWalletArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(owf.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
@@ -189,12 +193,14 @@ func TestCheckUIntArg(t *testing.T) {
 	}}
 	for _, test := range tests {
 		res, err := checkUIntArg(test.arg, "name", test.bitSize)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if res != test.want {
 			t.Fatalf("expected %d but got %d for test %q", test.want, res, test.name)
@@ -231,12 +237,14 @@ func TestCheckBoolArg(t *testing.T) {
 	}}
 	for _, test := range tests {
 		res, err := checkBoolArg(test.arg, "name")
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if res != test.want {
 			t.Fatalf("wanted %v but got %v for test %v", test.want, res, test.name)
@@ -253,18 +261,19 @@ func TestParseGetFeeArgs(t *testing.T) {
 		name:   "host and cert",
 		params: &RawParams{PWArgs: nil, Args: []string{"host", "cert bytes"}},
 	}, {
-		name:    "just host",
-		params:  &RawParams{PWArgs: nil, Args: []string{"host"}},
-		wantErr: errArgs,
+		name:   "just host",
+		params: &RawParams{PWArgs: nil, Args: []string{"host"}},
 	}}
 	for _, test := range tests {
 		host, cert, err := parseGetFeeArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if host != test.params.Args[0] {
 			t.Fatalf("url doesn't match")
@@ -296,12 +305,14 @@ func TestParseRegisterArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		reg, err := parseRegisterArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
@@ -342,12 +353,14 @@ func TestParseHelpArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		form, err := parseHelpArgs(&RawParams{Args: test.args})
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if len(test.args) > 0 && form.helpWith != test.args[0] {
 			t.Fatalf("helpwith doesn't match")
@@ -420,12 +433,14 @@ func TestTradeArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		reg, err := parseTradeArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("AppPass doesn't match")
@@ -481,12 +496,14 @@ func TestParseCancelArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		reg, err := parseCancelArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %q",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
@@ -522,12 +539,14 @@ func TestParseWithdrawArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		res, err := parseWithdrawArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if !bytes.Equal(res.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
@@ -579,12 +598,14 @@ func TestParseOrderBookArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		res, err := parseOrderBookArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if res.host != test.params.Args[0] {
 			t.Fatalf("host doesn't match")
@@ -640,12 +661,14 @@ func TestMyOrdersArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		res, err := parseMyOrdersArgs(test.params)
-		if err != nil {
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s",
-					err, test.name)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
 			}
-			continue
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
 		}
 		if len(test.params.Args) > 0 && res.host != test.params.Args[0] {
 			t.Fatalf("host doesn't match")
@@ -655,6 +678,39 @@ func TestMyOrdersArgs(t *testing.T) {
 		}
 		if len(test.params.Args) > 2 && fmt.Sprint(*res.quote) != test.params.Args[2] {
 			t.Fatalf("quote doesn't match")
+		}
+	}
+}
+
+func TestParseAppSeedArgs(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	pwArgs := []encode.PassBytes{pw}
+	args := &RawParams{PWArgs: pwArgs}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: args,
+	}, {
+		name:    "no pass",
+		params:  &RawParams{},
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		appPass, err := parseAppSeedArgs(test.params)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
+			}
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
+		}
+		if !bytes.Equal(appPass, test.params.PWArgs[0]) {
+			t.Fatalf("appPass doesn't match")
 		}
 	}
 }
