@@ -2,7 +2,7 @@
 
 set -e
 
-VER="v0.2.0"
+VER="v0.2.1"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-${VER}
@@ -13,7 +13,7 @@ mkdir -p bin/dexc-darwin-arm64-${VER}
 
 export CGO_ENABLED=0
 
-LDFLAGS="-X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=release"
+LDFLAGS="-s -w -X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=release"
 
 pushd client/cmd/dexc
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER} -ldflags "$LDFLAGS"
