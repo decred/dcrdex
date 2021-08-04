@@ -38,6 +38,8 @@ type TArchivist struct {
 	orderWithKnownCommit order.OrderID
 	commitForKnownOrder  order.Commitment
 	bookedOrders         []*order.LimitOrder
+	canceledOrders       []*order.LimitOrder
+	archivedCancels      []*order.CancelOrder
 	epochInserted        chan struct{}
 	revoked              order.Order
 }
@@ -71,6 +73,12 @@ func (ta *TArchivist) FlushBook(base, quote uint32) (sells, buys []order.OrderID
 	}
 	ta.bookedOrders = nil
 	return
+}
+func (ta *TArchivist) NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur int64) error {
+	if ta.archivedCancels != nil {
+		ta.archivedCancels = append(ta.archivedCancels, ord)
+	}
+	return nil
 }
 func (ta *TArchivist) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	return make(map[order.OrderID][]order.CoinID), make(map[order.OrderID][]order.CoinID), nil
@@ -135,8 +143,13 @@ func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
 	ta.bookedOrders = append(ta.bookedOrders, lo)
 	return nil
 }
-func (ta *TArchivist) ExecuteOrder(ord order.Order) error  { return nil }
-func (ta *TArchivist) CancelOrder(*order.LimitOrder) error { return nil }
+func (ta *TArchivist) ExecuteOrder(ord order.Order) error { return nil }
+func (ta *TArchivist) CancelOrder(lo *order.LimitOrder) error {
+	if ta.canceledOrders != nil {
+		ta.canceledOrders = append(ta.canceledOrders, lo)
+	}
+	return nil
+}
 func (ta *TArchivist) RevokeOrder(ord order.Order) (order.OrderID, time.Time, error) {
 	ta.revoked = ord
 	return ord.ID(), time.Now(), nil
@@ -1756,5 +1769,141 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	wantMsgPrefix = "error parsing preimage response payload result"
 	if !strings.Contains(msgErr.Message, wantMsgPrefix) {
 		t.Errorf("Expected error message %q, got %q", wantMsgPrefix, msgErr.Message)
+	}
+}
+
+func TestMarket_CancelWhileSuspended(t *testing.T) {
+	mkt, storage, auth, cleanup, err := newTestMarket()
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+		return
+	}
+
+	auth.handleMatchDone = make(chan *msgjson.Message, 1)
+	storage.archivedCancels = make([]*order.CancelOrder, 0, 1)
+	storage.canceledOrders = make([]*order.LimitOrder, 0, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Insert a limit order into the book before the market has started
+	lo := makeLO(buyer3, mkRate3(1.0, 1.2), 1, order.StandingTiF)
+	mkt.book.Insert(lo)
+	if err != nil {
+		t.Fatalf("Failed to Insert order into book.")
+	}
+
+	// Start the market
+	epochDurationMSec := int64(mkt.EpochDuration())
+	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
+	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	go mkt.Start(ctx, startEpochIdx)
+	<-time.After(time.Until(startEpochTime.Add(50 * time.Millisecond)))
+	if !mkt.Running() {
+		t.Fatal("market should be running")
+	}
+
+	// Suspend the market, persisting the existing orders
+	_, finalTime := mkt.Suspend(time.Now(), true)
+	<-time.After(time.Until(finalTime.Add(50 * time.Millisecond)))
+	if mkt.Running() {
+		t.Fatal("market should not be running")
+	}
+
+	if mkt.book.BuyCount() != 1 {
+		t.Fatalf("There should be an order in the book.")
+	}
+
+	// Submit a valid cancel order.
+	loID := lo.ID()
+	piCo := test.RandomPreimage()
+	commit := piCo.Commit()
+	cancelTime := encode.UnixMilli(time.Now())
+	aid := buyer3.Acct
+	cancelMsg := &msgjson.CancelOrder{
+		Prefix: msgjson.Prefix{
+			AccountID:  aid[:],
+			Base:       dcrID,
+			Quote:      btcID,
+			OrderType:  msgjson.CancelOrderNum,
+			ClientTime: uint64(cancelTime),
+			Commit:     commit[:],
+		},
+		TargetID: loID[:],
+	}
+	newCancel := func() *order.CancelOrder {
+		return &order.CancelOrder{
+			P: order.Prefix{
+				AccountID:  aid,
+				BaseAsset:  lo.Base(),
+				QuoteAsset: lo.Quote(),
+				OrderType:  order.CancelOrderType,
+				ClientTime: encode.UnixTimeMilli(cancelTime),
+				Commit:     commit,
+			},
+			TargetOrderID: loID,
+		}
+	}
+	co := newCancel()
+	coRecord := orderRecord{
+		msgID: 1,
+		req:   cancelMsg,
+		order: co,
+	}
+	err = mkt.SubmitOrder(&coRecord)
+	if err != nil {
+		t.Fatalf("Error submitting cancel order: %v", err)
+	}
+
+	if mkt.book.BuyCount() != 0 {
+		t.Fatalf("Did not remove order from book.")
+	}
+
+	// Make sure that the cancel order was archived, and the limit order was
+	// canceled.
+	if len(storage.archivedCancels) != 1 {
+		t.Fatalf("1 cancel order should be archived but there are %v", len(storage.archivedCancels))
+	}
+	if !bytes.Equal(storage.archivedCancels[0].ID().Bytes(), co.ID().Bytes()) {
+		t.Fatalf("Archived cancel order's ID does not match expected")
+	}
+	if len(storage.canceledOrders) != 1 {
+		t.Fatalf("1 cancel order should be archived but there are %v", len(storage.archivedCancels))
+	}
+	if !bytes.Equal(storage.canceledOrders[0].ID().Bytes(), lo.ID().Bytes()) {
+		t.Fatalf("Cacneled limit order's ID does not match expected")
+	}
+
+	// Make sure that we responded to the order request
+	if len(auth.sends) != 1 {
+		t.Fatalf("There should be 1 send, a response to the order request.")
+	}
+	msg := auth.sends[0]
+	response := new(msgjson.OrderResult)
+	msg.UnmarshalResult(response)
+	if !bytes.Equal(response.OrderID, co.ID().Bytes()) {
+		t.Fatalf("order response sent for the incorrect order ID")
+	}
+
+	// Make sure that we sent the match request to the client.
+	msg = <-auth.handleMatchDone
+	var matches []*msgjson.Match
+	err = json.Unmarshal(msg.Payload, &matches)
+	if err != nil {
+		t.Fatalf("failed to unmarshal match messages")
+	}
+	if len(matches) != 2 {
+		t.Fatalf("There should be 2 payloads, one for maker and taker match each: %v", len(matches))
+	}
+	var taker, maker bool
+	if matches[0].Side == uint8(order.Maker) || matches[1].Side == uint8(order.Maker) {
+		maker = true
+	}
+	if matches[0].Side == uint8(order.Taker) || matches[1].Side == uint8(order.Taker) {
+		taker = true
+	}
+	if !taker || !maker {
+		t.Fatalf("There should be 2 payloads, one for maker and taker match each")
 	}
 }

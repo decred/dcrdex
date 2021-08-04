@@ -165,6 +165,7 @@ type Storage interface {
 	Close() error
 	InsertEpoch(ed *db.EpochResults) error
 	MarketMatches(base, quote uint32) ([]*db.MatchDataWithCoins, error)
+	InsertMatch(match *order.Match) error
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with
@@ -587,6 +588,163 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
 }
 
+// processCancelOrderWhileSuspended is called when cancelling an order while
+// the market is suspended and Run is not running. The error sent on errChan
+// is returned to the client.
+//
+// This function:
+// 1. Removes the target order from the book.
+// 2. Unlocks the order coins.
+// 3. Updates the storage with the new cancel order and cancels the existing limit order.
+// 4. Responds to the client that the order was received.
+// 5. Sends the unbooked order to the order feeds.
+// 6. Creates a match object, stores it, and notifies the client of the match.
+func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan<- error) {
+	co, ok := rec.order.(*order.CancelOrder)
+	if !ok {
+		errChan <- ErrInvalidOrder
+		return
+	}
+
+	if cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID); !cancelable {
+		errChan <- err
+		return
+	}
+
+	m.bookMtx.Lock()
+	delete(m.settling, co.TargetOrderID)
+	lo, ok := m.book.Remove(co.TargetOrderID)
+	m.bookMtx.Unlock()
+	if !ok {
+		errChan <- ErrTargetNotCancelable
+		return
+	}
+
+	m.unlockOrderCoins(lo)
+
+	sTime := time.Now().Truncate(time.Millisecond).UTC()
+	co.SetTime(sTime)
+
+	// Create the client response here, but don't send it until the order has been
+	// committed to the storage.
+	respMsg, err := m.orderResponse(rec)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to create order response: %w", err)
+		return
+	}
+
+	dur := int64(m.EpochDuration())
+	now := encode.UnixMilli(time.Now())
+	epochIdx := now / dur
+	if err := m.storage.NewArchivedCancel(co, epochIdx, dur); err != nil {
+		errChan <- err
+		return
+	}
+	if err := m.storage.CancelOrder(lo); err != nil {
+		errChan <- err
+		return
+	}
+
+	err = m.auth.Send(rec.order.User(), respMsg)
+	if err != nil {
+		log.Errorf("Failed to send cancel order response: %v", err)
+	}
+
+	sig := &updateSignal{
+		action: unbookAction,
+		data: sigDataUnbookedOrder{
+			order:    lo,
+			epochIdx: 0,
+		},
+	}
+	m.sendToFeeds(sig)
+
+	match := order.Match{
+		Taker:    co,
+		Maker:    lo,
+		Quantity: lo.Remaining(),
+		Rate:     lo.Rate,
+		Epoch: order.EpochID{
+			Idx: uint64(epochIdx),
+			Dur: m.EpochDuration(),
+		},
+		FeeRateBase:  m.getFeeRate(m.Base(), m.baseFeeFetcher),
+		FeeRateQuote: m.getFeeRate(m.Quote(), m.quoteFeeFetcher),
+	}
+	// insertMatchErr is sent on errChan at the end of the function. We
+	// want to send the match request to the client even if this insertion
+	// fails.
+	insertMatchErr := m.storage.InsertMatch(&match)
+
+	makerMsg, takerMsg := matchNotifications(&match)
+	m.auth.Sign(makerMsg)
+	m.auth.Sign(takerMsg)
+	msgs := []msgjson.Signable{makerMsg, takerMsg}
+	req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
+	if err != nil {
+		log.Errorf("Failed to create match request: %v", err)
+	} else {
+		err = m.auth.Request(rec.order.User(), req, func(_ comms.Link, resp *msgjson.Message) {
+			m.processMatchAcksForCancel(rec.order.User(), resp)
+		})
+		if err != nil {
+			log.Errorf("Failed to send match request: %v", err)
+		}
+	}
+
+	errChan <- insertMatchErr
+}
+
+// matchNotifications creates a pair of msgjson.Match from a match.
+func matchNotifications(match *order.Match) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
+	stamp := encode.UnixMilliU(time.Now())
+	return &msgjson.Match{
+			OrderID:      idToBytes(match.Maker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      order.ExtractAddress(match.Taker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Maker),
+		}, &msgjson.Match{
+			OrderID:      idToBytes(match.Taker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      order.ExtractAddress(match.Maker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Taker),
+		}
+}
+
+// processMatchAcksForCancel is called when receiving a response to a match
+// request for a cancel order. Nothing is done other than logging and verifying
+// that the response is in the correct format.
+//
+// This is currently only used for cancel orders that happen while the market is
+// suspended, but may be later used for all cancel orders.
+func (m *Market) processMatchAcksForCancel(user account.AccountID, msg *msgjson.Message) {
+	var acks []msgjson.Acknowledgement
+	err := msg.UnmarshalResult(&acks)
+	if err != nil {
+		m.respondError(msg.ID, user, msgjson.RPCParseError,
+			"error parsing match request acknowledgment")
+		return
+	}
+	// The acknowledgment for both the taker and maker should come from the same user
+	expectedNumAcks := 2
+	if len(acks) != expectedNumAcks {
+		m.respondError(msg.ID, user, msgjson.AckCountError,
+			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), expectedNumAcks))
+		return
+	}
+	log.Debugf("processMatchAcksForCancel: 'match' ack received from %v", user)
+}
+
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
 // When submission is completed, an error value will be sent on the channel.
 // This is the asynchronous version of SubmitOrder.
@@ -614,6 +772,11 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	select {
 	case <-m.running:
 	default:
+		if rec.order.Type() == order.CancelOrderType {
+			errChan := make(chan error, 1)
+			go m.processCancelOrderWhileSuspended(rec, errChan)
+			return errChan
+		}
 		// m.orderRouter is closed
 		log.Infof("SubmitOrderAsync: Market stopped with an order in submission (commitment %v).",
 			rec.order.Commitment()) // The order is not time stamped, so no OrderID.
@@ -1840,6 +2003,15 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	})
 }
 
+// getFeeRate gets the fee rate for an asset.
+func (m *Market) getFeeRate(assetID uint32, f FeeFetcher) uint64 {
+	rate := m.ScaleFeeRate(assetID, f.FeeRate())
+	if rate > f.MaxFeeRate() || rate == 0 {
+		rate = f.MaxFeeRate()
+	}
+	return rate
+}
+
 // processReadyEpoch performs the following operations for a closed epoch that
 // has finished preimage collection via collectPreimages:
 //  1. Perform matching with the order book.
@@ -1875,15 +2047,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	// fallback MaxFeeRate when the justifiable network rate is much lower. I do
 	// remember some minor discussion of this at some point in the past, but I'd
 	// like to bring it back.
-	getFeeRate := func(assetID uint32, f FeeFetcher) uint64 {
-		rate := m.ScaleFeeRate(assetID, f.FeeRate())
-		if rate > f.MaxFeeRate() || rate == 0 {
-			rate = f.MaxFeeRate()
-		}
-		return rate
-	}
-	feeRateBase := getFeeRate(m.Base(), m.baseFeeFetcher)
-	feeRateQuote := getFeeRate(m.Quote(), m.quoteFeeFetcher)
+	feeRateBase := m.getFeeRate(m.Base(), m.baseFeeFetcher)
+	feeRateQuote := m.getFeeRate(m.Quote(), m.quoteFeeFetcher)
 
 	// Data from preimage collection
 	ordersRevealed := epoch.ordersRevealed

@@ -172,6 +172,11 @@ type OrderArchiver interface {
 	// should not return the cancel orders created this way.
 	RevokeOrderUncounted(order.Order) (cancelID order.OrderID, t time.Time, err error)
 
+	// NewArchivedCancel stores a cancel order directly in the executed state. This
+	// is used for orders that are canceled when the market is suspended, and therefore
+	// do not need to be matched.
+	NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur int64) error
+
 	// FailCancelOrder puts an unmatched cancel order into the executed state.
 	// For matched cancel orders, use ExecuteOrder.
 	FailCancelOrder(*order.CancelOrder) error

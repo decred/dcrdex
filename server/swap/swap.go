@@ -1819,16 +1819,6 @@ func (s *Swapper) revoke(match *matchTracker) {
 	sendRev(mid, match.Maker)
 }
 
-// extractAddress extracts the address from the order. If the order is a cancel
-// order, an empty string is returned.
-func extractAddress(ord order.Order) string {
-	trade := ord.Trade()
-	if trade == nil {
-		return ""
-	}
-	return trade.Address
-}
-
 // For the 'match' request, the user returns a msgjson.Acknowledgement array
 // with signatures for each match ID. The match acknowledgements were requested
 // from each matched user in Negotiate.
@@ -2005,7 +1995,7 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:      idToBytes(match.ID()),
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			Address:      extractAddress(match.Taker),
+			Address:      order.ExtractAddress(match.Taker),
 			ServerTime:   stamp,
 			FeeRateBase:  match.FeeRateBase,
 			FeeRateQuote: match.FeeRateQuote,
@@ -2015,7 +2005,7 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:      idToBytes(match.ID()),
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			Address:      extractAddress(match.Maker),
+			Address:      order.ExtractAddress(match.Maker),
 			ServerTime:   stamp,
 			FeeRateBase:  match.FeeRateBase,
 			FeeRateQuote: match.FeeRateQuote,
