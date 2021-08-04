@@ -19,7 +19,9 @@ const (
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 )
 
-// The Backend interface is an interface for a blockchain backend.
+// The Backend interface is an interface for a blockchain backend. TODO: Plumb
+// every method with a cancellable request with a Context, which will prevent
+// backend shutdown from cancelling requests, but is more idiomatic these days.
 type Backend interface {
 	// It is expected that Connect from dex.Connector is called and returns
 	// before use of the asset, and that it is only called once for the life
@@ -63,7 +65,7 @@ type Backend interface {
 	// for more UTXO data.
 	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
-	FeeRate() (uint64, error)
+	FeeRate(context.Context) (uint64, error)
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)

@@ -69,7 +69,8 @@ type DataCollector interface {
 // FeeFetcher is a fee fetcher for fetching fees. Fees are fickle, so fetch fees
 // with FeeFetcher fairly frequently.
 type FeeFetcher interface {
-	FeeRate() uint64
+	FeeRate(context.Context) uint64
+	LastRate() uint64
 	MaxFeeRate() uint64
 }
 
@@ -2005,7 +2006,16 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 
 // getFeeRate gets the fee rate for an asset.
 func (m *Market) getFeeRate(assetID uint32, f FeeFetcher) uint64 {
-	rate := m.ScaleFeeRate(assetID, f.FeeRate())
+	// Do not block indefinitely waiting for fetcher.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	rate := f.FeeRate(ctx)
+	if ctx.Err() != nil { // timeout, try last known rate
+		rate = f.LastRate()
+		log.Warnf("Failed to get latest fee rate for %v. Using last known rate %d.",
+			dex.BipIDSymbol(assetID), rate)
+	}
+	rate = m.ScaleFeeRate(assetID, rate)
 	if rate > f.MaxFeeRate() || rate == 0 {
 		rate = f.MaxFeeRate()
 	}

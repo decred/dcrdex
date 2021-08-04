@@ -402,7 +402,7 @@ func (a *TAsset) ValidateContract(contract []byte) error {
 func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate          { return a.bChan }
 func (a *TAsset) InitTxSize() uint32                                       { return 100 }
 func (a *TAsset) InitTxSizeBase() uint32                                   { return 66 }
-func (a *TAsset) FeeRate() (uint64, error)                                 { return 10, nil }
+func (a *TAsset) FeeRate(context.Context) (uint64, error)                  { return 10, nil }
 func (a *TAsset) CheckAddress(string) bool                                 { return true }
 func (a *TAsset) Connect(context.Context) (*sync.WaitGroup, error)         { return nil, nil }
 func (a *TAsset) ValidateSecret(secret, contract []byte) bool              { return true }

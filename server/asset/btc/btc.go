@@ -381,7 +381,7 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.
-func (btc *Backend) FeeRate() (uint64, error) {
+func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
 	return btc.estimateFee(btc.node)
 }
 

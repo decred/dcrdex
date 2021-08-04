@@ -79,7 +79,7 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	var errs []string
 	backend := asset.Backend
 	var scaledFeeRate uint64
-	currentFeeRate, err := backend.FeeRate()
+	currentFeeRate, err := backend.FeeRate(r.Context())
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
 	} else {

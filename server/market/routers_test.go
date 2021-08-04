@@ -402,7 +402,7 @@ func (b *TBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 	_, err := b.utxo(coinID)
 	return err
 }
-func (b *TBackend) FeeRate() (uint64, error) {
+func (b *TBackend) FeeRate(context.Context) (uint64, error) {
 	return 9, nil
 }
 

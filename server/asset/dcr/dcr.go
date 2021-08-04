@@ -222,7 +222,7 @@ func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	if _, err = dcr.FeeRate(); err != nil {
+	if _, err = dcr.FeeRate(ctx); err != nil {
 		dcr.log.Warnf("Decred backend started without fee estimation available: %v", err)
 	}
 
@@ -247,9 +247,9 @@ func (dcr *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
-func (dcr *Backend) FeeRate() (uint64, error) {
+func (dcr *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
-	estimateFeeResult, err := dcr.node.EstimateSmartFee(dcr.ctx, 2, chainjson.EstimateSmartFeeConservative)
+	estimateFeeResult, err := dcr.node.EstimateSmartFee(ctx, 2, chainjson.EstimateSmartFeeConservative)
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
@@ -310,7 +310,11 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (dcr *Backend) Synced() (bool, error) {
-	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
+	// With ws autoreconnect enabled, requests hang when backend is
+	// disconnected.
+	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+	defer cancel()
+	chainInfo, err := dcr.node.GetBlockChainInfo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("GetBlockChainInfo error: %w", translateRPCCancelErr(err))
 	}
