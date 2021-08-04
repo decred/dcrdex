@@ -227,7 +227,7 @@ type tFeeFetcher struct {
 	maxFeeRate uint64
 }
 
-func (*tFeeFetcher) FeeRate() uint64 {
+func (*tFeeFetcher) FeeRate(context.Context) uint64 {
 	return 10
 }
 

@@ -1,8 +1,10 @@
 package dex
 
 import (
+	"context"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/market"
@@ -28,7 +30,9 @@ func NewFeeManager() *FeeManager {
 // asset's MaxFeeRate are used to limit the rates returned by the LastRate
 // method as well as the rates returned by child FeeFetchers.
 func (m *FeeManager) AddFetcher(asset *asset.BackedAsset) {
-	rate, err := asset.Backend.FeeRate()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rate, err := asset.Backend.FeeRate(ctx)
 	if err != nil {
 		log.Warnf("Error priming fee cache for %s: %v", asset.Symbol, err)
 	}
@@ -75,16 +79,23 @@ func newFeeFetcher(asset *asset.BackedAsset, lastRate *uint64) *feeFetcher {
 }
 
 // FeeRate fetches a new fee rate and updates the cache.
-func (f *feeFetcher) FeeRate() uint64 {
-	r, err := f.Backend.FeeRate()
+func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
+	r, err := f.Backend.FeeRate(ctx)
 	if err != nil {
 		log.Errorf("Error retrieving fee rate for %s: %v", f.Symbol, err)
+		return 0 // Do not store as last rate.
 	}
 	if r > f.Asset.MaxFeeRate {
 		r = f.Asset.MaxFeeRate
 	}
 	atomic.StoreUint64(f.lastRate, r)
 	return r
+}
+
+// LastRate is the last rate cached. This may be used as a fallback if FeeRate
+// times out, or as a quick rate when rate freshness is not critical.
+func (f *feeFetcher) LastRate() uint64 {
+	return atomic.LoadUint64(f.lastRate)
 }
 
 // MaxFeeRate is a getter for the BackedAsset's dex.Asset.MaxFeeRate. This is

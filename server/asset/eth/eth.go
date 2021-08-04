@@ -173,8 +173,8 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in gwei / gas.
-func (eth *Backend) FeeRate() (uint64, error) {
-	bigGP, err := eth.node.suggestGasPrice(eth.rpcCtx)
+func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
+	bigGP, err := eth.node.suggestGasPrice(ctx)
 	if err != nil {
 		return 0, err
 	}

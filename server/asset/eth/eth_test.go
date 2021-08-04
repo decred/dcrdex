@@ -320,7 +320,7 @@ func TestFeeRate(t *testing.T) {
 			rpcCtx: ctx,
 			log:    tLogger,
 		}
-		fee, err := eth.FeeRate()
+		fee, err := eth.FeeRate(ctx)
 		cancel()
 		if test.wantErr {
 			if err == nil {
