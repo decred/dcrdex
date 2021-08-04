@@ -596,9 +596,9 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 // 1. Removes the target order from the book.
 // 2. Unlocks the order coins.
 // 3. Updates the storage with the new cancel order and cancels the existing limit order.
-// 3. Responds to the client that the order was received.
-// 4. Sends the unbooked order to the order feeds.
-// 5. Creates a match object, stores it, and notifies the client of the match.
+// 4. Responds to the client that the order was received.
+// 5. Sends the unbooked order to the order feeds.
+// 6. Creates a match object, stores it, and notifies the client of the match.
 func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan<- error) {
 	co, ok := rec.order.(*order.CancelOrder)
 	if !ok {
@@ -629,14 +629,14 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	// committed to the storage.
 	respMsg, err := m.orderResponse(rec)
 	if err != nil {
-		errChan <- fmt.Errorf("Failed to create order response: %v", err)
+		errChan <- fmt.Errorf("failed to create order response: %w", err)
 		return
 	}
 
 	dur := int64(m.EpochDuration())
 	now := encode.UnixMilli(time.Now())
 	epochIdx := now / dur
-	if err := m.storage.NewArchivedCancel(co, epochIdx, int64(m.EpochDuration())); err != nil {
+	if err := m.storage.NewArchivedCancel(co, epochIdx, dur); err != nil {
 		errChan <- err
 		return
 	}
@@ -645,12 +645,8 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 		return
 	}
 
-	// If we fail to send the response, then we send this error at the end of
-	// the function. If we send the error here and return the function, then
-	// the match will not be recorded and the server DB will be in an inconsistent
-	// state.
-	sendResponseErr := m.auth.Send(rec.order.User(), respMsg)
-	if sendResponseErr != nil {
+	err = m.auth.Send(rec.order.User(), respMsg)
+	if err != nil {
 		log.Errorf("Failed to send cancel order response: %v", err)
 	}
 
@@ -675,24 +671,28 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 		FeeRateBase:  m.getFeeRate(m.Base(), m.baseFeeFetcher),
 		FeeRateQuote: m.getFeeRate(m.Quote(), m.quoteFeeFetcher),
 	}
-	m.storage.InsertMatch(&match)
+	// insertMatchErr is sent on errChan at the end of the function. We
+	// want to send the match request to the client even if this insertion
+	// fails.
+	insertMatchErr := m.storage.InsertMatch(&match)
+
 	makerMsg, takerMsg := matchNotifications(&match)
 	m.auth.Sign(makerMsg)
 	m.auth.Sign(takerMsg)
 	msgs := []msgjson.Signable{makerMsg, takerMsg}
 	req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 	if err != nil {
-		log.Errorf("Failed to create match reqeust: %v", err)
+		log.Errorf("Failed to create match request: %v", err)
 	} else {
 		err = m.auth.Request(rec.order.User(), req, func(_ comms.Link, resp *msgjson.Message) {
 			m.processMatchAcksForCancel(rec.order.User(), resp)
 		})
 		if err != nil {
-			log.Errorf("Failed to send match reqeust: %v", err)
+			log.Errorf("Failed to send match request: %v", err)
 		}
 	}
 
-	errChan <- sendResponseErr
+	errChan <- insertMatchErr
 }
 
 // matchNotifications creates a pair of msgjson.Match from a match.
@@ -742,7 +742,7 @@ func (m *Market) processMatchAcksForCancel(user account.AccountID, msg *msgjson.
 			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), expectedNumAcks))
 		return
 	}
-	log.Debugf("processMatchAcksForCancel: 'match' ack recieived from %v", user)
+	log.Debugf("processMatchAcksForCancel: 'match' ack received from %v", user)
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
