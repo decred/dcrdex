@@ -365,7 +365,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 
 		tag, err := language.Parse(fi.Name())
 		if err != nil {
-			log.Debugf("error parsing language tag %q: %v", fi.Name(), err)
+			log.Warnf("error parsing language tag %q: %v", fi.Name(), err)
 			continue
 		}
 		langs = append(langs, tag)
@@ -373,8 +373,21 @@ func (s *WebServer) buildTemplates(lang string) error {
 	}
 
 	if match == "" {
+		// Try to identify candate languages.
+		acceptLangs, _, err := language.ParseAcceptLanguage(lang)
+		if err != nil {
+			return fmt.Errorf("unable to parse requested language: %v", err)
+		}
+		// Match against template languages.
 		matcher := language.NewMatcher(langs)
-		_, idx := language.MatchStrings(matcher, lang)
+		tag, idx, conf := matcher.Match(acceptLangs...)
+		switch conf {
+		case language.Exact:
+		case language.High, language.Low:
+			log.Infof("Using language %v", tag)
+		case language.No:
+			return fmt.Errorf("no match for %q in recognized languages %v", lang, langs)
+		}
 		match = dirs[idx]
 	}
 

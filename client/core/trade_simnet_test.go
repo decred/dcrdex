@@ -761,7 +761,7 @@ func TestResendPendingRequests(t *testing.T) {
 				foundSwapErrorNote = note.Severity() == db.ErrorLevel && (note.Subject() == SubjectSwapSendError ||
 					note.Subject() == SubjectInitError || note.Subject() == SubjectReportRedeemError)
 			case <-time.After(4 * time.Second):
-				return fmt.Errorf("client %d: no init/redeem error note after 1 second", client.id)
+				return fmt.Errorf("client %d: no init/redeem error note after 4 seconds", client.id)
 			}
 		}
 

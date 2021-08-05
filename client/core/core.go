@@ -1166,7 +1166,7 @@ func New(cfg *Config) (*Core, error) {
 	if cfg.Language != "" {
 		lang, err = language.Parse(cfg.Language)
 		if err != nil {
-			return nil, fmt.Errorf("Error parsing language tag %q: %v", cfg.Language, err)
+			return nil, fmt.Errorf("Error parsing language tag %q: %w", cfg.Language, err)
 		}
 	}
 

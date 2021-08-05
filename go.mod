@@ -37,7 +37,7 @@ require (
 	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
-	golang.org/x/text v0.3.4
+	golang.org/x/text v0.3.6
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
 	gopkg.in/ini.v1 v1.55.0
 )

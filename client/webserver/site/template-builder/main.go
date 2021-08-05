@@ -29,7 +29,7 @@ func main() {
 	err := os.MkdirAll(outputDirectory, 0755)
 	if err != nil {
 		fmt.Printf("MkdirAll %q error: %v \n", outputDirectory, err)
-		return
+		os.Exit(1)
 	}
 
 	for lang := range locales.Locales {
@@ -37,7 +37,7 @@ func main() {
 		err := os.MkdirAll(langDir, 0755)
 		if err != nil {
 			fmt.Printf("MkdirAll %q error: %v \n", langDir, err)
-			return
+			os.Exit(2)
 		}
 	}
 
@@ -99,6 +99,6 @@ func main() {
 	})
 	if err != nil {
 		fmt.Println("WalkDir error:", err)
-		return
+		os.Exit(3)
 	}
 }
