@@ -26,11 +26,8 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
-// version is the dexcctl version and should correspond to the rpcclient's
-// version. rpcclients with a higher minor are newer with newer features while
-// a higher major indicates breaking changes and dexcctl should be updated
-// before attempting to communicate.
-var version = semver{major: 0, minor: 4, patch: 0}
+// version is the dex server's release version.
+var version = semver{major: 0, minor: 3, patch: 0}
 
 // semver holds dexcctl's semver values.
 type semver struct {

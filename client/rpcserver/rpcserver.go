@@ -37,11 +37,9 @@ const (
 	rpcTimeoutSeconds = 10
 
 	// RPC version. Move major up one for breaking changes. Move minor for
-	// backwards compatible features. Move patch for bug fixes. It is
-	// intended that this always match dexcctl's version, so also update
-	// there accordingly.
+	// backwards compatible features. Move patch for bug fixes.
 	rpcSemverMajor = 0
-	rpcSemverMinor = 4
+	rpcSemverMinor = 1
 	rpcSemverPatch = 0
 )
 
