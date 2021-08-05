@@ -299,7 +299,7 @@ export default class MarketsPage extends BasePage {
 
       page.marketChart.style.height = `${h}px`
 
-      this.chart.resize(h)
+      this.chart.resize() // resize gets height from parent (marketChart)
     }
     const chartDivRatio = State.fetch(chartRatioKey)
     if (chartDivRatio) {
