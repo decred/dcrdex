@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"decred.org/dcrdex/client/asset"
@@ -993,11 +994,11 @@ func TestParseCoreOrder(t *testing.T) {
     "settled": 100000000,
     "status": "booked",
     "tif": "standing",
-    "matches": [                                                                                                                                                                                 
-      {                                                                                                                                                                                                         
-        "matchID": "992f15e89bbd670663b690b4da4a859609d83866e200f3c4cd5c916442b8ea46",                                                                                                                             
-        "status": "MatchComplete",                                                                                                                                                                                 
-        "revoked": false,                                                                                                                                                                                                     
+    "matches": [
+      {
+        "matchID": "992f15e89bbd670663b690b4da4a859609d83866e200f3c4cd5c916442b8ea46",
+        "status": "MatchComplete",
+        "revoked": false,
         "rate": 200000000,
         "qty": 100000000,
         "side": "Maker",
@@ -1042,5 +1043,44 @@ func TestParseCoreOrder(t *testing.T) {
 	myOrder.Age = res.Age
 	if !reflect.DeepEqual(myOrder, res) {
 		t.Fatalf("expected %v but got %v", spew.Sdump(myOrder), spew.Sdump(res))
+	}
+}
+
+func TestHandleAppSeed(t *testing.T) {
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{encode.PassBytes("abc")},
+	}
+	tests := []struct {
+		name          string
+		params        *RawParams
+		exportSeedErr error
+		wantErrCode   int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:          "core.ExportSeed error",
+		params:        params,
+		exportSeedErr: errors.New("error"),
+		wantErrCode:   msgjson.RPCExportSeedError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{exportSeed: []byte{255}, exportSeedErr: test.exportSeedErr}
+		r := &RPCServer{core: tc}
+		payload := handleAppSeed(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		res = strings.ToLower(res)
+		if test.wantErrCode == -1 && res != "ff" {
+			t.Fatalf("expected ff but got %v", res)
+		}
+
 	}
 }

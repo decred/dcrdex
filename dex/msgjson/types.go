@@ -74,6 +74,7 @@ const (
 	RouteUnavailableError             // 55
 	AccountExistsError                // 56
 	AccountSuspendedError             // 57
+	RPCExportSeedError                // 58
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

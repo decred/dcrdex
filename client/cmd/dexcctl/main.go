@@ -26,6 +26,7 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
+// version is the dex server's release version.
 var version = semver{major: 0, minor: 3, patch: 0}
 
 // semver holds dexcctl's semver values.
@@ -60,6 +61,7 @@ var promptPasswords = map[string][]string{
 	"register":   {"App password:"},
 	"trade":      {"App password:"},
 	"withdraw":   {"App password:"},
+	"appseed":    {"App password:"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read

@@ -37,6 +37,7 @@ const (
 	walletsRoute     = "wallets"
 	withdrawRoute    = "withdraw"
 	marketsRoute     = "markets"
+	appSeedRoute     = "appseed"
 )
 
 const (
@@ -85,6 +86,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
 	withdrawRoute:    handleWithdraw,
+	appSeedRoute:     handleAppSeed,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -549,6 +551,32 @@ func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(myOrdersRoute, myOrders, nil)
 }
 
+// handleAppSeed handles requests for the app seed. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	appPass, err := parseAppSeedArgs(params)
+	if err != nil {
+		return usage(registerRoute, err)
+	}
+	defer appPass.Clear()
+	seed, err := s.core.ExportSeed(appPass)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
+		return createResponse(appSeedRoute, nil, resErr)
+	}
+	// Zero seed and hex representation after use.
+	seedHex := fmt.Sprintf("%x", seed[:])
+	defer func() {
+		for i := range seed {
+			seed[i] = 0
+		}
+		seedHex = ""
+	}()
+
+	return createResponse(appSeedRoute, seedHex, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -975,5 +1003,14 @@ Registration is complete after the fee transaction has been confirmed.`,
       ]
     },...
   ]`,
+	},
+	appSeedRoute: {
+		pwArgsShort: `"appPass"`,
+		cmdSummary: `Show the application's seed. It is recommended to not store the seed
+  digitally. Make a copy on paper with pencil and keep it safe.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		returns: `Returns:
+    string: The application's seed as hex.`,
 	},
 }

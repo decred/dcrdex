@@ -56,6 +56,8 @@ type TCore struct {
 	logoutErr           error
 	book                *core.OrderBook
 	bookErr             error
+	exportSeed          []byte
+	exportSeedErr       error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -111,6 +113,9 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 }
 func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (asset.Coin, error) {
 	return c.coin, c.withdrawErr
+}
+func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
+	return c.exportSeed, c.exportSeedErr
 }
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()) {

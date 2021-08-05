@@ -36,9 +36,10 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	// RPC version
+	// RPC version. Move major up one for breaking changes. Move minor for
+	// backwards compatible features. Move patch for bug fixes.
 	rpcSemverMajor = 0
-	rpcSemverMinor = 0
+	rpcSemverMinor = 1
 	rpcSemverPatch = 0
 )
 
@@ -69,6 +70,7 @@ type clientCore interface {
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
+	ExportSeed(pw []byte) ([]byte, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
