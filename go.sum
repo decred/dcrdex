@@ -177,8 +177,8 @@ github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210129200153-14fd1a785bf2/g
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210525214639-70483c835b7f/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210715032435-c9521b468f95 h1:+sKcEQYVoc0xZ4eaD1NT+u5KUvkUlrJ5THydWNmi1OQ=
 github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210715032435-c9521b468f95/go.mod h1:9izQEJ5wU0ZwYHESMaaOIvE6H6y3IvDsQL3ByYGn9oc=
-github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210715032435-c9521b468f95 h1:/pCbsrqXsSElVeWxDiZTimZzZjt44eGdXk82FUhNuLY=
-github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210715032435-c9521b468f95/go.mod h1:I5Zy4x6Pyt9T+XzSzpo0CofTftWRl9OunpFMuf0g230=
+github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210819154602-48627ee18c3d h1:GTxOteWdXV/aFXJFWhnB+lWbjoipG8PhcEsyF2Xdo3Q=
+github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210819154602-48627ee18c3d/go.mod h1:McAn73oY1SeAVUBQAlkjFivR67oTcoJqWsjWalRFxmo=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210129190127-4ebd135a82f1/go.mod h1:EnS4vtxTESoI59geLo9M8AUOvIprJy+O4gSVsQp6/h4=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210330065944-a2366e6e0b3b/go.mod h1:G6b6ERb4KkSqMOCcfSS6m5QV2dgXKVohRpK0HEECw5Q=
 github.com/decred/dcrd/txscript/v4 v4.0.0-20210415215133-96b98390a9a9/go.mod h1:LBGwMZRfpS50huRsc0Bihy7w2Sl9vK3TNqv8nhCRj0U=
