@@ -20,7 +20,7 @@ require (
 	github.com/decred/dcrd/gcs/v3 v3.0.0-20210715032435-c9521b468f95
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210715032435-c9521b468f95
 	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210715032435-c9521b468f95
-	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210715032435-c9521b468f95
+	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210819154602-48627ee18c3d
 	github.com/decred/dcrd/txscript/v4 v4.0.0-20210715032435-c9521b468f95
 	github.com/decred/dcrd/wire v1.4.1-0.20210715032435-c9521b468f95
 	github.com/decred/go-socks v1.1.0
