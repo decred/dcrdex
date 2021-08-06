@@ -94,7 +94,11 @@ export class DepthChart {
     unbind(window, 'resize', this.boundResizer)
   }
 
-  // resize is a 'resize' event handler.
+  /*
+   * resize updates the chart size. The parentHeight is an argument to support
+   * updating the height programatically after the caller sets a style.height
+   * but before the clientHeight has been updated.
+   */
   resize (parentHeight) {
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = parentHeight - 20 // magic number derived from a soup of css values.
