@@ -131,7 +131,11 @@ export default class SettingsPage extends BasePage {
     const page = this.page
     page.exportAccountHost.textContent = host
     page.exportAccountErr.textContent = ''
-    this.showForm(authorizeAccountExportForm)
+    if (State.passwordIsCached()) {
+      this.exportAccount()
+    } else {
+      this.showForm(authorizeAccountExportForm)
+    }
   }
 
   async prepareAccountDisable (host, disableAccountForm) {

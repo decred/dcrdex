@@ -1,11 +1,12 @@
 import Doc from './doc'
 import { postJSON } from './http'
+import State from './state'
 
 let app
 
 /*
- * bindNewWallet should be used with the "newWalletForm" template. The enclosing
- * <form> element should be the second argument.
+ * NewWalletForm should be used with the "newWalletForm" template. The enclosing
+ * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
   constructor (application, form, success, pwCache) {
@@ -17,13 +18,14 @@ export class NewWalletForm {
       'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
       'newWalletAppPWBox', 'nwRegMsg'
     ])
+    this.refresh()
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
 
     bind(form, fields.submitAdd, async () => {
       const pw = fields.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
-      if (!pw) {
+      if (!pw && !State.passwordIsCached()) {
         fields.newWalletErr.textContent = 'app password cannot be empty'
         Doc.show(fields.newWalletErr)
         return
@@ -51,7 +53,8 @@ export class NewWalletForm {
   }
 
   refresh () {
-    if (this.pwCache && this.pwCache.pw) Doc.hide(this.fields.newWalletAppPWBox)
+    const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    if (hidePWBox) Doc.hide(this.fields.newWalletAppPWBox)
     else Doc.show(this.fields.newWalletAppPWBox)
   }
 
@@ -292,7 +295,7 @@ export class UnlockWalletForm {
   constructor (application, form, success, pwCache) {
     this.fields = Doc.parsePage(form, [
       'uwAssetLogo', 'uwAssetName', 'uwAppPassBox', 'uwAppPass', 'submitUnlock',
-      'unlockErr'
+      'unlockErr', 'submitUnlockDiv'
     ])
     app = application
     this.form = form
@@ -308,19 +311,39 @@ export class UnlockWalletForm {
     fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
     fields.uwAssetName.textContent = asset.info.name
     fields.uwAppPass.value = ''
-    if (this.pwCache.pw) Doc.hide(fields.uwAppPassBox)
+    const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    if (hidePWBox) Doc.hide(fields.uwAppPassBox)
     else Doc.show(fields.uwAppPassBox)
+  }
+
+  /*
+   * setError displays an error on the form.
+   */
+  setError (msg) {
+    this.fields.unlockErr.textContent = msg
+    Doc.show(this.fields.unlockErr)
+  }
+
+  /*
+   * showErrorOnly displays only an error on the form. Hides the
+   * app pass field and the submit button.
+   */
+  showErrorOnly (msg) {
+    this.fields.unlockErr.textContent = msg
+    Doc.show(this.fields.unlockErr)
+    Doc.hide(this.fields.uwAppPassBox)
+    Doc.hide(this.fields.submitUnlockDiv)
   }
 
   async submit () {
     const fields = this.fields
     const pw = fields.uwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
-    if (!pw) {
+    if (!pw && !State.passwordIsCached()) {
       fields.unlockErr.textContent = 'app password cannot be empty'
       Doc.show(fields.unlockErr)
       return
     }
-    Doc.hide(fields.unlockErr)
+    Doc.hide(this.fields.unlockErr)
     const open = {
       assetID: parseInt(this.currentAsset.id),
       pass: pw
@@ -330,8 +353,7 @@ export class UnlockWalletForm {
     const res = await postJSON('/api/openwallet', open)
     loaded()
     if (!app.checkResponse(res)) {
-      fields.unlockErr.textContent = res.msg
-      Doc.show(fields.unlockErr)
+      this.setError(res.msg)
       return
     }
     if (this.pwCache) this.pwCache.pw = pw
@@ -363,10 +385,12 @@ export class DEXAddressForm {
     })
 
     bind(form, page.submitDEXAddr, () => this.checkDEX())
+    this.refresh()
   }
 
   refresh () {
-    if (this.pwCache && this.pwCache.pw) Doc.hide(this.page.dexAddrAppPWBox)
+    const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    if (hidePWBox) Doc.hide(this.page.dexAddrAppPWBox)
     else Doc.show(this.page.dexAddrAppPWBox)
   }
 
@@ -385,7 +409,10 @@ export class DEXAddressForm {
       cert = await page.certFile.files[0].text()
     }
 
-    const pw = page.dexAddrAppPW.value || this.pwCache.pw
+    let pw = ''
+    if (!State.passwordIsCached()) {
+      pw = page.dexAddrAppPW.value || this.pwCache.pw
+    }
 
     const loaded = app.loading(this.form)
 

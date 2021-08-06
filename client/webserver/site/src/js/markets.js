@@ -1082,7 +1082,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     this.openAsset = asset
     this.openFunc = f
-    page.openForm.setAsset(app.assets[asset.id])
+    this.unlockForm.setAsset(app.assets[asset.id])
     this.showForm(page.openForm)
     page.uwAppPass.focus()
   }

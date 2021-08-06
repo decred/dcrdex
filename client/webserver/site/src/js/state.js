@@ -1,6 +1,7 @@
 const darkModeCK = 'darkMode'
 const authCK = 'dexauth'
 const popupsCK = 'popups'
+const pwKeyCK = 'sessionkey'
 
 // State is a set of static methods for working with the user state. It has
 // utilities for setting and retrieving cookies and storing user configuration
@@ -40,6 +41,11 @@ export default class State {
    */
   static isDark () {
     return document.cookie.split(';').filter((item) => item.includes(`${darkModeCK}=1`)).length
+  }
+
+  /* passwordIsCached returns whether or not there is a cached password in the cookies. */
+  static passwordIsCached () {
+    return !!this.getCookie(pwKeyCK)
   }
 
   /* store puts the key-value pair into Window.localStorage. */

@@ -24,6 +24,8 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/encrypt"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -44,6 +46,8 @@ const (
 	authCK = "dexauth"
 	// popupsCK is the cookie key for the user's preference for showing popups.
 	popupsCK = "popups"
+	// pwKeyCK is the cookie used to unencrypt the user's password.
+	pwKeyCK = "sessionkey"
 	// ctxKeyUserInfo is used in the authorization middleware for saving user
 	// info in http request contexts.
 	ctxKeyUserInfo = contextKey("userinfo")
@@ -52,6 +56,12 @@ const (
 	// The basis for content-security-policy. connect-src must be the final
 	// directive so that it can be reliably supplemented on startup.
 	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'"
+)
+
+var (
+	// errNoCachedPW is returned when attempting to retrieve a cached password, but the
+	// cookie that should contain the cached password is not populated.
+	errNoCachedPW = errors.New("no cached password")
 )
 
 var (
@@ -102,19 +112,28 @@ type clientCore interface {
 
 var _ clientCore = (*core.Core)(nil)
 
+// cachedPassword consists of the seralized crypter and an encrypted password.
+// A key stored in the cookies is used to deserlialize the crypter, then
+// the crypter is used to decrypt the password.
+type cachedPassword struct {
+	EncryptedPass     []byte
+	SerializedCrypter []byte
+}
+
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	wsServer   *websocket.Server
-	mux        *chi.Mux
-	core       clientCore
-	addr       string
-	csp        string
-	srv        *http.Server
-	html       *templates
-	indent     bool
-	mtx        sync.RWMutex
-	authTokens map[string]bool
+	wsServer        *websocket.Server
+	mux             *chi.Mux
+	core            clientCore
+	addr            string
+	csp             string
+	srv             *http.Server
+	html            *templates
+	indent          bool
+	mtx             sync.RWMutex
+	authTokens      map[string]bool
+	cachedPasswords map[string]*cachedPassword
 }
 
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
@@ -189,13 +208,14 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:       core,
-		mux:        mux,
-		srv:        httpServer,
-		addr:       addr,
-		html:       tmpl,
-		wsServer:   websocket.New(core, log.SubLogger("WS")),
-		authTokens: make(map[string]bool),
+		core:            core,
+		mux:             mux,
+		srv:             httpServer,
+		addr:            addr,
+		html:            tmpl,
+		wsServer:        websocket.New(core, log.SubLogger("WS")),
+		authTokens:      make(map[string]bool),
+		cachedPasswords: make(map[string]*cachedPassword),
 	}
 
 	// Middleware
@@ -385,13 +405,13 @@ func (s *WebServer) authorize() string {
 func (s *WebServer) deauth() {
 	s.mtx.Lock()
 	s.authTokens = make(map[string]bool)
+	s.cachedPasswords = make(map[string]*cachedPassword)
 	s.mtx.Unlock()
 }
 
-// isAuthed checks if the incoming request is from an authorized user/device.
-// Requires the auth token cookie to be set in the request and for the token
-// to match `WebServer.validAuthToken`.
-func (s *WebServer) isAuthed(r *http.Request) bool {
+// getAuthToken checks the request for an auth token cookie and returns it.
+// An empty string is returned if there is no auth token cookie.
+func getAuthToken(r *http.Request) string {
 	var authToken string
 	cookie, err := r.Cookie(authCK)
 	switch {
@@ -402,9 +422,100 @@ func (s *WebServer) isAuthed(r *http.Request) bool {
 		log.Errorf("authToken retrieval error: %v", err)
 	}
 
+	return authToken
+}
+
+// getPWKey checks the request for a password key cookie. Returns an error
+// if it does not exist or it is not a valid.
+func getPWKey(r *http.Request) ([]byte, error) {
+	cookie, err := r.Cookie(pwKeyCK)
+	switch {
+	case err == nil:
+		sessionKey, err := hex.DecodeString(cookie.Value)
+		if err != nil {
+			return nil, err
+		}
+		return sessionKey, nil
+	default:
+		return nil, err
+	}
+}
+
+// isAuthed checks if the incoming request is from an authorized user/device.
+// Requires the auth token cookie to be set in the request and for the token
+// to match `WebServer.validAuthToken`.
+func (s *WebServer) isAuthed(r *http.Request) bool {
+	authToken := getAuthToken(r)
+	if authToken == "" {
+		return false
+	}
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.authTokens[authToken]
+}
+
+// getCachedPassword takes authToken passed to and the key returned from
+// cacheAppPassword to retrieve and decrypt the app password.
+func (s *WebServer) getCachedPassword(key []byte, authToken string) ([]byte, error) {
+	s.mtx.Lock()
+	cachedPassword, ok := s.cachedPasswords[authToken]
+	s.mtx.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("cached encrypted password not found for"+
+			" auth token: %v", authToken)
+	}
+
+	crypter, err := encrypt.Deserialize(key, cachedPassword.SerializedCrypter)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing crypter: %v", err)
+	}
+
+	pw, err := crypter.Decrypt(cachedPassword.EncryptedPass)
+	if err != nil {
+		return nil, fmt.Errorf("error decrypting password: %v", err)
+	}
+
+	return pw, nil
+}
+
+// getCachedPasswordUsingRequest retrieves the cached password using the information
+// in the request.
+func (s *WebServer) getCachedPasswordUsingRequest(r *http.Request) ([]byte, error) {
+	authToken := getAuthToken(r)
+	if authToken == "" {
+		return nil, errNoCachedPW
+	}
+	pwKeyBlob, err := getPWKey(r)
+	if err != nil {
+		return nil, errNoCachedPW
+	}
+	return s.getCachedPassword(pwKeyBlob, authToken)
+}
+
+// cacheAppPassword encrypts the app password with a random encryption key and returns the key.
+// The authToken is used to lookup the encrypted password when calling getCachedPassword.
+func (s *WebServer) cacheAppPassword(appPW []byte, authToken string) ([]byte, error) {
+	key := encode.RandomBytes(16)
+	crypter := encrypt.NewCrypter(key)
+	encryptedPass, err := crypter.Encrypt(appPW)
+	if err != nil {
+		return nil, fmt.Errorf("error encrypting password: %v", err)
+	}
+
+	s.mtx.Lock()
+	s.cachedPasswords[authToken] = &cachedPassword{
+		EncryptedPass:     encryptedPass,
+		SerializedCrypter: crypter.Serialize(),
+	}
+	s.mtx.Unlock()
+	return key, nil
+}
+
+// isPasswordCached checks if a password can be retrieved from the encrypted
+// password cache using the information in the request.
+func (s *WebServer) isPasswordCached(r *http.Request) bool {
+	_, err := s.getCachedPasswordUsingRequest(r)
+	return err == nil
 }
 
 // readNotifications reads from the Core notification channel and relays to
@@ -444,9 +555,10 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 // and cookies.
 type userInfo struct {
 	*core.User
-	Authed     bool
-	DarkMode   bool
-	ShowPopups bool
+	Authed           bool
+	PasswordIsCached bool
+	DarkMode         bool
+	ShowPopups       bool
 }
 
 // Extract the userInfo from the request context. This should be used with

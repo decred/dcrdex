@@ -3,6 +3,7 @@ import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, WalletConfigForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as ntfn from './notifications'
+import State from './state'
 
 const bind = Doc.bind
 const animationLength = 300
@@ -124,7 +125,7 @@ export default class WalletsPage extends BasePage {
       bind(a.withdraw, 'click', e => { run(e, this.showWithdraw.bind(this)) })
       bind(a.deposit, 'click', e => { run(e, this.showDeposit.bind(this)) })
       bind(a.create, 'click', e => { run(e, this.showNewWallet.bind(this)) })
-      bind(a.unlock, 'click', e => { run(e, this.showOpen.bind(this)) })
+      bind(a.unlock, 'click', e => { run(e, this.openWallet.bind(this)) })
       bind(a.lock, 'click', async e => { run(e, this.lock.bind(this)) })
       bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
     }
@@ -245,12 +246,33 @@ export default class WalletsPage extends BasePage {
     await this.walletForm.loadDefaults()
   }
 
+  /* Show the open wallet form if the password is not cached, and otherwise
+   * attempt to open the wallet.
+   */
+  async openWallet (assetID) {
+    if (!State.passwordIsCached()) {
+      this.showOpen.bind(this)(assetID)
+    } else {
+      this.openAsset = assetID
+      const open = {
+        assetID: parseInt(assetID)
+      }
+      const res = await postJSON('/api/openwallet', open)
+      if (app.checkResponse(res)) {
+        this.openWalletSuccess.bind(this)()
+      } else {
+        this.showOpen.bind(this)(assetID, `Error opening wallet: ${res.msg}`)
+      }
+    }
+  }
+
   /* Show the form used to unlock a wallet. */
-  async showOpen (assetID) {
+  async showOpen (assetID, errorMsg) {
     const page = this.page
     this.openAsset = this.lastFormAsset = assetID
     await this.hideBox()
-    page.openForm.setAsset(app.assets[assetID])
+    this.unlockForm.setAsset(app.assets[assetID])
+    if (errorMsg) this.unlockForm.showErrorOnly(errorMsg)
     this.animation = this.showBox(page.openForm, page.walletPass)
   }
 
@@ -401,7 +423,7 @@ export default class WalletsPage extends BasePage {
   async reconfig () {
     const page = this.page
     Doc.hide(page.reconfigErr)
-    if (!page.appPW.value) {
+    if (!page.appPW.value && !State.passwordIsCached()) {
       page.reconfigErr.textContent = 'app password cannot be empty'
       Doc.show(page.reconfigErr)
       return
