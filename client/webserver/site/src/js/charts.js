@@ -83,20 +83,19 @@ export class DepthChart {
     }
 
     bind(this.canvas, 'wheel', e => { this.wheel(e) })
-    this.resize = h => { this.resize_(h) }
-    bind(window, 'resize', this.resize())
+    this.boundResizer = () => { this.resize(parent.clientHeight) }
+    bind(window, 'resize', this.boundResizer)
     bind(this.canvas, 'click', e => { this.click(e) })
     this.resize(parent.clientHeight)
   }
 
   // The market handler will call unattach when the markets page is unloaded.
   unattach () {
-    unbind(window, 'resize', this.resize)
+    unbind(window, 'resize', this.boundResizer)
   }
 
-  // resize_ is a 'resize' event handler.
-  resize_ (parentHeight) {
-    parentHeight = parentHeight || this.parent.clientHeight
+  // resize is a 'resize' event handler.
+  resize (parentHeight) {
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = parentHeight - 20 // magic number derived from a soup of css values.
     const xLblHeight = 30
