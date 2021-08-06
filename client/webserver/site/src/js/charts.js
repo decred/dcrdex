@@ -84,7 +84,7 @@ export class DepthChart {
 
     bind(this.canvas, 'wheel', e => { this.wheel(e) })
     this.resize = h => { this.resize_(h) }
-    bind(window, 'resize', () => { this.resize(parent.clientHeight) })
+    bind(window, 'resize', this.resize())
     bind(this.canvas, 'click', e => { this.click(e) })
     this.resize(parent.clientHeight)
   }
@@ -96,7 +96,7 @@ export class DepthChart {
 
   // resize_ is a 'resize' event handler.
   resize_ (parentHeight) {
-    if (!parentHeight) return // Fix for firefox bug. See #1113 for discussion.
+    parentHeight = parentHeight || this.parent.clientHeight
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = parentHeight - 20 // magic number derived from a soup of css values.
     const xLblHeight = 30
