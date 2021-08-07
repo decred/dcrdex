@@ -299,8 +299,10 @@ func v6Upgrade(tx *bbolt.Tx) error {
 		if err != nil {
 			return fmt.Errorf("error decoding proof: %w", err)
 		}
-		retired := encode.ByteFalse
-		if isRetiredMatch(match, proof) {
+		var retired []byte
+		if dexdb.MatchIsActive(match, proof) {
+			retired = encode.ByteFalse
+		} else {
 			retired = encode.ByteTrue
 		}
 		return mBkt.Put(retiredKey, retired)

@@ -245,6 +245,40 @@ func (m *MetaMatch) MatchOrderUniqueID() []byte {
 	return hashKey(append(m.MatchID[:], m.OrderID[:]...))
 }
 
+// MatchIsActive returns false (i.e. the match is inactive) if: (1) status is
+// complete AND proof.RedeemSig is set, (2) the match is refunded, or (3) it is
+// revoked and this side of the match requires no further action like refund or
+// auto-redeem.
+func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
+	// MatchComplete only means inactive if redeem request was accepted, but
+	// MatchComplete is set immediately after bcast for taker.
+	if match.Status == order.MatchComplete && len(proof.Auth.RedeemSig) > 0 {
+		return false
+	}
+
+	// Refunded matches are inactive regardless of status.
+	if len(proof.RefundCoin) > 0 {
+		return false
+	}
+
+	// Revoked matches may need to be refunded or auto-redeemed first.
+	if proof.IsRevoked() {
+		// - NewlyMatched requires no further action from either side
+		// - MakerSwapCast requires no further action from the taker
+		// - (TakerSwapCast requires action on both sides)
+		// - MakerRedeemed requires no further action from the maker
+		// - MatchComplete requires no further action. This happens if taker
+		//   does not have server's ack of their redeem request (RedeemSig).
+		status, side := match.Status, match.Side
+		if status == order.NewlyMatched || status == order.MatchComplete ||
+			(status == order.MakerSwapCast && side == order.Taker) ||
+			(status == order.MakerRedeemed && side == order.Maker) {
+			return false
+		}
+	}
+	return true
+}
+
 // MatchMetaData is important auxiliary information about the match.
 type MatchMetaData struct {
 	// Proof is the signatures and other verification-related data for the match.
