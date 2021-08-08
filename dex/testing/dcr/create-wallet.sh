@@ -16,10 +16,10 @@ mkdir -p ${WALLET_DIR}
 export SHELL=$(which bash)
 
 # Connect to alpha or beta node
-DCRD_RPC_PORT="19570"
+DCRD_RPC_PORT="${ALPHA_NODE_RPC_PORT}"
 DCRD_RPC_CERT="${NODES_ROOT}/alpha/rpc.cert"
-if [ "${NAME}" = "beta" ]; then
-  DCRD_RPC_PORT="19569"
+if [ "${NAME}" = "beta" ] || [ "${NAME}" = "alpha-clone" ]; then
+  DCRD_RPC_PORT="${BETA_NODE_RPC_PORT}"
   DCRD_RPC_CERT="${NODES_ROOT}/beta/rpc.cert"
 fi
 
@@ -39,17 +39,21 @@ rpcconnect=127.0.0.1:${DCRD_RPC_PORT}
 cafile=${DCRD_RPC_CERT}
 EOF
 
-if [ -n "${HTTPPROF_PORT}" ]; then
-echo "profile=127.0.0.1:${HTTPPROF_PORT}" >> "${WALLET_DIR}/${NAME}.conf"
+if [ "${ENABLE_VOTING}" = "1" ]; then
+echo "enablevoting=1" >> "${WALLET_DIR}/${NAME}.conf"
 fi
 
-if [ "${ENABLE_VOTING}" = "1" ]; then
+if [ "${ENABLE_VOTING}" = "2" ]; then
 cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
 enablevoting=1
 enableticketbuyer=1
 ticketbuyer.limit=6
 ticketbuyer.balancetomaintainabsolute=1000
 EOF
+fi
+
+if [ -n "${HTTPPROF_PORT}" ]; then
+echo "profile=127.0.0.1:${HTTPPROF_PORT}" >> "${WALLET_DIR}/${NAME}.conf"
 fi
 
 # wallet ctl config

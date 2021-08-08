@@ -34,10 +34,8 @@ Try `./alpha getbalance`, for example.
 undergo a 1-deep reorganization. The script takes the following optional
 arguments: `./reorg {node} {depth}`, where:
 - `node` is the node that should undergo a reorg, either "alpha" or "beta" (default: alpha)
-- `depth` is the number of blocks that should be reorged into `node` (default: 1 for alpha, 3 for beta).
-Currently, only 1 block (instead of `depth` blocks) can be purged from either
-nodes during reorg, but the reorged node will always see `depth` new blocks
-after the reorg.
+- `depth` is the number of blocks that should be purged from `node` (default: 2).
+At the end of the reorg, both nodes will have `depth+1` new blocks.
 
 `./quit` shuts down the nodes and closes the tmux session.
 
