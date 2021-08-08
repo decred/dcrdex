@@ -5,22 +5,32 @@ SESSION="dcr-harness"
 export RPC_USER="user"
 export RPC_PASS="pass"
 export WALLET_PASS=abc
+
+# --listen and --rpclisten ports for alpha and beta nodes.
+# The --rpclisten ports are exported for use by create-wallet.sh
+# to decide which node to connect a wallet to.
+ALPHA_NODE_PORT="19560"
+export ALPHA_NODE_RPC_PORT="19561"
+BETA_NODE_PORT="19570"
+export BETA_NODE_RPC_PORT="19571"
+
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
 ALPHA_MINING_ADDR="SsXciQNTo3HuV5tX3yy4hXndRWgLMRVC7Ah"
-ALPHA_NODE_PORT="19571"
-ALPHA_WALLET_PORT="19567"
-ALPHA_WALLET_HTTPPROF_PORT="19577"
-ALPHA_RPC_PORT="19570"
+ALPHA_WALLET_RPC_PORT="19562"
+ALPHA_WALLET_HTTPPROF_PORT="19563"
+
+# The alpha wallet clone uses the same seed as the alpha wallet.
+ALPHA_WALLET_CLONE_RPC_PORT="19564"
+
 BETA_WALLET_SEED="3285a47d6a59f9c548b2a72c2c34a2de97967bede3844090102bbba76707fe9d"
 BETA_MINING_ADDR="Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
-BETA_NODE_PORT="19559"
-BETA_WALLET_PORT="19568"
-BETA_WALLET_HTTPPROF_PORT="19578"
-BETA_RPC_PORT="19569"
+BETA_WALLET_RPC_PORT="19572"
+BETA_WALLET_HTTPPROF_PORT="19573"
 
 TRADING_WALLET1_SEED="31cc0eeb220aa5b1f1ab3b6c47529d737976af1a556b156a665408f1711c962f"
 TRADING_WALLET1_ADDRESS="SsjTp2QaT8qkPGWKKSeFi4DtaZsgkoPbgXt"
 TRADING_WALLET1_PORT="19581"
+
 TRADING_WALLET2_SEED="3db72efa55b9e6cce9c27dde9bea848c6199004f9b1ae2add3b04389495edb9c"
 TRADING_WALLET2_ADDRESS="SsYW5LPmGCvvHuWok8U9FQu1kotv8LpvoEt"
 TRADING_WALLET2_PORT="19582"
@@ -112,29 +122,32 @@ NUM=1
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
 
+# Alpha wallet clone script.
+# The alpha wallet clone connects to the beta node so it can vote on tickets
+# purchased with the alpha wallet after the alpha node is disconnected. This
+# alpha wallet clone does not need to purchase tickets or do anything else
+# really other than just voting on tickets purchased with the alpha wallet.
+cat > "${NODES_ROOT}/harness-ctl/clone-w-alpha" <<EOF
+"${HARNESS_DIR}/create-wallet" "$SESSION:7" "alpha-clone" ${ALPHA_WALLET_SEED} \
+${ALPHA_WALLET_CLONE_RPC_PORT} 1 # ENABLE_VOTING=1 enables voting but not ticket buyer
+tmux select-window -t $SESSION:0 # return to the ctl window
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/clone-w-alpha"
+
 # Reorg script
 cat > "${NODES_ROOT}/harness-ctl/reorg" <<EOF
 #!/usr/bin/env bash
 REORG_NODE="alpha"
 VALID_NODE="beta"
-REORG_DEPTH=1
+REORG_DEPTH=2
 
 if [ "\$1" = "beta" ]; then
   REORG_NODE="beta"
   VALID_NODE="alpha"
-  REORG_DEPTH=3
 fi
 
 if [ "\$2" != "" ]; then
   REORG_DEPTH=\$2
-fi
-
-# TODO: Cannot currently cause a 1+ block re-org on alpha because
-# beta cannot mine more than 1 main chain block while disconnected
-# from alpha.
-if [ "\${REORG_NODE}" = "alpha" ] && [ \${REORG_DEPTH} -gt 1 ]; then
-  echo "Cannot cause a re-org of more than 1 block on alpha."
-  exit 1
 fi
 
 echo "Current alpha, beta best blocks"
@@ -144,24 +157,34 @@ echo "Disconnecting beta from alpha"
 ./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
 sleep 1
 
-# Mine equal number of blocks while disconnected.
-for NODE in \${REORG_NODE} \${VALID_NODE}; do
-  echo "Mining \${REORG_DEPTH} blocks on \${NODE}"
-  ./mine-\${NODE} \${REORG_DEPTH}
-  sleep 1
-done
+# Start the alpha wallet clone to enable the beta node receive
+# votes while disconnected from the alpha node.
+"${NODES_ROOT}/harness-ctl/clone-w-alpha"
+
+# Mine REORG_DEPTH blocks on REORG_NODE and REORG_DEPTH+1 blocks
+# on VALID_NODE while disconnected.
+echo "Mining \${REORG_DEPTH} blocks on \${REORG_NODE}"
+./mine-\${REORG_NODE} \${REORG_DEPTH}
+sleep 1
+echo "Mining \$((REORG_DEPTH+1)) blocks on \${VALID_NODE}"
+./mine-\${VALID_NODE} \$((REORG_DEPTH+1))
+sleep 1
+
 echo "Diverged alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
+
+# Stop alpha wallet clone, no longer needed.
+echo "Stopping alpha-clone wallet"
+tmux send-keys -t $SESSION:7 C-c
+tmux send-keys -t $SESSION:7 exit C-m
 
 echo "Reconnecting beta to alpha"
 ./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} add
 sleep 1
 
-echo "Mining 1 more block on \${VALID_NODE} to trigger re-org on \${REORG_NODE}"
-./mine-\${VALID_NODE} 1
-sleep 2
 echo "Reconnected alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
 
-grep REORG ${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log
+echo "${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log:"
+grep REORG ${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log | tail -4
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 
@@ -197,7 +220,7 @@ cat > "${NODES_ROOT}/alpha/dcrd.conf" <<EOF
 rpcuser=${RPC_USER}
 rpcpass=${RPC_PASS}
 rpccert=${NODES_ROOT}/alpha/rpc.cert
-rpclisten=127.0.0.1:${ALPHA_RPC_PORT}
+rpclisten=127.0.0.1:${ALPHA_NODE_RPC_PORT}
 EOF
 
 
@@ -222,7 +245,7 @@ tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 echo "Starting simnet alpha node (txindex for server)"
 tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
---miningaddr=${ALPHA_MINING_ADDR} --rpclisten=:${ALPHA_RPC_PORT} \
+--miningaddr=${ALPHA_MINING_ADDR} --rpclisten=:${ALPHA_NODE_RPC_PORT} \
 --txindex --listen=:${ALPHA_NODE_PORT} \
 --debuglevel=debug \
 --whitelist=127.0.0.0/8 --whitelist=::1 \
@@ -235,7 +258,7 @@ tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 echo "Starting simnet beta node (no txindex for a typical client)"
 tmux send-keys -t $SESSION:2 "dcrd --appdata=${NODES_ROOT}/beta \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
---listen=:${BETA_NODE_PORT} --rpclisten=:${BETA_RPC_PORT} \
+--listen=:${BETA_NODE_PORT} --rpclisten=:${BETA_NODE_RPC_PORT} \
 --miningaddr=${BETA_MINING_ADDR} \
 --connect=127.0.0.1:${ALPHA_NODE_PORT} \
 --debuglevel=debug \
@@ -249,26 +272,26 @@ sleep 3
 ################################################################################
 
 echo "Creating simnet alpha wallet"
-ENABLE_TICKET_BUYER="1"
+ENABLE_VOTING="2" # 2 = enable voting and ticket buyer
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
-${ALPHA_WALLET_PORT} ${ENABLE_TICKET_BUYER} ${ALPHA_WALLET_HTTPPROF_PORT}
+${ALPHA_WALLET_RPC_PORT} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT}
 # alpha uses walletpassphrase/walletlock.
 
 echo "Creating simnet beta wallet"
-ENABLE_TICKET_BUYER="0"
+ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
-${BETA_WALLET_PORT} ${ENABLE_TICKET_BUYER} ${BETA_WALLET_HTTPPROF_PORT}
+${BETA_WALLET_RPC_PORT} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT}
 
 # The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
-ENABLE_TICKET_BUYER="0"
+ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
-${TRADING_WALLET1_PORT} ${ENABLE_TICKET_BUYER}
+${TRADING_WALLET1_PORT} ${ENABLE_VOTING}
 
 echo "Creating simnet trading wallet 2"
-ENABLE_TICKET_BUYER="0"
+ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
-${TRADING_WALLET2_PORT} ${ENABLE_TICKET_BUYER}
+${TRADING_WALLET2_PORT} ${ENABLE_VOTING}
 
 sleep 15
 
