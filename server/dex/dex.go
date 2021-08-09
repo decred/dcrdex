@@ -141,6 +141,7 @@ type configResponse struct {
 
 func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
 	configMsg := &msgjson.ConfigResult{
+		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
 		CancelMax:        cfg.CancelThreshold,
 		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
