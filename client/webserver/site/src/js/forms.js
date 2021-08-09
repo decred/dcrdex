@@ -329,8 +329,7 @@ export class UnlockWalletForm {
    * app pass field and the submit button.
    */
   showErrorOnly (msg) {
-    this.fields.unlockErr.textContent = msg
-    Doc.show(this.fields.unlockErr)
+    this.setError(msg)
     Doc.hide(this.fields.uwAppPassBox)
     Doc.hide(this.fields.submitUnlockDiv)
   }

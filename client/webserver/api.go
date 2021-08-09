@@ -602,11 +602,11 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	passwordIsCached := s.isPasswordCached(r)
 	// Force other sessions to login again. Without this, any sessions that
 	// had a cached password will no longer work. However, we assign a new auth
 	// token and cache the new password (if it was previously cached) for this
 	// session.
-	passwordIsCached := s.isPasswordCached(r)
 	s.deauth()
 	authToken := s.authorize()
 	setCookie(authCK, authToken, w)

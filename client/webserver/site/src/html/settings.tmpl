@@ -39,7 +39,7 @@
         {{end}}
       </div>
       <br>
-      <div {{if not .UserInfo.Authed}}class="d-hide"{{end}}>
+      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         <p>
         The Decred DEX Client supports simultaneous use of any number of DEX
         servers.
@@ -51,7 +51,7 @@
     <div>
         <button id="changeAppPW" class="bg2 selected">Change App Password</button>
     </div>
-    <div {{if not .UserInfo.Authed}}class="d-hide"{{end}}>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
       You should carefully write down your application seed and save a copy.
       Should you lose access to this machine or the critical application files,
       the seed can be used to restore your DEX accounts and native wallets.
