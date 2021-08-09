@@ -26,7 +26,8 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
-var version = semver{major: 0, minor: 0, patch: 0}
+// The product release version.
+var version = semver{major: 0, minor: 2, patch: 2}
 
 // semver holds dexcctl's semver values.
 type semver struct {
