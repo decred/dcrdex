@@ -5,8 +5,11 @@
 package eth
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -119,14 +122,14 @@ func TestLoad(t *testing.T) {
 func TestDecodeCoinID(t *testing.T) {
 	tests := []struct {
 		name                   string
-		wantFlags              uint16
+		wantFlags              CoinIDFlag
 		wantAddr               common.Address
 		coinID, wantSecretHash []byte
 		wantErr                bool
 	}{{
 		name: "ok",
 		coinID: []byte{
-			0xFF, 0x01, // 2 byte flags
+			0x00, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -135,7 +138,7 @@ func TestDecodeCoinID(t *testing.T) {
 			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
-		wantFlags: 65281,
+		wantFlags: TxIDFlag,
 		wantAddr: common.Address{
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
@@ -189,7 +192,7 @@ func TestDecodeCoinID(t *testing.T) {
 }
 
 func TestCoinIDToString(t *testing.T) {
-	flags := "ff01"
+	flags := SwapFlag
 	addr := "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	secretHash := "71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
 	tests := []struct {
@@ -199,7 +202,7 @@ func TestCoinIDToString(t *testing.T) {
 	}{{
 		name: "ok",
 		coinID: []byte{
-			0xFF, 0x01, // 2 byte flags
+			0x00, 0x02, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -208,11 +211,11 @@ func TestCoinIDToString(t *testing.T) {
 			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
-		wantCoinID: flags + ":" + addr + ":" + secretHash,
+		wantCoinID: fmt.Sprintf("%d:%s:%s", flags, addr, secretHash),
 	}, {
 		name: "wrong length",
 		coinID: []byte{
-			0xFF, 0x01, // 2 byte flags
+			0x00, 0x01, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05, // 20 byte addr
@@ -390,6 +393,107 @@ func TestSynced(t *testing.T) {
 		}
 		if synced != test.wantSynced {
 			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
+		}
+	}
+}
+
+func TestIsTxIDCoinID(t *testing.T) {
+	tests := []struct {
+		name string
+		flag CoinIDFlag
+		want bool
+	}{{
+		name: "true",
+		flag: TxIDFlag,
+		want: true,
+	}, {
+		name: "false zero",
+	}, {
+		name: "false other",
+		flag: SwapFlag,
+	}, {
+		name: "false txid and other",
+		flag: TxIDFlag | SwapFlag,
+	}}
+
+	for _, test := range tests {
+		got := IsTxIDCoinID(test.flag)
+		if got != test.want {
+			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
+		}
+	}
+}
+
+func TestIsSwapCoinID(t *testing.T) {
+	tests := []struct {
+		name string
+		flag CoinIDFlag
+		want bool
+	}{{
+		name: "true",
+		flag: SwapFlag,
+		want: true,
+	}, {
+		name: "false zero",
+	}, {
+		name: "false other",
+		flag: TxIDFlag,
+	}, {
+		name: "false txid and other",
+		flag: TxIDFlag | SwapFlag,
+	}}
+
+	for _, test := range tests {
+		got := IsSwapCoinID(test.flag)
+		if got != test.want {
+			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
+		}
+	}
+}
+
+func TestToCoinID(t *testing.T) {
+	a := common.HexToAddress("18d65fb8d60c1199bb1ad381be47aa692b482605")
+	addr := &a
+	secretHash, err := hex.DecodeString("71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c")
+	if err != nil {
+		panic(err)
+	}
+	tests := []struct {
+		name string
+		flag CoinIDFlag
+		want []byte
+	}{{
+		name: "txid",
+		flag: TxIDFlag,
+		want: []byte{
+			0x00, 0x01, // 2 byte flags
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, // 20 byte addr
+			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
+			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
+			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
+			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
+		},
+	}, {
+		name: "swap",
+		flag: SwapFlag,
+		want: []byte{
+			0x00, 0x02, // 2 byte flags
+			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
+			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
+			0x26, 0x05, // 20 byte addr
+			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
+			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
+			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
+			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
+		},
+	}}
+
+	for _, test := range tests {
+		got := ToCoinID(test.flag, addr, secretHash)
+		if !bytes.Equal(got, test.want) {
+			t.Fatalf("want %x but got %x for test %v", test.want, got, test.name)
 		}
 	}
 }

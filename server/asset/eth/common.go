@@ -11,7 +11,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// SwapState is the state of a swap and corresponds to values in the Solidity
+// swap contract.
 type SwapState uint8
+
+// CoinIDFlag signifies the type of coin ID. Currenty an eth coin ID can be
+// either a contract address and secret hash or a txid.
+type CoinIDFlag uint16
 
 const (
 	// Swap states represent the status of a swap.
@@ -29,6 +35,19 @@ const (
 	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
 	// as gwei, or 1e9 wei. This is used in factoring.
 	GweiFactor = 1e9
+)
+
+// TxIDFlag and SwapFlag are used in CoinIDs to signify a coinID
+// as either a transaction ID or a combination of a swap contract
+// address and secret hash. One or the other must be set.
+const (
+	// TxID indicates that this coin ID's hash is a txid. The address
+	// portion is zeros and unused.
+	TxIDFlag CoinIDFlag = 1 << iota
+	// SwapFlag indicates that this coin ID represents a swap with a
+	// contract address and secret hash used to fetch data about a swap
+	// from the live contract.
+	SwapFlag
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
@@ -57,32 +76,48 @@ func (ss SwapState) String() string {
 	return "unknown"
 }
 
-// DecodeCoinID decodes the coin ID into flags, a contract address, and secret hash.
-func DecodeCoinID(coinID []byte) (uint16, common.Address, []byte, error) {
+// DecodeCoinID decodes the coin ID into flags, a contract address which may be
+// zeroed, and hash that represents either a secret or txid depending on flags.
+func DecodeCoinID(coinID []byte) (CoinIDFlag, common.Address, []byte, error) {
 	if len(coinID) != coinIDSize {
 		return 0, common.Address{}, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
 			coinIDSize, len(coinID))
 	}
-	secretHash := make([]byte, 32)
-	copy(secretHash, coinID[22:])
-	return binary.BigEndian.Uint16(coinID[:2]), common.BytesToAddress(coinID[2:22]), secretHash, nil
+	hash := make([]byte, 32)
+	copy(hash, coinID[22:])
+	return CoinIDFlag(binary.BigEndian.Uint16(coinID[:2])),
+		common.BytesToAddress(coinID[2:22]), hash, nil
 }
 
 // CoinIDToString converts coinID into a human readable string.
 func CoinIDToString(coinID []byte) (string, error) {
-	flags, addr, secretHash, err := DecodeCoinID(coinID)
+	flags, addr, hash, err := DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x:%x:%x", flags, addr, secretHash), nil
+	return fmt.Sprintf("%x:%x:%x", flags, addr, hash), nil
 }
 
-// ToCoinID converts the address and secret hash to a coin ID.
-func ToCoinID(flags uint16, addr *common.Address, secretHash []byte) []byte {
+// ToCoinID converts the address and secret hash, or txid to a coin ID.
+func ToCoinID(flags CoinIDFlag, addr *common.Address, hash []byte) []byte {
 	b := make([]byte, coinIDSize)
-	b[0] = byte(flags)
-	b[1] = byte(flags >> 8)
-	copy(b[2:], addr[:])
-	copy(b[22:], secretHash[:])
+	b[0] = byte(flags >> 8)
+	b[1] = byte(flags)
+	if IsSwapCoinID(flags) {
+		copy(b[2:], addr[:])
+	}
+	copy(b[22:], hash[:])
 	return b
+}
+
+// IsTxIDCoinID returns whether the passed flags indicate the associated coin
+// ID's hash portion represents a transaction hash.
+func IsTxIDCoinID(flags CoinIDFlag) bool {
+	return flags == TxIDFlag
+}
+
+// IsSwapCoinID returns whether the passed flags indicate the associated
+// coin ID represents a swap with an address and secret hash.
+func IsSwapCoinID(flags CoinIDFlag) bool {
+	return flags == SwapFlag
 }
