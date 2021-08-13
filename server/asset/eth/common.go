@@ -63,6 +63,17 @@ const (
 	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
 	// as gwei, or 1e9 wei. This is used in factoring.
 	GweiFactor = 1e9
+	// InitGas is the amount of gas needed to initialize an ethereum swap.
+	//
+	// The price of a normal transaction is 21000 gas. However, when
+	// contract methods are called it is difficult to descern where gas is
+	// used. The formal declaration of what costs how much can be found at
+	// https://ethereum.github.io/yellowpaper/paper.pdf in Appendix G.
+	// The current value here is an appoximation based on tests.
+	//
+	// TODO: When the contract is solidified, break down evm functions
+	// called and the gas used for each. (◍•﹏•)
+	InitGas = 180000 // gas
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.

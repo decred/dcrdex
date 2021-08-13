@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -496,5 +497,30 @@ func TestToCoinID(t *testing.T) {
 		if !bytes.Equal(got, test.want) {
 			t.Fatalf("want %x but got %x for test %v", test.want, got, test.name)
 		}
+	}
+}
+
+// TestRequiredOrderFunds ensures that a fee calculation in the calc package
+// will come up with the correct required funds.
+func TestRequiredOrderFunds(t *testing.T) {
+	eth := new(Backend)
+	swapVal := uint64(1000000000)                // gwei
+	numSwaps := uint64(17)                       // swaps
+	initSizeBase := uint64(eth.InitTxSizeBase()) // 0 gas
+	initSize := uint64(eth.InitTxSize())         // init value gas
+	feeRate := uint64(30)                        // gwei
+
+	// We want the fee calculation to simply be the gas used for each swap
+	// plus the initial value.
+	want := swapVal + (numSwaps * initSize * feeRate)
+	nfo := &dex.Asset{
+		SwapSizeBase: initSizeBase,
+		SwapSize:     initSize,
+		MaxFeeRate:   feeRate,
+	}
+	// Second argument called inputsSize same as another initSize.
+	got := calc.RequiredOrderFunds(swapVal, initSize, numSwaps, nfo)
+	if got != want {
+		t.Fatalf("want %v got %v for fees", want, got)
 	}
 }
