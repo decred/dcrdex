@@ -251,7 +251,7 @@ export default class WalletsPage extends BasePage {
    */
   async openWallet (assetID) {
     if (!State.passwordIsCached()) {
-      this.showOpen.bind(this)(assetID)
+      this.showOpen(assetID)
     } else {
       this.openAsset = assetID
       const open = {
@@ -261,7 +261,7 @@ export default class WalletsPage extends BasePage {
       if (app.checkResponse(res)) {
         this.openWalletSuccess.bind(this)()
       } else {
-        this.showOpen.bind(this)(assetID, `Error opening wallet: ${res.msg}`)
+        this.showOpen(assetID, `Error opening wallet: ${res.msg}`)
       }
     }
   }
@@ -351,6 +351,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.withdrawAddr.value = ''
     page.withdrawAmt.value = ''
+    page.withdrawPW.value = ''
     page.withdrawAvail.textContent = (wallet.balance.available / 1e8).toFixed(8)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name

@@ -131,7 +131,7 @@ type WebServer struct {
 	srv             *http.Server
 	html            *templates
 	indent          bool
-	mtx             sync.RWMutex
+	authMtx         sync.RWMutex
 	authTokens      map[string]bool
 	cachedPasswords map[string]*cachedPassword
 }
@@ -394,19 +394,19 @@ func (s *WebServer) authorize() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
-	s.mtx.Lock()
+	s.authMtx.Lock()
 	s.authTokens[token] = true
-	s.mtx.Unlock()
+	s.authMtx.Unlock()
 	return token
 }
 
 // deauth invalidates all current auth tokens. All existing sessions will need
 // to login again.
 func (s *WebServer) deauth() {
-	s.mtx.Lock()
+	s.authMtx.Lock()
 	s.authTokens = make(map[string]bool)
 	s.cachedPasswords = make(map[string]*cachedPassword)
-	s.mtx.Unlock()
+	s.authMtx.Unlock()
 }
 
 // getAuthToken checks the request for an auth token cookie and returns it.
@@ -426,7 +426,7 @@ func getAuthToken(r *http.Request) string {
 }
 
 // getPWKey checks the request for a password key cookie. Returns an error
-// if it does not exist or it is not a valid.
+// if it does not exist or it is not valid.
 func getPWKey(r *http.Request) ([]byte, error) {
 	cookie, err := r.Cookie(pwKeyCK)
 	switch {
@@ -436,6 +436,8 @@ func getPWKey(r *http.Request) ([]byte, error) {
 			return nil, err
 		}
 		return sessionKey, nil
+	case errors.Is(err, http.ErrNoCookie):
+		return nil, nil
 	default:
 		return nil, err
 	}
@@ -449,17 +451,17 @@ func (s *WebServer) isAuthed(r *http.Request) bool {
 	if authToken == "" {
 		return false
 	}
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
+	s.authMtx.RLock()
+	defer s.authMtx.RUnlock()
 	return s.authTokens[authToken]
 }
 
-// getCachedPassword takes authToken passed to and the key returned from
-// cacheAppPassword to retrieve and decrypt the app password.
+// getCachedPassword retrieves the cached password for the user identified by authToken and
+// presenting the specified key in their cookies.
 func (s *WebServer) getCachedPassword(key []byte, authToken string) ([]byte, error) {
-	s.mtx.Lock()
+	s.authMtx.Lock()
 	cachedPassword, ok := s.cachedPasswords[authToken]
-	s.mtx.Unlock()
+	s.authMtx.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("cached encrypted password not found for"+
 			" auth token: %v", authToken)
@@ -467,12 +469,12 @@ func (s *WebServer) getCachedPassword(key []byte, authToken string) ([]byte, err
 
 	crypter, err := encrypt.Deserialize(key, cachedPassword.SerializedCrypter)
 	if err != nil {
-		return nil, fmt.Errorf("error deserializing crypter: %v", err)
+		return nil, fmt.Errorf("error deserializing crypter: %w", err)
 	}
 
 	pw, err := crypter.Decrypt(cachedPassword.EncryptedPass)
 	if err != nil {
-		return nil, fmt.Errorf("error decrypting password: %v", err)
+		return nil, fmt.Errorf("error decrypting password: %w", err)
 	}
 
 	return pw, nil
@@ -487,6 +489,9 @@ func (s *WebServer) getCachedPasswordUsingRequest(r *http.Request) ([]byte, erro
 	}
 	pwKeyBlob, err := getPWKey(r)
 	if err != nil {
+		return nil, err
+	}
+	if pwKeyBlob == nil && err == nil {
 		return nil, errNoCachedPW
 	}
 	return s.getCachedPassword(pwKeyBlob, authToken)
@@ -502,12 +507,12 @@ func (s *WebServer) cacheAppPassword(appPW []byte, authToken string) ([]byte, er
 		return nil, fmt.Errorf("error encrypting password: %v", err)
 	}
 
-	s.mtx.Lock()
+	s.authMtx.Lock()
 	s.cachedPasswords[authToken] = &cachedPassword{
 		EncryptedPass:     encryptedPass,
 		SerializedCrypter: crypter.Serialize(),
 	}
-	s.mtx.Unlock()
+	s.authMtx.Unlock()
 	return key, nil
 }
 
