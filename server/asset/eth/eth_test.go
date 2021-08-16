@@ -11,13 +11,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -47,7 +51,7 @@ type testNode struct {
 	peersErr       error
 }
 
-func (n *testNode) connect(ctx context.Context, IPC string) error {
+func (n *testNode) connect(ctx context.Context, cfg *config) error {
 	return n.connectErr
 }
 
@@ -81,31 +85,63 @@ func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return n.sugGasPrice, n.sugGasPriceErr
 }
 
-func TestLoad(t *testing.T) {
+func TestLoadConfig(t *testing.T) {
+	newCFGBytes := func(ipc, addr string) []byte {
+		return []byte(fmt.Sprintf("ipc=%s\ncontractaddr=%s", ipc, addr))
+	}
+	newCFG := func(ipc, addr string) *config {
+		return &config{
+			ContractAddr: addr,
+			IPC:          ipc,
+		}
+	}
+	goodAddr := "0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"
+	dir, err := os.MkdirTemp("", "loadconfigtest")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.Remove(dir)
 	tests := []struct {
-		name, IPC, wantIPC string
-		network            dex.Network
-		wantErr            bool
+		name    string
+		cfgB    []byte
+		network dex.Network
+		wantCFG *config
+		wantErr bool
 	}{{
 		name:    "ok ipc supplied",
-		IPC:     "/home/john/bleh.ipc",
-		wantIPC: "/home/john/bleh.ipc",
+		cfgB:    newCFGBytes("/home/john/bleh.ipc", goodAddr),
+		wantCFG: newCFG("/home/john/bleh.ipc", goodAddr),
 		network: dex.Simnet,
 	}, {
 		name:    "ok ipc not supplied",
-		IPC:     "",
-		wantIPC: defaultIPC,
+		cfgB:    newCFGBytes("", goodAddr),
+		wantCFG: newCFG(defaultIPC, goodAddr),
 		network: dex.Simnet,
 	}, {
 		name:    "mainnet not allowed",
-		IPC:     "",
-		wantIPC: defaultIPC,
+		cfgB:    newCFGBytes("/home/john/bleh.ipc", goodAddr),
 		network: dex.Mainnet,
+		wantErr: true,
+	}, {
+		name:    "no address",
+		cfgB:    newCFGBytes("/home/john/bleh.ipc", ""),
+		network: dex.Simnet,
+		wantErr: true,
+	}, {
+		name:    "bad address",
+		cfgB:    newCFGBytes("/home/john/bleh.ipc", "123"),
+		network: dex.Simnet,
 		wantErr: true,
 	}}
 
 	for _, test := range tests {
-		cfg, err := load(test.IPC, test.network)
+		f := filepath.Join(dir, test.name)
+		err := os.WriteFile(f, test.cfgB, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		cfg, err := loadConfig(f, test.network)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -115,8 +151,8 @@ func TestLoad(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		if cfg.IPC != test.wantIPC {
-			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.IPC, test.name)
+		if !reflect.DeepEqual(cfg, test.wantCFG) {
+			t.Fatalf("want cfg value of %v but got %v for test %v", spew.Sdump(test.wantCFG), spew.Sdump(cfg), test.name)
 		}
 	}
 }

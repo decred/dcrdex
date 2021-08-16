@@ -240,6 +240,12 @@ cat > "${NODES_ROOT}/contract_addr.txt" <<EOF
 ${CONTRACT_ADDR}
 EOF
 
+# Add config to alpha node directory.
+cat > "${NODES_ROOT}/alpha/alpha.conf" <<EOF
+ipc=${NODES_ROOT}/alpha/node/geth.ipc
+contractaddr=${CONTRACT_ADDR}
+EOF
+
 # Reenable history and attach to the control session.
 tmux select-window -t $SESSION:0
 tmux send-keys -t $SESSION:0 "set -o history" C-m

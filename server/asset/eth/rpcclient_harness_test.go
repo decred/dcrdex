@@ -7,33 +7,48 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"context"
 	"testing"
+
+	"decred.org/dcrdex/dex"
 )
 
 var (
 	homeDir   = os.Getenv("HOME")
-	ipc       = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
+	cfgFile   = filepath.Join(homeDir, "dextest", "eth", "alpha", "alpha.conf")
 	ethClient = new(rpcclient)
 	ctx       context.Context
 )
 
 func TestMain(m *testing.M) {
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithCancel(context.Background())
-	defer func() {
-		cancel()
-		ethClient.shutdown()
-	}()
-	if err := ethClient.connect(ctx, ipc); err != nil {
-		fmt.Printf("Connect error: %v\n", err)
-		os.Exit(1)
+	run := func() (int, error) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		defer func() {
+			cancel()
+			ethClient.shutdown()
+		}()
+
+		cfg, err := loadConfig(cfgFile, dex.Simnet)
+		if err != nil {
+			return 1, fmt.Errorf("loadConfig error: %v\n", err)
+		}
+
+		if err := ethClient.connect(ctx, cfg); err != nil {
+			return 1, fmt.Errorf("Connect error: %v\n", err)
+		}
+		return m.Run(), nil
 	}
-	os.Exit(m.Run())
+
+	exitCode, err := run()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	os.Exit(exitCode)
 }
 
 func TestBestBlockHash(t *testing.T) {

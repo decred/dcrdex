@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -24,16 +25,22 @@ type rpcclient struct {
 	ec *ethclient.Client
 	// c is a direct client for raw calls.
 	c *rpc.Client
+	// es is a wrapper for contract calls.
+	es *swap.ETHSwap
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easil use.
-func (c *rpcclient) connect(ctx context.Context, IPC string) error {
-	client, err := rpc.DialIPC(ctx, IPC)
+func (c *rpcclient) connect(ctx context.Context, cfg *config) error {
+	client, err := rpc.DialIPC(ctx, cfg.IPC)
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
 	c.ec = ethclient.NewClient(client)
+	c.es, err = swap.NewETHSwap(common.HexToAddress(cfg.ContractAddr), c.ec)
+	if err != nil {
+		return fmt.Errorf("unable to find swap contract: %v", err)
+	}
 	c.c = client
 	return nil
 }

@@ -61,7 +61,7 @@ type ethFetcher interface {
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
-	connect(ctx context.Context, IPC string) error
+	connect(ctx context.Context, cfg *config) error
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
@@ -111,8 +111,8 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 
 // NewBackend is the exported constructor by which the DEX will import the
 // Backend.
-func NewBackend(ipc string, logger dex.Logger, network dex.Network) (*Backend, error) {
-	cfg, err := load(ipc, network)
+func NewBackend(configFile string, logger dex.Logger, network dex.Network) (*Backend, error) {
+	cfg, err := loadConfig(configFile, network)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (eth *Backend) shutdown() {
 // Connect connects to the node RPC server and initializes some variables.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	if err := c.connect(ctx, eth.cfg.IPC); err != nil {
+	if err := c.connect(ctx, eth.cfg); err != nil {
 		return nil, err
 	}
 	eth.node = &c

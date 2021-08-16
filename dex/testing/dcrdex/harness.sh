@@ -163,7 +163,7 @@ if [ $ETH_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
+            "configPath": "${TEST_ROOT}/eth/alpha/alpha.conf"
 EOF
 fi
 
