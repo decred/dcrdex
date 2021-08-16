@@ -4,10 +4,12 @@
 package eth
 
 import (
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Config holds the parameters needed to initialize an ETH wallet.
@@ -15,6 +17,7 @@ type Config struct {
 	AppDir         string  `ini:"appdir"`
 	NodeListenAddr string  `ini:"nodelistenaddr"`
 	GasFee         float64 `ini:"gasfee"`
+	ContractAddr   string  `ini:"contractaddr"`
 }
 
 // loadConfig loads the Config from a setting map and checks the network.
@@ -33,5 +36,13 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 	default:
 		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
+
+	if cfg.ContractAddr == "" {
+		return nil, errors.New("no swap contract address specified in config file")
+	}
+	if !common.IsHexAddress(cfg.ContractAddr) {
+		return nil, errors.New("contract address is structually invalid")
+	}
+
 	return cfg, nil
 }

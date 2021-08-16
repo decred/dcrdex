@@ -119,21 +119,34 @@ func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 }
 
 func TestLoadConfig(t *testing.T) {
+	goodAddr := "0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"
 	tests := []struct {
-		name    string
-		network dex.Network
-		wantErr bool
+		name     string
+		settings map[string]string
+		network  dex.Network
+		wantErr  bool
 	}{{
-		name:    "ok",
-		network: dex.Simnet,
+		name:     "ok",
+		settings: map[string]string{"contractaddr": goodAddr},
+		network:  dex.Simnet,
 	}, {
 		name:    "mainnet not allowed",
 		network: dex.Mainnet,
 		wantErr: true,
+	}, {
+		name:     "no contract addr",
+		settings: map[string]string{"contractaddr": ""},
+		network:  dex.Simnet,
+		wantErr:  true,
+	}, {
+		name:     "bad contract addr",
+		settings: map[string]string{"contractaddr": "123"},
+		network:  dex.Simnet,
+		wantErr:  true,
 	}}
 
 	for _, test := range tests {
-		_, err := loadConfig(nil, test.network)
+		_, err := loadConfig(test.settings, test.network)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

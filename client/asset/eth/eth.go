@@ -57,10 +57,19 @@ var (
 			DefaultValue: defaultGasFeeLimit,
 		},
 		{
-			Key:          "appdir",
-			DisplayName:  "DCR Dex Ethereum directory location.",
-			Description:  "Location of the ethereum client data. This SHOULD NOT be a directory used by other ethereum applications. The default is recommended.",
+			Key:         "appdir",
+			DisplayName: "DCR Dex Ethereum directory location.",
+			Description: "Location of the ethereum client data. This SHOULD NOT be a " +
+				"directory used by other ethereum applications. The default is recommended.",
 			DefaultValue: defaultAppDir,
+		},
+		{
+			Key:         "contractaddr",
+			DisplayName: "Ethereum swap address.",
+			Description: "Address of the Ethereum contract to use for swaps. If this is " +
+				"not a contract supported by the server, swaps will fail to initiate. Using " +
+				"a malicious swap address will result in the loss of all of your funds. Double " +
+				"check that this address points to a verified contract.",
 		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
@@ -70,7 +79,6 @@ var (
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
 	}
-	mainnetContractAddr = common.HexToAddress("")
 )
 
 // Check that Driver implements asset.Driver.
@@ -153,6 +161,8 @@ type ExchangeWallet struct {
 	currentTip *types.Block
 
 	acct *accounts.Account
+
+	contractAddr common.Address
 }
 
 // Info returns basic information about the wallet and asset.
@@ -180,6 +190,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		log:          logger,
 		tipChange:    assetCFG.TipChange,
 		internalNode: node,
+		contractAddr: common.HexToAddress(cfg.ContractAddr),
 	}, nil
 }
 
@@ -192,7 +203,7 @@ func (eth *ExchangeWallet) shutdown() {
 // Connect connects to the node RPC server. A dex.Connector.
 func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	err := c.connect(ctx, eth.internalNode, &mainnetContractAddr)
+	err := c.connect(ctx, eth.internalNode, &eth.contractAddr)
 	if err != nil {
 		return nil, err
 	}
