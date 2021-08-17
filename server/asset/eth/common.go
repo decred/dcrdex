@@ -258,7 +258,8 @@ const (
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
-// Errors if the amount of gwei is too big to fit fully into a uint64.
+// Errors if the amount of gwei is too big to fit fully into a uint64. The
+// passed wei parameter value is changed and is no longer useable.
 func ToGwei(wei *big.Int) (uint64, error) {
 	gweiFactorBig := big.NewInt(GweiFactor)
 	wei.Div(wei, gweiFactorBig)
