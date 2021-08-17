@@ -101,8 +101,7 @@ func CoinIDToString(coinID []byte) (string, error) {
 // ToCoinID converts the address and secret hash, or txid to a coin ID.
 func ToCoinID(flags CoinIDFlag, addr *common.Address, hash []byte) []byte {
 	b := make([]byte, coinIDSize)
-	b[0] = byte(flags >> 8)
-	b[1] = byte(flags)
+	binary.BigEndian.PutUint16(b[:2], uint16(flags))
 	if IsSwapCoinID(flags) {
 		copy(b[2:], addr[:])
 	}
