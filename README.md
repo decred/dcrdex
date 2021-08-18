@@ -238,7 +238,7 @@ for more details about how atomic swaps work.
 
 ### Dependencies
 
-1. [Go >= 1.15](https://golang.org/doc/install)
+1. [Go >= 1.16](https://golang.org/doc/install)
 2. [Node 14+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
 3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV), installed from the [v1.6.x release binaries](https://github.com/decred/decred-release/releases/tag/v1.6.1), or built from the `release-v1.6` branch.
 4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.

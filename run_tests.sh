@@ -13,9 +13,9 @@ for m in $modules
 do
 	cd "$dir/$m"
 
-	# run `go mod tidy` and fail if the git status of go.mod and/or
-	# go.sum changes
-	if [[ "$GV" =~ ^1.16 ]]; then
+	# Run `go mod tidy` and fail if the git status of go.mod and/or
+	# go.sum changes. Only do this for the latest Go version.
+	if [[ "$GV" =~ ^1.17 ]]; then
 		MOD_STATUS=$(git status --porcelain go.mod go.sum)
 		go mod tidy
 		UPDATED_MOD_STATUS=$(git status --porcelain go.mod go.sum)
