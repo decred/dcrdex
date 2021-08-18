@@ -434,8 +434,8 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With Core locked up, invalidate all known auth tokens to force any other
-	// sessions to login again.
+	// With Core locked up, invalidate all known auth tokens and cached passwords
+	// to force any other sessions to login again.
 	s.deauth()
 
 	clearCookie(authCK, w)
@@ -603,10 +603,9 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 	}
 
 	passwordIsCached := s.isPasswordCached(r)
-	// Force other sessions to login again. Without this, any sessions that
-	// had a cached password will no longer work. However, we assign a new auth
-	// token and cache the new password (if it was previously cached) for this
-	// session.
+	// Since the user changed the password, we clear all of the auth tokens
+	// and cached passwords. However, we assign a new auth token and cache
+	// the new password (if it was previously cached) for this session.
 	s.deauth()
 	authToken := s.authorize()
 	setCookie(authCK, authToken, w)

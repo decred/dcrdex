@@ -123,17 +123,18 @@ type cachedPassword struct {
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	wsServer        *websocket.Server
-	mux             *chi.Mux
-	core            clientCore
-	addr            string
-	csp             string
-	srv             *http.Server
-	html            *templates
-	indent          bool
+	wsServer *websocket.Server
+	mux      *chi.Mux
+	core     clientCore
+	addr     string
+	csp      string
+	srv      *http.Server
+	html     *templates
+	indent   bool
+
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
-	cachedPasswords map[string]*cachedPassword
+	cachedPasswords map[string]*cachedPassword // cached passwords keyed by auth token
 }
 
 // New is the constructor for a new WebServer. customSiteDir can be left blank,
@@ -491,7 +492,7 @@ func (s *WebServer) getCachedPasswordUsingRequest(r *http.Request) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	if pwKeyBlob == nil && err == nil {
+	if pwKeyBlob == nil {
 		return nil, errNoCachedPW
 	}
 	return s.getCachedPassword(pwKeyBlob, authToken)
