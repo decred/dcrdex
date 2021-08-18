@@ -1,8 +1,6 @@
 module decred.org/dcrdex
 
-go 1.15
-
-replace decred.org/dcrdex/internal/eth/reentryattack => ./internal/eth/reentryattack
+go 1.16
 
 require (
 	decred.org/dcrwallet/v2 v2.0.0-20210714172147-8815838443cd
