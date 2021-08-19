@@ -1,5 +1,6 @@
+//go:build harness
 // +build harness
-//
+
 // This test requires that the testnet harness be running and the unix socket
 // be located at $HOME/dextest/eth/gamma/node/geth.ipc
 //

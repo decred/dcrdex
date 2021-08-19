@@ -1,5 +1,6 @@
+//go:build !harness
 // +build !harness
-//
+
 // These tests will not be run if the harness build tag is set.
 
 package eth

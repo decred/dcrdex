@@ -1,5 +1,6 @@
+//go:build bchlive
 // +build bchlive
-//
+
 // go test -v -tags bchlive -run UTXOStats
 // -----------------------------------
 // Grab the most recent block and iterate it's outputs, taking account of

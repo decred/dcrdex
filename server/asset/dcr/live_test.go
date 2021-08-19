@@ -1,5 +1,6 @@
+//go:build dcrlive
 // +build dcrlive
-//
+
 // Since at least one live test runs for an hour, you should run live tests
 // individually using the -run flag. All of these tests will only run with the
 // 'dcrlive' build tag, specified with the -tags flag.
