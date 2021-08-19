@@ -1,5 +1,6 @@
+//go:build !dcrlive
 // +build !dcrlive
-//
+
 // These tests will not be run if the dcrlive build tag is set.
 
 package dcr

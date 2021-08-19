@@ -1,3 +1,4 @@
+//go:build !live
 // +build !live
 
 package websocket
