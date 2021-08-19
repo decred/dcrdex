@@ -235,7 +235,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	return s, c, shutdown, err
 }
 
-func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
+func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}, cookies map[string]string) {
 	t.Helper()
 	var err error
 	reader.msg, err = json.Marshal(body)
@@ -245,6 +245,13 @@ func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request)
 	req, err := http.NewRequest("GET", "/", reader)
 	if err != nil {
 		t.Fatalf("error creating request: %v", err)
+	}
+	for name, value := range cookies {
+		cookie := http.Cookie{
+			Name:  name,
+			Value: value,
+		}
+		req.AddCookie(&cookie)
 	}
 	f(writer, req)
 	if len(writer.b) == 0 {
@@ -329,12 +336,12 @@ func TestAPIRegister(t *testing.T) {
 
 	ensure := func(want string) {
 		t.Helper()
-		ensureResponse(t, s.apiRegister, want, reader, writer, body)
+		ensureResponse(t, s.apiRegister, want, reader, writer, body, nil)
 	}
 
-	goodBody := &core.RegisterForm{
-		Addr:    "test",
-		AppPass: []byte("pass"),
+	goodBody := &registrationForm{
+		Addr:     "test",
+		Password: []byte("pass"),
 	}
 	body = goodBody
 	ensure(`{"ok":true}`)
@@ -363,7 +370,7 @@ func TestAPILogin(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s.apiLogin, want, reader, writer, body)
+		ensureResponse(t, s.apiLogin, want, reader, writer, body, nil)
 	}
 
 	goodBody := &loginForm{
@@ -403,7 +410,9 @@ func TestAPIWithdraw(t *testing.T) {
 		return resp.OK
 	}
 
-	body = &withdrawForm{}
+	body = &withdrawForm{
+		Pass: encode.PassBytes("dummyAppPass"),
+	}
 
 	// initial success
 	if !isOK() {
@@ -439,7 +448,7 @@ func TestAPIInit(t *testing.T) {
 
 	ensure := func(f func(http.ResponseWriter, *http.Request), want string) {
 		t.Helper()
-		ensureResponse(t, f, want, reader, writer, body)
+		ensureResponse(t, f, want, reader, writer, body, nil)
 	}
 
 	body = struct{}{}
@@ -471,7 +480,7 @@ func TestAPIGetFee(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s.apiGetFee, want, reader, writer, body)
+		ensureResponse(t, s.apiGetFee, want, reader, writer, body, nil)
 	}
 
 	body = &registrationForm{Addr: "somedexaddress.org"}
@@ -491,11 +500,12 @@ func TestAPINewWallet(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s.apiNewWallet, want, reader, writer, body)
+		ensureResponse(t, s.apiNewWallet, want, reader, writer, body, nil)
 	}
 
 	body = &newWalletForm{
-		Pass: encode.PassBytes("abc"),
+		Pass:  encode.PassBytes("abc"),
+		AppPW: encode.PassBytes("dummyAppPass"),
 	}
 	tCore.notHas = true
 	ensure(`{"ok":true}`)
@@ -518,7 +528,7 @@ func TestAPILogout(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s.apiLogout, want, reader, writer, nil)
+		ensureResponse(t, s.apiLogout, want, reader, writer, nil, nil)
 	}
 	ensure(`{"ok":true}`)
 
@@ -535,7 +545,7 @@ func TestApiGetBalance(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s.apiGetBalance, want, reader, writer, struct{}{})
+		ensureResponse(t, s.apiGetBalance, want, reader, writer, struct{}{}, nil)
 	}
 	ensure(`{"ok":true,"balance":null}`)
 
@@ -610,5 +620,65 @@ func TestGetOrderIDCtx(t *testing.T) {
 		if err == nil {
 			t.Fatalf("no error for %v", name)
 		}
+	}
+}
+
+func TestPasswordCache(t *testing.T) {
+	s, tCore, shutdown, err := newTServer(t, false)
+	if err != nil {
+		t.Fatalf("error starting server: %v", err)
+	}
+	defer shutdown()
+
+	password := encode.PassBytes("def")
+	authToken1 := s.authorize()
+	authToken2 := s.authorize()
+
+	key1, err := s.cacheAppPassword(password, authToken1)
+	if err != nil {
+		t.Fatalf("error caching password: %v", err)
+	}
+
+	key2, err := s.cacheAppPassword(password, authToken2)
+	if err != nil {
+		t.Fatalf("error caching password: %v", err)
+	}
+
+	retrievedPW, err := s.getCachedPassword(key1, authToken1)
+	if err != nil {
+		t.Fatalf("error getting password: %v", err)
+	}
+	if !bytes.Equal(password, retrievedPW) {
+		t.Fatalf("retrieved PW not same: %v - %v", password, retrievedPW)
+	}
+
+	retrievedPW, err = s.getCachedPassword(key2, authToken2)
+	if err != nil {
+		t.Fatalf("error getting password: %v", err)
+	}
+	if !bytes.Equal(password, retrievedPW) {
+		t.Fatalf("retrieved PW not same: %v - %v", password, retrievedPW)
+	}
+
+	// test new wallet request first without the cookies populated, then with
+	writer := new(TWriter)
+	reader := new(TReader)
+	body := &newWalletForm{
+		Pass: encode.PassBytes(""),
+	}
+	want := `{"ok":false,"msg":"password error: app pass cannot be empty"}`
+	tCore.notHas = true
+	ensureResponse(t, s.apiNewWallet, want, reader, writer, body, nil)
+
+	want = `{"ok":true}`
+	ensureResponse(t, s.apiNewWallet, want, reader, writer, body, map[string]string{
+		authCK:  authToken1,
+		pwKeyCK: hex.EncodeToString(key1),
+	})
+
+	s.apiLogout(writer, nil)
+
+	if len(s.cachedPasswords) != 0 {
+		t.Fatal("logout should clear all cached passwords")
 	}
 }

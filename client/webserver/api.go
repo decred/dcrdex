@@ -4,6 +4,7 @@
 package webserver
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,7 +46,12 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cert := []byte(form.Cert)
-	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, form.Password, cert)
+	pass, err := s.resolvePass(form.Password, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, pass, cert)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -97,11 +103,15 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, errors.New("No Decred wallet"))
 		return
 	}
-
-	_, err := s.core.Register(&core.RegisterForm{
+	pass, err := s.resolvePass(reg.Password, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	_, err = s.core.Register(&core.RegisterForm{
 		Addr:    reg.Addr,
 		Cert:    []byte(reg.Cert),
-		AppPass: reg.Password,
+		AppPass: pass,
 		Fee:     reg.Fee,
 	})
 	if err != nil {
@@ -130,8 +140,13 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("already have a wallet for %s", unbip(form.AssetID)))
 		return
 	}
+	pass, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
 	// Wallet does not exist yet. Try to create it.
-	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
+	err = s.core.CreateWallet(pass, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
 		Config:  form.Config,
 	})
@@ -156,7 +171,12 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("No wallet for %d -> %s", form.AssetID, unbip(form.AssetID)))
 		return
 	}
-	err := s.core.OpenWallet(form.AssetID, form.Pass)
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	err = s.core.OpenWallet(form.AssetID, pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error unlocking %s wallet: %w", unbip(form.AssetID), err))
 		return
@@ -220,7 +240,12 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	ord, err := s.core.Trade(form.Pass, form.Order)
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	ord, err := s.core.Trade(pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error placing order: %w", err))
 		return
@@ -244,7 +269,12 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	account, err := s.core.AccountExport(form.Pass, form.Host)
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	account, err := s.core.AccountExport(pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error exporting account: %w", err))
 		return
@@ -291,7 +321,12 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
-	err := s.core.AccountImport(form.Pass, form.Account)
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	err = s.core.AccountImport(pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
 		return
@@ -325,7 +360,12 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.Cancel(form.Pass, form.OrderID)
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	err = s.core.Cancel(pass, form.OrderID)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error cancelling order %s: %w", form.OrderID, err))
 		return
@@ -362,7 +402,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
-	s.actuallyLogin(w, r, &loginForm{Pass: init.Pass})
+	s.actuallyLogin(w, r, &loginForm{Pass: init.Pass, RememberPass: init.RememberPass})
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.
@@ -394,17 +434,12 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// With Core locked up, invalidate all known auth tokens to force any other
-	// sessions to login again.
+	// With Core locked up, invalidate all known auth tokens and cached passwords
+	// to force any other sessions to login again.
 	s.deauth()
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     authCK,
-		Path:     "/",
-		Value:    "",
-		Expires:  time.Unix(0, 0),
-		SameSite: http.SameSiteStrictMode,
-	})
+	clearCookie(authCK, w)
+	clearCookie(pwKeyCK, w)
 
 	response := struct {
 		OK bool `json:"ok"`
@@ -567,6 +602,23 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	passwordIsCached := s.isPasswordCached(r)
+	// Since the user changed the password, we clear all of the auth tokens
+	// and cached passwords. However, we assign a new auth token and cache
+	// the new password (if it was previously cached) for this session.
+	s.deauth()
+	authToken := s.authorize()
+	setCookie(authCK, authToken, w)
+	if passwordIsCached {
+		key, err := s.cacheAppPassword(form.NewAppPW, authToken)
+		if err != nil {
+			log.Errorf("unable to cache password: %v", err)
+			clearCookie(pwKeyCK, w)
+		} else {
+			setCookie(pwKeyCK, hex.EncodeToString(key), w)
+		}
+	}
+
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -586,9 +638,13 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-
+	pass, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
 	// Update wallet settings.
-	err := s.core.ReconfigureWallet(form.AppPW, form.NewWalletPW, form.AssetID,
+	err = s.core.ReconfigureWallet(pass, form.NewWalletPW, form.AssetID,
 		form.Config)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("reconfig error: %w", err))
@@ -678,7 +734,12 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
-	loginResult, err := s.core.Login(login.Pass)
+	pass, err := s.resolvePass(login.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		return
+	}
+	loginResult, err := s.core.Login(pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("login error: %w", err))
 		return
@@ -687,16 +748,19 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 	user := extractUserInfo(r)
 	if !user.Authed {
 		authToken := s.authorize()
-		http.SetCookie(w, &http.Cookie{
-			Name:  authCK,
-			Value: authToken,
-			Path:  "/",
-			// The client should only send the cookie with first-party requests.
-			// Cross-site requests should not include the auth cookie.
-			// https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00#section-4.1.1
-			SameSite: http.SameSiteStrictMode,
-			// Secure: false, // while false we require SameSite set
-		})
+		setCookie(authCK, authToken, w)
+		if login.RememberPass {
+			key, err := s.cacheAppPassword(pass, authToken)
+			if err != nil {
+				s.writeAPIError(w, fmt.Errorf("login error: %v", err))
+				return
+			}
+			setCookie(pwKeyCK, hex.EncodeToString(key), w)
+		} else {
+			// If dexc was shutdown and restarted, the old pw key cookie might
+			// need to be cleared.
+			clearCookie(pwKeyCK, w)
+		}
 	}
 
 	writeJSON(w, struct {
@@ -738,4 +802,41 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 	}
 	log.Error(err.Error())
 	writeJSON(w, resp, s.indent)
+}
+
+// setCookie sets the value of a cookie in the http response.
+func setCookie(name, value string, w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Path:     "/",
+		Value:    value,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// clearCookie removes a cookie in the http response.
+func clearCookie(name string, w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Path:     "/",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// resolvePass returns the appPW if it has a value, but if not, it attempts
+// to retrieve the cached password using the information in cookies.
+func (s *WebServer) resolvePass(appPW []byte, r *http.Request) ([]byte, error) {
+	if len(appPW) > 0 {
+		return appPW, nil
+	}
+	cachedPass, err := s.getCachedPasswordUsingRequest(r)
+	if err != nil {
+		if errors.Is(err, errNoCachedPW) {
+			return nil, fmt.Errorf("app pass cannot be empty")
+		}
+		return nil, fmt.Errorf("error retrieving cached pw: %w", err)
+	}
+	return cachedPass, nil
 }

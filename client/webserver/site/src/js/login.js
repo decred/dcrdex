@@ -10,7 +10,7 @@ export default class LoginPage extends BasePage {
     super()
     app = application
     const page = this.page = Doc.parsePage(body, [
-      'submit', 'errMsg', 'loginForm', 'pw'
+      'submit', 'errMsg', 'loginForm', 'pw', 'rememberPass'
     ])
     forms.bind(page.loginForm, page.submit, () => { this.login() })
     page.pw.focus()
@@ -22,13 +22,14 @@ export default class LoginPage extends BasePage {
     Doc.hide(page.errMsg)
     const pw = page.pw.value
     page.pw.value = ''
+    const rememberPass = page.rememberPass.checked
     if (pw === '') {
       page.errMsg.textContent = 'password cannot be empty'
       Doc.show(page.errMsg)
       return
     }
     const loaded = app.loading(page.loginForm)
-    const res = await postJSON('/api/login', { pass: pw })
+    const res = await postJSON('/api/login', { pass: pw, rememberPass })
     loaded()
     if (!app.checkResponse(res)) {
       page.errMsg.textContent = res.msg

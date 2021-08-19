@@ -428,14 +428,15 @@
           </div>
         </div>
         <hr class="dashed my-3">
-        <div class="fs16 text-center">Authorize this order with your app password.</div>
-        <div class="d-flex mt-3">
-          <div class="col-12 p-0 text-left">
+        {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">Authorize this order with your app password.</div>
+        <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
+          <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
             <label for="vPass" class="pl-1 mb-1">Password</label>
             <input type="password" class="form-control select" id="vPass">
           </div>
-          <div class="col-12 p-0 text-right">
-            <div>&nbsp;</div>
+          <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
+            <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
             <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
               <span id="vSideSubmit"></span>
               <span id="vBaseSubmit"></span>
@@ -457,7 +458,7 @@
     </form>
 
     <form class="card bg1 d-hide" id="cancelForm" autocomplete="off">
-      {{template "cancelOrderForm"}}
+      {{template "cancelOrderForm" .}}
     </form>
 
   </div>

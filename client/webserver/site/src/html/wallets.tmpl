@@ -45,6 +45,7 @@
 {{define "wallets"}}
 {{template "top" .}}
 <div id="main" data-handler="wallets" class="main">
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 
   {{- /* LEFT SIDE */ -}}
   <div class="col-14">
@@ -198,8 +199,8 @@
       <div class="px-4 my-2">
         Note: Changing to a different wallet while having active trades might cause funds to be lost. 
       </div>
-      <div class="d-flex px-4 mt-1">
-        <div class="col-12 p-0">
+      <div class="d-flex px-4 mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+        <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
           <label for="appPW" class="pl-1 mb-1">App Password</label>
           <input type="password" class="form-control select" id="appPW" autocomplete="off">
         </div>

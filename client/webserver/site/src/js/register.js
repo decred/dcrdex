@@ -3,6 +3,7 @@ import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, DEXAddressForm, bind as bindForm } from './forms'
 import { feeSendErr } from './constants'
+import State from './state'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -19,7 +20,7 @@ export default class RegistrationPage extends BasePage {
     const page = this.page = Doc.parsePage(body, [
       // Form 1: Set the application password
       'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
-      'showSeedRestore', 'seedRestore', 'seedInput', 'appPassBox',
+      'showSeedRestore', 'seedRestore', 'seedInput', 'rememberPass',
       // Form 2: Create Decred wallet
       'newWalletForm',
       // Form 3: Unlock Decred wallet
@@ -28,7 +29,7 @@ export default class RegistrationPage extends BasePage {
       'dexAddrForm',
       // Form 5: Confirm DEX registration and pay fee
       'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
-      'dexCertBox', 'failedRegForm', 'regFundsErr'
+      'dexCertBox', 'failedRegForm', 'regFundsErr', 'appPassBox'
     ])
 
     // Hide the form closers for the registration process.
@@ -81,6 +82,8 @@ export default class RegistrationPage extends BasePage {
           if (market.quoteid === 0) break // prefer dcr-btc
         }
       }
+      if (State.passwordIsCached()) Doc.hide(page.appPassBox)
+      else Doc.show(page.appPassBox)
       await this.changeForm(page.dexAddrForm, page.confirmRegForm)
     }, this.pwCache)
 
@@ -148,9 +151,11 @@ export default class RegistrationPage extends BasePage {
     page.appPWAgain.value = ''
     const loaded = app.loading(page.appPWForm)
     const seed = page.seedInput.value
+    const rememberPass = page.rememberPass.checked
     const res = await postJSON('/api/init', {
       pass: pw,
-      seed: seed
+      seed,
+      rememberPass
     })
     loaded()
     if (!app.checkResponse(res)) {
@@ -170,7 +175,7 @@ export default class RegistrationPage extends BasePage {
   async registerDEX () {
     const page = this.page
     const pw = page.appPass.value || this.pwCache.pw
-    if (!pw) {
+    if (!pw && !State.passwordIsCached()) {
       page.regErr.textContent = 'password required'
       Doc.show(page.regErr)
       return
