@@ -633,13 +633,12 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	toGo := ss.Target - ss.Height
-	if ss.Syncing || toGo > 1 {
+	if ss.Syncing {
 		ogTip := atomic.LoadInt64(&btc.tipAtConnect)
 		totalToSync := ss.Target - int32(ogTip)
 		var progress float32 = 1
 		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
+			progress = 1 - (float32(ss.Target-ss.Height) / float32(totalToSync))
 		}
 		return false, progress, nil
 	}
@@ -1414,7 +1413,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(&txHash, uint32(i), contract.Value)
-		signedRefundTx, err := btc.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], time.Now().Add(-time.Hour))
+		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i], time.Now().Add(-time.Hour))
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -1949,7 +1948,18 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 // was created. The client should store this information for persistence across
 // sessions.
 func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, startTime time.Time) (dex.Bytes, error) {
-	msgTx, err := btc.refundTx(coinID, contract, 0, nil, startTime)
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+	utxo, _, err := btc.node.getTxOut(txHash, vout, contract, startTime)
+	if err != nil {
+		return nil, fmt.Errorf("error finding unspent contract: %w", err)
+	}
+	if utxo == nil {
+		return nil, asset.CoinNotFoundError
+	}
+	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -1969,22 +1979,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, startTime time.Tim
 // refundTx crates and signs a contract`s refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
-func (btc *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr btcutil.Address, startTime time.Time) (*wire.MsgTx, error) {
-	txHash, vout, err := decodeCoinID(coinID)
-	if err != nil {
-		return nil, err
-	}
-	// Grab the unspent output to make sure it's good and to get the value if not supplied.
-	if val == 0 {
-		utxo, _, err := btc.node.getTxOut(txHash, vout, contract, startTime)
-		if err != nil {
-			return nil, fmt.Errorf("error finding unspent contract: %w", err)
-		}
-		if utxo == nil {
-			return nil, asset.CoinNotFoundError
-		}
-		val = uint64(utxo.Value)
-	}
+func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, startTime time.Time) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
