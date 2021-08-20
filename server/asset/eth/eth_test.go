@@ -123,7 +123,7 @@ func TestDecodeCoinID(t *testing.T) {
 	tests := []struct {
 		name                   string
 		wantFlags              CoinIDFlag
-		wantAddr               common.Address
+		wantAddr               *common.Address
 		coinID, wantSecretHash []byte
 		wantErr                bool
 	}{{
@@ -139,7 +139,7 @@ func TestDecodeCoinID(t *testing.T) {
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
 		wantFlags: TxIDFlag,
-		wantAddr: common.Address{
+		wantAddr: &common.Address{
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
 			0x26, 0x05,
@@ -180,7 +180,7 @@ func TestDecodeCoinID(t *testing.T) {
 			t.Fatalf("want flags value of %v but got %v for test %v",
 				test.wantFlags, flags, test.name)
 		}
-		if addr != test.wantAddr {
+		if !bytes.Equal(addr[:], test.wantAddr[:]) {
 			t.Fatalf("want addr value of %v but got %v for test %v",
 				test.wantAddr, addr, test.name)
 		}

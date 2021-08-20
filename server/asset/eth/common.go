@@ -78,15 +78,17 @@ func (ss SwapState) String() string {
 
 // DecodeCoinID decodes the coin ID into flags, a contract address which may be
 // zeroed, and hash that represents either a secret or txid depending on flags.
-func DecodeCoinID(coinID []byte) (CoinIDFlag, common.Address, []byte, error) {
+func DecodeCoinID(coinID []byte) (CoinIDFlag, *common.Address, []byte, error) {
+	var addr common.Address
 	if len(coinID) != coinIDSize {
-		return 0, common.Address{}, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
+		return 0, &addr, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
 			coinIDSize, len(coinID))
 	}
 	hash := make([]byte, 32)
 	copy(hash, coinID[22:])
+	copy(addr[:], coinID[2:22])
 	return CoinIDFlag(binary.BigEndian.Uint16(coinID[:2])),
-		common.BytesToAddress(coinID[2:22]), hash, nil
+		&addr, hash, nil
 }
 
 // CoinIDToString converts coinID into a human readable string.

@@ -67,12 +67,12 @@ var (
 	participantAcct  = &accounts.Account{Address: participantAddr}
 	contractAddr     common.Address
 	simnetID         = int64(42)
-	newTxOpts        = func(ctx context.Context, from common.Address, value *big.Int) *bind.TransactOpts {
+	newTxOpts        = func(ctx context.Context, from *common.Address, value *big.Int) *bind.TransactOpts {
 		return &bind.TransactOpts{
 			GasPrice: gasPrice,
 			GasLimit: 1e6,
 			Context:  ctx,
-			From:     from,
+			From:     *from,
 			Value:    value,
 		}
 	}
@@ -152,7 +152,8 @@ func TestMain(m *testing.M) {
 		wallet.internalNode.Close()
 		wallet.internalNode.Wait()
 	}()
-	if err := ethClient.connect(ctx, wallet.internalNode, common.HexToAddress(addrStr)); err != nil {
+	addr := common.HexToAddress(addrStr)
+	if err := ethClient.connect(ctx, wallet.internalNode, &addr); err != nil {
 		fmt.Printf("connect error: %v\n", err)
 		os.Exit(1)
 	}
@@ -255,7 +256,7 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestBalance(t *testing.T) {
-	bal, err := ethClient.balance(ctx, simnetAddr)
+	bal, err := ethClient.balance(ctx, &simnetAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +376,7 @@ func TestInitiate(t *testing.T) {
 		t.Fatal(err)
 	}
 	amt := big.NewInt(1e18)
-	txOpts := newTxOpts(ctx, simnetAddr, amt)
+	txOpts := newTxOpts(ctx, &simnetAddr, amt)
 	swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
 	if err != nil {
 		t.Fatal("unable to get swap state")
@@ -402,12 +403,12 @@ func TestInitiate(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		originalBal, err := ethClient.balance(ctx, simnetAddr)
+		originalBal, err := ethClient.balance(ctx, &simnetAddr)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		tx, err := ethClient.initiate(txOpts, simnetID, now, secretHash, participantAddr)
+		tx, err := ethClient.initiate(txOpts, simnetID, now, secretHash, &participantAddr)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -428,7 +429,7 @@ func TestInitiate(t *testing.T) {
 		// whether initiate completed successfully on-chain. If
 		// unsuccessful the fee is subtracted. If successful, amt is
 		// also subtracted.
-		bal, err := ethClient.balance(ctx, simnetAddr)
+		bal, err := ethClient.balance(ctx, &simnetAddr)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -495,7 +496,7 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		txOpts := newTxOpts(ctx, simnetAddr, amt)
+		txOpts := newTxOpts(ctx, &simnetAddr, amt)
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
 		secretHash := sha256.Sum256(secret[:])
@@ -515,7 +516,7 @@ func TestRedeem(t *testing.T) {
 		}
 
 		inLocktime := time.Now().Add(locktime).Unix()
-		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, participantAddr)
+		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, &participantAddr)
 		if err != nil {
 			t.Fatalf("unable to initiate swap for test %v: %v ", test.name, err)
 		}
@@ -524,11 +525,11 @@ func TestRedeem(t *testing.T) {
 		if err := waitForMined(t, test.sleep, true); err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		originalBal, err := ethClient.balance(ctx, test.redeemer.Address)
+		originalBal, err := ethClient.balance(ctx, &test.redeemer.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		txOpts = newTxOpts(ctx, test.redeemer.Address, nil)
+		txOpts = newTxOpts(ctx, &test.redeemer.Address, nil)
 		tx, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -550,7 +551,7 @@ func TestRedeem(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := ethClient.balance(ctx, test.redeemer.Address)
+		bal, err := ethClient.balance(ctx, &test.redeemer.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -616,7 +617,7 @@ func TestRefund(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		txOpts := newTxOpts(ctx, simnetAddr, amt)
+		txOpts := newTxOpts(ctx, &simnetAddr, amt)
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
 		secretHash := sha256.Sum256(secret[:])
@@ -631,7 +632,7 @@ func TestRefund(t *testing.T) {
 		}
 
 		inLocktime := time.Now().Add(locktime).Unix()
-		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, participantAddr)
+		_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, &participantAddr)
 		if err != nil {
 			t.Fatalf("unable to initiate swap for test %v: %v ", test.name, err)
 		}
@@ -640,7 +641,7 @@ func TestRefund(t *testing.T) {
 			if err := waitForMined(t, time.Second*8, false); err != nil {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}
-			txOpts = newTxOpts(ctx, participantAddr, nil)
+			txOpts = newTxOpts(ctx, &participantAddr, nil)
 			_, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
 			if err != nil {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -652,12 +653,12 @@ func TestRefund(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		originalBal, err := ethClient.balance(ctx, test.refunder.Address)
+		originalBal, err := ethClient.balance(ctx, &test.refunder.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		txOpts = newTxOpts(ctx, test.refunder.Address, nil)
+		txOpts = newTxOpts(ctx, &test.refunder.Address, nil)
 		tx, err := ethClient.refund(txOpts, simnetID, secretHash)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -679,7 +680,7 @@ func TestRefund(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := ethClient.balance(ctx, test.refunder.Address)
+		bal, err := ethClient.balance(ctx, &test.refunder.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -710,7 +711,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txOpts := newTxOpts(ctx, simnetAddr, nil)
+	txOpts := newTxOpts(ctx, &simnetAddr, nil)
 	err = ethClient.addSignerToOpts(txOpts, simnetID)
 	if err != nil {
 		t.Fatal(err)
@@ -725,7 +726,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalContractBal, err := ethClient.balance(ctx, contractAddr)
+	originalContractBal, err := ethClient.balance(ctx, &contractAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +742,7 @@ func TestReplayAttack(t *testing.T) {
 
 		if i != 4 {
 			inLocktime := time.Now().Add(time.Hour).Unix()
-			_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, participantAddr)
+			_, err = ethClient.initiate(txOpts, simnetID, inLocktime, secretHash, &participantAddr)
 			if err != nil {
 				t.Fatalf("unable to initiate swap: %v ", err)
 			}
@@ -785,7 +786,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalAcctBal, err := ethClient.balance(ctx, simnetAddr)
+	originalAcctBal, err := ethClient.balance(ctx, &simnetAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -805,7 +806,7 @@ func TestReplayAttack(t *testing.T) {
 	txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
 	wantBal := big.NewInt(0).Sub(originalAcctBal, txFee)
 
-	bal, err := ethClient.balance(ctx, simnetAddr)
+	bal, err := ethClient.balance(ctx, &simnetAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +832,7 @@ func TestReplayAttack(t *testing.T) {
 
 	// The contract should hold four more ether because initiation of one
 	// swap failed.
-	bal, err = ethClient.balance(ctx, contractAddr)
+	bal, err = ethClient.balance(ctx, &contractAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
