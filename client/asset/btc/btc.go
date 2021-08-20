@@ -839,7 +839,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 
 	val := lots * lotSize
 
-	sum, inputsSize, _, _, _, _, err := btc.fund(val, lots, utxos, nfo)
+	sum, inputsSize, _, _, _, _, err := btc.fund(val, lots, utxos, nfo, nfo.MaxFeeRate)
 	if err != nil {
 		return nil, false, err
 	}
@@ -933,12 +933,21 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
-	// Check wallets fee rate limit against server's max fee rate
+	// Check wallet's fee rate limit against server's max fee rate
 	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configued fee rate limit %v",
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
+			btc.feeRateLimit)
+	}
+
+	// Check wallet's fee rate limit against user defined custom fee rate
+	if ord.CustomSwapFeeRate != nil && btc.feeRateLimit < *ord.CustomSwapFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: custom swap fee %v higher than configured fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			*ord.CustomSwapFeeRate,
 			btc.feeRateLimit)
 	}
 
@@ -954,7 +963,13 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ordValStr, amount(avail))
 	}
 
-	sum, size, coins, fundingCoins, redeemScripts, spents, err := btc.fund(ord.Value, ord.MaxSwapCount, utxos, ord.DEXConfig)
+	var feeRate uint64
+	if ord.CustomSwapFeeRate != nil && *ord.CustomSwapFeeRate > ord.DEXConfig.MaxFeeRate {
+		feeRate = *ord.CustomSwapFeeRate
+	} else {
+		feeRate = ord.DEXConfig.MaxFeeRate
+	}
+	sum, size, coins, fundingCoins, redeemScripts, spents, err := btc.fund(ord.Value, ord.MaxSwapCount, utxos, ord.DEXConfig, feeRate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -985,13 +1000,13 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	return coins, redeemScripts, nil
 }
 
-func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *dex.Asset) (
+func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *dex.Asset, feeRate uint64) (
 	sum uint64, size uint32, coins asset.Coins, fundingCoins map[outPoint]*utxo, redeemScripts []dex.Bytes, spents []*output, err error) {
 
 	fundingCoins = make(map[outPoint]*utxo)
 
 	isEnoughWith := func(unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
+		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.VBytes()), lots, nfo.SwapSizeBase, nfo.SwapSize, feeRate)
 		return sum+unspent.amount >= reqFunds
 	}
 

@@ -83,6 +83,7 @@ var (
 	swapFeesKey            = []byte("swapFees")
 	maxFeeRateKey          = []byte("maxFeeRate")
 	redemptionFeesKey      = []byte("redeemFees")
+	customSwapFeeKey       = []byte("customswapfee")
 	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
 	encSeedKey             = []byte("encSeed")
@@ -586,6 +587,17 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			linkedB = md.LinkedOrder[:]
 		}
 
+		if md.CustomSwapFeeRate != nil {
+			err = newBucketPutter(oBkt).
+				put(customSwapFeeKey, uint64Bytes(*md.CustomSwapFeeRate)).
+				err()
+			if err != nil {
+				return err
+			}
+		} else {
+			oBkt.Delete(customSwapFeeKey)
+		}
+
 		return newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
@@ -880,6 +892,12 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
 	}
 
+	var customSwapFeeRate *uint64
+	if customSwapFeeInDb := oBkt.Get(customSwapFeeKey); customSwapFeeInDb != nil {
+		fee := intCoder.Uint64(customSwapFeeInDb)
+		customSwapFeeRate = &fee
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -890,6 +908,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
 			MaxFeeRate:         maxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
+			CustomSwapFeeRate:  customSwapFeeRate,
 		},
 		Order: ord,
 	}, nil
@@ -950,6 +969,17 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 		var linkedB []byte
 		if !md.LinkedOrder.IsZero() {
 			linkedB = md.LinkedOrder[:]
+		}
+
+		if md.CustomSwapFeeRate != nil {
+			err = newBucketPutter(oBkt).
+				put(customSwapFeeKey, uint64Bytes(*md.CustomSwapFeeRate)).
+				err()
+			if err != nil {
+				return err
+			}
+		} else {
+			oBkt.Delete(customSwapFeeKey)
 		}
 
 		return newBucketPutter(oBkt).

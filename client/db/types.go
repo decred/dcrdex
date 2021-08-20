@@ -230,6 +230,9 @@ type OrderMetaData struct {
 	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
 	// assigned to matches will be validated against this value.
 	MaxFeeRate uint64
+	// CustomSwapFeeRate is set by the user, and it is used as the fee rate for
+	// the swap transaction. It remains null if the user did not set a custom fee.
+	CustomSwapFeeRate *uint64
 }
 
 // MetaMatch is a match and its metadata.

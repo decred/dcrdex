@@ -319,6 +319,9 @@ type Order struct {
 	// is used, the fee rate used should be at least the suggested fee, else
 	// zero-conf coins might be rejected.
 	FeeSuggestion uint64
+	// CustomSwapFeeRate is set by the user, and it is used as the fee rate for
+	// the swap transaction. It remains null if the user did not set a custom fee.
+	CustomSwapFeeRate *uint64
 }
 
 // SwapEstimate is an estimate of the fees and locked amounts associated with

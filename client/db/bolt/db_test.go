@@ -634,6 +634,31 @@ func TestOrders(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error encountered for updating unknown order's status")
 	}
+
+	// Update order to have custom swap fee rate and make sure it's persisted
+	customSwapFeeRate := uint64(100)
+	o := activeOrders[0]
+	o.MetaData.CustomSwapFeeRate = &customSwapFeeRate
+	boltdb.UpdateOrder(o)
+	mord, err = boltdb.Order(o.Order.ID())
+	if err != nil {
+		t.Fatalf("failed to retrieve order")
+	}
+	if *mord.MetaData.CustomSwapFeeRate != customSwapFeeRate {
+		t.Fatalf("failed to store custom fee rate")
+	}
+
+	// Remove custom swap fee and make sure it's persisted
+	md := o.MetaData
+	md.CustomSwapFeeRate = nil
+	boltdb.UpdateOrderMetaData(o.Order.ID(), md)
+	mord, err = boltdb.Order(o.Order.ID())
+	if err != nil {
+		t.Fatalf("failed to retrieve order")
+	}
+	if mord.MetaData.CustomSwapFeeRate != nil {
+		t.Fatalf("failed to delete custom fee rate")
+	}
 }
 
 func TestOrderFilters(t *testing.T) {

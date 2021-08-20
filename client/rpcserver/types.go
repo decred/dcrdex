@@ -330,7 +330,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 }
 
 func parseTradeArgs(params *RawParams) (*tradeForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{8}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{8, 9}); err != nil {
 		return nil, err
 	}
 	isLimit, err := checkBoolArg(params.Args[1], "isLimit")
@@ -361,17 +361,26 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	if err != nil {
 		return nil, err
 	}
+	var customSwapFeeRate *uint64
+	if len(params.Args) > 8 {
+		fee, err := checkUIntArg(params.Args[8], "customSwapFeeRate", 64)
+		if err != nil {
+			return nil, err
+		}
+		customSwapFeeRate = &fee
+	}
 	req := &tradeForm{
 		appPass: params.PWArgs[0],
 		srvForm: &core.TradeForm{
-			Host:    params.Args[0],
-			IsLimit: isLimit,
-			Sell:    sell,
-			Base:    uint32(base),
-			Quote:   uint32(quote),
-			Qty:     qty,
-			Rate:    rate,
-			TifNow:  tifnow,
+			Host:              params.Args[0],
+			IsLimit:           isLimit,
+			Sell:              sell,
+			Base:              uint32(base),
+			Quote:             uint32(quote),
+			Qty:               qty,
+			Rate:              rate,
+			TifNow:            tifnow,
+			CustomSwapFeeRate: customSwapFeeRate,
 		},
 	}
 	return req, nil

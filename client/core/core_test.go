@@ -556,6 +556,7 @@ type TXCWallet struct {
 	preRedeem         *asset.PreRedeem
 	ownsAddress       bool
 	ownsAddressErr    error
+	lastSwapFeeRate   uint64
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -666,6 +667,7 @@ func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	if w.swapErr != nil {
 		return nil, nil, 0, w.swapErr
 	}
+	w.lastSwapFeeRate = swaps.FeeRate
 	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
@@ -3305,6 +3307,120 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	}
 }
 
+func TestCusomSwapFeeRate(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(rig.crypter)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(rig.crypter)
+
+	matchSize := 4 * dcrBtcLotSize
+	cancelledQty := dcrBtcLotSize
+	qty := 2*matchSize + cancelledQty
+	rate := dcrBtcRateStep * 10
+
+	// Test when cusom swap fee rate is higher than max fee rate
+	customSwapFeeRate := tMaxFeeRate + 999
+	lo, dbOrder, preImgL, _ := makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &customSwapFeeRate)
+	lo.Force = order.StandingTiF
+	loid := lo.ID()
+
+	mid := ordertest.RandomMatchID()
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+	mkt := dc.marketConfig(tDcrBtcMktName)
+	fundCoinDcrID := encode.RandomBytes(36)
+	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify)
+	rig.dc.trades[tracker.ID()] = tracker
+
+	matchTime := time.Now()
+	msgMatch := &msgjson.Match{
+		OrderID:    loid[:],
+		MatchID:    mid[:],
+		Quantity:   matchSize,
+		Rate:       rate,
+		Address:    "counterparty-address",
+		Side:       uint8(order.Maker),
+		ServerTime: encode.UnixMilliU(matchTime),
+	}
+	counterSwapID := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+
+	// Make sure that if the rate returned from server is higher than both custom swap fee
+	// and max fee rate, we get an error.
+	msgMatch.FeeRateBase = customSwapFeeRate + 1
+	sign(tDexPriv, msgMatch)
+	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no error on rate higher than custom rate")
+	}
+
+	// Make sure we the match handling succeeds when the custom fee is higher then the max fee rate
+	msgMatch.FeeRateBase = customSwapFeeRate
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("handleMatchRoute returned an error: %v", err)
+	}
+	if tDcrWallet.lastSwapFeeRate != customSwapFeeRate {
+		t.Fatalf("custom swap fee %d was expected, but %d was used in swap", customSwapFeeRate, tDcrWallet.lastSwapFeeRate)
+	}
+
+	// Test when cusom swap fee rate is higher than max fee rate
+	customSwapFeeRate = tMaxFeeRate - 2
+	lo, dbOrder, preImgL, _ = makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &customSwapFeeRate)
+	lo.Force = order.StandingTiF
+	loid = lo.ID()
+
+	mid = ordertest.RandomMatchID()
+	walletSet, err = tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+	fundCoinDcrID = encode.RandomBytes(36)
+	fundingCoins = asset.Coins{&tCoin{id: fundCoinDcrID}}
+	tracker = newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify)
+	rig.dc.trades[tracker.ID()] = tracker
+
+	msgMatch = &msgjson.Match{
+		OrderID:     loid[:],
+		MatchID:     mid[:],
+		Quantity:    matchSize,
+		Rate:        rate,
+		Address:     "counterparty-address",
+		Side:        uint8(order.Maker),
+		ServerTime:  encode.UnixMilliU(matchTime),
+		FeeRateBase: customSwapFeeRate + 1,
+	}
+
+	counterSwapID = encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("handleMatchRoute returned an error: %v", err)
+	}
+	if tDcrWallet.lastSwapFeeRate != customSwapFeeRate+1 {
+		t.Fatalf("custom swap fee %d was expected, but %d was used in swap", customSwapFeeRate+1, tDcrWallet.lastSwapFeeRate)
+	}
+}
+
 func TestTradeTracking(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
@@ -5105,6 +5221,10 @@ func TestSetEpoch(t *testing.T) {
 }
 
 func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
+	return makeLimitOrderWithCustomFee(dc, sell, qty, rate, nil)
+}
+
+func makeLimitOrderWithCustomFee(dc *dexConnection, sell bool, qty, rate uint64, customSwapFeeRate *uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
 	preImg := newPreimage()
 	addr := ordertest.RandomAddress()
 	lo := &order.LimitOrder{
@@ -5133,7 +5253,8 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Proof: db.OrderProof{
 				Preimage: preImg[:],
 			},
-			MaxFeeRate: tMaxFeeRate,
+			MaxFeeRate:        tMaxFeeRate,
+			CustomSwapFeeRate: customSwapFeeRate,
 		},
 		Order: lo,
 	}

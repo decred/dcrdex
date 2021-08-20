@@ -1377,6 +1377,10 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		if match.FeeRateSwap > highestFeeRate {
 			highestFeeRate = match.FeeRateSwap
 		}
+		if t.metaData.CustomSwapFeeRate != nil &&
+			*t.metaData.CustomSwapFeeRate > highestFeeRate {
+			highestFeeRate = *t.metaData.CustomSwapFeeRate
+		}
 	}
 
 	lockChange := true

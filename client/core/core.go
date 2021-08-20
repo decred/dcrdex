@@ -606,9 +606,20 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		if tracker.Trade().Sell {
 			swapRate = msgMatch.FeeRateBase
 		}
-		if !isCancel && swapRate > tracker.metaData.MaxFeeRate {
-			errs = append(errs, fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
-				msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate))
+
+		if !isCancel &&
+			swapRate > tracker.metaData.MaxFeeRate &&
+			(tracker.metaData.CustomSwapFeeRate == nil || swapRate > *tracker.metaData.CustomSwapFeeRate) {
+
+			if tracker.metaData.CustomSwapFeeRate != nil {
+				errs = append(errs,
+					fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d) and customSwapFeeRate (%d)",
+						msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate, *tracker.metaData.CustomSwapFeeRate))
+			} else {
+				errs = append(errs,
+					fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
+						msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate))
+			}
 			continue
 		}
 
@@ -3689,11 +3700,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
-		Value:         fundQty,
-		MaxSwapCount:  lots,
-		DEXConfig:     wallets.fromAsset,
-		Immediate:     isImmediate,
-		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell),
+		Value:             fundQty,
+		MaxSwapCount:      lots,
+		DEXConfig:         wallets.fromAsset,
+		Immediate:         isImmediate,
+		FeeSuggestion:     c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell),
+		CustomSwapFeeRate: form.CustomSwapFeeRate,
 	})
 	if err != nil {
 		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
@@ -3801,9 +3813,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:     order.OrderStatusEpoch,
-			Host:       dc.acct.host,
-			MaxFeeRate: wallets.fromAsset.MaxFeeRate,
+			Status:            order.OrderStatusEpoch,
+			Host:              dc.acct.host,
+			MaxFeeRate:        wallets.fromAsset.MaxFeeRate,
+			CustomSwapFeeRate: form.CustomSwapFeeRate,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],

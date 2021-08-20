@@ -818,7 +818,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	}
 
 	val := lots * lotSize
-	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo))
+	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, nfo, nfo.MaxFeeRate))
 	if err != nil {
 		return nil, false, err
 	}
@@ -911,9 +911,9 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 
 // orderEnough generates a function that can be used as the enough argument to
 // the fund method.
-func orderEnough(val, lots uint64, nfo *dex.Asset) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
+func orderEnough(val, lots uint64, nfo *dex.Asset, feeRate uint64) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 	return func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.Size()), lots, nfo)
+		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.Size()), lots, nfo.SwapSizeBase, nfo.SwapSize, feeRate)
 		// needed fees are reqFunds - value
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
@@ -947,7 +947,23 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			dcr.feeRateLimit)
 	}
 
-	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig))
+	// Check wallet's fee rate limit against user defined custom fee rate
+	if ord.CustomSwapFeeRate != nil && dcr.feeRateLimit < *ord.CustomSwapFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: custom swap fee %v higher than configured fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			*ord.CustomSwapFeeRate,
+			dcr.feeRateLimit)
+	}
+
+	var feeRate uint64
+	if ord.CustomSwapFeeRate != nil && *ord.CustomSwapFeeRate > ord.DEXConfig.MaxFeeRate {
+		feeRate = *ord.CustomSwapFeeRate
+	} else {
+		feeRate = ord.DEXConfig.MaxFeeRate
+	}
+
+	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, ord.DEXConfig, feeRate))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
 			amount(ord.Value), err)
