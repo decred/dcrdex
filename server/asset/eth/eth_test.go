@@ -180,7 +180,7 @@ func TestDecodeCoinID(t *testing.T) {
 			t.Fatalf("want flags value of %v but got %v for test %v",
 				test.wantFlags, flags, test.name)
 		}
-		if !bytes.Equal(addr[:], test.wantAddr[:]) {
+		if *addr != *test.wantAddr {
 			t.Fatalf("want addr value of %v but got %v for test %v",
 				test.wantAddr, addr, test.name)
 		}

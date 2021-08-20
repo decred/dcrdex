@@ -81,7 +81,7 @@ func (ss SwapState) String() string {
 func DecodeCoinID(coinID []byte) (CoinIDFlag, *common.Address, []byte, error) {
 	var addr common.Address
 	if len(coinID) != coinIDSize {
-		return 0, &addr, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
+		return 0, nil, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
 			coinIDSize, len(coinID))
 	}
 	hash := make([]byte, 32)
