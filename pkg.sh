@@ -2,7 +2,7 @@
 
 set -e
 
-VER="v0.2.1"
+VER="v0.2.2"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-${VER}
