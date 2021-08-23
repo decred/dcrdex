@@ -1938,7 +1938,14 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 	}
 
 	// Do we really want to do this? Mempool could be huge.
-	btc.node.findRedemptionsInMempool(mempoolReqs)
+	for outPt, res := range btc.node.findRedemptionsInMempool(mempoolReqs) {
+		req, ok := mempoolReqs[outPt]
+		if !ok {
+			btc.log.Errorf("findRedemptionsInMempool discovered outpoint not found")
+			continue
+		}
+		req.success(res)
+	}
 }
 
 // Refund revokes a contract. This can only be used after the time lock has

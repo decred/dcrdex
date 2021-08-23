@@ -601,7 +601,6 @@ func findRedemptionsInTx(segwit bool, reqs map[outPoint]*findRedemptionReq, msgT
 			if discovered[outPt] != nil {
 				continue
 			}
-
 			if outPt.txHash == poHash && outPt.vout == poVout {
 				// Match!
 				txHash := msgTx.TxHash()
