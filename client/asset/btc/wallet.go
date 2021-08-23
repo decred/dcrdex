@@ -41,4 +41,5 @@ type Wallet interface {
 	getTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	searchBlockForRedemptions(reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
+	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 }

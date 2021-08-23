@@ -386,7 +386,7 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Has
 	return blockHash, block.msgBlock
 }
 
-func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []*wire.TxIn) *wire.MsgTx {
+func makeRawTx(pkScripts []dex.Bytes, inputs []*wire.TxIn) *wire.MsgTx {
 	tx := &wire.MsgTx{
 		TxIn: inputs,
 	}
@@ -1837,12 +1837,9 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
 
 	contractHeight := node.GetBestBlockHeight() + 1
-	contractTxid := "e1b7c47df70d7d8f4c9c26f8ba9a59102c10885bd49024d32fdef08242f0c26c"
-	contractTxHash, _ := chainhash.NewHashFromStr(contractTxid)
 	otherTxid := "7a7b3b5c3638516bc8e7f19b4a3dec00f052a599fed5036c2b89829de2367bb6"
 	otherTxHash, _ := chainhash.NewHashFromStr(otherTxid)
 	contractVout := uint32(1)
-	coinID := toCoinID(contractTxHash, contractVout)
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -1874,7 +1871,10 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	// Prepare the "blockchain"
 	inputs := []*wire.TxIn{makeRPCVin(otherTxHash, 0, otherSigScript, otherWitness)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
-	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
+	contractTx := makeRawTx([]dex.Bytes{otherScript, pkScript}, inputs)
+	contractTxHash := contractTx.TxHash()
+	coinID := toCoinID(&contractTxHash, contractVout)
+	blockHash, _ := node.addRawTx(contractHeight, contractTx)
 	txHex, err := makeTxHex([]dex.Bytes{otherScript, pkScript}, inputs)
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
@@ -1894,12 +1894,12 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	node.getTransaction = getTxRes
 
 	// Add an intermediate block for good measure.
-	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
+	node.addRawTx(contractHeight+1, makeRawTx([]dex.Bytes{otherScript}, inputs))
 
 	// Now add the redemption.
-	redeemVin := makeRPCVin(contractTxHash, contractVout, redemptionSigScript, redemptionWitness)
+	redeemVin := makeRPCVin(&contractTxHash, contractVout, redemptionSigScript, redemptionWitness)
 	inputs = append(inputs, redeemVin)
-	node.addRawTx(contractHeight+2, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
+	node.addRawTx(contractHeight+2, makeRawTx([]dex.Bytes{otherScript}, inputs))
 
 	// Update currentTip from "RPC". Normally run() would do this.
 	wallet.checkForNewBlocks()
@@ -1932,7 +1932,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	}
 
 	node.blockchainMtx.Lock()
-	redeemVin.PreviousOutPoint.Hash = *contractTxHash
+	redeemVin.PreviousOutPoint.Hash = contractTxHash
 	node.blockchainMtx.Unlock()
 
 	// Canceled context

@@ -408,7 +408,16 @@ type findRedemptionReq struct {
 }
 
 func (req *findRedemptionReq) fail(s string, a ...interface{}) {
-	req.resultChan <- &findRedemptionResult{err: fmt.Errorf(s, a...)}
+	req.success(&findRedemptionResult{err: fmt.Errorf(s, a...)})
+
+}
+
+func (req *findRedemptionReq) success(res *findRedemptionResult) {
+	select {
+	case req.resultChan <- res:
+	default:
+		// In-case two separate threads find a result.
+	}
 }
 
 // findRedemptionResult models the result of a find redemption attempt.
@@ -1756,19 +1765,6 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 		return exitError("getTransaction error for FindRedemption transaction: %v", err)
 	}
 
-	var blockHash *chainhash.Hash
-	var blockHeight int32 = -1
-	if tx.BlockHash != "" {
-		blockHash, err = chainhash.NewHashFromStr(tx.BlockHash)
-		if err != nil {
-			return exitError("NewHashFromStr error: %v", err)
-		}
-		blockHeight, err = btc.node.getBlockHeight(blockHash)
-		if err != nil {
-			return exitError("GetBlockHeight for redemption %s error: %v", outPt, err)
-		}
-	}
-
 	contractHash := btc.hashContract(contract)
 
 	contractAddr, err := btc.scriptHashAddress(contract)
@@ -1780,15 +1776,25 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 		return exitError("PayToAddrScript error: %v", err)
 	}
 
+	var blockHash *chainhash.Hash
+	var blockHeight int32
+	if tx.BlockHash != "" {
+		blockHash, blockHeight, err = btc.checkRedemptionBlockDetails(outPt, tx.BlockHash, pkScript)
+		if err != nil {
+			return exitError("GetBlockHeight for redemption %s error: %v", outPt, err)
+		}
+	}
+
 	req := &findRedemptionReq{
 		outPt:        outPt,
 		contract:     contract,
 		blockHash:    blockHash,
-		resultChan:   make(chan *findRedemptionResult, 1),
 		blockHeight:  blockHeight,
+		resultChan:   make(chan *findRedemptionResult, 1),
 		pkScript:     pkScript,
 		contractHash: contractHash,
 	}
+
 	btc.findRedemptionMtx.Lock()
 	oldRedemption := btc.findRedemptionQueue[outPt]
 	btc.findRedemptionQueue[outPt] = req
@@ -1825,8 +1831,8 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 	return nil, nil, err
 }
 
-// tryRedemptionRequests searches all mainchain with height >= startBlock for
-// redemptions.
+// tryRedemptionRequests searches all mainchain blocks with height >= startBlock
+// for redemptions.
 func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, reqs []*findRedemptionReq) {
 	undiscovered := make(map[outPoint]*findRedemptionReq, len(reqs))
 	mempoolReqs := make(map[outPoint]*findRedemptionReq)
@@ -1838,19 +1844,6 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 			continue
 		}
 		undiscovered[req.outPt] = req
-	}
-
-	// A helper function will help us locate the lowest block in which an
-	// an undiscovered redemption's swap was mined.
-	lowestBlock := func() (hash *chainhash.Hash, height int32) {
-		height = math.MaxInt32
-		for _, req := range undiscovered {
-			if req.blockHash != nil && req.blockHeight < height {
-				height = req.blockHeight
-				hash = req.blockHash
-			}
-		}
-		return
 	}
 
 	// Only search up to the current tip. This does leave two unhandled
@@ -1868,30 +1861,47 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 		return
 	}
 
-	iHash, iHeight := lowestBlock()
-
 	// If a startBlock is provided at a higher height, use that as the starting
 	// point.
+	var iHash *chainhash.Hash
+	var iHeight int32
 	if startBlock != nil {
 		h, err := btc.node.getBlockHeight(startBlock)
 		if err != nil {
 			btc.log.Errorf("tryRedemptionRequests getBlockHeight error: %v", err)
 			return
 		}
-		// If the startBlock height is lower than the lowest swap block height,
-		// ignore the startBlock.
-		if h > iHeight {
-			iHeight = h
-			iHash = startBlock
+		iHeight = h
+		iHash = startBlock
+	} else {
+		iHeight = math.MaxInt32
+		for _, req := range undiscovered {
+			if req.blockHash != nil && req.blockHeight < iHeight {
+				iHeight = req.blockHeight
+				iHash = req.blockHash
+			}
 		}
+	}
+
+	// Helper function to check that the request hasn't been located in another
+	// thread and removed from queue already.
+	reqStillQueued := func(outPt outPoint) bool {
+		_, found := btc.findRedemptionQueue[outPt]
+		return found
 	}
 
 	for iHeight <= tipHeight {
 		validReqs := make(map[outPoint]*findRedemptionReq, len(undiscovered))
+		btc.findRedemptionMtx.RLock()
 		for outPt, req := range undiscovered {
-			if iHeight >= req.blockHeight {
+			if iHeight >= req.blockHeight && reqStillQueued(req.outPt) {
 				validReqs[outPt] = req
 			}
+		}
+		btc.findRedemptionMtx.RUnlock()
+
+		if len(validReqs) == 0 {
+			continue
 		}
 
 		discovered := btc.node.searchBlockForRedemptions(validReqs, *iHash)
@@ -1901,22 +1911,12 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 				btc.log.Errorf("Request not found in undiscovered map. This shouldn't be possible.")
 				continue
 			}
-			req.resultChan <- res
+			req.success(res)
 			delete(undiscovered, outPt)
 		}
 
 		if len(undiscovered) == 0 {
 			return
-		}
-
-		if len(discovered) > 0 {
-			// If we found some, we may be able to skip some blocks
-			lowHash, lowHeight := lowestBlock()
-			if lowHeight >= iHeight+1 {
-				iHash, iHeight = lowHash, lowHeight
-				continue
-			}
-
 		}
 
 		iHeight += 1
@@ -2151,10 +2151,40 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 	}
 }
 
+// prepareRedemptionRequestsForBlockCheck prepares a copy of the
+// findRedemptionQueue, checking for missing block data along the way.
+func (btc *ExchangeWallet) prepareRedemptionRequestsForBlockCheck() []*findRedemptionReq {
+	// Search for contract redemption in new blocks if there
+	// are contracts pending redemption.
+	btc.findRedemptionMtx.RLock()
+	defer btc.findRedemptionMtx.RUnlock()
+	reqs := make([]*findRedemptionReq, 0, len(btc.findRedemptionQueue))
+	for _, req := range btc.findRedemptionQueue {
+		// If the request doesn't have a block hash yet, check if we can get one
+		// now.
+		if req.blockHash == nil {
+			btc.trySetRedemptionRequestBlock(req)
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs
+}
+
 // checkForNewBlocks checks for new blocks. When a tip change is detected, the
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (btc *ExchangeWallet) checkForNewBlocks() {
+	reqs := btc.prepareRedemptionRequestsForBlockCheck()
+	// Redemption search would be compromised if the starting point cannot
+	// be determined, as searching just the new tip might result in blocks
+	// being omitted from the search operation. If that happens, cancel all
+	// find redemption requests in queue.
+	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
+		for _, req := range reqs {
+			req.fail("tipChange handler - "+s, a...)
+		}
+	}
+
 	newTipHash, err := btc.node.getBestBlockHash()
 	if err != nil {
 		go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
@@ -2185,7 +2215,6 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 	go btc.tipChange(nil)
 
 	var startPoint *block
-	var startPointErr error
 	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
@@ -2195,7 +2224,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 	case err != nil:
 		// Redemption search cannot continue reliably without knowing if there
 		// was a reorg, cancel all find redemption requests in queue.
-		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %w",
+		notifyFatalFindRedemptionError("getBlockHeader error for prev tip hash %s: %w",
 			prevTip.hash, err)
 		return
 
@@ -2207,7 +2236,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		for {
 			aBlock, err := btc.node.getBlockHeader(ancestorBlockHash)
 			if err != nil {
-				startPointErr = fmt.Errorf("getBlockHeader error for block %s: %w", ancestorBlockHash, err)
+				notifyFatalFindRedemptionError("getBlockHeader error for block %s: %w", ancestorBlockHash, err)
 				return
 			}
 			if aBlock.Confirmations > -1 {
@@ -2219,7 +2248,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 			if aBlock.Height == 0 {
 				// Crawled back to genesis block without finding a mainchain ancestor
 				// for the previous tip. Should never happen!
-				startPointErr = fmt.Errorf("no mainchain ancestor for orphaned block %s", prevTipHeader.Hash)
+				notifyFatalFindRedemptionError("no mainchain ancestor for orphaned block %s", prevTipHeader.Hash)
 				return
 			}
 			ancestorBlockHash = aBlock.PreviousBlockHash
@@ -2230,7 +2259,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		afterPrivTip := prevTipHeader.Height + 1
 		hashAfterPrevTip, err := btc.node.getBlockHash(afterPrivTip)
 		if err != nil {
-			startPointErr = fmt.Errorf("getBlockHash error for height %d: %w", afterPrivTip, err)
+			notifyFatalFindRedemptionError("getBlockHash error for height %d: %w", afterPrivTip, err)
 			return
 		}
 		startPoint = &block{hash: hashAfterPrevTip.String(), height: afterPrivTip}
@@ -2240,58 +2269,77 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 		startPoint = newTip
 	}
 
-	// Search for contract redemption in new blocks if there
-	// are contracts pending redemption.
-	btc.findRedemptionMtx.RLock()
-	reqs := make([]*findRedemptionReq, 0, len(btc.findRedemptionQueue))
-	for outPt, req := range btc.findRedemptionQueue {
-		// If the request doesn't have a block hash yet, check if we can get one
-		// now. Don't update the findRedemptionReq, since the mutex only
-		// protects the map.
-		if req.blockHash == nil {
-			tx, err := btc.node.getTransaction(&outPt.txHash)
-			if err != nil {
-				btc.log.Errorf("getTransaction error for FindRedemption transaction: %v", err)
-			}
-			if tx.BlockHash != "" {
-				blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
-				if err != nil {
-					btc.log.Errorf("NewHashFromStr error: %v", err)
-				}
-				blockHeight, err := btc.node.getBlockHeight(blockHash)
-				if err != nil {
-					btc.log.Errorf("GetBlockHeight for redemption %s error: %v", outPt, err)
-				}
-				req = &findRedemptionReq{
-					outPt:        req.outPt,
-					contract:     req.contract,
-					blockHash:    blockHash,
-					blockHeight:  blockHeight,
-					resultChan:   req.resultChan,
-					pkScript:     req.pkScript,
-					contractHash: req.contractHash,
-				}
-				btc.findRedemptionQueue[outPt] = req
-			}
-		}
-		reqs = append(reqs, req)
-	}
-	btc.findRedemptionMtx.RUnlock()
-
-	if len(reqs) == 0 {
-		return
-	}
-
-	// Redemption search would be compromised if the starting point cannot
-	// be determined, as searching just the new tip might result in blocks
-	// being omitted from the search operation. If that happens, cancel all
-	// find redemption requests in queue.
-	if startPointErr != nil {
-		btc.log.Errorf("Could not commence redemption check because start point could not be determined: %w", startPointErr)
-	} else {
+	if len(reqs) > 0 {
 		startHash, _ := chainhash.NewHashFromStr(startPoint.hash)
 		go btc.tryRedemptionRequests(startHash, reqs)
 	}
+}
+
+// trySetRedemptionRequestBlock should be called with findRedemptionMtx Lock'ed.
+func (btc *ExchangeWallet) trySetRedemptionRequestBlock(req *findRedemptionReq) {
+	tx, err := btc.node.getTransaction(&req.outPt.txHash)
+	if err != nil {
+		btc.log.Errorf("getTransaction error for FindRedemption transaction: %v", err)
+		return
+	}
+
+	if tx.BlockHash == "" {
+		return
+	}
+	blockHash, blockHeight, err := btc.checkRedemptionBlockDetails(req.outPt, tx.BlockHash, req.pkScript)
+	if err != nil {
+		btc.log.Error(err)
+		return
+	}
+	// Don't update the findRedemptionReq, since the findRedemptionMtx only
+	// protects the map.
+	req = &findRedemptionReq{
+		outPt:        req.outPt,
+		contract:     req.contract,
+		blockHash:    blockHash,
+		blockHeight:  blockHeight,
+		resultChan:   req.resultChan,
+		pkScript:     req.pkScript,
+		contractHash: req.contractHash,
+	}
+	btc.findRedemptionQueue[req.outPt] = req
+}
+
+// checkRedemptionBlockDetails looks retrieves the block at hashStr and checks
+// that the provided pkScript matches the specified outpoint
+func (btc *ExchangeWallet) checkRedemptionBlockDetails(outPt outPoint, blockStr string, pkScript []byte) (*chainhash.Hash, int32, error) {
+	blockHash, err := chainhash.NewHashFromStr(blockStr)
+	if err != nil {
+		return nil, 0, fmt.Errorf("NewHashFromStr error: %w", err)
+	}
+	blockHeight, err := btc.node.getBlockHeight(blockHash)
+	if err != nil {
+		return nil, 0, fmt.Errorf("GetBlockHeight for redemption block %s error: %w", blockStr, err)
+	}
+	blk, err := btc.node.getBlock(*blockHash)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error retrieving redemption block for %s: %w", blockStr, err)
+	}
+
+	var tx *wire.MsgTx
+out:
+	for _, iTx := range blk.Transactions {
+		if iTx.TxHash() == outPt.txHash {
+			tx = iTx
+			break out
+		}
+	}
+	if tx == nil {
+		return nil, 0, fmt.Errorf("transaction %s not found in block %s", outPt.txHash, blockStr)
+	}
+	if uint32(len(tx.TxOut)) < outPt.vout+1 {
+		return nil, 0, fmt.Errorf("no output %d in redemption transaction %s found in block %s", outPt.vout, outPt.txHash, blockStr)
+	}
+	if !bytes.Equal(tx.TxOut[outPt.vout].PkScript, pkScript) {
+		return nil, 0, fmt.Errorf("pubkey script mismatch for redemption at %s", outPt)
+	}
+
+	return blockHash, blockHeight, nil
 }
 
 func (btc *ExchangeWallet) blockFromHash(hash string) (*block, error) {
