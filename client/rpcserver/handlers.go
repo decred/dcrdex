@@ -850,7 +850,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	tradeRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" isLimit sell base quote qty rate immediate (customSwapFeeRate)`,
+		argsShort:   `"host" isLimit sell base quote qty rate immediate (minSwapFeeRate)`,
 		cmdSummary:  `Make an order to buy or sell an asset.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
@@ -862,10 +862,13 @@ Registration is complete after the fee transaction has been confirmed.`,
     quote (int): The BIP-44 coin index for the market's quote asset.
     qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
     rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
-	56000 satoshi/DCR for the DCR(base)_BTC(quote).
+      56000 satoshi/DCR for the DCR(base)_BTC(quote).
     immediate (bool): Require immediate match. Do not book the order.
-    customSwapFeeRate (int): Optional. Custom fee rate to use for swap transactions. The fee
-	may be higher if server's max fee rate is higher, but will never be lower.`,
+    minSwapFeeRate (int): Optional. Minimum fee rate to use for swap transactions. This
+      is used to set a higher fee rate than what might be prescribed by the server. The actual
+      fee may be higher if server's max fee rate is higher, but will never be lower. This fee
+      will be used for the asset you posess before the trade; i.e the base asset if sell=true or
+      the quote asset if sell=false.`,
 		returns: `Returns:
     obj: The order details.
     {

@@ -635,29 +635,29 @@ func TestOrders(t *testing.T) {
 		t.Fatalf("no error encountered for updating unknown order's status")
 	}
 
-	// Update order to have custom swap fee rate and make sure it's persisted
-	customSwapFeeRate := uint64(100)
+	// Update order to have minimum swap fee rate and make sure it's persisted
+	minSwapFeeRate := uint64(100)
 	o := activeOrders[0]
-	o.MetaData.CustomSwapFeeRate = &customSwapFeeRate
+	o.MetaData.MinSwapFeeRate = &minSwapFeeRate
 	boltdb.UpdateOrder(o)
 	mord, err = boltdb.Order(o.Order.ID())
 	if err != nil {
 		t.Fatalf("failed to retrieve order")
 	}
-	if *mord.MetaData.CustomSwapFeeRate != customSwapFeeRate {
-		t.Fatalf("failed to store custom fee rate")
+	if *mord.MetaData.MinSwapFeeRate != minSwapFeeRate {
+		t.Fatalf("failed to store minimum fee rate")
 	}
 
-	// Remove custom swap fee and make sure it's persisted
+	// Remove minimum swap fee and make sure it's persisted
 	md := o.MetaData
-	md.CustomSwapFeeRate = nil
+	md.MinSwapFeeRate = nil
 	boltdb.UpdateOrderMetaData(o.Order.ID(), md)
 	mord, err = boltdb.Order(o.Order.ID())
 	if err != nil {
 		t.Fatalf("failed to retrieve order")
 	}
-	if mord.MetaData.CustomSwapFeeRate != nil {
-		t.Fatalf("failed to delete custom fee rate")
+	if mord.MetaData.MinSwapFeeRate != nil {
+		t.Fatalf("failed to delete minimum fee rate")
 	}
 }
 

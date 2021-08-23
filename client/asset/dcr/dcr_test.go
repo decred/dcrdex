@@ -852,8 +852,8 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected spendable of value %d, got %d", littleFunds, v)
 	}
 
-	// Test that little funds are needed without a custom swap rate, but then
-	// lotta funds are needed with the custom swap rate.
+	// Test that little funds are needed without a minimum swap rate, but then
+	// lotta funds are needed with the minimum swap rate.
 	setOrderValue(littleOrder)
 	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -868,8 +868,8 @@ func TestAvailableFund(t *testing.T) {
 	}
 	_ = wallet.ReturnCoins(spendables)
 
-	customSwapFeeRate := ord.DEXConfig.MaxFeeRate + 1
-	ord.CustomSwapFeeRate = &customSwapFeeRate
+	minSwapFeeRate := ord.DEXConfig.MaxFeeRate + 1
+	ord.MinSwapFeeRate = &minSwapFeeRate
 	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for funding order")
@@ -881,22 +881,22 @@ func TestAvailableFund(t *testing.T) {
 	if v != lottaFunds {
 		t.Fatalf("expected spendable of value %d, got %d", lottaFunds, v)
 	}
-	ord.CustomSwapFeeRate = nil
+	ord.MinSwapFeeRate = nil
 	_ = wallet.ReturnCoins(spendables)
 
-	// Error with cusom fee rate higher than wallet fee rate limit
-	customSwapFeeRate = wallet.feeRateLimit + 1
-	ord.CustomSwapFeeRate = &customSwapFeeRate
+	// Error with minimum fee rate higher than wallet fee rate limit
+	minSwapFeeRate = wallet.feeRateLimit + 1
+	ord.MinSwapFeeRate = &minSwapFeeRate
 	_, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for too high fee rate")
 	}
 
 	// Success again.
-	ord.CustomSwapFeeRate = nil
+	ord.MinSwapFeeRate = nil
 	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
-		t.Fatalf("error for custom fee recovery run")
+		t.Fatalf("error for minimum fee recovery run")
 	}
 	_ = wallet.ReturnCoins(spendables)
 

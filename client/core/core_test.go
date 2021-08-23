@@ -3328,8 +3328,8 @@ func TestCusomSwapFeeRate(t *testing.T) {
 	rate := dcrBtcRateStep * 10
 
 	// Test when cusom swap fee rate is higher than max fee rate
-	customSwapFeeRate := tMaxFeeRate + 999
-	lo, dbOrder, preImgL, _ := makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &customSwapFeeRate)
+	minSwapFeeRate := tMaxFeeRate + 999
+	lo, dbOrder, preImgL, _ := makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &minSwapFeeRate)
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
@@ -3358,9 +3358,9 @@ func TestCusomSwapFeeRate(t *testing.T) {
 	counterSwapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
 
-	// Make sure that if the rate returned from server is higher than both custom swap fee
+	// Make sure that if the rate returned from server is higher than both minimum swap fee
 	// and max fee rate, we get an error.
-	msgMatch.FeeRateBase = customSwapFeeRate + 1
+	msgMatch.FeeRateBase = minSwapFeeRate + 1
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	err = handleMatchRoute(tCore, rig.dc, msg)
@@ -3368,21 +3368,21 @@ func TestCusomSwapFeeRate(t *testing.T) {
 		t.Fatalf("no error on rate higher than custom rate")
 	}
 
-	// Make sure we the match handling succeeds when the custom fee is higher then the max fee rate
-	msgMatch.FeeRateBase = customSwapFeeRate
+	// Make sure we the match handling succeeds when the minimum fee is higher then the max fee rate
+	msgMatch.FeeRateBase = minSwapFeeRate
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("handleMatchRoute returned an error: %v", err)
 	}
-	if tDcrWallet.lastSwapFeeRate != customSwapFeeRate {
-		t.Fatalf("custom swap fee %d was expected, but %d was used in swap", customSwapFeeRate, tDcrWallet.lastSwapFeeRate)
+	if tDcrWallet.lastSwapFeeRate != minSwapFeeRate {
+		t.Fatalf("minimum swap fee %d was expected, but %d was used in swap", minSwapFeeRate, tDcrWallet.lastSwapFeeRate)
 	}
 
 	// Test when cusom swap fee rate is higher than max fee rate
-	customSwapFeeRate = tMaxFeeRate - 2
-	lo, dbOrder, preImgL, _ = makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &customSwapFeeRate)
+	minSwapFeeRate = tMaxFeeRate - 2
+	lo, dbOrder, preImgL, _ = makeLimitOrderWithCustomFee(dc, true, qty, dcrBtcRateStep, &minSwapFeeRate)
 	lo.Force = order.StandingTiF
 	loid = lo.ID()
 
@@ -3405,7 +3405,7 @@ func TestCusomSwapFeeRate(t *testing.T) {
 		Address:     "counterparty-address",
 		Side:        uint8(order.Maker),
 		ServerTime:  encode.UnixMilliU(matchTime),
-		FeeRateBase: customSwapFeeRate + 1,
+		FeeRateBase: minSwapFeeRate + 1,
 	}
 
 	counterSwapID = encode.RandomBytes(36)
@@ -3416,8 +3416,8 @@ func TestCusomSwapFeeRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleMatchRoute returned an error: %v", err)
 	}
-	if tDcrWallet.lastSwapFeeRate != customSwapFeeRate+1 {
-		t.Fatalf("custom swap fee %d was expected, but %d was used in swap", customSwapFeeRate+1, tDcrWallet.lastSwapFeeRate)
+	if tDcrWallet.lastSwapFeeRate != minSwapFeeRate+1 {
+		t.Fatalf("minimum swap fee %d was expected, but %d was used in swap", minSwapFeeRate+1, tDcrWallet.lastSwapFeeRate)
 	}
 }
 
@@ -5224,7 +5224,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 	return makeLimitOrderWithCustomFee(dc, sell, qty, rate, nil)
 }
 
-func makeLimitOrderWithCustomFee(dc *dexConnection, sell bool, qty, rate uint64, customSwapFeeRate *uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
+func makeLimitOrderWithCustomFee(dc *dexConnection, sell bool, qty, rate uint64, minSwapFeeRate *uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
 	preImg := newPreimage()
 	addr := ordertest.RandomAddress()
 	lo := &order.LimitOrder{
@@ -5253,8 +5253,8 @@ func makeLimitOrderWithCustomFee(dc *dexConnection, sell bool, qty, rate uint64,
 			Proof: db.OrderProof{
 				Preimage: preImg[:],
 			},
-			MaxFeeRate:        tMaxFeeRate,
-			CustomSwapFeeRate: customSwapFeeRate,
+			MaxFeeRate:     tMaxFeeRate,
+			MinSwapFeeRate: minSwapFeeRate,
 		},
 		Order: lo,
 	}

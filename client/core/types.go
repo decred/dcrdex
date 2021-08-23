@@ -779,15 +779,15 @@ func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
 
 // TradeForm is used to place a market or limit order
 type TradeForm struct {
-	Host              string  `json:"host"`
-	IsLimit           bool    `json:"isLimit"`
-	Sell              bool    `json:"sell"`
-	Base              uint32  `json:"base"`
-	Quote             uint32  `json:"quote"`
-	Qty               uint64  `json:"qty"`
-	Rate              uint64  `json:"rate"`
-	TifNow            bool    `json:"tifnow"`
-	CustomSwapFeeRate *uint64 `json:"customSwapFee,omitempty"`
+	Host           string  `json:"host"`
+	IsLimit        bool    `json:"isLimit"`
+	Sell           bool    `json:"sell"`
+	Base           uint32  `json:"base"`
+	Quote          uint32  `json:"quote"`
+	Qty            uint64  `json:"qty"`
+	Rate           uint64  `json:"rate"`
+	TifNow         bool    `json:"tifnow"`
+	MinSwapFeeRate *uint64 `json:"minSwapFeeRate,omitempty"`
 }
 
 // marketName is a string ID constructed from the asset IDs.

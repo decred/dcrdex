@@ -83,7 +83,7 @@ var (
 	swapFeesKey            = []byte("swapFees")
 	maxFeeRateKey          = []byte("maxFeeRate")
 	redemptionFeesKey      = []byte("redeemFees")
-	customSwapFeeKey       = []byte("customswapfee")
+	minSwapFeeKey          = []byte("minSwapFee")
 	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
 	encSeedKey             = []byte("encSeed")
@@ -587,15 +587,15 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			linkedB = md.LinkedOrder[:]
 		}
 
-		if md.CustomSwapFeeRate != nil {
+		if md.MinSwapFeeRate != nil {
 			err = newBucketPutter(oBkt).
-				put(customSwapFeeKey, uint64Bytes(*md.CustomSwapFeeRate)).
+				put(minSwapFeeKey, uint64Bytes(*md.MinSwapFeeRate)).
 				err()
 			if err != nil {
 				return err
 			}
 		} else {
-			oBkt.Delete(customSwapFeeKey)
+			oBkt.Delete(minSwapFeeKey)
 		}
 
 		return newBucketPutter(oBkt).
@@ -892,10 +892,10 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
 	}
 
-	var customSwapFeeRate *uint64
-	if customSwapFeeInDb := oBkt.Get(customSwapFeeKey); customSwapFeeInDb != nil {
-		fee := intCoder.Uint64(customSwapFeeInDb)
-		customSwapFeeRate = &fee
+	var minSwapFeeRate *uint64
+	if minSwapFeeInDb := oBkt.Get(minSwapFeeKey); minSwapFeeInDb != nil {
+		fee := intCoder.Uint64(minSwapFeeInDb)
+		minSwapFeeRate = &fee
 	}
 
 	return &dexdb.MetaOrder{
@@ -908,7 +908,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
 			MaxFeeRate:         maxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
-			CustomSwapFeeRate:  customSwapFeeRate,
+			MinSwapFeeRate:     minSwapFeeRate,
 		},
 		Order: ord,
 	}, nil
@@ -971,15 +971,15 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			linkedB = md.LinkedOrder[:]
 		}
 
-		if md.CustomSwapFeeRate != nil {
+		if md.MinSwapFeeRate != nil {
 			err = newBucketPutter(oBkt).
-				put(customSwapFeeKey, uint64Bytes(*md.CustomSwapFeeRate)).
+				put(minSwapFeeKey, uint64Bytes(*md.MinSwapFeeRate)).
 				err()
 			if err != nil {
 				return err
 			}
 		} else {
-			oBkt.Delete(customSwapFeeKey)
+			oBkt.Delete(minSwapFeeKey)
 		}
 
 		return newBucketPutter(oBkt).

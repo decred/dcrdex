@@ -361,26 +361,26 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	var customSwapFeeRate *uint64
+	var minSwapFeeRate *uint64
 	if len(params.Args) > 8 {
-		fee, err := checkUIntArg(params.Args[8], "customSwapFeeRate", 64)
+		fee, err := checkUIntArg(params.Args[8], "minSwapFeeRate", 64)
 		if err != nil {
 			return nil, err
 		}
-		customSwapFeeRate = &fee
+		minSwapFeeRate = &fee
 	}
 	req := &tradeForm{
 		appPass: params.PWArgs[0],
 		srvForm: &core.TradeForm{
-			Host:              params.Args[0],
-			IsLimit:           isLimit,
-			Sell:              sell,
-			Base:              uint32(base),
-			Quote:             uint32(quote),
-			Qty:               qty,
-			Rate:              rate,
-			TifNow:            tifnow,
-			CustomSwapFeeRate: customSwapFeeRate,
+			Host:           params.Args[0],
+			IsLimit:        isLimit,
+			Sell:           sell,
+			Base:           uint32(base),
+			Quote:          uint32(quote),
+			Qty:            qty,
+			Rate:           rate,
+			TifNow:         tifnow,
+			MinSwapFeeRate: minSwapFeeRate,
 		},
 	}
 	return req, nil

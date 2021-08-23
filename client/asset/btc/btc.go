@@ -942,12 +942,12 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			btc.feeRateLimit)
 	}
 
-	// Check wallet's fee rate limit against user defined custom fee rate
-	if ord.CustomSwapFeeRate != nil && btc.feeRateLimit < *ord.CustomSwapFeeRate {
+	// Check wallet's fee rate limit against user defined minimum fee rate
+	if ord.MinSwapFeeRate != nil && btc.feeRateLimit < *ord.MinSwapFeeRate {
 		return nil, nil, fmt.Errorf(
-			"%v: custom swap fee %v higher than configured fee rate limit %v",
+			"%v: minimum swap fee %v higher than configured fee rate limit %v",
 			ord.DEXConfig.Symbol,
-			*ord.CustomSwapFeeRate,
+			*ord.MinSwapFeeRate,
 			btc.feeRateLimit)
 	}
 
@@ -964,8 +964,8 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 
 	var feeRate uint64
-	if ord.CustomSwapFeeRate != nil && *ord.CustomSwapFeeRate > ord.DEXConfig.MaxFeeRate {
-		feeRate = *ord.CustomSwapFeeRate
+	if ord.MinSwapFeeRate != nil && *ord.MinSwapFeeRate > ord.DEXConfig.MaxFeeRate {
+		feeRate = *ord.MinSwapFeeRate
 	} else {
 		feeRate = ord.DEXConfig.MaxFeeRate
 	}
