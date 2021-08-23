@@ -25,9 +25,8 @@ var EnUS = map[string]string{
 	"add a file":            "add a file",
 	"Submit":                "Submit",
 	"Confirm Registration":  "Confirm Registration",
-	"reg_confirm_submit": `Enter your app password to confirm DEX registration.
-		When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay
-		registration fees.`,
+	"app_pw_reg":            "Enter your app password to confirm DEX registration.",
+	"reg_confirm_submit":    `When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay registration fees.`,
 	"lot_size_headsup": `The lot size for the <span id="dcrBaseMarketName" class="mono"></span> market is <span id="dexDCRLotSize"></span> DCR.
 		All trades on this market are in multiples of this lot size.
 		This is the minimum possible trade amount in DCR.`,
@@ -151,4 +150,15 @@ var EnUS = map[string]string{
 	"pw_change_instructions": "Changing the password below does not change the password for your wallet software. Use this form to update the DEX client after you have changed your password with the wallet software directly.",
 	"New Wallet Password":    "New Wallet Password",
 	"pw_change_warn":         "Note: Changing to a different wallet while having active trades might cause funds to be lost.",
+	"Show more options":      "Show more options",
+	"seed_implore_msg":       "You should carefully write down your application seed and save a copy. Should you lose access to this machine or the critical application files, the seed can be used to restore your DEX accounts and native wallets. Some older accounts cannot be restored from seed, and whether old or new, it's good practice to backup the account keys separately from the seed.",
+	"View Application Seed":  "View Application Seed",
+	"Remember my password":   "Remember my password",
+	"pw_for_seed":            "Enter your app password to show your seed. Make sure nobody else can see your screen.",
+	"Asset":                  "Asset",
+	"Balance":                "Balance",
+	"Actions":                "Actions",
+	"Restoration Seed":       "Restoration Seed",
+	"Restore from seed":      "Restore from seed",
+	"Import Account":         "Import Account",
 }
