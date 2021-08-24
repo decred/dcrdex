@@ -1,6 +1,7 @@
 import Doc from './doc'
 import { postJSON } from './http'
 import State from './state'
+import { feeSendErr } from './constants'
 
 let app
 
@@ -289,6 +290,95 @@ export class WalletConfigForm {
       const el = els[opt.key]
       if (el) box.append(el)
     }
+  }
+}
+
+/*
+ * ConfirmRegistrationForm should be used with the "confirmRegistrationForm" template.
+ */
+export class ConfirmRegistrationForm {
+  constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail) {
+    this.fields = Doc.parsePage(form, [
+      'feeDisplay', 'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
+      'appPassSpan', 'submitConfirm', 'regErr'
+    ])
+    app = application
+    this.getDexAddr = getDexAddr
+    this.getCertFile = getCertFile
+    this.success = success
+    this.insufficientFundsFail = insufficientFundsFail
+    this.form = form
+    bind(form, this.fields.submitConfirm, () => this.submitForm())
+  }
+
+  /*
+   * setExchange populates the form with the details of an exchange.
+   */
+  setExchange (xc) {
+    const fields = this.fields
+    this.fee = xc.feeAsset.amount
+    fields.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    while (fields.marketsTableRows.firstChild) {
+      fields.marketsTableRows.removeChild(fields.marketsTableRows.firstChild)
+    }
+    const markets = Object.values(xc.markets)
+    markets.sort((m1, m2) => {
+      const compareBase = m1.basesymbol.localeCompare(m2.basesymbol)
+      const compareQuote = m1.quotesymbol.localeCompare(m2.quotesymbol)
+      return compareBase === 0 ? compareQuote : compareBase
+    })
+    markets.forEach((market) => {
+      const tr = fields.marketRowTemplate.cloneNode(true)
+      Doc.tmplElement(tr, 'baseicon').src = Doc.logoPath(market.basesymbol)
+      Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
+      Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
+      Doc.tmplElement(tr, 'quote').innerText = market.quotesymbol.toUpperCase()
+      Doc.tmplElement(tr, 'lotsize').innerText = `${market.lotsize / 1e8} ${market.basesymbol.toUpperCase()}`
+      fields.marketsTableRows.appendChild(tr)
+      if (State.passwordIsCached()) {
+        Doc.hide(fields.appPassBox)
+        Doc.hide(fields.appPassSpan)
+      } else {
+        Doc.show(fields.appPassBox)
+        Doc.show(fields.appPassSpan)
+      }
+    })
+  }
+
+  /*
+   * submitForm is called when the form is submitted.
+   */
+  async submitForm () {
+    const fields = this.fields
+    Doc.hide(fields.regErr)
+    const cert = await this.getCertFile()
+    const dexAddr = this.getDexAddr()
+    const registration = {
+      addr: dexAddr,
+      pass: fields.appPass.value,
+      fee: this.fee,
+      cert: cert
+    }
+    fields.appPass.value = ''
+    const loaded = app.loading(this.form)
+    const res = await postJSON('/api/register', registration)
+    if (!app.checkResponse(res)) {
+      // This form is used both in the register workflow and the
+      // settings page. The register workflow handles a failure
+      // where the user does not have enough funds to pay for the
+      // registration fee in a different way.
+      if (res.code === feeSendErr && this.insufficientFundsFail) {
+        loaded()
+        this.insufficientFundsFail(res.msg)
+        return
+      }
+      fields.regErr.textContent = res.msg
+      Doc.show(fields.regErr)
+      loaded()
+      return
+    }
+    loaded()
+    this.success()
   }
 }
 

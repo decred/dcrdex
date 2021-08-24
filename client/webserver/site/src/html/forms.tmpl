@@ -139,21 +139,47 @@
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-{{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="bg2 px-2 py-1 text-center position-relative fs18">
   [[[Confirm Registration]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-4">
   <div class="fs16">
-    <span {{if $passwordIsCached}}class="d-hide"{{end}}>[[[app_pw_reg]]]</span>
+    <span id="appPassSpan">[[[app_pw_reg]]]</span>
     [[[reg_confirm_submit]]]
   </div>
   <div class="fs16 mt-4">
+    [[[provied_markets]]]
+    <table class="marketstable">
+      <thead>
+        <tr>
+          <th class="text-center">[[[base_header]]]</th>
+          <th class="text-center">[[[quote_header]]]</th>
+          <th class="text-center">[[[lot_size_header]]]</th>
+        </tr>
+      </thead>
+      <tbody id="marketsTableRows">
+        <tr id="marketRowTemplate">
+          <td>
+            <div class="d-flex justify-content-center align-items-center">
+              <img class="micro-icon mr-1" data-tmpl="baseicon">
+              <div data-tmpl="base"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <div class="d-flex justify-content-center align-items-center">
+              <img class="micro-icon mr-1" data-tmpl="quoteicon">
+              <div data-tmpl="quote"></div>
+            </div>
+          </td>
+          <td class="text-center" data-tmpl="lotsize"></td>
+        </tr>
+      </tbody>
+    </table>
     [[[lot_size_headsup]]]
   </div>
-  <hr class="dashed my-4">
-  <div {{if $passwordIsCached}}class="d-hide"{{end}} id="appPassBox">
+  <hr class="dashed mt-4">
+  <div id="appPassBox">
     <label for="appPass" class="pl-1 mb-1">[[[Password]]]</label>
     <input type="password" class="form-control select" id="appPass" autocomplete="current-password">
   </div>
