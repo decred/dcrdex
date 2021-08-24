@@ -383,8 +383,8 @@ func TestInitiate(t *testing.T) {
 	}
 	spew.Dump(swap)
 	state := eth.SwapState(swap.State)
-	if state != eth.None {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.None, state)
+	if state != eth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
 	}
 
 	tests := []struct {
@@ -393,13 +393,13 @@ func TestInitiate(t *testing.T) {
 		finalState eth.SwapState
 	}{{
 		name:       "ok",
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 		subAmt:     true,
 	}, {
 		// If the hash already exists, the contract should subtract only
 		// the tx fee from the account.
 		name:       "secret hash already exists",
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 	}}
 
 	for _, test := range tests {
@@ -466,24 +466,24 @@ func TestRedeem(t *testing.T) {
 		name:       "ok before locktime",
 		sleep:      time.Second * 8,
 		redeemer:   participantAcct,
-		finalState: eth.Redeemed,
+		finalState: eth.SSRedeemed,
 		addAmt:     true,
 	}, {
 		name:       "ok after locktime",
 		sleep:      time.Second * 16,
 		redeemer:   participantAcct,
-		finalState: eth.Redeemed,
+		finalState: eth.SSRedeemed,
 		addAmt:     true,
 	}, {
 		name:       "bad secret",
 		sleep:      time.Second * 8,
 		redeemer:   participantAcct,
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 		badSecret:  true,
 	}, {
 		name:       "wrong redeemer",
 		sleep:      time.Second * 8,
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 		redeemer:   simnetAcct,
 	}}
 
@@ -506,8 +506,8 @@ func TestRedeem(t *testing.T) {
 			t.Fatal("unable to get swap state")
 		}
 		state := eth.SwapState(swap.State)
-		if state != eth.None {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.None, state)
+		if state != eth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
 		}
 
 		// Create a secret that doesn't has to secretHash.
@@ -589,23 +589,23 @@ func TestRefund(t *testing.T) {
 		sleep:      time.Second * 16,
 		refunder:   simnetAcct,
 		addAmt:     true,
-		finalState: eth.Refunded,
+		finalState: eth.SSRefunded,
 	}, {
 		name:       "before locktime",
 		sleep:      time.Second * 8,
 		refunder:   simnetAcct,
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 	}, {
 		name:       "wrong refunder",
 		sleep:      time.Second * 16,
 		refunder:   participantAcct,
-		finalState: eth.Initiated,
+		finalState: eth.SSInitiated,
 	}, {
 		name:       "already redeemed",
 		sleep:      time.Second * 16,
 		refunder:   simnetAcct,
 		redeem:     true,
-		finalState: eth.Redeemed,
+		finalState: eth.SSRedeemed,
 	}}
 
 	for _, test := range tests {
@@ -627,8 +627,8 @@ func TestRefund(t *testing.T) {
 			t.Fatal("unable to get swap state")
 		}
 		state := eth.SwapState(swap.State)
-		if state != eth.None {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.None, state)
+		if state != eth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
 		}
 
 		inLocktime := time.Now().Add(locktime).Unix()
@@ -819,15 +819,15 @@ func TestReplayAttack(t *testing.T) {
 			"or a difference of %v", wantBal, bal, diff)
 	}
 
-	// The exploit failed and status should be None because initiation also
+	// The exploit failed and status should be SSNone because initiation also
 	// failed.
 	swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state := eth.SwapState(swap.State)
-	if state != eth.None {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.None, state)
+	if state != eth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
 	}
 
 	// The contract should hold four more ether because initiation of one

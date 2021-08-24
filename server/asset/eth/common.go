@@ -19,22 +19,25 @@ type SwapState uint8
 // either a contract address and secret hash or a txid.
 type CoinIDFlag uint16
 
+// Swap states represent the status of a swap. The default state of a swap is
+// SSNone. A swap in status SSNone does not exist. SSInitiated indicates that a
+// party has initiated the swap and funds have been sent to the contract.
+// SSRedeemed indicates a successful swap where the participant was able to
+// redeem with the secret hash. SSRefunded indicates a failed swap, where the
+// initiating party refunded their coins after the locktime passed. A swap no
+// longer changes states after reaching SSRedeemed or SSRefunded.
 const (
-	// Swap states represent the status of a swap.
-	None SwapState = iota
-	Initiated
-	Redeemed
-	Refunded
-
-	// coinIdSize = flags (2) + smart contract address where funds are
-	// locked (20) + secret hash map key (32)
-	coinIDSize = 54
-	// MaxBlockInterval is the number of seconds since the last header came
-	// in over which we consider the chain to be out of sync.
-	MaxBlockInterval = 180
-	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
-	// as gwei, or 1e9 wei. This is used in factoring.
-	GweiFactor = 1e9
+	// SSNone indicates that the swap is not initiated. This is the default
+	// state of a swap.
+	SSNone SwapState = iota
+	// SSInitiated indicates that the swap has been initiated.
+	SSInitiated
+	// SSRedeemed indicates that the swap was initiated and then redeemed.
+	// This is one of two possible end states of a swap.
+	SSRedeemed
+	// SSRefunded indicates that the swap was initiated and then refunded.
+	// This is one of two possible end states of a swap.
+	SSRefunded
 )
 
 // CIDTxID and CIDSwap are used in CoinIDs to signify a coinID
@@ -48,6 +51,18 @@ const (
 	// contract address and secret hash used to fetch data about a swap
 	// from the live contract.
 	CIDSwap
+)
+
+const (
+	// coinIdSize = flags (2) + smart contract address where funds are
+	// locked (20) + secret hash map key (32)
+	coinIDSize = 54
+	// MaxBlockInterval is the number of seconds since the last header came
+	// in over which we consider the chain to be out of sync.
+	MaxBlockInterval = 180
+	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
+	// as gwei, or 1e9 wei. This is used in factoring.
+	GweiFactor = 1e9
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
@@ -64,13 +79,13 @@ func ToGwei(wei *big.Int) (uint64, error) {
 // String satisfies the Stringer interface.
 func (ss SwapState) String() string {
 	switch ss {
-	case None:
+	case SSNone:
 		return "none"
-	case Initiated:
+	case SSInitiated:
 		return "initiated"
-	case Redeemed:
+	case SSRedeemed:
 		return "redeemed"
-	case Refunded:
+	case SSRefunded:
 		return "refunded"
 	}
 	return "unknown"
