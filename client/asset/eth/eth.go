@@ -108,15 +108,15 @@ type rawWallet struct {
 type ethFetcher interface {
 	accounts() []*accounts.Account
 	addPeer(ctx context.Context, peer string) error
-	balance(ctx context.Context, addr common.Address) (*big.Int, error)
+	balance(ctx context.Context, addr *common.Address) (*big.Int, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	blockNumber(ctx context.Context) (uint64, error)
-	connect(ctx context.Context, node *node.Node, contractAddr common.Address) error
+	connect(ctx context.Context, node *node.Node, contractAddr *common.Address) error
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
-	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error)
+	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -192,7 +192,7 @@ func (eth *ExchangeWallet) shutdown() {
 // Connect connects to the node RPC server. A dex.Connector.
 func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	err := c.connect(ctx, eth.internalNode, mainnetContractAddr)
+	err := c.connect(ctx, eth.internalNode, &mainnetContractAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if eth.acct == nil {
 		return nil, errors.New("account not set")
 	}
-	bigBal, err := eth.node.balance(eth.ctx, eth.acct.Address)
+	bigBal, err := eth.node.balance(eth.ctx, &eth.acct.Address)
 	if err != nil {
 		return nil, err
 	}

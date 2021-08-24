@@ -38,7 +38,7 @@ type rpcclient struct {
 
 // connect connects to a node. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
-func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr common.Address) error {
+func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr *common.Address) error {
 	client, err := node.Attach()
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
@@ -46,7 +46,7 @@ func (c *rpcclient) connect(ctx context.Context, node *node.Node, contractAddr c
 	c.c = client
 	c.ec = ethclient.NewClient(client)
 	c.n = node
-	c.es, err = swap.NewETHSwap(contractAddr, c.ec)
+	c.es, err = swap.NewETHSwap(*contractAddr, c.ec)
 	if err != nil {
 		return fmt.Errorf("unable to find swap contract: %v", err)
 	}
@@ -104,8 +104,8 @@ func (c *rpcclient) accounts() []*accounts.Account {
 }
 
 // balance gets the current balance of an address.
-func (c *rpcclient) balance(ctx context.Context, addr common.Address) (*big.Int, error) {
-	return c.ec.BalanceAt(ctx, addr, nil)
+func (c *rpcclient) balance(ctx context.Context, addr *common.Address) (*big.Int, error) {
+	return c.ec.BalanceAt(ctx, *addr, nil)
 }
 
 // unlock uses a raw request to unlock an account indefinitely.
@@ -248,12 +248,12 @@ func (c *rpcclient) addSignerToOpts(txOpts *bind.TransactOpts, netID int64) erro
 // initiate creates a swap contract. The initiator will be the account at
 // txOpts.From. Any on-chain failure, such as this secret hash already existing
 // in the swaps map, will not cause this to error.
-func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error) {
+func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error) {
 	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
 	}
-	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, participant)
+	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
 }
 
 // redeem redeems a swap contract. The redeemer will be the account at txOpts.From.

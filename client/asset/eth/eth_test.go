@@ -46,7 +46,7 @@ type testNode struct {
 	balErr         error
 }
 
-func (n *testNode) connect(ctx context.Context, node *node.Node, addr common.Address) error {
+func (n *testNode) connect(ctx context.Context, node *node.Node, addr *common.Address) error {
 	return n.connectErr
 }
 func (n *testNode) shutdown() {}
@@ -62,7 +62,7 @@ func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, e
 func (n *testNode) accounts() []*accounts.Account {
 	return nil
 }
-func (n *testNode) balance(ctx context.Context, acct common.Address) (*big.Int, error) {
+func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int, error) {
 	return n.bal, n.balErr
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
@@ -98,7 +98,7 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
 	return nil, nil
 }
-func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant common.Address) (*types.Transaction, error) {
+func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
