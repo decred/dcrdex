@@ -138,7 +138,7 @@ func TestDecodeCoinID(t *testing.T) {
 			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
 			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
 		},
-		wantFlags: TxIDFlag,
+		wantFlags: CIDTxID,
 		wantAddr: &common.Address{
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
 			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
@@ -192,7 +192,7 @@ func TestDecodeCoinID(t *testing.T) {
 }
 
 func TestCoinIDToString(t *testing.T) {
-	flags := SwapFlag
+	flags := CIDSwap
 	addr := "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	secretHash := "71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
 	tests := []struct {
@@ -397,54 +397,54 @@ func TestSynced(t *testing.T) {
 	}
 }
 
-func TestIsTxIDCoinID(t *testing.T) {
+func TestIsCIDTxID(t *testing.T) {
 	tests := []struct {
 		name string
 		flag CoinIDFlag
 		want bool
 	}{{
 		name: "true",
-		flag: TxIDFlag,
+		flag: CIDTxID,
 		want: true,
 	}, {
 		name: "false zero",
 	}, {
 		name: "false other",
-		flag: SwapFlag,
+		flag: CIDSwap,
 	}, {
 		name: "false txid and other",
-		flag: TxIDFlag | SwapFlag,
+		flag: CIDTxID | CIDSwap,
 	}}
 
 	for _, test := range tests {
-		got := IsTxIDCoinID(test.flag)
+		got := IsCIDTxID(test.flag)
 		if got != test.want {
 			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
 		}
 	}
 }
 
-func TestIsSwapCoinID(t *testing.T) {
+func TestCIDSwap(t *testing.T) {
 	tests := []struct {
 		name string
 		flag CoinIDFlag
 		want bool
 	}{{
 		name: "true",
-		flag: SwapFlag,
+		flag: CIDSwap,
 		want: true,
 	}, {
 		name: "false zero",
 	}, {
 		name: "false other",
-		flag: TxIDFlag,
+		flag: CIDTxID,
 	}, {
 		name: "false txid and other",
-		flag: TxIDFlag | SwapFlag,
+		flag: CIDTxID | CIDSwap,
 	}}
 
 	for _, test := range tests {
-		got := IsSwapCoinID(test.flag)
+		got := IsCIDSwap(test.flag)
 		if got != test.want {
 			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
 		}
@@ -464,7 +464,7 @@ func TestToCoinID(t *testing.T) {
 		want []byte
 	}{{
 		name: "txid",
-		flag: TxIDFlag,
+		flag: CIDTxID,
 		want: []byte{
 			0x00, 0x01, // 2 byte flags
 			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -477,7 +477,7 @@ func TestToCoinID(t *testing.T) {
 		},
 	}, {
 		name: "swap",
-		flag: SwapFlag,
+		flag: CIDSwap,
 		want: []byte{
 			0x00, 0x02, // 2 byte flags
 			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
