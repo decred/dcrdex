@@ -8,9 +8,14 @@ modules="."
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
 
-cd client/webserver/site
-go generate
-cd $dir
+# Regenerate localized html templates and check for changes.
+TMPL_STATUS=$(git status --porcelain 'client/webserver/site/src/localized_html/*.tmpl')
+go generate -x ./client/webserver/site
+TMPL_STATUS2=$(git status --porcelain 'client/webserver/site/src/localized_html/*.tmpl')
+if [ "$TMPL_STATUS" != "$TMPL_STATUS2" ]; then
+	printf "Localized HTML templates in client/webserver/site/src/localized_html need updating:\n${TMPL_STATUS2}\n"
+	exit 1
+fi
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules

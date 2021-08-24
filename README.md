@@ -248,9 +248,18 @@ See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
 
 **Build the web assets** from *client/webserver/site/*.
 
+Bundle the CSS and JavaScript with Webpack:
+
 ```
 npm clean-install
 npm run build
+```
+
+If you have modified any of the HTML templates in *client/webserver/site/src/html*,
+it is necessary to regenerate the localize templates in *client/webserver/site/src/localized_html*:
+
+```
+go generate
 ```
 
 **Build and run the client** from *client/cmd/dexc*.
