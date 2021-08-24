@@ -296,7 +296,6 @@ export default class MarketsPage extends BasePage {
       else if (r < 0.25) r = 0.25
 
       const h = r * (this.main.clientHeight - app.header.offsetHeight)
-
       page.marketChart.style.height = `${h}px`
 
       this.chart.resize(h)

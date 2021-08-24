@@ -149,6 +149,7 @@ export class WalletConfigForm {
    * inspection by the user.
    */
   async fileInputChanged () {
+    Doc.hide(this.errMsg)
     if (!this.fileInput.value) return
     const loaded = app.loading(this.form)
     const config = await this.fileInput.files[0].text()

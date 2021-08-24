@@ -8,6 +8,10 @@ modules="."
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
 
+cd client/webserver/site
+go generate
+cd $dir
+
 # For each module, run go mod tidy, build and run test.
 for m in $modules
 do

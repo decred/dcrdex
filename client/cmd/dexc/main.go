@@ -154,8 +154,15 @@ func mainCore() error {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, cfg.SiteDir, logMaker.Logger("WEB"),
-			cfg.ReloadHTML, cfg.HTTPProfile)
+		webSrv, err := webserver.New(&webserver.Config{
+			Core:          clientCore,
+			Addr:          cfg.WebAddr,
+			CustomSiteDir: cfg.SiteDir,
+			Logger:        logMaker.Logger("WEB"),
+			ReloadHTML:    cfg.ReloadHTML,
+			HttpProf:      cfg.HTTPProfile,
+			Language:      cfg.Language,
+		})
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)
 		}

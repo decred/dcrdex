@@ -24,20 +24,20 @@
   {{$w := .Wallet}}
   {{if $w}}
   {{$ready := and $w.Running $w.Open}}
-  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>[[[Connect]]]</button>
-  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>[[[Unlock]]]</button>
-  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>[[[Withdraw]]]</button>
-  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>[[[Deposit]]]</button>
-  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>[[[Lock]]]</button>
-  <button data-action="create" class="d-hide">Create a {{.Info.Name}} [[[Wallet]]]</button>
+  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>Connect</button>
+  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Unlock</button>
+  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Withdraw</button>
+  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Deposit</button>
+  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Lock</button>
+  <button data-action="create" class="d-hide">Create a {{.Info.Name}} Wallet</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
     {{else}}
-    <button data-action="connect" class="d-hide">[[[Connect]]]</button>
-    <button data-action="unlock" class="d-hide">[[[Unlock]]]</button>
-    <button data-action="withdraw" class="d-hide">[[[Withdraw]]]</button>
-    <button data-action="deposit" class="d-hide">[[[Deposit]]]</button>
-    <button data-action="lock" class="d-hide">[[[Lock]]]</button>
-    <button data-action="create">[[[Create a]]] {{.Info.Name}} [[[Wallet]]]</button>
+    <button data-action="connect" class="d-hide">Connect</button>
+    <button data-action="unlock" class="d-hide">Unlock</button>
+    <button data-action="withdraw" class="d-hide">Withdraw</button>
+    <button data-action="deposit" class="d-hide">Deposit</button>
+    <button data-action="lock" class="d-hide">Lock</button>
+    <button data-action="create">Create a {{.Info.Name}} Wallet</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}
 {{end}}
@@ -49,14 +49,14 @@
 
   {{- /* LEFT SIDE */ -}}
   <div class="col-14">
-    <h3 class="p-3">[[[Wallets]]]</h3>
+    <h3 class="p-3">Wallets</h3>
     <table class="wallets">
       <thead>
         <tr>
-          <th>[[[Asset]]] <span id="assetArrow"></span></th>
-          <th>[[[Balance]]] <span id="balanceArrow"></span></th>
-          <th>[[[Status]]] <span id="statusArrow"></span></th>
-          <th>[[[Actions]]]</th>
+          <th>Asset <span id="assetArrow"></span></th>
+          <th>Balance <span id="balanceArrow"></span></th>
+          <th>Status <span id="statusArrow"></span></th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="walletTable">
@@ -91,7 +91,7 @@
 
     {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
     <div id="marketsBox" class="d-hide">
-      <div class="fs22 text-center py-1"><span id="marketsFor"></span> [[[Markets]]]</div>
+      <div class="fs22 text-center py-1"><span id="marketsFor"></span> Markets</div>
       <div id="marketsCard" class="card">
         <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
         <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
@@ -116,7 +116,7 @@
     {{- /* DEPOSIT ADDRESS */ -}}
     <div class="card bg1 text-center fs20 d-hide" id="deposit">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
-        [[[Deposit]]]
+        Deposit
         <img id="depositLogo" class="micro-icon mx-1">
         <span id="depositName"></span>
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
@@ -124,7 +124,7 @@
       <div class="p-2">
         <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
         <div class="my-3">
-          <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">[[[New Deposit Address]]]</button>
+          <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">New Deposit Address</button>
         </div>
         <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
       </div>
@@ -133,35 +133,35 @@
     {{- /* WITHDRAW */ -}}
     <form class="card bg1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
-        [[[Withdraw]]]
+        Withdraw
         <img id="withdrawLogo" class="micro-icon mx-1">
         <span id="withdrawName"></span>
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="px-4 mt-3">
-        <label for="withdrawAddr" class="pl-1 mb-1">[[[Address]]]</label>
+        <label for="withdrawAddr" class="pl-1 mb-1">Address</label>
         <input type="text" class="form-control select" id="withdrawAddr">
       </div>
       <div class="d-flex align-items-stretch px-4">
         <div class="mt-2 col-10 p-0">
-          <label for="withdrawAmt" class="pl-1 mb-1">[[[Amount]]]</label>
+          <label for="withdrawAmt" class="pl-1 mb-1">Amount</label>
           <input type="text" class="form-control select" id="withdrawAmt">
         </div>
         <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
-          <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> [[[available]]]</div>
+          <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> available</div>
           <!-- <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div> -->
         </div>
       </div>
       <hr class="dashed my-4 mx-4">
-      <div class="fs16 px-4 text-center">[[[Authorize the withdraw with your app password.]]]</div>
+      <div class="fs16 px-4 text-center">Authorize the withdraw with your app password.</div>
       <div class="d-flex px-4 mt-3">
         <div class="col-12 p-0">
-          <label for="withdrawPW" class="pl-1 mb-1">[[[Password]]]</label>
+          <label for="withdrawPW" class="pl-1 mb-1">Password</label>
           <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
         </div>
         <div class="col-12 p-0 text-right">
           <div>&nbsp;</div>
-          <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">[[[Withdraw]]]</button>
+          <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Withdraw</button>
         </div>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor" id="withdrawErr"></div>
@@ -170,10 +170,10 @@
     {{- /* RECONFIGURE WALLET */ -}}
     <form class="card bg1 pb-3 d-hide mt-3" id="walletReconfig" autocomplete="off">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
-        [[[Reconfigure]]]
+        Reconfigure
         <img id="recfgAssetLogo" class="micro-icon mx-1">
         <span id="recfgAssetName"></span>
-        [[[Wallet]]]
+        Wallet
         <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="px-3 py-1" id="reconfigInputs">
@@ -186,25 +186,25 @@
       </div>
       <div id="changePW" class="px-4 py-1">
         <div class="fs15">
-          [[[pw_change_instructions]]]
+          Changing the password below does not change the password for your wallet software. Use this form to update the DEX client after you have changed your password with the wallet software directly.
         </div>
         <div class="pt-3">
-          <label for="newPW" class="mb-1">[[[New Wallet Password]]]</label>
+          <label for="newPW" class="mb-1">New Wallet Password</label>
           <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
         </div>
       </div>
       <hr class="dashed my-2 mx-4">
       <div class="px-4 my-2">
-        [[[pw_change_warn]]]
+        Note: Changing to a different wallet while having active trades might cause funds to be lost.
       </div>
       <div class="d-flex px-4 mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
         <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-          <label for="appPW" class="pl-1 mb-1">[[[App Password]]]</label>
+          <label for="appPW" class="pl-1 mb-1">App Password</label>
           <input type="password" class="form-control select" id="appPW" autocomplete="off">
         </div>
         <div class="col-12 p-0 text-right">
           <div>&nbsp;</div>
-          <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
+          <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Submit</button>
         </div>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor" id="reconfigErr"></div>

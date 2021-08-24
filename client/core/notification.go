@@ -23,6 +23,7 @@ const (
 	NoteTypeWalletState  = "walletstate"
 	NoteTypeServerNotify = "notify"
 	NoteTypeSecurity     = "security"
+	NoteTypeUpgrade      = "upgrade"
 )
 
 // notify sends a notification to all subscribers. If the notification is of
@@ -77,6 +78,10 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 			c.log.Errorf("error saving notification acknowledgement for %s: %v", id, err)
 		}
 	}
+}
+
+func (c *Core) formatDetails(subject string, args ...interface{}) (translatedSubject, details string) {
+	return c.localePrinter.Sprintf(subject), c.localePrinter.Sprintf(TemplateKeys[subject], args...)
 }
 
 // Notification is an interface for a user notification. Notification is
@@ -186,12 +191,15 @@ type OrderNote struct {
 const (
 	SubjectOrderLoadFailure     = "Order load failure"
 	SubjectOrderPlaced          = "Order placed"
+	SubjectYoloPlaced           = "Market order placed"
 	SubjectMissingMatches       = "Missing matches"
 	SubjectWalletMissing        = "Wallet missing"
-	SubjectMatchStatusError     = "Match status error"
+	SubjectMatchErrorCoin       = "Match coin error"
+	SubjectMatchErrorContract   = "Match contract error"
 	SubjectMatchRecoveryError   = "Match recovery error"
 	SubjectNoFundingCoins       = "No funding coins"
 	SubjectOrderCoinError       = "Order coin error"
+	SubjectOrderCoinFetchError  = "Order coin fetch error"
 	SubjectPreimageSent         = "preimage sent"
 	SubjectCancelPreimageSent   = "cancel preimage sent"
 	SubjectMissedCancel         = "Missed cancel"
@@ -200,7 +208,9 @@ const (
 	SubjectOrderCanceled        = "Order canceled"
 	SubjectCancel               = "cancel"
 	SubjectMatchesMade          = "Matches made"
-	SubjectSwapError            = "Swap error"
+	SubjectSwapSendError        = "Swap send error"
+	SubjectInitError            = "Swap reporting error"
+	SubjectReportRedeemError    = "Redeem reporting error"
 	SubjectSwapsInitiated       = "Swaps initiated"
 	SubjectRedemptionError      = "Redemption error"
 	SubjectMatchComplete        = "Match complete"
@@ -298,6 +308,11 @@ type ConnEventNote struct {
 	Connected bool   `json:"connected"`
 }
 
+const (
+	SubjectDEXConnected    = "Server connected"
+	SubjectDEXDisconnected = "Server disconnect"
+)
+
 func newConnEventNote(subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
 		Notification: db.NewNotification(NoteTypeConnEvent, subject, details, severity),
@@ -379,14 +394,31 @@ type ServerNotifyNote struct {
 }
 
 const (
-	SubjectMarketSuspendScheduled = "market suspend scheduled"
-	SubjectMarketSuspended        = "market suspended"
-	SubjectMarketResumeScheduled  = "market resume scheduled"
-	SubjectMarketResumed          = "market resumed"
+	SubjectMarketSuspendScheduled   = "Market suspend scheduled"
+	SubjectMarketSuspended          = "Market suspended"
+	SubjectMarketSuspendedWithPurge = "Market suspended, orders purged"
+	SubjectMarketResumeScheduled    = "Market resume scheduled"
+	SubjectMarketResumed            = "Market resumed"
+	SubjectPenalized                = "Server has penalized you"
 )
 
 func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
 	return &ServerNotifyNote{
 		Notification: db.NewNotification(NoteTypeServerNotify, subject, details, severity),
+	}
+}
+
+// UpgradeNote is a notification containing a .
+type UpgradeNote struct {
+	db.Notification
+}
+
+const (
+	SubjectUpgradeNeeded = "Upgrade needed"
+)
+
+func newUpgradeNote(subject, details string, severity db.Severity) *UpgradeNote {
+	return &UpgradeNote{
+		Notification: db.NewNotification(NoteTypeUpgrade, subject, details, severity),
 	}
 }
