@@ -1420,27 +1420,11 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Add change, sign, and send the transaction.
 	dcr.fundingMtx.Lock()         // before generating change output
 	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
-	msgTx, change, changeAddr, fees, err := dcr.sendWithReturn(baseTx, swaps.FeeRate, -1)
+	// Sign the tx but don't send the transaction yet until
+	// the individual swap refund txs are prepared and signed.
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, swaps.FeeRate, -1)
 	if err != nil {
 		return nil, nil, 0, err
-	}
-
-	// Return spent outputs.
-	err = dcr.returnCoins(swaps.Inputs)
-	if err != nil {
-		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
-	}
-
-	// Lock the change coin, if requested.
-	if swaps.LockChange {
-		dcr.log.Debugf("locking change coin %s", change)
-		err = dcr.lockFundingCoins([]*fundingCoin{{
-			op:   change,
-			addr: changeAddr,
-		}})
-		if err != nil {
-			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
-		}
 	}
 
 	receipts := make([]asset.Receipt, 0, swapCount)
@@ -1461,6 +1445,30 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
 			signedRefund: refundB,
 		})
+	}
+
+	// Refund txs prepared and signed. Can now broadcast the swap(s).
+	err = dcr.broadcastTx(msgTx)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	// Return spent outputs.
+	err = dcr.returnCoins(swaps.Inputs)
+	if err != nil {
+		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
+	}
+
+	// Lock the change coin, if requested.
+	if swaps.LockChange {
+		dcr.log.Debugf("locking change coin %s", change)
+		err = dcr.lockFundingCoins([]*fundingCoin{{
+			op:   change,
+			addr: changeAddr,
+		}})
+		if err != nil {
+			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
+		}
 	}
 
 	// If change is nil, return a nil asset.Coin.
@@ -2639,6 +2647,17 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Addre
 // the amount is dust. subtractFrom indicates the output from which fees should
 // be subtraced, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
+	signedTx, change, changeAddr, fee, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom)
+	if err == nil {
+		err = dcr.broadcastTx(signedTx)
+	}
+	return signedTx, change, changeAddr, fee, err
+}
+
+// signTxAndAddChange signs the passed msgTx, adding a change output unless the
+// amount is dust. subtractFrom indicates the output from which fees should be
+// subtraced, where -1 indicates fees should come out of a change output.
+func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
@@ -2770,26 +2789,32 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}
 
-	checkHash := msgTx.TxHash()
+	txHash := msgTx.TxHash()
 	dcr.log.Debugf("%d signature cycles to converge on fees for tx %s: "+
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
-		sigCycles, checkHash, feeRate, checkRate, checkFee, size, changeAdded)
-	txHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
-	if err != nil {
-		return nil, nil, "", 0, fmt.Errorf("sendrawtx error: %w, raw tx: %x", translateRPCCancelErr(err), dcr.wireBytes(msgTx))
-	}
-	if *txHash != checkHash {
-		return nil, nil, "", 0, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s, raw tx: %x", *txHash, checkHash, dcr.wireBytes(msgTx))
-	}
+		sigCycles, txHash, feeRate, checkRate, checkFee, size, changeAdded)
 
 	var change *output
 	var changeAddr string
 	if changeAdded {
-		change = newOutput(txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular)
+		change = newOutput(&txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular)
 		changeAddr = changeAddress.String()
 	}
+
 	return msgTx, change, changeAddr, lastFee, nil
+}
+
+func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {
+	txHash, err := dcr.node.SendRawTransaction(dcr.ctx, signedTx, false)
+	if err != nil {
+		return fmt.Errorf("sendrawtx error: %w, raw tx: %x", translateRPCCancelErr(err), dcr.wireBytes(signedTx))
+	}
+	checkHash := signedTx.TxHash()
+	if *txHash != checkHash {
+		return fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s, raw tx: %x", *txHash, checkHash, dcr.wireBytes(signedTx))
+	}
+	return nil
 }
 
 // createSig creates and returns the serialized raw signature and compressed
