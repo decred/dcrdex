@@ -56,6 +56,34 @@ div.popupforms {
   z-index: 100;
 }
 
+div.market-orders-table-container {
+  @include media-breakpoint-down(md) {
+    max-height: 200px;
+  }
+
+  @include media-breakpoint-up(lg) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+  }
+}
+
+div.user-orders-table-container {
+  @include media-breakpoint-down(xl) {
+    max-height: 200px;
+  }
+
+  @include media-breakpoint-up(xxl) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+  }
+}
+
 table.ordertable {
   border-collapse: collapse;
   border: none;
@@ -345,10 +373,6 @@ table.balance-table button:hover {
 #orders {
   .ico-unlocked {
     color: #1e7d11;
-  }
-
-  .userorders {
-    min-height: 200px;
   }
 }
 
