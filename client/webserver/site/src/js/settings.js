@@ -290,19 +290,6 @@ export default class SettingsPage extends BasePage {
     form.style.right = '0'
   }
 
-  /**
-   * onCertFileChange when the input certFile changed, read the file
-   * and setting cert name into text of selectedCert to display on the view
-   */
-  async onCertFileChange () {
-    const page = this.page
-    const files = page.certFile.files
-    if (!files.length) return
-    page.selectedCert.textContent = files[0].name
-    Doc.show(page.removeCert)
-    Doc.hide(page.addCert)
-  }
-
   /* clearCertFile cleanup certFile value and selectedCert text */
   clearCertFile () {
     const page = this.page
@@ -321,7 +308,7 @@ export default class SettingsPage extends BasePage {
     return cert
   }
 
-  /* gets the dex address inputted by the user */
+  /* gets the dex address input by the user */
   getDexAddr () {
     const page = this.page
     return page.dexAddr.value

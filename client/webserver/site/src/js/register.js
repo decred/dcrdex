@@ -172,7 +172,7 @@ export default class RegistrationPage extends BasePage {
     return cert
   }
 
-  /* gets the dex address inputted by the user */
+  /* gets the dex address input by the user */
   getDexAddr () {
     return this.page.dexAddr.value
   }
