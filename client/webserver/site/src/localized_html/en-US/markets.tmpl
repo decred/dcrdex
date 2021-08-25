@@ -37,7 +37,7 @@
   </div>
 
   {{- /* RIGHT COLUMN */ -}}
-  <div id="rightSide" class="d-flex flex-column flex-grow-1 h-100 overflow-y-auto">
+  <div id="rightSide" class="d-flex flex-column flex-grow-1 h-100 overflow-y-auto overflow-x-hidden">
 
     {{- /* CHART */ -}}
 
@@ -73,33 +73,35 @@
         <div class="row m-0 h-100">
 
           {{- /* BUY ORDER LIST */ -}}
-          <div class="marketorders order-lg-1 order-2 col-lg-7 p-0 bg1">
+          <div class="marketorders order-lg-1 order-2 col-lg-7 p-0 bg1 d-flex flex-column">
             <div class="market-header text-center fs14 py-1">Buy Orders</div>
-            <div class="max-h-100 stylish-overflow">
-              <table class="ordertable">
-                {{block "thead" .}}
-                <thead>
-                  <tr>
-                    <th class="text-left pl-2">Quantity</th>
-                    <th class="text-right pr-2">Rate</th>
-                    <th class="text-right pr-2">Epoch</th>
-                  </tr>
-                </thead>
-                {{end}}
-                <tbody id="buyRows">
-                  {{- /* This row is used by the app as a template. */ -}}
-                  <tr id="rowTemplate">
-                    <td class="pl-2">
-                      <div class="d-flex justify-content-start align-items-center">
-                        <div data-tmpl="qty">-</div>
-                        <div class="numorders text-center ml-2" data-tmpl="numorders">-</div>
-                      </div>
-                    </td>
-                    <td class="text-right pr-2" data-tmpl="rate">-</td>
-                    <td class="text-right pr-3" data-tmpl="epoch"></td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="brdrleft flex-grow-1 bg1 position-relative">
+              <div class="market-orders-table-container stylish-overflow">
+                <table class="ordertable">
+                  {{block "thead" .}}
+                  <thead>
+                    <tr>
+                      <th class="text-left pl-2">Quantity</th>
+                      <th class="text-right pr-2">Rate</th>
+                      <th class="text-right pr-2">Epoch</th>
+                    </tr>
+                  </thead>
+                  {{end}}
+                  <tbody id="buyRows">
+                    {{- /* This row is used by the app as a template. */ -}}
+                    <tr id="rowTemplate">
+                      <td class="pl-2">
+                        <div class="d-flex justify-content-start align-items-center">
+                          <div data-tmpl="qty">-</div>
+                          <div class="numorders text-center ml-2" data-tmpl="numorders">-</div>
+                        </div>
+                      </td>
+                      <td class="text-right pr-2" data-tmpl="rate">-</td>
+                      <td class="text-right pr-3" data-tmpl="epoch"></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -312,26 +314,28 @@
           </div>
 
           {{- /* SELL ORDER LIST */ -}}
-          <div class="marketorders col-lg-7 order-3 p-0 bg1">
+          <div class="marketorders col-lg-7 order-3 p-0 bg1 d-flex flex-column">
             <div class="market-header text-center fs14 py-1">Sell Orders</div>
-            <div class="max-h-100 stylish-overflow">
-              <table class="ordertable">
-                {{template "thead"}}
-                <tbody id="sellRows"></tbody>
-              </table>
+            <div class="brdrleft flex-grow-1 bg1 position-relative">
+              <div class="market-orders-table-container stylish-overflow">
+                <table class="ordertable">
+                  {{template "thead"}}
+                  <tbody id="sellRows"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {{- /* USER ORDERS */ -}}
-      <div class="bg0 p-0 col-24 userorders col-xxl-10 d-flex flex-column align-items-stretch">
+      <div class="bg0 p-0 col-24 col-xxl-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">
           Your Orders
         </div>
         <div class="brdrleft flex-grow-1 bg1 position-relative">
 
-          <div class="fill-abs stylish-overflow">
+          <div class="user-orders-table-container stylish-overflow">
             <table id="liveTable" class="ordertable">
               <thead>
                 <tr>
