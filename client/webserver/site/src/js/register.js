@@ -26,8 +26,7 @@ export default class RegistrationPage extends BasePage {
       // Form 4: Configure DEX server
       'dexAddrForm', 'dexAddr',
       // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
-      'dexCertBox', 'failedRegForm', 'regFundsErr'
+      'confirmRegForm', 'failedRegForm', 'regFundsErr'
     ])
 
     // Hide the form closers for the registration process.
