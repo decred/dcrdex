@@ -2570,7 +2570,7 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 		feeSource = -1 // subtract from change
 	}
 
-	tx, _, _, _, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
+	tx, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
 	return tx, uint64(txOut.Value), err
 }
 
@@ -2646,12 +2646,14 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Addre
 // sendWithReturn sends the unsigned transaction, adding a change output unless
 // the amount is dust. subtractFrom indicates the output from which fees should
 // be subtraced, where -1 indicates fees should come out of a change output.
-func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
-	signedTx, change, changeAddr, fee, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom)
-	if err == nil {
-		err = dcr.broadcastTx(signedTx)
+func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, error) {
+	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom)
+	if err != nil {
+		return nil, err
 	}
-	return signedTx, change, changeAddr, fee, err
+
+	err = dcr.broadcastTx(signedTx)
+	return signedTx, err
 }
 
 // signTxAndAddChange signs the passed msgTx, adding a change output unless the

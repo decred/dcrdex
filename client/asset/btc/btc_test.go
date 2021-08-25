@@ -2287,7 +2287,7 @@ func testSendEdges(t *testing.T, segwit bool) {
 	}
 
 	for _, tt := range tests {
-		tx, _, _, err := wallet.sendWithReturn(newBaseTx(), addr, tt.funding, swapVal, feeRate)
+		tx, err := wallet.sendWithReturn(newBaseTx(), addr, tt.funding, swapVal, feeRate)
 		if err != nil {
 			t.Fatalf("sendWithReturn error: %v", err)
 		}

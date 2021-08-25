@@ -1142,7 +1142,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
+	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2445,13 +2445,15 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
-	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, uint64, error) {
+	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, error) {
 
-	signedTx, change, fee, err := btc.signTxAndAddChange(baseTx, addr, totalIn, totalOut, feeRate)
-	if err == nil {
-		err = btc.broadcastTx(signedTx)
+	signedTx, _, _, err := btc.signTxAndAddChange(baseTx, addr, totalIn, totalOut, feeRate)
+	if err != nil {
+		return nil, err
 	}
-	return signedTx, change, fee, err
+
+	err = btc.broadcastTx(signedTx)
+	return signedTx, err
 }
 
 // signTxAndAddChange signs the passed tx and adds a change output if the change
