@@ -363,12 +363,12 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:  randomBalance(),
-			2:  randomBalance(),
-			42: randomBalance(),
-			22: randomBalance(),
-			3:  randomBalance(),
-			28: randomBalance(),
+			0:  randomBalance(0),
+			2:  randomBalance(2),
+			42: randomBalance(42),
+			22: randomBalance(22),
+			3:  randomBalance(3),
+			28: randomBalance(28),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -802,9 +802,16 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func randomBalance() *core.WalletBalance {
+func randomBalance(assetID uint32) *core.WalletBalance {
+	pow := rand.Intn(6) + 6
+
+	if assetID == 42 {
+		// Make Decred >= 1e8, to accommodate the registration fee.
+		pow += 2
+	}
+
 	randVal := func() uint64 {
-		return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6))
+		return uint64(rand.Float64() * math.Pow10(pow))
 	}
 
 	return &core.WalletBalance{
@@ -824,7 +831,7 @@ func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	return &core.BalanceNote{
 		Notification: db.NewNotification(core.NoteTypeBalance, "", "", db.Data),
 		AssetID:      assetID,
-		Balance:      randomBalance(),
+		Balance:      randomBalance(assetID),
 	}
 }
 
@@ -871,6 +878,11 @@ var winfos = map[uint32]*asset.WalletInfo{
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
+	return c.walletState(assetID)
+}
+
+// walletState should be called with the c.mtx at least RLock'ed.
+func (c *TCore) walletState(assetID uint32) *core.WalletState {
 	w := c.wallets[assetID]
 	if w == nil {
 		return nil
@@ -891,11 +903,20 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	randomDelay()
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
+
 	c.wallets[form.AssetID] = &tWalletState{
 		running:  true,
 		open:     true,
 		settings: form.Config,
 	}
+
+	w := c.walletState(form.AssetID)
+
+	c.noteFeed <- &core.WalletStateNote{
+		Notification: db.NewNotification(core.NoteTypeWalletState, "", "", db.Data),
+		Wallet:       w,
+	}
+
 	return nil
 }
 
