@@ -2252,7 +2252,7 @@ func TestSendEdges(t *testing.T) {
 	node.changeAddr = tPKHAddr
 
 	for _, tt := range tests {
-		tx, _, _, _, err := wallet.sendWithReturn(newBaseTx(tt.funding), feeRate, -1)
+		tx, err := wallet.sendWithReturn(newBaseTx(tt.funding), feeRate, -1)
 		if err != nil {
 			t.Fatalf("sendWithReturn error: %v", err)
 		}

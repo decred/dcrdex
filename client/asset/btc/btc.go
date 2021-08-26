@@ -1142,7 +1142,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
+	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1411,8 +1411,9 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
 
-	// Sign, add change, and send the transaction.
-	msgTx, change, fees, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
+	// Sign, add change, but don't send the transaction yet until
+	// the individual swap refund txs are prepared and signed.
+	msgTx, change, fees, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1437,6 +1438,12 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
 			signedRefund: refundBuff.Bytes(),
 		})
+	}
+
+	// Refund txs prepared and signed. Can now broadcast the swap(s).
+	err = btc.broadcastTx(msgTx)
+	if err != nil {
+		return nil, nil, 0, err
 	}
 
 	// If change is nil, return a nil asset.Coin.
@@ -2438,13 +2445,28 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
+	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, error) {
+
+	signedTx, _, _, err := btc.signTxAndAddChange(baseTx, addr, totalIn, totalOut, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	err = btc.broadcastTx(signedTx)
+	return signedTx, err
+}
+
+// signTxAndAddChange signs the passed tx and adds a change output if the change
+// wouldn't be dust. Returns but does NOT broadcast the signed tx.
+func (btc *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Address,
 	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, uint64, error) {
-	// Sign the transaction to get an initial size estimate and calculate whether
-	// a change output would be dust.
+
 	makeErr := func(s string, a ...interface{}) (*wire.MsgTx, *output, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
+	// Sign the transaction to get an initial size estimate and calculate whether
+	// a change output would be dust.
 	sigCycles := 1
 	msgTx, err := btc.node.SignTx(baseTx)
 	if err != nil {
@@ -2530,25 +2552,30 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 
 	fee := totalIn - totalOut
 	actualFeeRate := fee / vSize
-	checkHash := msgTx.TxHash()
+	txHash := msgTx.TxHash()
 	btc.log.Debugf("%d signature cycles to converge on fees for tx %s: "+
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
-		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
-
-	txHash, err := btc.sendRawTransaction(msgTx)
-	if err != nil {
-		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
-	}
-	if *txHash != checkHash {
-		return makeErr("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s. raw tx: %x", checkHash, *txHash, btc.wireBytes(msgTx))
-	}
+		sigCycles, txHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
 	var change *output
 	if changeAdded {
-		change = newOutput(txHash, uint32(changeIdx), uint64(changeOutput.Value))
+		change = newOutput(&txHash, uint32(changeIdx), uint64(changeOutput.Value))
 	}
+
 	return msgTx, change, fee, nil
+}
+
+func (btc *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {
+	txHash, err := btc.sendRawTransaction(signedTx)
+	if err != nil {
+		return fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
+	}
+	checkHash := signedTx.TxHash()
+	if *txHash != checkHash {
+		return fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
+			"expected %s, got %s. raw tx: %x", checkHash, *txHash, btc.wireBytes(signedTx))
+	}
+	return nil
 }
 
 // createSig creates and returns the serialized raw signature and compressed
