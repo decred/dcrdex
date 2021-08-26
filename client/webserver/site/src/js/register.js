@@ -1,9 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, UnlockWalletForm, DEXAddressForm, bind as bindForm } from './forms'
-import { feeSendErr } from './constants'
-import State from './state'
+import { NewWalletForm, UnlockWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -26,10 +24,9 @@ export default class RegistrationPage extends BasePage {
       // Form 3: Unlock Decred wallet
       'unlockWalletForm',
       // Form 4: Configure DEX server
-      'dexAddrForm',
+      'dexAddrForm', 'dexAddr',
       // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
-      'dexCertBox', 'failedRegForm', 'regFundsErr', 'appPassBox'
+      'confirmRegForm', 'failedRegForm', 'regFundsErr'
     ])
 
     // Hide the form closers for the registration process.
@@ -58,38 +55,33 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      this.fee = xc.feeAsset.amount
+      const fee = xc.feeAsset.amount
       const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
-      if (balanceFeeRegistration < this.fee) {
-        await this.changeForm(page.dexAddrForm, page.failedRegForm)
-        page.regFundsErr.textContent = `Looks like there is not enough funds for
+      if (balanceFeeRegistration < fee) {
+        const errorMsg = `Looks like there is not enough funds for
         paying the registration fee. Amount needed:
-        ${Doc.formatCoinValue(this.fee / 1e8)} Amount available:
+        ${Doc.formatCoinValue(fee / 1e8)} Amount available:
         ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
 
         Deposit funds and try again.`
+        page.regFundsErr.textContent = errorMsg
         Doc.show(page.regFundsErr)
+        await this.changeForm(page.dexAddrForm, page.failedRegForm)
         return
       }
-
-      page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-      // Assume there is at least one DCR base market since we're assuming DCR for
-      // registration anyway.
-      for (const market of Object.values(xc.markets)) {
-        if (market.baseid === 42) {
-          page.dexDCRLotSize.textContent = Doc.formatCoinValue(market.lotsize / 1e8)
-          page.dcrBaseMarketName.textContent = market.name.toUpperCase()
-          if (market.quoteid === 0) break // prefer dcr-btc
-        }
-      }
-      if (State.passwordIsCached()) Doc.hide(page.appPassBox)
-      else Doc.show(page.appPassBox)
+      this.confirmRegisterForm.setExchange(xc)
       await this.changeForm(page.dexAddrForm, page.confirmRegForm)
     }, this.pwCache)
 
     // SUBMIT DEX REGISTRATION
-    bindForm(page.confirmRegForm, page.submitConfirm, () => this.registerDEX())
-
+    this.confirmRegisterForm = new ConfirmRegistrationForm(app,
+      page.confirmRegForm,
+      {
+        getCertFile: () => this.getCertFile(),
+        getDexAddr: () => this.getDexAddr()
+      },
+      () => this.registerDEXSuccess(),
+      (msg) => this.registerDEXFundsFail(msg))
     // Attempt to load the dcrwallet configuration from the default location.
     if (app.user.authed) this.auth()
   }
@@ -171,46 +163,30 @@ export default class RegistrationPage extends BasePage {
     await this.changeForm(page.appPWForm, page.newWalletForm)
   }
 
-  /* Authorize DEX registration. */
-  async registerDEX () {
-    const page = this.page
-    const pw = page.appPass.value || this.pwCache.pw
-    if (!pw && !State.passwordIsCached()) {
-      page.regErr.textContent = 'password required'
-      Doc.show(page.regErr)
-      return
-    }
-
-    Doc.hide(page.regErr)
+  /* gets the contents of the cert file */
+  async getCertFile () {
     let cert = ''
     if (this.dexAddrForm.page.certFile.value) {
       cert = await this.dexAddrForm.page.certFile.files[0].text()
     }
-    const registration = {
-      addr: this.dexAddrForm.page.dexAddr.value,
-      pass: pw,
-      fee: this.fee,
-      cert: cert
-    }
-    page.appPass.value = ''
-    const loaded = app.loading(page.confirmRegForm)
-    const res = await postJSON('/api/register', registration)
-    loaded()
-    if (!app.checkResponse(res)) {
-      // show different form with no passphrase input in case of no funds.
-      if (res.code === feeSendErr) {
-        await this.changeForm(page.confirmRegForm, page.failedRegForm)
-        page.regFundsErr.textContent = res.msg
-        Doc.show(page.regFundsErr)
-        return
-      }
+    return cert
+  }
 
-      page.regErr.textContent = res.msg
-      Doc.show(page.regErr)
-      return
-    }
-    // Need to get a fresh market list. May consider handling this with a
-    // websocket update instead.
+  /* gets the dex address input by the user */
+  getDexAddr () {
+    return this.page.dexAddr.value
+  }
+
+  /* Called when dex registration failed due to insufficient funds. */
+  async registerDEXFundsFail (msg) {
+    const page = this.page
+    page.regFundsErr.textContent = msg
+    Doc.show(page.regFundsErr)
+    await this.changeForm(page.confirmRegForm, page.failedRegForm)
+  }
+
+  /* Called after successful registration to a DEX. */
+  async registerDEXSuccess () {
     await app.fetchUser()
     app.loadPage('markets')
   }

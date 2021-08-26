@@ -17,9 +17,10 @@ export default class SettingsPage extends BasePage {
       'darkMode', 'commitHash',
       'addADex',
       // Form to configure DEX server
-      'dexAddrForm',
+      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
+      'submitDEXAddr', 'dexAddrErr',
       // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm', 'feeDisplay', 'dcrBaseMarketName', 'dexDCRLotSize', 'appPass', 'submitConfirm', 'regErr',
+      'forms', 'confirmRegForm',
       // Export Account
       'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
       'exportAccountHost', 'exportAccountErr',
@@ -59,23 +60,19 @@ export default class SettingsPage extends BasePage {
     page.commitHash.textContent = app.commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
 
-    this.dexAddrForm = new forms.DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      this.fee = xc.feeAsset.amount
+    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(app,
+      page.confirmRegForm,
+      {
+        getCertFile: () => this.getCertFile(),
+        getDexAddr: () => this.getDexAddr()
+      },
+      () => this.registerDEXSuccess())
 
-      page.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
-      // Assume there is at least one DCR base market since we're assuming DCR for
-      // registration anyway.
-      for (const market of Object.values(xc.markets)) {
-        if (market.baseid === 42) {
-          page.dexDCRLotSize.textContent = Doc.formatCoinValue(market.lotsize / 1e8)
-          page.dcrBaseMarketName.textContent = market.name.toUpperCase()
-          if (market.quoteid === 0) break // prefer dcr-btc
-        }
-      }
+    this.dexAddrForm = new forms.DEXAddressForm(app, page.dexAddrForm, async (xc) => {
+      this.confirmRegistrationForm.setExchange(xc)
       await this.showForm(page.confirmRegForm)
     })
 
-    forms.bind(page.confirmRegForm, page.submitConfirm, () => this.registerDEX())
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
@@ -106,7 +103,6 @@ export default class SettingsPage extends BasePage {
 
     const closePopups = () => {
       Doc.hide(page.forms)
-      page.appPass.value = ''
       page.exportSeedPW.value = ''
       page.seedDiv.textContent = ''
     }
@@ -291,36 +287,40 @@ export default class SettingsPage extends BasePage {
     await Doc.animate(animationLength, progress => {
       form.style.right = `${(1 - progress) * shift}px`
     }, 'easeOutHard')
+    form.style.right = '0'
   }
 
-  /* Authorize DEX registration. */
-  async registerDEX () {
+  /* clearCertFile cleanup certFile value and selectedCert text */
+  clearCertFile () {
     const page = this.page
-    Doc.hide(page.regErr)
+    page.certFile.value = ''
+    page.selectedCert.textContent = this.defaultTLSText
+    Doc.hide(page.removeCert)
+    Doc.show(page.addCert)
+  }
+
+  /* gets the contents of the cert file */
+  async getCertFile () {
     let cert = ''
     if (this.dexAddrForm.page.certFile.value) {
       cert = await this.dexAddrForm.page.certFile.files[0].text()
     }
-    const registration = {
-      addr: this.dexAddrForm.page.dexAddr.value,
-      pass: page.appPass.value,
-      fee: this.fee,
-      cert: cert
-    }
-    page.appPass.value = ''
-    const loaded = app.loading(page.confirmRegForm)
-    const res = await postJSON('/api/register', registration)
-    if (!app.checkResponse(res)) {
-      page.regErr.textContent = res.msg
-      Doc.show(page.regErr)
-      loaded()
-      return
-    }
-    this.dexAddrForm.page.dexAddr.value = ''
-    this.dexAddrForm.clearCertFile()
+    return cert
+  }
+
+  /* gets the dex address input by the user */
+  getDexAddr () {
+    const page = this.page
+    return page.dexAddr.value
+  }
+
+  /* Called after successful registration to a DEX. */
+  async registerDEXSuccess () {
+    const page = this.page
+    page.dexAddr.value = ''
+    this.clearCertFile()
     Doc.hide(page.forms)
     await app.fetchUser()
-    loaded()
     // Initial method of displaying added dex.
     window.location.reload()
   }
