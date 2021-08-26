@@ -41,7 +41,7 @@ rm -rf bin/site
 mkdir -p bin/site/src
 pushd client/webserver/site
 cp -R dist ../../../bin/site
-cp -R src/font src/html src/img ../../../bin/site/src
+cp -R src/font src/html src/localized_html src/img ../../../bin/site/src
 popd
 
 pushd bin
