@@ -299,7 +299,7 @@
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-3">
-  Enter your password to submit a cancel order for the remaining
+  {{if $passwordIsCached}}Submit a cancel order for the remaining{{else}}Enter your password to submit a cancel order for the remaining{{end}}
   <span id="cancelRemain"></span>
   <span id="cancelUnit"></span>.<br>
   The remaining amount may change before the cancel order is matched.
