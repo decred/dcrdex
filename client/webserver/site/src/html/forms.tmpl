@@ -299,7 +299,7 @@
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="p-3">
-  [[[cancel_pw]]]
+  {{if $passwordIsCached}}[[[cancel_no_pw]]]{{else}}[[[cancel_pw]]]{{end}}
   <span id="cancelRemain"></span>
   <span id="cancelUnit"></span>.<br>
   [[[cancel_remain]]]
