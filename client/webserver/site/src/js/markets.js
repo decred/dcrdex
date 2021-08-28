@@ -72,6 +72,9 @@ export default class MarketsPage extends BasePage {
     this.main = main
     this.loaded = app.loading(this.main.parentElement)
     this.maxLoaded = null
+    // There may be multiple pending updates to the max order. This makes sure
+    // that the screen is updated with the most recent one.
+    this.maxOrderUpdateCounter = 0
     this.market = null
     this.registrationStatus = {}
     this.currentForm = null
@@ -94,7 +97,6 @@ export default class MarketsPage extends BasePage {
     this.ordersSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
-
     const reporters = {
       click: p => { this.reportClick(p) },
       volume: d => { this.reportVolume(d) },
@@ -685,6 +687,7 @@ export default class MarketsPage extends BasePage {
    * preSell populates the max order message for the largest available sell.
    */
   preSell () {
+    this.maxOrderUpdateCounter++
     const mkt = this.market
     const baseWallet = app.assets[mkt.base.id].wallet
     if (baseWallet.available < mkt.cfg.lotsize) {
@@ -707,6 +710,7 @@ export default class MarketsPage extends BasePage {
    * preBuy populates the max order message for the largest available buy.
    */
   preBuy () {
+    this.maxOrderUpdateCounter++
     const mkt = this.market
     const rate = this.adjustedRate()
     const quoteWallet = app.assets[mkt.quote.id].wallet
@@ -746,20 +750,17 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.maxAboveZero)
     page.maxFromLots.textContent = 'calculating...'
     page.maxFromLotsLbl.textContent = ''
+    const counter = this.maxOrderUpdateCounter
     this.preorderTimer = window.setTimeout(async () => {
       this.preorderTimer = null
+      if (counter !== this.maxOrderUpdateCounter) return
       const res = await postJSON(path, {
         host: this.market.dex.host,
         base: bid,
         quote: qid,
         ...args
       })
-      // If a new timer is set, a change was made while fetching the pre-order.
-      // Abandon this result.
-      if (this.preorderTimer) return
-      this.maxLoaded()
-      this.maxLoaded = null
-
+      if (counter !== this.maxOrderUpdateCounter) return
       if (!app.checkResponse(res, true)) {
         console.warn('max order estimate not available:', res)
         page.maxFromLots.textContent = 'estimate unavailable'
@@ -772,6 +773,10 @@ export default class MarketsPage extends BasePage {
   /* setMaxOrder sets the max order text. */
   setMaxOrder (maxOrder, rate) {
     const page = this.page
+    if (this.maxLoaded) {
+      this.maxLoaded()
+      this.maxLoaded = null
+    }
     Doc.show(page.maxOrd, page.maxLotBox, page.maxAboveZero)
     const sell = this.isSell()
     page.maxFromLots.textContent = maxOrder.lots.toString()
