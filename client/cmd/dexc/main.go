@@ -19,8 +19,12 @@ import (
 	_ "decred.org/dcrdex/client/asset/bch" // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
-	_ "decred.org/dcrdex/client/asset/eth" // register eth asset
 	_ "decred.org/dcrdex/client/asset/ltc" // register ltc asset
+
+	// ETH is commented to prevent go-ethereum goroutines from launching via
+	// it's init(). Uncomment this when ETH is ready:
+	// _ "decred.org/dcrdex/client/asset/eth" // register eth asset
+
 	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
