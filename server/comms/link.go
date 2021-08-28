@@ -65,20 +65,24 @@ type wsLink struct {
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
 	ban bool
-	// meter is a function that will be checked to see if certain data API
-	// requests should be denied due to rate limits or if the API disabled.
-	meter func() (int, error)
+	// dataMeter is a function that will be checked to see if certain data API
+	// requests should be denied due to rate limits or if the data API is
+	// disabled. This applies to non-critical httpRoutes requests.
+	dataMeter func() (int, error)
+	// wsLimiter is a route-based rate limiter. This applies to rpcRoutes.
+	wsLimiter *routeLimiter
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection, limitRate func() (int, error)) *wsLink {
+func newWSLink(addr string, conn ws.Connection, wsLimiter *routeLimiter, limitData func() (int, error)) *wsLink {
 	var c *wsLink
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
 			return handleMessage(c, msg)
 		}, log.SubLogger("WS")),
 		respHandlers: make(map[uint64]*responseHandler),
-		meter:        limitRate,
+		dataMeter:    limitData,
+		wsLimiter:    wsLimiter,
 	}
 	return c
 }
@@ -115,9 +119,13 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
 		}
-		// Look for a registered route handler.
+		// Look for a registered WebSocket route handler. This excludes the data
+		// API routes, which are part of the httpHandler map.
 		handler := RouteHandler(msg.Route)
 		if handler != nil {
+			if !c.wsLimiter.allow(msg.Route) {
+				return msgjson.NewError(msgjson.TooManyRequestsError, "too many requests to "+msg.Route)
+			}
 			// Handle the request.
 			return handler(c, msg)
 		}
@@ -130,10 +138,10 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 
 		// If it's not a critical route, check the rate limiters.
 		if !criticalRoutes[msg.Route] {
-			if _, err := c.meter(); err != nil {
+			if _, err := c.dataMeter(); err != nil {
 				// These errors are actually formatted nicely for sending, since
 				// they are used directly in HTTP errors as well.
-				return msgjson.NewError(msgjson.RouteUnavailableError, err.Error())
+				return msgjson.NewError(msgjson.TooManyRequestsError, err.Error())
 			}
 		}
 

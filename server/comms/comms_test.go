@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,6 +34,8 @@ var (
 func newServer() *Server {
 	return &Server{
 		clients:     make(map[uint64]*wsLink),
+		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:  make(map[dex.IPKey]int),
 		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: 1,
 	}
@@ -85,12 +86,17 @@ type wsConnStub struct {
 	quit     chan struct{}
 	close    int
 	recv     chan []byte
+	nextRead chan struct{} // helps detect when (*WSLink).inHandler is running
 	writeMtx sync.Mutex
 	writeErr error
 }
 
 func (conn *wsConnStub) addChan() {
 	conn.recv = make(chan []byte)
+}
+
+func (conn *wsConnStub) addNextChan() {
+	conn.nextRead = make(chan struct{}, 1) // send when ReadMessage() is called
 }
 
 func (conn *wsConnStub) wait(t *testing.T, tag string) {
@@ -121,6 +127,10 @@ var nonEOF = make(chan struct{})
 var pongTrigger = []byte("pong")
 
 func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
+	if conn.nextRead != nil {
+		conn.nextRead <- struct{}{}
+	}
+
 	var b []byte
 	select {
 	case b = <-conn.msg:
@@ -128,9 +138,9 @@ func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 			return websocket.PongMessage, []byte{}, nil
 		}
 	case <-conn.quit:
-		return 0, nil, io.EOF
+		return 0, nil, &websocket.CloseError{Code: websocket.CloseGoingAway, Text: "bye"}
 	case <-testCtx.Done():
-		return 0, nil, io.EOF
+		return 0, nil, &websocket.CloseError{Code: websocket.CloseGoingAway, Text: "bye"}
 	case <-nonEOF:
 		close(conn.quit)
 		return 0, nil, fmt.Errorf("test nonEOF error")
@@ -192,7 +202,10 @@ var reqID uint64
 
 func makeReq(route, msg string) *msgjson.Message {
 	reqID++
-	req, _ := msgjson.NewRequest(reqID, route, json.RawMessage(msg))
+	req, err := msgjson.NewRequest(reqID, route, json.RawMessage(msg))
+	if err != nil {
+		panic("bad request message")
+	}
 	return req
 }
 
@@ -207,6 +220,7 @@ func makeNtfn(route, msg string) *msgjson.Message {
 }
 
 func sendToConn(t *testing.T, conn *wsConnStub, method, msg string) {
+	t.Helper()
 	encMsg, err := json.Marshal(makeReq(method, msg))
 	if err != nil {
 		t.Fatalf("error encoding %s request: %v", method, err)
@@ -247,6 +261,10 @@ func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, err
 	return conn, nil
 }
 
+func resetRPCRoutes() {
+	rpcRoutes = make(map[string]MsgHandler)
+}
+
 func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
@@ -266,6 +284,7 @@ func TestRoute_PanicsEmptyString(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
+	defer resetRPCRoutes()
 	Route("", dummyRPCHandler)
 }
 
@@ -276,12 +295,15 @@ func TestRoute_PanicsDoubleRegistry(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
+	defer resetRPCRoutes()
 	Route("somemethod", dummyRPCHandler)
 	Route("somemethod", dummyRPCHandler)
 }
 
 // Test the server with a stub for the client connections.
 func TestClientRequests(t *testing.T) {
+	defer resetRPCRoutes()
+
 	server := newServer()
 	var wg sync.WaitGroup
 	defer func() {
@@ -476,8 +498,8 @@ func TestClientRequests(t *testing.T) {
 	server.EnableDataAPI(false)
 	sendToServer("httproute", "{}")
 	resp := decodeResponse(t, <-conn.recv)
-	if resp.Error == nil || resp.Error.Code != msgjson.RouteUnavailableError {
-		t.Fatalf("no error for disabled HTTP route")
+	if resp.Error == nil || resp.Error.Code != msgjson.TooManyRequestsError {
+		t.Fatalf("no or incorrect error for disabled HTTP route: %v", resp.Error)
 	}
 	if atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
 		t.Fatalf("disabled HTTP route hit")
@@ -514,6 +536,8 @@ func TestClientRequests(t *testing.T) {
 }
 
 func TestClientResponses(t *testing.T) {
+	defer resetRPCRoutes()
+
 	server := newServer()
 	var client *wsLink
 	var conn *wsConnStub
@@ -653,6 +677,8 @@ func TestClientResponses(t *testing.T) {
 }
 
 func TestOnline(t *testing.T) {
+	defer resetRPCRoutes()
+
 	tempDir, err := os.MkdirTemp("", "example")
 	if err != nil {
 		t.Fatalf("TempDir error: %v", err)
@@ -888,7 +914,7 @@ func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
 	atomic.AddUint32(&h.count, 1)
 }
 
-func TestRateLimiter(t *testing.T) {
+func TestHTTPRateLimiter(t *testing.T) {
 	tHandler := &tHTTPHandler{}
 	s := Server{dataEnabled: 1}
 
@@ -909,5 +935,138 @@ func TestRateLimiter(t *testing.T) {
 	if statusCode != http.StatusTooManyRequests {
 		t.Fatalf("wrong status code. wanted %d, got %d", http.StatusTooManyRequests, statusCode)
 	}
+}
 
+func TestWSRateLimiter(t *testing.T) {
+	defer resetRPCRoutes()
+
+	server := newServer()
+	var wg sync.WaitGroup
+	defer func() {
+		server.disconnectClients()
+		wg.Wait()
+	}()
+
+	handled := make(chan struct{}, 1)
+	Route(msgjson.RegisterRoute, func(Link, *msgjson.Message) *msgjson.Error {
+		handled <- struct{}{}
+		return nil
+	})
+
+	Route(msgjson.FeeRateRoute, func(Link, *msgjson.Message) *msgjson.Error {
+		handled <- struct{}{}
+		return nil
+	})
+
+	Route(msgjson.OrderBookRoute, func(Link, *msgjson.Message) *msgjson.Error {
+		handled <- struct{}{}
+		return nil
+	})
+
+	conn := newWsStub()
+	conn.addChan()     // for <-conn.recv
+	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stubAddr := dex.NewIPKey("aabb:cc:ddee:ff::abc") // "abc" chopped by NewIPKey, "ff" chopped by PrefixV6
+		if stubAddr.IsUnspecified() {
+			t.Errorf("bad addr")
+			return
+		}
+		server.websocketHandler(testCtx, conn, stubAddr) // newWSLink -> Connect -> readloop will call handleMessage
+	}()
+
+	<-conn.nextRead
+	go func() { // connected, so just keep receiving on the channel
+		for range conn.nextRead {
+		}
+	}()
+
+	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
+
+	waitResult := func() int {
+		t.Helper()
+		select {
+		case <-handled:
+			return 0
+		case resp := <-conn.recv: // test handers only return resp with error (rate limit)
+			// t.Log("handler error message:", string(resp))
+			msg, err := msgjson.DecodeMessage(resp)
+			if err != nil {
+				t.Fatalf("failed to decode response message: %v", err)
+			}
+			payload, err := msg.Response()
+			if err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if payload.Error == nil {
+				t.Fatalf("Expected rate limiting error, got none.")
+			}
+			if payload.Error.Code != msgjson.TooManyRequestsError {
+				t.Fatalf("Wanted code %d, got %d.", msgjson.TooManyRequestsError, payload.Error.Code)
+			}
+			if !strings.HasPrefix(payload.Error.Message, "too many requests") {
+				t.Fatalf("Wanted message with prefix %q, got %q.", "too many requests", payload.Error.Message)
+			}
+			return 1
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
+		return 2
+	}
+
+	if waitResult() != 0 {
+		t.Fatalf("initial register request failed")
+	}
+
+	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
+	if waitResult() != 1 {
+		t.Fatalf("second register request did not fail")
+	}
+
+	// Other routes still work.
+	sendToConn(t, conn, msgjson.FeeRateRoute, `{}`)
+	if waitResult() != 0 {
+		t.Fatalf("fee_rate request failed")
+	}
+
+	// orderbook, which has 1 r/s rate limit, 100 burst
+	sendToConn(t, conn, msgjson.OrderBookRoute, `{}`)
+	if waitResult() != 0 {
+		t.Fatalf("orderbook request failed")
+	}
+	sendToConn(t, conn, msgjson.OrderBookRoute, `{}`)
+	if waitResult() != 0 { // tests burst > 1
+		t.Fatalf("orderbook request failed")
+	}
+
+	// New connection from different address.
+	conn = newWsStub()
+	conn.addChan()     // for <-conn.recv
+	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stubAddr := dex.NewIPKey("aabb:cc:ddee:11::") // same prefix, different subnet
+		if stubAddr.IsUnspecified() {
+			t.Errorf("bad addr")
+			return
+		}
+		server.websocketHandler(testCtx, conn, stubAddr) // newWSLink -> Connect -> readloop will call handleMessage
+	}()
+
+	<-conn.nextRead
+	go func() { // connected, so just keep receiving on the channel
+		for range conn.nextRead {
+		}
+	}()
+
+	sendToConn(t, conn, msgjson.RegisterRoute, `{}`)
+
+	if waitResult() != 0 {
+		t.Fatalf("initial register request from different conn failed")
+	}
 }
