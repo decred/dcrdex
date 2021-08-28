@@ -39,7 +39,7 @@ type Wallet interface {
 	getBlockHeader(blockHash string) (*blockHeader, error)
 	ownsAddress(addr btcutil.Address) (bool, error)
 	getTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
-	searchBlockForRedemptions(reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
-	findRedemptionsInMempool(reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
+	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
+	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 }

@@ -1804,7 +1804,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 		oldRedemption.fail("Duplicate FindRedemption request received. Aborting the old request.")
 	}
 
-	go btc.tryRedemptionRequests(nil, []*findRedemptionReq{req})
+	go btc.tryRedemptionRequests(ctx, nil, []*findRedemptionReq{req})
 
 	var result *findRedemptionResult
 	select {
@@ -1833,7 +1833,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 
 // tryRedemptionRequests searches all mainchain blocks with height >= startBlock
 // for redemptions.
-func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, reqs []*findRedemptionReq) {
+func (btc *ExchangeWallet) tryRedemptionRequests(ctx context.Context, startBlock *chainhash.Hash, reqs []*findRedemptionReq) {
 	undiscovered := make(map[outPoint]*findRedemptionReq, len(reqs))
 	mempoolReqs := make(map[outPoint]*findRedemptionReq)
 	for _, req := range reqs {
@@ -1844,6 +1844,13 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 			continue
 		}
 		undiscovered[req.outPt] = req
+	}
+
+	epicFail := func(s string, a ...interface{}) {
+		errMsg := fmt.Sprintf(s, a...)
+		for _, req := range reqs {
+			req.fail(errMsg)
+		}
 	}
 
 	// Only search up to the current tip. This does leave two unhandled
@@ -1857,7 +1864,7 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 	//     exit the block loop.
 	tipHeight, err := btc.node.getBestBlockHeight()
 	if err != nil {
-		btc.log.Errorf("tryRedemptionRequests getBestBlockHeight error: %v", err)
+		epicFail("tryRedemptionRequests getBestBlockHeight error: %v", err)
 		return
 	}
 
@@ -1868,7 +1875,7 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 	if startBlock != nil {
 		h, err := btc.node.getBlockHeight(startBlock)
 		if err != nil {
-			btc.log.Errorf("tryRedemptionRequests getBlockHeight error: %v", err)
+			epicFail("tryRedemptionRequests startBlock getBlockHeight error: %v", err)
 			return
 		}
 		iHeight = h
@@ -1901,14 +1908,15 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 		btc.findRedemptionMtx.RUnlock()
 
 		if len(validReqs) == 0 {
+			iHeight += 1
 			continue
 		}
 
-		discovered := btc.node.searchBlockForRedemptions(validReqs, *iHash)
+		discovered := btc.node.searchBlockForRedemptions(ctx, validReqs, *iHash)
 		for outPt, res := range discovered {
 			req, found := undiscovered[outPt]
 			if !found {
-				btc.log.Errorf("Request not found in undiscovered map. This shouldn't be possible.")
+				btc.log.Critical("Request not found in undiscovered map. This shouldn't be possible.")
 				continue
 			}
 			req.success(res)
@@ -1916,15 +1924,18 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 		}
 
 		if len(undiscovered) == 0 {
-			return
+			break
 		}
 
 		iHeight += 1
-		if iHash, err = btc.node.getBlockHash(int64(iHeight)); err != nil {
-			if iHeight < tipHeight {
-				btc.log.Errorf("error getting block hash for height %d: %v", iHeight, err)
+		if iHeight <= tipHeight {
+			if iHash, err = btc.node.getBlockHash(int64(iHeight)); err != nil {
+				// This might be due to a reorg. Don't abandon yet, since
+				// tryRedemptionRequests will be tried again by the block
+				// monitor loop.
+				btc.log.Warn("error getting block hash for height %d: %v", iHeight, err)
+				return
 			}
-			return
 		}
 	}
 
@@ -1938,13 +1949,23 @@ func (btc *ExchangeWallet) tryRedemptionRequests(startBlock *chainhash.Hash, req
 	}
 
 	// Do we really want to do this? Mempool could be huge.
-	for outPt, res := range btc.node.findRedemptionsInMempool(mempoolReqs) {
+	searchDur := time.Minute * 5
+	searchCtx, cancel := context.WithTimeout(ctx, searchDur)
+	defer cancel()
+	for outPt, res := range btc.node.findRedemptionsInMempool(searchCtx, mempoolReqs) {
 		req, ok := mempoolReqs[outPt]
 		if !ok {
 			btc.log.Errorf("findRedemptionsInMempool discovered outpoint not found")
 			continue
 		}
 		req.success(res)
+	}
+	if err := searchCtx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			btc.log.Error("mempool search exceeded %s time limit", searchDur)
+		} else {
+			btc.log.Error("mempool search was cancelled")
+		}
 	}
 }
 
@@ -2151,7 +2172,7 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			btc.checkForNewBlocks()
+			btc.checkForNewBlocks(ctx)
 		case <-ctx.Done():
 			return
 		}
@@ -2163,8 +2184,8 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 func (btc *ExchangeWallet) prepareRedemptionRequestsForBlockCheck() []*findRedemptionReq {
 	// Search for contract redemption in new blocks if there
 	// are contracts pending redemption.
-	btc.findRedemptionMtx.RLock()
-	defer btc.findRedemptionMtx.RUnlock()
+	btc.findRedemptionMtx.Lock()
+	defer btc.findRedemptionMtx.Unlock()
 	reqs := make([]*findRedemptionReq, 0, len(btc.findRedemptionQueue))
 	for _, req := range btc.findRedemptionQueue {
 		// If the request doesn't have a block hash yet, check if we can get one
@@ -2180,7 +2201,7 @@ func (btc *ExchangeWallet) prepareRedemptionRequestsForBlockCheck() []*findRedem
 // checkForNewBlocks checks for new blocks. When a tip change is detected, the
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
-func (btc *ExchangeWallet) checkForNewBlocks() {
+func (btc *ExchangeWallet) checkForNewBlocks(ctx context.Context) {
 	reqs := btc.prepareRedemptionRequestsForBlockCheck()
 	// Redemption search would be compromised if the starting point cannot
 	// be determined, as searching just the new tip might result in blocks
@@ -2278,7 +2299,7 @@ func (btc *ExchangeWallet) checkForNewBlocks() {
 
 	if len(reqs) > 0 {
 		startHash, _ := chainhash.NewHashFromStr(startPoint.hash)
-		go btc.tryRedemptionRequests(startHash, reqs)
+		go btc.tryRedemptionRequests(ctx, startHash, reqs)
 	}
 }
 
@@ -2695,7 +2716,11 @@ func (btc *ExchangeWallet) externalAddress() (btcutil.Address, error) {
 // The hash function used depends on whether the wallet is configured for
 // segwit. Non-segwit uses Hash160, segwit uses SHA256.
 func (btc *ExchangeWallet) hashContract(contract []byte) []byte {
-	if btc.segwit {
+	return hashContract(btc.segwit, contract)
+}
+
+func hashContract(segwit bool, contract []byte) []byte {
+	if segwit {
 		h := sha256.Sum256(contract) // BIP141
 		return h[:]
 	}
@@ -2705,10 +2730,14 @@ func (btc *ExchangeWallet) hashContract(contract []byte) []byte {
 // scriptHashAddress returns a new p2sh or p2wsh address, depending on whether
 // the wallet is configured for segwit.
 func (btc *ExchangeWallet) scriptHashAddress(contract []byte) (btcutil.Address, error) {
-	if btc.segwit {
-		return btcutil.NewAddressWitnessScriptHash(btc.hashContract(contract), btc.chainParams)
+	return scriptHashAddress(btc.segwit, contract, btc.chainParams)
+}
+
+func scriptHashAddress(segwit bool, contract []byte, chainParams *chaincfg.Params) (btcutil.Address, error) {
+	if segwit {
+		return btcutil.NewAddressWitnessScriptHash(hashContract(segwit, contract), chainParams)
 	}
-	return btcutil.NewAddressScriptHash(contract, btc.chainParams)
+	return btcutil.NewAddressScriptHash(contract, chainParams)
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.

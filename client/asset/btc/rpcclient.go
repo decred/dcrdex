@@ -234,6 +234,7 @@ func (wc *rpcClient) GetRawMempool() ([]*chainhash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// Convert received hex hashes to chainhash.Hash
 	hashes := make([]*chainhash.Hash, 0, len(mempool))
 	for _, h := range mempool {
@@ -548,7 +549,7 @@ func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 
 // findRedemptionsInMempool attempts to find spending info for the specified
 // contracts by searching every input of all txs in the mempool.
-func (wc *rpcClient) findRedemptionsInMempool(reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult) {
+func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult) {
 	contractsCount := len(reqs)
 	wc.log.Debugf("finding redemptions for %d contracts in mempool", contractsCount)
 
@@ -574,12 +575,15 @@ func (wc *rpcClient) findRedemptionsInMempool(reqs map[outPoint]*findRedemptionR
 	}
 
 	for _, txHash := range mempoolTxs {
+		if ctx.Err() != nil {
+			return nil
+		}
 		tx, err := wc.GetRawTransaction(txHash)
 		if err != nil {
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		newlyDiscovered := findRedemptionsInTx(wc.segwit, reqs, tx, wc.chainParams)
+		newlyDiscovered := findRedemptionsInTx(ctx, wc.segwit, reqs, tx, wc.chainParams)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -590,12 +594,15 @@ func (wc *rpcClient) findRedemptionsInMempool(reqs map[outPoint]*findRedemptionR
 
 // findRedemptionsInTx searches the MsgTx for the redemptions for the specified
 // swaps.
-func findRedemptionsInTx(segwit bool, reqs map[outPoint]*findRedemptionReq, msgTx *wire.MsgTx,
+func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*findRedemptionReq, msgTx *wire.MsgTx,
 	chainParams *chaincfg.Params) (discovered map[outPoint]*findRedemptionResult) {
 
 	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
 
 	for vin, txIn := range msgTx.TxIn {
+		if ctx.Err() != nil {
+			return discovered
+		}
 		poHash, poVout := txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index
 		for outPt, req := range reqs {
 			if discovered[outPt] != nil {
@@ -622,17 +629,17 @@ func findRedemptionsInTx(segwit bool, reqs map[outPoint]*findRedemptionReq, msgT
 
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
-func (wc *rpcClient) searchBlockForRedemptions(reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {
+func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {
 	msgBlock, err := wc.getBlock(blockHash)
 	if err != nil {
-		wc.log.Errorf("neutrino GetBlock error: %v", err)
+		wc.log.Errorf("RPC GetBlock error: %v", err)
 		return
 	}
 
 	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
 
 	for _, msgTx := range msgBlock.Transactions {
-		newlyDiscovered := findRedemptionsInTx(wc.segwit, reqs, msgTx, wc.chainParams)
+		newlyDiscovered := findRedemptionsInTx(ctx, wc.segwit, reqs, msgTx, wc.chainParams)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}

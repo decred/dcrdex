@@ -120,30 +120,31 @@ type msgBlockWithHeight struct {
 }
 
 type tRPCClient struct {
-	sendHash          *chainhash.Hash
-	sendErr           error
-	sentRawTx         *wire.MsgTx
-	txOutRes          *btcjson.GetTxOutResult
-	txOutErr          error
-	signFunc          func([]json.RawMessage) (json.RawMessage, error)
-	signMsgFunc       func([]json.RawMessage) (json.RawMessage, error)
-	blockchainMtx     sync.RWMutex
-	verboseBlocks     map[string]*msgBlockWithHeight
-	mainchain         map[int64]*chainhash.Hash
-	mpVerboseTxs      map[string]*btcjson.TxRawResult
-	rawVerboseErr     error
-	lockedCoins       []*RPCOutpoint
-	estFeeErr         error
-	listLockUnspent   []*RPCOutpoint
-	getBalances       *GetBalancesResult
-	getBalancesErr    error
-	lockUnspentErr    error
-	changeAddr        string
-	changeAddrErr     error
-	newAddress        string
-	newAddressErr     error
-	privKeyForAddr    *btcutil.WIF
-	privKeyForAddrErr error
+	sendHash            *chainhash.Hash
+	sendErr             error
+	sentRawTx           *wire.MsgTx
+	txOutRes            *btcjson.GetTxOutResult
+	txOutErr            error
+	signFunc            func([]json.RawMessage) (json.RawMessage, error)
+	signMsgFunc         func([]json.RawMessage) (json.RawMessage, error)
+	blockchainMtx       sync.RWMutex
+	verboseBlocks       map[string]*msgBlockWithHeight
+	mainchain           map[int64]*chainhash.Hash
+	getBestBlockHashErr error
+	mempoolTxs          map[chainhash.Hash]*wire.MsgTx
+	rawVerboseErr       error
+	lockedCoins         []*RPCOutpoint
+	estFeeErr           error
+	listLockUnspent     []*RPCOutpoint
+	getBalances         *GetBalancesResult
+	getBalancesErr      error
+	lockUnspentErr      error
+	changeAddr          string
+	changeAddrErr       error
+	newAddress          string
+	newAddressErr       error
+	privKeyForAddr      *btcutil.WIF
+	privKeyForAddrErr   error
 
 	getTransaction    *GetTransactionResult
 	getTransactionErr error
@@ -174,7 +175,7 @@ func newTRPCClient() *tRPCClient {
 		mainchain: map[int64]*chainhash.Hash{
 			0: &newHash,
 		},
-		mpVerboseTxs: make(map[string]*btcjson.TxRawResult),
+		mempoolTxs: make(map[chainhash.Hash]*wire.MsgTx),
 	}
 }
 
@@ -209,8 +210,7 @@ type tRawRequester struct {
 
 func (c *tRawRequester) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
-	// TODO: handle methodGetBlockHash, methodGetRawMempool and add actual tests
-	// to cover them.
+	// TODO: handle methodGetBlockHash and add actual tests to cover it.
 	case methodEstimateSmartFee:
 		if c.tRPCClient.estFeeErr != nil {
 			return nil, c.tRPCClient.estFeeErr
@@ -242,6 +242,9 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetTxOut:
 		return encodeOrError(c.txOutRes, c.txOutErr)
 	case methodGetBestBlockHash:
+		if c.getBestBlockHashErr != nil {
+			return nil, c.getBestBlockHashErr
+		}
 		c.blockchainMtx.RLock()
 		defer c.blockchainMtx.RUnlock()
 		var bestHash *chainhash.Hash
@@ -268,17 +271,30 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		return nil, fmt.Errorf("block not found")
 
 	case methodGetRawMempool:
-		return json.Marshal(&[]string{})
+		hashes := make([]string, 0, len(c.mempoolTxs))
+		for txHash := range c.mempoolTxs {
+			hashes = append(hashes, txHash.String())
+		}
+		return json.Marshal(hashes)
 	case methodGetRawTransaction:
 		if c.tRPCClient.rawVerboseErr != nil {
 			return nil, c.tRPCClient.rawVerboseErr
 		}
-		var txHash string
-		err := json.Unmarshal(params[0], &txHash)
+		var hashStr string
+		err := json.Unmarshal(params[0], &hashStr)
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(c.mpVerboseTxs[txHash])
+		txHash, err := chainhash.NewHashFromStr(hashStr)
+		if err != nil {
+			return nil, err
+		}
+		msgTx := c.mempoolTxs[*txHash]
+		if msgTx == nil {
+			return nil, fmt.Errorf("transaction not found")
+		}
+		txB, _ := serializeMsgTx(msgTx)
+		return json.Marshal(hex.EncodeToString(txB))
 	case methodSignTx:
 		if c.signTxErr != nil {
 			return nil, c.signTxErr
@@ -369,9 +385,13 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Has
 		var newHash chainhash.Hash
 		copy(newHash[:], randBytes(32))
 		blockHash = &newHash
-		prevBlock, found := c.mainchain[blockHeight]
-		if !found {
-			prevBlock = &chainhash.Hash{}
+		prevBlock := &chainhash.Hash{}
+		if blockHeight > 0 {
+			var exists bool
+			prevBlock, exists = c.mainchain[blockHeight-1]
+			if !exists {
+				prevBlock = &chainhash.Hash{}
+			}
 		}
 		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{}, 1, 2)
 		msgBlock := wire.NewMsgBlock(header)
@@ -384,6 +404,25 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Has
 	block := c.verboseBlocks[blockHash.String()]
 	block.msgBlock.AddTransaction(tx)
 	return blockHash, block.msgBlock
+}
+
+func (c *tRPCClient) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
+	blockHash, found := c.mainchain[blockHeight]
+	if !found {
+		return nil, nil
+	}
+	blk := c.verboseBlocks[blockHash.String()]
+	return blockHash, blk
+}
+
+func (c *tRPCClient) truncateChains() {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
+	c.mainchain = make(map[int64]*chainhash.Hash)
+	c.verboseBlocks = make(map[string]*msgBlockWithHeight)
+	c.mempoolTxs = make(map[chainhash.Hash]*wire.MsgTx)
 }
 
 func makeRawTx(pkScripts []dex.Bytes, inputs []*wire.TxIn) *wire.MsgTx {
@@ -430,6 +469,22 @@ func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutR
 			Hex: hex.EncodeToString(script),
 		},
 	}
+}
+
+func makeSwapContract(segwit bool, lockTimeOffset time.Duration) (secret []byte, secretHash [32]byte, pkScript, contract []byte, addr, contractAddr btcutil.Address, lockTime time.Time) {
+	secret = randBytes(32)
+	secretHash = sha256.Sum256(secret)
+
+	addr = btcAddr(segwit)
+
+	lockTime = time.Now().Add(lockTimeOffset)
+	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
+	if err != nil {
+		panic("error making swap contract:" + err.Error())
+	}
+	contractAddr, _ = scriptHashAddress(segwit, contract, &chaincfg.MainNetParams)
+	pkScript, _ = txscript.PayToAddrScript(contractAddr)
+	return
 }
 
 func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
@@ -1499,15 +1554,8 @@ func testRedeem(t *testing.T, segwit bool) {
 		t.Fatal(err)
 	}
 	swapVal := toSatoshi(5)
-	secret := randBytes(32)
-	secretHash := sha256.Sum256(secret)
-	lockTime := time.Now().Add(time.Hour * 12)
-	addr := btcAddr(segwit)
 
-	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
-	if err != nil {
-		t.Fatalf("error making swap contract: %v", err)
-	}
+	secret, _, _, contract, addr, _, lockTime := makeSwapContract(segwit, time.Hour*12)
 
 	coin := newOutput(tTxHash, 0, swapVal)
 	ci := &asset.AuditInfo{
@@ -1841,18 +1889,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	otherTxHash, _ := chainhash.NewHashFromStr(otherTxid)
 	contractVout := uint32(1)
 
-	secret := randBytes(32)
-	secretHash := sha256.Sum256(secret)
-
-	addr := btcAddr(segwit)
-
-	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
-	if err != nil {
-		t.Fatalf("error making swap contract: %v", err)
-	}
-	contractAddr, _ := wallet.scriptHashAddress(contract)
-	pkScript, _ := txscript.PayToAddrScript(contractAddr)
+	secret, _, pkScript, contract, addr, contractAddr, _ := makeSwapContract(segwit, time.Hour*12)
 	otherScript, _ := txscript.PayToAddrScript(addr)
 
 	var redemptionWitness, otherWitness [][]byte
@@ -1902,7 +1939,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	node.addRawTx(contractHeight+2, makeRawTx([]dex.Bytes{otherScript}, inputs))
 
 	// Update currentTip from "RPC". Normally run() would do this.
-	wallet.checkForNewBlocks()
+	wallet.checkForNewBlocks(tCtx)
 
 	// Check find redemption result.
 	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, contract)
@@ -1981,16 +2018,7 @@ func testRefund(t *testing.T, segwit bool) {
 		t.Fatal(err)
 	}
 
-	secret := randBytes(32)
-	secretHash := sha256.Sum256(secret)
-	lockTime := time.Now().Add(time.Hour * 12)
-
-	addr := btcAddr(segwit)
-
-	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
-	if err != nil {
-		t.Fatalf("error making swap contract: %v", err)
-	}
+	_, _, _, contract, addr, _, _ := makeSwapContract(segwit, time.Hour*12)
 
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut
@@ -2484,6 +2512,238 @@ func TestPreRedeem(t *testing.T) {
 
 	if segwitRedeem.Estimate.RealisticWorstCase >= nonSegRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("segwit > non-segwit")
+	}
+
+}
+
+func TestTryRedemptionRequests(t *testing.T) {
+	wallet, node, shutdown, _ := tNewWallet(false)
+	defer shutdown()
+
+	const swapVout = 1
+
+	randHash := func() *chainhash.Hash {
+		var h chainhash.Hash
+		copy(h[:], randBytes(32))
+		return &h
+	}
+
+	otherScript, _ := txscript.PayToAddrScript(btcAddr(false))
+	otherInput := []*wire.TxIn{makeRPCVin(randHash(), 0, randBytes(5), nil)}
+	otherTx := func() *wire.MsgTx {
+		return makeRawTx([]dex.Bytes{otherScript}, otherInput)
+	}
+
+	addBlocks := func(n int) {
+		var h int64 = 0
+		// Make dummy transactions.
+		for i := 0; i < n; i++ {
+			node.addRawTx(h, otherTx())
+			h++
+		}
+	}
+
+	getTx := func(blockHeight int64, txIdx int) *wire.MsgTx {
+		if blockHeight == -1 {
+			// mempool
+			txHash := randHash()
+			tx := otherTx()
+			node.mempoolTxs[*txHash] = tx
+			return tx
+		}
+		_, blk := node.getBlockAtHeight(blockHeight)
+		for len(blk.msgBlock.Transactions) <= txIdx {
+			blk.msgBlock.Transactions = append(blk.msgBlock.Transactions, otherTx())
+		}
+		return blk.msgBlock.Transactions[txIdx]
+	}
+
+	type tRedeem struct {
+		redeemTxIdx, redeemVin        int
+		swapHeight, redeemBlockHeight int64
+		notRedeemed                   bool
+	}
+
+	redeemReq := func(r *tRedeem) *findRedemptionReq {
+		var swapBlockHash *chainhash.Hash
+		var swapHeight int64
+		if r.swapHeight >= 0 {
+			swapHeight = r.swapHeight
+			swapBlockHash, _ = node.getBlockAtHeight(swapHeight)
+		}
+
+		swapTxHash := randHash()
+		secret, _, pkScript, contract, _, _, _ := makeSwapContract(false, time.Hour*12)
+
+		if !r.notRedeemed {
+			redeemTx := getTx(r.redeemBlockHeight, r.redeemTxIdx)
+
+			redemptionSigScript, _ := dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+			for len(redeemTx.TxIn) < r.redeemVin {
+				redeemTx.TxIn = append(redeemTx.TxIn, makeRPCVin(randHash(), 0, nil, nil))
+			}
+
+			redeemTx.TxIn = append(redeemTx.TxIn, makeRPCVin(swapTxHash, swapVout, redemptionSigScript, nil))
+		}
+
+		req := &findRedemptionReq{
+			outPt:        newOutPoint(swapTxHash, swapVout),
+			contract:     contract,
+			blockHash:    swapBlockHash,
+			blockHeight:  int32(swapHeight),
+			resultChan:   make(chan *findRedemptionResult, 1),
+			pkScript:     pkScript,
+			contractHash: hashContract(false, contract),
+		}
+		wallet.findRedemptionQueue[req.outPt] = req
+		return req
+	}
+
+	type test struct {
+		numBlocks        int
+		startBlockHeight int64
+		redeems          []*tRedeem
+		forcedErr        bool
+		canceledCtx      bool
+	}
+
+	tests := []*test{
+		{ // Normal redemption
+			numBlocks: 2,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 1,
+				redeemTxIdx:       1,
+				redeemVin:         1,
+			}},
+		},
+		{ // Mempool redemption
+			numBlocks: 2,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: -1,
+				redeemTxIdx:       2,
+				redeemVin:         2,
+			}},
+		},
+		{ // A couple of redemptions, both in tip.
+			numBlocks:        3,
+			startBlockHeight: 1,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 2,
+			}, {
+				redeemBlockHeight: 2,
+			}},
+		},
+		{ // A couple of redemptions, spread apart.
+			numBlocks: 6,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 2,
+			}, {
+				redeemBlockHeight: 4,
+			}},
+		},
+		{ // nil start block
+			numBlocks:        5,
+			startBlockHeight: -1,
+			redeems: []*tRedeem{{
+				swapHeight:        4,
+				redeemBlockHeight: 4,
+			}},
+		},
+		{ // A mix of mined and mempool redeems
+			numBlocks:        3,
+			startBlockHeight: 1,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: -1,
+			}, {
+				redeemBlockHeight: 2,
+			}},
+		},
+		{ // One found, one not found.
+			numBlocks:        4,
+			startBlockHeight: 1,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 2,
+			}, {
+				notRedeemed: true,
+			}},
+		},
+		{ // One found in mempool, one not found.
+			numBlocks:        4,
+			startBlockHeight: 1,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: -1,
+			}, {
+				notRedeemed: true,
+			}},
+		},
+		{ // Swap not mined.
+			numBlocks:        3,
+			startBlockHeight: 1,
+			redeems: []*tRedeem{{
+				swapHeight:        -1,
+				redeemBlockHeight: -1,
+			}},
+		},
+		{ // Fatal error
+			numBlocks: 2,
+			forcedErr: true,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 1,
+			}},
+		},
+		{ // Canceled context.
+			numBlocks:   2,
+			canceledCtx: true,
+			redeems: []*tRedeem{{
+				redeemBlockHeight: 1,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		node.truncateChains()
+		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
+		node.getBestBlockHashErr = nil
+		if tt.forcedErr {
+			node.getBestBlockHashErr = tErr
+		}
+		addBlocks(tt.numBlocks)
+		var startBlock *chainhash.Hash
+		if tt.startBlockHeight >= 0 {
+			startBlock, _ = node.getBlockAtHeight(tt.startBlockHeight)
+		}
+
+		ctx := tCtx
+		if tt.canceledCtx {
+			timedCtx, cancel := context.WithTimeout(tCtx, time.Second)
+			ctx = timedCtx
+			cancel()
+		}
+
+		reqs := make([]*findRedemptionReq, 0, len(tt.redeems))
+		for _, redeem := range tt.redeems {
+			reqs = append(reqs, redeemReq(redeem))
+		}
+
+		wallet.tryRedemptionRequests(ctx, startBlock, reqs)
+
+		for i, req := range reqs {
+			select {
+			case res := <-req.resultChan:
+				if res.err != nil {
+					if !tt.forcedErr {
+						t.Fatalf("result error: %v", res.err)
+					}
+				} else if tt.canceledCtx {
+					t.Fatalf("got success with canceled context")
+				}
+			default:
+				redeem := tt.redeems[i]
+				if !redeem.notRedeemed && !tt.canceledCtx {
+					t.Fatalf("redemption not found")
+				}
+			}
+		}
 	}
 
 }
