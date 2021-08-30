@@ -25,7 +25,7 @@ require (
 	github.com/decred/dcrd/wire v1.4.1-0.20210715032435-c9521b468f95
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.1.0
-	github.com/ethereum/go-ethereum v1.10.6
+	github.com/ethereum/go-ethereum v1.10.8
 	github.com/gcash/bchd v0.17.2-0.20201218180520-5708823e0e99
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
 	github.com/go-chi/chi/v5 v5.0.1
@@ -38,6 +38,6 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 	golang.org/x/text v0.3.6
-	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
+	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
 	gopkg.in/ini.v1 v1.55.0
 )
