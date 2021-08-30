@@ -764,6 +764,10 @@ export default class MarketsPage extends BasePage {
       if (!app.checkResponse(res, true)) {
         console.warn('max order estimate not available:', res)
         page.maxFromLots.textContent = 'estimate unavailable'
+        if (this.maxLoaded) {
+          this.maxLoaded()
+          this.maxLoaded = null
+        }
         return
       }
       success(res)
