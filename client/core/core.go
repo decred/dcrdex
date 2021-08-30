@@ -2513,22 +2513,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
-	var reg *inProcessRegistration
-
-	// Prepare and sign the registration payload.
-	storeAccount := func() error {
-		return c.db.CreateAccount(&db.AccountInfo{
-			Host:         dc.acct.host,
-			Cert:         dc.acct.cert,
-			LegacyEncKey: reg.encKeyLegacy,
-			EncKeyV2:     reg.encKey,
-			DEXPubKey:    dc.acct.dexPubKey,
-			FeeCoin:      dc.acct.feeCoin,
-		})
-	}
-
 	c.preRegisterMtx.RLock()
-	reg = c.preRegistration
+	reg := c.preRegistration
 	c.preRegisterMtx.RUnlock()
 
 	if reg == nil || reg.host != host || time.Since(reg.stamp) >= time.Minute*5 {
@@ -2601,7 +2587,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Set the dexConnection account fields and save account info to db.
 	dc.acct.feeCoin = coin.ID()
 
-	err = storeAccount()
+	err = c.db.CreateAccount(&db.AccountInfo{
+		Host:         dc.acct.host,
+		Cert:         dc.acct.cert,
+		LegacyEncKey: reg.encKeyLegacy,
+		EncKeyV2:     reg.encKey,
+		DEXPubKey:    dc.acct.dexPubKey,
+		FeeCoin:      dc.acct.feeCoin,
+	})
 	if err != nil {
 		c.log.Errorf("error saving account: %v\n", err)
 		// Don't abandon registration. The fee is already paid.
@@ -4842,11 +4835,11 @@ func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
 
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
-// route. If temporary is provided and true, no connect and reconnect handlers
-// are registered, and the c.listen(dc) goroutine is not started so that
-// associated trades are not processed and no incoming requests are
-// notifications are handled. A temporary dexConnection may be used to inspect
-// the config response.
+// route. If temporary is provided and true, no reconnect handler is registered
+// and the c.listen(dc) goroutine is not started so that associated trades are
+// not processed and no incoming requests are notifications are handled. A
+// temporary dexConnection may be used to inspect the config response or check
+// if a (paid) HD account exists with a DEX.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
@@ -4892,12 +4885,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		wsCfg.NetDialContext = proxy.DialContext
 	}
 
+	wsCfg.ConnectEventFunc = func(connected bool) {
+		c.handleConnectEvent(dc, connected)
+	}
 	if listen {
 		wsCfg.ReconnectSync = func() {
 			go c.handleReconnect(host)
-		}
-		wsCfg.ConnectEventFunc = func(connected bool) {
-			c.handleConnectEvent(dc, connected)
 		}
 	}
 
@@ -4937,7 +4930,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
 
-	c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+	if listen {
+		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+	} else {
+		c.log.Infof("Connected to DEX server at %s but NOT listening for messages.", host)
+	}
 
 	return dc, nil
 }
