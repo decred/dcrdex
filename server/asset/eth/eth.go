@@ -161,13 +161,19 @@ func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
 	return nil, notImplementedErr
 }
 
-// InitTxSize is an asset.Backend method that must produce the max size of a
-// standardized atomic swap initialization transaction.
+// InitTxSize is not size for eth. In ethereum the size of a non-standard
+// transaction does not say anything about the processing power the ethereum
+// virtual machine will use in order to process it, and therefor gas needed
+// cannot be ascertained from it. Multiplying the required gas by the gas price
+// will give us the actual fee needed, so returning gas here.
 func (eth *Backend) InitTxSize() uint32 {
-	return 0
+	return InitGas
 }
 
-// InitTxSizeBase is InitTxSize not including an input.
+// InitTxSizeBase is used in fee.go in a fee calculation. Currently we are
+// unable to batch eth contract calls like UTXO coins so all contracts will
+// need to be per transaction. Setting this to zero produces the expected
+// result in fee calculations.
 func (eth *Backend) InitTxSizeBase() uint32 {
 	return 0
 }

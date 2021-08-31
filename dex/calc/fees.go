@@ -20,7 +20,7 @@ func RequiredOrderFunds(swapVal, inputsSize, maxSwaps uint64, nfo *dex.Asset) ui
 
 // RequiredOrderFundsAlt is the same as RequiredOrderFunds, but built-in type
 // parameters.
-func RequiredOrderFundsAlt(swapVal, inputsSize, maxSwaps uint64, swapSizeBase, swapSize, feeRate uint64) uint64 {
+func RequiredOrderFundsAlt(swapVal, inputsSize, maxSwaps, swapSizeBase, swapSize, feeRate uint64) uint64 {
 	baseBytes := maxSwaps * swapSize
 	// SwapSize already includes one input, replace the size of the first swap
 	// in the chain with the given size of the actual inputs + SwapSizeBase.
