@@ -1,6 +1,7 @@
 package locales
 
 var EnUS = map[string]string{
+	"Language":                       "en-US",
 	"Markets":                        "Markets",
 	"Wallets":                        "Wallets",
 	"Notifications":                  "Notifications",

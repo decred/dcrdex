@@ -87,6 +87,7 @@ func mainCore() error {
 		Logger:       logMaker.Logger("CORE"),
 		TorProxy:     cfg.TorProxy,
 		TorIsolation: cfg.TorIsolation,
+		Language:     cfg.Language,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)

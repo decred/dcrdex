@@ -10,6 +10,7 @@ import OrderPage from './order'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
+import Locales from './locales'
 
 const idel = Doc.idel // = element by id
 const bind = Doc.bind
@@ -88,6 +89,9 @@ export default class Application {
         document.body.removeChild(a)
       }, 0)
     }
+
+    // use user current locale set by backend
+    window.locales = new Locales()
   }
 
   /**
@@ -152,6 +156,7 @@ export default class Application {
     this.assets = user.assets
     this.exchanges = user.exchanges
     this.walletMap = {}
+    this.locale = user.locale
     for (const [assetID, asset] of Object.entries(user.assets)) {
       if (asset.wallet) {
         this.walletMap[assetID] = asset.wallet

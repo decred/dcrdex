@@ -3,6 +3,7 @@ import BasePage from './basepage'
 import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
+import { ID_NO_APP_PASS_ERROR_MSG, ID_ACCT_UNDEFINED, ID_PASSWORD_NOT_MATCH } from './locales'
 
 const animationLength = 300
 
@@ -232,7 +233,7 @@ export default class SettingsPage extends BasePage {
       return
     }
     if (typeof account === 'undefined') {
-      page.importAccountErr.textContent = 'Account undefined.'
+      page.importAccountErr.textContent = window.locales.formatDetails(ID_ACCT_UNDEFINED)
       Doc.show(page.importAccountErr)
       return
     }
@@ -337,14 +338,14 @@ export default class SettingsPage extends BasePage {
     }
     // Ensure password fields are nonempty.
     if (!page.appPW.value || !page.newAppPW.value || !page.confirmNewPW.value) {
-      page.changePWErrMsg.textContent = 'app password cannot be empty'
+      page.changePWErrMsg.textContent = window.locales.formatDetails(ID_NO_APP_PASS_ERROR_MSG)
       Doc.show(page.changePWErrMsg)
       clearValues()
       return
     }
     // Ensure password confirmation matches.
     if (page.newAppPW.value !== page.confirmNewPW.value) {
-      page.changePWErrMsg.textContent = 'password confirmation doesn\'t match'
+      page.changePWErrMsg.textContent = window.locales.formatDetails(ID_PASSWORD_NOT_MATCH)
       Doc.show(page.changePWErrMsg)
       clearValues()
       return

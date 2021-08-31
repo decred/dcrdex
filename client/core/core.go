@@ -1171,6 +1171,7 @@ func New(cfg *Config) (*Core, error) {
 			return nil, fmt.Errorf("Error parsing language tag %q: %w", cfg.Language, err)
 		}
 	}
+	cfg.Logger.Debugf("Using locale printer for %q", lang, cfg.Language)
 
 	locale, found := locales[lang.String()]
 	if !found {
