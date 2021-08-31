@@ -508,10 +508,10 @@ func TestRequiredOrderFunds(t *testing.T) {
 	numSwaps := uint64(17)                       // swaps
 	initSizeBase := uint64(eth.InitTxSizeBase()) // 0 gas
 	initSize := uint64(eth.InitTxSize())         // init value gas
-	feeRate := uint64(30)                        // gwei
+	feeRate := uint64(30)                        // gwei / gas
 
-	// We want the fee calculation to simply be the gas used for each swap
-	// plus the initial value.
+	// We want the fee calculation to simply be the cost of the gas used
+	// for each swap plus the initial value.
 	want := swapVal + (numSwaps * initSize * feeRate)
 	nfo := &dex.Asset{
 		SwapSizeBase: initSizeBase,
