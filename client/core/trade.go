@@ -1009,10 +1009,14 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 		return true
 	}
 
-	// For the first check or hourly tick, log the time until expiration.
+	// Log contract expiry info on intervals: hourly when not expired, otherwise
+	// every 5 minutes until the refund occurs.
 	expiresIn := time.Until(contractExpiry) // may be negative
-	if match.lastExpireDur-expiresIn < time.Hour {
-		// Logged less than an hour ago.
+	logInterval := time.Hour
+	if expiresIn <= 0 {
+		logInterval = 5 * time.Minute
+	}
+	if match.lastExpireDur-expiresIn < logInterval {
 		return false
 	}
 
@@ -1025,16 +1029,16 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 	from := t.wallets.fromAsset
 	remainingTime := expiresIn.Round(time.Second)
-	var but string
-	if remainingTime <= 0 {
-		// Since reaching expiry time does not necessarily mean it is spendable
-		// by consensus rules (e.g. 11 block median time must be greater than
-		// lock time with BTC), include a "but" in the message.
-		but = "but "
+	assetSymb := strings.ToUpper(from.Symbol)
+	var expireDetails string
+	if remainingTime > 0 {
+		expireDetails = fmt.Sprintf("expires at %v (%v).", contractExpiry, remainingTime)
+	} else {
+		expireDetails = fmt.Sprintf("expired %v ago, but additional blocks are required by the %s network.",
+			-remainingTime, assetSymb)
 	}
-	t.dc.log.Infof("Contract for match %s with swap coin %v (%s) has an expiry time of %v (%v), %snot yet expired.",
-		match, coinIDString(from.ID, swapCoinID), from.Symbol,
-		contractExpiry, remainingTime, but)
+	t.dc.log.Infof("Contract for match %s with swap coin %v (%s) %s",
+		match, coinIDString(from.ID, swapCoinID), assetSymb, expireDetails)
 
 	return false
 }
