@@ -1,0 +1,120 @@
+{{define "settings"}}
+{{template "top" .}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+<div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
+
+  <span class="settings-gear ico-settings"></span><br>
+
+  <div class="settings">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
+      <label class="form-check-label" for="darkMode">
+        Modo Dark
+      </label>
+    </div>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
+      <label class="form-check-label" for="showPokes">
+        Mostrar notificações de pop-up
+      </label>
+    </div>
+    <div>
+      <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
+        {{range $host, $xc := .UserInfo.Exchanges}}
+          <div class="settings-exchange border1">
+            <span>
+              Endereço DEX: {{$host}}
+            </span>
+            <br>
+            ID da Conta: <span class="fs12">
+            {{if eq (len $xc.AcctID) 0}}
+              &lt;login to show&gt;
+            {{else}}
+              {{$xc.AcctID}}
+              <br>
+            {{end}}</span>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Exportar Conta</button>
+            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Desativar Conta</button>
+          </div>
+        {{end}}
+      </div>
+      <br>
+      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+        <p>
+        O cliente da DEX suporta simultâneos números de servidores DEX.
+        </p>
+        <button id="addADex" class="bg2 selected">Adicionar uma DEX</button>
+        <button id="importAccount" class="bg2 selected ml-2">Importar Conta</button>
+      </div>
+    </div>
+    <div>
+        <button id="changeAppPW" class="bg2 selected">Trocar Senha do aplicativo</button>
+    </div>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      Você deve ser cuidadoso. Escreva sua semente e salve uma cópia. Caso você perca acesso a essa maquina ou algum outra problema ocorra, você poderá usar sua semente recupear acesso a sua conta DEX e carteiras regitrada. Algumas contas antigas não podem ser recuperadas, e apesar de novas ou não, é uma boa prática salvar backup das contas de forma separada da semente.<br>
+      <button id="exportSeed" class="fs15 bg2 selected">Ver semente da aplicação</button>
+    </div>
+    <div>ID da Build: <span id="commitHash" class="mono"></span></div>
+  </div>
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+    
+    {{- /* DEX ADDRESS */ -}}
+    <form class="card mx-auto my-5 bg1 text-left" id="dexAddrForm" autocomplete="off">
+      {{template "dexAddrForm"}}
+    </form>
+    
+    {{- /* CONFIRM REGISTRATION */ -}}
+    <form class="card mx-auto my-5 bg1 text-left d-hide" id="confirmRegForm">
+      {{template "confirmRegistrationForm" .}}
+    </form>
+
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+      {{template "authorizeAccountExportForm"}}
+    </form>
+
+    {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountImportForm">
+      {{template "authorizeAccountImportForm" .}}
+    </form>
+
+    {{- /* DISABLE ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="disableAccountForm">
+      {{template "disableAccountForm"}}
+    </form>
+	
+	{{- /* CHANGE APP PASSWORD */ -}}
+    <form class="card bg1 d-hide" id="changeAppPWForm">
+      {{template "changeAppPWForm"}}
+    </form>
+    {{- /* EXPORT SEED AUTHORIZATION */ -}}
+    <form class="card bg1 p-4 d-hide position-relative" id="exportSeedAuth">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="fs16">
+        Informar sua senha do aplicativo para mostrar sua seed. Tenha certeza que mais ninguém pode ver sua tela.
+      </div>
+      <hr class="dashed my-4">
+      <div>
+        <label for="exportSeedPW" class="pl-1 mb-1">Senha</label>
+        <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="exportSeedSubmit" type="button" class="col-8 justify-content-center fs15 bg2 selected">Mostre me</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="exportSeedErr"></div>
+    </form>
+
+    {{- /* SEED DISPLAY */ -}}
+    <form class="card bg1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      Não compartilhe e não perca sua seed.
+      <div id="seedDiv"></div>
+    </form>
+
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}
