@@ -2656,8 +2656,7 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 				return nil, true, fmt.Errorf("error authorizing pre-paid account: %v", err)
 			}
 
-			if !dc.broadcastingConnect() { // dc might already be listening for messages if called from Register which creates a non-temporary dc.
-				atomic.StoreUint32(&dc.reportingConnects, 1)
+			if atomic.CompareAndSwapUint32(&dc.reportingConnects, 0, 1) { // dc might already be listening for messages if called from Register which creates a non-temporary dc.
 				c.wg.Add(1)
 				go c.listen(dc)
 			}
@@ -4852,11 +4851,10 @@ func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
 
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
-// route. If temporary is provided and true, no reconnect handler is registered
-// and the c.listen(dc) goroutine is not started so that associated trades are
-// not processed and no incoming requests are notifications are handled. A
-// temporary dexConnection may be used to inspect the config response or check
-// if a (paid) HD account exists with a DEX.
+// route. If temporary is provided and true, the c.listen(dc) goroutine is not
+// started so that associated trades are not processed and no incoming requests
+// and notifications are handled. A temporary dexConnection may be used to
+// inspect the config response or check if a (paid) HD account exists with a DEX.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
@@ -4905,10 +4903,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	wsCfg.ConnectEventFunc = func(connected bool) {
 		c.handleConnectEvent(dc, connected)
 	}
-	if listen {
-		wsCfg.ReconnectSync = func() {
-			go c.handleReconnect(host)
-		}
+	wsCfg.ReconnectSync = func() {
+		go c.handleReconnect(host)
 	}
 
 	// Create a websocket connection to the server.
