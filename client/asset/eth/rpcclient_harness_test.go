@@ -368,6 +368,23 @@ func TestPeers(t *testing.T) {
 	spew.Dump(peers)
 }
 
+func TestInitiateGas(t *testing.T) {
+	gas, err := ethClient.initiateGas(ctx, &contractAddr)
+	if err != nil {
+		t.Fatalf("unexpected error from initiateGas: %v", err)
+	}
+
+	if gas > eth.InitGas {
+		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
+	}
+
+	if gas+10000 < eth.InitGas {
+		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+	}
+
+	fmt.Sprintf("Gas used for initiate: %v", gas)
+}
+
 func TestInitiate(t *testing.T) {
 	now := time.Now().Unix()
 	var secretHash [32]byte

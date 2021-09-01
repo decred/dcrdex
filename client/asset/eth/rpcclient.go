@@ -5,12 +5,17 @@ package eth
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
+	"strings"
+	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
@@ -254,6 +259,38 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 		return nil, err
 	}
 	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
+}
+
+// initiateGas checks the amount of gas that is used for a call to the initiate function.
+func (c *rpcclient) initiateGas(ctx context.Context, contractAddress *common.Address) (uint64, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		return 0, err
+	}
+	refundTimestamp := time.Now().Unix()
+	var secret [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+	// just an arbitrary address
+	participant := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	data, err := parsedAbi.Pack("initiate", big.NewInt(refundTimestamp), secretHash, participant)
+	if err != nil {
+		return 0, nil
+	}
+
+	msg := ethereum.CallMsg{
+		From:  participant,
+		To:    contractAddress,
+		Gas:   0,
+		Value: big.NewInt(100000000),
+		Data:  data,
+	}
+	gas, err := c.ec.EstimateGas(ctx, msg)
+	if err != nil {
+		return 0, err
+	}
+
+	return gas, nil
 }
 
 // redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
