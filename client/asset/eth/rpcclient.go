@@ -293,6 +293,32 @@ func (c *rpcclient) initiateGas(ctx context.Context, contractAddress *common.Add
 	return gas, nil
 }
 
+// initiateGas checks the amount of gas that is used for a call to the redeem function.
+func (c *rpcclient) redeemGas(ctx context.Context, secret, secretHash [32]byte, participant *common.Address, contractAddress *common.Address) (uint64, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		return 0, err
+	}
+
+	data, err := parsedAbi.Pack("redeem", secret, secretHash)
+	if err != nil {
+		return 0, nil
+	}
+
+	msg := ethereum.CallMsg{
+		From: *participant,
+		To:   contractAddress,
+		Gas:  0,
+		Data: data,
+	}
+	gas, err := c.ec.EstimateGas(ctx, msg)
+	if err != nil {
+		return 0, err
+	}
+
+	return gas, nil
+}
+
 // redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
 // Any on-chain failure, such as this secret not matching the hash, will not cause
 // this to error.
