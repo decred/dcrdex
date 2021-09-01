@@ -29,18 +29,18 @@ type Candle struct {
 // slice until it reaches capacity, when it becomes a "circular array" to avoid
 // re-allocations.
 type CandleCache struct {
-	candles []Candle
+	Candles []Candle
+	BinSize uint64
 	cap     int
 	// cursor will be the index of the last inserted candle.
-	cursor  int
-	binSize uint64
+	cursor int
 }
 
 // NewCandleCache is a constructor for a CandleCache.
 func NewCandleCache(cap int, binSize uint64) *CandleCache {
 	return &CandleCache{
 		cap:     cap,
-		binSize: binSize,
+		BinSize: binSize,
 	}
 }
 
@@ -48,9 +48,9 @@ func NewCandleCache(cap int, binSize uint64) *CandleCache {
 // responsible to ensure that candles added with Add are always newer than
 // the last candle added.
 func (c *CandleCache) Add(candle *Candle) {
-	sz := len(c.candles)
+	sz := len(c.Candles)
 	if sz == 0 {
-		c.candles = append(c.candles, *candle)
+		c.Candles = append(c.Candles, *candle)
 		return
 	}
 	if c.combineCandles(c.last(), candle) {
@@ -58,10 +58,10 @@ func (c *CandleCache) Add(candle *Candle) {
 	}
 	if sz == c.cap { // circular mode
 		c.cursor = (c.cursor + 1) % c.cap
-		c.candles[c.cursor] = *candle
+		c.Candles[c.cursor] = *candle
 		return
 	}
-	c.candles = append(c.candles, *candle)
+	c.Candles = append(c.Candles, *candle)
 	c.cursor = sz // len(c.candles) - 1
 }
 
@@ -70,13 +70,13 @@ func (c *CandleCache) Add(candle *Candle) {
 // those available will be returned, with no indication of error.
 func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 	n := count
-	sz := len(c.candles)
+	sz := len(c.Candles)
 	if sz < n {
 		n = sz
 	}
 	wc := msgjson.NewWireCandles(n)
 	for i := sz - n; i < sz; i++ {
-		candle := &c.candles[(c.cursor+1+i)%sz]
+		candle := &c.Candles[(c.cursor+1+i)%sz]
 		wc.StartStamps = append(wc.StartStamps, candle.StartStamp)
 		wc.EndStamps = append(wc.EndStamps, candle.EndStamp)
 		wc.MatchVolumes = append(wc.MatchVolumes, candle.MatchVolume)
@@ -98,14 +98,14 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 // be of little value.
 func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
 	cutoff := encode.UnixMilliU(since)
-	sz := len(c.candles)
+	sz := len(c.Candles)
 	if sz == 0 {
 		return 0, 0
 	}
 	endRate := c.last().EndRate
 	var startRate uint64
 	for i := 0; i < sz; i++ {
-		candle := &c.candles[(c.cursor+sz-i)%sz]
+		candle := &c.Candles[(c.cursor+sz-i)%sz]
 		if candle.EndStamp <= cutoff {
 			break
 		} else if candle.StartStamp <= cutoff {
@@ -129,13 +129,13 @@ func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
 
 // last gets the most recent candle in the cache.
 func (c *CandleCache) last() *Candle {
-	return &c.candles[c.cursor]
+	return &c.Candles[c.cursor]
 }
 
 // combineCandles attempts to add the candidate candle to the target candle
 // in-place, if they're in the same bin, otherwise returns false.
 func (c *CandleCache) combineCandles(target, candidate *Candle) bool {
-	if target.EndStamp/c.binSize != candidate.EndStamp/c.binSize {
+	if target.EndStamp/c.BinSize != candidate.EndStamp/c.BinSize {
 		// The candidate candle cannot be added.
 		return false
 	}

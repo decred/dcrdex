@@ -17,8 +17,8 @@ func TestCandleCache(t *testing.T) {
 	const cacheCapacity = 5
 	cache := NewCandleCache(cacheCapacity, binSize)
 
-	if cache.binSize != binSize {
-		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.binSize)
+	if cache.BinSize != binSize {
+		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.BinSize)
 	}
 
 	makeCandle := func(startStamp, endStamp, matchVol, quoteVol, bookVol, startRate, endRate, lowRate, highRate uint64) *Candle {
@@ -72,7 +72,7 @@ func TestCandleCache(t *testing.T) {
 
 	// Check basic functionality.
 	cache.Add(makeCandle(11, 12, 100, 101, 100, 100, 100, 50, 150)) // start rate 100
-	if len(cache.candles) != 1 {
+	if len(cache.Candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
 	lastCandle := cache.last()
@@ -87,7 +87,7 @@ func TestCandleCache(t *testing.T) {
 	cache.Add(makeCandle(12, 13, 100, 101, 100, 100, 100, 25, 100)) // low rate 25
 	cache.Add(makeCandle(13, 14, 100, 101, 100, 100, 100, 50, 200)) // high rate 200
 	cache.Add(makeCandle(14, 15, 100, 101, 150, 100, 125, 50, 100)) // end book volume 150, end rate 125
-	if len(cache.candles) != 1 {
+	if len(cache.Candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
 	checkCandleStamps(cache.last(), 11, 15)
@@ -97,7 +97,7 @@ func TestCandleCache(t *testing.T) {
 	// Two candles each in a new bin.
 	cache.Add(makeCandle(25, 27, 10, 11, 12, 13, 14, 15, 16))
 	cache.Add(makeCandle(41, 48, 17, 18, 19, 20, 21, 22, 23))
-	if len(cache.candles) != 3 {
+	if len(cache.Candles) != 3 {
 		t.Fatalf("New candles didn't add")
 	}
 	checkCandleStamps(cache.last(), 41, 48)
@@ -106,19 +106,19 @@ func TestCandleCache(t *testing.T) {
 
 	// Candle combination is based on end stamp only.
 	cache.Add(makeCandle(49, 51, 24, 25, 26, 27, 28, 29, 30))
-	if len(cache.candles) != 4 {
+	if len(cache.Candles) != 4 {
 		t.Fatalf("straddling candle didn't create new entry")
 	}
 
 	// Adding two more should only increase length by 1, since capacity is 5.
 	cache.Add(makeCandle(61, 69, 24, 25, 26, 27, 28, 29, 30))
 	cache.Add(makeCandle(71, 79, 54321, 25, 26, 27, 28, 29, 30))
-	if len(cache.candles) != cacheCapacity {
-		t.Fatalf("cache size not at capacity. wanted %d, found %d", cacheCapacity, len(cache.candles))
+	if len(cache.Candles) != cacheCapacity {
+		t.Fatalf("cache size not at capacity. wanted %d, found %d", cacheCapacity, len(cache.Candles))
 	}
 	// The cache becomes circular, so the most recent will be at the previously
 	// oldest index, 0.
-	if cache.last() != &cache.candles[0] {
+	if cache.last() != &cache.Candles[0] {
 		t.Fatalf("cache didn't wrap")
 	}
 
