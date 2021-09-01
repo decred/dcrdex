@@ -17,8 +17,8 @@ func TestCandleCache(t *testing.T) {
 	const cacheCapacity = 5
 	cache := NewCandleCache(cacheCapacity, binSize)
 
-	if cache.binSize != binSize {
-		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.binSize)
+	if cache.BinSize != binSize {
+		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.BinSize)
 	}
 
 	makeCandle := func(startStamp, endStamp, matchVol, quoteVol, bookVol, startRate, endRate, lowRate, highRate uint64) *Candle {

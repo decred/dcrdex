@@ -30,17 +30,17 @@ type Candle struct {
 // re-allocations.
 type CandleCache struct {
 	Candles []Candle
+	BinSize uint64
 	cap     int
 	// cursor will be the index of the last inserted candle.
-	cursor  int
-	binSize uint64
+	cursor int
 }
 
 // NewCandleCache is a constructor for a CandleCache.
 func NewCandleCache(cap int, binSize uint64) *CandleCache {
 	return &CandleCache{
 		cap:     cap,
-		binSize: binSize,
+		BinSize: binSize,
 	}
 }
 
@@ -135,7 +135,7 @@ func (c *CandleCache) last() *Candle {
 // combineCandles attempts to add the candidate candle to the target candle
 // in-place, if they're in the same bin, otherwise returns false.
 func (c *CandleCache) combineCandles(target, candidate *Candle) bool {
-	if target.EndStamp/c.binSize != candidate.EndStamp/c.binSize {
+	if target.EndStamp/c.BinSize != candidate.EndStamp/c.BinSize {
 		// The candidate candle cannot be added.
 		return false
 	}
