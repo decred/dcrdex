@@ -23,14 +23,14 @@ var (
 )
 
 type TCore struct {
-	syncFeed   *core.BookFeed
+	syncFeed   core.BookFeed
 	syncErr    error
 	notHas     bool
 	notRunning bool
 	notOpen    bool
 }
 
-func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
+func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
 	return c.syncFeed, c.syncErr
 }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
@@ -131,6 +131,16 @@ func newTServer() (*Server, *TCore) {
 	return New(c, dex.StdOutLogger("TEST", dex.LevelTrace)), c
 }
 
+type tBookFeed struct{}
+
+func (*tBookFeed) Next() <-chan *core.BookUpdate {
+	return make(chan *core.BookUpdate, 1)
+}
+func (*tBookFeed) Close() {}
+func (*tBookFeed) Candles(dur string) error {
+	return nil
+}
+
 func TestMain(m *testing.M) {
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -157,8 +167,8 @@ func TestLoadMarket(t *testing.T) {
 	// so manually stop the marketSyncer started by wsLoadMarket and the WSLink
 	// before returning from this test.
 	defer func() {
-		link.cl.feedLoop.Stop()
-		link.cl.feedLoop.WaitForShutdown()
+		link.cl.feed.loop.Stop()
+		link.cl.feed.loop.WaitForShutdown()
 		link.cl.Disconnect()
 		linkWg.Wait()
 	}()
@@ -175,12 +185,12 @@ func TestLoadMarket(t *testing.T) {
 		t.Helper()
 		// Create a new feed for every request because a Close()d feed cannot be
 		// reused.
-		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
+		tCore.syncFeed = &tBookFeed{}
 		msgErr := srv.handleMessage(link.cl, subscription)
 		if msgErr != nil {
 			t.Fatalf("'loadmarket' error: %d: %s", msgErr.Code, msgErr.Message)
 		}
-		if link.cl.feedLoop == nil {
+		if link.cl.feed.loop == nil {
 			t.Fatalf("nil book feed waiter after 'loadmarket'")
 		}
 	}
@@ -195,7 +205,7 @@ func TestLoadMarket(t *testing.T) {
 		t.Fatalf("'unmarket' error: %d: %s", msgErr.Code, msgErr.Message)
 	}
 
-	if link.cl.feedLoop != nil {
+	if link.cl.feed != nil {
 		t.Fatalf("non-nil book feed waiter after 'unmarket'")
 	}
 

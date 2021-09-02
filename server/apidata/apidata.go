@@ -11,27 +11,14 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/comms"
-	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
 
-const (
-	// DefaultCandleRequest is the number of candles to return if the request
-	// does not specify otherwise.
-	DefaultCandleRequest = 50
-	// CacheSize is the default cache size. Also represents the maximum number
-	// of candles that can be requested at once.
-	CacheSize = 1000
-)
-
 var (
-	// BinSizes is the default bin sizes for candlestick data sets. Exported for
-	// use in the 'config' response. Internally, we will parse these to uint64
-	// milliseconds.
-	BinSizes = []string{"24h", "1h", "5m"}
 	// Our internal millisecond representation of the bin sizes.
 	binSizes []uint64
 	bin5min  uint64 = 60 * 5 * 1000
@@ -41,7 +28,7 @@ var (
 // DBSource is a source of persistent data. DBSource is used to prime the
 // caches at startup.
 type DBSource interface {
-	LoadEpochStats(base, quote uint32, caches []*db.CandleCache) error
+	LoadEpochStats(base, quote uint32, caches []*candles.Cache) error
 }
 
 // MarketSource is a source of market information. Markets are added after
@@ -68,8 +55,8 @@ type DataAPI struct {
 	spots    map[string]json.RawMessage
 
 	cacheMtx     sync.RWMutex
-	marketCaches map[string]map[uint64]*db.CandleCache
-	cache5min    *db.CandleCache
+	marketCaches map[string]map[uint64]*candles.Cache
+	cache5min    *candles.Cache
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
@@ -78,7 +65,7 @@ func NewDataAPI(dbSrc DBSource) *DataAPI {
 		db:             dbSrc,
 		epochDurations: make(map[string]uint64),
 		spots:          make(map[string]json.RawMessage),
-		marketCaches:   make(map[string]map[uint64]*db.CandleCache),
+		marketCaches:   make(map[string]map[uint64]*candles.Cache),
 	}
 
 	if atomic.CompareAndSwapUint32(&started, 0, 1) {
@@ -97,11 +84,11 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 	}
 	epochDur := mkt.EpochDuration()
 	s.epochDurations[mktName] = epochDur
-	binCaches := make(map[uint64]*db.CandleCache, len(binSizes)+1)
+	binCaches := make(map[uint64]*candles.Cache, len(binSizes)+1)
 	s.marketCaches[mktName] = binCaches
-	cacheList := make([]*db.CandleCache, 0, len(binSizes)+1)
+	cacheList := make([]*candles.Cache, 0, len(binSizes)+1)
 	for _, binSize := range append([]uint64{epochDur}, binSizes...) {
-		cache := db.NewCandleCache(CacheSize, binSize)
+		cache := candles.NewCache(candles.CacheSize, binSize)
 		cacheList = append(cacheList, cache)
 		binCaches[binSize] = cache
 		if binSize == bin5min {
@@ -142,7 +129,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	startStamp := epochIdx * epochDur
 	endStamp := startStamp + epochDur
 	for _, cache := range mktCaches {
-		cache.Add(&db.Candle{
+		cache.Add(&candles.Candle{
 			StartStamp:  startStamp,
 			EndStamp:    endStamp,
 			MatchVolume: stats.MatchVolume,
@@ -190,9 +177,9 @@ func (s *DataAPI) handleCandles(thing interface{}) (interface{}, error) {
 	}
 
 	if req.NumCandles == 0 {
-		req.NumCandles = DefaultCandleRequest
-	} else if req.NumCandles > CacheSize {
-		return nil, fmt.Errorf("requested numCandles %d exceeds maximum request size %d", req.NumCandles, CacheSize)
+		req.NumCandles = candles.DefaultCandleRequest
+	} else if req.NumCandles > candles.CacheSize {
+		return nil, fmt.Errorf("requested numCandles %d exceeds maximum request size %d", req.NumCandles, candles.CacheSize)
 	}
 
 	mkt, err := dex.MarketName(req.BaseID, req.QuoteID)
@@ -236,7 +223,7 @@ func (s *DataAPI) handleOrderBook(thing interface{}) (interface{}, error) {
 }
 
 func init() {
-	for _, s := range BinSizes {
+	for _, s := range candles.BinSizes {
 		dur, err := time.ParseDuration(s)
 		if err != nil {
 			panic("error parsing bin size '" + s + "': " + err.Error())

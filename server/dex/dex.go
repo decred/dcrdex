@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -152,7 +153,7 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfg
 		Markets:          cfgMarkets,
 		Fee:              dcrAsset.Amt, // DEPRECATED - DCR only
 		APIVersion:       uint16(APIVersion),
-		BinSizes:         apidata.BinSizes,
+		BinSizes:         candles.BinSizes,
 		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		RegFees:          regAssets,
 	}

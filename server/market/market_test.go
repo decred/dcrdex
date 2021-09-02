@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -209,8 +210,8 @@ func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error 
 func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error            { return nil }
-func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*db.CandleCache) error { return nil }
+func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error           { return nil }
+func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*candles.Cache) error { return nil }
 
 type TCollector struct{}
 

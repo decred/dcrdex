@@ -99,8 +99,8 @@ func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange,
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 	return c.registerResult, c.registerErr
 }
-func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.BookFeed, error) {
-	return core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
+	return &tBookFeed{}, c.syncErr
 }
 func (c *TCore) Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error) {
 	return c.order, c.tradeErr
@@ -116,6 +116,16 @@ func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (
 }
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	return c.exportSeed, c.exportSeedErr
+}
+
+type tBookFeed struct{}
+
+func (*tBookFeed) Next() <-chan *core.BookUpdate {
+	return make(<-chan *core.BookUpdate)
+}
+func (*tBookFeed) Close() {}
+func (*tBookFeed) Candles(dur string) error {
+	return nil
 }
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()) {

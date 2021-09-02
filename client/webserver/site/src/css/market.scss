@@ -276,21 +276,12 @@ table.balance-table button:hover {
     align-items: center;
     position: absolute;
     top: 0;
-    left: 50px;
+    left: 0;
     right: 0;
+    padding: 0 5px;
     height: 30px;
     font-size: 14px;
     color: #444;
-
-    .epoch-line {
-      display: inline-block;
-      border-top: 3px dotted #626262;
-      width: 25px;
-      height: 0;
-      margin-right: 5px;
-      position: relative;
-      top: 1px;
-    }
 
     .category-spacer {
       display: inline-block;
@@ -303,15 +294,56 @@ table.balance-table button:hover {
       }
     }
 
-    button {
-      border-left: 1px solid #333;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: transparent;
-      padding: 0 10px;
-      color: #999;
+    button.chart-selector {
+      width: 52px;
+      height: 20px;
+      padding: 1px;
+      margin-right: 10px;
+      background-color: #7772;
+      border: 1px solid #777;
+      border-radius: 5px;
+    }
+
+    button.chart-selector:hover {
+      background-color: #7777;
+      border-color: #6cac78;
+    }
+
+    .candle-dur-bttn {
+      background-color: #7772;
+      border: 1px solid #777;
+      padding: 2px 4px;
+      font-size: 14px;
+      border-radius: 3px;
+      line-height: 1;
+      margin: 0 2px;
+
+      &:hover {
+        background-color: #7777;
+      }
+
+      &:hover,
+      &.selected {
+        border-color: #6cac78;
+      }
+    }
+
+    .epoch-line {
+      display: inline-block;
+      border-top: 3px dotted #626262;
+      width: 25px;
+      height: 0;
+      margin-right: 5px;
+      position: relative;
+      top: 1px;
+    }
+
+    #candlestickBttn {
+      background-image: url('/img/candlestick_bttn.png');
+    }
+
+    #depthBttn {
+      background-image: url('/img/depth_bttn.png');
     }
   }
 }

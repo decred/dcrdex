@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 )
@@ -78,7 +79,7 @@ type DEXArchivist interface {
 	InsertEpoch(ed *EpochResults) error
 
 	// LoadEpochStats reads all market epoch history from the database.
-	LoadEpochStats(uint32, uint32, []*CandleCache) error
+	LoadEpochStats(uint32, uint32, []*candles.Cache) error
 
 	OrderArchiver
 	AccountArchiver

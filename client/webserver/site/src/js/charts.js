@@ -41,27 +41,17 @@ const lightTheme = {
   legendText: '#1b1b1b'
 }
 
-// DepthChart is a javascript Canvas-based depth chart renderer.
-export class DepthChart {
-  constructor (parent, reporters, zoom) {
+// Chart is the base class for charts.
+class Chart {
+  constructor (parent) {
+    this.parent = parent
     this.theme = State.isDark() ? darkTheme : lightTheme
     this.canvas = document.createElement('canvas')
-    this.parent = parent
-    this.reporters = reporters
+    this.visible = true
+    parent.appendChild(this.canvas)
     this.ctx = this.canvas.getContext('2d')
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.book = null
-    this.dataExtents = null
-    this.zoomLevel = zoom
-    this.lotSize = null
-    this.rateStep = null
-    this.lines = []
-    this.markers = {
-      buys: [],
-      sells: []
-    }
-    parent.appendChild(this.canvas)
     // Mouse handling
     this.mousePos = null
     bind(this.canvas, 'mousemove', e => {
@@ -81,17 +71,31 @@ export class DepthChart {
     this.wheeled = () => {
       this.wheelLimiter = setTimeout(() => { this.wheelLimiter = null }, 100)
     }
-
     bind(this.canvas, 'wheel', e => { this.wheel(e) })
     this.boundResizer = () => { this.resize(parent.clientHeight) }
     bind(window, 'resize', this.boundResizer)
     bind(this.canvas, 'click', e => { this.click(e) })
-    this.resize(parent.clientHeight)
   }
 
-  // The market handler will call unattach when the markets page is unloaded.
-  unattach () {
-    unbind(window, 'resize', this.boundResizer)
+  /* clear the canvas. */
+  clear () {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+  }
+
+  /* draw calls the child class's render method. */
+  draw () {
+    this.render()
+  }
+
+  /* click is the handler for a click event on the canvas. */
+  click (e) {
+    this.clicked(e)
+  }
+
+  /* wheel is a mousewheel event handler. */
+  wheel (e) {
+    this.zoom(e.deltaY < 0)
+    e.preventDefault()
   }
 
   /*
@@ -110,23 +114,175 @@ export class DepthChart {
     this.plotRegion = new Region(this.ctx, plotExtents)
     this.xRegion = new Region(this.ctx, xLblExtents)
     this.yRegion = new Region(this.ctx, yLblExtents)
+    this.rect = this.canvas.getBoundingClientRect()
+    this.resized()
+  }
+
+  /* zoom is called when the user scrolls the mouse wheel on the canvas. */
+  zoom (bigger) {
+    if (this.wheelLimiter) return
+    this.zoomed(bigger)
+  }
+
+  /* hide hides the canvas */
+  hide () {
+    this.visible = false
+    Doc.hide(this.canvas)
+  }
+
+  /* show shows the canvas */
+  show () {
+    this.visible = true
+    Doc.show(this.canvas)
+    this.resize(this.parent.clientHeight)
+  }
+
+  /* The market handler will call unattach when the markets page is unloaded. */
+  unattach () {
+    unbind(window, 'resize', this.boundResizer)
+  }
+
+  /* render must be implemented by the child class. */
+  render () {
+    console.error('child class must override render method')
+  }
+
+  /* applyLabelStyle applies the style used for axis tick labels. */
+  applyLabelStyle () {
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'middle'
+    this.ctx.font = '12px \'sans\', sans-serif'
+    this.ctx.fillStyle = this.theme.axisLabel
+  }
+
+  /* plotXLabels applies the provided labels to the x axis and draws the grid. */
+  plotXLabels (labels, minX, maxX, unitLines) {
+    const extents = new Extents(minX, maxX, 0, 1)
+    this.xRegion.plot(extents, (ctx, tools) => {
+      this.applyLabelStyle()
+      const centerX = (maxX + minX) / 2
+      let lastX = minX
+      let unitCenter = centerX
+      labels.lbls.forEach(lbl => {
+        ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
+        if (centerX >= lastX && centerX < lbl.val) {
+          unitCenter = (lastX + lbl.val) / 2
+        }
+        lastX = lbl.val
+      })
+      ctx.font = '11px \'sans\', sans-serif'
+      if (unitLines.length === 2) {
+        ctx.fillText(unitLines[0], tools.x(unitCenter), tools.y(0.63))
+        ctx.fillText(unitLines[1], tools.x(unitCenter), tools.y(0.23))
+      } else if (unitLines.length === 1) {
+        ctx.fillText(unitLines[0], tools.x(unitCenter), tools.y(0.5))
+      }
+    }, true)
+    this.plotRegion.plot(extents, (ctx, tools) => {
+      ctx.lineWidth = 1
+      ctx.strokeStyle = this.theme.gridLines
+      labels.lbls.forEach(lbl => {
+        line(ctx, tools.x(lbl.val), tools.y(0), tools.x(lbl.val), tools.y(1))
+      })
+    }, true)
+  }
+
+  /*
+   * plotYLabels applies the y labels based on the provided plot region, and
+   * draws the grid.
+   */
+  plotYLabels (region, labels, minY, maxY, unit) {
+    const extents = new Extents(0, 1, minY, maxY)
+    this.yRegion.plot(extents, (ctx, tools) => {
+      this.applyLabelStyle()
+      const centerY = maxY / 2
+      let lastY = 0
+      let unitCenter = centerY
+      labels.lbls.forEach(lbl => {
+        ctx.fillText(lbl.txt, tools.x(0.5), tools.y(lbl.val))
+        if (centerY >= lastY && centerY < lbl.val) {
+          unitCenter = (lastY + lbl.val) / 2
+        }
+        lastY = lbl.val
+      })
+      ctx.fillText(unit, tools.x(0.5), tools.y(unitCenter))
+    }, true)
+    region.plot(extents, (ctx, tools) => {
+      ctx.lineWidth = 1
+      ctx.strokeStyle = this.theme.gridLines
+      labels.lbls.forEach(lbl => {
+        line(ctx, tools.x(0), tools.y(lbl.val), tools.x(1), tools.y(lbl.val))
+      })
+    }, true)
+  }
+
+  /*
+   * doYLabels generates and applies the y-axis labels, based upon the
+   * provided plot region.
+   */
+  doYLabels (region, step, unit, valFmt) {
+    const yLabels = makeLabels(this.ctx, region.height(), this.dataExtents.y.min,
+      this.dataExtents.y.max, 50, step, unit, valFmt)
+
+    // Reassign the width of the y-label column to accommodate the widest text.
+    const yAxisWidth = yLabels.widest * 1.5
+    this.yRegion.extents.x.max = yAxisWidth
+    this.yRegion.extents.y.max = region.extents.y.max
+
+    this.plotRegion.extents.x.min = yAxisWidth
+    this.xRegion.extents.x.min = yAxisWidth
+    // Print the y labels.
+    this.plotYLabels(region, yLabels, this.dataExtents.y.min, this.dataExtents.y.max, unit)
+    return yLabels
+  }
+
+  // drawFrame draws an outline around the plotRegion.
+  drawFrame () {
+    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
+      ctx.lineWidth = 1
+      ctx.strokeStyle = this.theme.gridBorder
+      ctx.beginPath()
+      tools.dataCoords(() => {
+        ctx.moveTo(0, 0)
+        ctx.lineTo(0, 1)
+        ctx.lineTo(1, 1)
+        ctx.lineTo(1, 0)
+        ctx.lineTo(0, 0)
+      })
+      ctx.stroke()
+    })
+  }
+}
+
+/* DepthChart is a javascript Canvas-based depth chart renderer. */
+export class DepthChart extends Chart {
+  constructor (parent, reporters, zoom) {
+    super(parent)
+    this.reporters = reporters
+    this.book = null
+    this.dataExtents = null
+    this.zoomLevel = zoom
+    this.lotSize = null
+    this.rateStep = null
+    this.lines = []
+    this.markers = {
+      buys: [],
+      sells: []
+    }
+    this.resize(parent.clientHeight)
+  }
+
+  /* resized is called when the window or parent element are resized. */
+  resized () {
     // The button region extents are set during drawing.
     this.zoomInBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
     this.zoomOutBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
-    this.rect = this.canvas.getBoundingClientRect()
     if (this.book) this.draw()
   }
 
-  // wheel is a mousewheel event handler.
-  wheel (e) {
-    this.zoom(e.deltaY < 0)
-    e.preventDefault()
-  }
-
-  // zoom zooms the current view in or out. bigger=true is zoom in.
-  zoom (bigger) {
+  /* zoomed zooms the current view in or out. bigger=true is zoom in. */
+  zoomed (bigger) {
     if (!this.zoomLevel) return
-    if (this.wheelLimiter) return
     if (!this.book.buys || !this.book.sells) return
     this.wheeled()
     // Zoom in to 66%, but out to 150% = 1 / (2/3) so that the same zoom levels
@@ -137,8 +293,8 @@ export class DepthChart {
     this.reporters.zoom(this.zoomLevel)
   }
 
-  // click is the canvas 'click' event handler.
-  click (e) {
+  /* clicked is the canvas 'click' event handler. */
+  clicked (e) {
     if (!this.dataExtents) return
     const x = e.clientX - this.rect.left
     const y = e.clientY - this.rect.y
@@ -148,12 +304,7 @@ export class DepthChart {
     this.reporters.click(translator.unx(x))
   }
 
-  // clear the canvas.
-  clear () {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-  }
-
-  // set sets the current data set and draws.
+  /* set sets the current data set and draws. */
   set (book, lotSize, rateStep) {
     this.book = book
     this.lotSize = lotSize / 1e8
@@ -170,24 +321,25 @@ export class DepthChart {
     this.draw()
   }
 
-  // Draw the chart.
-  // 1. Calculate the data extents and translate the order book data to a
-  //    cumulative form.
-  // 2. Draw axis ticks and grid, mid-gap line and value, zoom buttons, mouse
-  //    position indicator...
-  // 4. Tick labels.
-  // 5. Data.
-  // 6. Epoch line legend.
-  // 7. Hover legend.
-  draw () {
+  /*
+   * render draws the chart.
+   * 1. Calculate the data extents and translate the order book data to a
+   *    cumulative form.
+   * 2. Draw axis ticks and grid, mid-gap line and value, zoom buttons, mouse
+   *    position indicator...
+   * 4. Tick labels.
+   * 5. Data.
+   * 6. Epoch line legend.
+   * 7. Hover legend.
+   */
+  render () {
     // if connection fails it is not possible to get book.
-    if (!this.book) return
+    if (!this.book || !this.visible) return
 
     this.clear()
     // if (!this.book || this.book.empty()) return
 
-    this.ctx.textAlign = 'center'
-    this.ctx.textBaseline = 'middle'
+    const ctx = this.ctx
     const mousePos = this.mousePos
     const buys = this.book.buys
     const sells = this.book.sells
@@ -278,57 +430,33 @@ export class DepthChart {
     const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
 
-    // Draw the axis tick labels.
-    const ctx = this.ctx
-    ctx.font = '12px \'sans\', sans-serif'
-    ctx.fillStyle = this.theme.axisLabel
+    this.doYLabels(this.plotRegion, this.lotSize, this.book.baseSymbol)
 
-    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min,
-      dataExtents.y.max, 50, this.lotSize, this.book.baseSymbol)
-    // Reassign the width of the y-label column to accommodate the widest text.
-    const yAxisWidth = yLabels.widest * 1.5
-    this.yRegion.extents.x.max = yAxisWidth
-    this.plotRegion.extents.x.min = yAxisWidth
-    this.xRegion.extents.x.min = yAxisWidth
     const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
       dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
+
+    // Print the x labels
+    this.plotXLabels(xLabels, low, high, [`${this.quoteTicker}/`, this.baseTicker])
 
     // A function to be run at the end if there is legend data to display.
     let mouseData
 
     // Draw the grid.
-    ctx.lineWidth = 1
+    this.drawFrame()
     this.plotRegion.plot(dataExtents, (ctx, tools) => {
+      ctx.lineWidth = 1
       // first, a square around the plot area.
       ctx.strokeStyle = this.theme.gridBorder
-      const extX = dataExtents.x
-      const extY = dataExtents.y
-      ctx.beginPath()
-      tools.dataCoords(() => {
-        ctx.moveTo(extX.min, extY.min)
-        ctx.lineTo(extX.min, extY.max)
-        ctx.lineTo(extX.max, extY.max)
-        ctx.lineTo(extX.max, extY.min)
-        ctx.lineTo(extX.min, extY.min)
-      })
-      ctx.stroke()
-      // for each x label, draw a vertical line
-      ctx.strokeStyle = this.theme.gridLines
-      xLabels.lbls.forEach(lbl => {
-        line(ctx, tools.x(lbl.val), tools.y(0), tools.x(lbl.val), tools.y(extY.max))
-      })
-      // horizontal lines for y labels.
-      yLabels.lbls.forEach(lbl => {
-        line(ctx, tools.x(extX.min), tools.y(lbl.val), tools.x(extX.max), tools.y(lbl.val))
-      })
       // draw a line to indicate mid-gap
       ctx.lineWidth = 2.5
       ctx.strokeStyle = this.theme.gapLine
-      line(ctx, tools.x(midGap), tools.y(0), tools.x(midGap), tools.y(0.3 * extY.max))
+      line(ctx, tools.x(midGap), tools.y(0), tools.x(midGap), tools.y(0.3 * dataExtents.y.max))
 
       ctx.font = '30px \'demi-sans\', sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
       ctx.fillStyle = this.theme.value
-      const y = 0.5 * extY.max
+      const y = 0.5 * dataExtents.y.max
       ctx.fillText(formatLabelValue(midGap), tools.x(midGap), tools.y(y))
       ctx.font = '12px \'sans\', sans-serif'
       // ctx.fillText('mid-market price', tools.x(midGap), tools.y(y) + 24)
@@ -336,6 +464,8 @@ export class DepthChart {
         tools.x(midGap), tools.y(y) + 24)
 
       // Draw zoom buttons.
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
       const topCenterX = this.plotRegion.extents.midX
       const topCenterY = tools.y(maxY * 0.9)
       const zoomPct = dataExtents.xRange / midGap * 100
@@ -448,45 +578,12 @@ export class DepthChart {
         rate: dataX,
         depth: bestDepth[1],
         dotColor: dotColor,
-        yAxisWidth: yAxisWidth,
         hoverMarkers: hoverMarkers
       }
     })
 
-    // Print the y labels.
-    this.yRegion.plot(new Extents(0, 1, 0, maxY), (ctx, tools) => {
-      const centerY = maxY / 2
-      let lastY = 0
-      let unitCenter = centerY
-      yLabels.lbls.forEach(lbl => {
-        ctx.fillText(lbl.txt, tools.x(0.5), tools.y(lbl.val))
-        if (centerY >= lastY && centerY < lbl.val) {
-          unitCenter = (lastY + lbl.val) / 2
-        }
-        lastY = lbl.val
-      })
-      ctx.fillText(this.baseTicker, tools.x(0.5), tools.y(unitCenter))
-    }, true)
-
-    // Print the x labels
-    this.xRegion.plot(new Extents(low, high, 0, 1), (ctx, tools) => {
-      const centerX = (high + low) / 2
-      let lastX = low
-      let unitCenter = centerX
-      xLabels.lbls.forEach(lbl => {
-        ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
-        if (centerX >= lastX && centerX < lbl.val) {
-          unitCenter = (lastX + lbl.val) / 2
-        }
-        lastX = lbl.val
-      })
-      ctx.font = '11px \'sans\', sans-serif'
-      ctx.fillText(`${this.quoteTicker}/`, tools.x(unitCenter), tools.y(0.63))
-      ctx.fillText(this.baseTicker, tools.x(unitCenter), tools.y(0.23))
-    }, true)
-
     // Draw the epoch lines
-    this.ctx.lineWidth = 1.5
+    ctx.lineWidth = 1.5
     ctx.setLineDash([3, 3])
     // epoch sells
     ctx.fillStyle = this.theme.sellFill
@@ -498,7 +595,7 @@ export class DepthChart {
     this.drawDepth(buyEpoch)
 
     // Draw the book depth.
-    this.ctx.lineWidth = 2.5
+    ctx.lineWidth = 2.5
     ctx.setLineDash([])
     // book sells
     ctx.fillStyle = this.theme.sellFill
@@ -522,7 +619,7 @@ export class DepthChart {
     this.reporters.mouse(mouseData)
   }
 
-  // Draw a single side's depth chart data.
+  /* drawDepth draws a single side's depth chart data. */
   drawDepth (depth) {
     const firstPt = depth[0]
     let y = firstPt[1]
@@ -551,6 +648,7 @@ export class DepthChart {
     })
   }
 
+  /* returns the mid-gap rate and gap width as a tuple. */
   gap () {
     const [b, s] = [this.book.bestGapBuy(), this.book.bestGapSell()]
     if (!b) {
@@ -560,17 +658,206 @@ export class DepthChart {
     return [(s.rate + b.rate) / 2, s.rate - b.rate]
   }
 
+  /* setLines stores the indicator lines to draw. */
   setLines (lines) {
     this.lines = lines
   }
 
+  /* setMarkers sets the indicator markers to draw. */
   setMarkers (markers) {
     this.markers = markers
   }
 }
 
-// Extents holds a min and max in both the x and y directions, and provides
-// getters for related data.
+/* CandleChart is a candlestick data renderer. */
+export class CandleChart extends Chart {
+  constructor (parent, reporters) {
+    super(parent)
+    this.reporters = reporters
+    this.data = null
+    this.dataExtents = null
+    this.zoomLevel = 1
+    this.numToShow = 100
+    this.resize(parent.clientHeight)
+  }
+
+  /* resized is called when the window or parent element are resized. */
+  resized () {
+    const ext = this.plotRegion.extents
+    const candleExtents = new Extents(ext.x.min, ext.x.max, ext.y.min, ext.y.min + ext.yRange * 0.85)
+    this.candleRegion = new Region(this.ctx, candleExtents)
+    const volumeExtents = new Extents(ext.x.min, ext.x.max, ext.y.min + 0.85 * ext.yRange, ext.y.max)
+    this.volumeRegion = new Region(this.ctx, volumeExtents)
+    // Set a delay on the render to prevent lag.
+    if (this.resizeTimer) clearTimeout(this.resizeTimer)
+    this.resizeTimer = setTimeout(() => this.draw(), 100)
+  }
+
+  clicked (e) {}
+
+  /* zoomed zooms the current view in or out. bigger=true is zoom in. */
+  zoomed (bigger) {
+    // bigger actually means fewer candles -> reduce zoomLevels index.
+    const idx = this.zoomLevels.indexOf(this.numToShow)
+    if (bigger) {
+      if (idx === 0) return
+      this.numToShow = this.zoomLevels[idx - 1]
+    } else {
+      if (this.zoomLevels.length <= idx + 1 || this.numToShow > this.data.candles.length) return
+      this.numToShow = this.zoomLevels[idx + 1]
+    }
+    this.draw()
+  }
+
+  /* render draws the chart */
+  render () {
+    const data = this.data
+    if (!data || !this.visible) return
+    const candleWidth = data.ms
+    const mousePos = this.mousePos
+    const allCandles = data.candles || []
+
+    const n = Math.min(this.numToShow, allCandles.length)
+    const candles = allCandles.slice(allCandles.length - n)
+
+    this.clear()
+
+    // If there are no candles. just don't draw anything.
+    if (n === 0) return
+
+    // padding definition and some helper functions to parse candles.
+    const candleWidthPadding = 0.2
+    const start = c => truncate(c.endStamp, candleWidth)
+    const end = c => start(c) + candleWidth
+    const paddedStart = c => start(c) + candleWidthPadding * candleWidth
+    const paddedWidth = (1 - 2 * candleWidthPadding) * candleWidth
+
+    const first = candles[0]
+    const last = candles[n - 1]
+
+    let [high, low, highVol] = [first.highRate, first.lowRate, first.matchVolume]
+    for (const c of candles) {
+      if (c.highRate > high) high = c.highRate
+      if (c.lowRate < low) low = c.lowRate
+      if (c.matchVolume > highVol) highVol = c.matchVolume
+    }
+
+    // Calculate data extents and store them. They are used to apply labels.
+    const rateStep = this.market.ratestep
+    const dataExtents = new Extents(start(first), end(last), low, high)
+    if (low === high) {
+      // If there is no price movement at all in the window, show a little more
+      // top and bottom so things render nicely.
+      dataExtents.y.min -= rateStep
+      dataExtents.y.max += rateStep
+    }
+    this.dataExtents = dataExtents
+
+    // Apply labels.
+    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / 1e8))
+    this.candleRegion.extents.x.min = this.yRegion.extents.x.max
+    this.volumeRegion.extents.x.min = this.yRegion.extents.x.max
+
+    const xLabels = makeCandleTimeLabels(candles, candleWidth, this.plotRegion.width(), 100)
+
+    this.plotXLabels(xLabels, start(first), end(last), [])
+
+    this.drawFrame()
+
+    // Highlight the candle if the user mouse is over the canvas.
+    let mouseCandle
+    if (mousePos) {
+      this.plotRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, 0, 1), (ctx, tools) => {
+        const selectedStartStamp = truncate(tools.unx(mousePos.x), candleWidth)
+        for (const c of candles) {
+          if (start(c) === selectedStartStamp) {
+            mouseCandle = c
+            ctx.fillStyle = this.theme.gridLines
+            ctx.fillRect(tools.x(start(c)), tools.y(0), tools.w(candleWidth), tools.h(1))
+            break
+          }
+        }
+      })
+      if (mouseCandle) {
+        const yExt = this.xRegion.extents.y
+        this.xRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, yExt.min, yExt.max), (ctx, tools) => {
+          this.applyLabelStyle()
+          const rangeTxt = `${new Date(start(mouseCandle)).toLocaleString()} - ${new Date(end(mouseCandle)).toLocaleString()}`
+          const [xPad, yPad] = [25, 2]
+          const rangeWidth = ctx.measureText(rangeTxt).width + 2 * xPad
+          const rangeHeight = 16
+          let centerX = tools.x((start(mouseCandle) + end(mouseCandle)) / 2)
+          let left = centerX - rangeWidth / 2
+          const xExt = this.xRegion.extents.x
+          if (left < xExt.min) left = xExt.min
+          else if (left + rangeWidth > xExt.max) left = xExt.max - rangeWidth
+          centerX = left + rangeWidth / 2
+          const top = yExt.min + (this.xRegion.height() - rangeHeight) / 2
+          ctx.fillStyle = this.theme.legendFill
+          ctx.strokeStyle = this.theme.gridBorder
+          const rectArgs = [left - xPad, top - yPad, rangeWidth + 2 * xPad, rangeHeight + 2 * yPad]
+          ctx.fillRect(...rectArgs)
+          ctx.strokeRect(...rectArgs)
+          this.applyLabelStyle()
+          ctx.fillText(rangeTxt, centerX, this.xRegion.extents.midY, rangeWidth)
+        })
+      }
+    }
+
+    // Draw the volume bars.
+    const volDataExtents = new Extents(start(first), end(last), 0, highVol)
+    this.volumeRegion.plot(volDataExtents, (ctx, tools) => {
+      ctx.fillStyle = this.theme.gridBorder
+      for (const c of candles) {
+        ctx.fillRect(tools.x(paddedStart(c)), tools.y(0), tools.w(paddedWidth), tools.h(c.matchVolume))
+      }
+    })
+
+    // Draw the candles.
+    this.candleRegion.plot(dataExtents, (ctx, tools) => {
+      ctx.lineWidth = 1
+      for (const c of candles) {
+        const desc = c.startRate > c.endRate
+        const [x, y, w, h] = [tools.x(paddedStart(c)), tools.y(c.startRate), tools.w(paddedWidth), tools.h(c.endRate - c.startRate)]
+        const [high, low, cx] = [tools.y(c.highRate), tools.y(c.lowRate), w / 2 + x]
+        ctx.strokeStyle = desc ? this.theme.sellLine : this.theme.buyLine
+        ctx.fillStyle = desc ? this.theme.sellFill : this.theme.buyFill
+
+        ctx.beginPath()
+        ctx.moveTo(cx, high)
+        ctx.lineTo(cx, low)
+        ctx.stroke()
+
+        ctx.fillRect(x, y, w, h)
+        ctx.strokeRect(x, y, w, h)
+      }
+    })
+
+    // Report the mouse candle.
+    this.reporters.mouse(mouseCandle)
+  }
+
+  /* setCandles sets the candle data and redraws the chart. */
+  setCandles (data, market) {
+    this.data = data
+    if (!data.candles) return
+    this.market = market
+    let n = 25
+    this.zoomLevels = []
+    const maxCandles = Math.max(data.candles.length, 1000)
+    while (n < maxCandles) {
+      this.zoomLevels.push(n)
+      n *= 2
+    }
+    this.numToShow = 100
+    this.draw()
+  }
+}
+
+/*
+ * Extents holds a min and max in both the x and y directions, and provides
+ * getters for related data.
+ */
 class Extents {
   constructor (xMin, xMax, yMin, yMax) {
     this.setExtents(xMin, xMax, yMin, yMax)
@@ -604,8 +891,10 @@ class Extents {
   }
 }
 
-// Region applies an Extents to the canvas, providing utilities for coordinate
-// transformations and restricting drawing to a specified region of the canvas.
+/*
+ * Region applies an Extents to the canvas, providing utilities for coordinate
+ * transformations and restricting drawing to a specified region of the canvas.
+ */
 class Region {
   constructor (context, extents) {
     this.context = context
@@ -630,9 +919,11 @@ class Region {
       y < ext.y.max && y > ext.y.min)
   }
 
-  // A translator provides 4 function for coordinate transformations. x and y
-  // translate data coordinates to canvas coordinates for the specified data
-  // Extents. unx and uny translate canvas coordinates to data coordinates.
+  /*
+   * A translator provides 4 function for coordinate transformations. x and y
+   * translate data coordinates to canvas coordinates for the specified data
+   * Extents. unx and uny translate canvas coordinates to data coordinates.
+   */
   translator (dataExtents) {
     const region = this.extents
     const xMin = dataExtents.x.min
@@ -651,20 +942,19 @@ class Region {
       x: x => (x - xMin) * xFactor + screenMinX,
       y: y => screenMaxY - (y - yMin) * yFactor,
       unx: x => (x - screenMinX) / xFactor + xMin,
-      uny: y => yMin - (y - screenMaxY) / yFactor
+      uny: y => yMin - (y - screenMaxY) / yFactor,
+      w: w => w / xRange * screenW,
+      h: h => -h / yRange * screenH
     }
   }
 
-  // Clear the region.
+  /* clear clears the region. */
   clear () {
     const ext = this.extents
     this.ctx.clearRect(ext.x.min, ext.y.min, ext.xRange, ext.yRange)
   }
 
-  // plot allows some drawing to be performed directly in data coordinates.
-  // Most actual drawing functions like ctx.stroke and ctx.fillRect should not
-  // be called from inside the provided drawFunc, but ctx.moveTo and ctx.LineTo
-  // are fine.
+  /* plot prepares tools for drawing using data coordinates. */
   plot (dataExtents, drawFunc, skipMask) {
     const ctx = this.context
     const region = this.extents
@@ -702,7 +992,10 @@ class Region {
       // on the canvas.
       ctx.transform(xFactor, 0, 0, yFactor, tx, ty)
     }
-    // Provide drawCoords as a tool to enable inline drawing.
+    // dataCoords allows some drawing to be performed directly in data
+    // coordinates. Most actual drawing functions like ctx.stroke and
+    // ctx.fillRect should not be called from inside dataCoords, but
+    // ctx.moveTo and ctx.LineTo are fine.
     tools.dataCoords = f => {
       ctx.save()
       setTransform()
@@ -715,9 +1008,12 @@ class Region {
   }
 }
 
-// makeLabels attempts to create the appropriate labels for the specified
-// screen size, context, and label spacing.
-function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
+/*
+ * makeLabels attempts to create the appropriate labels for the specified
+ * screen size, context, and label spacing.
+ */
+function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit, valFmt) {
+  valFmt = valFmt || formatLabelValue
   const n = screenW / spacingGuess
   const diff = max - min
   const tickGuess = diff / n
@@ -732,7 +1028,7 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
   let widest = 0
   while (x < max) {
     x = Number(x.toPrecision(sigFigs))
-    const lbl = formatLabelValue(x)
+    const lbl = valFmt(x)
     widest = Math.max(widest, ctx.measureText(lbl).width)
     pts.push({
       val: x,
@@ -748,12 +1044,61 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit) {
   }
 }
 
-// The last element of an array.
+const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/* makeCandleTimeLabels prepares labels for candlestick data. */
+function makeCandleTimeLabels (candles, dur, screenW, spacingGuess) {
+  const first = candles[0]
+  const last = candles[candles.length - 1]
+  const start = truncate(first.endStamp, dur)
+  const end = truncate(last.endStamp, dur) + dur
+  const diff = end - start
+  const n = Math.min(candles.length, screenW / spacingGuess)
+  const tick = truncate(diff / n, dur)
+  if (tick === 0) return console.error('zero tick', dur, diff, n) // probably won't happen, but it'd suck if it did
+  let x = start
+  const zoneOffset = new Date().getTimezoneOffset()
+  const dayStamp = x => {
+    x = x - zoneOffset * 60000
+    return x - (x % 86400000)
+  }
+  let lastDay = dayStamp(start)
+  let lastYear = 0 // new Date(start).getFullYear()
+  if (dayStamp(first) === dayStamp(last)) lastDay = 0 // Force at least one day stamp.
+  const pts = []
+  let label
+  if (dur < 86400000) {
+    label = (d, x) => {
+      const day = dayStamp(x)
+      if (day !== lastDay) return `${months[d.getMonth()]}${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+      else return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+    }
+  } else {
+    label = d => {
+      const year = d.getFullYear()
+      if (year !== lastYear) return `${months[d.getMonth()]}${d.getDate()} '${String(year).slice(2, 4)}`
+      else return `${months[d.getMonth()]}${d.getDate()}`
+    }
+  }
+  while (x <= end) {
+    const d = new Date(x)
+    pts.push({
+      val: x,
+      txt: label(d, x)
+    })
+    lastDay = dayStamp(x)
+    lastYear = d.getFullYear()
+    x += tick
+  }
+  return { lbls: pts }
+}
+
+/* The last element of an array. */
 function last (arr) {
   return arr[arr.length - 1]
 }
 
-// line draws a line with the provided context.
+/* line draws a line with the provided context. */
 function line (ctx, x0, y0, x1, y1, skipStroke) {
   ctx.beginPath()
   ctx.moveTo(x0, y0)
@@ -761,7 +1106,7 @@ function line (ctx, x0, y0, x1, y1, skipStroke) {
   if (!skipStroke) ctx.stroke()
 }
 
-// dot draws a circle with the provided context.
+/* dot draws a circle with the provided context. */
 function dot (ctx, x, y, color, radius) {
   ctx.fillStyle = color
   ctx.beginPath()
@@ -769,27 +1114,37 @@ function dot (ctx, x, y, color, radius) {
   ctx.fill()
 }
 
+/* clamp returns v if min <= v <= max, else min or max. */
 function clamp (v, min, max) {
   if (v < min) return min
   if (v > max) return max
   return v
 }
 
-// labelSpecs is specifications for axis tick labels.
+/* labelSpecs is specifications for axis tick labels. */
 const labelSpecs = {
   minimumSignificantDigits: 4,
   maximumSignificantDigits: 5
 }
 
-// formatLabelValue formats the provided value using the labelSpecs format.
+/* formatLabelValue formats the provided value using the labelSpecs format. */
 function formatLabelValue (x) {
   return x.toLocaleString('en-us', labelSpecs)
 }
 
+/* floatCompare compares two floats to within a tolerance of  1e-8. */
 function floatCompare (a, b) {
   return withinTolerance(a, b, 1e-8)
 }
 
+/*
+ * withinTolerance returns true if the difference between a and b are with
+ * the specified tolerance.
+ */
 function withinTolerance (a, b, tolerance) {
   return Math.abs(a - b) < Math.abs(tolerance)
+}
+
+function truncate (v, w) {
+  return v - (v % w)
 }

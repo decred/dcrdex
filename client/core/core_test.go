@@ -208,6 +208,7 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 			Fee:            tFee,
 			RegFeeConfirms: 0,
 			DEXPubKey:      acct.dexPubKey.SerializeCompressed(),
+			BinSizes:       []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
@@ -1066,11 +1067,22 @@ func TestMarkets(t *testing.T) {
 	}
 }
 
-func TestDexConnectionOrderBook(t *testing.T) {
+func TestBookFeed(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
+
+	checkAction := func(feed BookFeed, action string) {
+		select {
+		case u := <-feed.Next():
+			if u.Action != action {
+				t.Fatalf("expected action = %s, got %s", action, u.Action)
+			}
+		default:
+			t.Fatalf("no %s received", action)
+		}
+	}
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
 	oid1 := ordertest.RandomOrderID()
@@ -1150,16 +1162,8 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// Both channels should have a full orderbook.
-	select {
-	case <-feed1.C:
-	default:
-		t.Fatalf("no book on feed 1")
-	}
-	select {
-	case <-feed2.C:
-	default:
-		t.Fatalf("no book on feed 2")
-	}
+	checkAction(feed1, FreshBookAction)
+	checkAction(feed2, FreshBookAction)
 
 	err = handleBookOrderMsg(tCore, dc, bookNote)
 	if err != nil {
@@ -1167,16 +1171,8 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// Both channels should have an update.
-	select {
-	case <-feed1.C:
-	default:
-		t.Fatalf("no update received on feed 1")
-	}
-	select {
-	case <-feed2.C:
-	default:
-		t.Fatalf("no update received on feed 2")
-	}
+	checkAction(feed1, BookOrderAction)
+	checkAction(feed2, BookOrderAction)
 
 	// Close feed 1
 	feed1.Close()
@@ -1201,16 +1197,12 @@ func TestDexConnectionOrderBook(t *testing.T) {
 
 	// feed1 should have no update
 	select {
-	case <-feed1.C:
+	case <-feed1.Next():
 		t.Fatalf("update for feed 1 after Close")
 	default:
 	}
 	// feed2 should though
-	select {
-	case <-feed2.C:
-	default:
-		t.Fatalf("no update received on feed 2")
-	}
+	checkAction(feed2, BookOrderAction)
 
 	// Make sure the book has been updated.
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
@@ -1236,11 +1228,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// feed2 should have an update
-	select {
-	case <-feed2.C:
-	default:
-		t.Fatalf("no update received on feed 2")
-	}
+	checkAction(feed2, UpdateRemainingAction)
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	firstSellQty := book.Sells[0].Qty
 	if firstSellQty != 5 {
@@ -1260,15 +1248,77 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("[handleUnbookOrderMsg]: unexpected err: %v", err)
 	}
 	// feed2 should have a notification.
-	select {
-	case <-feed2.C:
-	default:
-		t.Fatalf("no update received on feed 2")
-	}
+	checkAction(feed2, UnbookOrderAction)
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	if len(book.Buys) != 1 {
 		t.Fatalf("expected 1 buy after unbook_order, got %d", len(book.Buys))
 	}
+
+	// Test candles
+	queueCandles := func() {
+		rig.ws.queueResponse(msgjson.CandlesRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, &msgjson.WireCandles{
+				StartStamps:  []uint64{1, 2},
+				EndStamps:    []uint64{3, 4},
+				MatchVolumes: []uint64{1, 2},
+				QuoteVolumes: []uint64{1, 2},
+				HighRates:    []uint64{3, 4},
+				LowRates:     []uint64{1, 2},
+				StartRates:   []uint64{1, 2},
+				EndRates:     []uint64{3, 4},
+			}, nil)
+			f(resp)
+			return nil
+		})
+	}
+	queueCandles()
+
+	if err := feed2.Candles("1h"); err != nil {
+		t.Fatalf("Candles error: %v", err)
+	}
+
+	checkAction(feed2, FreshCandlesAction)
+
+	// An epoch report should trigger two candle updates, one for each bin size.
+	epochReport, _ := msgjson.NewNotification(msgjson.EpochReportRoute, &msgjson.EpochReportNote{
+		MarketID:     tDcrBtcMktName,
+		Epoch:        1,
+		BaseFeeRate:  2,
+		QuoteFeeRate: 3,
+		Candle: msgjson.Candle{
+			StartStamp:  1,
+			EndStamp:    2,
+			MatchVolume: 3,
+			QuoteVolume: 3,
+			HighRate:    4,
+			LowRate:     1,
+			StartRate:   1,
+			EndRate:     2,
+		},
+	})
+
+	if err := handleEpochReportMsg(tCore, dc, epochReport); err != nil {
+		t.Fatalf("handleEpochReportMsg error: %v", err)
+	}
+
+	// We'll only receive 1 candle update, since we only synced one set of
+	// candles so far.
+	checkAction(feed2, CandleUpdateAction)
+
+	// Now subscribe to the 24h candles too.
+	queueCandles()
+	if err := feed2.Candles("24h"); err != nil {
+		t.Fatalf("24h Candles error: %v", err)
+	}
+	checkAction(feed2, FreshCandlesAction)
+
+	// This time, an epoch report should trigger two updates.
+	if err := handleEpochReportMsg(tCore, dc, epochReport); err != nil {
+		t.Fatalf("handleEpochReportMsg error: %v", err)
+	}
+	checkAction(feed2, CandleUpdateAction)
+	checkAction(feed2, CandleUpdateAction)
+
 }
 
 type tDriver struct {
@@ -2252,7 +2302,7 @@ func TestTrade(t *testing.T) {
 	tBtcWallet.fundingCoins = asset.Coins{btcCoin}
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
-	book := newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	book := newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 	rig.dc.books[tDcrBtcMktName] = book
 
 	msgOrderNote := &msgjson.BookOrderNote{
@@ -4863,7 +4913,7 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 
 	err = handleEpochOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
@@ -4925,7 +4975,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 
 	err = rig.dc.books[tDcrBtcMktName].Enqueue(eo)
 	if err != nil {
@@ -5054,7 +5104,7 @@ func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	dc := rig.dc
-	dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	dc.books[tDcrBtcMktName] = newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 
 	mktEpoch := func() uint64 {
 		dc.epochMtx.RLock()
@@ -5256,7 +5306,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 
-	rig.dc.books[tDcrBtcMktName] = newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 
 	addTracker := func(coins asset.Coins) *trackedTrade {
 		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
@@ -6878,7 +6928,7 @@ func TestPreOrder(t *testing.T) {
 	var rate uint64 = 1e8
 	quoteConvertedLotSize := calc.BaseToQuote(rate, dcrBtcLotSize)
 
-	book := newBookie(tDCR.ID, tBTC.ID, tLogger, func() {})
+	book := newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger, func() {})
 	dc.books[tDcrBtcMktName] = book
 
 	sellNote := &msgjson.BookOrderNote{

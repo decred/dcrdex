@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -29,7 +29,7 @@ type TDBSource struct {
 	loadEpochErr error
 }
 
-func (db *TDBSource) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) error {
+func (db *TDBSource) LoadEpochStats(base, quote uint32, caches []*candles.Cache) error {
 	return db.loadEpochErr
 }
 
@@ -154,7 +154,7 @@ func TestReportEpoch(t *testing.T) {
 		BaseID:     42,
 		QuoteID:    0,
 		BinSize:    "1s", // Epoch duration, smallest candle size
-		NumCandles: CacheSize,
+		NumCandles: candles.CacheSize,
 	})
 	if err != nil {
 		t.Fatalf("handleCandles error: %v", err)

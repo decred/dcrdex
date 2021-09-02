@@ -48,20 +48,32 @@
 
       </div>
       <div class="chart-legend" id="chartLegend">
-        <div class="epoch-line"></div> [[[epoch]]]
+        <button class="chart-selector" id="candlestickBttn"></button>
+        <button class="chart-selector d-hide" id="depthBttn"></button>
+        <div class="d-flex align-items-center" id="epochLine"><div class="epoch-line"></div> [[[epoch]]]</div>
         <div class="flex-grow-1">
           <div id="hoverData" class="d-flex align-items-center d-hide">
             <span class="category-spacer text-center text-nowrap"></span>
-            <span>
-              <span class="ico-target fs11"></span>
+            <span class="ico-target fs11 mr-1"></span>
+            <span id="depthHoverData">
               [[[price]]]: <span id="hoverPrice"></span>,
               [[[volume]]]: <span id="hoverVolume"></span>
             </span>
+            <span class="d-hide" id="candleHoverData">
+              S: <span id="candleStart"></span>,
+              E: <span id="candleEnd"></span>,
+              L: <span id="candleLow"></span>,
+              H: <span id="candleHigh"></span>,
+              V: <span id="candleVol"></span>
+            </span>
           </div>
         </div>
-        <span>sells: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
-        <span class="category-spacer"></span>
-        <span class="mr-2">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+        <div id="depthSummary" class="d-flex align-items-center">
+          <span>sells: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
+          <span class="category-spacer"></span>
+          <span class="mr-2">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+        </div>
+        <div class="d-flex flex-nowrap mr-2 d-hide" id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
       </div>
       <div id="chartResizer"></div>
     </div>

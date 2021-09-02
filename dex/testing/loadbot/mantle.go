@@ -83,7 +83,7 @@ out:
 					go func() {
 						for {
 							select {
-							case <-bookFeed.C:
+							case <-bookFeed.Next():
 								// If we ever enable the  thebook feed, we
 								// would pass the update to the Trader here.
 								// For now, just keep the channel empty.

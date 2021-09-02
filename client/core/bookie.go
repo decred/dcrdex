@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -26,29 +27,96 @@ var (
 	outdatedClientErr = errors.New("outdated client")
 )
 
-// BookFeed manages a channel for receiving order book updates. The only
-// exported field, C, is a channel on which to receive the updates as a series
-// of *BookUpdate. It is imperative that the feeder (*BookFeed).Close() when no
-// longer using the feed.
-type BookFeed struct {
-	C     chan *BookUpdate
-	id    uint32
-	close func(*BookFeed)
+// BookFeed manages a channel for receiving order book updates. It is imperative
+// that the feeder (BookFeed).Close() when no longer using the feed.
+type BookFeed interface {
+	Next() <-chan *BookUpdate
+	Close()
+	Candles(dur string) error
 }
 
-// NewBookFeed is a constructor for a *BookFeed. The caller must Close() the
-// feed when it's no longer being used.
-func NewBookFeed(close func(feed *BookFeed)) *BookFeed {
-	return &BookFeed{
-		C:     make(chan *BookUpdate, 256),
-		id:    atomic.AddUint32(&feederID, 1),
-		close: close,
-	}
+// bookFeed implements BookFeed.
+type bookFeed struct {
+	c      chan *BookUpdate
+	bookie *bookie
+	id     uint32
+}
+
+// Next returns the channel for receiving updates.
+func (f *bookFeed) Next() <-chan *BookUpdate {
+	return f.c
 }
 
 // Close the BookFeed.
-func (f *BookFeed) Close() {
-	f.close(f) // i.e. (*bookie).closeFeed(feed *BookFeed)
+func (f *bookFeed) Close() {
+	f.bookie.closeFeed(f.id)
+}
+
+// Candles subscribes to the candlestick duration and sends the initial set
+// of sticks over the update channel.
+func (f *bookFeed) Candles(durStr string) error {
+	dur, err := time.ParseDuration(durStr)
+	if err != nil {
+		return err
+	}
+
+	candles, err := f.bookie.candles(durStr)
+	if err != nil {
+		return err
+	}
+
+	f.c <- &BookUpdate{
+		Action:   FreshCandlesAction,
+		Host:     f.bookie.dc.acct.host,
+		MarketID: marketName(f.bookie.base, f.bookie.quote),
+		Payload: &CandlesPayload{
+			Dur:          durStr,
+			DurMilliSecs: uint64(dur.Milliseconds()),
+			Candles:      candles,
+		},
+	}
+	return nil
+}
+
+// candleCache adds syncrhonization and an on/off switch to *candles.Cache.
+type candleCache struct {
+	*candles.Cache
+	candleMtx sync.RWMutex
+	on        uint32
+}
+
+// copy creates a copy of the candles.
+func (c *candleCache) copy() []candles.Candle {
+	var cands []candles.Candle
+	// The last candle can be modified after creation. Make a copy.
+	c.candleMtx.RLock()
+	defer c.candleMtx.RUnlock()
+	if len(c.Candles) > 0 {
+		cands = make([]candles.Candle, len(c.Candles))
+		copy(cands, c.Candles)
+	}
+	return cands
+}
+
+// init resets the candles with the supplied set.
+func (c *candleCache) init(in []*msgjson.Candle) {
+	c.candleMtx.Lock()
+	defer c.candleMtx.Unlock()
+	c.Reset()
+	for _, candle := range in {
+		c.Add(candle)
+	}
+}
+
+// addCandle adds the candle using candles.Cache.Add.
+func (c *candleCache) addCandle(msgCandle *msgjson.Candle) *msgjson.Candle {
+	if atomic.LoadUint32(&c.on) == 0 {
+		return nil
+	}
+	c.candleMtx.Lock()
+	defer c.candleMtx.Unlock()
+	c.Add(msgCandle)
+	return c.Last()
 }
 
 // bookie is a BookFeed manager. bookie will maintain any number of order book
@@ -58,40 +126,81 @@ func (f *BookFeed) Close() {
 // supplied close() callback.
 type bookie struct {
 	*orderbook.OrderBook
-	log         dex.Logger
-	mtx         sync.Mutex
-	feeds       map[uint32]*BookFeed
-	close       func() // e.g. dexConnection.StopBook
-	closeTimer  *time.Timer
+	dc           *dexConnection
+	candleCaches map[string]*candleCache
+	log          dex.Logger
+
+	feedsMtx sync.RWMutex
+	feeds    map[uint32]*bookFeed
+
+	timerMtx   sync.Mutex
+	closeTimer *time.Timer
+
 	base, quote uint32
 }
 
 // newBookie is a constructor for a bookie. The caller should provide a callback
 // function to be called when there are no subscribers and the close timer has
 // expired.
-func newBookie(base, quote uint32, logger dex.Logger, close func()) *bookie {
+func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger dex.Logger, close func()) *bookie {
+	candleCaches := make(map[string]*candleCache, len(binSizes))
+	for _, durStr := range binSizes {
+		dur, err := time.ParseDuration(durStr)
+		if err != nil {
+			logger.Errorf("failed to ParseDuration(%q)", durStr)
+			continue
+		}
+		candleCaches[durStr] = &candleCache{
+			Cache: candles.NewCache(candles.CacheSize, uint64(dur.Milliseconds())),
+		}
+	}
+
 	return &bookie{
-		OrderBook: orderbook.NewOrderBook(logger.SubLogger("book")),
-		log:       logger,
-		feeds:     make(map[uint32]*BookFeed, 1),
-		close:     close,
-		base:      base,
-		quote:     quote,
+		OrderBook:    orderbook.NewOrderBook(logger.SubLogger("book")),
+		dc:           dc,
+		candleCaches: candleCaches,
+		log:          logger,
+		feeds:        make(map[uint32]*bookFeed, 1),
+		base:         base,
+		quote:        quote,
 	}
 }
 
-// resets the bookie with a new OrderBook based on the provided book snapshot
-// from the server.
-func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-	b.OrderBook = orderbook.NewOrderBook(b.log)
-	return b.OrderBook.Sync(snapshot)
+// logEpochReport handles the epoch candle in the epoch_report message.
+func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
+	err := b.LogEpochReport(note)
+	if err != nil {
+		return err
+	}
+	if note.Candle.EndStamp == 0 {
+		return fmt.Errorf("epoch report has zero-valued candle end stamp")
+	}
+
+	for durStr, cache := range b.candleCaches {
+		c := cache.addCandle(&note.Candle)
+		if c == nil {
+			continue
+		}
+		dur, _ := time.ParseDuration(durStr)
+		b.send(&BookUpdate{
+			Action:   CandleUpdateAction,
+			Host:     b.dc.acct.host,
+			MarketID: marketName(b.base, b.quote),
+			Payload: CandleUpdate{
+				Dur:          durStr,
+				DurMilliSecs: uint64(dur.Milliseconds()),
+				Candle:       c,
+			},
+		})
+	}
+
+	return nil
 }
 
-// feed gets a new *BookFeed and cancels the close timer. feed must be called
+// feed gets a new *bookFeed and cancels the close timer. feed must be called
 // with the bookie.mtx locked.
-func (b *bookie) feed() *BookFeed {
+func (b *bookie) feed() *bookFeed {
+	b.timerMtx.Lock()
 	if b.closeTimer != nil {
 		// If Stop returns true, the timer did not fire. If false, the timer
 		// already fired and the close func was called. The caller of feed()
@@ -103,36 +212,74 @@ func (b *bookie) feed() *BookFeed {
 		b.closeTimer.Stop()
 		b.closeTimer = nil
 	}
-	feed := NewBookFeed(b.CloseFeed)
+	b.timerMtx.Unlock()
+	feed := &bookFeed{
+		c:      make(chan *BookUpdate, 256),
+		bookie: b,
+		id:     atomic.AddUint32(&feederID, 1),
+	}
+	b.feedsMtx.Lock()
 	b.feeds[feed.id] = feed
+	b.feedsMtx.Unlock()
 	return feed
 }
 
-// CloseFeed is ultimately called when the BookFeed subscriber closes the feed.
-// If this was the last feed for this bookie aka market, set a timer to
-// unsubscribe unless another feed is requested.
-func (b *bookie) CloseFeed(feed *BookFeed) {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-	_, found := b.feeds[feed.id]
-	if !found {
-		return
+// closeFeeds closes the bookie's book feeds and resets the feeds map.
+func (b *bookie) closeFeeds() {
+	b.feedsMtx.Lock()
+	defer b.feedsMtx.Unlock()
+	for _, f := range b.feeds {
+		close(f.c)
 	}
-	b.closeFeed(feed)
+	b.feeds = make(map[uint32]*bookFeed, 1)
+
 }
 
-func (b *bookie) closeFeed(feed *BookFeed) {
-	delete(b.feeds, feed.id)
+// candles fetches the candle set from the server and activates the candle
+// cache.
+func (b *bookie) candles(dur string) ([]candles.Candle, error) {
+	cache := b.candleCaches[dur]
+	if cache == nil {
+		return nil, fmt.Errorf("no candles for %s-%s %q", unbip(b.base), unbip(b.quote), dur)
+	}
+	if atomic.LoadUint32(&cache.on) == 1 {
+		return cache.copy(), nil
+	}
+	// Subscribe to the feed.
+	payload := &msgjson.CandlesRequest{
+		BaseID:     b.base,
+		QuoteID:    b.quote,
+		BinSize:    dur,
+		NumCandles: candles.CacheSize,
+	}
+	wireCandles := new(msgjson.WireCandles)
+	err := sendRequest(b.dc.WsConn, msgjson.CandlesRoute, payload, wireCandles, DefaultResponseTimeout)
+	if err != nil {
+		return nil, err
+	}
+	cache.init(wireCandles.Candles())
+	atomic.StoreUint32(&cache.on, 1)
+	return cache.copy(), nil
+}
+
+// closeFeed closes the specified feed, and if no more feeds are open, sets a
+// close timer to disconnect from the market feed.
+func (b *bookie) closeFeed(feedID uint32) {
+	b.feedsMtx.Lock()
+	delete(b.feeds, feedID)
+	numFeeds := len(b.feeds)
+	b.feedsMtx.Unlock()
 
 	// If that was the last BookFeed, set a timer to unsubscribe w/ server.
-	if len(b.feeds) == 0 {
+	if numFeeds == 0 {
+		b.timerMtx.Lock()
 		if b.closeTimer != nil {
 			b.closeTimer.Stop()
 		}
 		b.closeTimer = time.AfterFunc(bookFeedTimeout, func() {
-			b.mtx.Lock()
+			b.feedsMtx.RLock()
 			numFeeds := len(b.feeds)
-			b.mtx.Unlock() // cannot be locked for b.close
+			b.feedsMtx.RUnlock() // cannot be locked for b.close
 			// Note that it is possible that the timer fired as b.feed() was
 			// about to stop it before inserting a new BookFeed. If feed() got
 			// the mutex first, there will be a feed to prevent b.close below.
@@ -142,23 +289,24 @@ func (b *bookie) closeFeed(feed *BookFeed) {
 
 			// Call the close func if there are no more feeds.
 			if numFeeds == 0 {
-				b.close()
+				b.dc.stopBook(b.base, b.quote)
 			}
 		})
+		b.timerMtx.Unlock()
 	}
 }
 
 // send sends a *BookUpdate to all subscribers.
 func (b *bookie) send(u *BookUpdate) {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
+	b.feedsMtx.Lock()
+	defer b.feedsMtx.Unlock()
 	for fid, feed := range b.feeds {
 		select {
-		case feed.C <- u:
+		case feed.c <- u:
 		default:
 			b.log.Warnf("bookie %p: Closing book update feed %d with no receiver. "+
 				"The receiver should have closed the feed before going away.", b, fid)
-			b.closeFeed(feed) // delete it and maybe start a delayed bookie close
+			go b.closeFeed(feed.id) // delete it and maybe start a delayed bookie close
 		}
 	}
 }
@@ -183,7 +331,10 @@ func (dc *dexConnection) bookie(marketID string) *bookie {
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
-func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
+func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
 
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
@@ -201,8 +352,8 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(base, quote, dc.log.SubLogger(mktID), func() {
-			dc.stopBook(base, quote)
+		booky = newBookie(dc, base, quote, cfg.BinSizes, dc.log.SubLogger(mktID), func() {
+
 		})
 		err = booky.Sync(obRes)
 		if err != nil {
@@ -213,11 +364,9 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*BookFeed, error) {
 
 	// Get the feed and the book under a single lock to make sure the first
 	// message is the book.
-	booky.mtx.Lock()
-	defer booky.mtx.Unlock()
 	feed := booky.feed()
 
-	feed.C <- &BookUpdate{
+	feed.c <- &BookUpdate{
 		Action:   FreshBookAction,
 		Host:     dc.acct.host,
 		MarketID: mktID,
@@ -273,9 +422,9 @@ func (dc *dexConnection) stopBook(base, quote uint32) {
 	// Abort the unsubscribe if feeds exist for the bookie. This can happen if a
 	// bookie's close func is called while a new BookFeed is generated elsewhere.
 	if booky, found := dc.books[mkt]; found {
-		booky.mtx.Lock()
+		booky.feedsMtx.Lock()
 		numFeeds := len(booky.feeds)
-		booky.mtx.Unlock()
+		booky.feedsMtx.Unlock()
 		if numFeeds > 0 {
 			dc.log.Warnf("Aborting booky %p unsubscribe for market %s with active feeds", booky, mkt)
 			return
@@ -316,7 +465,7 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 // SyncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) SyncBook(host string, base, quote uint32) (*BookFeed, error) {
+func (c *Core) SyncBook(host string, base, quote uint32) (BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
@@ -405,7 +554,7 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return err
 	}
 	book.send(&BookUpdate{
-		Action:   msg.Route,
+		Action:   BookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  minifyOrder(note.OrderID, &note.TradeNote, 0),
@@ -743,7 +892,7 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return err
 	}
 	book.send(&BookUpdate{
-		Action:   msg.Route,
+		Action:   UnbookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  &MiniOrder{Token: token(note.OrderID)},
@@ -771,7 +920,7 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		return err
 	}
 	book.send(&BookUpdate{
-		Action:   msg.Route,
+		Action:   UpdateRemainingAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload: &RemainingUpdate{
@@ -794,7 +943,7 @@ func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
-	err = book.LogEpochReport(note)
+	err = book.logEpochReport(note)
 	if err != nil {
 		return fmt.Errorf("error logging epoch report: %w", err)
 	}
@@ -823,7 +972,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 
 	// Send a MiniOrder for book updates.
 	book.send(&BookUpdate{
-		Action:   msg.Route,
+		Action:   EpochOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),

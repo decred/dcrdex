@@ -14,8 +14,10 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -475,6 +477,7 @@ type Exchange struct {
 	Fee        *FeeAsset             `json:"feeAsset"` // DEPRECATED. DCR.
 	RegFees    map[string]*FeeAsset  `json:"regFees"`
 	PendingFee *PendingFeeState      `json:"pendingFee,omitempty"`
+	CandleDurs []string              `json:"candleDurs"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.
@@ -519,11 +522,20 @@ type MarketOrderBook struct {
 	Book  *OrderBook `json:"book"`
 }
 
+type CandleUpdate struct {
+	Dur          string          `json:"dur"`
+	DurMilliSecs uint64          `json:"ms"`
+	Candle       *candles.Candle `json:"candle"`
+}
+
 const (
-	FreshBookAction   = "book"
-	BookOrderAction   = "book_order"
-	EpochOrderAction  = "epoch_order"
-	UnbookOrderAction = "unbook_order"
+	FreshBookAction       = "book"
+	FreshCandlesAction    = "candles"
+	BookOrderAction       = "book_order"
+	EpochOrderAction      = "epoch_order"
+	UnbookOrderAction     = "unbook_order"
+	UpdateRemainingAction = "update_remaining"
+	CandleUpdateAction    = "candle_update"
 )
 
 // BookUpdate is an order book update.
@@ -532,6 +544,12 @@ type BookUpdate struct {
 	Host     string      `json:"host"`
 	MarketID string      `json:"marketID"`
 	Payload  interface{} `json:"payload"`
+}
+
+type CandlesPayload struct {
+	Dur          string           `json:"dur"`
+	DurMilliSecs uint64           `json:"ms"`
+	Candles      []msgjson.Candle `json:"candles"`
 }
 
 // dexAccount is the core type to represent the client's account information for

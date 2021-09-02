@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -1254,10 +1255,10 @@ func TestEpochReport(t *testing.T) {
 		QuoteVolume: 100,
 	})
 
-	epochCache := db.NewCandleCache(3, uint64(epochDur))
-	dayCache := db.NewCandleCache(2, uint64(time.Hour*24/time.Millisecond))
+	epochCache := candles.NewCache(3, uint64(epochDur))
+	dayCache := candles.NewCache(2, uint64(time.Hour*24/time.Millisecond))
 
-	err = archie.LoadEpochStats(42, 0, []*db.CandleCache{epochCache, dayCache})
+	err = archie.LoadEpochStats(42, 0, []*candles.Cache{epochCache, dayCache})
 	if err != nil {
 		t.Fatalf("error loading epoch stats: %v", err)
 	}
