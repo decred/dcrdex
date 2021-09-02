@@ -665,7 +665,7 @@ func TestOnline(t *testing.T) {
 	pongWait = time.Millisecond * 500
 	pingPeriod = (pongWait * 9) / 10
 	server, err := NewServer(&RPCConfig{
-		ListenAddrs: []string{":0"},
+		ListenAddrs: []string{"127.0.0.1:0"},
 		RPCKey:      keyPath,
 		RPCCert:     certPath,
 	})
