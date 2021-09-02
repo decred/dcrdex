@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	"decred.org/dcrdex/client/webserver/locales"
 )
 
 var (
 	workingDirectory, _ = os.Getwd()
-	keyRegExp           = regexp.MustCompile(`\[\[\[([a-zA-Z0-9 _.-]+)\]\]\]`)
 )
 
 func main() {
@@ -65,8 +63,7 @@ func main() {
 			localizedTemplates[lang] = tmpl
 		}
 
-		matchGroups := keyRegExp.FindAllSubmatch(rawTmpl, -1)
-		for _, matchGroup := range matchGroups {
+		for _, matchGroup := range locales.Tokens(rawTmpl) {
 			if len(matchGroup) != 2 {
 				return fmt.Errorf("can't parse match group: %v", matchGroup)
 			}

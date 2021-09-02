@@ -156,11 +156,6 @@ type WebServer struct {
 func New(cfg *Config) (*WebServer, error) {
 	log = cfg.Logger
 
-	folderExists := func(fp string) bool {
-		stat, err := os.Stat(fp)
-		return err == nil && stat.IsDir()
-	}
-
 	// Look for the "site" folder in the executable's path, the working
 	// directory, or the source path relative to [repo root]/client/cmd/dexc.
 	execPath, err := os.Executable() // e.g. /usr/bin/dexc
@@ -396,7 +391,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 	log.Infof("Using HTML templates in %s", tmplDir)
 
 	bb := "bodybuilder"
-	s.html = newTemplates(tmplDir, s.reloadHTML).
+	s.html = newTemplates(tmplDir, match, s.reloadHTML).
 		addTemplate("login", bb).
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -740,4 +735,9 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, ind
 	if err != nil {
 		log.Errorf("Write error: %v", err)
 	}
+}
+
+func folderExists(fp string) bool {
+	stat, err := os.Stat(fp)
+	return err == nil && stat.IsDir()
 }
