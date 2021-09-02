@@ -379,7 +379,7 @@ func TestInitiateGas(t *testing.T) {
 	if gas+10000 < eth.InitGas {
 		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
 	}
-	fmt.Printf("Gas used for initiate: %v", gas)
+	fmt.Printf("Gas used for initiate: %v \n", gas)
 }
 
 func TestInitiate(t *testing.T) {
@@ -490,7 +490,7 @@ func TestRedeemGas(t *testing.T) {
 		t.Fatalf("actual gas %v is greater than eth.RedeemGas %v", gas, eth.RedeemGas)
 	}
 	if gas+3000 < eth.RedeemGas {
-		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+		t.Fatalf("actual gas %v is much less than eth.RedeemGas %v", gas, eth.InitGas)
 	}
 	fmt.Printf("Gas used for redeem: %v \n", gas)
 }

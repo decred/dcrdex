@@ -13,6 +13,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
+	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -282,7 +283,7 @@ func (c *rpcclient) initiateGas(ctx context.Context, contractAddress *common.Add
 		From:  participant,
 		To:    contractAddress,
 		Gas:   0,
-		Value: big.NewInt(100000000),
+		Value: big.NewInt(dexeth.GweiFactor),
 		Data:  data,
 	}
 	gas, err := c.ec.EstimateGas(ctx, msg)
