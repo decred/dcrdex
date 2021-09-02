@@ -7,7 +7,9 @@
 package eth
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -260,9 +262,10 @@ func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
 	}, nil
 }
 
-// ValidateSecret checks that the secret satisfies the contract.
-func (eth *Backend) ValidateSecret(secret, contract []byte) bool {
-	return false
+// ValidateSecret checks that the secret satisfies the secret hash.
+func (eth *Backend) ValidateSecret(secret, secretHash []byte) bool {
+	sh := sha256.Sum256(secret)
+	return bytes.Equal(sh[:], secretHash)
 }
 
 // Synced is true if the blockchain is ready for action.
