@@ -8,6 +8,7 @@ package eth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -524,6 +525,33 @@ func TestContract(t *testing.T) {
 		if contract.SwapAddress != initParticipantAddr.String() ||
 			contract.LockTime.Unix() != initLocktime/1000 {
 			t.Fatalf("returns do not match expected for test %q", test.name)
+		}
+	}
+}
+
+func TestValidateSecret(t *testing.T) {
+	secret, blankHash := make([]byte, 32), make([]byte, 32)
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+	tests := []struct {
+		name       string
+		secretHash []byte
+		want       bool
+	}{{
+		name:       "ok",
+		secretHash: secretHash[:],
+		want:       true,
+	}, {
+		name:       "not the right hash",
+		secretHash: blankHash,
+	}}
+	for _, test := range tests {
+		eth := &Backend{
+			log: tLogger,
+		}
+		got := eth.ValidateSecret(secret, test.secretHash)
+		if test.want != got {
+			t.Fatalf("expected %v but got %v for test %q", test.want, got, test.name)
 		}
 	}
 }
