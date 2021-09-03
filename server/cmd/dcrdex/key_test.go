@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,7 @@ import (
 )
 
 func Test_createAndStoreKey(t *testing.T) {
-	dir, _ := ioutil.TempDir("", "test")
+	dir, _ := os.MkdirTemp("", "test")
 	defer os.RemoveAll(dir)
 
 	file := "newkey"
@@ -62,7 +61,7 @@ func Test_createAndStoreKey(t *testing.T) {
 }
 
 func Test_loadKeyFile(t *testing.T) {
-	dir, _ := ioutil.TempDir("", "test")
+	dir, _ := os.MkdirTemp("", "test")
 	defer os.RemoveAll(dir)
 
 	fullFile := filepath.Join(dir, "newkey")
@@ -120,7 +119,7 @@ func Test_loadKeyFile(t *testing.T) {
 }
 
 func Test_dexKey(t *testing.T) {
-	dir, _ := ioutil.TempDir("", "test")
+	dir, _ := os.MkdirTemp("", "test")
 	defer os.RemoveAll(dir)
 
 	file := "newkey"

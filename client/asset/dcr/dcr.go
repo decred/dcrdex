@@ -12,8 +12,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -548,7 +548,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
 func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
-	certs, err := ioutil.ReadFile(cert)
+	certs, err := os.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
 	}

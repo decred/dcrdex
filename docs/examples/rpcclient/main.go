@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -101,7 +101,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	notification, err := ioutil.ReadAll(r)
+	notification, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ type config struct {
 // newHTTPClient returns a new HTTP client
 func newHTTPClient(cfg *config, urlStr string) (*http.Client, error) {
 	// Configure TLS.
-	pem, err := ioutil.ReadFile(cfg.RPCCert)
+	pem, err := os.ReadFile(cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func newHTTPClient(cfg *config, urlStr string) (*http.Client, error) {
 func newWSClient(cfg *config) (*websocket.Conn, error) {
 	urlStr := "wss://" + cfg.RPCAddr + "/ws"
 	// Configure TLS.
-	pem, err := ioutil.ReadFile(cfg.RPCCert)
+	pem, err := os.ReadFile(cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func sendPostRequest(marshalledJSON []byte, urlStr string, cfg *config, httpClie
 	}
 
 	// Read the raw bytes and close the response.
-	respBytes, err := ioutil.ReadAll(httpResponse.Body)
+	respBytes, err := io.ReadAll(httpResponse.Body)
 	httpResponse.Body.Close()
 	if err != nil {
 		err = fmt.Errorf("error reading json reply: %v", err)

@@ -6,7 +6,6 @@ package dex
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -17,7 +16,7 @@ import (
 var Disabled Logger = &logger{
 	Logger:  slog.Disabled,
 	level:   LevelOff,
-	backend: slog.NewBackend(ioutil.Discard),
+	backend: slog.NewBackend(io.Discard),
 }
 
 // Level constants.

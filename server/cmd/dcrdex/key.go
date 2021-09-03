@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"decred.org/dcrdex/dex/encode"
@@ -35,7 +34,7 @@ func dexKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 
 func loadKeyFile(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	// Load and decrypt it.
-	pkFileBuffer, err := ioutil.ReadFile(path)
+	pkFileBuffer, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("ReadFile: %v", err)
 	}
@@ -97,7 +96,7 @@ func createAndStoreKey(path string, pass []byte) (*secp256k1.PrivateKey, error) 
 
 	// Store it.
 	data := encode.BuildyBytes{0}.AddData(keyParams).AddData(encKey)
-	err = ioutil.WriteFile(path, data, 0644)
+	err = os.WriteFile(path, data, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write DEX signing key: %v", err)
 	}

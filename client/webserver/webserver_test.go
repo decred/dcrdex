@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -289,7 +288,7 @@ func TestNew_siteError(t *testing.T) {
 	}
 
 	// Change to a directory with no "site" or "../../webserver/site" folder.
-	dir, _ := ioutil.TempDir("", "test")
+	dir, _ := os.MkdirTemp("", "test")
 	defer os.RemoveAll(dir)
 	defer os.Chdir(cwd) // leave the temp dir before trying to delete it
 

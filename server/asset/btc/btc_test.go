@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"os"
@@ -56,7 +55,7 @@ func TestConfig(t *testing.T) {
 	cfg := &dexbtc.Config{}
 	parsedCfg := &dexbtc.Config{}
 
-	tempDir, err := ioutil.TempDir("", "btctest")
+	tempDir, err := os.MkdirTemp("", "btctest")
 	if err != nil {
 		t.Fatalf("error creating temporary directory: %v", err)
 	}

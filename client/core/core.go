@@ -9,10 +9,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"net"
 	"net/url"
+	"os"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -6014,7 +6014,7 @@ func parseCert(host string, certI interface{}) ([]byte, error) {
 		if len(c) == 0 {
 			return CertStore[host], nil
 		}
-		cert, err := ioutil.ReadFile(c)
+		cert, err := os.ReadFile(c)
 		if err != nil {
 			return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", c, err)
 		}

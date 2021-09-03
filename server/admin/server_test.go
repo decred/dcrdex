@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -228,10 +227,10 @@ func genCertPair(certFile, keyFile string) error {
 	}
 
 	// Write cert and key files.
-	if err = ioutil.WriteFile(certFile, cert, 0644); err != nil {
+	if err = os.WriteFile(certFile, cert, 0644); err != nil {
 		return err
 	}
-	if err = ioutil.WriteFile(keyFile, key, 0600); err != nil {
+	if err = os.WriteFile(keyFile, key, 0600); err != nil {
 		os.Remove(certFile)
 		return err
 	}
@@ -245,7 +244,7 @@ var tPort = 5555
 // If start is true, the Server's Run goroutine is started, and the shutdown
 // func must be called when finished with the Server.
 func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, func()) {
-	tmp, err := ioutil.TempDir("", "admin")
+	tmp, err := os.MkdirTemp("", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

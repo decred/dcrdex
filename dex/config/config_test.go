@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +38,7 @@ func makeConfigPtr() *config {
 func TestConfigParsing(t *testing.T) {
 	var testConfig = defaultConfig()
 
-	tempDir, err := ioutil.TempDir("", "configtest")
+	tempDir, err := os.MkdirTemp("", "configtest")
 	if err != nil {
 		t.Fatalf("error creating temporary directory: %v", err)
 	}

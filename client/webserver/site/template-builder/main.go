@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,7 +50,7 @@ func main() {
 		baseName := fi.Name()
 		fmt.Println(baseName)
 		rawTmplPath := filepath.Join(templateDir, baseName)
-		rawTmpl, err := ioutil.ReadFile(rawTmplPath)
+		rawTmpl, err := os.ReadFile(rawTmplPath)
 		if err != nil {
 			return fmt.Errorf("ReadFile error: %w", err)
 		}
@@ -91,7 +90,7 @@ func main() {
 			// name := baseName[:len(baseName)-len(ext)]
 			// localizedName := filepath.Join(outputDirectory, name+"_"+lang+ext)
 			fmt.Println("Writing", localizedName)
-			if err := ioutil.WriteFile(localizedName, tmpl, 0644); err != nil {
+			if err := os.WriteFile(localizedName, tmpl, 0644); err != nil {
 				return fmt.Errorf("error writing localized template %s: %v", localizedName, err)
 			}
 		}

@@ -5,7 +5,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"os"
 	"reflect"
 	"testing"
@@ -60,7 +59,7 @@ func TestConfigure(t *testing.T) {
 	cfgFile := tmp + "/testconfig"
 	defer os.Remove(cfgFile)
 	b := []byte("rpcaddr=1.2.3.4:3000\nproxyuser=jorb\n")
-	err = ioutil.WriteFile(cfgFile, b, 0644)
+	err = os.WriteFile(cfgFile, b, 0644)
 	if err != nil {
 		t.Fatal(err)
 	}

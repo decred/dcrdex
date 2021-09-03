@@ -11,8 +11,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -1052,7 +1052,7 @@ func (dcr *Backend) getMainchainDcrBlock(ctx context.Context, height uint32) (*d
 // with the given credentials and notification handlers.
 func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 
-	dcrdCerts, err := ioutil.ReadFile(cert)
+	dcrdCerts, err := os.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
 	}

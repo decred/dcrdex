@@ -27,7 +27,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/user"
@@ -86,7 +85,7 @@ var (
 
 func readWalletCfgsAndDexCert() error {
 	readCert := func(path string) ([]byte, error) {
-		data, err := ioutil.ReadFile(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +186,7 @@ func teardown(cancelCtx context.CancelFunc) {
 }
 
 func TestMain(m *testing.M) {
-	tmpDir, _ = ioutil.TempDir("", "")
+	tmpDir, _ = os.MkdirTemp("", "")
 	defer os.RemoveAll(tmpDir)
 	os.Exit(m.Run())
 }

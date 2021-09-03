@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -6868,7 +6867,7 @@ func TestParseCert(t *testing.T) {
 		t.Fatalf("byte cert note returned unmodified. expected %x, got %x", byteCert, cert)
 	}
 	byteCert = []byte{0x05, 0x06}
-	certFile, _ := ioutil.TempFile("", "dumbcert")
+	certFile, _ := os.CreateTemp("", "dumbcert")
 	defer os.Remove(certFile.Name())
 	certFile.Write(byteCert)
 	certFile.Close()
