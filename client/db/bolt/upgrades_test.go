@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +37,7 @@ var dbUpgradeTests = [...]struct {
 }
 
 func TestUpgrades(t *testing.T) {
-	d, err := ioutil.TempDir("", "dcrdex_test_upgrades")
+	d, err := os.MkdirTemp("", "dcrdex_test_upgrades")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +289,7 @@ func checkVersion(dbtx *bbolt.Tx, expectedVersion uint32) error {
 
 func unpack(t *testing.T, db string) (string, func()) {
 	t.Helper()
-	d, err := ioutil.TempDir("", "dcrdex_test_upgrades")
+	d, err := os.MkdirTemp("", "dcrdex_test_upgrades")
 	if err != nil {
 		t.Fatal(err)
 	}

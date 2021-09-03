@@ -28,7 +28,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"os/exec"
@@ -126,7 +125,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	addrBytes, err := ioutil.ReadFile(contractAddrFile)
+	addrBytes, err := os.ReadFile(contractAddrFile)
 	if err != nil {
 		fmt.Printf("error reading contract address: %v\n", err)
 		os.Exit(1)

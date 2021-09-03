@@ -6,7 +6,7 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -662,12 +662,12 @@ func decodeAccountBackup(b []byte) (*AccountBackup, error) {
 // Save persists an account backup to file.
 func (ab *AccountBackup) Save(path string) error {
 	backup := ab.Serialize()
-	return ioutil.WriteFile(path, backup, 0o600)
+	return os.WriteFile(path, backup, 0o600)
 }
 
 // RestoreAccountBackup generates a user account from a backup file.
 func RestoreAccountBackup(path string) (*AccountBackup, error) {
-	backup, err := ioutil.ReadFile(path)
+	backup, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

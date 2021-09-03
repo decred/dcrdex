@@ -13,7 +13,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"testing"
@@ -131,7 +130,7 @@ func newTServerWErr(t *testing.T, start bool, user, pass string) (*RPCServer, fu
 
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	tempDir, err := ioutil.TempDir("", "rpcservertest")
+	tempDir, err := os.MkdirTemp("", "rpcservertest")
 	if err != nil {
 		killCtx()
 		return nil, nil, fmt.Errorf("error creating temporary directory: %w", err)
@@ -183,7 +182,7 @@ func TestConnectBindError(t *testing.T) {
 	s0, shutdown := newTServer(t, true, "", "abc")
 	defer shutdown()
 
-	tempDir, err := ioutil.TempDir("", "rpcservertest")
+	tempDir, err := os.MkdirTemp("", "rpcservertest")
 	if err != nil {
 		t.Fatalf("error creating temporary directory: %v", err)
 	}

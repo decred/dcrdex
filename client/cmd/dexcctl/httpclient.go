@@ -9,10 +9,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/go-socks/socks"
@@ -39,7 +40,7 @@ func newHTTPClient(cfg *config, urlStr string) (*http.Client, error) {
 	}
 
 	// Configure TLS.
-	pem, err := ioutil.ReadFile(cfg.RPCCert)
+	pem, err := os.ReadFile(cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func sendPostRequest(marshalledJSON []byte, cfg *config) (*msgjson.Message, erro
 	}
 
 	// Read the raw bytes and close the response.
-	respBytes, err := ioutil.ReadAll(httpResponse.Body)
+	respBytes, err := io.ReadAll(httpResponse.Body)
 	httpResponse.Body.Close()
 	if err != nil {
 		err = fmt.Errorf("error reading json reply: %v", err)

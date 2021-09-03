@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -47,7 +46,7 @@ func TestMain(m *testing.M) {
 	defer os.Stdout.Sync()
 	doIt := func() int {
 		var err error
-		tDir, err = ioutil.TempDir("", "dbtest")
+		tDir, err = os.MkdirTemp("", "dbtest")
 		if err != nil {
 			fmt.Println("error creating temporary directory:", err)
 			return -1

@@ -15,7 +15,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -217,7 +216,7 @@ func main() {
 
 	// Get the server harness configuration file. We'll want these parameters
 	// before we get them from 'config'.
-	f, err := ioutil.ReadFile(filepath.Join(dextestDir, "dcrdex", "markets.json"))
+	f, err := os.ReadFile(filepath.Join(dextestDir, "dcrdex", "markets.json"))
 	if err != nil {
 		fmt.Println("error reading simnet dcrdex markets.json file:", err)
 		return

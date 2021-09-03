@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -50,7 +49,7 @@ func TestLoadConfig(t *testing.T) {
 	cfg := &config{}
 	parsedCfg := &config{}
 
-	tempDir, err := ioutil.TempDir("", "btctest")
+	tempDir, err := os.MkdirTemp("", "btctest")
 	if err != nil {
 		t.Fatalf("error creating temporary directory: %v", err)
 	}

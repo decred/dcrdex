@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -39,7 +38,7 @@ func loadMarketConfFile(network dex.Network, marketsJSON string) ([]*dex.MarketI
 }
 
 func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*dexsrv.AssetConf, error) {
-	settings, err := ioutil.ReadAll(src)
+	settings, err := io.ReadAll(src)
 	if err != nil {
 		return nil, nil, err
 	}

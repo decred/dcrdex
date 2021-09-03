@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -494,10 +493,10 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	}
 
 	// Write cert and key files.
-	if err = ioutil.WriteFile(certFile, cert, 0644); err != nil {
+	if err = os.WriteFile(certFile, cert, 0644); err != nil {
 		return err
 	}
-	if err = ioutil.WriteFile(keyFile, key, 0600); err != nil {
+	if err = os.WriteFile(keyFile, key, 0600); err != nil {
 		os.Remove(certFile)
 		return err
 	}

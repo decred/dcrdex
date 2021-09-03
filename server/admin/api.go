@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -577,7 +577,7 @@ func (s *Server) apiForgiveMatchFail(w http.ResponseWriter, r *http.Request) {
 }
 
 func toNote(r *http.Request) (*msgjson.Message, int, error) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("unable to read request body: %w", err)

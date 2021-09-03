@@ -7,7 +7,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -195,7 +194,7 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 		if simnetGenesis == "" {
 			homeDir := os.Getenv("HOME")
 			genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
-			genBytes, err := ioutil.ReadFile(genesisFile)
+			genBytes, err := os.ReadFile(genesisFile)
 			if err != nil {
 				return nil, fmt.Errorf("error reading genesis file: %v", err)
 			}

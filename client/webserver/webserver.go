@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -349,7 +349,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 
 	htmlDir := filepath.Join(s.siteDir, "src", "localized_html")
 
-	fileInfos, err := ioutil.ReadDir(htmlDir)
+	fileInfos, err := os.ReadDir(htmlDir)
 	if err != nil {
 		return fmt.Errorf("ReadDir error: %w", err)
 	}
@@ -611,7 +611,7 @@ func (s *WebServer) readNotifications(ctx context.Context) {
 
 // readPost unmarshals the request body into the provided interface.
 func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
 		log.Debugf("Error reading request body: %v", err)

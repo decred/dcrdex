@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"runtime"
@@ -267,7 +266,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
 
-	swapDataDir, err := ioutil.TempDir("", "swapstates")
+	swapDataDir, err := os.MkdirTemp("", "swapstates")
 	if err != nil {
 		panic(err.Error())
 	}

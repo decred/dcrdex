@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -654,7 +653,7 @@ func TestClientResponses(t *testing.T) {
 }
 
 func TestOnline(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "example")
+	tempDir, err := os.MkdirTemp("", "example")
 	if err != nil {
 		t.Fatalf("TempDir error: %v", err)
 	}
@@ -718,7 +717,7 @@ func TestOnline(t *testing.T) {
 	}
 
 	// Read in the cert file
-	certs, err := ioutil.ReadFile(certPath)
+	certs, err := os.ReadFile(certPath)
 	if err != nil {
 		t.Fatalf("Failed to append %q to RootCAs: %v", certPath, err)
 	}

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -118,7 +117,7 @@ func readTextFile(cmd string, args []string) error {
 	if !fileExists(path) {
 		return fmt.Errorf("no file found at %s", path)
 	}
-	fileContents, err := ioutil.ReadFile(path)
+	fileContents, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("error reading %s: %v", path, err)
 	}
