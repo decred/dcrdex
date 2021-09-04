@@ -24,6 +24,7 @@ const (
 	NoteTypeServerNotify = "notify"
 	NoteTypeSecurity     = "security"
 	NoteTypeUpgrade      = "upgrade"
+	NoteTypeDEXAuth      = "dex_auth"
 )
 
 // notify sends a notification to all subscribers. If the notification is of
@@ -80,8 +81,13 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 	}
 }
 
-func (c *Core) formatDetails(subject string, args ...interface{}) (translatedSubject, details string) {
-	return c.localePrinter.Sprintf(subject), c.localePrinter.Sprintf(TemplateKeys[subject], args...)
+func (c *Core) formatDetails(topic string, args ...interface{}) (translatedSubject, details string) {
+	trans, found := c.locale[topic]
+	if !found {
+		c.log.Errorf("no translation found for topic %q", topic)
+		return topic, "translation error"
+	}
+	return trans.subject, c.localePrinter.Sprintf(trans.template, args...)
 }
 
 // Notification is an interface for a user notification. Notification is
@@ -89,6 +95,10 @@ func (c *Core) formatDetails(subject string, args ...interface{}) (translatedSub
 type Notification interface {
 	// Type is a string ID unique to the concrete type.
 	Type() string
+	// Topic is a string ID unique to the message subject. Since subjects must
+	// be translated, we cannot rely on the subject to programatically identify
+	// the message.
+	Topic() string
 	// Subject is a short description of the notification contents. When displayed
 	// to the user, the Subject will typically be given visual prominence. For
 	// notifications with Severity < Poke (not meant for display), the Subject
@@ -124,13 +134,13 @@ type SecurityNote struct {
 }
 
 const (
-	SubjectSeedNeedsSaving = "Don't forget to back up your application seed"
-	SubjectUpgradedToSeed  = "Back up your new application seed"
+	TopicSeedNeedsSaving = "SeedNeedsSaving"
+	TopicUpgradedToSeed  = "UpgradedToSeed"
 )
 
-func newSecurityNote(subject, details string, severity db.Severity) *SecurityNote {
+func newSecurityNote(topic, subject, details string, severity db.Severity) *SecurityNote {
 	return &SecurityNote{
-		Notification: db.NewNotification(NoteTypeSecurity, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeSecurity, topic, subject, details, severity),
 	}
 }
 
@@ -142,26 +152,26 @@ type FeePaymentNote struct {
 }
 
 const (
-	SubjectFeePaymentInProgress    = "Fee payment in progress"
-	SubjectRegUpdate               = "regupdate"
-	SubjectFeePaymentError         = "Fee payment error"
-	SubjectAccountRegistered       = "Account registered"
-	SubjectAccountUnlockError      = "Account unlock error"
-	SubjectFeeCoinError            = "Fee coin error"
-	SubjectWalletConnectionWarning = "Wallet connection warning"
-	SubjectWalletUnlockError       = "Wallet unlock error"
+	TopicFeePaymentInProgress    = "FeePaymentInProgress"
+	TopicRegUpdate               = "RegUpdate"
+	TopicFeePaymentError         = "FeePaymentError"
+	TopicAccountRegistered       = "AccountRegistered"
+	TopicAccountUnlockError      = "AccountUnlockError"
+	TopicFeeCoinError            = "FeeCoinError"
+	TopicWalletConnectionWarning = "WalletConnectionWarning"
+	TopicWalletUnlockError       = "WalletUnlockError"
 )
 
-func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
+func newFeePaymentNote(topic, subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	host, _ := addrHost(dexAddr)
 	return &FeePaymentNote{
-		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeFeePayment, topic, subject, details, severity),
 		Dex:          host,
 	}
 }
 
-func newFeePaymentNoteWithConfirmations(subject, details string, severity db.Severity, currConfs uint32, dexAddr string) *FeePaymentNote {
-	feePmtNt := newFeePaymentNote(subject, details, severity, dexAddr)
+func newFeePaymentNoteWithConfirmations(topic, subject, details string, severity db.Severity, currConfs uint32, dexAddr string) *FeePaymentNote {
+	feePmtNt := newFeePaymentNote(topic, subject, details, severity, dexAddr)
 	feePmtNt.Confirmations = &currConfs
 	return feePmtNt
 }
@@ -172,13 +182,13 @@ type WithdrawNote struct {
 }
 
 const (
-	SubjectWithdrawError = "Withdraw error"
-	SubjectWithdrawSend  = "Withdraw sent"
+	TopicWithdrawError = "WithdrawError"
+	TopicWithdrawSend  = "WithdrawSend"
 )
 
-func newWithdrawNote(subject, details string, severity db.Severity) *WithdrawNote {
+func newWithdrawNote(topic, subject, details string, severity db.Severity) *WithdrawNote {
 	return &WithdrawNote{
-		Notification: db.NewNotification(NoteTypeWithdraw, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeWithdraw, topic, subject, details, severity),
 	}
 }
 
@@ -189,48 +199,47 @@ type OrderNote struct {
 }
 
 const (
-	SubjectOrderLoadFailure     = "Order load failure"
-	SubjectOrderPlaced          = "Order placed"
-	SubjectYoloPlaced           = "Market order placed"
-	SubjectMissingMatches       = "Missing matches"
-	SubjectWalletMissing        = "Wallet missing"
-	SubjectMatchErrorCoin       = "Match coin error"
-	SubjectMatchErrorContract   = "Match contract error"
-	SubjectMatchRecoveryError   = "Match recovery error"
-	SubjectNoFundingCoins       = "No funding coins"
-	SubjectOrderCoinError       = "Order coin error"
-	SubjectOrderCoinFetchError  = "Order coin fetch error"
-	SubjectPreimageSent         = "preimage sent"
-	SubjectCancelPreimageSent   = "cancel preimage sent"
-	SubjectMissedCancel         = "Missed cancel"
-	SubjectOrderBooked          = "Order booked"
-	SubjectNoMatch              = "No match"
-	SubjectOrderCanceled        = "Order canceled"
-	SubjectCancel               = "cancel"
-	SubjectMatchesMade          = "Matches made"
-	SubjectSwapSendError        = "Swap send error"
-	SubjectInitError            = "Swap reporting error"
-	SubjectReportRedeemError    = "Redeem reporting error"
-	SubjectSwapsInitiated       = "Swaps initiated"
-	SubjectRedemptionError      = "Redemption error"
-	SubjectMatchComplete        = "Match complete"
-	SubjectRefundFailure        = "Refund Failure"
-	SubjectMatchesRefunded      = "Matches Refunded"
-	SubjectMatchRevoked         = "Match revoked"
-	SubjectOrderRevoked         = "Order revoked"
-	SubjectOrderAutoRevoked     = "Order auto-revoked"
-	SubjectMatchRecovered       = "Match recovered"
-	SubjectCancellingOrder      = "Cancelling order"
-	SubjectOrderStatusUpdate    = "Order status update"
-	SubjectMatchResolutionError = "Match resolution error"
-	SubjectFailedCancel         = "Failed cancel"
-	SubjectOrderLoaded          = "Order loaded"
-	SubjectOrderRetired         = "Order retired"
+	TopicOrderLoadFailure     = "OrderLoadFailure"
+	TopicOrderPlaced          = "OrderPlaced"
+	TopicYoloPlaced           = "YoloPlaced"
+	TopicMissingMatches       = "MissingMatches"
+	TopicWalletMissing        = "WalletMissing"
+	TopicMatchErrorCoin       = "MatchErrorCoin"
+	TopicMatchErrorContract   = "MatchErrorContract"
+	TopicMatchRecoveryError   = "MatchRecoveryError"
+	TopicOrderCoinError       = "OrderCoinError"
+	TopicOrderCoinFetchError  = "OrderCoinFetchError"
+	TopicPreimageSent         = "PreimageSent"
+	TopicCancelPreimageSent   = "CancelPreimageSent"
+	TopicMissedCancel         = "MissedCancel"
+	TopicOrderBooked          = "OrderBooked"
+	TopicNoMatch              = "NoMatch"
+	TopicOrderCanceled        = "OrderCanceled"
+	TopicCancel               = "Cancel"
+	TopicMatchesMade          = "MatchesMade"
+	TopicSwapSendError        = "SwapSendError"
+	TopicInitError            = "InitError"
+	TopicReportRedeemError    = "ReportRedeemError"
+	TopicSwapsInitiated       = "SwapsInitiated"
+	TopicRedemptionError      = "RedemptionError"
+	TopicMatchComplete        = "MatchComplete"
+	TopicRefundFailure        = "RefundFailure"
+	TopicMatchesRefunded      = "MatchesRefunded"
+	TopicMatchRevoked         = "MatchRevoked"
+	TopicOrderRevoked         = "OrderRevoked"
+	TopicOrderAutoRevoked     = "OrderAutoRevoked"
+	TopicMatchRecovered       = "MatchRecovered"
+	TopicCancellingOrder      = "CancellingOrder"
+	TopicOrderStatusUpdate    = "OrderStatusUpdate"
+	TopicMatchResolutionError = "MatchResolutionError"
+	TopicFailedCancel         = "FailedCancel"
+	TopicOrderLoaded          = "OrderLoaded"
+	TopicOrderRetired         = "OrderRetired"
 )
 
-func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
+func newOrderNote(topic, subject, details string, severity db.Severity, corder *Order) *OrderNote {
 	return &OrderNote{
-		Notification: db.NewNotification(NoteTypeOrder, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeOrder, topic, subject, details, severity),
 		Order:        corder,
 	}
 }
@@ -245,14 +254,14 @@ type MatchNote struct {
 }
 
 const (
-	SubjectAudit           = "audit"
-	SubjectAuditTrouble    = "Audit trouble"
-	SubjectNewMatch        = "new_match"
-	SubjectCounterConfirms = "counterconfirms"
-	SubjectConfirms        = "confirms"
+	TopicAudit           = "Audit"
+	TopicAuditTrouble    = "AuditTrouble"
+	TopicNewMatch        = "NewMatch"
+	TopicCounterConfirms = "CounterConfirms"
+	TopicConfirms        = "Confirms"
 )
 
-func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
+func newMatchNote(topic, subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
 	var counterConfs int64
 	if match.counterConfirms > 0 {
 		// This can be -1 before it is actually checked, but for purposes of the
@@ -260,7 +269,7 @@ func newMatchNote(subject, details string, severity db.Severity, t *trackedTrade
 		counterConfs = match.counterConfirms
 	}
 	return &MatchNote{
-		Notification: db.NewNotification(NoteTypeMatch, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeMatch, topic, subject, details, severity),
 		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
 			int64(t.wallets.fromAsset.SwapConf), counterConfs, int64(t.wallets.toAsset.SwapConf)),
@@ -287,11 +296,13 @@ type EpochNotification struct {
 	Epoch    uint64 `json:"epoch"`
 }
 
+const TopicEpoch = "Epoch"
+
 func newEpochNotification(host, mktID string, epochIdx uint64) *EpochNotification {
 	return &EpochNotification{
 		Host:         host,
 		MarketID:     mktID,
-		Notification: db.NewNotification(NoteTypeEpoch, "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeEpoch, TopicEpoch, "", "", db.Data),
 		Epoch:        epochIdx,
 	}
 }
@@ -309,13 +320,13 @@ type ConnEventNote struct {
 }
 
 const (
-	SubjectDEXConnected    = "Server connected"
-	SubjectDEXDisconnected = "Server disconnect"
+	TopicDEXConnected    = "DEXConnected"
+	TopicDEXDisconnected = "DEXDisconnected"
 )
 
-func newConnEventNote(subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
+func newConnEventNote(topic, subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
-		Notification: db.NewNotification(NoteTypeConnEvent, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeConnEvent, topic, subject, details, severity),
 		Host:         host,
 		Connected:    connected,
 	}
@@ -328,9 +339,11 @@ type BalanceNote struct {
 	Balance *WalletBalance `json:"balance"`
 }
 
+const TopicBalanceUpdated = "BalanceUpdated"
+
 func newBalanceNote(assetID uint32, bal *WalletBalance) *BalanceNote {
 	return &BalanceNote{
-		Notification: db.NewNotification(NoteTypeBalance, "balance updated", "", db.Data),
+		Notification: db.NewNotification(NoteTypeBalance, TopicBalanceUpdated, "balance updated", "", db.Data),
 		AssetID:      assetID,
 		Balance:      bal, // Once created, balance is never modified by Core.
 	}
@@ -344,14 +357,14 @@ type DEXAuthNote struct {
 }
 
 const (
-	SubjectDexAuthError     = "DEX auth error"
-	SubjectUnknownOrders    = "DEX reported unknown orders"
-	SubjectOrdersReconciled = "Orders reconciled with DEX"
+	TopicDexAuthError     = "DexAuthError"
+	TopicUnknownOrders    = "UnknownOrders"
+	TopicOrdersReconciled = "OrdersReconciled"
 )
 
-func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
+func newDEXAuthNote(topic, subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
 	return &DEXAuthNote{
-		Notification:  db.NewNotification("dex_auth", subject, details, severity),
+		Notification:  db.NewNotification(NoteTypeDEXAuth, topic, subject, details, severity),
 		Host:          host,
 		Authenticated: authenticated,
 	}
@@ -365,13 +378,13 @@ type WalletConfigNote struct {
 }
 
 const (
-	SubjectWalletConfigurationUpdated = "Wallet Configuration Updated"
-	SubjectWalletPasswordUpdated      = "Wallet Password Updated"
+	TopicWalletConfigurationUpdated = "WalletConfigurationUpdated"
+	TopicWalletPasswordUpdated      = "WalletPasswordUpdated"
 )
 
-func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
+func newWalletConfigNote(topic, subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
 	return &WalletConfigNote{
-		Notification: db.NewNotification(NoteTypeWalletConfig, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeWalletConfig, topic, subject, details, severity),
 		Wallet:       walletState,
 	}
 }
@@ -381,9 +394,11 @@ func newWalletConfigNote(subject, details string, severity db.Severity, walletSt
 // a Data Severity notification.
 type WalletStateNote WalletConfigNote
 
+const TopicWalletState = "WalletState"
+
 func newWalletStateNote(walletState *WalletState) *WalletStateNote {
 	return &WalletStateNote{
-		Notification: db.NewNotification(NoteTypeWalletState, "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeWalletState, TopicWalletState, "", "", db.Data),
 		Wallet:       walletState,
 	}
 }
@@ -394,17 +409,18 @@ type ServerNotifyNote struct {
 }
 
 const (
-	SubjectMarketSuspendScheduled   = "Market suspend scheduled"
-	SubjectMarketSuspended          = "Market suspended"
-	SubjectMarketSuspendedWithPurge = "Market suspended, orders purged"
-	SubjectMarketResumeScheduled    = "Market resume scheduled"
-	SubjectMarketResumed            = "Market resumed"
-	SubjectPenalized                = "Server has penalized you"
+	TopicMarketSuspendScheduled   = "MarketSuspendScheduled"
+	TopicMarketSuspended          = "MarketSuspended"
+	TopicMarketSuspendedWithPurge = "MarketSuspendedWithPurge"
+	TopicMarketResumeScheduled    = "MarketResumeScheduled"
+	TopicMarketResumed            = "MarketResumed"
+	TopicPenalized                = "Penalized"
+	TopicDEXNotification          = "DEXNotification"
 )
 
-func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
+func newServerNotifyNote(topic, subject, details string, severity db.Severity) *ServerNotifyNote {
 	return &ServerNotifyNote{
-		Notification: db.NewNotification(NoteTypeServerNotify, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeServerNotify, topic, subject, details, severity),
 	}
 }
 
@@ -414,11 +430,11 @@ type UpgradeNote struct {
 }
 
 const (
-	SubjectUpgradeNeeded = "Upgrade needed"
+	TopicUpgradeNeeded = "UpgradeNeeded"
 )
 
-func newUpgradeNote(subject, details string, severity db.Severity) *UpgradeNote {
+func newUpgradeNote(topic, subject, details string, severity db.Severity) *UpgradeNote {
 	return &UpgradeNote{
-		Notification: db.NewNotification(NoteTypeUpgrade, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeUpgrade, topic, subject, details, severity),
 	}
 }

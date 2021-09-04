@@ -32,6 +32,8 @@ var upgrades = [...]upgradefunc{
 	// only thing we need to do during the DB upgrade is to update the
 	// db.AccountInfo to differentiate legacy vs. new-style key.
 	v5Upgrade,
+	// v5 => v6 adds a Topic field to Notifications.
+	v6Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -261,6 +263,26 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 	}
 
 	return credsBkt.Put(outerKeyParamsKey, legacyKeyParams)
+}
+
+// v6Upgrade adds a Topic field to Notifications.
+func v6Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 5
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	notes := dbtx.Bucket(notesBucket)
+	return notes.ForEach(func(k, _ []byte) error {
+		noteBkt := notes.Bucket(k)
+		note, err := dexdb.DecodeNotification(noteBkt.Get(noteKey))
+		if err != nil {
+			return err
+		}
+		return noteBkt.Put(noteKey, note.Encode())
+
+	})
 }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {

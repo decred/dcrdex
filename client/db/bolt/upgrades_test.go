@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 
 	dexdb "decred.org/dcrdex/client/db"
@@ -35,6 +36,7 @@ var dbUpgradeTests = [...]struct {
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
 	{"upgradeFromV3", v4Upgrade, verifyV4Upgrade, "v3.db.gz", 4},
 	{"upgradeFromV4", v5Upgrade, verifyV5Upgrade, "v4.db.gz", 5},
+	{"upgradeFromV5", v6Upgrade, verifyV6Upgrade, "v5.db.gz", 6},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -263,6 +265,35 @@ func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
 			}
 			if len(acctInfo.LegacyEncKey) == 0 {
 				return errors.New("LegacyEncKey not sets")
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Error(err)
+	}
+}
+
+func verifyV6Upgrade(t *testing.T, db *bbolt.DB) {
+	if err := db.View(func(tx *bbolt.Tx) error {
+		return checkVersion(tx, 6)
+	}); err != nil {
+		t.Error(err)
+	}
+
+	if err := db.View(func(tx *bbolt.Tx) error {
+		notes := tx.Bucket(notesBucket)
+		c := notes.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			noteBkt := notes.Bucket(k)
+			ver, pushes, err := encode.DecodeBlob(noteBkt.Get(noteKey))
+			if err != nil {
+				return fmt.Errorf("DecodeBlob error: %w", err)
+			}
+			if ver != 1 {
+				return fmt.Errorf("wrong blob version. wanted 1, got %d", ver)
+			}
+			if len(pushes) != 6 {
+				return fmt.Errorf("topic ID not added to blobbed notifications. expected 6 pushes, got %d", len(pushes))
 			}
 		}
 		return nil

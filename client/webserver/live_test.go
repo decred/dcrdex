@@ -829,7 +829,7 @@ func randomBalance(assetID uint32) *core.WalletBalance {
 
 func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	return &core.BalanceNote{
-		Notification: db.NewNotification(core.NoteTypeBalance, "", "", db.Data),
+		Notification: db.NewNotification(core.NoteTypeBalance, core.TopicBalanceUpdated, "", "", db.Data),
 		AssetID:      assetID,
 		Balance:      randomBalance(assetID),
 	}
@@ -913,7 +913,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	w := c.walletState(form.AssetID)
 
 	c.noteFeed <- &core.WalletStateNote{
-		Notification: db.NewNotification(core.NoteTypeWalletState, "", "", db.Data),
+		Notification: db.NewNotification(core.NoteTypeWalletState, core.TopicWalletState, "", "", db.Data),
 		Wallet:       w,
 	}
 
@@ -1090,7 +1090,7 @@ out:
 			c.noteFeed <- &core.EpochNotification{
 				Host:         dexAddr,
 				MarketID:     mktID,
-				Notification: db.NewNotification(core.NoteTypeEpoch, "", "", db.Data),
+				Notification: db.NewNotification(core.NoteTypeEpoch, core.TopicEpoch, "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
 
@@ -1146,7 +1146,7 @@ func (c *TCore) runRandomPokes() {
 	for {
 		select {
 		case <-time.NewTimer(nextWait()).C:
-			note := db.NewNotification(randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
+			note := db.NewNotification(randStr(5, 30), randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return
@@ -1169,7 +1169,7 @@ func (c *TCore) runRandomNotes() {
 				severity = db.WarningLevel
 			}
 
-			note := db.NewNotification(randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
+			note := db.NewNotification(randStr(5, 30), randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return

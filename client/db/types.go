@@ -682,6 +682,7 @@ func RestoreAccountBackup(path string) (*AccountBackup, error) {
 // and is persisted for recall across sessions.
 type Notification struct {
 	NoteType    string    `json:"type"`
+	TopicID     string    `json:"topic"`
 	SubjectText string    `json:"subject"`
 	DetailText  string    `json:"details"`
 	Severeness  Severity  `json:"severity"`
@@ -691,9 +692,10 @@ type Notification struct {
 }
 
 // NewNotification is a constructor for a Notification.
-func NewNotification(noteType, subject, details string, severity Severity) Notification {
+func NewNotification(noteType, topic, subject, details string, severity Severity) Notification {
 	note := Notification{
 		NoteType:    noteType,
+		TopicID:     topic,
 		SubjectText: subject,
 		DetailText:  details,
 		Severeness:  severity,
@@ -710,6 +712,11 @@ func (n *Notification) ID() dex.Bytes {
 // Type is the notification type.
 func (n *Notification) Type() string {
 	return n.NoteType
+}
+
+// Topic is a language-independent unique ID for the Notification.
+func (n *Notification) Topic() string {
+	return n.TopicID
 }
 
 // Subject is a short description of the notification contents.
@@ -781,6 +788,8 @@ func DecodeNotification(b []byte) (*Notification, error) {
 		return nil, err
 	}
 	switch ver {
+	case 1:
+		return decodeNotification_v1(pushes)
 	case 0:
 		return decodeNotification_v0(pushes)
 	}
@@ -788,7 +797,11 @@ func DecodeNotification(b []byte) (*Notification, error) {
 }
 
 func decodeNotification_v0(pushes [][]byte) (*Notification, error) {
-	if len(pushes) != 5 {
+	return decodeNotification_v1(append(pushes, []byte{}))
+}
+
+func decodeNotification_v1(pushes [][]byte) (*Notification, error) {
+	if len(pushes) != 6 {
 		return nil, fmt.Errorf("decodeNotification_v0: expected 5 pushes, got %d", len(pushes))
 	}
 	if len(pushes[3]) != 1 {
@@ -797,6 +810,7 @@ func decodeNotification_v0(pushes [][]byte) (*Notification, error) {
 
 	return &Notification{
 		NoteType:    string(pushes[0]),
+		TopicID:     string(pushes[5]),
 		SubjectText: string(pushes[1]),
 		DetailText:  string(pushes[2]),
 		Severeness:  Severity(pushes[3][0]),
@@ -806,12 +820,13 @@ func decodeNotification_v0(pushes [][]byte) (*Notification, error) {
 
 // Encode encodes the Notification to a versioned blob.
 func (n *Notification) Encode() []byte {
-	return dbBytes{0}.
+	return dbBytes{1}.
 		AddData([]byte(n.NoteType)).
 		AddData([]byte(n.SubjectText)).
 		AddData([]byte(n.DetailText)).
 		AddData([]byte{byte(n.Severeness)}).
-		AddData(uint64Bytes(n.TimeStamp))
+		AddData(uint64Bytes(n.TimeStamp)).
+		AddData([]byte(n.TopicID))
 }
 
 // OrderFilter is used to limit the results returned by a query to (DB).Orders.
