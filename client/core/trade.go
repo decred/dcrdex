@@ -148,7 +148,7 @@ type trackedTrade struct {
 	cancel        *trackedCancel
 	matches       map[order.MatchID]*matchTracker
 	notify        func(Notification)
-	formatDetails func(string, ...interface{}) (string, string)
+	formatDetails func(Topic, ...interface{}) (string, string)
 	epochLen      uint64
 	fromAssetID   uint32
 }
@@ -156,7 +156,7 @@ type trackedTrade struct {
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(string, ...interface{}) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -348,8 +348,8 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		t.cancel = nil
 		t.metaData.LinkedOrder = order.OrderID{}
 
-		subject, details := t.formatDetails(SubjectMissedCancel, t.token())
-		t.notify(newOrderNote(subject, details, db.WarningLevel, t.coreOrderInternal()))
+		subject, details := t.formatDetails(TopicMissedCancel, t.token())
+		t.notify(newOrderNote(TopicMissedCancel, subject, details, db.WarningLevel, t.coreOrderInternal()))
 		return assets, t.db.UpdateOrderStatus(oid, order.OrderStatusExecuted)
 	}
 
@@ -361,13 +361,13 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 		t.dc.log.Infof("Standing order %s did not match and is now booked.", t.token())
 		t.metaData.Status = order.OrderStatusBooked
-		t.notify(newOrderNote(SubjectOrderBooked, "", db.Data, t.coreOrderInternal()))
+		t.notify(newOrderNote(TopicOrderBooked, "", "", db.Data, t.coreOrderInternal()))
 	} else {
 		t.returnCoins()
 		assets.count(t.wallets.fromAsset.ID)
 		t.dc.log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
-		t.notify(newOrderNote(SubjectNoMatch, "", db.Data, t.coreOrderInternal()))
+		t.notify(newOrderNote(TopicNoMatch, "", "", db.Data, t.coreOrderInternal()))
 	}
 	return assets, t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
@@ -534,12 +534,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// Send notifications.
 	corder := t.coreOrderInternal()
 	if cancelMatch != nil {
-		subject, details := t.formatDetails(SubjectOrderCanceled,
+		subject, details := t.formatDetails(TopicOrderCanceled,
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 
-		t.notify(newOrderNote(subject, details, db.Success, corder))
+		t.notify(newOrderNote(TopicOrderCanceled, subject, details, db.Poke, corder))
 		// Also send out a data notification with the cancel order information.
-		t.notify(newOrderNote(SubjectCancel, "", db.Data, corder))
+		t.notify(newOrderNote(TopicCancel, "", "", db.Data, corder))
 	}
 	if len(newTrackers) > 0 {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
@@ -548,13 +548,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 
 		// Match notifications.
 		for _, match := range newTrackers {
-			t.notify(newMatchNote(SubjectNewMatch, "", db.Data, t, match))
+			t.notify(newMatchNote(TopicNewMatch, "", "", db.Data, t, match))
 		}
 
 		// A single order notification.
-		subject, details := t.formatDetails(SubjectMatchesMade,
+		subject, details := t.formatDetails(TopicMatchesMade,
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
-		t.notify(newOrderNote(subject, details, db.Poke, corder))
+		t.notify(newOrderNote(TopicMatchesMade, subject, details, db.Poke, corder))
 	}
 
 	err := t.db.UpdateOrder(t.metaOrder())
@@ -677,7 +677,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	if match.counterConfirms != int64(have) {
 		match.counterConfirms = int64(have)
 		changed = true
-		t.notify(newMatchNote(SubjectCounterConfirms, "", db.Data, t, match))
+		t.notify(newMatchNote(TopicCounterConfirms, "", "", db.Data, t, match))
 	}
 
 	return
@@ -746,8 +746,8 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", t.cancel.ID(), t.ID(), err)
 	}
 
-	subject, details := t.formatDetails(SubjectFailedCancel, t.token())
-	t.notify(newOrderNote(subject, details, db.WarningLevel, t.coreOrderInternal()))
+	subject, details := t.formatDetails(TopicFailedCancel, t.token())
+	t.notify(newOrderNote(TopicFailedCancel, subject, details, db.WarningLevel, t.coreOrderInternal()))
 }
 
 // isActive will be true if the trade is booked or epoch, or if any of the
@@ -903,7 +903,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
+		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
 		return false
 	}
 	if match.Side == order.Maker && match.Status == order.NewlyMatched {
@@ -955,7 +955,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		match.swapConfirms = int64(confs)
-		t.notify(newMatchNote(SubjectConfirms, "", db.Data, t, match))
+		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
 		return false
 	}
 	if match.Side == order.Taker && match.Status == order.MakerRedeemed {
@@ -1158,13 +1158,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
-			subject, details := c.formatDetails(SubjectSwapSendError,
+			subject, details := c.formatDetails(TopicSwapSendError,
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote(subject, details, db.ErrorLevel, corder))
+			t.notify(newOrderNote(TopicSwapSendError, subject, details, db.ErrorLevel, corder))
 		} else {
-			subject, details := c.formatDetails(SubjectSwapsInitiated,
+			subject, details := c.formatDetails(TopicSwapsInitiated,
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote(subject, details, db.Poke, corder))
+			t.notify(newOrderNote(TopicSwapsInitiated, subject, details, db.Poke, corder))
 		}
 	}
 
@@ -1188,13 +1188,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
-			subject, details := c.formatDetails(SubjectRedemptionError,
+			subject, details := c.formatDetails(TopicRedemptionError,
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			t.notify(newOrderNote(subject, details, db.ErrorLevel, corder))
+			t.notify(newOrderNote(TopicRedemptionError, subject, details, db.ErrorLevel, corder))
 		} else {
-			subject, details := c.formatDetails(SubjectMatchComplete,
+			subject, details := c.formatDetails(TopicMatchComplete,
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			t.notify(newOrderNote(subject, details, db.Poke, corder))
+			t.notify(newOrderNote(TopicMatchComplete, subject, details, db.Poke, corder))
 		}
 	}
 
@@ -1211,13 +1211,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		corder := t.coreOrderInternal()
 		if err != nil {
 			errs.addErr(err)
-			subject, details := c.formatDetails(SubjectRefundFailure,
+			subject, details := c.formatDetails(TopicRefundFailure,
 				float64(refunded)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote(subject, details, db.ErrorLevel, corder))
+			t.notify(newOrderNote(TopicRefundFailure, subject, details, db.ErrorLevel, corder))
 		} else {
-			subject, details := c.formatDetails(SubjectMatchesRefunded,
+			subject, details := c.formatDetails(TopicMatchesRefunded,
 				float64(refunded)/conversionFactor, unbip(fromID), t.token())
-			t.notify(newOrderNote(subject, details, db.WarningLevel, corder))
+			t.notify(newOrderNote(TopicMatchesRefunded, subject, details, db.WarningLevel, corder))
 		}
 	}
 
@@ -1313,8 +1313,8 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 
 	// Notify the user of the failed match.
 	corder := t.coreOrderInternal() // no cancel order
-	subject, details := t.formatDetails(SubjectMatchRevoked, token(matchID[:]))
-	t.notify(newOrderNote(subject, details, db.WarningLevel, corder))
+	subject, details := t.formatDetails(TopicMatchRevoked, token(matchID[:]))
+	t.notify(newOrderNote(TopicMatchRevoked, subject, details, db.WarningLevel, corder))
 
 	// Unlock coins if we're not expecting future matches for this
 	// trade and there are no matches that MAY later require sending
@@ -1566,8 +1566,8 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
-				subject, details := c.formatDetails(SubjectInitError, match, err)
-				t.notify(newOrderNote(subject, details, db.ErrorLevel, corder))
+				subject, details := c.formatDetails(TopicInitError, match, err)
+				t.notify(newOrderNote(TopicInitError, subject, details, db.ErrorLevel, corder))
 			}
 		}()
 
@@ -1779,8 +1779,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
-				subject, details := c.formatDetails(SubjectReportRedeemError, match, err)
-				t.notify(newOrderNote(subject, details, db.ErrorLevel, corder))
+				subject, details := c.formatDetails(TopicReportRedeemError, match, err)
+				t.notify(newOrderNote(TopicReportRedeemError, subject, details, db.ErrorLevel, corder))
 			}
 		}()
 
@@ -1905,9 +1905,9 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 			t.dc.log.Errorf("waitForRedemptions: error storing match info in database: %v", err)
 		}
 
-		subject, details := t.formatDetails(SubjectMatchRecovered,
+		subject, details := t.formatDetails(TopicMatchRecovered,
 			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match)
-		t.notify(newOrderNote(subject, details, db.Poke, t.coreOrderInternal()))
+		t.notify(newOrderNote(TopicMatchRecovered, subject, details, db.Poke, t.coreOrderInternal()))
 	}()
 }
 
@@ -2028,7 +2028,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		t.mtx.Lock()
 		auth := &match.MetaData.Proof.Auth
 		auth.AuditStamp, auth.AuditSig = audit.Time, audit.Sig
-		t.notify(newMatchNote(SubjectAudit, "", db.Data, t, match))
+		t.notify(newMatchNote(TopicAudit, "", "", db.Data, t, match))
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		t.mtx.Unlock()
 		if err != nil {
@@ -2082,8 +2082,8 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 					return wait.DontTryAgain
 				}
 				if tries > 0 && tries%12 == 0 {
-					subject, detail := t.formatDetails(SubjectAuditTrouble, contractID, contractSymb, match)
-					t.notify(newOrderNote(subject, detail, db.WarningLevel, t.coreOrder()))
+					subject, detail := t.formatDetails(TopicAuditTrouble, contractID, contractSymb, match)
+					t.notify(newOrderNote(TopicAuditTrouble, subject, detail, db.WarningLevel, t.coreOrder()))
 				}
 				tries++
 				return wait.TryAgain

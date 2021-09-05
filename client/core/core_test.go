@@ -903,8 +903,10 @@ func newTestRig() *testRig {
 				// which may have been previously "disconnected".
 				return conn, nil
 			},
-			newCrypter:    func([]byte) encrypt.Crypter { return crypter },
-			reCrypter:     func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
+			newCrypter: func([]byte) encrypt.Crypter { return crypter },
+			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
+
+			locale:        enUS,
 			localePrinter: message.NewPrinter(language.AmericanEnglish),
 		},
 		db:      tdb,
@@ -2670,8 +2672,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		select {
 		case note := <-notes:
-			if note.Subject() != SubjectPreimageSent {
-				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			if note.Topic() != TopicPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("no order note from preimage request handling")
@@ -2762,8 +2764,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		select {
 		case note := <-notes:
-			if note.Subject() != SubjectPreimageSent {
-				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			if note.Topic() != TopicPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("no order note from preimage request handling")
@@ -2902,8 +2904,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		select {
 		case note := <-notes:
-			if note.Subject() != SubjectPreimageSent {
-				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			if note.Topic() != TopicPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("no order note from preimage request handling")
@@ -2981,8 +2983,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		select {
 		case note := <-notes:
-			if note.Subject() != SubjectCancelPreimageSent {
-				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectCancelPreimageSent)
+			if note.Topic() != TopicCancelPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicCancelPreimageSent)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("no order note from preimage request handling")
@@ -3146,8 +3148,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		select {
 		case note := <-notes:
-			if note.Subject() != SubjectCancelPreimageSent {
-				t.Fatalf("note subject is %v, not %v", note.Subject(), SubjectPreimageSent)
+			if note.Topic() != TopicCancelPreimageSent {
+				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicCancelPreimageSent)
 			}
 		case <-time.After(time.Second):
 			t.Fatal("no order note from preimage request handling")
@@ -3230,7 +3232,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 		t.Fatalf("handleRevokeOrderMsg error: %v", err)
 	}
 
-	verifyRevokeNotification(orderNotes, SubjectOrderRevoked, t)
+	verifyRevokeNotification(orderNotes, TopicOrderRevoked, t)
 
 	if tracker.metaData.Status != order.OrderStatusRevoked {
 		t.Errorf("expected order status %v, got %v", order.OrderStatusRevoked, tracker.metaData.Status)
@@ -3372,8 +3374,8 @@ func TestTradeTracking(t *testing.T) {
 		for {
 			select {
 			case note := <-notes:
-				if note.Severity() == db.ErrorLevel && (note.Subject() == SubjectSwapSendError ||
-					note.Subject() == SubjectInitError || note.Subject() == SubjectReportRedeemError) {
+				if note.Severity() == db.ErrorLevel && (note.Topic() == TopicSwapSendError ||
+					note.Topic() == TopicInitError || note.Topic() == TopicReportRedeemError) {
 
 					return note
 				}
@@ -4336,7 +4338,7 @@ func TestNotifications(t *testing.T) {
 	defer rig.shutdown()
 
 	// Insert a notification into the database.
-	typedNote := newOrderNote("abc", "def", 100, nil)
+	typedNote := newOrderNote("123", "abc", "def", 100, nil)
 
 	tCore := rig.core
 	ch := tCore.NotificationFeed()
@@ -5334,7 +5336,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
-	verifyRevokeNotification(orderNotes, SubjectOrderAutoRevoked, t)
+	verifyRevokeNotification(orderNotes, TopicOrderAutoRevoked, t)
 
 	// Check that the funding coin was returned. Use the tradeMtx for
 	// synchronization.
@@ -5443,12 +5445,12 @@ func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
 	return orderNotes, done
 }
 
-func verifyRevokeNotification(ch chan *OrderNote, expectedSubject string, t *testing.T) {
+func verifyRevokeNotification(ch chan *OrderNote, expectedTopic Topic, t *testing.T) {
 	select {
 	case actualOrderNote := <-ch:
-		if expectedSubject != actualOrderNote.SubjectText {
-			t.Fatalf("SubjectText mismatch. %s != %s", actualOrderNote.SubjectText,
-				expectedSubject)
+		if expectedTopic != actualOrderNote.TopicID {
+			t.Fatalf("SubjectText mismatch. %s != %s", actualOrderNote.TopicID,
+				expectedTopic)
 		}
 		return
 	case <-tCtx.Done():

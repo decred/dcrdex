@@ -482,17 +482,17 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if sp.SuspendTime != 0 {
 		// This is just a warning about a scheduled suspension.
 		suspendTime := encode.UnixTimeMilli(int64(sp.SuspendTime))
-		subject, detail := c.formatDetails(SubjectMarketSuspendScheduled, sp.MarketID, dc.acct.host, suspendTime)
-		c.notify(newServerNotifyNote(subject, detail, db.WarningLevel))
+		subject, detail := c.formatDetails(TopicMarketSuspendScheduled, sp.MarketID, dc.acct.host, suspendTime)
+		c.notify(newServerNotifyNote(TopicMarketSuspendScheduled, subject, detail, db.WarningLevel))
 		return nil
 	}
 
-	subject := SubjectMarketSuspended
+	topic := TopicMarketSuspended
 	if !sp.Persist {
-		subject = SubjectMarketSuspendedWithPurge
+		topic = TopicMarketSuspendedWithPurge
 	}
-	subject, detail := c.formatDetails(subject, sp.MarketID, dc.acct.host)
-	c.notify(newServerNotifyNote(subject, detail, db.WarningLevel))
+	subject, detail := c.formatDetails(topic, sp.MarketID, dc.acct.host)
+	c.notify(newServerNotifyNote(topic, subject, detail, db.WarningLevel))
 
 	if sp.Persist {
 		// No book changes. Just wait for more order notes.
@@ -522,8 +522,8 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 			tracker.metaData.Host == dc.acct.host && tracker.metaData.Status == order.OrderStatusBooked {
 			// Locally revoke the purged book order.
 			tracker.revoke()
-			subject, details := c.formatDetails(SubjectOrderAutoRevoked, tracker.token(), sp.MarketID, dc.acct.host)
-			c.notify(newOrderNote(subject, details, db.WarningLevel, tracker.coreOrderInternal()))
+			subject, details := c.formatDetails(TopicOrderAutoRevoked, tracker.token(), sp.MarketID, dc.acct.host)
+			c.notify(newOrderNote(TopicOrderAutoRevoked, subject, details, db.WarningLevel, tracker.coreOrderInternal()))
 			updatedAssets.count(tracker.fromAssetID)
 		}
 	}
@@ -569,8 +569,8 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		// This is just a notice about a scheduled resumption.
 		dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, false) // set the start epoch, leaving any final/persist data
 		resTime := encode.UnixTimeMilli(int64(rs.ResumeTime))
-		subject, detail := c.formatDetails(SubjectMarketResumeScheduled, rs.MarketID, dc.acct.host, resTime)
-		c.notify(newServerNotifyNote(subject, detail, db.WarningLevel))
+		subject, detail := c.formatDetails(TopicMarketResumeScheduled, rs.MarketID, dc.acct.host, resTime)
+		c.notify(newServerNotifyNote(TopicMarketResumeScheduled, subject, detail, db.WarningLevel))
 		return nil
 	}
 
@@ -587,8 +587,8 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Fetch the updated DEX configuration.
 	// dc.refreshServerConfig()
 
-	subject, detail := c.formatDetails(SubjectMarketResumed, rs.MarketID, dc.acct.host, rs.StartEpoch)
-	c.notify(newServerNotifyNote(subject, detail, db.Success))
+	subject, detail := c.formatDetails(TopicMarketResumed, rs.MarketID, dc.acct.host, rs.StartEpoch)
+	c.notify(newServerNotifyNote(TopicMarketResumed, subject, detail, db.Success))
 
 	// Book notes may resume at any time. Seq not set since no book changes.
 

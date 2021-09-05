@@ -70,7 +70,7 @@ out:
 			switch n := note.(type) {
 			case *core.FeePaymentNote:
 				// Once registration is complete, register for a book feed.
-				if n.Subject() == core.SubjectAccountRegistered {
+				if n.Topic() == core.TopicAccountRegistered {
 					// Even if we're not going to use it, we need to subscribe
 					// to a book feed and keep the channel empty, so that we
 					// can keep receiving book feed notifications.
@@ -99,7 +99,7 @@ out:
 					m.replenishBalances()
 				}
 			case *core.MatchNote:
-				if n.Subject() == core.SubjectNewMatch {
+				if n.Topic() == core.TopicNewMatch {
 					atomic.AddUint32(&matchCounter, 1)
 				}
 			}

@@ -48,13 +48,13 @@ func (p *pingPonger) SetupWallets(m *Mantle) {
 func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 	switch n := note.(type) {
 	case *core.FeePaymentNote:
-		if n.Subject() == core.SubjectAccountRegistered {
+		if n.Topic() == core.TopicAccountRegistered {
 			p.buy(m)
 			p.sell(m)
 		}
 	case *core.MatchNote:
-		switch n.Subject() {
-		case core.SubjectAudit:
+		switch n.Topic() {
+		case core.TopicAudit:
 			ord, err := m.Order(n.OrderID)
 			if err != nil {
 				m.fatalError("Error fetching order for match: %v", err)

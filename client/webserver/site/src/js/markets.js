@@ -1257,7 +1257,7 @@ export default class MarketsPage extends BasePage {
     const oldStatus = metaOrder.status
     metaOrder.order = order
     const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
-    if (note.subject === 'Missed cancel') {
+    if (note.topic === 'MissedCancel') {
       Doc.show(bttn)
     }
     if (order.filled === order.qty) {

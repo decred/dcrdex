@@ -501,7 +501,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			if isOrderNote && n.Subject() == SubjectPreimageSent && orderNote.Order.ID.String() == orderID {
+			if isOrderNote && n.Topic() == TopicPreimageSent && orderNote.Order.ID.String() == orderID {
 				forgetClient2Order(oid)
 				return true
 			}
@@ -536,7 +536,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Subject() == SubjectPreimageSent && orderNote.Order.ID.String() == orderID
+			return isOrderNote && n.Topic() == TopicPreimageSent && orderNote.Order.ID.String() == orderID
 		})
 		if !preimageRevealed {
 			return fmt.Errorf("preimage not revealed for order %s after %s", tracker.token(), twoEpochs)
@@ -551,7 +551,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 		client2.log("Waiting %v for order %s to be partially matched", maxMatchDuration, tracker.token())
 		matched := notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Subject() == SubjectMatchesMade && orderNote.Order.ID.String() == orderID
+			return isOrderNote && n.Topic() == TopicMatchesMade && orderNote.Order.ID.String() == orderID
 		})
 		if !matched {
 			return fmt.Errorf("order %s not matched after %s", tracker.token(), maxMatchDuration)
@@ -758,8 +758,8 @@ func TestResendPendingRequests(t *testing.T) {
 		for !foundSwapErrorNote {
 			select {
 			case note := <-notes:
-				foundSwapErrorNote = note.Severity() == db.ErrorLevel && (note.Subject() == SubjectSwapSendError ||
-					note.Subject() == SubjectInitError || note.Subject() == SubjectReportRedeemError)
+				foundSwapErrorNote = note.Severity() == db.ErrorLevel && (note.Topic() == TopicSwapSendError ||
+					note.Topic() == TopicInitError || note.Topic() == TopicReportRedeemError)
 			case <-time.After(4 * time.Second):
 				return fmt.Errorf("client %d: no init/redeem error note after 4 seconds", client.id)
 			}
@@ -939,7 +939,7 @@ func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, order
 	client.log("Waiting up to %v for matches on order %s", maxMatchDuration, tracker.token())
 	matched := client.notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)
-		return isOrderNote && n.Subject() == SubjectMatchesMade && orderNote.Order.ID.String() == orderID
+		return isOrderNote && n.Topic() == TopicMatchesMade && orderNote.Order.ID.String() == orderID
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -1348,7 +1348,7 @@ func (client *tClient) registerDEX(ctx context.Context) error {
 	feeTimeout := time.Millisecond*time.Duration(client.dc().cfg.BroadcastTimeout) + 12*time.Second
 	client.log("Waiting %v for fee confirmation notice", feeTimeout)
 	feePaid := client.notes.find(ctx, feeTimeout, func(n Notification) bool {
-		return n.Type() == NoteTypeFeePayment && n.Subject() == SubjectAccountRegistered
+		return n.Type() == NoteTypeFeePayment && n.Topic() == TopicAccountRegistered
 	})
 	if !feePaid {
 		return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)

@@ -5,147 +5,305 @@ import (
 	"golang.org/x/text/message"
 )
 
-type Translation struct {
-	Subject  string
-	Template string
+type translation struct {
+	subject  string
+	template string
 }
 
-var TemplateKeys = map[string]string{
+// enUS is the American English translations.
+var enUS = map[Topic]*translation{
 	// [host]
-	SubjectAccountRegistered: "You may now trade at %s",
+	TopicAccountRegistered: {
+		subject:  "Account registered",
+		template: "You may now trade at %s",
+	},
 	// [confs, host]
-	SubjectFeePaymentInProgress: "Waiting for %d confirmations before trading at %s",
+	TopicFeePaymentInProgress: {
+		subject:  "Fee payment in progress",
+		template: "Waiting for %d confirmations before trading at %s",
+	},
 	// [confs, required confs]
-	SubjectRegUpdate: "Fee payment confirmations %v/%v",
+	TopicRegUpdate: {
+		subject:  "regupdate",
+		template: "Fee payment confirmations %v/%v",
+	},
 	// [host, error]
-	SubjectFeePaymentError: "Error encountered while paying fees to %s: %v",
+	TopicFeePaymentError: {
+		subject:  "Fee payment error",
+		template: "Error encountered while paying fees to %s: %v",
+	},
 	// [host, error]
-	SubjectAccountUnlockError: "error unlocking account for %s: %v",
+	TopicAccountUnlockError: {
+		subject:  "Account unlock error",
+		template: "error unlocking account for %s: %v",
+	},
 	// [host]
-	SubjectFeeCoinError: "Empty fee coin for %s.",
+	TopicFeeCoinError: {
+		subject:  "Fee coin error",
+		template: "Empty fee coin for %s.",
+	},
 	// [host]
-	SubjectWalletConnectionWarning: "Incomplete registration detected for %s, but failed to connect to the Decred wallet",
+	TopicWalletConnectionWarning: {
+		subject:  "Wallet connection warning",
+		template: "Incomplete registration detected for %s, but failed to connect to the Decred wallet",
+	},
 	// [host, error]
-	SubjectWalletUnlockError: "Connected to Decred wallet to complete registration at %s, but failed to unlock: %v",
+	TopicWalletUnlockError: {
+		subject:  "Wallet unlock error",
+		template: "Connected to Decred wallet to complete registration at %s, but failed to unlock: %v",
+	},
 	// [ticker, error]
-	SubjectWithdrawError: "Error encountered during %s withdraw: %v",
+	TopicWithdrawError: {
+		subject:  "Withdraw error",
+		template: "Error encountered during %s withdraw: %v",
+	},
 	// [ticker, coin ID]
-	SubjectWithdrawSend: "Withdraw of %s has completed successfully. Coin ID = %s",
+	TopicWithdrawSend: {
+		subject:  "Withdraw sent",
+		template: "Withdraw of %s has completed successfully. Coin ID = %s",
+	},
 	// [error]
-	SubjectOrderLoadFailure: "Some orders failed to load from the database: %v",
+	TopicOrderLoadFailure: {
+		subject:  "Order load failure",
+		template: "Some orders failed to load from the database: %v",
+	},
 	// [qty, ticker, token]
-	SubjectYoloPlaced: "selling %.8f %s at market rate (%s)",
+	TopicYoloPlaced: {
+		subject:  "Market order placed",
+		template: "selling %.8f %s at market rate (%s)",
+	},
 	// [sell string, qty, ticker, rate string, token]
-	SubjectOrderPlaced: "%sing %.8f %s, rate = %s (%s)",
+	TopicOrderPlaced: {
+		subject:  "Order placed",
+		template: "%sing %.8f %s, rate = %s (%s)",
+	},
 	// [missing count, token, host]
-	SubjectMissingMatches: "%d matches for order %s were not reported by %q and are considered revoked",
+	TopicMissingMatches: {
+		subject:  "Missing matches",
+		template: "%d matches for order %s were not reported by %q and are considered revoked",
+	},
 	// [token, error]
-	SubjectWalletMissing: "Wallet retrieval error for active order %s: %v",
+	TopicWalletMissing: {
+		subject:  "Wallet missing",
+		template: "Wallet retrieval error for active order %s: %v",
+	},
 	// [side, token, match status]
-	SubjectMatchErrorCoin: "Match %s for order %s is in state %s, but has no maker swap coin.",
+	TopicMatchErrorCoin: {
+		subject:  "Match coin error",
+		template: "Match %s for order %s is in state %s, but has no maker swap coin.",
+	},
 	// [side, token, match status]
-	SubjectMatchErrorContract: "Match %s for order %s is in state %s, but has no maker swap contract.",
+	TopicMatchErrorContract: {
+		subject:  "Match contract error",
+		template: "Match %s for order %s is in state %s, but has no maker swap contract.",
+	},
 	// [ticker, contract, token, error]
-	SubjectMatchRecoveryError: "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
+	TopicMatchRecoveryError: {
+		subject:  "Match recovery error",
+		template: "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
+	},
 	// [token]
-	SubjectOrderCoinError: "No funding coins recorded for active order %s",
+	TopicOrderCoinError: {
+		subject:  "Order coin error",
+		template: "No funding coins recorded for active order %s",
+	},
 	// [token, ticker, error]
-	SubjectOrderCoinFetchError: "Source coins retrieval error for order %s (%s): %v",
+	TopicOrderCoinFetchError: {
+		subject:  "Order coin fetch error",
+		template: "Source coins retrieval error for order %s (%s): %v",
+	},
 	// [token, ticker, error]
-	SubjectMissedCancel: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.",
+	TopicMissedCancel: {
+		subject:  "Missed cancel",
+		template: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.",
+	},
 	// [capitalized sell string, base ticker, quote ticker, host, token]
-	SubjectOrderCanceled: "%s order on %s-%s at %s has been canceled (%s)",
+	TopicOrderCanceled: {
+		subject:  "Order canceled",
+		template: "%s order on %s-%s at %s has been canceled (%s)",
+	},
 	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
-	SubjectMatchesMade: "%s order on %s-%s %.1f%% filled (%s)",
+	TopicMatchesMade: {
+		subject:  "Matches made",
+		template: "%s order on %s-%s %.1f%% filled (%s)",
+	},
 	// [qty, ticker, token]
-	SubjectSwapSendError: "Error encountered sending a swap output(s) worth %.8f %s on order %s",
+	TopicSwapSendError: {
+		subject:  "Swap send error",
+		template: "Error encountered sending a swap output(s) worth %.8f %s on order %s",
+	},
 	// [match, error]
-	SubjectInitError: "Error notifying DEX of swap for match %s: %v",
+	TopicInitError: {
+		subject:  "Swap reporting error",
+		template: "Error notifying DEX of swap for match %s: %v",
+	},
 	// [match, error]
-	SubjectReportRedeemError: "Error notifying DEX of redemption for match %s: %v",
+	TopicReportRedeemError: {
+		subject:  "Redeem reporting error",
+		template: "Error notifying DEX of redemption for match %s: %v",
+	},
 	// [qty, ticker, token]
-	SubjectSwapsInitiated: "Sent swaps worth %.8f %s on order %s",
+	TopicSwapsInitiated: {
+		subject:  "Swaps initiated",
+		template: "Sent swaps worth %.8f %s on order %s",
+	},
 	// [qty, ticker, token]
-	SubjectRedemptionError: "Error encountered sending redemptions worth %.8f %s on order %s",
+	TopicRedemptionError: {
+		subject:  "Redemption error",
+		template: "Error encountered sending redemptions worth %.8f %s on order %s",
+	},
 	// [qty, ticker, token]
-	SubjectMatchComplete: "Redeemed %.8f %s on order %s",
+	TopicMatchComplete: {
+		subject:  "Match complete",
+		template: "Redeemed %.8f %s on order %s",
+	},
 	// [qty, ticker, token]
-	SubjectRefundFailure: "Refunded %.8f %s on order %s, with some errors",
+	TopicRefundFailure: {
+		subject:  "Refund Failure",
+		template: "Refunded %.8f %s on order %s, with some errors",
+	},
 	// [qty, ticker, token]
-	SubjectMatchesRefunded: "Refunded %.8f %s on order %s",
+	TopicMatchesRefunded: {
+		subject:  "Matches Refunded",
+		template: "Refunded %.8f %s on order %s",
+	},
 	// [match ID token]
-	SubjectMatchRevoked: "Match %s has been revoked",
+	TopicMatchRevoked: {
+		subject:  "Match revoked",
+		template: "Match %s has been revoked",
+	},
 	// [token, market name, host]
-	SubjectOrderRevoked: "Order %s on market %s at %s has been revoked by the server",
+	TopicOrderRevoked: {
+		subject:  "Order revoked",
+		template: "Order %s on market %s at %s has been revoked by the server",
+	},
 	// [token, market name, host]
-	SubjectOrderAutoRevoked: "Order %s on market %s at %s revoked due to market suspension",
+	TopicOrderAutoRevoked: {
+		subject:  "Order auto-revoked",
+		template: "Order %s on market %s at %s revoked due to market suspension",
+	},
 	// [ticker, coin ID, match]
-	SubjectMatchRecovered: "Found maker's redemption (%s: %v) and validated secret for match %s",
+	TopicMatchRecovered: {
+		subject:  "Match recovered",
+		template: "Found maker's redemption (%s: %v) and validated secret for match %s",
+	},
 	// [token]
-	SubjectCancellingOrder: "A cancel order has been submitted for order %s",
+	TopicCancellingOrder: {
+		subject:  "Cancelling order",
+		template: "A cancel order has been submitted for order %s",
+	},
 	// [token, old status, new status]
-	SubjectOrderStatusUpdate: "Status of order %v revised from %v to %v",
+	TopicOrderStatusUpdate: {
+		subject:  "Order status update",
+		template: "Status of order %v revised from %v to %v",
+	},
 	// [count, host, token]
-	SubjectMatchResolutionError: "%d matches reported by %s were not found for %s.",
+	TopicMatchResolutionError: {
+		subject:  "Match resolution error",
+		template: "%d matches reported by %s were not found for %s.",
+	},
 	// [token]
-	SubjectFailedCancel: "Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.",
+	TopicFailedCancel: {
+		subject:  "Failed cancel",
+		template: "Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.",
+	},
 	// [coin ID, ticker, match]
-	SubjectAuditTrouble: "Still searching for counterparty's contract coin %v (%s) for match %s. Are your internet and wallet connections good?",
+	TopicAuditTrouble: {
+		subject:  "Audit trouble",
+		template: "Still searching for counterparty's contract coin %v (%s) for match %s. Are your internet and wallet connections good?",
+	},
 	// [host, error]
-	SubjectDexAuthError: "%s: %v",
+	TopicDexAuthError: {
+		subject:  "DEX auth error",
+		template: "%s: %v",
+	},
 	// [count, host]
-	SubjectUnknownOrders: "%d active orders reported by DEX %s were not found.",
+	TopicUnknownOrders: {
+		subject:  "DEX reported unknown orders",
+		template: "%d active orders reported by DEX %s were not found.",
+	},
 	// [count]
-	SubjectOrdersReconciled: "Statuses updated for %d orders.",
+	TopicOrdersReconciled: {
+		subject:  "Orders reconciled with DEX",
+		template: "Statuses updated for %d orders.",
+	},
 	// [ticker, address]
-	SubjectWalletConfigurationUpdated: "Configuration for %s wallet has been updated. Deposit address = %s",
+	TopicWalletConfigurationUpdated: {
+		subject:  "Wallet configuration updated",
+		template: "Configuration for %s wallet has been updated. Deposit address = %s",
+	},
 	//  [ticker]
-	SubjectWalletPasswordUpdated: "Password for %s wallet has been updated.",
+	TopicWalletPasswordUpdated: {
+		subject:  "Wallet Password Updated",
+		template: "Password for %s wallet has been updated.",
+	},
 	// [market name, host, time]
-	SubjectMarketSuspendScheduled: "Market %s at %s is now scheduled for suspension at %v",
+	TopicMarketSuspendScheduled: {
+		subject:  "Market suspend scheduled",
+		template: "Market %s at %s is now scheduled for suspension at %v",
+	},
 	// [market name, host]
-	SubjectMarketSuspended: "Trading for market %s at %s is now suspended.",
+	TopicMarketSuspended: {
+		subject:  "Market suspended",
+		template: "Trading for market %s at %s is now suspended.",
+	},
 	// [market name, host]
-	SubjectMarketSuspendedWithPurge: "Trading for market %s at %s is now suspended. All booked orders are now PURGED.",
+	TopicMarketSuspendedWithPurge: {
+		subject:  "Market suspended, orders purged",
+		template: "Trading for market %s at %s is now suspended. All booked orders are now PURGED.",
+	},
 	// [market name, host, time]
-	SubjectMarketResumeScheduled: "Market %s at %s is now scheduled for resumption at %v",
+	TopicMarketResumeScheduled: {
+		subject:  "Market resume scheduled",
+		template: "Market %s at %s is now scheduled for resumption at %v",
+	},
 	// [market name, host, epoch]
-	SubjectMarketResumed: "Market %s at %s has resumed trading at epoch %d",
+	TopicMarketResumed: {
+		subject:  "Market resumed",
+		template: "Market %s at %s has resumed trading at epoch %d",
+	},
 	// [host]
-	SubjectUpgradeNeeded: "You may need to update your client to trade at %s.",
+	TopicUpgradeNeeded: {
+		subject:  "Upgrade needed",
+		template: "You may need to update your client to trade at %s.",
+	},
 	// [host]
-	SubjectDEXConnected: "%s is connected",
+	TopicDEXConnected: {
+		subject:  "Server connected",
+		template: "%s is connected",
+	},
 	// [host]
-	SubjectDEXDisconnected: "%s is disconnected",
+	TopicDEXDisconnected: {
+		subject:  "Server disconnect",
+		template: "%s is disconnected",
+	},
 	// [host, rule, time, details]
-	SubjectPenalized: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
+	TopicPenalized: {
+		subject:  "Server has penalized you",
+		template: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n",
+	},
+	TopicSeedNeedsSaving: {
+		subject:  "Don't forget to back up your application seed",
+		template: "A new application seed has been created. Make a back up now in the settings view.",
+	},
+	TopicUpgradedToSeed: {
+		subject:  "Back up your new application seed",
+		template: "The client has been upgraded to use an application seed. Back up the seed now in the settings view.",
+	},
+	TopicDEXNotification: {
+		subject:  "Message from DEX",
+		template: "%s: %s",
+	},
 }
 
-// EnLocale is the english translations. We can construct the EnLocale in an
-// init function, since the subjects and templates are untranslated from the
-// TemplateKeys. Other translators will define each entry in a struct literal.
-var EnLocale = map[string]*Translation{}
-
-var Subjects map[string]map[string]string
-
-func registerTranslations(lang language.Tag, translations map[string]*Translation) {
-	for subject, t := range translations {
-		tmplKey := TemplateKeys[subject]
-		message.SetString(lang, tmplKey, t.Template)
-		message.SetString(lang, subject, t.Subject)
-	}
-}
-
-func inintializeEnLocale() {
-	for subject, t := range TemplateKeys {
-		EnLocale[subject] = &Translation{
-			Subject:  subject,
-			Template: t,
-		}
-	}
-	registerTranslations(language.AmericanEnglish, EnLocale)
+var locales = map[string]map[Topic]*translation{
+	language.AmericanEnglish.String(): enUS,
 }
 
 func init() {
-	inintializeEnLocale()
+	for lang, translations := range locales {
+		for topic, translation := range translations {
+			message.SetString(language.Make(lang), string(topic), translation.template)
+		}
+	}
 }

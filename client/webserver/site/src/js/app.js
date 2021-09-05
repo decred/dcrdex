@@ -430,11 +430,11 @@ export default class Application {
    * is used to update the dex registration status.
    */
   handleFeePaymentNote (note) {
-    switch (note.subject) {
-      case 'regupdate':
+    switch (note.topic) {
+      case 'RegUpdate':
         this.updateExchangeRegistration(note.dex, false, note.confirmations)
         break
-      case 'Account registered':
+      case 'AccountRegistered':
         this.updateExchangeRegistration(note.dex, true)
         break
       default:
