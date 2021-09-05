@@ -11,7 +11,7 @@ type translation struct {
 }
 
 // enUS is the American English translations.
-var enUS = map[string]*translation{
+var enUS = map[Topic]*translation{
 	// [host]
 	TopicAccountRegistered: {
 		subject:  "Account registered",
@@ -296,14 +296,14 @@ var enUS = map[string]*translation{
 	},
 }
 
-var locales = map[string]map[string]*translation{
+var locales = map[string]map[Topic]*translation{
 	language.AmericanEnglish.String(): enUS,
 }
 
 func init() {
 	for lang, translations := range locales {
 		for topic, translation := range translations {
-			message.SetString(language.Make(lang), topic, translation.template)
+			message.SetString(language.Make(lang), string(topic), translation.template)
 		}
 	}
 }

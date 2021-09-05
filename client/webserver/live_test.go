@@ -1146,7 +1146,7 @@ func (c *TCore) runRandomPokes() {
 	for {
 		select {
 		case <-time.NewTimer(nextWait()).C:
-			note := db.NewNotification(randStr(5, 30), randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
+			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), strings.Title(randStr(5, 30)), randStr(5, 100), db.Poke)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return
@@ -1169,7 +1169,7 @@ func (c *TCore) runRandomNotes() {
 				severity = db.WarningLevel
 			}
 
-			note := db.NewNotification(randStr(5, 30), randStr(5, 30), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
+			note := db.NewNotification(randStr(5, 30), core.Topic(randStr(5, 30)), strings.Title(randStr(5, 30)), randStr(5, 100), severity)
 			c.noteFeed <- &note
 		case <-tCtx.Done():
 			return

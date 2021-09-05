@@ -148,7 +148,7 @@ type trackedTrade struct {
 	cancel        *trackedCancel
 	matches       map[order.MatchID]*matchTracker
 	notify        func(Notification)
-	formatDetails func(string, ...interface{}) (string, string)
+	formatDetails func(Topic, ...interface{}) (string, string)
 	epochLen      uint64
 	fromAssetID   uint32
 }
@@ -156,7 +156,7 @@ type trackedTrade struct {
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(string, ...interface{}) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {

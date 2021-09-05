@@ -5446,7 +5446,7 @@ func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
 	return orderNotes, done
 }
 
-func verifyRevokeNotification(ch chan *OrderNote, expectedTopic string, t *testing.T) {
+func verifyRevokeNotification(ch chan *OrderNote, expectedTopic Topic, t *testing.T) {
 	select {
 	case actualOrderNote := <-ch:
 		if expectedTopic != actualOrderNote.TopicID {

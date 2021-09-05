@@ -1114,7 +1114,7 @@ type Core struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 
-	locale        map[string]*translation
+	locale        map[Topic]*translation
 	localePrinter *message.Printer
 
 	credMtx     sync.RWMutex
@@ -4562,7 +4562,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 // new matches on an order.
 func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMap {
 	var tracker *trackedTrade
-	notifyErr := func(topic string, args ...interface{}) {
+	notifyErr := func(topic Topic, args ...interface{}) {
 		subject, detail := c.formatDetails(topic, args...)
 		c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrder()))
 	}

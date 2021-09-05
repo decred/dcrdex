@@ -678,11 +678,13 @@ func RestoreAccountBackup(path string) (*AccountBackup, error) {
 	return ab, nil
 }
 
+type Topic string
+
 // Notification is information for the user that is typically meant for display,
 // and is persisted for recall across sessions.
 type Notification struct {
 	NoteType    string    `json:"type"`
-	TopicID     string    `json:"topic"`
+	TopicID     Topic     `json:"topic"`
 	SubjectText string    `json:"subject"`
 	DetailText  string    `json:"details"`
 	Severeness  Severity  `json:"severity"`
@@ -692,7 +694,7 @@ type Notification struct {
 }
 
 // NewNotification is a constructor for a Notification.
-func NewNotification(noteType, topic, subject, details string, severity Severity) Notification {
+func NewNotification(noteType string, topic Topic, subject, details string, severity Severity) Notification {
 	note := Notification{
 		NoteType:    noteType,
 		TopicID:     topic,
@@ -715,7 +717,7 @@ func (n *Notification) Type() string {
 }
 
 // Topic is a language-independent unique ID for the Notification.
-func (n *Notification) Topic() string {
+func (n *Notification) Topic() Topic {
 	return n.TopicID
 }
 
@@ -810,7 +812,7 @@ func decodeNotification_v1(pushes [][]byte) (*Notification, error) {
 
 	return &Notification{
 		NoteType:    string(pushes[0]),
-		TopicID:     string(pushes[5]),
+		TopicID:     Topic(string(pushes[5])),
 		SubjectText: string(pushes[1]),
 		DetailText:  string(pushes[2]),
 		Severeness:  Severity(pushes[3][0]),
