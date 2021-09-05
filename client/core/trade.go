@@ -537,7 +537,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		subject, details := t.formatDetails(TopicOrderCanceled,
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 
-		t.notify(newOrderNote(TopicOrderCanceled, subject, details, db.Success, corder))
+		t.notify(newOrderNote(TopicOrderCanceled, subject, details, db.Poke, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote(TopicCancel, "", "", db.Data, corder))
 	}

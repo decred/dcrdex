@@ -678,6 +678,7 @@ func RestoreAccountBackup(path string) (*AccountBackup, error) {
 	return ab, nil
 }
 
+// Topic is a language-independent unique ID for a Notification.
 type Topic string
 
 // Notification is information for the user that is typically meant for display,

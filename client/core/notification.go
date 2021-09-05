@@ -87,7 +87,7 @@ func (c *Core) formatDetails(topic Topic, args ...interface{}) (translatedSubjec
 		c.log.Errorf("no translation found for topic %q", topic)
 		return string(topic), "translation error"
 	}
-	return trans.subject, c.localePrinter.Sprintf(trans.template, args...)
+	return trans.subject, c.localePrinter.Sprintf(string(topic), args...)
 }
 
 // Notification is an interface for a user notification. Notification is
