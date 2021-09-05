@@ -372,6 +372,23 @@ func TestPeers(t *testing.T) {
 	spew.Dump(peers)
 }
 
+func TestInitiateGas(t *testing.T) {
+	now := time.Now().Unix()
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	gas, err := ethClient.initiateGas(ctx, now, secretHash, &participantAddr, &contractAddr)
+	if err != nil {
+		t.Fatalf("unexpected error from initiateGas: %v", err)
+	}
+	if gas > eth.InitGas {
+		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
+	}
+	if gas+10000 < eth.InitGas {
+		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+	}
+	fmt.Printf("Gas used for initiate: %v \n", gas)
+}
+
 func TestInitiate(t *testing.T) {
 	now := time.Now().Unix()
 	var secretHash [32]byte
@@ -456,6 +473,33 @@ func TestInitiate(t *testing.T) {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
 	}
+}
+
+func TestRedeemGas(t *testing.T) {
+	now := time.Now().Unix()
+	amt := big.NewInt(1e18)
+	txOpts := newTxOpts(ctx, &simnetAddr, amt)
+	var secret [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+	_, err := ethClient.initiate(txOpts, simnetID, now, secretHash, &participantAddr)
+	if err != nil {
+		t.Fatalf("Unable to initiate swap: %v ", err)
+	}
+	if err := waitForMined(t, time.Second*8, true); err != nil {
+		t.Fatalf("unexpected error while waiting to mine: %v", err)
+	}
+	gas, err := ethClient.redeemGas(ctx, secret, secretHash, &participantAddr, &contractAddr)
+	if err != nil {
+		t.Fatalf("Error getting gas for redeem function: %v", err)
+	}
+	if gas > eth.RedeemGas {
+		t.Fatalf("actual gas %v is greater than eth.RedeemGas %v", gas, eth.RedeemGas)
+	}
+	if gas+3000 < eth.RedeemGas {
+		t.Fatalf("actual gas %v is much less than eth.RedeemGas %v", gas, eth.InitGas)
+	}
+	fmt.Printf("Gas used for redeem: %v \n", gas)
 }
 
 func TestRedeem(t *testing.T) {

@@ -45,6 +45,8 @@ type testNode struct {
 	peersErr       error
 	bal            *big.Int
 	balErr         error
+	initGas        uint64
+	initGasErr     error
 }
 
 func (n *testNode) connect(ctx context.Context, node *node.Node, addr *common.Address) error {
@@ -116,6 +118,9 @@ func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (
 }
 func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return n.peerInfo, n.peersErr
+}
+func (n *testNode) initiateGas(ctx context.Context, refundTimestamp int64, secretHash [32]byte, participant *common.Address, contractAddress *common.Address) (uint64, error) {
+	return n.initGas, n.initGasErr
 }
 
 func TestLoadConfig(t *testing.T) {
@@ -346,6 +351,155 @@ func TestBalance(t *testing.T) {
 		}
 		if bal.Available != test.wantBal {
 			t.Fatalf("want available balance %v got %v for test %q", test.wantBal, bal.Available, test.name)
+		}
+	}
+}
+
+func TestMaxOrder(t *testing.T) {
+	ethToGwei := func(eth uint64) uint64 {
+		return eth * dexeth.GweiFactor
+	}
+
+	ethToWei := func(eth int64) *big.Int {
+		return big.NewInt(0).Mul(big.NewInt(eth*dexeth.GweiFactor), big.NewInt(dexeth.GweiFactor))
+	}
+
+	estimatedInitGas := uint64(180000)
+	hardcodedInitGas := uint64(170000)
+	tests := []struct {
+		name          string
+		bal           *big.Int
+		balErr        error
+		initGasErr    error
+		lotSize       uint64
+		maxFeeRate    uint64
+		feeSuggestion uint64
+		wantErr       bool
+		wantLots      uint64
+		wantValue     uint64
+		wantMaxFees   uint64
+		wantWorstCase uint64
+		wantBestCase  uint64
+		wantLocked    uint64
+	}{
+		{
+			name:          "no balance",
+			bal:           big.NewInt(0),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+		},
+		{
+			name:          "not enough for fees",
+			bal:           ethToWei(10),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+		},
+		{
+			name:          "one lot enough for fees",
+			bal:           ethToWei(11),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			wantLots:      1,
+			wantValue:     ethToGwei(10),
+			wantMaxFees:   100 * estimatedInitGas,
+			wantBestCase:  90 * estimatedInitGas,
+			wantWorstCase: 90 * estimatedInitGas,
+			wantLocked:    ethToGwei(10) + (100 * estimatedInitGas),
+		},
+		{
+			name:          "multiple lots",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			wantLots:      5,
+			wantValue:     ethToGwei(50),
+			wantMaxFees:   5 * 100 * estimatedInitGas,
+			wantBestCase:  90 * estimatedInitGas,
+			wantWorstCase: 5 * 90 * estimatedInitGas,
+			wantLocked:    ethToGwei(50) + (5 * 100 * estimatedInitGas),
+		},
+		{
+			name:          "balanceError",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			balErr:        errors.New(""),
+			wantErr:       true,
+		},
+		{
+			name:          "initGasError",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			initGasErr:    errors.New(""),
+			wantLots:      5,
+			wantValue:     ethToGwei(50),
+			wantMaxFees:   5 * 100 * hardcodedInitGas,
+			wantBestCase:  90 * hardcodedInitGas,
+			wantWorstCase: 5 * 90 * hardcodedInitGas,
+			wantLocked:    ethToGwei(50) + (5 * 100 * hardcodedInitGas),
+		},
+	}
+
+	dexAsset := dex.Asset{
+		ID:           60,
+		Symbol:       "ETH",
+		MaxFeeRate:   100,
+		SwapSize:     hardcodedInitGas,
+		SwapSizeBase: 0,
+		SwapConf:     1,
+	}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := &testNode{}
+		node.bal = test.bal
+		node.balErr = test.balErr
+		node.initGasErr = test.initGasErr
+		node.initGas = estimatedInitGas
+		eth := &ExchangeWallet{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+			acct: new(accounts.Account),
+		}
+		dexAsset.MaxFeeRate = test.maxFeeRate
+		maxOrder, err := eth.MaxOrder(test.lotSize, test.feeSuggestion, &dexAsset)
+		cancel()
+
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+
+		if maxOrder.Lots != test.wantLots {
+			t.Fatalf("want lots %v got %v for test %q", test.wantLots, maxOrder.Lots, test.name)
+		}
+		if maxOrder.Value != test.wantValue {
+			t.Fatalf("want value %v got %v for test %q", test.wantValue, maxOrder.Value, test.name)
+		}
+		if maxOrder.MaxFees != test.wantMaxFees {
+			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, maxOrder.MaxFees, test.name)
+		}
+		if maxOrder.RealisticBestCase != test.wantBestCase {
+			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, maxOrder.RealisticBestCase, test.name)
+		}
+		if maxOrder.RealisticWorstCase != test.wantWorstCase {
+			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, maxOrder.RealisticWorstCase, test.name)
+		}
+		if maxOrder.Locked != test.wantLocked {
+			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, maxOrder.Locked, test.name)
 		}
 	}
 }

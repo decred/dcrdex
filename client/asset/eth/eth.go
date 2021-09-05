@@ -18,6 +18,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
@@ -117,6 +118,7 @@ type ethFetcher interface {
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
+	initiateGas(ctx context.Context, refundTimestamp int64, secretHash [32]byte, participant, contractAddress *common.Address) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -297,8 +299,41 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
-func (*ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	return nil, asset.ErrNotImplemented
+func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+	balance, err := eth.Balance()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().Unix()
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	// TODO: replace with configured contract address
+	contractAddress := common.HexToAddress("2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f")
+	initGas, err := eth.node.initiateGas(eth.ctx, now, secretHash, &eth.acct.Address, &contractAddress)
+	if err != nil {
+		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
+		initGas = nfo.SwapSize
+	}
+	availableBalance := balance.Available
+	maxTxFee := initGas * nfo.MaxFeeRate
+	realisticTxFee := initGas * feeSuggestion
+	lots := availableBalance / (lotSize + maxTxFee)
+	if lots < 1 {
+		return &asset.SwapEstimate{}, nil
+	}
+	value := lots * lotSize
+	maxFees := lots * maxTxFee
+	realisticWorstCase := realisticTxFee * lots
+	realisticBestCase := realisticTxFee
+	locked := value + maxFees
+	return &asset.SwapEstimate{
+		Lots:               lots,
+		Value:              value,
+		MaxFees:            maxFees,
+		RealisticWorstCase: realisticWorstCase,
+		RealisticBestCase:  realisticBestCase,
+		Locked:             locked,
+	}, nil
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
