@@ -1980,7 +1980,6 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 			}
 			if !owns {
 				return errors.New("new wallet does not own old deposit address")
-
 			}
 		}
 		return nil
