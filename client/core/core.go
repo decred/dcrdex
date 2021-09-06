@@ -1166,12 +1166,32 @@ func New(cfg *Config) (*Core, error) {
 	}
 	lang := language.AmericanEnglish
 	if cfg.Language != "" {
-		lang, err = language.Parse(cfg.Language)
+		acceptLangs, _, err := language.ParseAcceptLanguage(cfg.Language)
 		if err != nil {
-			return nil, fmt.Errorf("Error parsing language tag %q: %w", cfg.Language, err)
+			return nil, fmt.Errorf("unable to parse requested language: %w", err)
 		}
+		// fmt.Println("parsed input:", acceptLangs)
+		var langs []language.Tag
+		for locale := range locales {
+			tag, err := language.Parse(locale)
+			if err != nil {
+				return nil, fmt.Errorf("bad %v: %w", locale, err)
+			}
+			langs = append(langs, tag)
+		}
+		// fmt.Println("defined langs:", langs)
+		matcher := language.NewMatcher(langs)
+		tag, _, conf := matcher.Match(acceptLangs...)
+		switch conf {
+		case language.Exact:
+		case language.High, language.Low:
+			cfg.Logger.Infof("Using language %v", tag)
+		case language.No:
+			return nil, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
+		}
+		lang = tag
 	}
-	cfg.Logger.Debugf("Using locale printer for %q", lang, cfg.Language)
+	cfg.Logger.Debugf("Using locale printer for %q", lang)
 
 	locale, found := locales[lang.String()]
 	if !found {

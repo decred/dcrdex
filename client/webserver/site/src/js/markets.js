@@ -7,7 +7,7 @@ import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as Order from './orderutil'
 import ws from './ws'
-import Locales, {
+import {
   ID_BOOKED,
   ID_BUY,
   ID_EXECUTED,
@@ -1125,7 +1125,7 @@ export default class MarketsPage extends BasePage {
     const fromAsset = isSell ? baseAsset : quoteAsset
 
     page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
-    page.vSideHeader.textContent = isSell ? window.locales.formatDetails(ID_SELL) : Locales.formatDetails(ID_BUY)
+    page.vSideHeader.textContent = isSell ? window.locales.formatDetails(ID_SELL) : window.locales.formatDetails(ID_BUY)
     page.vSideSubmit.textContent = page.vSideHeader.textContent
     page.vBaseSubmit.textContent = baseAsset.symbol.toUpperCase()
     if (order.isLimit) {

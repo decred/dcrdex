@@ -5,7 +5,6 @@ import { feeSendErr } from './constants'
 import {
   ID_HIDE_ADDIIONAL_SETTINGS,
   ID_NO_APP_PASS_ERROR_MSG,
-  ID_NO_PASS_ERROR_MSG,
   ID_SHOW_ADDIIONAL_SETTINGS
 } from './locales'
 
@@ -33,7 +32,7 @@ export class NewWalletForm {
     bind(form, fields.submitAdd, async () => {
       const pw = fields.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
       if (!pw && !State.passwordIsCached()) {
-        fields.newWalletErr.textContent = window.locales.formatDetails(ID_NO_PASS_ERROR_MSG)
+        fields.newWalletErr.textContent = window.locales.formatDetails(ID_NO_APP_PASS_ERROR_MSG)
         Doc.show(fields.newWalletErr)
         return
       }
@@ -229,12 +228,12 @@ export class WalletConfigForm {
     if (visible) {
       Doc.hide(this.showIcon)
       Doc.show(this.hideIcon, this.otherSettings)
-      this.showHideMsg.textContent = window.locales.formatDetails(ID_SHOW_ADDIIONAL_SETTINGS)
+      this.showHideMsg.textContent = window.locales.formatDetails(ID_HIDE_ADDIIONAL_SETTINGS)
       return
     }
     Doc.hide(this.hideIcon, this.otherSettings)
     Doc.show(this.showIcon)
-    this.showHideMsg.textContent = window.locales.formatDetails(ID_HIDE_ADDIIONAL_SETTINGS)
+    this.showHideMsg.textContent = window.locales.formatDetails(ID_SHOW_ADDIIONAL_SETTINGS)
   }
 
   /*
