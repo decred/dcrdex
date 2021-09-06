@@ -2,6 +2,7 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
+import { ID_NO_PASS_ERROR_MSG, ID_PASSWORD_NOT_MATCH } from './locales'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -124,12 +125,12 @@ export default class RegistrationPage extends BasePage {
     const pw = page.appPW.value
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
-      page.appPWErrMsg.textContent = 'password cannot be empty'
+      page.appPWErrMsg.textContent = window.locales.formatDetails(ID_NO_PASS_ERROR_MSG)
       Doc.show(page.appPWErrMsg)
       return
     }
     if (pw !== pwAgain) {
-      page.appPWErrMsg.textContent = 'passwords do not match'
+      page.appPWErrMsg.textContent = window.locales.formatDetails(ID_PASSWORD_NOT_MATCH)
       Doc.show(page.appPWErrMsg)
       return
     }

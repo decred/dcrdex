@@ -8,7 +8,8 @@
     "watch": "webpack --watch --config webpack/dev.js",
     "analyze": "webpack --config webpack/analyze.js",
     "build": "webpack --config webpack/prod.js --progress --color",
-    "lint": "./node_modules/.bin/eslint src --ext .js"
+    "lint": "./node_modules/.bin/eslint src --ext .js",
+    "lint-fix": "./node_modules/.bin/eslint src --ext .js --fix"
   },
   "keywords": [],
   "author": "The Decred developers",

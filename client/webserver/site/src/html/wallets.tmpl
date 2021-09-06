@@ -16,7 +16,7 @@
     <span data-state="unlocked" class="ico-unlocked d-hide"></span>
     <span data-state="nowallet" class="ico-cross fs12 red"></span>
     <span data-state="syncing" class="ico-sync fs12 d-hide"></span>
-    <span data-state="status" class="txt-status">no wallet</span>
+    <span data-state="status" class="txt-status">[[[no_wallet]]]</span>
   {{end}}
 {{end}}
 
@@ -29,7 +29,7 @@
   <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>[[[Withdraw]]]</button>
   <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>[[[Deposit]]]</button>
   <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>[[[Lock]]]</button>
-  <button data-action="create" class="d-hide">Create a {{.Info.Name}} [[[Wallet]]]</button>
+  <button data-action="create" class="d-hide">[[[create_a_x_wallet]]]</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
     {{else}}
     <button data-action="connect" class="d-hide">[[[Connect]]]</button>
@@ -37,7 +37,7 @@
     <button data-action="withdraw" class="d-hide">[[[Withdraw]]]</button>
     <button data-action="deposit" class="d-hide">[[[Deposit]]]</button>
     <button data-action="lock" class="d-hide">[[[Lock]]]</button>
-    <button data-action="create">[[[Create a]]] {{.Info.Name}} [[[Wallet]]]</button>
+    <button data-action="create">[[[create_a_x_wallet]]]</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}
 {{end}}

@@ -1,6 +1,7 @@
 package locales
 
 var EnUS = map[string]string{
+	"Language":                       "en-US",
 	"Markets":                        "Markets",
 	"Wallets":                        "Wallets",
 	"Notifications":                  "Notifications",
@@ -144,7 +145,6 @@ var EnUS = map[string]string{
 	"Withdraw":                  "Withdraw",
 	"Deposit":                   "Deposit",
 	"Lock":                      "Lock",
-	"Create a":                  "Create a",
 	"New Deposit Address":       "New Deposit Address",
 	"Address":                   "Address",
 	"Amount":                    "Amount",
@@ -164,4 +164,6 @@ var EnUS = map[string]string{
 	"Restoration Seed":       "Restoration Seed",
 	"Restore from seed":      "Restore from seed",
 	"Import Account":         "Import Account",
+	"no_wallet":              "no wallet",
+	"create_a_x_wallet":      "Create a {{.Info.Name}} Wallet", // .Info.Name will be an asset symbol like DCR
 }

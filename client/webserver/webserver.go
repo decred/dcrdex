@@ -393,6 +393,8 @@ func (s *WebServer) buildTemplates(lang string) error {
 
 	tmplDir := filepath.Join(htmlDir, match)
 
+	log.Infof("Using HTML templates in %s", tmplDir)
+
 	bb := "bodybuilder"
 	s.html = newTemplates(tmplDir, s.reloadHTML).
 		addTemplate("login", bb).
