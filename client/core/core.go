@@ -6,7 +6,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -36,7 +35,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
-	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -2637,22 +2635,18 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 			// have to pay the fee. Server provides fee coin as the error message.
 			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
 			dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
-			if err != nil {
-				return nil, true, fmt.Errorf("error decoding fee coin ID from message %q", msgErr.Message)
+			if err != nil || len(dc.acct.feeCoin) == 0 { // err may be nil but feeCoin is empty, e.g. if msgErr.Message == ""
+				c.log.Errorf("Failed to decode fee coin from pre-paid account info message = %q, err = %w", msgErr.Message, err)
+				dc.acct.feeCoin = []byte("DUMMY COIN")
+			} else {
+				regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+				cid, err := asset.DecodeCoinID(regFeeAssetID, dc.acct.feeCoin)
+				if err != nil {
+					c.log.Errorf("Failed to decode coin ID for pre-paid account from feeCoin = %x, err = %w", dc.acct.feeCoin, err)
+				} else {
+					c.log.Infof("Recovered paid account for %s. Fee previously paid with %s", dc.acct.host, cid)
+				}
 			}
-
-			dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-			cid, err := asset.DecodeCoinID(dcrID, dc.acct.feeCoin)
-			if err != nil {
-				// feeCoin decoded from the server's error message above is invalid,
-				// use a dummy dcr fee coin.
-				var zeroHash chainhash.Hash
-				dc.acct.feeCoin = make([]byte, chainhash.HashSize+4)
-				copy(dc.acct.feeCoin[:chainhash.HashSize], zeroHash[:])
-				binary.BigEndian.PutUint32(dc.acct.feeCoin[chainhash.HashSize:], 0)
-				cid = fmt.Sprintf("%s:%d", zeroHash, 0)
-			}
-			c.log.Infof("Recovered paid account for %s. Fee previously paid with %s", dc.acct.host, cid)
 
 			err = c.db.CreateAccount(&db.AccountInfo{
 				Host:         dc.acct.host,
