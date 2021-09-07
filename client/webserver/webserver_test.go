@@ -79,7 +79,7 @@ func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange,
 	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
 }
 
-func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
 	return nil, false, nil
 }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }

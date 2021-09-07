@@ -397,8 +397,8 @@ func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, er
 	return tExchanges[host], nil
 }
 
-// PreRegister - use secondDEX = "thisdexwithalongname.com" to get paid = true.
-func (c *TCore) PreRegister(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
+// DiscoverAccount - use secondDEX = "thisdexwithalongname.com" to get paid = true.
+func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
 	xc := tExchanges[dexAddr]
 	if xc == nil {
 		xc = tExchanges[firstDEX]

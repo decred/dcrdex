@@ -506,7 +506,7 @@ export class DEXAddressForm {
 
     const loaded = app.loading(this.form)
 
-    const res = await postJSON('/api/preregister', {
+    const res = await postJSON('/api/discoveracct', {
       addr: addr,
       cert: cert,
       pass: pw
