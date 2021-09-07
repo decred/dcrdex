@@ -77,7 +77,7 @@ var (
 	// non-critical routes, including all routes registered as HTTP routes.
 	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
 
-	// ipRateLimiter is a per-client rate limiter for the HTTP endpoints
+	// ipHTTPRateLimiter is a per-client rate limiter for the HTTP endpoints
 	// requests and httpRoutes (the market data API). The Server manages
 	// separate limiters used with the websocket routes, rpcRoutes.
 	ipHTTPRateLimiter = make(map[dex.IPKey]*ipRateLimiter)
@@ -500,7 +500,11 @@ func (s *Server) wsLimiter(ip dex.IPKey) *routeLimiter {
 	if prefix != nil { // not ipv4
 		if n := s.v6Prefixes[*prefix]; n > 0 {
 			log.Infof("Detected %d active IPv6 connections with same prefix %v", n, prefix)
-			// ip = *prefix // Use a prefix-aggregated limiter.
+			// Consider: Use a prefix-aggregated limiter when n > threshold. If
+			// we want to get really sophisticated, we may look into a tiered
+			// aggregation algorithm. https://serverfault.com/a/919324/190378
+			//
+			// ip = *prefix
 		}
 	}
 
@@ -552,18 +556,8 @@ func (s *Server) wsLimiterDone(ip dex.IPKey) {
 
 	wsLimiter := s.wsLimiters[ip]
 	if wsLimiter == nil {
-		return // untracked limiter
-		/*
-			// Try a prefix-aggregated limiter.
-			if prefix == nil {
-				return
-			}
-			wsLimiter = s.wsLimiters[*prefix]
-			if wsLimiter == nil {
-				return
-			}
-			ip = *prefix
-		*/
+		return // untracked limiter (i.e. loopback)
+		// If using prefix-aggregated limiters, we'd check for one here.
 	}
 
 	wsLimiter.conns--
