@@ -95,6 +95,7 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		CommonArguments: *cArgs,
 	}
 
+	// TODO: rework register page for paying with other assets.
 	feeAssetID, _ := dex.BipSymbolID("dcr")
 	feeWalletStatus := s.core.WalletState(feeAssetID)
 	feeWalletExists := feeWalletStatus != nil

@@ -390,9 +390,6 @@ func (c *TCore) InitializeClient(pw, seed []byte) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) GetFee(host string, cert interface{}) (uint64, error) {
-	return tExchanges[host].Fee.Amt, nil
-}
 func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, error) {
 	return tExchanges[host], nil
 }

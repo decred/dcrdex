@@ -39,7 +39,7 @@
       {{template "newWalletForm" "[[[reg_dcr_required]]]"}}
     </form>
 
-    {{- /* Unlock Decred wallet. Only shown if not already unlocked. */ -}}
+    {{- /* Unlock wallet. Only shown if not already unlocked. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
       {{template "unlockWalletForm" "[[[reg_dcr_unlocked]]]"}}
     </form>

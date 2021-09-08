@@ -17,29 +17,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
-// apiGetFee is the handler for the '/getfee' API request.
-func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
-	form := new(registrationForm)
-	if !readPost(w, r, form) {
-		return
-	}
-	cert := []byte(form.Cert)
-	fee, err := s.core.GetFee(form.Addr, cert)
-	if err != nil {
-		s.writeAPIError(w, err)
-		return
-	}
-	resp := struct {
-		OK  bool   `json:"ok"`
-		Fee uint64 `json:"fee,omitempty"`
-	}{
-		OK:  true,
-		Fee: fee,
-	}
-	writeJSON(w, resp, s.indent)
-}
-
-// DiscoverAccount is the handler for the '/discoveracct' API request.
+// apiDiscoverAccount is the handler for the '/discoveracct' API request.
 func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
 	if !readPost(w, r, form) {
@@ -97,8 +75,11 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, reg) {
 		return
 	}
-	dcrID, _ := dex.BipSymbolID("dcr")
-	wallet := s.core.WalletState(dcrID)
+	assetID := uint32(42)
+	if reg.AssetID != nil {
+		assetID = *reg.AssetID
+	}
+	wallet := s.core.WalletState(assetID)
 	if wallet == nil {
 		s.writeAPIError(w, errors.New("No Decred wallet"))
 		return
@@ -113,6 +94,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		Cert:    []byte(reg.Cert),
 		AppPass: pass,
 		Fee:     reg.Fee,
+		Asset:   &assetID,
 	})
 	if err != nil {
 		s.writeAPIError(w, err)

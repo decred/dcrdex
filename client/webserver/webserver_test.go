@@ -61,7 +61,7 @@ type TCore struct {
 	logoutErr       error
 	initErr         error
 	isInited        bool
-	getFeeErr       error
+	getDEXConfigErr error
 	createWalletErr error
 	openWalletErr   error
 	closeWalletErr  error
@@ -71,13 +71,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Network() dex.Network                       { return dex.Mainnet }
-func (c *TCore) Exchanges() map[string]*core.Exchange       { return nil }
-func (c *TCore) GetFee(string, interface{}) (uint64, error) { return 1e8, c.getFeeErr }
+func (c *TCore) Network() dex.Network                 { return dex.Mainnet }
+func (c *TCore) Exchanges() map[string]*core.Exchange { return nil }
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
-	return nil, c.getFeeErr // TODO along with test for apiUser / Exchanges() / User()
+	return nil, c.getDEXConfigErr // TODO along with test for apiUser / Exchanges() / User()
 }
-
 func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
 	return nil, false, nil
 }
@@ -484,25 +482,7 @@ func TestAPIInit(t *testing.T) {
 	tCore.initErr = nil
 }
 
-func TestAPIGetFee(t *testing.T) {
-	writer := new(TWriter)
-	var body interface{}
-	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
-	defer shutdown()
-
-	ensure := func(want string) {
-		ensureResponse(t, s.apiGetFee, want, reader, writer, body, nil)
-	}
-
-	body = &registrationForm{Addr: "somedexaddress.org"}
-	ensure(`{"ok":true,"fee":100000000}`)
-
-	// getFee error
-	tCore.getFeeErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
-	tCore.getFeeErr = nil
-}
+// TODO: TesAPIGetDEXInfo
 
 func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)
