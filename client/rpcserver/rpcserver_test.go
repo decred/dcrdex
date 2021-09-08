@@ -32,8 +32,8 @@ var (
 )
 
 type TCore struct {
-	regFee              uint64
-	getFeeErr           error
+	dexExchange         *core.Exchange
+	getDEXConfigErr     error
 	balanceErr          error
 	syncErr             error
 	createWalletErr     error
@@ -93,8 +93,8 @@ func (c *TCore) Logout() error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) GetFee(url string, cert interface{}) (uint64, error) {
-	return c.regFee, c.getFeeErr
+func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
+	return c.dexExchange, c.getDEXConfigErr
 }
 func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 	return c.registerResult, c.registerErr

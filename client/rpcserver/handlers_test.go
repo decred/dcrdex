@@ -187,6 +187,7 @@ func TestHandleVersion(t *testing.T) {
 	}
 }
 
+/* TODO: TestHandleDEXConfig
 func TestHandleGetFee(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -226,6 +227,7 @@ func TestHandleGetFee(t *testing.T) {
 		}
 	}
 }
+*/
 
 func TestHandleInit(t *testing.T) {
 	pw := encode.PassBytes("password123")
@@ -425,36 +427,38 @@ func TestHandleRegister(t *testing.T) {
 		Args: []string{
 			"dex:1234",
 			"1000",
+			"42",
 			"cert",
 		},
 	}
+	dcrFeeAsset := &core.FeeAsset{Amt: 1000, ID: 42}
 	tests := []struct {
-		name                   string
-		params                 *RawParams
-		regFee                 uint64
-		getFeeErr, registerErr error
-		wantErrCode            int
+		name                         string
+		params                       *RawParams
+		regFees                      map[string]*core.FeeAsset
+		getDEXConfigErr, registerErr error
+		wantErrCode                  int
 	}{{
 		name:        "ok",
 		params:      params,
-		regFee:      1000,
+		regFees:     map[string]*core.FeeAsset{"dcr": dcrFeeAsset},
 		wantErrCode: -1,
 	}, {
 		name:        "fee different",
 		params:      params,
-		regFee:      100,
+		regFees:     map[string]*core.FeeAsset{"dcr": {Amt: 100, ID: 42}},
 		wantErrCode: msgjson.RPCRegisterError,
 	}, {
 		name:        "core.Register error",
 		params:      params,
-		regFee:      1000,
+		regFees:     map[string]*core.FeeAsset{"dcr": dcrFeeAsset},
 		registerErr: errors.New("error"),
 		wantErrCode: msgjson.RPCRegisterError,
 	}, {
-		name:        "core.GetFee error",
-		params:      params,
-		getFeeErr:   errors.New("error"),
-		wantErrCode: msgjson.RPCGetFeeError,
+		name:            "core.GetDEXConfig error",
+		params:          params,
+		getDEXConfigErr: errors.New("error"),
+		wantErrCode:     msgjson.RPCGetDEXConfigError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
@@ -463,8 +467,10 @@ func TestHandleRegister(t *testing.T) {
 	for _, test := range tests {
 		tc := &TCore{
 			registerErr: test.registerErr,
-			regFee:      test.regFee,
-			getFeeErr:   test.getFeeErr,
+			dexExchange: &core.Exchange{
+				RegFees: test.regFees,
+			},
+			getDEXConfigErr: test.getDEXConfigErr,
 		}
 		r := &RPCServer{core: tc}
 		payload := handleRegister(r, test.params)
@@ -538,8 +544,13 @@ const exchangeIn = `{
         "swapConf": 1
       }
     },
-    "confsrequired": 1,
-    "confs": null
+    "regFees": {
+      "dcr": {
+        "id": 42,
+        "amt": 2000000,
+        "confs": 1
+	  }
+	}
   }
 }`
 
@@ -577,8 +588,13 @@ const exchangeOut = `{
         "swapConf": 1
       }
     },
-    "confsrequired": 1,
-    "confs": null
+    "regFees": {
+      "dcr": {
+        "id": 42,
+        "amt": 2000000,
+        "confs": 1
+      }
+    }
   }
 }`
 

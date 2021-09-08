@@ -30,13 +30,12 @@ const (
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	orderBookRoute   = "orderbook"
-	getFeeRoute      = "getfee"
+	getDEXConfRoute  = "getdexconfig" // consider a getfees route
 	registerRoute    = "register"
 	tradeRoute       = "trade"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 	withdrawRoute    = "withdraw"
-	marketsRoute     = "markets"
 	appSeedRoute     = "appseed"
 )
 
@@ -80,7 +79,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	orderBookRoute:   handleOrderBook,
-	getFeeRoute:      handleGetFee,
+	getDEXConfRoute:  handleGetDEXConfig,
 	registerRoute:    handleRegister,
 	tradeRoute:       handleTrade,
 	versionRoute:     handleVersion,
@@ -238,23 +237,20 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
-// handleGetFee handles requests for getfee.
+// handleGetDEXConfig handles requests for getdexconfig.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns the dex fee.
-func handleGetFee(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseGetFeeArgs(params)
+// of a dex and returns its config..
+func handleGetDEXConfig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	host, cert, err := parseGetDEXConfigArgs(params)
 	if err != nil {
-		return usage(getFeeRoute, err)
+		return usage(getDEXConfRoute, err)
 	}
-	fee, err := s.core.GetFee(host, cert) // cert is file contents, not name
+	exchange, err := s.core.GetDEXConfig(host, cert) // cert is file contents, not name
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetFeeError, err.Error())
-		return createResponse(getFeeRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, err.Error())
+		return createResponse(getDEXConfRoute, nil, resErr)
 	}
-	res := &getFeeResponse{
-		Fee: fee,
-	}
-	return createResponse(getFeeRoute, res, nil)
+	return createResponse(getDEXConfRoute, exchange, nil)
 }
 
 // handleRegister handles requests for register. *msgjson.ResponsePayload.Error
@@ -265,12 +261,24 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(registerRoute, err)
 	}
 	defer form.AppPass.Clear()
-	fee, err := s.core.GetFee(form.Addr, form.Cert)
+	assetID := uint32(42)
+	if form.Asset != nil {
+		assetID = *form.Asset
+	}
+	exchange, err := s.core.GetDEXConfig(form.Addr, form.Cert)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetFeeError,
-			err.Error())
+		resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
 		return createResponse(registerRoute, nil, resErr)
 	}
+	symb := dex.BipIDSymbol(assetID)
+	feeAsset := exchange.RegFees[symb]
+	if feeAsset == nil {
+		errMsg := fmt.Sprintf("dex does not support asset %v for registration", symb)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(registerRoute, nil, resErr)
+	}
+	fee := feeAsset.Amt
+
 	if fee != form.Fee {
 		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.Addr, fee, form.Fee)
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
@@ -556,7 +564,7 @@ func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	appPass, err := parseAppSeedArgs(params)
 	if err != nil {
-		return usage(registerRoute, err)
+		return usage(appSeedRoute, err)
 	}
 	defer appPass.Clear()
 	seed, err := s.core.ExportSeed(appPass)
@@ -685,17 +693,14 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
-	getFeeRoute: {
+	getDEXConfRoute: {
 		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get dex registration fee.`,
+		cmdSummary: `Get a DEX configuration.`,
 		argsLong: `Args:
-    dex (string): The dex address to get fee for.
+    dex (string): The dex address to get config for.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
-    obj: The getFee result.
-    {
-      "fee" (int): The DEX registration fee.
-    }`,
+    obj: The getdexconfig result. See the 'exchanges' result.`,
 	},
 	newWalletRoute: {
 		pwArgsShort: `"appPass" "walletPass"`,
@@ -762,7 +767,7 @@ var helpMsgs = map[string]helpMsg{
 	},
 	registerRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" fee ("cert")`,
+		argsShort:   `"addr" fee assetID ("cert")`,
 		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong: `Password Args:
@@ -770,6 +775,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		argsLong: `Args:
     addr (string): The DEX address to register for.
     fee (int): The DEX fee.
+    assetID (int): The asset ID with which to pay the fee.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
     {
@@ -808,10 +814,13 @@ Registration is complete after the fee transaction has been confirmed.`,
 	      trade transactions.
           },...
         },
-        "confsrequired": (int) The number of confirmations needed for the
-          registration fee payment
-        "confs" (int): The current number of confirmations for the registration
-          fee payment. This is only present during the registration process.
+        "regFees": {
+          "[assetSymbol]": {
+            "id" (int): The asset's BIP-44 coin ID.
+            "confs" (int): The number of confirmations required.
+            "amt" (int): The fee amount.
+          },...
+        }
       },...
     }`,
 	},

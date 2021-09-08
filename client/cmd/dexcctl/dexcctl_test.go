@@ -108,14 +108,14 @@ func TestReadTextFile(t *testing.T) {
 		wantErr                           bool
 	}{{
 		name:        "ok with cert",
-		cmd:         "getfee",
+		cmd:         "getdexconfig",
 		args:        []string{"1.2.3.4:3000", "./cert"},
 		txtFilePath: "./cert",
 		txtToSave:   certTxt,
 		want:        []string{"1.2.3.4:3000", certTxt},
 	}, {
 		name: "ok no cert",
-		cmd:  "getfee",
+		cmd:  "getdexconfig",
 		args: []string{"1.2.3.4:3000"},
 		want: []string{"1.2.3.4:3000"},
 	}, {
@@ -123,7 +123,7 @@ func TestReadTextFile(t *testing.T) {
 		cmd:  "not a real command",
 	}, {
 		name:    "no file at path",
-		cmd:     "getfee",
+		cmd:     "getdexconfig",
 		args:    []string{"1.2.3.4:3000", "./cert"},
 		wantErr: true,
 	}, {
