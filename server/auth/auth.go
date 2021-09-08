@@ -50,6 +50,7 @@ type Storage interface {
 	ForgiveMatchFail(mid order.MatchID) (bool, error)
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	AccountInfo(aid account.AccountID) (*db.Account, error)
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
 	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
@@ -58,8 +59,8 @@ type Storage interface {
 	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
-	CreateAccount(*account.Account) (string, error)
-	AccountRegAddr(account.AccountID) (string, error)
+	CreateAccount(acct *account.Account, feeAsset uint32, feeAddr string) error
+	AccountRegAddr(account.AccountID) (addr string, asset uint32, err error)
 	PayAccount(account.AccountID, []byte) error
 }
 
@@ -71,7 +72,7 @@ type Signer interface {
 
 // FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).FeeCoin.
-type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
+type FeeChecker func(assetID uint32, coinID []byte) (addr string, val uint64, confs int64, err error)
 
 type TxDataSource func([]byte) ([]byte, error)
 
@@ -180,6 +181,11 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	return handler
 }
 
+type feeAsset struct {
+	confs uint32
+	amt   uint64
+}
+
 // AuthManager handles authentication-related tasks, including validating client
 // signatures, maintaining association between accounts and `comms.Link`s, and
 // signing messages with the DEX's private key. AuthManager manages requests to
@@ -187,11 +193,12 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 type AuthManager struct {
 	storage        Storage
 	signer         Signer
-	regFee         uint64
 	checkFee       FeeChecker
-	feeConfs       int64
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
+
+	feeAddress func(assetID uint32) string
+	feeAssets  map[uint32]*feeAsset
 
 	anarchy           bool
 	freeCancels       bool
@@ -318,13 +325,16 @@ type Config struct {
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
-	// RegistrationFee is the DEX registration fee, in atoms DCR
-	RegistrationFee uint64
-	// FeeConfs is the number of confirmations required on the registration fee
-	// before registration can be completed with notifyfee.
-	FeeConfs int64
+
+	// FeeAddress retrieves a fresh registration fee address for an asset. It
+	// should return an empty string for an unsupported asset.
+	FeeAddress func(assetID uint32) string
+	// FeeAssets specifies the registration fee parameters for assets supported
+	// for registration.
+	FeeAssets map[string]*msgjson.FeeAsset
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
+
 	// TxDataSources are sources of tx data for a coin ID.
 	TxDataSources map[uint32]TxDataSource
 	// UserUnbooker is a function for unbooking all of a user's orders.
@@ -367,14 +377,21 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	if absTakerLotLimit == 0 {
 		absTakerLotLimit = defaultAbsTakerLotLimit
 	}
+	feeAssets := make(map[uint32]*feeAsset)
+	for _, asset := range cfg.FeeAssets {
+		feeAssets[asset.ID] = &feeAsset{
+			amt:   asset.Amt,
+			confs: asset.Confs,
+		}
+	}
 	auth := &AuthManager{
 		storage:           cfg.Storage,
 		signer:            cfg.Signer,
-		regFee:            cfg.RegistrationFee,
 		checkFee:          cfg.FeeChecker,
-		feeConfs:          cfg.FeeConfs,
 		miaUserTimeout:    cfg.MiaUserTimeout,
 		unbookFun:         cfg.UserUnbooker,
+		feeAddress:        cfg.FeeAddress,
+		feeAssets:         feeAssets,
 		anarchy:           cfg.Anarchy,
 		freeCancels:       cfg.FreeCancels || cfg.Anarchy,
 		banScore:          banScore,

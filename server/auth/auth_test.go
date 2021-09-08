@@ -47,6 +47,8 @@ type ratioData struct {
 
 // TStorage satisfies the Storage interface
 type TStorage struct {
+	acctInfo            *db.Account
+	acctInfoErr         error
 	acct                *account.Account
 	matches             []*db.MatchData
 	closedID            account.AccountID
@@ -54,9 +56,9 @@ type TStorage struct {
 	userPreimageResults []*db.PreimageResult
 	userMatchOutcomes   []*db.MatchOutcome
 	orderStatuses       []*db.OrderStatus
-	acctAddr            string
 	acctErr             error
 	regAddr             string
+	regAsset            uint32
 	regErr              error
 	payErr              error
 	unpaid              bool
@@ -70,6 +72,9 @@ func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
 }
 func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 	return nil
+}
+func (s *TStorage) AccountInfo(account.AccountID) (*db.Account, error) {
+	return s.acctInfo, s.acctInfoErr
 }
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
@@ -101,9 +106,15 @@ func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, err
 func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
 	return s.matchStatuses, nil
 }
-func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
-func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
-func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
+func (s *TStorage) CreateAccount(acct *account.Account, assetID uint32, addr string) error {
+	s.regAddr = addr
+	s.regAsset = assetID
+	return s.acctErr
+}
+func (s *TStorage) AccountRegAddr(account.AccountID) (string, uint32, error) {
+	return s.regAddr, s.regAsset, s.regErr
+}
+func (s *TStorage) PayAccount(account.AccountID, []byte) error { return s.payErr }
 func (s *TStorage) setRatioData(dat *ratioData) {
 	s.ratio = *dat
 }
@@ -329,14 +340,24 @@ var (
 	tCheckFeeErr   error
 )
 
-func tCheckFee([]byte) (addr string, val uint64, confs int64, err error) {
+func tCheckFee(assetID uint32, coin []byte) (addr string, val uint64, confs int64, err error) {
+	if assetID != 42 {
+		err = fmt.Errorf("bad asset")
+		return
+	}
 	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
+}
+
+func tFeeAddress(assetID uint32) string {
+	if assetID != 42 {
+		return ""
+	}
+	return tCheckFeeAddr
 }
 
 const (
 	tRegFee       uint64 = 500_000_000
 	tDexPubKeyHex string = "032e3678f9889206dcea4fc281556c9e543c5d5ffa7efe8d11118b52e29c773f27"
-	tFeeAddr      string = "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
 )
 
 var tDexPubKeyBytes = []byte{
@@ -346,7 +367,7 @@ var tDexPubKeyBytes = []byte{
 }
 
 func resetStorage() {
-	*rig.storage = TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+	*rig.storage = TStorage{}
 }
 
 func TestMain(m *testing.M) {
@@ -354,14 +375,20 @@ func TestMain(m *testing.M) {
 		UseLogger(dex.StdOutLogger("AUTH_TEST", dex.LevelTrace))
 		ctx, shutdown := context.WithCancel(context.Background())
 		defer shutdown()
-		storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+		storage := &TStorage{}
 		dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
 		signer := &TSigner{pubkey: dexKey}
 		authMgr := NewAuthManager(&Config{
-			Storage:         storage,
-			Signer:          signer,
-			RegistrationFee: tRegFee,
-			FeeConfs:        tCheckFeeConfs,
+			Storage:    storage,
+			Signer:     signer,
+			FeeAddress: tFeeAddress,
+			FeeAssets: map[string]*msgjson.FeeAsset{
+				"dcr": {
+					ID:    42,
+					Confs: uint32(tCheckFeeConfs),
+					Amt:   tRegFee,
+				},
+			},
 			FeeChecker:      tCheckFee,
 			UserUnbooker:    func(account.AccountID) {},
 			MiaUserTimeout:  90 * time.Second, // TODO: test
@@ -1276,10 +1303,14 @@ func TestHandleRegister(t *testing.T) {
 	user := tNewUser(t)
 	dummyError := fmt.Errorf("test error")
 
+	rig.storage.acctInfoErr = db.ArchiveError{Code: db.ErrAccountUnknown}
+
 	newReg := func() *msgjson.Register {
+		assetID := uint32(42)
 		reg := &msgjson.Register{
 			PubKey: user.privKey.PubKey().SerializeCompressed(),
 			Time:   encode.UnixMilliU(unixMsNow()),
+			Asset:  &assetID,
 		}
 		sigMsg := reg.Serialize()
 		sig := ecdsa.Sign(user.privKey, sigMsg)
@@ -1314,8 +1345,14 @@ func TestHandleRegister(t *testing.T) {
 	reg.Sig = []byte{0x01, 0x02}
 	ensureErr(do(newMsg(reg)), "bad signature", msgjson.SignatureError)
 
-	// storage.CreateAccount error
 	msg = newMsg(newReg())
+
+	// AccountInfo failure
+	rig.storage.acctInfoErr = db.ArchiveError{Code: db.ErrGeneralFailure}
+	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
+	rig.storage.acctInfoErr = db.ArchiveError{Code: db.ErrAccountUnknown}
+
+	// storage.CreateAccount error
 	rig.storage.acctErr = dummyError
 	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
 	rig.storage.acctErr = nil
@@ -1346,8 +1383,8 @@ func TestHandleRegister(t *testing.T) {
 	if regRes.DEXPubKey.String() != tDexPubKeyHex {
 		t.Fatalf("wrong DEX pubkey. expected %s, got %s", tDexPubKeyHex, regRes.DEXPubKey.String())
 	}
-	if regRes.Address != tFeeAddr {
-		t.Fatalf("wrong fee address. expected %s, got %s", tFeeAddr, regRes.Address)
+	if regRes.Address != tCheckFeeAddr {
+		t.Fatalf("wrong fee address. expected %s, got %s", tCheckFeeAddr, regRes.Address)
 	}
 	if regRes.Fee != tRegFee {
 		t.Fatalf("wrong fee. expected %d, got %d", tRegFee, regRes.Fee)
@@ -1357,13 +1394,22 @@ func TestHandleRegister(t *testing.T) {
 func TestHandleNotifyFee(t *testing.T) {
 	user := tNewUser(t)
 	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
+	userDBAcct := &db.Account{
+		AccountID:  user.acctID,
+		BrokenRule: account.NoRule,
+		Pubkey:     user.privKey.PubKey().SerializeCompressed(),
+	}
 	rig.storage.acct = userAcct
+	rig.storage.acctInfo = userDBAcct
 	dummyError := fmt.Errorf("test error")
 	coinid := []byte{
 		0xe2, 0x48, 0xd9, 0xea, 0xa1, 0xc4, 0x78, 0xd5, 0x31, 0xc2, 0x41, 0xb4,
 		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
 		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8, 0x00, 0x00, 0x00, 0x32,
 	}
+	// Simulate a CreateAccount done already.
+	rig.storage.regAsset = 42
+	rig.storage.regAddr = tCheckFeeAddr
 
 	defer func() {
 		rig.storage.unpaid = false
@@ -1428,14 +1474,24 @@ func TestHandleNotifyFee(t *testing.T) {
 
 	// missing account
 	rig.storage.acct = nil
+	rig.storage.acctInfo = nil
+	rig.storage.acctInfoErr = db.ArchiveError{Code: db.ErrAccountUnknown}
 	ensureErr(do(newMsg(newNotify())), "bad account ID", msgjson.AuthenticationError)
 	rig.storage.acct = userAcct
+	rig.storage.acctInfo = userDBAcct
+	rig.storage.acctInfoErr = nil
 
-	// account already paid
-	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
+	// account already paid sends a NotifyFeeResult now
+	userDBAcct.FeeCoin = coinid
+	rig.signer.sig = user.randomSignature()
+	rpcErr := doWaiter(newMsg(newNotify()))
+	if rpcErr != nil {
+		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
+	}
+	userDBAcct.FeeCoin = nil
 
 	// Signature error
-	rig.storage.unpaid = true // notifyfee cannot be sent for paid account
+	rig.storage.unpaid = true
 	notify = newNotify()
 	notify.Sig = []byte{0x01, 0x02}
 	ensureErr(do(newMsg(notify)), "bad signature", msgjson.SignatureError)
@@ -1461,7 +1517,7 @@ func TestHandleNotifyFee(t *testing.T) {
 
 	// Send a valid notifyfee, and check the response.
 	rig.signer.sig = user.randomSignature()
-	rpcErr := doWaiter(goodMsg)
+	rpcErr = doWaiter(goodMsg)
 	if rpcErr != nil {
 		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
 	}
