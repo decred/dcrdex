@@ -55,6 +55,14 @@ func init() {
 	asset.Register(assetName, &Driver{})
 }
 
+// NewAddresser creates an asset.Addresser for deriving addresses for the given
+// extended public key. The HDKeyIndexer will be used for discovering the
+// current child index, and storing the index as new addresses are generated
+// with the NextAddress method of the Addresser.
+func (btc *Backend) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer) (asset.Addresser, error) {
+	return NewAddressDeriver(xPub, keyIndexer, btc.chainParams)
+}
+
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
@@ -350,6 +358,82 @@ func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 		return asset.CoinNotFoundError
 	}
 	return nil
+}
+
+// FeeCoin gets the recipient address, value, and confirmations of a transaction
+// output encoded by the given coinID. A non-nil error is returned if the
+// output's pubkey script is not a P2WPKH requiring a single ECDSA-secp256k1
+// signature.
+func (btc *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
+		return
+	}
+
+	var txOut *TxOutData
+	txOut, confs, err = btc.OutputSummary(txHash, vout)
+	if err != nil {
+		return
+	}
+
+	// AddressDeriver gives out p2wpkh addresses.
+	if len(txOut.Addresses) != 1 || !txOut.ScriptType.IsP2WPKH() {
+		return "", 0, -1, dex.UnsupportedScriptError
+	}
+	addr = txOut.Addresses[0]
+	val = txOut.Value
+	return
+}
+
+// TxOutData is transaction output data, including recipient addresses, value,
+// script type, and number of required signatures.
+type TxOutData struct {
+	Value        uint64
+	Addresses    []string
+	SigsRequired int
+	ScriptType   dexbtc.BTCScriptType
+}
+
+// OutputSummary gets transaction output data, including recipient addresses,
+// value, script type, and number of required signatures, plus the current
+// confirmations of a transaction output. If the output does not exist, an error
+// will be returned. Non-standard scripts are not an error.
+func (btc *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
+	var verboseTx *btcjson.TxRawResult
+	verboseTx, err = btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			err = asset.CoinNotFoundError
+		}
+		return
+	}
+
+	if int(vout) > len(verboseTx.Vout)-1 {
+		err = asset.CoinNotFoundError // should be something fatal?
+		return
+	}
+
+	out := verboseTx.Vout[vout]
+
+	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
+	if err != nil {
+		return nil, -1, dex.UnsupportedScriptError
+	}
+	scriptType, addrs, numRequired, err := dexbtc.ExtractScriptData(scriptHex, btc.chainParams)
+	if err != nil {
+		return nil, -1, dex.UnsupportedScriptError
+	}
+
+	txOut = &TxOutData{
+		Value:        toSat(out.Value),
+		Addresses:    addrs,       // out.ScriptPubKey.Addresses
+		SigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
+		ScriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
+	}
+
+	confs = int64(verboseTx.Confirmations)
+	return
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

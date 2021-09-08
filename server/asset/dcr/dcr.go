@@ -64,6 +64,15 @@ func init() {
 	asset.Register(assetName, &Driver{})
 }
 
+// NewAddresser creates an asset.Addresser for deriving addresses for the given
+// extended public key. The HDKeyIndexer will be used for discovering the
+// current child index, and storing the index as new addresses are generated
+// with the NextAddress method of the Addresser. The Backend must have been
+// created with NewBackend (or Setup) to initialize the chain parameters.
+func (*Backend) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer) (asset.Addresser, error) {
+	return NewAddressDeriver(xPub, keyIndexer, chainParams)
+}
+
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
@@ -508,8 +517,7 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	// out.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
-	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.Version, scriptHex, chainParams)
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, scriptHex, chainParams)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
@@ -580,7 +588,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 		sumOut += toAtoms(output.Value)
 		outputs = append(outputs, txOut{
 			value:    toAtoms(output.Value),
-			version:  output.Version, // output.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
+			version:  output.ScriptPubKey.Version,
 			pkScript: pkScript,
 		})
 	}

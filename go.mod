@@ -5,7 +5,7 @@ go 1.16
 require (
 	decred.org/dcrwallet/v2 v2.0.0-20210913145543-714c2f555f04
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
-	github.com/btcsuite/btcutil v1.0.2
+	github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210914193033-2efb9bda71fe
 	github.com/decred/dcrd/certgen v1.1.2-0.20210901152745-8830d9c9cdba

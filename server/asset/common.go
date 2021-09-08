@@ -11,6 +11,17 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+// Addresser retrieves unique addresses.
+type Addresser interface {
+	NextAddress() string
+}
+
+// HDKeyIndexer retrieves and stores child indexes for an extended public key.
+type HDKeyIndexer interface {
+	KeyIndex(xpub string) (uint32, error)
+	SetKeyIndex(idx uint32, xpub string) error
+}
+
 // CoinNotFoundError is to be returned from Contract, Redemption, and
 // FundingCoin when the specified transaction cannot be found. Used by the
 // server to handle network latency.
@@ -19,9 +30,9 @@ const (
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 )
 
-// The Backend interface is an interface for a blockchain backend. TODO: Plumb
-// every method with a cancellable request with a Context, which will prevent
-// backend shutdown from cancelling requests, but is more idiomatic these days.
+// Backend is a blockchain backend. TODO: Plumb every method with a cancellable
+// request with a Context, which will prevent backend shutdown from cancelling
+// requests, but is more idiomatic these days.
 type Backend interface {
 	// It is expected that Connect from dex.Connector is called and returns
 	// before use of the asset, and that it is only called once for the life
