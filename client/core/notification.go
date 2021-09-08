@@ -150,6 +150,7 @@ func newSecurityNote(topic Topic, subject, details string, severity db.Severity)
 // FeePaymentNote is a notification regarding registration fee payment.
 type FeePaymentNote struct {
 	db.Notification
+	Asset         *uint32 `json:"asset,omitempty"`
 	Confirmations *uint32 `json:"confirmations,omitempty"`
 	Dex           string  `json:"dex,omitempty"`
 }
@@ -173,8 +174,9 @@ func newFeePaymentNote(topic Topic, subject, details string, severity db.Severit
 	}
 }
 
-func newFeePaymentNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, currConfs uint32, dexAddr string) *FeePaymentNote {
+func newFeePaymentNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, asset, currConfs uint32, dexAddr string) *FeePaymentNote {
 	feePmtNt := newFeePaymentNote(topic, subject, details, severity, dexAddr)
+	feePmtNt.Asset = &asset
 	feePmtNt.Confirmations = &currConfs
 	return feePmtNt
 }

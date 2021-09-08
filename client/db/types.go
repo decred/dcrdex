@@ -81,8 +81,11 @@ type PrimaryCredentials struct {
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
-	Host string
-	Cert []byte
+	// Host, Cert, and DEXPubKey identify the DEX server.
+	Host      string
+	Cert      []byte
+	DEXPubKey *secp256k1.PublicKey
+
 	// EncKeyV2 is an encrypted private key generated deterministically from the
 	// app seed.
 	EncKeyV2 []byte
@@ -90,22 +93,23 @@ type AccountInfo struct {
 	// when exporting the client credentials, since it cannot be regenerated
 	// automatically.
 	LegacyEncKey []byte
-	DEXPubKey    *secp256k1.PublicKey
-	FeeCoin      []byte
-	// Paid will be set on retrieval based on whether there is an AccountProof
-	// set.
+
+	FeeAssetID uint32
+	FeeCoin    []byte
+	// Paid is set on retrieval based on whether there is an AccountProof set.
 	Paid bool
 }
 
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
-	return dbBytes{1}.
+	return dbBytes{2}.
 		AddData([]byte(ai.Host)).
-		AddData(ai.LegacyEncKey).
-		AddData(ai.DEXPubKey.SerializeCompressed()).
-		AddData(ai.FeeCoin).
 		AddData(ai.Cert).
-		AddData(ai.EncKeyV2)
+		AddData(ai.DEXPubKey.SerializeCompressed()).
+		AddData(ai.EncKeyV2).
+		AddData(ai.LegacyEncKey).
+		AddData(encode.Uint32Bytes(ai.FeeAssetID)).
+		AddData(ai.FeeCoin)
 }
 
 // EncKey is the encrypted account private key.
@@ -128,6 +132,8 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 		return decodeAccountInfo_v0(pushes)
 	case 1:
 		return decodeAccountInfo_v1(pushes)
+	case 2:
+		return decodeAccountInfo_v2(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
@@ -150,9 +156,32 @@ func decodeAccountInfo_v1(pushes [][]byte) (*AccountInfo, error) {
 		Host:         string(hostB),
 		LegacyEncKey: legacyKeyB,
 		DEXPubKey:    pk,
+		FeeAssetID:   42, // only option at this version
 		FeeCoin:      coinB,
 		Cert:         certB,
 		EncKeyV2:     v2Key,
+	}, nil
+}
+
+func decodeAccountInfo_v2(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 7 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 7 data pushes, got %d", len(pushes))
+	}
+	hostB, certB, dexPkB := pushes[0], pushes[1], pushes[2] // dex identity
+	v2Key, legacyKeyB := pushes[3], pushes[4]               // account identity
+	regAssetB, coinB := pushes[5], pushes[6]                // reg fee data
+	pk, err := secp256k1.ParsePubKey(dexPkB)
+	if err != nil {
+		return nil, err
+	}
+	return &AccountInfo{
+		Host:         string(hostB),
+		Cert:         certB,
+		DEXPubKey:    pk,
+		EncKeyV2:     v2Key,
+		LegacyEncKey: legacyKeyB,
+		FeeAssetID:   intCoder.Uint32(regAssetB),
+		FeeCoin:      coinB,
 	}, nil
 }
 

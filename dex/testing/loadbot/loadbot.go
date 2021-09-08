@@ -60,8 +60,9 @@ var (
 	dextestDir = filepath.Join(usr.HomeDir, "dextest")
 	botDir     = filepath.Join(dextestDir, "loadbot")
 
-	defaultRegFee uint64 = 1e8
-	ctx, quit            = context.WithCancel(context.Background())
+	defaultRegFee   uint64 = 1e8
+	defaultRegAsset uint32 = dcrID
+	ctx, quit              = context.WithCancel(context.Background())
 
 	alphaAddrDCR, betaAddrDCR, alphaAddrBTC, betaAddrBTC string
 	alphaCfgDCR, betaCfgDCR,

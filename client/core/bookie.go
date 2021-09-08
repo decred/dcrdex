@@ -662,6 +662,33 @@ func (dc *dexConnection) refreshServerConfig() error {
 			}
 		}
 	}
+
+	// Patch ConfigResponse.RegFees if no entry for DCR is there, meaning it is
+	// likely an older server using cfg.Fee and cfg.RegFeeConfirms.
+	if dcrAsset := cfg.RegFees["dcr"]; dcrAsset == nil {
+		dc.log.Warnf("Legacy server %v does not provide a regFees map.", dc.acct.host)
+		if cfg.RegFees == nil {
+			cfg.RegFees = make(map[string]*msgjson.FeeAsset)
+		}
+		if cfg.Fee > 0 {
+			cfg.RegFees["dcr"] = &msgjson.FeeAsset{ // v0 is only DCR
+				ID:    42,
+				Confs: uint32(cfg.RegFeeConfirms),
+				Amt:   cfg.Fee,
+			}
+		} else {
+			dc.log.Warnf("Server %v does not support DCR for registration", dc.acct.host)
+		}
+	} else {
+		if cfg.Fee > 0 && dcrAsset.Amt != cfg.Fee {
+			dc.log.Warnf("Inconsistent DCR fee amount: %d != %d", dcrAsset.Amt, cfg.Fee)
+		}
+		if dcrAsset.Confs != uint32(cfg.RegFeeConfirms) {
+			dc.log.Warnf("Inconsistent DCR fee confirmation requirement: %d != %d",
+				dcrAsset.Confs, cfg.RegFeeConfirms)
+		}
+	}
+
 	// Update the dex connection with the new config details, including
 	// StartEpoch and FinalEpoch, and rebuild the market data maps.
 	dc.cfgMtx.Lock()

@@ -52,6 +52,7 @@ func runTrader(t Trader, name string) {
 		Addr:    hostAddr,
 		AppPass: pass,
 		Fee:     defaultRegFee,
+		Asset:   &defaultRegAsset,
 		Cert:    filepath.Join(dextestDir, "dcrdex", "rpc.cert"),
 	})
 	if err != nil {
