@@ -43,12 +43,14 @@ func TestAccounts(t *testing.T) {
 
 	acct := tNewAccount(t)
 
-	regAddr, err := archie.CreateAccount(acct)
+	assetID := uint32(42)
+	regAddr := "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k"
+	err := archie.CreateAccount(acct, assetID, regAddr)
 	if err != nil {
 		t.Fatalf("error creating account: %v", err)
 	}
 
-	checkAddr, err := archie.AccountRegAddr(tAcctID)
+	checkAddr, checkAssetID, err := archie.AccountRegAddr(tAcctID)
 	if err != nil {
 		t.Fatalf("error getting registration address: %v", err)
 	}
@@ -56,6 +58,10 @@ func TestAccounts(t *testing.T) {
 	if checkAddr != regAddr {
 		t.Fatalf("unexpected address retrieved from the DB. wanted %s, got %s",
 			regAddr, checkAddr)
+	}
+	if checkAssetID != assetID {
+		t.Fatalf("unexpected asset ID retrieved from the DB. wanted %d, got %d",
+			assetID, checkAssetID)
 	}
 
 	// Get the account. It should be unpaid.
@@ -85,6 +91,7 @@ func TestAccounts(t *testing.T) {
 	}
 	if accts[0].AccountID.String() != "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc" ||
 		accts[0].Pubkey.String() != "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19" ||
+		accts[0].FeeAsset != assetID ||
 		accts[0].FeeAddress != "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k" ||
 		accts[0].FeeCoin.String() != "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005" ||
 		byte(accts[0].BrokenRule) != byte(0) {
@@ -161,7 +168,7 @@ func TestWrongAccount(t *testing.T) {
 
 	acct := tNewAccount(t)
 
-	_, err := archie.AccountRegAddr(tAcctID)
+	_, _, err := archie.AccountRegAddr(tAcctID)
 	if err == nil {
 		t.Fatalf("no error fetching registration address for unknown account")
 	}

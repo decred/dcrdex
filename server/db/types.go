@@ -12,6 +12,7 @@ import (
 type Account struct {
 	AccountID  account.AccountID `json:"accountid"`
 	Pubkey     dex.Bytes         `json:"pubkey"`
+	FeeAsset   uint32            `json:"feeasset,omitempty"`
 	FeeAddress string            `json:"feeaddress"`
 	FeeCoin    dex.Bytes         `json:"feecoin"`
 	BrokenRule account.Rule      `json:"brokenrule"`

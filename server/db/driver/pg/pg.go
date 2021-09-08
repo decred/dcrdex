@@ -12,9 +12,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/db"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
 // Driver implements db.Driver.
@@ -53,18 +50,6 @@ type Config struct {
 
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
 	MarketCfg []*dex.MarketInfo
-
-	// CheckedStores checks the tables for existing identical entires before
-	// attempting to store new data. This will should not be needed if there are
-	// no bugs...
-	//CheckedStores bool
-
-	// Net is the current network, and can be one of mainnet, testnet, or simnet.
-	Net dex.Network
-
-	// FeeKey is base58-encoded extended public key that will be used for
-	// generating fee payment addresses.
-	FeeKey string
 }
 
 // Some frequently used long-form table names.
@@ -80,11 +65,7 @@ type Archiver struct {
 	queryTimeout time.Duration
 	db           *sql.DB
 	dbName       string
-	//checkedStores bool
 	markets      map[string]*dex.MarketInfo
-	feeKeyBranch *hdkeychain.ExtendedKey
-	keyHash      []byte // Store the hash to ref the counter table.
-	keyParams    *chaincfg.Params
 	tables       archiverTables
 
 	fatalMtx sync.RWMutex
@@ -165,7 +146,6 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		dbName:       cfg.DBName,
 		queryTimeout: queryTimeout,
 		markets:      mktMap,
-		//checkedStores: cfg.CheckedStores,
 		tables: archiverTables{
 			feeKeys:  fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),
@@ -194,35 +174,6 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		}
 		log.Infof("Flushed %d sell orders and %d buy orders from market %v with a changed lot size.",
 			len(unbookedSells), len(unbookedBuys), staleMarket)
-	}
-
-	switch cfg.Net {
-	case dex.Mainnet:
-		archiver.keyParams = chaincfg.MainNetParams()
-	case dex.Testnet:
-		archiver.keyParams = chaincfg.TestNet3Params()
-	case dex.Simnet:
-		archiver.keyParams = chaincfg.SimNetParams()
-	default:
-		return nil, fmt.Errorf("unknown network %d", cfg.Net)
-	}
-
-	// Get the master extended public key.
-	masterKey, err := hdkeychain.NewKeyFromString(cfg.FeeKey, archiver.keyParams)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing master pubkey: %w", err)
-	}
-
-	// Get the external branch (= child 0) of the extended pubkey.
-	archiver.feeKeyBranch, err = masterKey.Child(0)
-	if err != nil {
-		return nil, fmt.Errorf("error creating external branch: %w", err)
-	}
-
-	// Get a unique ID to serve as an ID for this key in the child counter table.
-	archiver.keyHash = dcrutil.Hash160([]byte(cfg.FeeKey))
-	if err = archiver.CreateKeyEntry(archiver.keyHash); err != nil {
-		return nil, err
 	}
 
 	return archiver, nil

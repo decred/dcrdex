@@ -70,9 +70,6 @@ func openDB() (func() error, error) {
 		ShowPGConfig: false,
 		QueryTimeout: 0, // zero to use the default
 		MarketCfg:    []*dex.MarketInfo{mktInfo, mktInfo2},
-		//CheckedStores: true,
-		Net:    dex.Mainnet,
-		FeeKey: "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
 	}
 
 	numMarkets = len(dbi.MarketCfg)
@@ -177,11 +174,7 @@ func cleanTables(db *sql.DB) error {
 		return err
 	}
 	_, err = prepareTables(context.Background(), db, mktConfig())
-	if err != nil {
-		return err
-	}
-
-	return archie.CreateKeyEntry(archie.keyHash)
+	return err
 }
 
 func Test_sqlExec(t *testing.T) {
