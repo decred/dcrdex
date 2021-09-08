@@ -23,7 +23,10 @@
             "network": "mainnet",
             "maxFeeRate": 10,
             "swapConf": 4,
-            "configPath": "/home/dcrd/.dcrd/dcrd.conf"
+            "configPath": "/home/dcrd/.dcrd/dcrd.conf",
+            "regConfs": 2,
+            "regFee": 0.1,
+            "regXPub": "xpubdecredonlyadsf"
         },
         "DCR_testnet": {
             "bip44symbol": "dcr",
@@ -36,7 +39,10 @@
             "bip44symbol": "btc",
             "network": "mainnet",
             "maxFeeRate": 100,
-            "swapConf": 3
+            "swapConf": 3,
+            "regConfs": 2,
+            "regFee": 0.0005,
+            "regXPub": "xpubbitcoinonlyasdf"
         },
         "BTC_testnet": {
             "bip44symbol": "btc",

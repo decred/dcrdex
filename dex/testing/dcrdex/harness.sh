@@ -121,14 +121,20 @@ cat << EOF >> "./markets.json"
             "network": "simnet",
             "maxFeeRate": 10,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf"
+            "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf",
+            "regConfs": 1,
+            "regFee": 100000000,
+            "regXPub": "spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE"
         },
         "BTC_simnet": {
             "bip44symbol": "btc",
             "network": "simnet",
             "maxFeeRate": 100,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf",
+            "regConfs": 2,
+            "regFee": 20000000,
+            "regXPub": "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp"
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
@@ -176,12 +182,12 @@ EOF
 # Write dcrdex.conf. The regfeexpub comes from the alpha>server_fees account.
 cat << EOF >> ./dcrdex.conf
 regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
+regfeeconfirms=1
 pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273
 debuglevel=trace
 loglocal=true
-regfeeconfirms=1
 signingkeypass=keypass
 adminsrvon=1
 adminsrvpass=adminpass
