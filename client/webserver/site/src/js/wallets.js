@@ -4,7 +4,7 @@ import { postJSON } from './http'
 import { NewWalletForm, WalletConfigForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as ntfn from './notifications'
 import State from './state'
-import { ID_NO_APP_PASS_ERROR_MSG, ID_KEEP_WALLET_PASS, ID_NEW_WALLET_PASS } from './locales'
+import * as intl from './locales'
 
 const bind = Doc.bind
 const animationLength = 300
@@ -163,12 +163,12 @@ export default class WalletsPage extends BasePage {
     if (visible) {
       Doc.hide(this.page.showIcon)
       Doc.show(this.page.hideIcon, this.page.changePW)
-      this.page.switchPWMsg.textContent = window.locales.formatDetails(ID_KEEP_WALLET_PASS)
+      this.page.switchPWMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_PASS)
       return
     }
     Doc.hide(this.page.hideIcon, this.page.changePW)
     Doc.show(this.page.showIcon)
-    this.page.switchPWMsg.textContent = window.locales.formatDetails(ID_NEW_WALLET_PASS)
+    this.page.switchPWMsg.textContent = intl.prep(intl.ID_NEW_WALLET_PASS)
   }
 
   /*
@@ -426,7 +426,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.reconfigErr)
     if (!page.appPW.value && !State.passwordIsCached()) {
-      page.reconfigErr.textContent = window.locales.formatDetails(ID_NO_APP_PASS_ERROR_MSG)
+      page.reconfigErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
       Doc.show(page.reconfigErr)
       return
     }

@@ -7,23 +7,7 @@ import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as Order from './orderutil'
 import ws from './ws'
-import {
-  ID_BOOKED,
-  ID_BUY,
-  ID_EXECUTED,
-  ID_ORDER_PREVIEW,
-  ID_SELL,
-  ID_TRADE,
-  ID_SET_BUTTON_BUY,
-  ID_NOT_SUPPORTED,
-  ID_SET_BUTTON_SELL,
-  ID_CONNECTION_FAILED,
-  ID_CALCULATING,
-  ID_ESTIMATE_UNAVAILABLE,
-  ID_NO_ZERO_RATE,
-  ID_NO_ZERO_QUANTITY,
-  ID_NO_ASSET_WALLET
-} from './locales'
+import * as intl from './locales'
 
 let app
 const bind = Doc.bind
@@ -162,7 +146,7 @@ export default class MarketsPage extends BasePage {
       swapBttns(page.sellBttn, page.buyBttn)
       page.submitBttn.classList.remove('sellred')
       page.submitBttn.classList.add('buygreen')
-      page.maxLbl.textContent = window.locales.formatDetails(ID_BUY)
+      page.maxLbl.textContent = intl.prep(intl.ID_BUY)
       this.setOrderBttnText()
       this.setOrderVisibility()
       this.drawChartLines()
@@ -171,7 +155,7 @@ export default class MarketsPage extends BasePage {
       swapBttns(page.buyBttn, page.sellBttn)
       page.submitBttn.classList.add('sellred')
       page.submitBttn.classList.remove('buygreen')
-      page.maxLbl.textContent = window.locales.formatDetails(ID_SELL)
+      page.maxLbl.textContent = intl.prep(intl.ID_SELL)
       this.setOrderBttnText()
       this.setOrderVisibility()
       this.drawChartLines()
@@ -459,7 +443,7 @@ export default class MarketsPage extends BasePage {
     }
     const symbol = (!base && this.market.baseCfg.symbol) || (!quote && this.market.quoteCfg.symbol)
 
-    page.loaderMsg.textContent = window.locales.formatDetails(ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
+    page.loaderMsg.textContent = intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
     Doc.show(page.loaderMsg)
   }
 
@@ -528,8 +512,8 @@ export default class MarketsPage extends BasePage {
 
   setOrderBttnText () {
     if (this.isSell()) {
-      this.page.submitBttn.textContent = window.locales.formatDetails(ID_SET_BUTTON_SELL, { asset: this.market.base.symbol.toUpperCase() })
-    } else this.page.submitBttn.textContent = window.locales.formatDetails(ID_SET_BUTTON_BUY, { asset: this.market.base.symbol.toUpperCase() })
+      this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: this.market.base.symbol.toUpperCase() })
+    } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: this.market.base.symbol.toUpperCase() })
   }
 
   /* setMarket sets the currently displayed market. */
@@ -541,7 +525,7 @@ export default class MarketsPage extends BasePage {
     // established, at which time handleConnNote will refresh and reload.
     if (!dex.connected) {
       this.market = { dex: dex }
-      page.chartErrMsg.textContent = window.locales.formatDetails(ID_CONNECTION_FAILED)
+      page.chartErrMsg.textContent = intl.prep(intl.ID_CONNECTION_FAILED)
       Doc.show(page.chartErrMsg)
       this.loaded()
       this.main.style.opacity = 1
@@ -694,7 +678,7 @@ export default class MarketsPage extends BasePage {
     }
     const quoteAsset = app.assets[order.quote]
     const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
-    page.orderPreview.textContent = window.locales.formatDetails(ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
+    page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
     else this.preBuy()
   }
@@ -764,7 +748,7 @@ export default class MarketsPage extends BasePage {
 
     Doc.show(page.maxOrd, page.maxLotBox)
     Doc.hide(page.maxAboveZero)
-    page.maxFromLots.textContent = window.locales.formatDetails(ID_CALCULATING)
+    page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
     const counter = this.maxOrderUpdateCounter
     this.preorderTimer = window.setTimeout(async () => {
@@ -779,7 +763,7 @@ export default class MarketsPage extends BasePage {
       if (counter !== this.maxOrderUpdateCounter) return
       if (!app.checkResponse(res, true)) {
         console.warn('max order estimate not available:', res)
-        page.maxFromLots.textContent = window.locales.formatDetails(ID_ESTIMATE_UNAVAILABLE)
+        page.maxFromLots.textContent = intl.prep(intl.ID_ESTIMATE_UNAVAILABLE)
         if (this.maxLoaded) {
           this.maxLoaded()
           this.maxLoaded = null
@@ -823,12 +807,12 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     if (order.isLimit && !order.rate) {
       Doc.show(page.orderErr)
-      page.orderErr.textContent = window.locales.formatDetails(ID_NO_ZERO_RATE)
+      page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_RATE)
       return false
     }
     if (!order.qty) {
       Doc.show(page.orderErr)
-      page.orderErr.textContent = window.locales.formatDetails(ID_NO_ZERO_QUANTITY)
+      page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_QUANTITY)
       return false
     }
     return true
@@ -1125,7 +1109,7 @@ export default class MarketsPage extends BasePage {
     const fromAsset = isSell ? baseAsset : quoteAsset
 
     page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
-    page.vSideHeader.textContent = isSell ? window.locales.formatDetails(ID_SELL) : window.locales.formatDetails(ID_BUY)
+    page.vSideHeader.textContent = isSell ? intl.prep(intl.ID_SELL) : intl.prep(intl.ID_BUY)
     page.vSideSubmit.textContent = page.vSideHeader.textContent
     page.vBaseSubmit.textContent = baseAsset.symbol.toUpperCase()
     if (order.isLimit) {
@@ -1135,11 +1119,11 @@ export default class MarketsPage extends BasePage {
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
       page.vTotal.textContent = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
       page.vBase.textContent = baseAsset.symbol.toUpperCase()
-      page.vSide.textContent = isSell ? window.locales.formatDetails(ID_SELL).toLowerCase() : window.locales.formatDetails(ID_BUY).toLowerCase()
+      page.vSide.textContent = isSell ? intl.prep(intl.ID_SELL).toLowerCase() : intl.prep(intl.ID_BUY).toLowerCase()
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
-      page.vSide.textContent = window.locales.formatDetails(ID_TRADE)
+      page.vSide.textContent = intl.prep(intl.ID_TRADE)
       page.vBase.textContent = fromAsset.symbol.toUpperCase()
       const gap = this.midGap()
       if (gap) {
@@ -1228,12 +1212,12 @@ export default class MarketsPage extends BasePage {
     const baseWallet = app.walletMap[market.base.id]
     const quoteWallet = app.walletMap[market.quote.id]
     if (!baseWallet) {
-      page.orderErr.textContent = window.locales.formatDetails(ID_NO_ASSET_WALLET, { asset: market.base.symbol })
+      page.orderErr.textContent = intl.prep(intl.ID_NO_ASSET_WALLET, { asset: market.base.symbol })
       Doc.show(page.orderErr)
       return
     }
     if (!quoteWallet) {
-      page.orderErr.textContent = window.locales.formatDetails(ID_NO_ASSET_WALLET, { asset: market.quote.symbol })
+      page.orderErr.textContent = intl.prep(intl.ID_NO_ASSET_WALLET, { asset: market.quote.symbol })
       Doc.show(page.orderErr)
       return
     }
@@ -1304,12 +1288,12 @@ export default class MarketsPage extends BasePage {
       const statusTD = Doc.tmplElement(metaOrder.row, 'status')
       switch (true) {
         case order.type === Order.Limit && order.status === Order.StatusEpoch && alreadyMatched:
-          statusTD.textContent = order.tif === Order.ImmediateTiF ? window.locales.formatDetails(ID_EXECUTED) : window.locales.formatDetails(ID_BOOKED)
+          statusTD.textContent = order.tif === Order.ImmediateTiF ? intl.prep(intl.ID_EXECUTED) : intl.prep(intl.ID_BOOKED)
           order.status = order.tif === Order.ImmediateTiF ? Order.StatusExecuted : Order.StatusBooked
           break
         case order.type === Order.Market && order.status === Order.StatusEpoch:
           // Technically don't know if this should be 'executed' or 'settling'.
-          statusTD.textContent = window.locales.formatDetails(ID_EXECUTED)
+          statusTD.textContent = intl.prep(intl.ID_EXECUTED)
           order.status = Order.StatusExecuted
           break
       }

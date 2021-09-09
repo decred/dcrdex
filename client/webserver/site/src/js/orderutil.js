@@ -1,4 +1,5 @@
 import Doc from './doc'
+import * as intl from './locales'
 
 export const Limit = 1
 export const Market = 2
@@ -52,16 +53,18 @@ export function hasLiveMatches (order) {
 export function statusString (order) {
   const isLive = hasLiveMatches(order)
   switch (order.status) {
-    case StatusUnknown: return 'unknown'
-    case StatusEpoch: return 'epoch'
+    case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)
+    case StatusEpoch: return intl.prep(intl.ID_EPOCH)
     case StatusBooked:
-      if (order.cancelling) return 'cancelling'
-      return isLive ? 'booked/settling' : 'booked'
+      if (order.cancelling) return intl.prep(intl.ID_CANCELING)
+      return isLive ? `${intl.prep(intl.ID_BOOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_BOOKED)
     case StatusExecuted:
-      if (isLive) return 'settling'
-      return (order.filled === 0) ? 'no match' : 'executed'
-    case StatusCanceled: return isLive ? 'canceled/settling' : 'canceled'
-    case StatusRevoked: return isLive ? 'revoked/settling' : 'revoked'
+      if (isLive) return intl.prep(intl.ID_SETTLING)
+      return (order.filled === 0) ? intl.prep(intl.ID_NO_MATCH) : intl.prep(intl.ID_EXECUTED)
+    case StatusCanceled:
+      return isLive ? `${intl.prep(intl.ID_CANCELED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_CANCELED)
+    case StatusRevoked:
+      return isLive ? `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_REVOKED)
   }
 }
 
