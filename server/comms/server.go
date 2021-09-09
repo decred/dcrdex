@@ -48,8 +48,9 @@ const (
 	ipMaxRatePerSec = 1
 	ipMaxBurstSize  = 5
 
-	// Per-websocket-connection request limits. Rate should be a reasonable
-	// sustained rate, while burst should consider bulk reconnect operations.
+	// Per-websocket-connection limits in requests per second. Rate should be a
+	// reasonable sustained rate, while burst should consider bulk reconnect
+	// operations. Consider which routes are authenticated when setting these.
 	wsRateStatus, wsBurstStatus     = 10, 500     // order_status and match_status (combined)
 	wsRateOrder, wsBurstOrder       = 5, 100      // market, limit, and cancel (combined)
 	wsRateInfo, wsBurstInfo         = 10, 200     // low-cost route limiter for: config, fee_rate  (combined)

@@ -966,6 +966,7 @@ func TestWSRateLimiter(t *testing.T) {
 	conn := newWsStub()
 	conn.addChan()     // for <-conn.recv
 	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
+	defer close(conn.nextRead)
 
 	wg.Add(1)
 	go func() {
@@ -991,7 +992,7 @@ func TestWSRateLimiter(t *testing.T) {
 		select {
 		case <-handled:
 			return 0
-		case resp := <-conn.recv: // test handers only return resp with error (rate limit)
+		case resp := <-conn.recv: // test handlers only return resp with error (rate limit)
 			// t.Log("handler error message:", string(resp))
 			msg, err := msgjson.DecodeMessage(resp)
 			if err != nil {
@@ -1046,6 +1047,7 @@ func TestWSRateLimiter(t *testing.T) {
 	conn = newWsStub()
 	conn.addChan()     // for <-conn.recv
 	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
+	defer close(conn.nextRead)
 
 	wg.Add(1)
 	go func() {
