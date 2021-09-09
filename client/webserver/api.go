@@ -39,8 +39,8 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiPreRegister is the handler for the '/preregister' API request.
-func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
+// DiscoverAccount is the handler for the '/discoveracct' API request.
+func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
 	if !readPost(w, r, form) {
 		return
@@ -51,7 +51,7 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
 		return
 	}
-	exchangeInfo, paid, err := s.core.PreRegister(form.Addr, pass, cert)
+	exchangeInfo, paid, err := s.core.DiscoverAccount(form.Addr, pass, cert)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

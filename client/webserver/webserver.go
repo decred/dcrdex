@@ -93,7 +93,7 @@ type clientCore interface {
 	User() *core.User
 	GetFee(url string, cert interface{}) (uint64, error)
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
-	PreRegister(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
+	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
@@ -300,7 +300,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiInit.Post("/login", s.apiLogin)
 			apiInit.Post("/getfee", s.apiGetFee)
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
-			apiInit.Post("/preregister", s.apiPreRegister)
+			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
 		})
 
 		r.Group(func(apiAuth chi.Router) {

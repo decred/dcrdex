@@ -500,86 +500,6 @@ func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjs
 	return nil
 }
 
-// register submits a new 'register' request to the server. Depending on the
-// server version, either encKey or encKeyLegacy will be set, but not both.
-func (c *Core) register(dc *dexConnection, crypter encrypt.Crypter) (regRes *msgjson.RegisterResult,
-	acctPubB, encKey, encKeyLegacy []byte, paid bool, err error) {
-
-	creds := c.creds()
-
-	// register is called before the *dexConnection is in the Core.conns map,
-	// so no risk of concurrent access.
-	regV2 := dc.acct.dexPubKey != nil
-
-	var accountSuspended bool
-	for {
-		if regV2 && !accountSuspended {
-			encKey, acctPubB, err = dc.acct.setupCryptoV2(creds, crypter)
-			if err != nil {
-				return nil, nil, nil, nil, false, newError(acctKeyErr, "setupCryptoV2 error: %v", err)
-			}
-		} else {
-			encKey = nil
-			// This is an old-style DEX that doesn't provide their pubkey in the
-			// config response. Gotta use a legacy-style key.
-			encKeyLegacy, acctPubB, err = dc.acct.setupCryptoLegacy(crypter)
-			if err != nil {
-				return nil, nil, nil, nil, false, codedError(acctKeyErr, err)
-			}
-		}
-		dexReg := &msgjson.Register{
-			PubKey: acctPubB,
-			Time:   encode.UnixMilliU(time.Now()),
-		}
-		regRes = new(msgjson.RegisterResult)
-		err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
-		if err == nil {
-			break
-		}
-		var msgErr *msgjson.Error
-		if errors.As(err, &msgErr) {
-			switch msgErr.Code {
-			case msgjson.AccountExistsError:
-				// Server provides fee coin as the error message.
-				dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
-				if err != nil {
-					err = fmt.Errorf("error decoding coin ID from message %q", msgErr.Message)
-				} else {
-					paid = true
-				}
-				return
-			case msgjson.AccountSuspendedError:
-				// Retry with a legacy-style key.
-				c.log.Infof("HD account key for %s was reported as suspended. Generating a legacy-style key instead.", dc.acct.host)
-				accountSuspended = true
-				dc.acct.resetKeys()
-				continue
-			}
-		}
-
-		return nil, nil, nil, nil, false, codedError(registerErr, err)
-	}
-
-	// If we already had a DEX pubkey from the 'config' response, check for
-	// discrepancies.
-	if dc.acct.dexPubKey != nil && !bytes.Equal(dc.acct.dexPubKey.SerializeCompressed(), regRes.DEXPubKey) {
-		return nil, nil, nil, nil, false, fmt.Errorf("different pubkeys reported by dex in 'config' and 'register' responses")
-	}
-
-	// Check the DEX server's signature.
-	msg := regRes.Serialize()
-
-	// If this was a legacy registration, we'll be setting the pubkey here. For
-	// v2 registrations, we're overwriting the existing key, but whatever. We
-	// already checked that they're identical a few lines up.
-	dc.acct.dexPubKey, err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
-	if err != nil {
-		return nil, nil, nil, nil, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
-	}
-
-	return
-}
-
 // serverMatches are an intermediate structure used by the dexConnection to
 // sort incoming match notifications.
 type serverMatches struct {
@@ -1074,12 +994,14 @@ type blockWaiter struct {
 	action  func(error)
 }
 
-// inProcessRegistration is used internally to Register, and to cache info
-// during the PreRegister -> Register sequence.
-type inProcessRegistration struct {
+// incompleteRegistration stores information about an uncompleted registration.
+// It is used internally to Register, and to cache info during the
+// DiscoverAccount -> Register sequence.
+type incompleteRegistration struct {
 	host                          string
 	regRes                        *msgjson.RegisterResult
 	acctPub, encKey, encKeyLegacy []byte
+	acctSuspended                 bool
 	stamp                         time.Time
 }
 
@@ -1146,8 +1068,8 @@ type Core struct {
 	sentCommitsMtx sync.Mutex
 	sentCommits    map[order.Commitment]chan struct{}
 
-	preRegisterMtx  sync.RWMutex
-	preRegistration *inProcessRegistration
+	incompleteRegMtx sync.RWMutex
+	incompleteReg    *incompleteRegistration
 }
 
 // New is the constructor for a new Core.
@@ -2388,11 +2310,20 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 	return dc.exchangeInfo(), nil
 }
 
-// PreRegister fetches the DEXConfig and a registration address. If the host
-// supports the v2 registration protocol, and the generated account key is
-// recognized and has completed registration, paid will be true and the account
-// will be ready for immediate use.
-func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc *Exchange, paid bool, err error) {
+// DiscoverAccount fetches the DEX server's config, and if the server supports
+// the new deterministic account derivation scheme by providing its public key
+// in the config response, DiscoverAccount also checks if the account is already
+// paid. If the returned paid value is true, the account is ready for immediate
+// use. If paid is false, Register should be used to complete the registration.
+// For an older server that does not provide its pubkey in the config response,
+// paid will always be false and the user should proceed to use Register.
+//
+// The purpose of DiscoverAccount is existing account discovery when the client
+// has been restored from seed. As such, DiscoverAccount is not strictly necessary
+// to register on a DEX, and Register may be called directly, although it requires
+// the expected fee amount as an additional input and it will pay the fee if the
+// account is not discovered and paid.
+func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) (xc *Exchange, paid bool, err error) {
 	if !c.IsInitialized() {
 		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
@@ -2425,44 +2356,16 @@ func (c *Core) PreRegister(dexAddr string, appPW []byte, certI interface{}) (xc 
 		return dc.exchangeInfo(), false, nil
 	}
 
-	regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
+	incompleteReg, paid, err := c.registerHD(dc, crypter)
 	if err != nil {
 		return nil, false, err
 	}
-	if paid {
-		// It's an AccountExistsError. This is now account recovery, which is
-		// great news since we don't have to pay the fee.
-		err = c.authDEX(dc)
-		if err != nil {
-			return nil, false, fmt.Errorf("error authorizing pre-paid account: %v", err)
-		}
-
-		atomic.StoreUint32(&dc.reportingConnects, 1)
-		c.wg.Add(1)
-		go c.listen(dc)
-
-		err = c.markAccountPrePaid(dc, encKey, nil)
-		if err != nil {
-			return nil, false, err
-		}
-
-		c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
-		return dc.exchangeInfo(), true, nil
+	if !paid {
+		c.incompleteRegMtx.Lock()
+		c.incompleteReg = incompleteReg
+		c.incompleteRegMtx.Unlock()
 	}
-
-	c.preRegisterMtx.Lock()
-	c.preRegistration = &inProcessRegistration{
-		host:         dc.acct.host,
-		regRes:       regRes,
-		acctPub:      acctPubB,
-		encKey:       encKey,
-		encKeyLegacy: encKeyLegacy,
-		stamp:        time.Now(),
-	}
-	c.preRegisterMtx.Unlock()
-
-	return dc.exchangeInfo(), false, nil
-
+	return dc.exchangeInfo(), paid, nil
 }
 
 // Register registers an account with a new DEX. If an error occurs while
@@ -2542,83 +2445,87 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
-	var reg *inProcessRegistration
+	c.incompleteRegMtx.RLock()
+	incompleteReg := c.incompleteReg
+	c.incompleteRegMtx.RUnlock()
 
-	// Prepare and sign the registration payload.
-	storeAccount := func() error {
-		return c.db.CreateAccount(&db.AccountInfo{
-			Host:         dc.acct.host,
-			Cert:         dc.acct.cert,
-			LegacyEncKey: reg.encKeyLegacy,
-			EncKeyV2:     reg.encKey,
-			DEXPubKey:    dc.acct.dexPubKey,
-			FeeCoin:      dc.acct.feeCoin,
-		})
+	dexSupportsHDAccts := dc.acct.dexPubKey != nil
+	if incompleteReg == nil || incompleteReg.host != host || time.Since(incompleteReg.stamp) >= time.Minute*5 {
+		// Either we've not attempted to create an HD account with this DEX or we
+		// did so over 5 minutes ago. Anyhow, let's (re)try creating one now.
+		if dexSupportsHDAccts {
+			var paid bool
+			incompleteReg, paid, err = c.registerHD(dc, crypter)
+			if err != nil {
+				return nil, err
+			}
+			if paid {
+				res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}
+				return res, nil
+			}
+		}
 	}
 
-	c.preRegisterMtx.RLock()
-	reg = c.preRegistration
-	c.preRegisterMtx.RUnlock()
-
-	if reg == nil || reg.host != host || time.Since(reg.stamp) >= time.Minute*5 {
-		// c.register must be called before the *dexConnection is added to the
-		// c.conns map.
-		regRes, acctPubB, encKey, encKeyLegacy, paid, err := c.register(dc, crypter)
+	// If the DEX supports HD accounts, and we don't yet have a paid HD account with
+	// the DEX, `incompleteReg` would be appropriately set either in a previous call
+	// to DiscoverAccount or by the if block above. If the DEX does not support HD
+	// accounts, or there is an existing but suspended account with the DEX, register
+	// using a legacy-style key.
+	// TODO: 2 options for improvement here:
+	// 1) Just don't support older-version DEXs or
+	// 2) If the DEX does support HD accounts but the account is suspended, generate
+	// another HD key for the DEX instead of creating a legacy-style key.
+	if !dexSupportsHDAccts || incompleteReg.acctSuspended {
+		c.log.Infof("Generating a legacy-style key to register with %s.", dc.acct.host)
+		var paid bool
+		dc.acct.resetKeys() // clear any previously set HD acct keys
+		incompleteReg, paid, err = c.registerLegacy(dc, crypter)
 		if err != nil {
 			return nil, err
 		}
 		if paid {
-			// It's an AccountExistsError. This is now account recovery, which is
-			// great news since we don't have to pay the fee.
-			err = c.authDEX(dc)
-			if err != nil {
-				return nil, fmt.Errorf("error authorizing pre-paid account: %v", err)
-			}
-			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+			// TODO: This is unlikely as the key used for registration was only just
+			// recently generated, randomly.
 			res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}
-			return res, c.markAccountPrePaid(dc, encKey, encKeyLegacy)
-		}
-		reg = &inProcessRegistration{
-			host:         host,
-			regRes:       regRes,
-			acctPub:      acctPubB,
-			encKey:       encKey,
-			encKeyLegacy: encKeyLegacy,
-			stamp:        time.Now(),
-		}
-	} else {
-		dc.acct.encKey = reg.encKey
-		if len(reg.encKey) == 0 {
-			dc.acct.encKey = reg.encKeyLegacy
-		}
-
-		if err := dc.acct.unlock(crypter); err != nil {
-			return nil, newError(authErr, "failed to unlock account: %v", err)
+			return res, nil
 		}
 	}
 
+	// `incompleteReg` must be set at this point and must have been set within the past
+	// 5 minutes and for this host. This is ensured by the 2 if statements above.
+	dc.acct.encKey = incompleteReg.encKey
+	if len(incompleteReg.encKey) == 0 {
+		dc.acct.encKey = incompleteReg.encKeyLegacy
+	}
+
+	if err := dc.acct.unlock(crypter); err != nil {
+		return nil, newError(authErr, "failed to unlock account: %v", err)
+	}
 	fee := dc.cfg.Fee
 
 	// Check that the fee is non-zero.
-	if reg.regRes.Fee == 0 {
+	if incompleteReg.regRes.Fee == 0 {
 		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
-	if reg.regRes.Fee != fee {
-		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", reg.regRes.Fee, fee)
+	if incompleteReg.regRes.Fee != fee {
+		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", incompleteReg.regRes.Fee, fee)
 	}
-	if reg.regRes.Fee != form.Fee {
-		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, reg.regRes.Fee)
+	if incompleteReg.regRes.Fee != form.Fee {
+		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, incompleteReg.regRes.Fee)
 	}
 
 	// Pay the registration fee.
-	acctID := account.NewID(reg.acctPub)
+	acctID := account.NewID(incompleteReg.acctPub)
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
-		reg.regRes.Address, acctID, reg.regRes.Fee, regAsset.Symbol)
-	coin, err := wallet.PayFee(reg.regRes.Address, reg.regRes.Fee)
+		incompleteReg.regRes.Address, acctID, incompleteReg.regRes.Fee, regAsset.Symbol)
+	coin, err := wallet.PayFee(incompleteReg.regRes.Address, incompleteReg.regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
+
+	// Set the dexConnection account fields and save account info to db.
+	dc.acct.feeCoin = coin.ID()
 
 	// Registration complete.
 	registrationComplete = true
@@ -2627,10 +2534,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.conns[host] = dc
 	c.connMtx.Unlock()
 
-	// Set the dexConnection account fields and save account info to db.
-	dc.acct.feeCoin = coin.ID()
-
-	err = storeAccount()
+	err = c.db.CreateAccount(&db.AccountInfo{
+		Host:         dc.acct.host,
+		Cert:         dc.acct.cert,
+		LegacyEncKey: incompleteReg.encKeyLegacy,
+		EncKeyV2:     incompleteReg.encKey,
+		DEXPubKey:    dc.acct.dexPubKey,
+		FeeCoin:      dc.acct.feeCoin,
+	})
 	if err != nil {
 		c.log.Errorf("error saving account: %v\n", err)
 		// Don't abandon registration. The fee is already paid.
@@ -2646,50 +2557,174 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 
-	c.preRegisterMtx.Lock()
-	c.preRegistration = nil
-	c.preRegisterMtx.Unlock()
+	c.incompleteRegMtx.Lock()
+	c.incompleteReg = nil
+	c.incompleteRegMtx.Unlock()
 
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
 	return res, nil
 }
 
-// markAccountPrePaid takes an unauthorized *dexConnection and completes the
-// process of storing the account info in the db and adding the connection to
-// the conns map.
-func (c *Core) markAccountPrePaid(dc *dexConnection, encKey, encKeyLegacy []byte) error {
-	c.connMtx.Lock()
-	c.conns[dc.acct.host] = dc
-	c.connMtx.Unlock()
-
-	dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-	cid, _ := asset.DecodeCoinID(dcrID, dc.acct.feeCoin)
-	c.log.Infof("Recovered paid account for %s. Fee previously paid with %s", dc.acct.host, cid)
-
-	err := c.db.CreateAccount(&db.AccountInfo{
-		Host:         dc.acct.host,
-		Cert:         dc.acct.cert,
-		LegacyEncKey: encKeyLegacy,
-		EncKeyV2:     encKey,
-		DEXPubKey:    dc.acct.dexPubKey,
-		FeeCoin:      dc.acct.feeCoin,
-	})
-	if err != nil {
-		return fmt.Errorf("Error saving restored account: %w", err)
+// registerHD sets up an HD account for this DEX and submits a new 'register'
+// request to the server. Does not pay the fee even if the server's response
+// indicates that this is a new account. The first return variable contains
+// info that the caller can use to complete this registration by paying the
+// fee where necessary.
+func (c *Core) registerHD(dc *dexConnection, crypter encrypt.Crypter) (*incompleteRegistration, bool, error) {
+	if dc.acct.dexPubKey == nil {
+		return nil, false, fmt.Errorf("DEX %s does not support HD account registration", dc.acct.host)
 	}
 
-	err = c.db.AccountPaid(&db.AccountProof{
-		Host:  dc.acct.host,
-		Stamp: 54321,
-		Sig:   []byte("RECOVERY SIGNATURE"),
-	})
+	creds := c.creds()
+	encKey, acctPubB, err := dc.acct.setupCryptoV2(creds, crypter)
 	if err != nil {
-		return fmt.Errorf("Error marking recovered account as paid: %w", err)
+		return nil, false, newError(acctKeyErr, "setupCryptoV2 error: %v", err)
 	}
 
-	dc.acct.markFeePaid()
+	return c.register(dc, encKey, nil, acctPubB)
+}
 
-	return nil
+// registerLegacy sets up a legacy-style account for this DEX and submits a new
+// 'register' request to the server. Does not pay the fee even if the server's
+// response indicates that this is a new account. The first return variable
+// contains info that the caller can use to complete this registration by paying
+// the fee where necessary.
+func (c *Core) registerLegacy(dc *dexConnection, crypter encrypt.Crypter) (*incompleteRegistration, bool, error) {
+	encKeyLegacy, acctPubB, err := dc.acct.setupCryptoLegacy(crypter)
+	if err != nil {
+		return nil, false, codedError(acctKeyErr, err)
+	}
+	return c.register(dc, nil, encKeyLegacy, acctPubB)
+}
+
+// register submits a new 'register' request to the server. Only one of encKey
+// or encKeyLegacy should be set, NOT both. encKeyLegacy should ideally only be
+// set if the server does not support HD accounts or a HD account already exists
+// with this server but is suspended.
+// The result of this registration attempt will be returned to enable follow up
+// action if this is a fresh registration with the server or if the account
+// already exists but is suspended.
+// The registration result is nil if the account exists and the fee is paid. If
+// the account exists and fee is paid, the account is restored, the dc is auth'ed
+// and added to the conns map and a goroutine is started to listen for server
+// messages.
+func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte) (incompleteReg *incompleteRegistration, paid bool, err error) {
+	if len(encKey) > 0 && len(encKeyLegacy) > 0 {
+		return nil, false, fmt.Errorf("cannot register with BOTH HD acct key and legacy acct key")
+	}
+
+	dexReg := &msgjson.Register{
+		PubKey: acctPubB,
+		Time:   encode.UnixMilliU(time.Now()),
+	}
+	regRes := new(msgjson.RegisterResult)
+	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
+	incompleteReg = &incompleteRegistration{
+		host:         dc.acct.host,
+		regRes:       regRes,
+		acctPub:      acctPubB,
+		encKey:       encKey,
+		encKeyLegacy: encKeyLegacy,
+		stamp:        time.Now(),
+	}
+	if err == nil {
+		// If we already had a DEX pubkey from the 'config' response, check for
+		// discrepancies.
+		if dc.acct.dexPubKey != nil && !bytes.Equal(dc.acct.dexPubKey.SerializeCompressed(), regRes.DEXPubKey) {
+			return nil, false, fmt.Errorf("different pubkeys reported by dex in 'config' and 'register' responses")
+		}
+		// Check the DEX server's signature.
+		// If this was a legacy registration, we'll be setting the pubkey here. For
+		// v2 registrations, we're overwriting the existing key, but whatever. We
+		// already checked that they're identical a few lines up.
+		msg := regRes.Serialize()
+		dc.acct.dexPubKey, err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
+		if err != nil {
+			return nil, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
+		}
+		// Fresh account registration success.
+		return
+	}
+
+	// Registration error could be AccountExistsError or AccountSuspendedError.
+	var msgErr *msgjson.Error
+	if errors.As(err, &msgErr) {
+		switch msgErr.Code {
+		case msgjson.AccountSuspendedError:
+			incompleteReg.acctSuspended = true
+			acctType := "HD"
+			if len(encKey) == 0 {
+				acctType = "Legacy"
+			}
+			c.log.Infof("%s account key for %s was reported as suspended.", acctType, dc.acct.host)
+			return incompleteReg, false, nil
+
+		case msgjson.AccountExistsError:
+			// This is now account recovery, which is great news since we don't
+			// have to pay the fee. Server provides fee coin as the error message.
+			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+			dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
+			if err != nil || len(dc.acct.feeCoin) == 0 { // err may be nil but feeCoin is empty, e.g. if msgErr.Message == ""
+				c.log.Errorf("Failed to decode fee coin from pre-paid account info message = %q, err = %w", msgErr.Message, err)
+				dc.acct.feeCoin = []byte("DUMMY COIN")
+			} else {
+				regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+				cid, err := asset.DecodeCoinID(regFeeAssetID, dc.acct.feeCoin)
+				if err != nil {
+					c.log.Errorf("Failed to decode coin ID for pre-paid account from feeCoin = %x, err = %w", dc.acct.feeCoin, err)
+				} else {
+					c.log.Infof("Recovered paid account for %s. Fee previously paid with %s", dc.acct.host, cid)
+				}
+			}
+
+			err = c.db.CreateAccount(&db.AccountInfo{
+				Host:         dc.acct.host,
+				Cert:         dc.acct.cert,
+				LegacyEncKey: encKeyLegacy,
+				EncKeyV2:     encKey,
+				DEXPubKey:    dc.acct.dexPubKey,
+				FeeCoin:      dc.acct.feeCoin,
+			})
+			if err != nil {
+				// Shouldn't let the client trade with this server if we can't store
+				// the acct details to DB. Since this is not a fresh registration with
+				// a randomly generated acct key, the client can restore this account
+				// after fixing any db issues before proceeding to trade.
+				return nil, true, fmt.Errorf("error saving restored account: %w", err)
+			}
+
+			err = c.db.AccountPaid(&db.AccountProof{
+				Host:  dc.acct.host,
+				Stamp: 54321,
+				Sig:   []byte("RECOVERY SIGNATURE"),
+			})
+			if err != nil {
+				return nil, true, fmt.Errorf("error marking recovered account as paid: %w", err)
+			}
+
+			dc.acct.isPaid = true
+
+			err = c.authDEX(dc)
+			if err != nil {
+				return nil, true, fmt.Errorf("error authorizing pre-paid account: %w", err)
+			}
+
+			// If called from DiscoverAccount, where a temporary connection is used,
+			// promote this dexConnection and start listening for messages.
+			if atomic.CompareAndSwapUint32(&dc.reportingConnects, 0, 1) {
+				c.wg.Add(1)
+				go c.listen(dc)
+			}
+
+			c.connMtx.Lock()
+			c.conns[dc.acct.host] = dc
+			c.connMtx.Unlock()
+
+			return nil, true, nil
+		}
+	}
+
+	return nil, false, codedError(registerErr, err)
 }
 
 // verifyRegistrationFee waits the required amount of confirmations for the
@@ -4871,11 +4906,10 @@ func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
 
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
-// route. If temporary is provided and true, no connect and reconnect handlers
-// are registered, and the c.listen(dc) goroutine is not started so that
-// associated trades are not processed and no incoming requests are
-// notifications are handled. A temporary dexConnection may be used to inspect
-// the config response.
+// route. If temporary is provided and true, the c.listen(dc) goroutine is not
+// started so that associated trades are not processed and no incoming requests
+// and notifications are handled. A temporary dexConnection may be used to
+// inspect the config response or check if a (paid) HD account exists with a DEX.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
@@ -4921,13 +4955,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		wsCfg.NetDialContext = proxy.DialContext
 	}
 
-	if listen {
-		wsCfg.ReconnectSync = func() {
-			go c.handleReconnect(host)
-		}
-		wsCfg.ConnectEventFunc = func(connected bool) {
-			c.handleConnectEvent(dc, connected)
-		}
+	wsCfg.ConnectEventFunc = func(connected bool) {
+		c.handleConnectEvent(dc, connected)
+	}
+	wsCfg.ReconnectSync = func() {
+		go c.handleReconnect(host)
 	}
 
 	// Create a websocket connection to the server.
@@ -4966,7 +4998,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
 
-	c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+	if listen {
+		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+	} else {
+		c.log.Infof("Connected to DEX server at %s but NOT listening for messages.", host)
+	}
 
 	return dc, nil
 }
