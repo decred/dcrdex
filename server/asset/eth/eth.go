@@ -295,9 +295,20 @@ func (eth *Backend) Synced() (bool, error) {
 	return timeDiff < MaxBlockInterval, nil
 }
 
-// Redemption is an input that redeems a swap contract.
-func (eth *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
-	return nil, notImplementedErr
+// Redemption returns a coin that represents a contract redemption. coinID should
+// be the transaction that sent a redemption.
+func (eth *Backend) Redemption(coinID, _ []byte) (asset.Coin, error) {
+	cnr, err := newSwapCoin(eth, coinID, sctRedeem)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create coiner: %v", err)
+	}
+	// Confirmations performs some extra swap status checks if the the tx
+	// is mined.
+	_, err = cnr.Confirmations(eth.rpcCtx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get confirmations: %v", err)
+	}
+	return cnr, nil
 }
 
 // FundingCoin is an unspent output.
