@@ -277,3 +277,13 @@ func (c *rpcclient) refund(txOpts *bind.TransactOpts, netID int64, secretHash [3
 	}
 	return c.es.Refund(txOpts, secretHash)
 }
+
+// getCodeAt retrieves the runtime bytecode at a certain address.
+func (c *rpcclient) getCodeAt(ctx context.Context, contractAddr *common.Address) ([]byte, error) {
+	bn, err := c.ec.BlockNumber(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.ec.CodeAt(ctx, *contractAddr, big.NewInt(int64(bn)))
+}

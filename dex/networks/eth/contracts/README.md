@@ -4,6 +4,10 @@ Have `solc` and `abigen` installed on your system and run from this directory:
 
 `abigen --sol ETHSwapV{version}.sol --pkg eth --out ../contract.go`
 
+To generate the runtime bytecode, run from this directory:
+
+`./genruntime.sh {version}`
+
 ## History
 
 ### V0 (untested, unsafe, do not use)

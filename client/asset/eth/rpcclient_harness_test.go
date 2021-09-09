@@ -23,6 +23,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,6 +39,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
 	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
@@ -840,5 +842,19 @@ func TestReplayAttack(t *testing.T) {
 	wantBal = big.NewInt(0).Add(originalContractBal, expectDiff)
 	if bal.Cmp(wantBal) != 0 {
 		t.Fatalf("unexpected balance change of contract: want %v got %v", wantBal, bal)
+	}
+}
+
+func TestAbiEqual(t *testing.T) {
+	byteCode, err := ethClient.getCodeAt(ctx, &contractAddr)
+	if err != nil {
+		t.Fatalf("Failed to get bytecode: %v", err)
+	}
+	c, err := hex.DecodeString(dexeth.ETHSwapRuntimeBin)
+	if err != nil {
+		t.Fatalf("Error decoding")
+	}
+	if !bytes.Equal(byteCode, c) {
+		t.Fatal("Contract on chain does not match one in code")
 	}
 }
