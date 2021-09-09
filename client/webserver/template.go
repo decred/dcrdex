@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"io/ioutil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -59,6 +59,7 @@ func (t *templates) filepath(name string) string {
 
 // srcDir is the expected directory of the translation source templates. Only
 // used in development when the --reload-html flag is used.
+// <root>/localized_html/[lang] -> <root>/html
 func (t *templates) srcDir() string {
 	return filepath.Join(filepath.Dir(filepath.Dir(t.folder)), "html")
 }
@@ -74,7 +75,7 @@ func (t *templates) srcPath(name string) string {
 func (t *templates) retranslate(name string, preloads ...string) error {
 	for _, iName := range append(preloads, name) {
 		srcPath := t.srcPath(iName)
-		rawTmpl, err := ioutil.ReadFile(srcPath)
+		rawTmpl, err := os.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("ReadFile error: %w", err)
 		}
@@ -92,7 +93,7 @@ func (t *templates) retranslate(name string, preloads ...string) error {
 			destTmpl = bytes.Replace(destTmpl, token, []byte(replacement), -1)
 		}
 
-		if err := ioutil.WriteFile(t.filepath(iName), destTmpl, 0644); err != nil {
+		if err := os.WriteFile(t.filepath(iName), destTmpl, 0644); err != nil {
 			return fmt.Errorf("error writing localized template %s: %v", t.filepath(iName), err)
 		}
 	}
