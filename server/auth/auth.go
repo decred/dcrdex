@@ -1284,6 +1284,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
 		Score:               score,
+		Suspended:           &client.suspended,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
@@ -1300,8 +1301,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		return nil
 	}
 
-	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches",
-		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches))
+	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches (score = %d, suspended = %v)",
+		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), score, client.suspended)
 	auth.addClient(client)
 	return nil
 }
