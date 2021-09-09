@@ -4,13 +4,16 @@
 package webserver
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/webserver/locales"
 )
 
 // pageTemplate holds the information necessary to process a template. Also
@@ -24,18 +27,26 @@ type pageTemplate struct {
 type templates struct {
 	templates map[string]pageTemplate
 	folder    string
+	locale    map[string]string
 	exec      func(string, interface{}) (string, error)
 	addErr    error
 }
 
 // newTemplates constructs a new templates.
-func newTemplates(folder string, reload bool) *templates {
+func newTemplates(folder, lang string, reload bool) *templates {
 	t := &templates{
 		templates: make(map[string]pageTemplate),
 		folder:    folder,
 	}
 	t.exec = t.execTemplateToString
 	if reload {
+		var found bool
+		// Make sure we have the expected directory structure.
+		if !folderExists(t.srcDir()) {
+			t.addErr = fmt.Errorf("reload-html set but source directory not found at %s", t.srcDir())
+		} else if t.locale, found = locales.Locales[lang]; !found {
+			t.addErr = fmt.Errorf("no translation dictionary found for lang %q", lang)
+		}
 		t.exec = t.execWithReload
 	}
 	return t
@@ -44,6 +55,49 @@ func newTemplates(folder string, reload bool) *templates {
 // filepath constructs the template path from the template ID.
 func (t *templates) filepath(name string) string {
 	return filepath.Join(t.folder, name+".tmpl")
+}
+
+// srcDir is the expected directory of the translation source templates. Only
+// used in development when the --reload-html flag is used.
+// <root>/localized_html/[lang] -> <root>/html
+func (t *templates) srcDir() string {
+	return filepath.Join(filepath.Dir(filepath.Dir(t.folder)), "html")
+}
+
+// srcPath is the path translation source. Only used in
+// development when the --reload-html flag is used.
+func (t *templates) srcPath(name string) string {
+	return filepath.Join(t.srcDir(), name+".tmpl")
+}
+
+// retranslate rebuilds the locallized html template. Only used in development
+// when the --reload-html flag is used.
+func (t *templates) retranslate(name string, preloads ...string) error {
+	for _, iName := range append(preloads, name) {
+		srcPath := t.srcPath(iName)
+		rawTmpl, err := os.ReadFile(srcPath)
+		if err != nil {
+			return fmt.Errorf("ReadFile error: %w", err)
+		}
+		destTmpl := make([]byte, len(rawTmpl))
+		copy(destTmpl, rawTmpl)
+		for _, matchGroup := range locales.Tokens(rawTmpl) {
+			if len(matchGroup) != 2 {
+				return fmt.Errorf("can't parse match group: %v", matchGroup)
+			}
+			token, key := matchGroup[0], string(matchGroup[1])
+			replacement, found := t.locale[key]
+			if !found {
+				return fmt.Errorf("warning: no translation text for key %q", key)
+			}
+			destTmpl = bytes.Replace(destTmpl, token, []byte(replacement), -1)
+		}
+
+		if err := os.WriteFile(t.filepath(iName), destTmpl, 0644); err != nil {
+			return fmt.Errorf("error writing localized template %s: %v", t.filepath(iName), err)
+		}
+	}
+	return nil
 }
 
 // addTemplate adds a new template. The template is specified with a name, which
@@ -121,6 +175,12 @@ func (t *templates) execWithReload(name string, data interface{}) (string, error
 	if !found {
 		return "", fmt.Errorf("template %s not found", name)
 	}
+
+	err := t.retranslate(name, tmpl.preloads...)
+	if err != nil {
+		return "", err
+	}
+
 	t.addTemplate(name, tmpl.preloads...)
 	log.Debugf("reloaded HTML template %q", name)
 	return t.execTemplateToString(name, data)
