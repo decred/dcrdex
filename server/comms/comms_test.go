@@ -966,10 +966,9 @@ func TestWSRateLimiter(t *testing.T) {
 	conn := newWsStub()
 	conn.addChan()     // for <-conn.recv
 	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
-	defer close(conn.nextRead)
 
 	wg.Add(1)
-	go func() {
+	go func(conn *wsConnStub) {
 		defer wg.Done()
 		stubAddr := dex.NewIPKey("aabb:cc:ddee:ff::abc") // "abc" chopped by NewIPKey, "ff" chopped by PrefixV6
 		if stubAddr.IsUnspecified() {
@@ -977,7 +976,8 @@ func TestWSRateLimiter(t *testing.T) {
 			return
 		}
 		server.websocketHandler(testCtx, conn, stubAddr) // newWSLink -> Connect -> readloop will call handleMessage
-	}()
+		close(conn.nextRead)                             // must be after read loop has quit (sends on nextRead)
+	}(conn)
 
 	<-conn.nextRead
 	go func() { // connected, so just keep receiving on the channel
@@ -1047,10 +1047,9 @@ func TestWSRateLimiter(t *testing.T) {
 	conn = newWsStub()
 	conn.addChan()     // for <-conn.recv
 	conn.addNextChan() // for <-conn.nextRead, each time ReadMessage is called
-	defer close(conn.nextRead)
 
 	wg.Add(1)
-	go func() {
+	go func(conn *wsConnStub) {
 		defer wg.Done()
 		stubAddr := dex.NewIPKey("aabb:cc:ddee:11::") // same prefix, different subnet
 		if stubAddr.IsUnspecified() {
@@ -1058,7 +1057,8 @@ func TestWSRateLimiter(t *testing.T) {
 			return
 		}
 		server.websocketHandler(testCtx, conn, stubAddr) // newWSLink -> Connect -> readloop will call handleMessage
-	}()
+		close(conn.nextRead)                             // must be after read loop has quit (sends on nextRead)
+	}(conn)
 
 	<-conn.nextRead
 	go func() { // connected, so just keep receiving on the channel
