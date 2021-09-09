@@ -42,6 +42,7 @@ const (
 	unknownDEXErr
 	accountRetrieveErr
 	accountDisableErr
+	suspendedAcctErr
 )
 
 // Error is an error message and an error code.

@@ -894,6 +894,7 @@ type ConnectResult struct {
 	ActiveOrderStatuses []*OrderStatus `json:"activeorderstatuses"`
 	ActiveMatches       []*Match       `json:"activematches"`
 	Score               int32          `json:"score"`
+	Suspended           *bool          `json:"suspended,omitempty"` // will be implied (obsolete) with tiers and bonds
 }
 
 // PenaltyNote is the payload of a Penalty notification.

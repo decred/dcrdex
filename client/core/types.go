@@ -530,16 +530,20 @@ type BookUpdate struct {
 // a DEX.
 type dexAccount struct {
 	host      string
-	encKey    []byte
-	keyMtx    sync.RWMutex
-	privKey   *secp256k1.PrivateKey
-	id        account.AccountID
-	dexPubKey *secp256k1.PublicKey
-	feeCoin   []byte
 	cert      []byte
-	isPaid    bool
-	authMtx   sync.RWMutex
-	isAuthed  bool
+	dexPubKey *secp256k1.PublicKey
+
+	keyMtx  sync.RWMutex
+	encKey  []byte
+	privKey *secp256k1.PrivateKey
+	id      account.AccountID
+
+	feeCoin []byte
+
+	authMtx     sync.RWMutex
+	isPaid      bool
+	isAuthed    bool
+	isSuspended bool
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
@@ -551,6 +555,7 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		isPaid:    acctInfo.Paid,
 		feeCoin:   acctInfo.FeeCoin,
 		cert:      acctInfo.Cert,
+		// isSuspended is determined on connect, not stored
 	}
 }
 
@@ -722,10 +727,12 @@ func (a *dexAccount) authed() bool {
 	return a.isAuthed
 }
 
-// auth sets the account as authenticated.
-func (a *dexAccount) auth() {
+// auth sets the account as authenticated, but possibly suspended (may not place
+// new orders, but may still be negotiating swaps).
+func (a *dexAccount) auth(suspended bool) {
 	a.authMtx.Lock()
 	a.isAuthed = true
+	a.isSuspended = suspended
 	a.authMtx.Unlock()
 }
 
@@ -734,6 +741,13 @@ func (a *dexAccount) unauth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
 	a.authMtx.Unlock()
+}
+
+// suspended will be true if the account was suspended as of the latest authDEX.
+func (a *dexAccount) suspended() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.isSuspended
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the

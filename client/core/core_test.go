@@ -4362,7 +4362,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 
-	rig.acct.auth() // Short path through initializeDEXConnections
+	rig.acct.auth(false) // Short path through initializeDEXConnections
 
 	// Create an order
 	qty := dcrBtcLotSize * 5
