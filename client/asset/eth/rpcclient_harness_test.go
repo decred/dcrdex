@@ -845,7 +845,7 @@ func TestReplayAttack(t *testing.T) {
 	}
 }
 
-func TestAbiEqual(t *testing.T) {
+func TestGetCodeAt(t *testing.T) {
 	byteCode, err := ethClient.getCodeAt(ctx, &contractAddr)
 	if err != nil {
 		t.Fatalf("Failed to get bytecode: %v", err)

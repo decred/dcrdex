@@ -18,7 +18,7 @@ then
 fi
 
 solc --bin-runtime --optimize ${SOLIDITY_FILE} -o .
-BYTECODE=`cat ETHSwap.bin-runtime`
+BYTECODE=$(<ETHSwap.bin-runtime)
 
 cat > "../BinRuntimeV${ETH_SWAP_VERSION}.go" <<EOF
 // Code generated - DO NOT EDIT.
