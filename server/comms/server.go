@@ -37,12 +37,28 @@ const (
 	// allowed.
 	rpcMaxClients = 10000
 
+	// rpcMaxConnsPerIP is the maximum number of active websocket connections
+	// allowed per IP, loopback excluded.
+	rpcMaxConnsPerIP = 8
+
 	// banishTime is the default duration of a client quarantine.
 	banishTime = time.Hour
 
-	// Per-ip rate limits for HTTP routes.
+	// Per-ip rate limits for market data API routes.
 	ipMaxRatePerSec = 1
 	ipMaxBurstSize  = 5
+
+	// Per-websocket-connection limits in requests per second. Rate should be a
+	// reasonable sustained rate, while burst should consider bulk reconnect
+	// operations. Consider which routes are authenticated when setting these.
+	wsRateStatus, wsBurstStatus     = 10, 500     // order_status and match_status (combined)
+	wsRateOrder, wsBurstOrder       = 5, 100      // market, limit, and cancel (combined)
+	wsRateInfo, wsBurstInfo         = 10, 200     // low-cost route limiter for: config, fee_rate  (combined)
+	wsRateBook, wsBurstBook         = 1, 100      // orderbook, assuming 100 markets subscribed max
+	wsRateRegister, wsBurstRegister = 1 / 60.0, 1 // register, rate.Every(time.Minute) but const
+	// The cumulative rates below would need to be less than sum of above to
+	// actually trip unless it is also applied to unspecified routes.
+	wsRateTotal, wsBurstTotal = 40, 1000
 )
 
 var (
@@ -62,7 +78,9 @@ var (
 	// non-critical routes, including all routes registered as HTTP routes.
 	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
 
-	// ipRateLimiter is a per-client rate limiter.
+	// ipHTTPRateLimiter is a per-client rate limiter for the HTTP endpoints
+	// requests and httpRoutes (the market data API). The Server manages
+	// separate limiters used with the websocket routes, rpcRoutes.
 	ipHTTPRateLimiter = make(map[dex.IPKey]*ipRateLimiter)
 	rateLimiterMtx    sync.RWMutex
 )
@@ -75,7 +93,9 @@ type ipRateLimiter struct {
 	lastHit time.Time
 }
 
-// Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist.
+// Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist. This
+// is for use with the HTTP endpoints and httpRoutes (the data API), not the
+// websocket request routes in rpcRoutes.
 func getIPLimiter(ip dex.IPKey) *ipRateLimiter {
 	rateLimiterMtx.Lock()
 	defer rateLimiterMtx.Unlock()
@@ -158,30 +178,100 @@ type RPCConfig struct {
 	DisableDataAPI bool
 }
 
+// allower is satisfied by rate.Limiter.
+type allower interface {
+	Allow() bool
+}
+
+// routeLimiter contains a set of rate limiters for individual routes, and a
+// cumulative limiter applied after defined routers are applied. No limiter is
+// applied to an unspecified route.
+type routeLimiter struct {
+	routes     map[string]allower
+	cumulative allower // only used for defined routes
+}
+
+func (rl *routeLimiter) allow(route string) bool {
+	// To apply the cumulative limiter to all routes including those without
+	// their own limiter, we would apply it here. Maybe go with this if we are
+	// confident it's not going to interfere with init/redeem or others.
+	// if !rl.cumulative.Allow() {
+	// 	return false
+	// }
+	limiter := rl.routes[route]
+	if limiter == nil {
+		return true // free
+	}
+	return rl.cumulative.Allow() && limiter.Allow()
+}
+
+// newRouteLimiter creates a route-based rate limiter. It should be applied to
+// all connections from a given IP address.
+func newRouteLimiter() *routeLimiter {
+	// Some routes share a limiter to aggregate request stats:
+	statusLimiter := rate.NewLimiter(wsRateStatus, wsBurstStatus)
+	orderLimiter := rate.NewLimiter(wsRateOrder, wsBurstOrder)
+	infoLimiter := rate.NewLimiter(wsRateInfo, wsBurstInfo)
+	return &routeLimiter{
+		cumulative: rate.NewLimiter(wsRateTotal, wsBurstTotal),
+		routes: map[string]allower{
+			// Meter the 'register' route the most.
+			msgjson.RegisterRoute: rate.NewLimiter(wsRateRegister, wsBurstRegister),
+			// Status checking of matches and orders
+			msgjson.MatchStatusRoute: statusLimiter,
+			msgjson.OrderStatusRoute: statusLimiter,
+			// Order submission
+			msgjson.LimitRoute:  orderLimiter,
+			msgjson.MarketRoute: orderLimiter,
+			msgjson.CancelRoute: orderLimiter,
+			// Order book subscription with full snapshot
+			msgjson.OrderBookRoute: rate.NewLimiter(wsRateBook, wsBurstBook),
+			// Config and fee rate
+			msgjson.FeeRateRoute: infoLimiter,
+			msgjson.ConfigRoute:  infoLimiter,
+		},
+	}
+}
+
+// ipWsLimiter facilitates connection counting for a source IP address to
+// aggregate requests stats by a single rate limiter.
+type ipWsLimiter struct {
+	conns   int64
+	cleaner *time.Timer // when conns drops to zero, set a cleanup timer
+	*routeLimiter
+}
+
 // Server is a low-level communications hub. It supports websocket clients
 // and an HTTP API.
 type Server struct {
 	// One listener for each address specified at (RPCConfig).ListenAddrs.
 	listeners []net.Listener
-	// Protect the client map, which maps the (link).id to the client itself.
+
+	// The client map indexes each wsLink by its id.
 	clientMtx sync.RWMutex
 	clients   map[uint64]*wsLink
-	// A simple counter for generating unique client IDs. The counter is also
-	// protected by the clientMtx.
-	counter uint64
+	counter   uint64 // for generating unique client IDs
+
+	// wsLimiters manages per-IP per-route websocket connection request rate
+	// limiters that are not subject to server-wide rate limits or affected by
+	// disabling of the data API (Server.dataEnabled).
+	wsLimiterMtx sync.Mutex // the map and the fields of each limiter
+	wsLimiters   map[dex.IPKey]*ipWsLimiter
+	v6Prefixes   map[dex.IPKey]int // just debugging presently
+
 	// The quarantine map maps IP addresses to a time in which the quarantine will
 	// be lifted.
-	banMtx      sync.RWMutex
-	quarantine  map[dex.IPKey]time.Time
-	dataEnabled uint32
+	banMtx     sync.RWMutex
+	quarantine map[dex.IPKey]time.Time
+
+	dataEnabled uint32 // atomic
 }
 
-// A constructor for an Server. The Server handles a map of clients, each
-// with at least 3 goroutines for communications. The server is TLS-only, and
-// will generate a key pair with a self-signed certificate if one is not
-// provided as part of the RPCConfig. The server also maintains a IP-based
-// quarantine to short-circuit to an error response for misbehaving clients, if
-// necessary.
+// NewServer constructs a Server that should be started with Run. The server is
+// TLS-only, and will generate a key pair with a self-signed certificate if one
+// is not provided as part of the RPCConfig. The server also maintains a
+// IP-based quarantine to short-circuit to an error response for misbehaving
+// clients, if necessary.
 func NewServer(cfg *RPCConfig) (*Server, error) {
 	// Find or create the key pair.
 	keyExists := fileExists(cfg.RPCKey)
@@ -236,6 +326,8 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	return &Server{
 		listeners:   listeners,
 		clients:     make(map[uint64]*wsLink),
+		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:  make(map[dex.IPKey]int),
 		quarantine:  make(map[dex.IPKey]time.Time),
 		dataEnabled: dataEnabled,
 	}, nil
@@ -269,6 +361,13 @@ func (s *Server) Run(ctx context.Context) {
 		}
 		if s.clientCount() >= rpcMaxClients {
 			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
+			return
+		}
+		// Check websocket connection count for this IP before upgrading the
+		// conn so we can send an HTTP error code, but check again after
+		// upgrade/hijack so they cannot initiate many simultaneously.
+		if s.ipConnCount(ip) >= rpcMaxConnsPerIP {
+			http.Error(w, "too many connections from your address", http.StatusServiceUnavailable)
 			return
 		}
 		wsConn, err := ws.NewConnection(w, r, pongWait)
@@ -380,6 +479,102 @@ func (s *Server) banish(ip dex.IPKey) {
 	s.quarantine[ip] = time.Now().Add(banishTime)
 }
 
+// wsLimiter gets any existing routeLimiter for an IP incrementing the
+// connection count for the address, or creates a new one. The caller should use
+// wsLimiterDone after the connection that uses routeLimiter is closed. Loopback
+// addresses always get a new unshared limiter. NewIPKey should be used to
+// create an IPKey with interface bits masked out. This is not perfect with
+// respect to remote IPv6 hosts assigned multiple subnets (up to 16 bits worth).
+// Disable IPv6 if this is not acceptable.
+func (s *Server) wsLimiter(ip dex.IPKey) *routeLimiter {
+	// If the ip is a loopback address, this likely indicates a hidden service
+	// or misconfigured reverse proxy, and it is undesirable for many such
+	// connections to share a common limiter. To avoid this, return a new
+	// untracked limiter for such clients.
+	if ip.IsLoopback() {
+		return newRouteLimiter()
+	}
+
+	s.wsLimiterMtx.Lock()
+	defer s.wsLimiterMtx.Unlock()
+	prefix := ip.PrefixV6()
+	if prefix != nil { // not ipv4
+		if n := s.v6Prefixes[*prefix]; n > 0 {
+			log.Infof("Detected %d active IPv6 connections with same prefix %v", n, prefix)
+			// Consider: Use a prefix-aggregated limiter when n > threshold. If
+			// we want to get really sophisticated, we may look into a tiered
+			// aggregation algorithm. https://serverfault.com/a/919324/190378
+			//
+			// ip = *prefix
+		}
+	}
+
+	if l := s.wsLimiters[ip]; l != nil {
+		if l.conns >= rpcMaxConnsPerIP {
+			return nil
+		}
+		l.conns++
+		if prefix != nil {
+			s.v6Prefixes[*prefix]++
+		}
+		if l.cleaner != nil { // l.conns was zero
+			log.Debugf("Restoring active rate limiter for %v", ip)
+			// Even if the timer already fired, we won the race to the lock and
+			// incremented conns so the cleaner func will be a no-op.
+			l.cleaner.Stop() // false means timer fired already
+			l.cleaner = nil
+		}
+		return l.routeLimiter
+	}
+
+	limiter := newRouteLimiter()
+	s.wsLimiters[ip] = &ipWsLimiter{
+		conns:        1,
+		routeLimiter: limiter,
+	}
+	if prefix != nil {
+		s.v6Prefixes[*prefix]++
+	}
+	return limiter
+}
+
+// wsLimiterDone decrements the connection count for the IP address'
+// routeLimiter, and deletes it entirely if there are no remaining connections
+// from this address.
+func (s *Server) wsLimiterDone(ip dex.IPKey) {
+	s.wsLimiterMtx.Lock()
+	defer s.wsLimiterMtx.Unlock()
+
+	if prefix := ip.PrefixV6(); prefix != nil {
+		switch s.v6Prefixes[*prefix] {
+		case 0:
+		case 1:
+			delete(s.v6Prefixes, *prefix)
+		default:
+			s.v6Prefixes[*prefix]--
+		}
+	}
+
+	wsLimiter := s.wsLimiters[ip]
+	if wsLimiter == nil {
+		return // untracked limiter (i.e. loopback)
+		// If using prefix-aggregated limiters, we'd check for one here.
+	}
+
+	wsLimiter.conns--
+	if wsLimiter.conns < 1 {
+		// Start a cleanup timer.
+		wsLimiter.cleaner = time.AfterFunc(time.Minute, func() {
+			s.wsLimiterMtx.Lock()
+			defer s.wsLimiterMtx.Unlock()
+			if wsLimiter.conns < 1 {
+				log.Debugf("Forgetting rate limiter for %v", ip)
+				delete(s.wsLimiters, ip)
+			} // else lost the race to the mutex, don't remove
+		})
+	}
+}
+
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
@@ -390,8 +585,14 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip de
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	meter := func() (int, error) { return s.meterIP(ip) }
-	client := newWSLink(addr, conn, meter)
+	dataRoutesMeter := func() (int, error) { return s.meterIP(ip) } // includes global limiter and may be disabled
+	wsLimiter := s.wsLimiter(ip)
+	if wsLimiter == nil { // too many active ws conns from this IP
+		log.Warnf("Too many websocket connections from %v", ip)
+		return
+	}
+	defer s.wsLimiterDone(ip)
+	client := newWSLink(addr, conn, wsLimiter, dataRoutesMeter)
 	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", addr)
@@ -472,6 +673,17 @@ func (s *Server) clientCount() uint64 {
 	s.clientMtx.RLock()
 	defer s.clientMtx.RUnlock()
 	return uint64(len(s.clients))
+}
+
+// Get the number of websocket connections for a given IP, excluding loopback.
+func (s *Server) ipConnCount(ip dex.IPKey) int64 {
+	s.wsLimiterMtx.Lock()
+	defer s.wsLimiterMtx.Unlock()
+	wsl := s.wsLimiters[ip]
+	if wsl == nil {
+		return 0
+	}
+	return wsl.conns
 }
 
 // filesExists reports whether the named file or directory exists.
