@@ -169,5 +169,8 @@ var EnUS = map[string]string{
 	"dont_share":             "Don't share it. Don't lose it.",
 	"Show Me":                "Show Me",
 	"Wallet Settings":        "Wallet Settings",
-	"Add a":                  "Add a",
+	"add_a_x_wallet":         `Add a <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span> Wallet`,
+	"ready":                  "ready",
+	"off":                    "off",
+	"Export Trades":          "Export Trades",
 }

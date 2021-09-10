@@ -9,7 +9,7 @@
     <span data-state="syncing" 
       class="ico-sync fs12{{if or (not $w.Running) $w.Synced}} d-hide{{end}}"
       data-tooltip="wallet is {{printf "%.2f" (x100  $w.SyncProgress)}}% synced"></span>
-    <span data-state="status" class="txt-status">{{walletStatusString $w}}</span>
+    <span data-state="status" class="txt-status">{{if $w.Open}}ready{{else if $w.Running}}locked{{else}}off{{end}}</span>
   {{else}}
     <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
     <span data-state="locked" class="ico-locked grey d-hide"></span>
