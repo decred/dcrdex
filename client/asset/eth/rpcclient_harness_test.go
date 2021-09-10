@@ -110,54 +110,57 @@ out:
 }
 
 func TestMain(m *testing.M) {
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithCancel(context.Background())
-	defer func() {
-		cancel()
-		ethClient.shutdown()
-	}()
-	// Create dir if none yet exists. This persists for the life of the
-	// testing harness.
-	if _, err := os.Stat(testDir); os.IsNotExist(err) {
-		err := os.Mkdir(testDir, 0755)
-		if err != nil {
-			fmt.Printf("error creating temp dir: %v\n", err)
-			os.Exit(1)
+	// Run in function so that defers happen before os.Exit is called.
+	run := func() (int, error) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		defer func() {
+			cancel()
+			ethClient.shutdown()
+		}()
+		// Create dir if none yet exists. This persists for the life of the
+		// testing harness.
+		if _, err := os.Stat(testDir); os.IsNotExist(err) {
+			err := os.Mkdir(testDir, 0755)
+			if err != nil {
+				return 1, fmt.Errorf("error creating temp dir: %v\n", err)
+			}
 		}
+		addrBytes, err := os.ReadFile(contractAddrFile)
+		if err != nil {
+			return 1, fmt.Errorf("error reading contract address: %v\n", err)
+		}
+		addrLen := len(addrBytes)
+		if addrLen == 0 {
+			return 1, fmt.Errorf("no contract address found at %v\n", contractAddrFile)
+		}
+		addrStr := string(addrBytes[:addrLen-1])
+		contractAddr = common.HexToAddress(addrStr)
+		fmt.Printf("Contract address is %v\n", addrStr)
+		settings := map[string]string{
+			"appdir":         testDir,
+			"nodelistenaddr": "localhost:30355",
+		}
+		wallet, err := NewWallet(&asset.WalletConfig{Settings: settings}, tLogger, dex.Simnet)
+		if err != nil {
+			return 1, fmt.Errorf("error starting node: %v\n", err)
+		}
+		fmt.Printf("Node created at: %v\n", testDir)
+		defer func() {
+			wallet.internalNode.Close()
+			wallet.internalNode.Wait()
+		}()
+		addr := common.HexToAddress(addrStr)
+		if err := ethClient.connect(ctx, wallet.internalNode, &addr); err != nil {
+			return 1, fmt.Errorf("connect error: %v\n", err)
+		}
+		return m.Run(), nil
 	}
-	addrBytes, err := os.ReadFile(contractAddrFile)
+	exitCode, err := run()
 	if err != nil {
-		fmt.Printf("error reading contract address: %v\n", err)
-		os.Exit(1)
+		fmt.Println(err)
 	}
-	addrLen := len(addrBytes)
-	if addrLen == 0 {
-		fmt.Printf("no contract address found at %v\n", contractAddrFile)
-		os.Exit(1)
-	}
-	addrStr := string(addrBytes[:addrLen-1])
-	contractAddr = common.HexToAddress(addrStr)
-	fmt.Printf("Contract address is %v\n", addrStr)
-	settings := map[string]string{
-		"appdir":         testDir,
-		"nodelistenaddr": "localhost:30355",
-	}
-	wallet, err := NewWallet(&asset.WalletConfig{Settings: settings}, tLogger, dex.Simnet)
-	if err != nil {
-		fmt.Printf("error starting node: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Node created at: %v\n", testDir)
-	defer func() {
-		wallet.internalNode.Close()
-		wallet.internalNode.Wait()
-	}()
-	addr := common.HexToAddress(addrStr)
-	if err := ethClient.connect(ctx, wallet.internalNode, &addr); err != nil {
-		fmt.Printf("connect error: %v\n", err)
-		os.Exit(1)
-	}
-	os.Exit(m.Run())
+	os.Exit(exitCode)
 }
 
 func TestNodeInfo(t *testing.T) {

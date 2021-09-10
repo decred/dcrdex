@@ -23,17 +23,24 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithCancel(context.Background())
-	defer func() {
-		cancel()
-		ethClient.shutdown()
-	}()
-	if err := ethClient.connect(ctx, ipc); err != nil {
-		fmt.Printf("Connect error: %v\n", err)
-		os.Exit(1)
+	// Run in function so that defers happen before os.Exit is called.
+	run := func() (int, error) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		defer func() {
+			cancel()
+			ethClient.shutdown()
+		}()
+		if err := ethClient.connect(ctx, ipc); err != nil {
+			return 1, fmt.Errorf("Connect error: %v\n", err)
+		}
+		return m.Run(), nil
 	}
-	os.Exit(m.Run())
+	exitCode, err := run()
+	if err != nil {
+		fmt.Println(err)
+	}
+	os.Exit(exitCode)
 }
 
 func TestBestBlockHash(t *testing.T) {
