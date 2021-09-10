@@ -7,7 +7,7 @@ export const ID_READY = 'ID_READY'
 export const ID_LOCKED = 'ID_LOCKED'
 export const ID_NOWALLET = 'ID_NOWALLET'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
-export const ID_HIDE_ADDIIONAL_SETTINGS = 'ID_HIDE_ADDIIONAL_SETTINGS'
+export const ID_HIDE_ADDITIONAL_SETTINGS = 'ID_HIDE_ADDITIONAL_SETTINGS'
 export const ID_SHOW_ADDIIONAL_SETTINGS = 'ID_SHOW_ADDIIONAL_SETTINGS'
 export const ID_BUY = 'ID_BUY'
 export const ID_SELL = 'ID_SELL'
@@ -29,6 +29,12 @@ export const ID_KEEP_WALLET_PASS = 'ID_KEEP_WALLET_PASS'
 export const ID_NEW_WALLET_PASS = 'ID_NEW_WALLET_PASS'
 export const ID_LOT = 'ID_LOT'
 export const ID_LOTS = 'ID_LOTS'
+export const ID_UNKNOWN = 'ID_UNKNOWN'
+export const ID_EPOCH = 'ID_EPOCH'
+export const ID_SETTLING = 'ID_SETTLING'
+export const ID_NO_MATCH = 'ID_NO_MATCH'
+export const ID_CANCELED = 'ID_CANCELED'
+export const ID_REVOKED = 'ID_REVOKED'
 
 export const templateKeys = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -41,7 +47,7 @@ export const templateKeys = {
   [ID_LOCKED]: 'locked',
   [ID_NOWALLET]: 'no wallet',
   [ID_WALLET_SYNC_PROGRESS]: 'wallet is {{ syncProgress }}% synced',
-  [ID_HIDE_ADDIIONAL_SETTINGS]: 'hide additional settings',
+  [ID_HIDE_ADDITIONAL_SETTINGS]: 'hide additional settings',
   [ID_SHOW_ADDIIONAL_SETTINGS]: 'show additional settings',
   [ID_BUY]: 'Buy',
   [ID_SELL]: 'Sell',
@@ -60,37 +66,47 @@ export const templateKeys = {
   [ID_ACCT_UNDEFINED]: 'Account undefined.',
   [ID_KEEP_WALLET_PASS]: 'keep current wallet password',
   [ID_NEW_WALLET_PASS]: 'set a new wallet password',
-  [ID_LOT]: 'lote',
-  [ID_LOTS]: 'lotes'
+  [ID_LOT]: 'lot',
+  [ID_LOTS]: 'lots',
+  [ID_UNKNOWN]: 'unknown',
+  [ID_EPOCH]: 'epoch',
+  [ID_SETTLING]: 'settling',
+  [ID_NO_MATCH]: 'no match',
+  [ID_CANCELED]: 'canceled',
+  [ID_REVOKED]: 'revoked'
 }
 
 const localesMap = {
   'en-us': templateKeys
 }
 
-export default class Locales {
-  constructor (locale) {
-    // lang is hardcoded at the <html lang=...>
-    this.locale = (document.documentElement.lang).toLowerCase()
-  }
+/* locale will hold the locale loaded via setLocale. */
+let locale
 
-  // formatDetails will format the message to its locale.
-  // need to add one for plurals
-  formatDetails (stringKey, args = undefined) {
-    return this.stringTemplateParser(localesMap[this.locale][stringKey], args)
-  }
+/*
+ * setLocale read the language tag from the current document's html element lang
+ * attribute and sets the locale. setLocale should be called once by the
+ * application before prep is used.
+*/
+export function setLocale () { locale = localesMap[document.documentElement.lang.toLowerCase()] }
 
-  // stringTemplateParser is a template string matcher, where expression is any
-  // text. It switches what is inside double brackets (e.g. 'buy {{ asset }}')
-  // for the value described into valueObj. valueObj is an object with keys
-  // equal to the placeholder keys. (e.g. {"asset": "dcr"}).
-  // So that will be switched for: 'asset dcr'.
-  stringTemplateParser (expression, valueObj) {
-    // templateMatcher matches any text which:
-    // is some {{ text }} between two brackets, and a space between them.
-    // It is global, therefore it will change all occurrences found.
-    // text can be anything, but brackets '{}' and space '\s'
-    const templateMatcher = /{{\s?([^{}\s]*)\s?}}/g
-    return expression.replace(templateMatcher, (_, value) => valueObj[value])
-  }
+/* prep will format the message to the current locale. */
+export function prep (k, args = undefined) {
+  return stringTemplateParser(locale[k], args)
+}
+
+/*
+ * stringTemplateParser is a template string matcher, where expression is any
+ * text. It switches what is inside double brackets (e.g. 'buy {{ asset }}')
+ * for the value described into valueObj. valueObj is an object with keys
+ * equal to the placeholder keys. (e.g. {"asset": "dcr"}).
+ * So that will be switched for: 'asset dcr'.
+ */
+function stringTemplateParser (expression, valueObj) {
+  // templateMatcher matches any text which:
+  // is some {{ text }} between two brackets, and a space between them.
+  // It is global, therefore it will change all occurrences found.
+  // text can be anything, but brackets '{}' and space '\s'
+  const templateMatcher = /{{\s?([^{}\s]*)\s?}}/g
+  return expression.replace(templateMatcher, (_, value) => valueObj[value])
 }

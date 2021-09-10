@@ -166,4 +166,11 @@ var EnUS = map[string]string{
 	"Import Account":         "Import Account",
 	"no_wallet":              "no wallet",
 	"create_a_x_wallet":      "Create a {{.Info.Name}} Wallet", // .Info.Name will be an asset symbol like DCR
+	"dont_share":             "Don't share it. Don't lose it.",
+	"Show Me":                "Show Me",
+	"Wallet Settings":        "Wallet Settings",
+	"add_a_x_wallet":         `Add a <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span> Wallet`,
+	"ready":                  "ready",
+	"off":                    "off",
+	"Export Trades":          "Export Trades",
 }

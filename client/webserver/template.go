@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/webserver/locales"
 )
 
@@ -204,16 +203,6 @@ var templateFuncs = template.FuncMap{
 	},
 	"fromAtoms": func(v uint64) float64 {
 		return float64(v) / 1e8
-	},
-	"walletStatusString": func(status *core.WalletState) string {
-		switch {
-		case status.Open:
-			return "ready"
-		case status.Running:
-			return "locked"
-		default:
-			return "off"
-		}
 	},
 	"x100": func(v float32) float32 {
 		return v * 100

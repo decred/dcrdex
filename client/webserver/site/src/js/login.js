@@ -2,7 +2,7 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import * as forms from './forms'
-import { ID_NO_PASS_ERROR_MSG } from './locales'
+import * as intl from './locales'
 
 let app
 
@@ -25,7 +25,7 @@ export default class LoginPage extends BasePage {
     page.pw.value = ''
     const rememberPass = page.rememberPass.checked
     if (pw === '') {
-      page.errMsg.textContent = window.locales.formatDetails(ID_NO_PASS_ERROR_MSG)
+      page.errMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
       Doc.show(page.errMsg)
       return
     }

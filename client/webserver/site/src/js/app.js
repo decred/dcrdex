@@ -10,7 +10,7 @@ import OrderPage from './order'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
-import Locales from './locales'
+import { setLocale } from './locales'
 
 const idel = Doc.idel // = element by id
 const bind = Doc.bind
@@ -91,7 +91,7 @@ export default class Application {
     }
 
     // use user current locale set by backend
-    window.locales = new Locales()
+    setLocale()
   }
 
   /**
