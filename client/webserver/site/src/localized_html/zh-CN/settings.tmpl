@@ -1,0 +1,120 @@
+{{define "settings"}}
+{{template "top" .}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+<div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
+
+  <span class="settings-gear ico-settings"></span><br>
+
+  <div class="settings">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
+      <label class="form-check-label" for="darkMode">
+        暗模式
+      </label>
+    </div>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
+      <label class="form-check-label" for="showPokes">
+        显示弹出通知
+      </label>
+    </div>
+    <div>
+      <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
+        {{range $host, $xc := .UserInfo.Exchanges}}
+          <div class="settings-exchange border1">
+            <span>
+              DEX 地址: {{$host}}
+            </span>
+            <br>
+            帐户 ID: <span class="fs12">
+            {{if eq (len $xc.AcctID) 0}}
+              &lt;login to show&gt;
+            {{else}}
+              {{$xc.AcctID}}
+              <br>
+            {{end}}</span>
+            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">账户导出</button>
+            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">禁用帐户</button>
+          </div>
+        {{end}}
+      </div>
+      <br>
+      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+        <p>
+        DEX 客户端支持同时使用多个 DEX 服务器。
+        </p>
+        <button id="addADex" class="bg2 selected">添加一个 DEX</button>
+        <button id="importAccount" class="bg2 selected ml-2">导入帐户</button>
+      </div>
+    </div>
+    <div>
+        <button id="changeAppPW" class="bg2 selected">更改应用密码</button>
+    </div>
+    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      请注意。您需要写下种子并保存副本。如果您无法访问此计算机或发生任何其它问题，您可以使用该种子反向访问您的DEX帐户和注册钱包。请将帐户备份与种子分开保存。<br>
+      <button id="exportSeed" class="fs15 bg2 selected">查看应用种子</button>
+    </div>
+    <div>创建ID: <span id="commitHash" class="mono"></span></div>
+  </div>
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+    
+    {{- /* DEX ADDRESS */ -}}
+    <form class="card mx-auto my-5 bg1 text-left" id="dexAddrForm" autocomplete="off">
+      {{template "dexAddrForm"}}
+    </form>
+    
+    {{- /* CONFIRM REGISTRATION */ -}}
+    <form class="card mx-auto my-5 bg1 text-left d-hide" id="confirmRegForm">
+      {{template "confirmRegistrationForm" .}}
+    </form>
+
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+      {{template "authorizeAccountExportForm"}}
+    </form>
+
+    {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="authorizeAccountImportForm">
+      {{template "authorizeAccountImportForm" .}}
+    </form>
+
+    {{- /* DISABLE ACCOUNT */ -}}
+    <form class="card bg1 d-hide" id="disableAccountForm">
+      {{template "disableAccountForm"}}
+    </form>
+	
+	{{- /* CHANGE APP PASSWORD */ -}}
+    <form class="card bg1 d-hide" id="changeAppPWForm">
+      {{template "changeAppPWForm"}}
+    </form>
+    {{- /* EXPORT SEED AUTHORIZATION */ -}}
+    <form class="card bg1 p-4 d-hide position-relative" id="exportSeedAuth">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="fs16">
+        输入您的应用密码以显示您的种子。确保没有其它人可以看到您的屏幕。
+      </div>
+      <hr class="dashed my-4">
+      <div>
+        <label for="exportSeedPW" class="pl-1 mb-1">密码</label>
+        <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="exportSeedSubmit" type="button" class="col-8 justify-content-center fs15 bg2 selected">展示</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="exportSeedErr"></div>
+    </form>
+
+    {{- /* SEED DISPLAY */ -}}
+    <form class="card bg1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      请好好保存切勿分享它。
+      <div id="seedDiv"></div>
+    </form>
+
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}

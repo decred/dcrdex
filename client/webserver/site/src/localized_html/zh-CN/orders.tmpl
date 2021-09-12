@@ -1,0 +1,86 @@
+{{define "orders"}}
+{{template "top" .}}
+<div id="main" data-handler="orders" class="main overflow-y-auto">
+
+  <div class="w-100 d-flex justify-content-start align-items-stretch">
+    <div class="d-flex flex-column align-items-stretch justify-content-start orders-left-side">
+      <div class="demi fs22 text-center py-1 px-4">历史订单</div>
+      <div class="filter-display bg1">交易市场</div>
+      <div id="hostFilter" class="filter-opts">
+        {{range .Hosts}}
+        <div class="pl-4 pr-2">
+          <input class="form-check-input" type="checkbox" value="{{.}}">
+          <label class="form-check-label fs14">{{.}}</label>
+        </div>
+        {{end}}
+        <div class="apply-bttn d-hide"><button class="bg2 demi">申请</button></div>
+      </div>
+      <div class="filter-display bg1">资产</div>
+      <div id="assetFilter" class="filter-opts">
+        {{range $assetID, $asset := .Assets}}
+        <div class="pl-4 pr-2">
+          <input class="form-check-input" type="checkbox" value="{{$assetID}}">
+          <label class="form-check-label fs14">{{$asset.Symbol}}</label>
+        </div>
+        {{end}}
+        <div class="apply-bttn d-hide"><button class="bg2 demi">申请</button></div>
+      </div>
+      <div class="filter-display bg1">状态</div>
+      <div id="statusFilter" class="filter-opts">
+        {{range $status, $statusString := .Statuses}}
+        <div class="pl-4 pr-2">
+          <input class="form-check-input" type="checkbox" value="{{$status}}">
+          <label class="form-check-label fs14">{{$statusString}}</label>
+        </div>
+        {{end}}
+        <div class="apply-bttn d-hide"><button class="bg2 demi">申请</button></div>
+      </div>
+      <div id="exportOrders" class="export-bttn">
+        <button class="bg2 demi">导出交易</button>
+      </div>
+    </div>
+    <div class="flex-grow-1">
+      <table class="orderstable" id="ordersTable">
+        <thead id="tableHead" class="bg1 fs16">
+          <tr>
+            <th>贸易</th>
+            <th>市场</th>
+            <th>类型</th>
+            <th>状态</th>
+            <th class="text-right">比率</th>
+            <th class="text-right">已满</th>
+            <th class="text-right">稳定的</th>
+            <th class="text-right">时间</th>
+            <th></th> {{/* Link */}}
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr id="rowTmpl">
+            <td data-tmpl="trade">
+              <span data-tmpl="fromQty"></span>
+              <img data-tmpl="fromLogo" class="micro-icon">
+              <span data-tmpl="fromSymbol"></span>
+              <span class="mx-1">&rarr;</span>
+              <span data-tmpl="toQty"></span>
+              <img data-tmpl="toLogo" class="micro-icon">
+              <span data-tmpl="toSymbol"></span>
+            </td>
+            <td data-tmpl="host"></td>
+            <td data-tmpl="type"></td>
+            <td data-tmpl="status"></td>
+            <td data-tmpl="rate" class="text-right"></td>
+            <td data-tmpl="filled" class="text-right"></td>
+            <td data-tmpl="settled" class="text-right"></td>
+            <td data-tmpl="time" class="text-right"></td>
+            <td><a class="ico-open fs14 pointer plainlink" data-tmpl="link"></a></td>
+          </tr>
+        </tbody>
+      </table>
+      <div id="orderLoader" class="text-center mt-2 mb-5 d-hide"><div class="ico-spinner spinner"></div></div>
+      <div class="py-5"></div>
+    </div>
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}
