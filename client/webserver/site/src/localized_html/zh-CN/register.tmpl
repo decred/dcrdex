@@ -1,0 +1,72 @@
+{{define "register"}}
+{{template "top" .}}
+<div id="main" data-handler="register" class="main align-items-center justify-content-center flex-column overflow-y-auto">
+  <div class="d-flex flex-column vscroll w-100">
+
+    {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}
+    <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
+      <div class="bg2 px-2 py-1 text-center fs18">设置应用密码</div>
+      <div class="p-4">
+        <div class="fs16">设置应用密码。这个密码将保护你的 DEX 账户和连接的密钥和钱包。</div>
+        <hr class="dashed my-4">
+        <div class="pb-3">
+          <label for="appPW" class="pl-1 mb-1">密码</label>
+          <input type="password" class="form-control select" id="appPW" autocomplete="new-password">
+        </div>
+        <div class="pb-3">
+          <label for="appPWAgain" class="pl-1 mb-1">再次输入密码</label>
+          <input type="password" class="form-control select" id="appPWAgain" autocomplete="off">
+        </div>
+        <div class="pl-4">
+          <input class="form-check-input" type="checkbox" id="rememberPass">
+          <label for="rememberPass" class="pl-1">记住我的密码</label>
+        </div>
+        <div class="pb-3 d-hide mt-2" id="seedRestore">
+          <label for="seedInput" class="pl-1 mb-1">恢复种子</label>
+          <input type="text" class="form-control select" id="seedInput" autocomplete="off">
+        </div>
+        <div class="d-flex justify-content-between mt-4">
+          <div class="px-1 fs13 pointer d-flex justify-content-start align-items-center" id="showSeedRestore"><span class="ico-plus fs11"></span> <div class="pl-2">从种子恢复</div></div>
+          <span></span>
+          <button id="appPWSubmit" type="submit" class="col-8 justify-content-center fs15 bg2 selected">提交</button>
+        </div>
+        <div class="fs15 pt-3 text-center d-hide errcolor" id="appPWErrMsg"></div>
+      </div>
+    </form>
+
+    {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
+    <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="newWalletForm">
+      {{template "newWalletForm" "你的 decred 钱包需要支付注册费。"}}
+    </form>
+
+    {{- /* Unlock wallet. Only shown if not already unlocked. */ -}}
+    <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
+      {{template "unlockWalletForm" "解锁你的 decred 钱包以支付费用。"}}
+    </form>
+
+    {{- /* DEX ADDRESS FORM */ -}}
+    <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="dexAddrForm">
+      {{template "dexAddrForm"}}
+    </form>
+
+    {{- /* Confirm registration with app password. */ -}}
+    <form class="card mx-auto my-5 bg1 d-hide" id="confirmRegForm">
+      {{template "confirmRegistrationForm"}}
+    </form>
+
+    {{- /* registration failed low balance. */ -}}
+    <form class="card mx-auto my-5 bg1 d-hide" id="failedRegForm">
+      <div class="bg2 px-2 py-1 text-center fs18">Insuficient funds</div>
+      <div class="p-4">
+        <div class="fs16">
+          Registration failed. Look below for more details:
+        </div>
+        <div class="fs15 pt-3 text-center d-hide errcolor" id="regFundsErr"></div>
+        <hr class="dashed mt-4">
+      </div>
+    </form>
+
+  </div>
+</div>
+{{template "bottom"}}
+{{end}}

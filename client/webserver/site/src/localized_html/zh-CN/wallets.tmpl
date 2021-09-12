@@ -1,0 +1,217 @@
+{{define "stateIcons"}}
+  {{$w := .Wallet}}
+  {{if $w}}
+    {{$ready := and $w.Running $w.Open}}
+    <span data-state="sleeping" class="ico-sleeping fs17 grey{{if $w.Running}} d-hide{{end}}"></span>
+    <span data-state="locked" class="ico-locked grey{{if or $ready (not $w.Running)}} d-hide{{end}}"></span>
+    <span data-state="unlocked" class="ico-unlocked{{if not $ready}} d-hide{{end}}"></span>
+    <span data-state="nowallet" class="ico-cross fs12 red d-hide"></span>
+    <span data-state="syncing" 
+      class="ico-sync fs12{{if or (not $w.Running) $w.Synced}} d-hide{{end}}"
+      data-tooltip="wallet is {{printf "%.2f" (x100  $w.SyncProgress)}}% synced"></span>
+    <span data-state="status" class="txt-status">{{if $w.Open}}准备就绪{{else if $w.Running}}锁定{{else}}关闭{{end}}</span>
+  {{else}}
+    <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
+    <span data-state="locked" class="ico-locked grey d-hide"></span>
+    <span data-state="unlocked" class="ico-unlocked d-hide"></span>
+    <span data-state="nowallet" class="ico-cross fs12 red"></span>
+    <span data-state="syncing" class="ico-sync fs12 d-hide"></span>
+    <span data-state="status" class="txt-status">未连接钱包</span>
+  {{end}}
+{{end}}
+
+{{define "actionButtons"}}
+  {{$w := .Wallet}}
+  {{if $w}}
+  {{$ready := and $w.Running $w.Open}}
+  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>连接</button>
+  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>解锁</button>
+  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>提款</button>
+  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>存款</button>
+  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>锁定</button>
+  <button data-action="create" class="d-hide">创建{{.Info.Name}}钱包</button>
+    <span data-action="settings" class="ico-settings fs20 pointer"></span>
+    {{else}}
+    <button data-action="connect" class="d-hide">连接</button>
+    <button data-action="unlock" class="d-hide">解锁</button>
+    <button data-action="withdraw" class="d-hide">提款</button>
+    <button data-action="deposit" class="d-hide">存款</button>
+    <button data-action="lock" class="d-hide">锁定</button>
+    <button data-action="create">创建{{.Info.Name}}钱包</button>
+    <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
+  {{end}}
+{{end}}
+
+{{define "wallets"}}
+{{template "top" .}}
+<div id="main" data-handler="wallets" class="main">
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+
+  {{- /* LEFT SIDE */ -}}
+  <div class="col-14">
+    <h3 class="p-3">钱包</h3>
+    <table class="wallets">
+      <thead>
+        <tr>
+          <th>列表 <span id="assetArrow"></span></th>
+          <th>余额 <span id="balanceArrow"></span></th>
+          <th>状态 <span id="statusArrow"></span></th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="walletTable">
+        {{range .Assets}}
+        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Info.Name}}">
+          <td>
+            <img src="{{logoPath .Symbol}}" class="mini-icon">
+            <span class="fs20">{{.Info.Name}}</span>
+            <span class="fs15">({{toUpper .Symbol}})</span>
+          </td>
+          <td data-balance-target="{{.ID}}">
+            {{if .Wallet}}
+              {{printf "%.8f" (fromAtoms .Wallet.Balance.Available)}}
+            {{else}}
+              0.00000000
+            {{end}}
+          </td>
+          <td class="status-col fs16">
+            {{template "stateIcons" .}}
+          </td>
+          <td>
+            {{template "actionButtons" .}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{- /* RIGHT SIDE */ -}}
+  <div id="rightBox" class="col-10 px-2 py-5 d-flex justify-content-center align-items-start overflow-auto">
+
+    {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
+    <div id="marketsBox" class="d-hide">
+      <div class="fs22 text-center py-1"><span id="marketsFor"></span> 市场</div>
+      <div id="marketsCard" class="card">
+        <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
+        <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
+          <div class="asset-market p-1" id="oneMarket">
+            <img src="{{logoPath "dcr"}}" class="mini-icon"><br>
+            <span>DCR-BTC</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {{- /* NEW WALLET */ -}}
+    <form class="card bg1 position-relative d-hide" id="walletForm" autocomplete="off">
+      {{template "newWalletForm"}}
+    </form>
+
+    {{- /* UNLOCK WALLET */ -}}
+    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
+    </form>
+
+    {{- /* DEPOSIT ADDRESS */ -}}
+    <div class="card bg1 text-center fs20 d-hide" id="deposit">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+        存款
+        <img id="depositLogo" class="micro-icon mx-1">
+        <span id="depositName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="p-2">
+        <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
+        <div class="my-3">
+          <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">新存款地址</button>
+        </div>
+        <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
+      </div>
+    </div>
+
+    {{- /* WITHDRAW */ -}}
+    <form class="card bg1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+        提款
+        <img id="withdrawLogo" class="micro-icon mx-1">
+        <span id="withdrawName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="px-4 mt-3">
+        <label for="withdrawAddr" class="pl-1 mb-1">地址</label>
+        <input type="text" class="form-control select" id="withdrawAddr">
+      </div>
+      <div class="d-flex align-items-stretch px-4">
+        <div class="mt-2 col-10 p-0">
+          <label for="withdrawAmt" class="pl-1 mb-1">金额</label>
+          <input type="text" class="form-control select" id="withdrawAmt">
+        </div>
+        <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
+          <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> 可用</div>
+          <!-- <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div> -->
+        </div>
+      </div>
+      <hr class="dashed my-4 mx-4">
+      <div class="fs16 px-4 text-center">使用您的应用密码授权取款。</div>
+      <div class="d-flex px-4 mt-3">
+        <div class="col-12 p-0">
+          <label for="withdrawPW" class="pl-1 mb-1">密码</label>
+          <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
+        </div>
+        <div class="col-12 p-0 text-right">
+          <div>&nbsp;</div>
+          <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">提款</button>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="withdrawErr"></div>
+    </form>
+    
+    {{- /* RECONFIGURE WALLET */ -}}
+    <form class="card bg1 pb-3 d-hide mt-3" id="walletReconfig" autocomplete="off">
+      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+        重新配置
+        <img id="recfgAssetLogo" class="micro-icon mx-1">
+        <span id="recfgAssetName"></span>
+        钱包
+        <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="px-3 py-1" id="reconfigInputs">
+        {{template "walletConfigTemplates"}}
+      </div>
+      <div id="showChangePW" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+        <span id="showIcon" class="ico-plus fs8 pl-1"></span>
+        <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
+        <span id="switchPWMsg" class="d-inline-block pl-1 pb-1"></span>
+      </div>
+      <div id="changePW" class="px-4 py-1">
+        <div class="fs15">
+          更改下面的密码不会更改您钱包中的密码。在您直接通过电子钱包应用程序更改电子钱包密码后，使用此表单更新DEX客户端。
+        </div>
+        <div class="pt-3">
+          <label for="newPW" class="mb-1">新钱包密码</label>
+          <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
+        </div>
+      </div>
+      <hr class="dashed my-2 mx-4">
+      <div class="px-4 my-2">
+        注意：在有活跃交易或预订订单时切换到不同的钱包可能会导致资金丢失。
+      </div>
+      <div class="d-flex px-4 mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+        <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
+          <label for="appPW" class="pl-1 mb-1">应用程序密码</label>
+          <input type="password" class="form-control select" id="appPW" autocomplete="off">
+        </div>
+        <div class="col-12 p-0 text-right">
+          <div>&nbsp;</div>
+          <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">提交</button>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="reconfigErr"></div>
+    </form>
+
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}
