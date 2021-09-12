@@ -8,7 +8,7 @@ export const ID_LOCKED = 'ID_LOCKED'
 export const ID_NOWALLET = 'ID_NOWALLET'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
 export const ID_HIDE_ADDITIONAL_SETTINGS = 'ID_HIDE_ADDITIONAL_SETTINGS'
-export const ID_SHOW_ADDIIONAL_SETTINGS = 'ID_SHOW_ADDIIONAL_SETTINGS'
+export const ID_SHOW_ADDITIONAL_SETTINGS = 'ID_SHOW_ADDITIONAL_SETTINGS'
 export const ID_BUY = 'ID_BUY'
 export const ID_SELL = 'ID_SELL'
 export const ID_NOT_SUPPORTED = 'ID_NOT_SUPPORTED'
@@ -36,8 +36,9 @@ export const ID_NO_MATCH = 'ID_NO_MATCH'
 export const ID_CANCELED = 'ID_CANCELED'
 export const ID_REVOKED = 'ID_REVOKED'
 export const ID_WAITING_FOR_CONFS = 'ID_WAITING_FOR_CONFS'
-export const ID_NONE_SELECTED = 'ID_NONE_SELECTED'
+export const ID_NONE_SELECTED = 'ID_NONE_SELECTED' // unused?
 export const ID_REGISTRATION_FEE_SUCCESS = 'ID_REGISTRATION_FEE_SUCCESS'
+export const ID_API_ERROR = 'ID_API_ERROR'
 
 export const enUS = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -51,7 +52,7 @@ export const enUS = {
   [ID_NOWALLET]: 'no wallet',
   [ID_WALLET_SYNC_PROGRESS]: 'wallet is {{ syncProgress }}% synced',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'hide additional settings',
-  [ID_SHOW_ADDIIONAL_SETTINGS]: 'show additional settings',
+  [ID_SHOW_ADDITIONAL_SETTINGS]: 'show additional settings',
   [ID_BUY]: 'Buy',
   [ID_SELL]: 'Sell',
   [ID_NOT_SUPPORTED]: '{{ asset }} is not supported',
@@ -79,7 +80,8 @@ export const enUS = {
   [ID_REVOKED]: 'revoked',
   [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...',
   [ID_NONE_SELECTED]: 'none selected',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!'
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!',
+  [ID_API_ERROR]: 'API error'
 }
 
 export const ptBR = {
@@ -104,7 +106,7 @@ export const ptBR = {
   [ID_ESTIMATE_UNAVAILABLE]: 'estimativa indisponível',
   [ID_NO_ZERO_RATE]: 'taxa não pode ser zero',
   [ID_NO_ZERO_QUANTITY]: 'quantidade não pode ser zero',
-  [ID_TRADE]: 'trade',
+  [ID_TRADE]: 'troca',
   [ID_NO_ASSET_WALLET]: 'Sem carteira {{ asset }}',
   [ID_EXECUTED]: 'executado',
   [ID_BOOKED]: 'reservado',
@@ -122,7 +124,8 @@ export const ptBR = {
   [ID_REVOKED]: 'revocado',
   [ID_WAITING_FOR_CONFS]: 'Esperando confirmações...',
   [ID_NONE_SELECTED]: 'nenhuma selecionado',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!'
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!',
+  [ID_API_ERROR]: 'Erro de API'
 }
 
 const localesMap = {

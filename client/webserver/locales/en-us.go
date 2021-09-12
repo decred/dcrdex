@@ -28,7 +28,7 @@ var EnUS = map[string]string{
 	"Confirm Registration":           "Confirm Registration",
 	"app_pw_reg":                     "Enter your app password to confirm DEX registration.",
 	"reg_confirm_submit":             `When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay registration fees.`, // TODO for multi-asset reg
-	"provied_markets":                "This DEX provides the following markets:",
+	"provided_markets":               "This DEX provides the following markets:",
 	"base_header":                    "Base",
 	"quote_header":                   "Quote",
 	"lot_size_header":                "Lot Size",
@@ -56,6 +56,7 @@ var EnUS = map[string]string{
 	"price":                          "price",
 	"volume":                         "volume",
 	"buys":                           "buys",
+	"sells":                          "sells",
 	"Buy Orders":                     "Buy Orders",
 	"Quantity":                       "Quantity",
 	"Rate":                           "Rate",

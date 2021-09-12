@@ -229,7 +229,7 @@ export class WalletConfigForm {
     }
     Doc.hide(this.hideIcon, this.otherSettings)
     Doc.show(this.showIcon)
-    this.showHideMsg.textContent = intl.prep(intl.ID_SHOW_ADDIIONAL_SETTINGS)
+    this.showHideMsg.textContent = intl.prep(intl.ID_SHOW_ADDITIONAL_SETTINGS)
   }
 
   /*
