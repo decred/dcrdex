@@ -314,7 +314,7 @@ export default class WalletsPage extends BasePage {
     const wallet = app.walletMap[assetID]
     this.depositAsset = this.lastFormAsset = assetID
     if (!wallet) {
-      app.notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR))
+      app.notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR)) // TODO: translate
       return
     }
     await this.hideBox()

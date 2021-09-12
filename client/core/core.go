@@ -1114,11 +1114,10 @@ func New(cfg *Config) (*Core, error) {
 	}
 	lang := language.AmericanEnglish
 	if cfg.Language != "" {
-		acceptLangs, _, err := language.ParseAcceptLanguage(cfg.Language)
+		acceptLang, err := language.Parse(cfg.Language)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse requested language: %w", err)
 		}
-		// fmt.Println("parsed input:", acceptLangs)
 		var langs []language.Tag
 		for locale := range locales {
 			tag, err := language.Parse(locale)
@@ -1127,9 +1126,9 @@ func New(cfg *Config) (*Core, error) {
 			}
 			langs = append(langs, tag)
 		}
-		// fmt.Println("defined langs:", langs)
 		matcher := language.NewMatcher(langs)
-		tag, _, conf := matcher.Match(acceptLangs...)
+		_, idx, conf := matcher.Match(acceptLang) // use index because tag may end up as something hyper specific like zh-Hans-u-rg-cnzzzz
+		tag := langs[idx]
 		switch conf {
 		case language.Exact:
 		case language.High, language.Low:

@@ -366,14 +366,15 @@ func (s *WebServer) buildTemplates(lang string) error {
 	}
 
 	if match == "" {
-		// Try to identify candate languages.
-		acceptLangs, _, err := language.ParseAcceptLanguage(lang)
+		// Try to identify candidate languages.
+		acceptLang, err := language.Parse(lang)
 		if err != nil {
 			return fmt.Errorf("unable to parse requested language: %v", err)
 		}
 		// Match against template languages.
 		matcher := language.NewMatcher(langs)
-		tag, idx, conf := matcher.Match(acceptLangs...)
+		_, idx, conf := matcher.Match(acceptLang) // use index because tag may end up as something hyper specific like zh-Hans-u-rg-cnzzzz
+		tag := langs[idx]
 		switch conf {
 		case language.Exact:
 		case language.High, language.Low:

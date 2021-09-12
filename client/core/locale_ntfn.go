@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -112,7 +114,7 @@ var enUS = map[Topic]*translation{
 		subject:  "Order coin fetch error",
 		template: "Source coins retrieval error for order %s (%s): %v",
 	},
-	// [token, ticker, error]
+	// [token]
 	TopicMissedCancel: {
 		subject:  "Missed cancel",
 		template: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.",
@@ -290,6 +292,7 @@ var enUS = map[Topic]*translation{
 		subject:  "Back up your new application seed",
 		template: "The client has been upgraded to use an application seed. Back up the seed now in the settings view.",
 	},
+	// [host, msg]
 	TopicDEXNotification: {
 		subject:  "Message from DEX",
 		template: "%s: %s",
@@ -298,15 +301,11 @@ var enUS = map[Topic]*translation{
 
 var ptBR = map[Topic]*translation{
 	// [host]
-	TopicDEXConnected: {
-		subject:  "DEX conectado",
-		template: "%s está conectado",
-	},
-	// [host]
 	TopicAccountRegistered: {
 		subject:  "Conta Registrada",
 		template: "Você agora pode trocar em %s",
 	},
+	// [confs, host]
 	TopicFeePaymentInProgress: {
 		subject:  "Pagamento da Taxa em andamento",
 		template: "Esperando por %d confirmações antes de trocar em %s",
@@ -401,7 +400,7 @@ var ptBR = map[Topic]*translation{
 		template: "Erro ao recuperar moedas de origem para pedido %s (%s): %v",
 		subject:  "Erro na Recuperação do Pedido de Moedas",
 	},
-	// [token, ticker, error]
+	// [token]
 	TopicMissedCancel: {
 		template: "Pedido de cancelamento não combinou para pedido %s. Isto pode acontecer se o pedido de cancelamento foi enviado no mesmo epoque do que a troca ou se o pedido foi completamente executado antes da ordem de cancelamento ser executada.",
 		subject:  "Cancelamento Perdido",
@@ -557,6 +556,11 @@ var ptBR = map[Topic]*translation{
 		subject:  "Atualização Necessária",
 	},
 	// [host]
+	TopicDEXConnected: {
+		subject:  "DEX conectado",
+		template: "%s está conectado",
+	},
+	// [host]
 	TopicDEXDisconnected: {
 		template: "%s está desconectado",
 		subject:  "Server Disconectado",
@@ -574,7 +578,7 @@ var ptBR = map[Topic]*translation{
 		subject:  "Guardar nova seed do app",
 		template: "O cliente foi atualizado para usar uma seed. Faça backup dessa seed na página de configurações.",
 	},
-	// [msg, msg]
+	// [host, msg]
 	TopicDEXNotification: {
 		subject:  "Mensagem da DEX",
 		template: "%s: %s",
@@ -589,7 +593,10 @@ var locales = map[string]map[Topic]*translation{
 func init() {
 	for lang, translations := range locales {
 		for topic, translation := range translations {
-			message.SetString(language.Make(lang), string(topic), translation.template)
+			err := message.SetString(language.Make(lang), string(topic), translation.template)
+			if err != nil {
+				panic(fmt.Sprintf("SetString(%s): %v", lang, err))
+			}
 		}
 	}
 }

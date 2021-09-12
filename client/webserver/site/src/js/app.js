@@ -10,7 +10,7 @@ import OrderPage from './order'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
-import { setLocale } from './locales'
+import * as intl from './locales'
 
 const idel = Doc.idel // = element by id
 const bind = Doc.bind
@@ -91,7 +91,7 @@ export default class Application {
     }
 
     // use user current locale set by backend
-    setLocale()
+    intl.setLocale()
   }
 
   /**
@@ -678,7 +678,7 @@ export default class Application {
    */
   checkResponse (resp, skipNote) {
     if (!resp.requestSuccessful || !resp.ok) {
-      if (this.user.inited && !skipNote) this.notify(ntfn.make('API error', resp.msg, ntfn.ERROR))
+      if (this.user.inited && !skipNote) this.notify(ntfn.make(intl.prep(intl.ID_API_ERROR), resp.msg, ntfn.ERROR))
       return false
     }
     return true
