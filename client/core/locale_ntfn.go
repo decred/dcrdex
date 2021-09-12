@@ -585,9 +585,297 @@ var ptBR = map[Topic]*translation{
 	},
 }
 
+// zhCN is the Simplified Chinese (PRC) translations.
+var zhCN = map[Topic]*translation{
+	// [host]
+	TopicAccountRegistered: {
+		subject:  "注册账户",
+		template: "您现在可以在 %s 进行交易", // alt. 您现在可以切换到 %s
+	},
+	// [confs, host]
+	TopicFeePaymentInProgress: {
+		subject:  "费用支付中",
+		template: "在切换到 %s 之前等待 %d 次确认", // alt. 在 %s 交易之前等待 %d 确认
+	},
+	// [confs, required confs]
+	TopicRegUpdate: {
+		subject:  "费用支付确认", // alt. 记录更新 (but not displayed)
+		template: "%v/%v 费率确认",
+	},
+	// [host, error]
+	TopicFeePaymentError: {
+		subject:  "费用支付错误",
+		template: "向 %s 支付费用时遇到错误: %v", // alt. 为 %s 支付费率时出错：%v
+	},
+	// [host, error]
+	TopicAccountUnlockError: {
+		subject:  "解锁钱包时出错",
+		template: "解锁帐户 %s 时出错： %v", // alt. 解锁 %s 的帐户时出错: %v
+	},
+	// [host]
+	TopicFeeCoinError: {
+		subject:  "汇率错误",
+		template: "%s 的空置率。", // alt. %s 的费用硬币为空。
+	},
+	// [host]
+	TopicWalletConnectionWarning: {
+		subject:  "钱包连接通知",
+		template: "检测到 %s 的注册不完整，无法连接 decred 钱包", // alt. 检测到 %s 的注册不完整，无法连接到 Decred 钱包
+	},
+	// [host, error]
+	TopicWalletUnlockError: {
+		subject:  "解锁钱包时出错",
+		template: "与 decred 钱包连接以在 %s 上完成注册，但无法解锁： %v", // alt. 已连接到 Decred 钱包以在 %s 完成注册，但无法解锁：%v
+	},
+	// [ticker, error]
+	TopicWithdrawError: {
+		subject:  "提款错误",
+		template: "在 %s 提取过程中遇到错误: %v", // alt. 删除 %s 时遇到错误： %v
+	},
+	// [ticker, coin ID]
+	TopicWithdrawSend: {
+		subject:  "提款已发送",
+		template: "%s 的提款已成功完成。硬币 ID = %s",
+	},
+	// [error]
+	TopicOrderLoadFailure: {
+		subject:  "请求加载失败",
+		template: "某些订单无法从数据库加载：%v", // alt. 某些请求无法从数据库加载:
+	},
+	// [qty, ticker, token]
+	TopicYoloPlaced: {
+		subject:  "下达市价单",
+		template: "以市场价格 (%[3]s) 出售 %[1].8f %[2]s",
+	},
+	// [sell string, qty, ticker, rate string, token]
+	TopicOrderPlaced: {
+		subject:  "已下订单",
+		template: "%sing %.8f %s，值 = %s (%s)", // figure out the "ing" issue (TODO)
+	},
+	// [missing count, token, host]
+	TopicMissingMatches: {
+		subject:  "订单缺失匹配",
+		template: "%[2]s 订单的 %[1]d 匹配项未被 %[3]q 报告并被视为已撤销", // alt. %d 订单 %s 的匹配没有被 %q 报告并被视为已撤销
+	},
+	// [token, error]
+	TopicWalletMissing: {
+		subject:  "丢失的钱包",
+		template: "活动订单 %s 的钱包检索错误： %v", // alt. 通过钱包 %s 检索活动订单时出错: %v
+	},
+	// [side, token, match status]
+	TopicMatchErrorCoin: {
+		subject:  "货币不匹配错误",
+		template: "订单 %s 的组合 %s 处于状态 %s，但没有用于交换货币的运行程序。", // alt. 订单 %s 的匹配 %s 处于状态 %s，但没有交换硬币服务商。
+	},
+	// [side, token, match status]
+	TopicMatchErrorContract: {
+		subject:  "合约组合错误",
+		template: "订单 %s 的匹配 %s 处于状态 %s，没有服务商交换合约。",
+	},
+	// [ticker, contract, token, error]
+	TopicMatchRecoveryError: {
+		subject:  "检索匹配时出错",
+		template: "在检索订单 %s: %v 的交易期间审核交易对手交易合约 (%s %v) 时出错", // ? 在订单 %s: %v 的交易恢复期间审核对方的交易合约 (%s %v) 时出错
+	},
+	// [token]
+	TopicOrderCoinError: {
+		subject:  "硬币订单错误",
+		template: "没有为活动订单 %s 记录资金硬币", // alt. 没有为活动订单 %s 注册资金货币
+	},
+	// [token, ticker, error]
+	TopicOrderCoinFetchError: {
+		subject:  "硬币订单恢复错误",
+		template: "检索订单 %s (%s) 的源硬币时出错： %v", // alt. 订单 %s (%s) 的源硬币检索错误: %v
+	},
+	// [token]
+	TopicMissedCancel: {
+		subject:  "丢失取消",
+		template: "取消订单与订单 %s 不匹配。如果取消订单与交易所同时发送，或者订单在取消订单执行之前已完全执行，则可能发生这种情况。",
+	},
+	// [capitalized sell string, base ticker, quote ticker, host, token]
+	TopicOrderCanceled: {
+		subject:  "订单取消",
+		template: "%s 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+	},
+	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
+	TopicMatchesMade: {
+		subject:  "匹配完成",
+		template: "%s 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+	},
+	// [qty, ticker, token]
+	TopicSwapSendError: {
+		subject:  "发送交换时出错",
+		template: "在以 %[3]s 的顺序发送价值 %[1].8f %[2]s 的输出的交换时遇到错误", // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
+	},
+	// [match, error]
+	TopicInitError: {
+		subject:  "交换错误",
+		template: "通知 DEX 匹配 %s 的交换时出错： %v", // alt. 错误通知 DEX %s 交换组合：%v
+	},
+	// [match, error]
+	TopicReportRedeemError: {
+		subject:  "报销错误",
+		template: "通知 DEX %s 赎回时出错： %v",
+	},
+	// [qty, ticker, token]
+	TopicSwapsInitiated: {
+		subject:  "发起交流",
+		template: "在订单 %[3]s 上发送价值 %[1].8f %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
+	},
+	// [qty, ticker, token]
+	TopicRedemptionError: {
+		subject:  "赎回错误",
+		template: "在订单 %[3]s 上发送价值 %[1].8f %[2]s 的兑换时遇到错误", // alt. 在订单 %s 上发现发送价值 %.8f %s 的赎回错误
+	},
+	// [qty, ticker, token]
+	TopicMatchComplete: {
+		subject:  "完全匹配",
+		template: "在订单 %s 上兑换了 %.8f %s",
+	},
+	// [qty, ticker, token]
+	TopicRefundFailure: {
+		subject:  "退款错误",
+		template: "按顺序 %[3]s 返回 %[1].8f %[2]s，有一些错误", // alt. 退款％.8f％s的订单％S，但出现一些错误
+	},
+	// [qty, ticker, token]
+	TopicMatchesRefunded: {
+		subject:  "退款成功",
+		template: "在订单 %[3]s 上返回了 %[1].8f %[2]s", // 在订单 %s 上返回了 %.8f %s
+	},
+	// [match ID token]
+	TopicMatchRevoked: {
+		subject:  "撤销组合",
+		template: "匹配 %s 已被撤销", // alt. 组合 %s 已被撤销
+	},
+	// [token, market name, host]
+	TopicOrderRevoked: {
+		subject:  "撤销订单",
+		template: "%s 市场 %s 的订单 %s 已被服务器撤销",
+	},
+	// [token, market name, host]
+	TopicOrderAutoRevoked: {
+		subject:  "订单自动撤销",
+		template: "%s 市场 %s 上的订单 %s 由于市场暂停而被撤销", // alt. %s 市场 %s 中的订单 %s 被市场暂停撤销
+	},
+	// [ticker, coin ID, match]
+	TopicMatchRecovered: {
+		subject:  "恢复订单",
+		template: "找到赎回 (%s: %v) 并验证了请求 %s 的秘密",
+	},
+	// [token]
+	TopicCancellingOrder: {
+		subject:  "取消订单",
+		template: "已为订单 %s 提交了取消操作", // alt. 已为订单 %s 提交取消订单
+	},
+	// [token, old status, new status]
+	TopicOrderStatusUpdate: {
+		subject:  "订单状态更新",
+		template: "订单 %v 的状态从 %v 修改为 %v", // alt. 订单状态 %v 从 %v 修改为 %v
+	},
+	// [count, host, token]
+	TopicMatchResolutionError: {
+		subject:  "订单解析错误",
+		template: "没有为 %[3]s 找到为 %[2]s 报告的 %[1]d 个匹配项。请联系Decred社区以解决该问题。", // alt. %s 报告的 %d 个匹配项没有找到 %s。
+	},
+	// [token]
+	TopicFailedCancel: {
+		subject:  "取消失败",
+		template: "取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。",
+	},
+	// [coin ID, ticker, match]
+	TopicAuditTrouble: {
+		subject:  "审计时的问题",
+		template: "继续寻找组合 %[3]s 的货币 %[1]v (%[2]s) 的交易对手合约。您的互联网和钱包连接是否正常？",
+	},
+	// [host, error]
+	TopicDexAuthError: {
+		subject:  "身份验证错误",
+		template: "%s: %v",
+	},
+	// [count, host]
+	TopicUnknownOrders: {
+		subject:  "DEX 报告的未知请求",
+		template: "未找到 DEX %[2]s 报告的 %[1]d 个活动订单。",
+	},
+	// [count]
+	TopicOrdersReconciled: {
+		subject:  "与 DEX 协调的订单",
+		template: "%d 个订单的更新状态。", // alt. %d 个订单的状态已更新。
+	},
+	// [ticker, address]
+	TopicWalletConfigurationUpdated: {
+		subject:  "更新的钱包设置a",
+		template: "钱包 %[1]s 的配置已更新。存款地址 = %[2]s", // alt. %s 钱包的配置已更新。存款地址 = %s
+	},
+	//  [ticker]
+	TopicWalletPasswordUpdated: {
+		subject:  "钱包密码更新",
+		template: "钱包 %s 的密码已更新。", // alt. %s 钱包的密码已更新。
+	},
+	// [market name, host, time]
+	TopicMarketSuspendScheduled: {
+		subject:  "市场暂停预定",
+		template: "%s 上的市场 %s 现在计划在 %v 暂停",
+	},
+	// [market name, host]
+	TopicMarketSuspended: {
+		subject:  "暂停市场",
+		template: "%s 的 %s 市场交易现已暂停。", // alt. %s 市场 %s 的交易现已暂停。
+	},
+	// [market name, host]
+	TopicMarketSuspendedWithPurge: {
+		subject:  "暂停市场，清除订单",
+		template: "%s 的市场交易 %s 现已暂停。订单簿中的所有订单现已被删除。", // alt. %s 市场 %s 的交易现已暂停。所有预订的订单现在都已清除。
+	},
+	// [market name, host, time]
+	TopicMarketResumeScheduled: {
+		subject:  "预定市场摘要",
+		template: "%s 上的市场 %s 现在计划在 %v 恢",
+	},
+	// [market name, host, epoch]
+	TopicMarketResumed: {
+		subject:  "总结市场",
+		template: "%[2]s 上的市场 %[1]s 已汇总用于时代 %[3]d 中的交易", // alt. M%s 的市场 %s 已在epoch %d 恢复交易
+	},
+	// [host]
+	TopicUpgradeNeeded: {
+		subject:  "需要更新",
+		template: "您可能需要更新您的帐户以进行 %s 的交易。", // alt. 您可能需要更新您的客户端以在 %s 进行交易。
+	},
+	// [host]
+	TopicDEXConnected: {
+		subject:  "DEX 连接",
+		template: "%s 已连接",
+	},
+	// [host]
+	TopicDEXDisconnected: {
+		subject:  "服务器断开连接",
+		template: "%s 离线", // alt. %s 已断开连接
+	},
+	// [host, rule, time, details]
+	TopicPenalized: {
+		subject:  "服务器惩罚了你",
+		template: "%s 上的 DEX 惩罚\n最后一条规则被破坏：%s \n时间： %v \n详细信息：\n \" %s \" \n",
+	},
+	TopicSeedNeedsSaving: {
+		subject:  "不要忘记备份你的应用程序种子", // alt. 别忘了备份应用程序种子
+		template: "已创建新的应用程序种子。请立刻在设置界面中进行备份。",
+	},
+	TopicUpgradedToSeed: {
+		subject:  "备份您的新应用程序种子",                   // alt. 备份新的应用程序种子
+		template: "客户端已升级为使用应用程序种子。请切换至设置界面备份种子。", // alt. 客户端已升级。请在“设置”界面中备份种子。
+	},
+	// [host, msg]
+	TopicDEXNotification: {
+		subject:  "来自DEX的消息",
+		template: "%s: %s",
+	},
+}
+
 var locales = map[string]map[Topic]*translation{
 	language.AmericanEnglish.String():     enUS,
 	language.BrazilianPortuguese.String(): ptBR,
+	"zh-CN":                               zhCN, // language.SimplifiedChinese is zh-Hans
 }
 
 func init() {
