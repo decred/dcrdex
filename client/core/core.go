@@ -1966,8 +1966,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 				if !trade.isActive() {
 					continue
 				}
-				waID := wallet.AssetID
-				if trade.wallets.toAsset.ID == waID || trade.wallets.fromAsset.ID == waID {
+				if dc.hasActiveAssetOrders(wallet.AssetID) {
 					hasActiveTrade = true
 					break
 				}
