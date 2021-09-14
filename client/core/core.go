@@ -1962,14 +1962,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	sameWallet := func() error {
 		hasActiveTrade := false
 		for _, dc := range c.dexConnections() {
-			for _, trade := range dc.trackedTrades() {
-				if !trade.isActive() {
-					continue
-				}
-				if dc.hasActiveAssetOrders(wallet.AssetID) {
-					hasActiveTrade = true
-					break
-				}
+			if dc.hasActiveAssetOrders(wallet.AssetID) {
+				hasActiveTrade = true
+				break
 			}
 		}
 		if hasActiveTrade {
