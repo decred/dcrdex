@@ -2333,7 +2333,7 @@ func (btc *ExchangeWallet) trySetRedemptionRequestBlock(req *findRedemptionReq) 
 	btc.findRedemptionQueue[req.outPt] = req
 }
 
-// checkRedemptionBlockDetails looks retrieves the block at hashStr and checks
+// checkRedemptionBlockDetails looks retrieves the block at blockStr and checks
 // that the provided pkScript matches the specified outpoint
 func (btc *ExchangeWallet) checkRedemptionBlockDetails(outPt outPoint, blockStr string, pkScript []byte) (*chainhash.Hash, int32, error) {
 	blockHash, err := chainhash.NewHashFromStr(blockStr)
