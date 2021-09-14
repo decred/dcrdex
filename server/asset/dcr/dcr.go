@@ -994,6 +994,8 @@ func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vo
 	return txOut, verboseTx, pkScript, nil
 }
 
+// determineTxTree determines if the transaction is in the regular transaction
+// tree (wire.TxTreeRegular) or the stake tree (wire.TxTreeStake).
 func determineTxTree(msgTx *wire.MsgTx) int8 {
 	// stake.DetermineTxType will produce correct results if we pass true for
 	// isTreasuryEnabled regardless of whether the treasury vote has activated
@@ -1005,7 +1007,13 @@ func determineTxTree(msgTx *wire.MsgTx) int8 {
 	// as a stake transaction, then we infer regular, but that isn't necessary
 	// as explained above.
 	isTreasuryEnabled := true
-	if stake.DetermineTxType(msgTx, isTreasuryEnabled) != stake.TxTypeRegular {
+	// Consider the automatic ticket revocations agenda NOT active. Specifying
+	// true just adds the constraints that revocations must have an empty
+	// signature script for its input and must have zero fee. Thus, false will
+	// correctly identify consensus-validated transactions before OR after
+	// activation of this agenda.
+	isAutoRevocationsEnabled := false
+	if stake.DetermineTxType(msgTx, isTreasuryEnabled, isAutoRevocationsEnabled) != stake.TxTypeRegular {
 		return wire.TxTreeStake
 	}
 	return wire.TxTreeRegular
