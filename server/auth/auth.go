@@ -20,8 +20,8 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 )
 
 const (

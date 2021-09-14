@@ -24,7 +24,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/eth" // register eth asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
 	dexsrv "decred.org/dcrdex/server/dex"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 func mainCore(ctx context.Context) error {
