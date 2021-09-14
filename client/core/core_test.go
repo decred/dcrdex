@@ -226,7 +226,7 @@ func (conn *TWebsocket) queueResponse(route string, handler func(*msgjson.Messag
 	if handlers == nil {
 		handlers = make([]func(*msgjson.Message, msgFunc) error, 0, 1)
 	}
-	conn.handlers[route] = append(handlers, handler)
+	conn.handlers[route] = append(handlers, handler) // NOTE: handler is called by RequestWithTimeout
 }
 
 func (conn *TWebsocket) NextID() uint64 {
@@ -964,12 +964,15 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.OrderStatus, suspended ...bool) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
 		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
+		if len(suspended) > 0 {
+			result.Suspended = &suspended[0]
+		}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
@@ -1444,15 +1447,6 @@ func TestCreateWallet(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
-	t.Run("TestRegister_legacy", func(t *testing.T) {
-		testRegister(t, true)
-	})
-	t.Run("TestRegister_v2", func(t *testing.T) {
-		testRegister(t, false)
-	})
-}
-
-func testRegister(t *testing.T, legacyKeys bool) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
@@ -1465,10 +1459,6 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		tCore.connMtx.Unlock()
 	}
 	clearConn()
-
-	if legacyKeys {
-		dc.cfg.DEXPubKey = nil
-	}
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
@@ -1514,8 +1504,15 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		}()
 	}
 
-	queueResponses := func() {
+	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, "test account not found error")
+
+	queueConfigAndConnectUnknownAcct := func() {
 		rig.queueConfig()
+		rig.queueConnect(accountNotFoundError, nil, nil) // for discoverAccount
+	}
+
+	queueResponses := func() {
+		queueConfigAndConnectUnknownAcct()
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
@@ -1667,7 +1664,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	rig.crypter.(*tCrypter).encryptErr = nil
 
 	// register request error
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 		return tErr
 	})
@@ -1679,7 +1676,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	// signature error
 	goodSig := regRes.Sig
 	regRes.Sig = []byte("badsig")
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, signatureErr) {
@@ -1690,7 +1687,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	// zero fee error
 	goodFee := regRes.Fee
 	regRes.Fee = 0
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, zeroFeeErr) {
@@ -1699,7 +1696,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 
 	// wrong fee error
 	regRes.Fee = tFee + 1
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, feeMismatchErr) {
@@ -1709,7 +1706,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 
 	// Form fee error
 	form.Fee = tFee + 1
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, feeMismatchErr) {
@@ -1718,7 +1715,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	form.Fee = tFee
 
 	// PayFee error
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	tWallet.payFeeErr = tErr
 	run()
@@ -1728,7 +1725,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	tWallet.payFeeErr = nil
 
 	// notifyfee response error
-	rig.queueConfig()
+	queueConfigAndConnectUnknownAcct()
 	rig.queueRegister(regRes)
 	queueTipChange()
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -1765,20 +1762,29 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	}
 	getFeeAndBalanceNote() // account registered
 
-	// Account recovery testing below doesn't apply to legacy servers.
-	if legacyKeys {
-		return
+	// Existing but unpaid account. Server would sent previously-requested fee
+	// address and asset ID.
+	clearConn()
+	rig.queueConfig()
+	unpaidAccountError := msgjson.NewError(msgjson.UnpaidAccountError, "test account not found error")
+	rig.queueConnect(unpaidAccountError, nil, nil) // for discoverAccount
+	rig.queueRegister(regRes)
+	queueTipChange()
+	rig.queueNotifyFee()
+	rig.queueConnect(nil, nil, nil)
+
+	_, err = tCore.Register(form)
+	if err != nil {
+		t.Fatalf("Unpaid Register error: %v", err)
 	}
+
+	getFeeAndBalanceNote() // payment in progress
+	getFeeAndBalanceNote() // account registered
 
 	// Test the account recovery path.
 	clearConn()
 	rig.queueConfig()
-	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountExistsError, "abcdef"))
-		f(accountExistsResp)
-		return nil
-	})
-	rig.queueConnect(nil, nil, nil)
+	rig.queueConnect(nil, nil, nil) // account exists
 
 	_, err = tCore.Register(form)
 	if err != nil {
@@ -1787,26 +1793,17 @@ func testRegister(t *testing.T, legacyKeys bool) {
 
 	// no fee payment notes
 
-	// Account suspended should force legacy credentials..
+	// Account suspended should derive new HD credentials.
 	clearConn()
-	rig.queueConfig()
-	dc.acct.keyMtx.Lock()
-	dc.acct.encKey = nil
-	dc.acct.privKey = nil
-	dc.acct.keyMtx.Unlock()
-	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-		accountExistsResp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.AccountSuspendedError, ""))
-		f(accountExistsResp)
-		return nil
-	})
-	queueResponses() // Queueing an extra config response here, but we're done anyway.
+	rig.queueConnect(nil, nil, nil, true) // first try exists but suspended
+	queueResponses()
 
 	_, err = tCore.Register(form)
 	if err != nil {
 		t.Fatalf("Suspended Register error: %v", err)
 	}
 
-	if len(rig.db.acct.EncKeyV2) != 0 || len(rig.db.acct.LegacyEncKey) == 0 {
+	if len(rig.db.acct.EncKeyV2) == 0 || len(rig.db.acct.LegacyEncKey) != 0 {
 		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
 	}
 	getFeeAndBalanceNote() // payment in progress
