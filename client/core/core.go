@@ -1933,12 +1933,13 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
+	oldDepositAddr := oldWallet.currentDepositAddress()
 	dbWallet := &db.Wallet{
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
 		EncryptedPW: oldWallet.encPW(),
-		Address:     oldWallet.currentDepositAddress(),
+		Address:     oldDepositAddr,
 	}
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
@@ -1959,66 +1960,20 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	// If there are active trades, make sure they can be settled by the
 	// keys held within the new wallet.
 	sameWallet := func() error {
-		ownsAddr := func(addr string) error {
-			owns, err := wallet.OwnsAddress(addr)
+		hasActiveTrade := false
+		for _, dc := range c.dexConnections() {
+			if dc.hasActiveAssetOrders(wallet.AssetID) {
+				hasActiveTrade = true
+				break
+			}
+		}
+		if hasActiveTrade {
+			owns, err := wallet.OwnsAddress(oldDepositAddr)
 			if err != nil {
 				return err
 			}
 			if !owns {
-				return fmt.Errorf("new wallet does not own address found in active trades: %v", addr)
-			}
-			return nil
-		}
-		for _, dc := range c.dexConnections() {
-			maybeDifferentWallet := false
-			for _, trade := range dc.trackedTrades() {
-				if !trade.isActive() {
-					continue
-				}
-				waID := wallet.AssetID
-				// If the to asset, check if we own an
-				// contract.Address.
-				if trade.wallets.toAsset.ID == waID {
-					if err := ownsAddr(trade.Trade().SwapAddress()); err != nil {
-						return err
-					}
-					// Assume all trade addresses are
-					// owned by the new wallet if one is.
-					return nil
-				}
-				// If the from asset, check if we own a
-				// refund address for a match if any exist.
-				if trade.wallets.fromAsset.ID == waID {
-					for _, match := range trade.matches {
-						script := match.MetaData.Proof.Script
-						if len(script) == 0 {
-							continue
-						}
-						addr, err := wallet.RefundAddress(script)
-						if err != nil {
-							return err
-						}
-						if err := ownsAddr(addr); err != nil {
-							return err
-						}
-						// Assume all refund addresses
-						// are owned by the new
-						// wallet if one is.
-						return nil
-					}
-					// If we did not find a refund address,
-					// we cannot be sure that this is the
-					// same wallet.
-					//
-					// TODO: Implement a way to check that
-					// these accounts are the same or not.
-					maybeDifferentWallet = true
-				}
-			}
-			if maybeDifferentWallet {
-				return errors.New("unable to change wallets with active trades. " +
-					"trades with this wallet must match or be canceled in " +
-					"order to change settings")
+				return errors.New("new wallet does not own old deposit address")
 			}
 		}
 		return nil
