@@ -594,57 +594,29 @@ func (a *dexAccount) ID() account.AccountID {
 	return a.id
 }
 
-// setupCryptoLegacy creates and returns a new privkey for the account.
-// Returns existing privkey if previously set up.
-func (a *dexAccount) setupCryptoLegacy(crypter encrypt.Crypter) (encPriv, pubB []byte, err error) {
-	// Check if privKey exists. Check a.encKey instead of a.privKey
-	// as a.privKey will be nil if the account is locked.
-	a.keyMtx.RLock()
-	encKey := a.encKey
-	a.keyMtx.RUnlock()
-	if encKey != nil {
-		return nil, nil, fmt.Errorf("key already set")
-	}
-
-	// Create a new private key for the account.
-	privKey, err := secp256k1.GeneratePrivateKey()
-	if err != nil {
-		return nil, nil, fmt.Errorf("error creating acct private key: %w", err)
-	}
-	// Encrypt the private key.
-	encPriv, err = crypter.Encrypt(privKey.Serialize())
-	if err != nil {
-		return nil, nil, fmt.Errorf("error encrypting acct private key: %w", err)
-	}
-
-	a.keyMtx.Lock()
-	a.encKey = encPriv
-	a.privKey = privKey
-	a.id = account.NewID(privKey.PubKey().SerializeCompressed())
-	a.keyMtx.Unlock()
-
-	return encPriv, privKey.PubKey().SerializeCompressed(), nil
-}
-
 // setupCryptoV2 generates a hierarchical deterministic key for the account.
-// setupCryptoV2 should be called before adding the account's *dexConnection
-// to the Core.conns map.
-func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt.Crypter) (encKey, pkBytes []byte, err error) {
+// setupCryptoV2 should be called before adding the account's *dexConnection to
+// the Core.conns map. This sets the dexAccount's encKey, privKey, and id.
+func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt.Crypter, keyIndex uint32) error {
+	if keyIndex >= hdkeychain.HardenedKeyStart {
+		return fmt.Errorf("maximum key generation reached, cannot generate %dth key", keyIndex)
+	}
+
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("seed decryption error: %w", err)
+		return fmt.Errorf("seed decryption error: %w", err)
 	}
 
 	// Get the root key.
 	root, err := hdkeychain.NewMaster(seed, &rootKeyParams{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("NewMaster error: %w", err)
+		return fmt.Errorf("NewMaster error: %w", err)
 	}
 
 	dexPkB := a.dexPubKey.SerializeCompressed()
 	// And because I'm neurotic.
 	if len(dexPkB) != 33 {
-		return nil, nil, fmt.Errorf("invalid dex pubkey length %d", len(dexPkB))
+		return fmt.Errorf("invalid dex pubkey length %d", len(dexPkB))
 	}
 
 	// Deterministically generate the DEX private key using a chain of extended
@@ -653,8 +625,9 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	// but it works.
 
 	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
-		err := hdkeychain.ErrUnusableSeed
-		for err == hdkeychain.ErrUnusableSeed {
+		// While extremely unlikely, it may be necessary to skip indexes.
+		err := hdkeychain.ErrInvalidChild
+		for err == hdkeychain.ErrInvalidChild {
 			var kid *hdkeychain.ExtendedKey
 			// Hardened child by modding i first, technically doubling the
 			// collision rate, but OK.
@@ -662,13 +635,14 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 			if err == nil {
 				return kid, nil
 			}
+			fmt.Printf("Child derive skipped a key index %d -> %d", childIdx, childIdx+1) // < 1 in 2^127 chance
 			childIdx++
 		}
 		return nil, err
 	}
 
 	// Prepare the chain of child indices.
-	kids := make([]uint32, 0, 10) // 1 x purpose, 1 x version (incl. oddness), 8 x 4-byte uint32s.
+	kids := make([]uint32, 0, 11) // 1 x purpose, 1 x version (incl. oddness), 8 x 4-byte uint32s, 1 x acct key index.
 	// Hardened "purpose" key.
 	kids = append(kids, HDKeyPurpose)
 	// Second child is the the format/oddness byte.
@@ -678,44 +652,38 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	for i := 0; i < 8; i++ {
 		kids = append(kids, binary.LittleEndian.Uint32(byteSeq[i*4:i*4+4]))
 	}
+	// Last child is the account key index.
+	kids = append(kids, keyIndex)
 
-	// Start with the root key
+	// Start with the root key.
 	extKey := root
-
 	for _, childIdx := range kids {
 		extKey, err = genChild(extKey, childIdx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("genChild error: %w", err)
+			return fmt.Errorf("genChild error: %w", err)
 		}
 	}
 
 	privB, err := extKey.SerializedPrivKey()
 	if err != nil {
-		return nil, nil, fmt.Errorf("SerializedPrivKey error: %w", err)
+		return fmt.Errorf("SerializedPrivKey error: %w", err)
 	}
 
-	encKey, err = crypter.Encrypt(privB)
+	encKey, err := crypter.Encrypt(privB)
 	if err != nil {
-		return nil, nil, fmt.Errorf("key Encrypt error: %w", err)
+		return fmt.Errorf("key Encrypt error: %w", err)
 	}
 
-	pubB := extKey.SerializedPubKey()
+	pkBytes := extKey.SerializedPubKey()
 	priv := secp256k1.PrivKeyFromBytes(privB)
 
 	a.keyMtx.Lock()
 	a.encKey = encKey
 	a.privKey = priv
-	a.id = account.NewID(pubB)
+	a.id = account.NewID(pkBytes)
 	a.keyMtx.Unlock()
 
-	return encKey, pubB, nil
-}
-
-func (a *dexAccount) resetKeys() {
-	a.keyMtx.Lock()
-	a.encKey = nil
-	a.privKey = nil
-	a.keyMtx.Unlock()
+	return nil
 }
 
 // unlock decrypts the account private key.
@@ -815,8 +783,7 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 
 // checkSig checks the signature against the message and the DEX pubkey.
 func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
-	_, err := checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
-	return err
+	return checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
 }
 
 // TradeForm is used to place a market or limit order
