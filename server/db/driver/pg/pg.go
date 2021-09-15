@@ -179,8 +179,21 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	// Ensure all tables required by the current market configuration are ready.
-	if err = prepareTables(ctx, db, cfg.MarketCfg); err != nil {
+	purgeMarkets, err := prepareTables(ctx, db, cfg.MarketCfg)
+	if err != nil {
 		return nil, err
+	}
+	for _, staleMarket := range purgeMarkets {
+		mkt := mktMap[staleMarket]
+		if mkt == nil { // shouldn't happen
+			return nil, fmt.Errorf("unrecognized market %v", staleMarket)
+		}
+		unbookedSells, unbookedBuys, err := archiver.FlushBook(mkt.Base, mkt.Quote)
+		if err != nil {
+			return nil, fmt.Errorf("failed to flush book for market %v: %w", staleMarket, err)
+		}
+		log.Infof("Flushed %d sell orders and %d buy orders from market %v with a changed lot size.",
+			len(unbookedSells), len(unbookedBuys), staleMarket)
 	}
 
 	switch cfg.Net {

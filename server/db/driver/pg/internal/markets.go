@@ -21,4 +21,7 @@ const (
 	// InsertMarket inserts a new market in to the markets tables
 	InsertMarket = `INSERT INTO %s (name, base, quote, lot_size)
 		VALUES ($1, $2, $3, $4);`
+
+	// UpdateLotSize updates the market's lot size.
+	UpdateLotSize = `UPDATE %s SET lot_size = $2 WHERE name = $1;`
 )
