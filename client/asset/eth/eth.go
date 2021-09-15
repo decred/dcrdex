@@ -307,9 +307,7 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	now := time.Now().Unix()
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	// TODO: replace with configured contract address
-	contractAddress := common.HexToAddress("2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f")
-	initGas, err := eth.node.initiateGas(eth.ctx, now, secretHash, &eth.acct.Address, &contractAddress)
+	initGas, err := eth.node.initiateGas(eth.ctx, now, secretHash, &eth.acct.Address, &mainnetContractAddr)
 	if err != nil {
 		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
 		initGas = nfo.SwapSize
