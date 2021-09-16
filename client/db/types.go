@@ -230,6 +230,8 @@ type OrderMetaData struct {
 	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
 	// assigned to matches will be validated against this value.
 	MaxFeeRate uint64
+	// Options are the options offered by the wallet and selected by the user.
+	Options map[string]string
 }
 
 // MetaMatch is a match and its metadata.

@@ -589,6 +589,18 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 // 	}
 // }
 
+// SupportedSwapOptions returns a SwapOptions with the non-nil options being the ones
+// that the wallet supports.
+func (*ExchangeWallet) SupportedSwapOptions() asset.SwapOptions {
+	return asset.SwapOptions{}
+}
+
+// SupportedRedeemOptions returns a RedeemOptions with the non-nil options being the ones
+// that the wallet supports.
+func (*ExchangeWallet) SupportedRedeemOptions() asset.RedeemOptions {
+	return asset.RedeemOptions{}
+}
+
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface. WARNING: Once stopped, it cannot reconnect, requiring NewWallet to
 // construct a new ExchangeWallet to Connect again.

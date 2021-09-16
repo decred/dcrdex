@@ -63,3 +63,16 @@ func Unmapify(settings map[string]string, obj interface{}) error {
 	cfgData := Data(settings)
 	return ParseInto(cfgData, obj)
 }
+
+// Unmapify converts a config object into a settings map.
+func Mapify(obj interface{}) (map[string]string, error) {
+	file := ini.Empty()
+	ini.ReflectFrom(file, obj)
+	cfgKeyValues := make(map[string]string)
+	for _, section := range file.Sections() {
+		for _, key := range section.Keys() {
+			cfgKeyValues[key.Name()] = key.String()
+		}
+	}
+	return cfgKeyValues, nil
+}

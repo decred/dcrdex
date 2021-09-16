@@ -567,6 +567,18 @@ func (btc *ExchangeWallet) Net() *chaincfg.Params {
 	return btc.chainParams
 }
 
+// SupportedSwapOptions returns a SwapOptions with the non-nil options being the ones
+// that the wallet supports.
+func (*ExchangeWallet) SupportedSwapOptions() asset.SwapOptions {
+	return asset.SwapOptions{}
+}
+
+// SupportedRedeemOptions returns a RedeemOptions with the non-nil options being the ones
+// that the wallet supports.
+func (*ExchangeWallet) SupportedRedeemOptions() asset.RedeemOptions {
+	return asset.RedeemOptions{}
+}
+
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {

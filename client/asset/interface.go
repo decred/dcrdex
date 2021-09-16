@@ -184,6 +184,12 @@ type Wallet interface {
 	SyncStatus() (synced bool, progress float32, err error)
 	// RefundAddress extracts and returns the refund address from a contract.
 	RefundAddress(contract dex.Bytes) (string, error)
+	// SupportedSwapOptions returns a SwapOptions with the non-nil options being the ones
+	// that the wallet supports.
+	SupportedSwapOptions() SwapOptions
+	// SupportedRedeemOptions returns a RedeemOptions with the non-nil options being the ones
+	// that the wallet supports.
+	SupportedRedeemOptions() RedeemOptions
 }
 
 // Balance is categorized information about a wallet's balance.
@@ -319,6 +325,8 @@ type Order struct {
 	// is used, the fee rate used should be at least the suggested fee, else
 	// zero-conf coins might be rejected.
 	FeeSuggestion uint64
+	// Options are optional options that may be used by exchange wallets.
+	Options OrderOptions
 }
 
 // SwapEstimate is an estimate of the fees and locked amounts associated with

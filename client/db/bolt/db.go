@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
@@ -90,6 +91,7 @@ var (
 	innerKeyParamsKey      = []byte("innerKeyParams")
 	outerKeyParamsKey      = []byte("outerKeyParams")
 	legacyKeyParamsKey     = []byte("keyParams")
+	optionsKey             = []byte("options")
 	byteTrue               = encode.ByteTrue
 	byteFalse              = encode.ByteFalse
 	byteEpoch              = uint16Bytes(uint16(order.OrderStatusEpoch))
@@ -600,6 +602,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(optionsKey, config.Data(md.Options)).
 			err()
 	})
 }
@@ -880,6 +883,12 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
 	}
 
+	optionsB := oBkt.Get(optionsKey)
+	options, err := config.Parse(optionsB)
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode order options")
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -890,6 +899,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
 			MaxFeeRate:         maxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
+			Options:            options,
 		},
 		Order: ord,
 	}, nil
@@ -961,6 +971,7 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(optionsKey, config.Data(md.Options)).
 			err()
 	})
 }
