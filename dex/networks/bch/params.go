@@ -4,11 +4,19 @@
 package bch
 
 import (
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
 var (
+	UnitInfo = dex.UnitInfo{
+		AtomicUnit: "Sats",
+		Conventional: dex.Denomination{
+			Unit:             "BCH",
+			ConversionFactor: 1e8,
+		},
+	}
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{
 		PubKeyHashAddrID: 0x00,

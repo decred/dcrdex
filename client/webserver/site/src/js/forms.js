@@ -334,6 +334,7 @@ export class ConfirmRegistrationForm {
     for (const [symbol, fee] of Object.entries(xc.regFees)) {
       // if asset fee is not supported by the client we can skip it.
       if (app.user.assets[fee.id] === undefined) continue
+      const unitInfo = app.assets[fee.id].info.unitinfo
       const haveWallet = app.user.assets[fee.id].wallet
       const tr = fields.feeRowTemplate.cloneNode(true)
       Doc.bind(tr, 'click', () => {
@@ -351,9 +352,9 @@ export class ConfirmRegistrationForm {
         }
       })
       Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(symbol)
-      Doc.tmplElement(tr, 'asset').innerText = symbol.toUpperCase()
+      Doc.tmplElement(tr, 'asset').innerText = unitInfo.conventional.unit
       Doc.tmplElement(tr, 'confs').innerText = fee.confs
-      Doc.tmplElement(tr, 'fee').innerText = fee.amount / 1e8
+      Doc.tmplElement(tr, 'fee').innerText = Doc.formatCoinValue(fee.amount, unitInfo)
 
       const setupWallet = Doc.tmplElement(tr, 'setupWallet')
       const walletReady = Doc.tmplElement(tr, 'walletReady')
@@ -388,7 +389,9 @@ export class ConfirmRegistrationForm {
       Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
       Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
       Doc.tmplElement(tr, 'quote').innerText = market.quotesymbol.toUpperCase()
-      Doc.tmplElement(tr, 'lotsize').innerText = `${market.lotsize / 1e8} ${market.basesymbol.toUpperCase()}`
+      const baseUnitInfo = app.assets[market.baseid].info.unitinfo
+      const fmtVal = Doc.formatCoinValue(market.lotsize, baseUnitInfo)
+      Doc.tmplElement(tr, 'lotsize').innerText = `${fmtVal} ${baseUnitInfo.conventional.unit}`
       fields.marketsTableRows.appendChild(tr)
       if (State.passwordIsCached()) {
         Doc.hide(fields.appPassBox)

@@ -426,7 +426,7 @@ func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 
 // truncateOrderBook truncates book to the top nOrders of buys and sells.
 func truncateOrderBook(book *core.OrderBook, nOrders uint64) {
-	truncFn := func(orders []*core.MiniOrder) []*core.MiniOrder {
+	truncFn := func(orders []*core.SimpleOrder) []*core.SimpleOrder {
 		if uint64(len(orders)) > nOrders {
 			// Nullify pointers stored in the unused part of the
 			// underlying array to allow for GC.

@@ -48,6 +48,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const conversionFactor = 1e8
+
 var (
 	client1 = &tClient{
 		id:      1,

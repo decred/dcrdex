@@ -871,16 +871,16 @@ func TestTruncateOrderBook(t *testing.T) {
 	lowRate := 1.0
 	medRate := 1.5
 	highRate := 2.0
-	lowRateOrder := &core.MiniOrder{Rate: lowRate}
-	medRateOrder := &core.MiniOrder{Rate: medRate}
-	highRateOrder := &core.MiniOrder{Rate: highRate}
+	lowRateOrder := &core.SimpleOrder{Rate: lowRate}
+	medRateOrder := &core.SimpleOrder{Rate: medRate}
+	highRateOrder := &core.SimpleOrder{Rate: highRate}
 	book := &core.OrderBook{
-		Buys: []*core.MiniOrder{
+		Buys: []*core.SimpleOrder{
 			highRateOrder,
 			medRateOrder,
 			lowRateOrder,
 		},
-		Sells: []*core.MiniOrder{
+		Sells: []*core.SimpleOrder{
 			lowRateOrder,
 			medRateOrder,
 		},

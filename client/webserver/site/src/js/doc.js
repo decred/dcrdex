@@ -19,10 +19,19 @@ const BipSymbols = Object.values(BipIDs)
 
 const intFormatter = new Intl.NumberFormat(navigator.languages)
 
-const decimalFormatter = new Intl.NumberFormat(navigator.languages, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 8
-})
+const decimalFormatters = {}
+
+function decimalFormatter (digits) {
+  let fmt = decimalFormatters[digits]
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(navigator.languages, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: digits
+    })
+    decimalFormatters[digits] = fmt
+  }
+  return fmt
+}
 
 // Helpers for working with the DOM.
 export default class Doc {
@@ -146,9 +155,15 @@ export default class Doc {
     return page
   }
 
-  static formatCoinValue (v) {
+  static formatCoinValue (v, unitInfo) {
+    let prec = 8
+    if (unitInfo) {
+      const f = unitInfo.conventional.conversionFactor
+      v = v / unitInfo.conventional.conversionFactor
+      prec = Math.round(Math.log10(f))
+    }
     if (Number.isInteger(v)) return intFormatter.format(v)
-    return decimalFormatter.format(v)
+    return decimalFormatter(prec).format(v)
   }
 
   /*

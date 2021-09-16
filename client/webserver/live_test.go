@@ -149,7 +149,7 @@ func mkMrkt(base, quote string) *core.Market {
 	rateStep := lotSize / 1e3
 	if _, exists := marketStats[mktID]; !exists {
 		midGap := float64(rateStep) / 1e8 * float64(rand.Intn(1e6))
-		maxQty := float64(lotSize) / 1e8 * float64(rand.Intn(1e3))
+		maxQty := float64(lotSize) * float64(rand.Intn(1e3))
 		marketStats[mktID] = [2]float64{midGap, maxQty}
 	}
 
@@ -179,7 +179,7 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 			Running:      state.running,
 			Address:      ordertest.RandomAddress(),
 			Balance:      bal,
-			Units:        winfo.Units,
+			Units:        winfo.UnitInfo.AtomicUnit,
 			Encrypted:    true,
 			Synced:       false,
 			SyncProgress: 0.5,
@@ -215,7 +215,7 @@ func getEpoch() uint64 {
 	return encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
 }
 
-func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.MiniOrder {
+func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.SimpleOrder {
 	var epochIdx uint64
 	var rate float64
 	var limitRate = midGap - rand.Float64()*marketWidth
@@ -232,8 +232,8 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 		rate = limitRate
 	}
 
-	return &core.MiniOrder{
-		Qty:   math.Exp(-rand.Float64()*5) * maxQty,
+	return &core.SimpleOrder{
+		Qty:   uint64(math.Exp(-rand.Float64()*5) * maxQty),
 		Rate:  rate,
 		Sell:  sell,
 		Token: nextToken(),
@@ -241,13 +241,13 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 	}
 }
 
-func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
+func miniOrderFromCoreOrder(ord *core.Order) *core.SimpleOrder {
 	var epoch uint64 = 555
 	if ord.Status > order.OrderStatusEpoch {
 		epoch = 0
 	}
-	return &core.MiniOrder{
-		Qty:   float64(ord.Qty) / 1e8,
+	return &core.SimpleOrder{
+		Qty:   ord.Qty,
 		Rate:  float64(ord.Rate) / 1e8,
 		Sell:  ord.Sell,
 		Token: ord.ID[:4].String(),
@@ -361,8 +361,8 @@ type TCore struct {
 
 	bookFeed    *tBookFeed
 	killFeed    context.CancelFunc
-	buys        map[string]*core.MiniOrder
-	sells       map[string]*core.MiniOrder
+	buys        map[string]*core.SimpleOrder
+	sells       map[string]*core.SimpleOrder
 	noteFeed    chan core.Notification
 	orderMtx    sync.Mutex
 	epochOrders []*core.BookUpdate
@@ -463,7 +463,7 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := toAtoms(ord.Qty)
+	qty := ord.Qty
 	quoteQty := calc.BaseToQuote(rate, qty)
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
@@ -486,9 +486,9 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := toAtoms(ord.Qty)
+	qty := ord.Qty
 
-	quoteQty := calc.BaseToQuote(toAtoms(midGap), qty)
+	quoteQty := calc.BaseToQuote(uint64(midGap), qty)
 
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
@@ -513,9 +513,6 @@ func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
-func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
-}
 
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)
@@ -748,7 +745,7 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 						Action:   msgjson.UnbookOrderRoute,
 						Host:     c.dexAddr,
 						MarketID: mktID,
-						Payload:  &core.MiniOrder{Token: tkn},
+						Payload:  &core.SimpleOrder{Token: tkn},
 					})
 				}
 
@@ -882,10 +879,10 @@ func nextToken() string {
 func (c *TCore) book(dexAddr, mktID string) *core.OrderBook {
 	midGap, maxQty := getMarketStats(mktID)
 	// Set the market width to about 5% of midGap.
-	var buys, sells []*core.MiniOrder
+	var buys, sells []*core.SimpleOrder
 	c.orderMtx.Lock()
-	c.buys = make(map[string]*core.MiniOrder, numBuys)
-	c.sells = make(map[string]*core.MiniOrder, numSells)
+	c.buys = make(map[string]*core.SimpleOrder, numBuys)
+	c.sells = make(map[string]*core.SimpleOrder, numSells)
 	c.epochOrders = nil
 
 	mkt := tExchanges[dexAddr].Markets[mktID]
@@ -986,19 +983,48 @@ var winfos = map[uint32]*asset.WalletInfo{
 	2:  ltc.WalletInfo,
 	42: dcr.WalletInfo,
 	22: {
-		Units:      "atoms",
 		Name:       "Monacoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "atoms",
+			Conventional: dex.Denomination{
+				Unit:             "MONA",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 	3: {
-		Units:      "atoms",
 		Name:       "Dogecoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "atoms",
+			Conventional: dex.Denomination{
+				Unit:             "DOGE",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 	28: {
-		Units:      "Satoshis",
 		Name:       "Vertcoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				Unit:             "VTC",
+				ConversionFactor: 1e8,
+			},
+		},
+	},
+	141: {
+		Name:       "Komodo",
+		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				Unit:             "KMD",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 }
 
@@ -1021,7 +1047,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Running:   w.running,
 		Address:   ordertest.RandomAddress(),
 		Balance:   c.balances[assetID],
-		Units:     winfos[assetID].Units,
+		Units:     winfos[assetID].UnitInfo.AtomicUnit,
 		Encrypted: true,
 	}
 }
@@ -1098,7 +1124,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running:   wallet.running,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
-			Units:     winfos[assetID].Units,
+			Units:     winfos[assetID].UnitInfo.AtomicUnit,
 			Encrypted: true,
 		})
 	}
@@ -1148,12 +1174,13 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		141: mkSupportedAsset("kmd", c.wallets[141], c.balances[141]),
 	}
 }
 
@@ -1232,7 +1259,7 @@ out:
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
-				miniOrder := o.Payload.(*core.MiniOrder)
+				miniOrder := o.Payload.(*core.SimpleOrder)
 				if miniOrder.Rate > 0 {
 					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute

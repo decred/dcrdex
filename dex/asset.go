@@ -5,6 +5,8 @@ package dex
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,4 +120,31 @@ type Asset struct {
 	SwapSize     uint64 `json:"swapSize"`
 	SwapSizeBase uint64 `json:"swapSizeBase"`
 	SwapConf     uint32 `json:"swapConf"`
+}
+
+// Denomination is a unit and its conversion factor.
+type Denomination struct {
+	Unit             string `json:"unit"`
+	ConversionFactor uint64 `json:"conversionFactor"`
+}
+
+// UnitInfo conveys information about the units and available denominations for
+// an asset.
+type UnitInfo struct {
+	// AtomicUnit is the name associated with the asset's integral unit of
+	// measure, e.g. satoshis, atoms, gwei (for DEX purposes).
+	AtomicUnit string `json:"atomicUnit"`
+	// Conventional is the conventionally-used denomination.
+	Conventional Denomination `json:"conventional"`
+	// Alternatives lists additionally available Denominations, and can be
+	// empty.
+	Alternatives []Denomination `json:"denominations"`
+}
+
+// ConventionalString converts the quantity to conventional units, and returns
+// the formatted float string.
+func (ui *UnitInfo) ConventionalString(v uint64) string {
+	c := ui.Conventional.ConversionFactor
+	prec := int(math.Round(math.Log10(float64(c)))) // Assumes integer powers of 10
+	return strconv.FormatFloat(float64(v)/float64(c), 'f', prec, 64)
 }

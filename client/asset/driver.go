@@ -33,6 +33,9 @@ func Register(assetID uint32, driver Driver) {
 	if _, dup := drivers[assetID]; dup {
 		panic(fmt.Sprint("asset: Register called twice for asset driver ", assetID))
 	}
+	if driver.Info().UnitInfo.Conventional.ConversionFactor == 0 {
+		panic(fmt.Sprint("asset: Registered driver doesn't have a conventional conversion factor set in the wallet info ", assetID))
+	}
 	drivers[assetID] = driver
 }
 

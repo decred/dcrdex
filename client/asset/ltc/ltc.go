@@ -89,10 +89,10 @@ var (
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Litecoin",
-		Units:             "Litoshi",
 		Version:           version,
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexltc.UnitInfo,
 	}
 )
 

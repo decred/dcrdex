@@ -5,9 +5,11 @@ package calc
 
 import "math/big"
 
+// RateConversionFactor is used when encoding an exchange rate as an integer.
+const RateConversionFactor = 1e8
+
 var (
-	bigAtomsPerCoin        = big.NewInt(int64(atomsPerCoin))
-	atomsPerCoin    uint64 = 1e8
+	bigRateConversionFactor = big.NewInt(RateConversionFactor)
 )
 
 // BaseToQuote computes a quote asset amount based on a base asset amount
@@ -17,7 +19,7 @@ func BaseToQuote(rate uint64, base uint64) (quote uint64) {
 	bigRate := big.NewInt(int64(rate))
 	bigBase := big.NewInt(int64(base))
 	bigBase.Mul(bigBase, bigRate)
-	bigBase.Div(bigBase, bigAtomsPerCoin)
+	bigBase.Div(bigBase, bigRateConversionFactor)
 	return bigBase.Uint64()
 }
 
@@ -30,7 +32,7 @@ func QuoteToBase(rate uint64, quote uint64) (base uint64) {
 	}
 	bigRate := big.NewInt(int64(rate))
 	bigQuote := big.NewInt(int64(quote))
-	bigQuote.Mul(bigQuote, bigAtomsPerCoin)
+	bigQuote.Mul(bigQuote, bigRateConversionFactor)
 	bigQuote.Div(bigQuote, bigRate)
 	return bigQuote.Uint64()
 }

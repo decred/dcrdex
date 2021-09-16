@@ -42,8 +42,7 @@ import (
 )
 
 const (
-	keyParamsKey     = "keyParams"
-	conversionFactor = 1e8
+	keyParamsKey = "keyParams"
 
 	// tickCheckDivisions is how many times to tick trades per broadcast timeout
 	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
@@ -3900,16 +3899,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Send a low-priority notification.
 	corder := tracker.coreOrder()
 	if !form.IsLimit && !form.Sell {
+		ui := wallets.quoteWallet.Info().UnitInfo
 		subject, details := c.formatDetails(TopicYoloPlaced,
-			float64(corder.Qty)/conversionFactor, unbip(form.Quote), tracker.token())
+			ui.ConventionalString(corder.Qty), ui.Conventional.Unit, tracker.token())
 		c.notify(newOrderNote(TopicYoloPlaced, subject, details, db.Poke, corder))
 	} else {
 		rateString := "market"
 		if form.IsLimit {
-			rateString = strconv.FormatFloat(float64(corder.Rate)/conversionFactor, 'f', 8, 64)
+			rateString = strconv.FormatFloat(float64(corder.Rate)/calc.RateConversionFactor, 'f', 8, 64)
 		}
+		ui := wallets.baseWallet.Info().UnitInfo
 		subject, details := c.formatDetails(TopicOrderPlaced,
-			sellString(corder.Sell), float64(corder.Qty)/conversionFactor, unbip(form.Base), rateString, tracker.token())
+			sellString(corder.Sell), ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
 		c.notify(newOrderNote(TopicOrderPlaced, subject, details, db.Poke, corder))
 	}
 
@@ -3919,12 +3920,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 // walletSet is a pair of wallets with asset configurations identified in useful
 // ways.
 type walletSet struct {
-	baseAsset  *dex.Asset
-	quoteAsset *dex.Asset
-	fromWallet *xcWallet
-	fromAsset  *dex.Asset
-	toWallet   *xcWallet
-	toAsset    *dex.Asset
+	baseAsset   *dex.Asset
+	quoteAsset  *dex.Asset
+	fromWallet  *xcWallet
+	fromAsset   *dex.Asset
+	toWallet    *xcWallet
+	toAsset     *dex.Asset
+	baseWallet  *xcWallet
+	quoteWallet *xcWallet
 }
 
 // walletSet constructs a walletSet.
@@ -3970,12 +3973,14 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	}
 
 	return &walletSet{
-		baseAsset:  baseAsset,
-		quoteAsset: quoteAsset,
-		fromWallet: fromWallet,
-		fromAsset:  fromAsset,
-		toWallet:   toWallet,
-		toAsset:    toAsset,
+		baseAsset:   baseAsset,
+		quoteAsset:  quoteAsset,
+		fromWallet:  fromWallet,
+		fromAsset:   fromAsset,
+		toWallet:    toWallet,
+		toAsset:     toAsset,
+		baseWallet:  baseWallet,
+		quoteWallet: quoteWallet,
 	}, nil
 }
 

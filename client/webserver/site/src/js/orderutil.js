@@ -28,9 +28,12 @@ export const MatchComplete = 4
 export const Maker = 0
 export const Taker = 1
 
+/* RateConversionFactor is used when encoding an exchange rate as an integer. */
+export const RateConversionFactor = 1e8
+
 export function sellString (ord) { return ord.sell ? 'sell' : 'buy' }
 export function typeString (ord) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
-export function rateString (ord) { return ord.type === Market ? 'market' : Doc.formatCoinValue(ord.rate / 1e8) }
+export function rateString (ord) { return ord.type === Market ? 'market' : Doc.formatCoinValue(ord.rate / RateConversionFactor) }
 
 /* isMarketBuy will return true if the order is a market buy order. */
 export function isMarketBuy (ord) {

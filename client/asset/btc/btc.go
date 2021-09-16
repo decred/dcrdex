@@ -140,10 +140,10 @@ var (
 	// WalletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
-		Units:             "Satoshis",
 		Version:           version,
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexbtc.UnitInfo,
 	}
 )
 
@@ -505,7 +505,7 @@ func newWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, btcCfg *dexb
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
 	}
 	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
-		fallbackFeesPerByte, cfg.WalletInfo.Units)
+		fallbackFeesPerByte, cfg.WalletInfo.UnitInfo.AtomicUnit)
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
 	// Convert to sats/byte & error if value is smaller than smallest unit.

@@ -147,7 +147,7 @@ func (w *xcWallet) state() *WalletState {
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,
-		Units:        winfo.Units,
+		Units:        winfo.UnitInfo.AtomicUnit,
 		Encrypted:    len(w.encPass) > 0,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,

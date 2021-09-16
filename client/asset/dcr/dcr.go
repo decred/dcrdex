@@ -148,10 +148,10 @@ var (
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
-		Units:             "atoms",
 		Version:           version,
 		DefaultConfigPath: defaultConfigPath,
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexdcr.UnitInfo,
 	}
 )
 

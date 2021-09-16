@@ -26,9 +26,7 @@ const (
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
-	// Units is the unit used for the smallest (integer) denomination of the
-	// currency, in plural form e.g. atoms, Satoshis.
-	Units string `json:"units"`
+
 	// Version is the Wallet's version number, which is used to signal when
 	// major changes are made to internal details such as coin ID encoding and
 	// contract structure that must be common to a server's.
@@ -41,6 +39,9 @@ type WalletInfo struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
+	// UnitInfo is the information about unit names and conversion factors for
+	// the asset.
+	UnitInfo dex.UnitInfo `json:"unitinfo"`
 }
 
 // ConfigOption is a wallet configuration option.

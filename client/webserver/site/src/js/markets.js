@@ -624,10 +624,11 @@ export default class MarketsPage extends BasePage {
    */
   reportDepthVolume (d) {
     const page = this.page
-    page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase)
-    page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote)
-    page.buyBookedBase.textContent = Doc.formatCoinValue(d.buyBase)
-    page.buyBookedQuote.textContent = Doc.formatCoinValue(d.buyQuote)
+    const { base, quote } = this.market
+    page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase, base.info.unitinfo)
+    page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote, quote.info.unitinfo)
+    page.buyBookedBase.textContent = Doc.formatCoinValue(d.buyBase, base.info.unitinfo)
+    page.buyBookedQuote.textContent = Doc.formatCoinValue(d.buyQuote, quote.info.unitinfo)
   }
 
   /*
@@ -644,7 +645,7 @@ export default class MarketsPage extends BasePage {
 
     // If the user is hovered to within a small percent (based on chart width)
     // of a user order, highlight that order's row.
-    const markers = d.hoverMarkers.map(v => Math.round(v * 1e8))
+    const markers = d.hoverMarkers.map(v => Math.round(v * Order.RateConversionFactor))
     for (const metaOrd of Object.values(this.metaOrders)) {
       const [row, ord] = [metaOrd.row, metaOrd.order]
       if (ord.status !== Order.StatusBooked) continue
@@ -655,7 +656,7 @@ export default class MarketsPage extends BasePage {
     }
 
     page.hoverPrice.textContent = Doc.formatCoinValue(d.rate)
-    page.hoverVolume.textContent = Doc.formatCoinValue(d.depth)
+    page.hoverVolume.textContent = Doc.formatCoinValue(d.depth, this.market.base.info.unitinfo)
     page.hoverVolume.style.color = d.dotColor
     Doc.show(page.hoverData)
   }
@@ -703,8 +704,8 @@ export default class MarketsPage extends BasePage {
       sell: sell,
       base: market.base.id,
       quote: market.quote.id,
-      qty: asAtoms(qtyField.value),
-      rate: asAtoms(page.rateField.value), // message-rate
+      qty: asAtoms(qtyField.value, conversionFactor(market.base)),
+      rate: asAtoms(page.rateField.value, Order.RateConversionFactor), // message-rate
       tifnow: page.tifNow.checked
     }
   }
@@ -724,8 +725,8 @@ export default class MarketsPage extends BasePage {
     this.depthLines.input = []
     if (adjusted && this.isLimit()) {
       this.depthLines.input = [{
-        rate: order.rate / 1e8,
-        color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
+        rate: order.rate / Order.RateConversionFactor,
+        color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
       }]
     }
     this.drawChartLines()
@@ -735,7 +736,7 @@ export default class MarketsPage extends BasePage {
       return
     }
     const quoteAsset = app.assets[order.quote]
-    const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+    const total = Doc.formatCoinValue(order.rate / Order.RateConversionFactor * order.qty, quoteAsset.info.unitinfo)
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
     else this.preBuy()
@@ -749,18 +750,18 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const baseWallet = app.assets[mkt.base.id].wallet
     if (baseWallet.available < mkt.cfg.lotsize) {
-      this.setMaxOrder({ lots: 0 }, this.adjustedRate() / 1e8)
+      this.setMaxOrder({ lots: 0 }, this.adjustedRate() / Order.RateConversionFactor)
       return
     }
     if (mkt.maxSell) {
-      this.setMaxOrder(mkt.maxSell.swap, this.adjustedRate() / 1e8)
+      this.setMaxOrder(mkt.maxSell.swap, this.adjustedRate() / Order.RateConversionFactor)
       return
     }
     // We only fetch pre-sell once per balance update, so don't delay.
     this.schedulePreOrder('/api/maxsell', {}, 0, res => {
       mkt.maxSell = res.maxSell
       mkt.sellBalance = baseWallet.balance.available
-      this.setMaxOrder(res.maxSell.swap, this.adjustedRate() / 1e8)
+      this.setMaxOrder(res.maxSell.swap, this.adjustedRate() / Order.RateConversionFactor)
     })
   }
 
@@ -772,13 +773,13 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const rate = this.adjustedRate()
     const quoteWallet = app.assets[mkt.quote.id].wallet
-    const aLot = mkt.cfg.lotsize * (rate / 1e8)
+    const aLot = mkt.cfg.lotsize * (rate / Order.RateConversionFactor)
     if (quoteWallet.balance.available < aLot) {
-      this.setMaxOrder({ lots: 0 }, 1e8 / rate)
+      this.setMaxOrder({ lots: 0 }, Order.RateConversionFactor / rate)
       return
     }
     if (mkt.maxBuys[rate]) {
-      this.setMaxOrder(mkt.maxBuys[rate].swap, 1e8 / rate)
+      this.setMaxOrder(mkt.maxBuys[rate].swap, Order.RateConversionFactor / rate)
       return
     }
     // 0 delay for first fetch after balance update or market change, otherwise
@@ -787,7 +788,7 @@ export default class MarketsPage extends BasePage {
     this.schedulePreOrder('/api/maxbuy', { rate: rate }, delay, res => {
       mkt.maxBuys[rate] = res.maxBuy
       mkt.buyBalance = app.assets[mkt.quote.id].wallet.balance.available
-      this.setMaxOrder(res.maxBuy.swap, 1e8 / rate)
+      this.setMaxOrder(res.maxBuy.swap, Order.RateConversionFactor / rate)
     })
   }
 
@@ -850,10 +851,10 @@ export default class MarketsPage extends BasePage {
     }
     // Could add the maxOrder.estimatedFees here, but that might also be
     // confusing.
-    page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value / 1e8)
+    page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value, this.market.base.info.unitinfo)
     page.maxFromTicker.textContent = sell ? this.market.base.symbol : this.market.quote.symbol.toUpperCase()
     // Could subtract the maxOrder.redemptionFees here.
-    page.maxToAmt.textContent = Doc.formatCoinValue(maxOrder.value / 1e8 * rate)
+    page.maxToAmt.textContent = Doc.formatCoinValue(maxOrder.value * rate, this.market.quote.info.unitinfo)
     page.maxToTicker.textContent = sell ? this.market.quote.symbol : this.market.base.symbol.toUpperCase()
   }
 
@@ -878,8 +879,8 @@ export default class MarketsPage extends BasePage {
 
   /* handleBook accepts the data sent in the 'book' notification. */
   handleBook (data) {
-    const [b, q] = [this.market.baseCfg, this.market.quoteCfg]
-    this.book = new OrderBook(data, b.symbol, q.symbol)
+    const { cfg, base, baseCfg, quoteCfg } = this.market
+    this.book = new OrderBook(data, baseCfg.symbol, quoteCfg.symbol)
     this.loadTable()
     for (const order of (data.book.epoch || [])) {
       if (order.rate > 0) this.book.add(order)
@@ -891,7 +892,7 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
-    this.depthChart.set(this.book, this.market.cfg.lotsize, this.market.cfg.ratestep)
+    this.chart.set(this.book, cfg.lotsize, cfg.ratestep, base.info.unitinfo)
   }
 
   /*
@@ -926,7 +927,7 @@ export default class MarketsPage extends BasePage {
     const buffer = xc.markets[market.sid].buybuffer
     const gap = this.midGap()
     if (gap) {
-      this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap / 1e8)
+      this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, market.base.info.unitinfo)
     }
   }
 
@@ -982,7 +983,7 @@ export default class MarketsPage extends BasePage {
         this.activeMarkerRate = ord.rate
         this.setDepthMarkers()
       })
-      updateUserOrderRow(row, ord)
+      this.updateUserOrderRow(row, ord)
       if (ord.type === Order.Limit && (ord.tif === Order.StandingTiF && ord.status < Order.StatusExecuted)) {
         const icon = Doc.tmplElement(row, 'cancelBttn')
         Doc.show(icon)
@@ -1002,7 +1003,21 @@ export default class MarketsPage extends BasePage {
     this.setDepthMarkers()
   }
 
-  /* setDepthMarkers sets the depth chart markers for booked orders. */
+  /*
+  * updateUserOrderRow sets the td contents of the user's order table row.
+  */
+  updateUserOrderRow (tr, ord) {
+    updateDataCol(tr, 'type', Order.typeString(ord))
+    updateDataCol(tr, 'side', Order.sellString(ord))
+    updateDataCol(tr, 'age', Doc.timeSince(ord.stamp))
+    updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / Order.RateConversionFactor))
+    updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.base.info.unitinfo))
+    updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
+    updateDataCol(tr, 'settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
+    updateDataCol(tr, 'status', Order.statusString(ord))
+  }
+
+  /* setMarkers sets the depth chart markers for booked orders. */
   setDepthMarkers () {
     const markers = {
       buys: [],
@@ -1013,12 +1028,12 @@ export default class MarketsPage extends BasePage {
       if (ord.rate && ord.status === Order.StatusBooked) {
         if (ord.sell) {
           markers.sells.push({
-            rate: ord.rate / 1e8,
+            rate: ord.rate / Order.RateConversionFactor,
             active: ord.rate === this.activeMarkerRate
           })
         } else {
           markers.buys.push({
-            rate: ord.rate / 1e8,
+            rate: ord.rate / Order.RateConversionFactor,
             active: ord.rate === this.activeMarkerRate
           })
         }
@@ -1069,8 +1084,8 @@ export default class MarketsPage extends BasePage {
       quote: mktBook.quote
     })
 
-    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize / 1e8)
-    page.rateStep.textContent = market.cfg.ratestep / 1e8
+    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize, market.base.info.unitinfo)
+    page.rateStep.textContent = market.cfg.ratestep / Order.RateConversionFactor
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     this.balanceWgt.setWallets(host, b.id, q.id)
@@ -1199,16 +1214,16 @@ export default class MarketsPage extends BasePage {
     const toAsset = isSell ? quoteAsset : baseAsset
     const fromAsset = isSell ? baseAsset : quoteAsset
 
-    page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
+    page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.info.unitinfo)
     page.vSideHeader.textContent = isSell ? intl.prep(intl.ID_SELL) : intl.prep(intl.ID_BUY)
     page.vSideSubmit.textContent = page.vSideHeader.textContent
     page.vBaseSubmit.textContent = baseAsset.symbol.toUpperCase()
     if (order.isLimit) {
       Doc.show(page.verifyLimit)
       Doc.hide(page.verifyMarket)
-      page.vRate.textContent = Doc.formatCoinValue(order.rate / 1e8)
+      page.vRate.textContent = Doc.formatCoinValue(order.rate / Order.RateConversionFactor)
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
-      page.vTotal.textContent = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+      page.vTotal.textContent = Doc.formatCoinValue(order.rate / Order.RateConversionFactor * order.qty, quoteAsset.info.unitinfo)
       page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vSide.textContent = isSell ? intl.prep(intl.ID_SELL).toLowerCase() : intl.prep(intl.ID_BUY).toLowerCase()
     } else {
@@ -1222,7 +1237,7 @@ export default class MarketsPage extends BasePage {
         const lotSize = this.market.cfg.lotsize
         const lots = order.sell ? order.qty / lotSize : received / lotSize
         // TODO: Some kind of adjustment to align with lot sizes for market buy?
-        page.vmTotal.textContent = Doc.formatCoinValue(received / 1e8)
+        page.vmTotal.textContent = Doc.formatCoinValue(received, toAsset.info.unitinfo)
         page.vmAsset.textContent = toAsset.symbol.toUpperCase()
         page.vmLots.textContent = lots.toFixed(1)
       } else {
@@ -1268,9 +1283,9 @@ export default class MarketsPage extends BasePage {
     const order = this.metaOrders[orderID].order
     const page = this.page
     const remaining = order.qty - order.filled
-    page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
-    const symbol = Order.isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
-    page.cancelUnit.textContent = symbol.toUpperCase()
+    const asset = Order.isMarketBuy(order) ? this.market.quote : this.market.base
+    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
+    page.cancelUnit.textContent = asset.symbol.toUpperCase()
     this.showForm(page.cancelForm)
     page.cancelPass.focus()
     this.cancelData = {
@@ -1356,7 +1371,7 @@ export default class MarketsPage extends BasePage {
       // Remove the cancellation button.
       Doc.hide(bttn)
     }
-    updateUserOrderRow(metaOrder.row, order)
+    this.updateUserOrderRow(metaOrder.row, order)
     // Only reset markers if there is a change, since the chart is redrawn.
     if ((oldStatus === Order.StatusEpoch && order.status === Order.StatusBooked) ||
       (oldStatus === Order.StatusBooked && order.status > Order.StatusBooked)) this.setDepthMarkers()
@@ -1492,7 +1507,7 @@ export default class MarketsPage extends BasePage {
     }
     const lotSize = this.market.cfg.lotsize
     page.lotField.value = lots
-    page.qtyField.value = (lots * lotSize / 1e8)
+    page.qtyField.value = Doc.formatCoinValue(lots * lotSize, this.market.base.info.unitinfo)
     this.previewQuoteAmt(true)
   }
 
@@ -1513,7 +1528,7 @@ export default class MarketsPage extends BasePage {
     const adjusted = lots * lotSize
     page.lotField.value = lots
     if (!order.isLimit && !order.sell) return
-    if (finalize) page.qtyField.value = (adjusted / 1e8)
+    if (finalize) page.qtyField.value = Doc.formatCoinValue(adjusted, this.market.base.info.unitinfo)
     this.previewQuoteAmt(true)
   }
 
@@ -1523,7 +1538,7 @@ export default class MarketsPage extends BasePage {
    */
   marketBuyChanged () {
     const page = this.page
-    const qty = asAtoms(page.mktBuyField.value)
+    const qty = asAtoms(page.mktBuyField.value, conversionFactor(this.market.quote))
     const gap = this.midGap()
     if (!gap || !qty) {
       page.mktBuyLots.textContent = '0'
@@ -1533,7 +1548,7 @@ export default class MarketsPage extends BasePage {
     const lotSize = this.market.cfg.lotsize
     const received = qty / gap
     page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
-    page.mktBuyScore.textContent = Doc.formatCoinValue(received / 1e8)
+    page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.base.info.unitinfo)
   }
 
   /*
@@ -1550,11 +1565,11 @@ export default class MarketsPage extends BasePage {
       return
     }
     const order = this.parseOrder()
-    const v = (adjusted / 1e8)
-    this.page.rateField.value = v
+    const r = (adjusted / Order.RateConversionFactor)
+    this.page.rateField.value = r
     this.depthLines.input = [{
-      rate: v,
-      color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
+      rate: r,
+      color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
     }]
     this.drawChartLines()
     this.previewQuoteAmt(true)
@@ -1567,7 +1582,7 @@ export default class MarketsPage extends BasePage {
   adjustedRate () {
     const v = this.page.rateField.value
     if (!v) return null
-    const rate = asAtoms(v)
+    const rate = asAtoms(v, Order.RateConversionFactor)
     const rateStep = this.market.cfg.ratestep
     return rate - (rate % rateStep)
   }
@@ -1697,7 +1712,7 @@ export default class MarketsPage extends BasePage {
    */
   orderTableRow (orderBin) {
     const tr = this.page.rowTemplate.cloneNode(true)
-    const manager = new OrderTableRowManager(tr, orderBin)
+    const manager = new OrderTableRowManager(tr, orderBin, this.market.base.info.unitinfo)
     tr.manager = manager
     bind(tr, 'click', () => {
       this.reportDepthClick(tr.manager.getRate())
@@ -2110,9 +2125,9 @@ class BalanceWidget {
     }
     // We have a wallet and a DEX-specific balance. Set all of the fields.
     Doc.show(side.avail, side.immature, side.locked)
-    side.avail.textContent = Doc.formatCoinValue(bal.available / 1e8)
-    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked) / 1e8)
-    side.immature.textContent = Doc.formatCoinValue(bal.immature / 1e8)
+    side.avail.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
+    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked), asset.info.unitinfo)
+    side.immature.textContent = Doc.formatCoinValue(bal.immature, asset.info.unitinfo)
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
     const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
@@ -2157,9 +2172,11 @@ function makeMarket (host, base, quote) {
 /* marketID creates a DEX-compatible market name from the ticker symbols. */
 export function marketID (b, q) { return `${b}_${q}` }
 
+function conversionFactor (asset) { return asset.info.unitinfo.conventional.conversionFactor }
+
 /* asAtoms converts the float string to atoms. */
-function asAtoms (s) {
-  return Math.round(parseFloat(s) * 1e8)
+function asAtoms (s, conversionFactor) {
+  return Math.round(parseFloat(s) * conversionFactor)
 }
 
 /* swapBttns changes the 'selected' class of the buttons. */
@@ -2173,20 +2190,6 @@ function swapBttns (before, now) {
  */
 function updateDataCol (tr, col, s) {
   Doc.tmplElement(tr, col).textContent = s
-}
-
-/*
- * updateUserOrderRow sets the td contents of the user's order table row.
- */
-function updateUserOrderRow (tr, ord) {
-  updateDataCol(tr, 'type', Order.typeString(ord))
-  updateDataCol(tr, 'side', Order.sellString(ord))
-  updateDataCol(tr, 'age', Doc.timeSince(ord.stamp))
-  updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / 1e8))
-  updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty / 1e8))
-  updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
-  updateDataCol(tr, 'settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
-  updateDataCol(tr, 'status', Order.statusString(ord))
 }
 
 /*
@@ -2204,12 +2207,13 @@ function cleanTemplates (...tmpls) {
 // represents all the orders in the order book with the same rate, but orders that
 // are booked or still in the epoch queue are displayed in separate rows.
 class OrderTableRowManager {
-  constructor (tableRow, orderBin) {
+  constructor (tableRow, orderBin, baseUnitInfo) {
     this.tableRow = tableRow
     this.orderBin = orderBin
     this.sell = orderBin[0].sell
     this.rate = orderBin[0].rate
     this.epoch = !!orderBin[0].epoch
+    this.baseUnitInfo = baseUnitInfo
     this.setRateEl()
     this.setEpochEl()
     this.updateQtyNumOrdersEl()
@@ -2242,7 +2246,7 @@ class OrderTableRowManager {
     const numOrders = this.orderBin.length
     const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
     const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
-    qtyEl.innerText = qty.toFixed(8)
+    qtyEl.innerText = Doc.formatCoinValue(qty, this.baseUnitInfo)
     if (numOrders > 1) {
       numOrdersEl.removeAttribute('hidden')
       numOrdersEl.innerText = numOrders

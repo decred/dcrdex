@@ -83,8 +83,15 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelCritical)
 	tMaxFeeRate         uint64 = 10
+	tWalletInfo                = &asset.WalletInfo{
+		UnitInfo: dex.UnitInfo{
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e8,
+			},
+		},
+	}
 )
 
 type tMsg = *msgjson.Message
@@ -1251,13 +1258,14 @@ func TestBookFeed(t *testing.T) {
 	}
 
 	// Update the remaining quantity of the just booked order.
+	var remaining uint64 = 5 * 1e8
 	bookNote, _ = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.UpdateRemainingNote{
 		OrderNote: msgjson.OrderNote{
 			Seq:      4,
 			MarketID: tDcrBtcMktName,
 			OrderID:  oid3[:],
 		},
-		Remaining: 5 * 1e8,
+		Remaining: remaining,
 	})
 	err = handleUpdateRemainingMsg(tCore, dc, bookNote)
 	if err != nil {
@@ -1268,8 +1276,8 @@ func TestBookFeed(t *testing.T) {
 	checkAction(feed2, UpdateRemainingAction)
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	firstSellQty := book.Sells[0].Qty
-	if firstSellQty != 5 {
-		t.Fatalf("expected remaining quantity of 5.00000000 after update_remaining. got %.8f", firstSellQty)
+	if firstSellQty != remaining {
+		t.Fatalf("expected remaining quantity of 500000000 after update_remaining. got %d", firstSellQty)
 	}
 
 	// Ensure handleUnbookOrderMsg removes a book order from an associated
@@ -1435,7 +1443,7 @@ func TestCreateWallet(t *testing.T) {
 			return wallet.Wallet, nil
 		},
 		decoder: decoder,
-		winfo:   &asset.WalletInfo{},
+		winfo:   tWalletInfo,
 	})
 
 	// Connection error.
@@ -5836,6 +5844,7 @@ func TestReconfigureWallet(t *testing.T) {
 		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 			return xyzWallet.Wallet, nil
 		},
+		winfo: tWalletInfo,
 	})
 	if err = xyzWallet.Connect(); err != nil {
 		t.Fatal(err)

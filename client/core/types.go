@@ -491,27 +491,29 @@ func newDisplayIDFromSymbols(base, quote string) string {
 	return strings.ToUpper(base) + "-" + strings.ToUpper(quote)
 }
 
-// MiniOrder is minimal information about an order in a market's order book.
-type MiniOrder struct {
-	Qty   float64 `json:"qty"`
+// SimpleOrder is minimal information about an order in a market's order book.
+// Replaced MiniOrder, which had a float Qty in conventional units.
+type SimpleOrder struct {
+	Qty   uint64  `json:"qty"`
 	Rate  float64 `json:"rate"`
 	Epoch uint64  `json:"epoch,omitempty"`
 	Sell  bool    `json:"sell"`
 	Token string  `json:"token"`
 }
 
-// RemainingUpdate is an update to the quantity for an order on the order book.
-type RemainingUpdate struct {
-	Token string  `json:"token"`
-	Qty   float64 `json:"qty"`
+// RemainderUpdate is an update to the quantity for an order on the order book.
+// Replaced RemainingUpdate, which had a float Qty in conventional units.
+type RemainderUpdate struct {
+	Token string `json:"token"`
+	Qty   uint64 `json:"qty"`
 }
 
 // OrderBook represents an order book, which are sorted buys and sells, and
 // unsorted epoch orders.
 type OrderBook struct {
-	Sells []*MiniOrder `json:"sells"`
-	Buys  []*MiniOrder `json:"buys"`
-	Epoch []*MiniOrder `json:"epoch"`
+	Sells []*SimpleOrder `json:"sells"`
+	Buys  []*SimpleOrder `json:"buys"`
+	Epoch []*SimpleOrder `json:"epoch"`
 }
 
 // MarketOrderBook is used as the BookUpdate's Payload with the FreshBookAction.

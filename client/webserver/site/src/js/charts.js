@@ -1,5 +1,6 @@
 import Doc from './doc'
 import State from './state'
+import { RateConversionFactor } from './orderutil'
 
 const bind = Doc.bind
 const unbind = Doc.unbind
@@ -308,13 +309,19 @@ export class DepthChart extends Chart {
     this.reporters.click(translator.unx(x))
   }
 
-  /* set sets the current data set and draws. */
-  set (book, lotSize, rateStep) {
+  // clear the canvas.
+  clear () {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+  }
+
+  // set sets the current data set and draws.
+  set (book, lotSize, rateStep, baseUnitInfo) {
     this.book = book
-    this.lotSize = lotSize / 1e8
-    this.rateStep = rateStep / 1e8
+    this.lotSize = lotSize
+    this.rateStep = rateStep / RateConversionFactor
     this.baseTicker = book.baseSymbol.toUpperCase()
     this.quoteTicker = book.quoteSymbol.toUpperCase()
+    this.baseConversionFactor = baseUnitInfo.conventional.conversionFactor
     if (!this.zoomLevel) {
       const [midGap, gapWidth] = this.gap()
       // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing

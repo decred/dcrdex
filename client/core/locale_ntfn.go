@@ -72,12 +72,12 @@ var enUS = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicYoloPlaced: {
 		subject:  "Market order placed",
-		template: "selling %.8f %s at market rate (%s)",
+		template: "selling %s %s at market rate (%s)",
 	},
 	// [sell string, qty, ticker, rate string, token]
 	TopicOrderPlaced: {
 		subject:  "Order placed",
-		template: "%sing %.8f %s, rate = %s (%s)",
+		template: "%sing %s %s, rate = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -132,7 +132,7 @@ var enUS = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicSwapSendError: {
 		subject:  "Swap send error",
-		template: "Error encountered sending a swap output(s) worth %.8f %s on order %s",
+		template: "Error encountered sending a swap output(s) worth %s %s on order %s",
 	},
 	// [match, error]
 	TopicInitError: {
@@ -147,27 +147,27 @@ var enUS = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
 		subject:  "Swaps initiated",
-		template: "Sent swaps worth %.8f %s on order %s",
+		template: "Sent swaps worth %s %s on order %s",
 	},
 	// [qty, ticker, token]
 	TopicRedemptionError: {
 		subject:  "Redemption error",
-		template: "Error encountered sending redemptions worth %.8f %s on order %s",
+		template: "Error encountered sending redemptions worth %s %s on order %s",
 	},
 	// [qty, ticker, token]
 	TopicMatchComplete: {
 		subject:  "Match complete",
-		template: "Redeemed %.8f %s on order %s",
+		template: "Redeemed %s %s on order %s",
 	},
 	// [qty, ticker, token]
 	TopicRefundFailure: {
 		subject:  "Refund Failure",
-		template: "Refunded %.8f %s on order %s, with some errors",
+		template: "Refunded %s %s on order %s, with some errors",
 	},
 	// [qty, ticker, token]
 	TopicMatchesRefunded: {
 		subject:  "Matches Refunded",
-		template: "Refunded %.8f %s on order %s",
+		template: "Refunded %s %s on order %s",
 	},
 	// [match ID token]
 	TopicMatchRevoked: {

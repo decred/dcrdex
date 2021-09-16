@@ -103,19 +103,20 @@ export default class OrdersPage extends BasePage {
       set('host', `${mktID} @ ${ord.host}`)
       let from, to, fromQty
       let toQty = ''
+      const [baseUnitInfo, quoteUnitInfo] = [app.assets[ord.baseID].info.unitinfo, app.assets[ord.quoteID].info.unitinfo]
       if (ord.sell) {
-        [from, to] = [ord.baseSymbol, ord.quoteSymbol]
-        fromQty = Doc.formatCoinValue(ord.qty / 1e8)
+        [from, to] = [baseUnitInfo.conventional.unit, quoteUnitInfo.conventional.unit]
+        fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         if (ord.type === Order.Limit) {
-          toQty = Doc.formatCoinValue(ord.qty / 1e8 * ord.rate / 1e8)
+          toQty = Doc.formatCoinValue(ord.qty / Order.RateConversionFactor * ord.rate, quoteUnitInfo)
         }
       } else {
-        [from, to] = [ord.quoteSymbol, ord.baseSymbol]
+        [from, to] = [quoteUnitInfo.conventional.unit, baseUnitInfo.conventional.unit]
         if (ord.type === Order.Market) {
-          fromQty = Doc.formatCoinValue(ord.qty / 1e8)
+          fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         } else {
-          fromQty = Doc.formatCoinValue(ord.qty / 1e8 * ord.rate / 1e8)
-          toQty = Doc.formatCoinValue(ord.qty / 1e8)
+          fromQty = Doc.formatCoinValue(ord.qty / Order.RateConversionFactor * ord.rate, quoteUnitInfo)
+          toQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         }
       }
 

@@ -75,9 +75,9 @@ var (
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Ethereum",
-		Units:             "gwei",
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
+		UnitInfo:          swap.UnitInfo,
 	}
 	mainnetContractAddr = common.HexToAddress("")
 )

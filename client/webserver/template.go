@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,17 +191,6 @@ var templateFuncs = template.FuncMap{
 	// market.
 	"logoPath": func(symbol string) string {
 		return "/img/coins/" + strings.ToLower(symbol) + ".png"
-	},
-	// urlBase attempts to get the domain name without the TLD.
-	"urlBase": func(uri string) string {
-		u, err := url.Parse(uri)
-		if err != nil {
-			log.Errorf("failed to parse URL: %s", uri)
-		}
-		return u.Host
-	},
-	"fromAtoms": func(v uint64) float64 {
-		return float64(v) / 1e8
 	},
 	"x100": func(v float32) float32 {
 		return v * 100

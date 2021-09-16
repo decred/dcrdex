@@ -506,10 +506,11 @@ export default class Application {
         // assets can be null if failed to connect to dex server.
         if (!this.assets) return
         const wallet = note.wallet
-        this.assets[wallet.assetID].wallet = wallet
+        const asset = this.assets[wallet.assetID]
+        asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
+        balances.forEach(el => { el.textContent = Doc.formatCoinValue(wallet.balance.available, asset.info.unitinfo) })
         break
       }
       case 'match': {

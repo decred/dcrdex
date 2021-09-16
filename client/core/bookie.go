@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -526,11 +527,11 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 }
 
 // translateBookSide translates from []*orderbook.Order to []*MiniOrder.
-func translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
+func translateBookSide(ins []*orderbook.Order) (outs []*SimpleOrder) {
 	for _, o := range ins {
-		outs = append(outs, &MiniOrder{
-			Qty:   float64(o.Quantity) / conversionFactor,
-			Rate:  float64(o.Rate) / conversionFactor,
+		outs = append(outs, &SimpleOrder{
+			Qty:   o.Quantity,
+			Rate:  float64(o.Rate) / calc.RateConversionFactor,
 			Sell:  o.Side == msgjson.SellOrderNum,
 			Token: token(o.OrderID[:]),
 			Epoch: o.Epoch,
@@ -898,7 +899,7 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		Action:   UnbookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  &MiniOrder{Token: token(note.OrderID)},
+		Payload:  &SimpleOrder{Token: token(note.OrderID)},
 	})
 
 	return nil
@@ -926,9 +927,9 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		Action:   UpdateRemainingAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload: &RemainingUpdate{
+		Payload: &RemainderUpdate{
 			Token: token(note.OrderID),
-			Qty:   float64(note.Remaining) / conversionFactor,
+			Qty:   note.Remaining,
 		},
 	})
 	return nil
@@ -986,10 +987,10 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 
 // minifyOrder creates a MiniOrder from a TradeNote. The epoch and order ID must
 // be supplied.
-func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrder {
-	return &MiniOrder{
-		Qty:   float64(trade.Quantity) / conversionFactor,
-		Rate:  float64(trade.Rate) / conversionFactor,
+func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *SimpleOrder {
+	return &SimpleOrder{
+		Qty:   trade.Quantity,
+		Rate:  float64(trade.Rate) / calc.RateConversionFactor,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
 		Epoch: epoch,

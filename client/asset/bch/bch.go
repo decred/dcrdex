@@ -83,11 +83,11 @@ var (
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:    "Bitcoin Cash",
-		Units:   "Satoshi",
 		Version: version,
 		// Same as bitcoin. That's dumb.
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexbch.UnitInfo,
 	}
 )
 
