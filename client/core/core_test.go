@@ -41,8 +41,8 @@ import (
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // AccountDisable is used to disable an account by given host and application

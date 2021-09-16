@@ -12,7 +12,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	ordertest "decred.org/dcrdex/dex/order/test"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // Generate a public key on the secp256k1 curve.

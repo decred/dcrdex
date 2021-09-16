@@ -30,7 +30,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrd/dcrjson/v3" // for dcrjson.RPCError returns from rpcclient
+	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
 )
 
