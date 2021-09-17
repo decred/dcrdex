@@ -5,12 +5,12 @@ package calc
 
 import "math/big"
 
-// RateConversionFactor is used when encoding an exchange rate as an integer.
+// RateEncodingFactor is used when encoding an exchange rate as an integer.
 // https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
-const RateConversionFactor = 1e8
+const RateEncodingFactor = 1e8
 
 var (
-	bigRateConversionFactor = big.NewInt(RateConversionFactor)
+	bigRateConversionFactor = big.NewInt(RateEncodingFactor)
 )
 
 // BaseToQuote computes a quote asset amount based on a base asset amount

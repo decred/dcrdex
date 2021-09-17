@@ -1,6 +1,6 @@
 import Doc from './doc'
 import State from './state'
-import { RateConversionFactor } from './orderutil'
+import { RateEncodingFactor } from './orderutil'
 
 const bind = Doc.bind
 const unbind = Doc.unbind
@@ -315,13 +315,14 @@ export class DepthChart extends Chart {
   }
 
   // set sets the current data set and draws.
-  set (book, lotSize, rateStep, baseUnitInfo) {
+  set (book, lotSize, rateStep, baseUnit, quoteUnit) {
     this.book = book
     this.lotSize = lotSize
-    this.rateStep = rateStep / RateConversionFactor
-    this.baseTicker = book.baseSymbol.toUpperCase()
-    this.quoteTicker = book.quoteSymbol.toUpperCase()
-    this.baseConversionFactor = baseUnitInfo.conventional.conversionFactor
+    this.rateStep = rateStep
+    this.baseUnit = baseUnit.conventional.unit.toUpperCase()
+    this.quoteUnit = quoteUnit.conventional.unit.toUpperCase()
+    this.baseConversionFactor = baseUnit.conventional.conversionFactor
+    this.rateConversionFactor = RateEncodingFactor / this.baseConversionFactor * quoteUnit.conventional.conversionFactor
     if (!this.zoomLevel) {
       const [midGap, gapWidth] = this.gap()
       // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing
@@ -390,7 +391,7 @@ export class DepthChart extends Chart {
       sum += ord.qty
       buyDepth.push([ord.rate, sum])
       volumeReport.buyBase += ord.qty
-      volumeReport.buyQuote += ord.qty * ord.rate
+      volumeReport.buyQuote += ord.qty * ord.rate / this.rateConversionFactor
       while (buyMarkers.length && floatCompare(buyMarkers[0].rate, ord.rate)) {
         const mark = buyMarkers.shift()
         markers.push({
@@ -415,7 +416,7 @@ export class DepthChart extends Chart {
       sum += ord.qty
       sellDepth.push([ord.rate, sum])
       volumeReport.sellBase += ord.qty
-      volumeReport.sellQuote += ord.qty * ord.rate
+      volumeReport.sellQuote += ord.qty * ord.rate / this.rateConversionFactor
       while (sellMarkers.length && floatCompare(sellMarkers[0].rate, ord.rate)) {
         const mark = sellMarkers.shift()
         markers.push({
@@ -444,7 +445,7 @@ export class DepthChart extends Chart {
     this.doYLabels(this.plotRegion, this.lotSize, this.book.baseSymbol)
 
     const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
-      dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
+      dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`, this.rateConversionFactor)
 
     // Print the x labels
     this.plotXLabels(xLabels, low, high, [`${this.quoteTicker}/`, this.baseTicker])

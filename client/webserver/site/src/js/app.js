@@ -7,6 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
+import { RateEncodingFactor } from './orderutil'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -673,6 +674,13 @@ export default class Application {
 
   /* unitInfo fetches unit info [dex.UnitInfo] for the asset */
   unitInfo (assetID) { return this.assets[assetID].info.unitinfo }
+
+  /* conventionalRate converts the encoded atomic rate to a conventional rate */
+  conventionalRate (baseID, quoteID, encRate) {
+    const [b, q] = [this.unitInfo(baseID), this.unitInfo(quoteID)]
+    const r = b.conventional.conversionFactor / q.conventional.conversionFactor
+    return encRate / RateEncodingFactor * r
+  }
 
   /*
    * checkResponse checks the response object as returned from the functions in

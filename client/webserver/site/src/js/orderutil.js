@@ -1,4 +1,3 @@
-import Doc from './doc'
 import * as intl from './locales'
 
 export const Limit = 1
@@ -29,14 +28,14 @@ export const Maker = 0
 export const Taker = 1
 
 /*
- * RateConversionFactor is used when encoding an exchange rate as an integer.
- * See https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
+ * RateEncodingFactor is used when encoding an atomic exchange rate as an
+ * integer. See docs on message-rate encoding @
+ * https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
  */
-export const RateConversionFactor = 1e8
+export const RateEncodingFactor = 1e8
 
 export function sellString (ord) { return ord.sell ? 'sell' : 'buy' }
 export function typeString (ord) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
-export function rateString (ord) { return ord.type === Market ? 'market' : Doc.formatCoinValue(ord.rate / RateConversionFactor) }
 
 /* isMarketBuy will return true if the order is a market buy order. */
 export function isMarketBuy (ord) {

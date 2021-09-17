@@ -494,11 +494,11 @@ func newDisplayIDFromSymbols(base, quote string) string {
 // SimpleOrder is minimal information about an order in a market's order book.
 // Replaced MiniOrder, which had a float Qty in conventional units.
 type SimpleOrder struct {
-	Qty   uint64  `json:"qty"`
-	Rate  float64 `json:"rate"`
-	Epoch uint64  `json:"epoch,omitempty"`
-	Sell  bool    `json:"sell"`
-	Token string  `json:"token"`
+	Qty   uint64 `json:"qty"`
+	Rate  uint64 `json:"rate"`
+	Epoch uint64 `json:"epoch,omitempty"`
+	Sell  bool   `json:"sell"`
+	Token string `json:"token"`
 }
 
 // RemainderUpdate is an update to the quantity for an order on the order book.

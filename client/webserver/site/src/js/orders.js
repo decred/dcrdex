@@ -105,17 +105,17 @@ export default class OrdersPage extends BasePage {
       let toQty = ''
       const [baseUnitInfo, quoteUnitInfo] = [app.unitInfo(ord.baseID), app.unitInfo(ord.quoteID)]
       if (ord.sell) {
-        [from, to] = [baseUnitInfo.conventional.unit, quoteUnitInfo.conventional.unit]
+        [from, to] = [ord.baseSymbol, ord.quoteSymbol]
         fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         if (ord.type === Order.Limit) {
-          toQty = Doc.formatCoinValue(ord.qty / Order.RateConversionFactor * ord.rate, quoteUnitInfo)
+          toQty = Doc.formatCoinValue(ord.qty / Order.RateEncodingFactor * ord.rate, quoteUnitInfo)
         }
       } else {
-        [from, to] = [quoteUnitInfo.conventional.unit, baseUnitInfo.conventional.unit]
+        [from, to] = [ord.quoteSymbol, ord.baseSymbol]
         if (ord.type === Order.Market) {
           fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         } else {
-          fromQty = Doc.formatCoinValue(ord.qty / Order.RateConversionFactor * ord.rate, quoteUnitInfo)
+          fromQty = Doc.formatCoinValue(ord.qty / Order.RateEncodingFactor * ord.rate, quoteUnitInfo)
           toQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
         }
       }
@@ -127,7 +127,7 @@ export default class OrdersPage extends BasePage {
       Doc.tmplElement(tr, 'toLogo').src = Doc.logoPath(to)
       set('toSymbol', to)
       set('type', `${Order.typeString(ord)} ${Order.sellString(ord)}`)
-      set('rate', Order.rateString(ord))
+      set('rate', Doc.formatCoinValue(app.conventionalRate(ord.baseID, ord.quoteID, ord.rate)))
       set('status', Order.statusString(ord))
       set('filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)

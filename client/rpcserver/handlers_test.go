@@ -868,9 +868,9 @@ func TestHandleOrderBook(t *testing.T) {
 }
 
 func TestTruncateOrderBook(t *testing.T) {
-	lowRate := 1.0
-	medRate := 1.5
-	highRate := 2.0
+	var lowRate uint64 = 1e8
+	var medRate uint64 = 1.5e8
+	var highRate uint64 = 2.0e8
 	lowRateOrder := &core.SimpleOrder{Rate: lowRate}
 	medRateOrder := &core.SimpleOrder{Rate: medRate}
 	highRateOrder := &core.SimpleOrder{Rate: highRate}

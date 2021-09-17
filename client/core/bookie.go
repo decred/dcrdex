@@ -13,7 +13,6 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -531,7 +530,7 @@ func translateBookSide(ins []*orderbook.Order) (outs []*SimpleOrder) {
 	for _, o := range ins {
 		outs = append(outs, &SimpleOrder{
 			Qty:   o.Quantity,
-			Rate:  float64(o.Rate) / calc.RateConversionFactor,
+			Rate:  o.Rate,
 			Sell:  o.Side == msgjson.SellOrderNum,
 			Token: token(o.OrderID[:]),
 			Epoch: o.Epoch,
@@ -990,7 +989,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *SimpleOrder {
 	return &SimpleOrder{
 		Qty:   trade.Quantity,
-		Rate:  float64(trade.Rate) / calc.RateConversionFactor,
+		Rate:  trade.Rate,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
 		Epoch: epoch,

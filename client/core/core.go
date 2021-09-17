@@ -3906,7 +3906,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	} else {
 		rateString := "market"
 		if form.IsLimit {
-			rateString = strconv.FormatFloat(float64(corder.Rate)/calc.RateConversionFactor, 'f', 8, 64)
+			rateString = strconv.FormatFloat(wallets.conventionalRate(corder.Rate), 'f', 8, 64)
 		}
 		ui := wallets.baseWallet.Info().UnitInfo
 		subject, details := c.formatDetails(TopicOrderPlaced,
@@ -3928,6 +3928,13 @@ type walletSet struct {
 	toAsset     *dex.Asset
 	baseWallet  *xcWallet
 	quoteWallet *xcWallet
+}
+
+func (w *walletSet) conventionalRate(atomicRate uint64) float64 {
+	atomicRatio := float64(atomicRate) / calc.RateEncodingFactor
+	baseFactor := float64(w.baseWallet.Info().UnitInfo.Conventional.ConversionFactor)
+	quoteFactor := float64(w.quoteWallet.Info().UnitInfo.Conventional.ConversionFactor)
+	return atomicRatio * (baseFactor / quoteFactor)
 }
 
 // walletSet constructs a walletSet.

@@ -148,7 +148,7 @@ func mkMrkt(base, quote string) *core.Market {
 	lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
 	rateStep := lotSize / 1e3
 	if _, exists := marketStats[mktID]; !exists {
-		midGap := float64(rateStep) / 1e8 * float64(rand.Intn(1e6))
+		midGap := float64(rateStep) * float64(rand.Intn(1e6))
 		maxQty := float64(lotSize) * float64(rand.Intn(1e3))
 		marketStats[mktID] = [2]float64{midGap, maxQty}
 	}
@@ -234,7 +234,7 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 
 	return &core.SimpleOrder{
 		Qty:   uint64(math.Exp(-rand.Float64()*5) * maxQty),
-		Rate:  rate,
+		Rate:  uint64(rate * calc.RateEncodingFactor),
 		Sell:  sell,
 		Token: nextToken(),
 		Epoch: epochIdx,
@@ -248,7 +248,7 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.SimpleOrder {
 	}
 	return &core.SimpleOrder{
 		Qty:   ord.Qty,
-		Rate:  float64(ord.Rate) / calc.RateConversionFactor,
+		Rate:  ord.Rate,
 		Sell:  ord.Sell,
 		Token: ord.ID[:4].String(),
 		Epoch: epoch,
@@ -380,7 +380,13 @@ func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
 }
 
 func (*TDriver) Info() *asset.WalletInfo {
-	return nil
+	return &asset.WalletInfo{
+		UnitInfo: dex.UnitInfo{
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e8,
+			},
+		},
+	}
 }
 
 func newTCore() *TCore {
