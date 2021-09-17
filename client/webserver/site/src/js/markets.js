@@ -704,7 +704,7 @@ export default class MarketsPage extends BasePage {
       sell: sell,
       base: market.base.id,
       quote: market.quote.id,
-      qty: asAtoms(qtyField.value, conversionFactor(market.base)),
+      qty: asAtoms(qtyField.value, conventionalFactor(market.base)),
       rate: asAtoms(page.rateField.value, Order.RateConversionFactor), // message-rate
       tifnow: page.tifNow.checked
     }
@@ -1538,7 +1538,7 @@ export default class MarketsPage extends BasePage {
    */
   marketBuyChanged () {
     const page = this.page
-    const qty = asAtoms(page.mktBuyField.value, conversionFactor(this.market.quote))
+    const qty = asAtoms(page.mktBuyField.value, conventionalFactor(this.market.quote))
     const gap = this.midGap()
     if (!gap || !qty) {
       page.mktBuyLots.textContent = '0'
@@ -2172,7 +2172,11 @@ function makeMarket (host, base, quote) {
 /* marketID creates a DEX-compatible market name from the ticker symbols. */
 export function marketID (b, q) { return `${b}_${q}` }
 
-function conversionFactor (asset) { return asset.info.unitinfo.conventional.conversionFactor }
+/*
+ * conventionalFactor picks out the conversion factor for conventional units for
+ * the asset [core.SupportedAsset].
+ */
+function conventionalFactor (asset) { return asset.info.unitinfo.conventional.conversionFactor }
 
 /* asAtoms converts the float string to atoms. */
 function asAtoms (s, conversionFactor) {
@@ -2246,7 +2250,7 @@ class OrderTableRowManager {
     const numOrders = this.orderBin.length
     const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
     const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
-    qtyEl.innerText = Doc.formatCoinValue(qty, this.baseUnitInfo)
+    qtyEl.innerText = Doc.formatFullPrecision(qty, this.baseUnitInfo)
     if (numOrders > 1) {
       numOrdersEl.removeAttribute('hidden')
       numOrdersEl.innerText = numOrders

@@ -6,6 +6,7 @@ package calc
 import "math/big"
 
 // RateConversionFactor is used when encoding an exchange rate as an integer.
+// https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
 const RateConversionFactor = 1e8
 
 var (

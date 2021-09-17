@@ -510,7 +510,7 @@ export default class Application {
         asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = Doc.formatCoinValue(wallet.balance.available, asset.info.unitinfo) })
+        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo) })
         break
       }
       case 'match': {
@@ -670,6 +670,9 @@ export default class Application {
       }
     }
   }
+
+  /* unitInfo fetches unit info [dex.UnitInfo] for the asset */
+  unitInfo (assetID) { return this.assets[assetID].info.unitinfo }
 
   /*
    * checkResponse checks the response object as returned from the functions in

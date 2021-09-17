@@ -389,7 +389,7 @@ export class ConfirmRegistrationForm {
       Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
       Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
       Doc.tmplElement(tr, 'quote').innerText = market.quotesymbol.toUpperCase()
-      const baseUnitInfo = app.assets[market.baseid].info.unitinfo
+      const baseUnitInfo = app.unitInfo(market.baseid)
       const fmtVal = Doc.formatCoinValue(market.lotsize, baseUnitInfo)
       Doc.tmplElement(tr, 'lotsize').innerText = `${fmtVal} ${baseUnitInfo.conventional.unit}`
       fields.marketsTableRows.appendChild(tr)

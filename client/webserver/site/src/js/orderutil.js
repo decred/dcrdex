@@ -28,7 +28,10 @@ export const MatchComplete = 4
 export const Maker = 0
 export const Taker = 1
 
-/* RateConversionFactor is used when encoding an exchange rate as an integer. */
+/*
+ * RateConversionFactor is used when encoding an exchange rate as an integer.
+ * See https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
+ */
 export const RateConversionFactor = 1e8
 
 export function sellString (ord) { return ord.sell ? 'sell' : 'buy' }

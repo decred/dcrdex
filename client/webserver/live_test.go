@@ -248,7 +248,7 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.SimpleOrder {
 	}
 	return &core.SimpleOrder{
 		Qty:   ord.Qty,
-		Rate:  float64(ord.Rate) / 1e8,
+		Rate:  float64(ord.Rate) / calc.RateConversionFactor,
 		Sell:  ord.Sell,
 		Token: ord.ID[:4].String(),
 		Epoch: epoch,

@@ -103,7 +103,7 @@ export default class OrdersPage extends BasePage {
       set('host', `${mktID} @ ${ord.host}`)
       let from, to, fromQty
       let toQty = ''
-      const [baseUnitInfo, quoteUnitInfo] = [app.assets[ord.baseID].info.unitinfo, app.assets[ord.quoteID].info.unitinfo]
+      const [baseUnitInfo, quoteUnitInfo] = [app.unitInfo(ord.baseID), app.unitInfo(ord.quoteID)]
       if (ord.sell) {
         [from, to] = [baseUnitInfo.conventional.unit, quoteUnitInfo.conventional.unit]
         fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)

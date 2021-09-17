@@ -353,7 +353,7 @@ export default class WalletsPage extends BasePage {
     page.withdrawAmt.value = ''
     page.withdrawPW.value = ''
 
-    page.withdrawAvail.textContent = Doc.formatCoinValue(wallet.balance.available, asset.info.unitinfo)
+    page.withdrawAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name
     // page.withdrawFee.textContent = wallet.feerate
@@ -404,8 +404,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.withdrawErr)
     const assetID = parseInt(page.withdrawForm.dataset.assetID)
-    const unitInfo = app.assets[assetID].info.unitinfo
-    const conversionFactor = unitInfo.conventional.conversionFactor
+    const conversionFactor = app.unitInfo(assetID).conventional.conversionFactor
     const open = {
       assetID: assetID,
       address: page.withdrawAddr.value,
@@ -466,8 +465,7 @@ export default class WalletsPage extends BasePage {
   /* handleBalance handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     const td = this.page.walletTable.querySelector(`[data-balance-target="${note.assetID}"]`)
-    const unitInfo = app.assets[note.assetID].info.unitinfo
-    td.textContent = Doc.formatCoinValue(note.balance.available, unitInfo)
+    td.textContent = Doc.formatFullPrecision(note.balance.available, app.unitInfo(note.assetID))
   }
 
   /*
