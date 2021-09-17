@@ -714,20 +714,20 @@ type hdKeyIndexer struct {
 func (ki *hdKeyIndexer) KeyIndex(xpub string) (uint32, error) {
 	idx, err := ki.FeeKeyIndex(xpub)
 	if err == nil {
-		log.Infof("Resuming fee keys at index %d for extended pubkey %s", idx, xpub)
+		log.Infof("Resuming fee keys at index %d for extended pubkey %.40s...", idx, xpub)
 		return idx, nil
 	}
 	if !db.IsErrUnknownFeeKey(err) {
 		return 0, err
 	}
-	log.Infof("Creating new fee key entry for extended pubkey %s", xpub)
+	log.Infof("Creating new fee key entry for extended pubkey %.40s...", xpub)
 	return ki.CreateFeeKeyEntryFromPubKey(xpub)
 }
 
 // SetKeyIndex stores an index for the given pubkey.
 func (ki *hdKeyIndexer) SetKeyIndex(idx uint32, xpub string) {
 	if err := ki.SetFeeKeyIndex(idx, xpub); err != nil {
-		log.Errorf("Failed to store key index for xpub %s: %v", xpub, err)
+		log.Errorf("Failed to store key index for xpub %.40s...: %v", xpub, err)
 	}
 }
 
