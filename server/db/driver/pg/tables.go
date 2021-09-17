@@ -120,36 +120,37 @@ func createTable(db sqlQueryExecutor, schema, tableName string) (bool, error) {
 
 // prepareTables ensures that all tables required by the DEX market config,
 // mktConfig, are ready. This also runs any required DB scheme upgrades. The
-// Context allows safely canceling upgrades, which may be long running.
-func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo) error {
+// Context allows safely canceling upgrades, which may be long running. Returns
+// a slice of markets that should have orders flushed due to lot size changes.
+func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo) ([]string, error) {
 	// Create the markets table in the public schema.
 	created, err := createTable(db, publicSchema, marketsTableName)
 	if err != nil {
-		return fmt.Errorf("failed to create markets table: %w", err)
+		return nil, fmt.Errorf("failed to create markets table: %w", err)
 	}
 	if created { // Fresh install
 		// Create the meta table in the public schema.
 		created, err = createTable(db, publicSchema, metaTableName)
 		if err != nil {
-			return fmt.Errorf("failed to create meta table: %w", err)
+			return nil, fmt.Errorf("failed to create meta table: %w", err)
 		}
 		if !created {
-			return fmt.Errorf("existing meta table but no markets table: corrupt DB")
+			return nil, fmt.Errorf("existing meta table but no markets table: corrupt DB")
 		}
 		_, err = db.Exec(internal.CreateMetaRow)
 		if err != nil {
-			return fmt.Errorf("failed to create row for meta table: %w", err)
+			return nil, fmt.Errorf("failed to create row for meta table: %w", err)
 		}
 		err = setDBVersion(db, dbVersion) // no upgrades
 		if err != nil {
-			return fmt.Errorf("failed to set db version in meta table: %w", err)
+			return nil, fmt.Errorf("failed to set db version in meta table: %w", err)
 		}
 		log.Infof("Created new meta table at version %d", dbVersion)
 
 		// Prepare the account and registration key counter tables.
 		err = createAccountTables(db)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		// Attempt upgrade.
@@ -157,9 +158,9 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 			// If the context is canceled, it will either be context.Canceled
 			// from db.BeginTx, or sql.ErrTxDone from any of the tx operations.
 			if errors.Is(err, context.Canceled) || errors.Is(err, sql.ErrTxDone) {
-				return fmt.Errorf("upgrade DB canceled: %w", err)
+				return nil, fmt.Errorf("upgrade DB canceled: %w", err)
 			}
-			return fmt.Errorf("upgrade DB failed: %w", err)
+			return nil, fmt.Errorf("upgrade DB failed: %w", err)
 		}
 	}
 
@@ -167,16 +168,12 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 	// exists. This is done after upgrades since it can create new tables with
 	// the current DB scheme for newly configured markets.
 	log.Infof("Configuring %d markets tables: %v", len(mktConfig), mktConfig)
-	_, err = prepareMarkets(db, mktConfig)
-	if err != nil {
-		return err
-	}
-	return nil
+	return prepareMarkets(db, mktConfig)
 }
 
 // prepareMarkets ensures that the market-specific tables required by the DEX
 // market config, mktConfig, are ready. See also prepareTables.
-func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.MarketInfo, error) {
+func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) ([]string, error) {
 	// Load existing markets and ensure there aren't multiple with the same ID.
 	mkts, err := loadMarkets(db, marketsTableName)
 	if err != nil {
@@ -192,6 +189,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 		marketMap[mkt.Name] = mkt
 	}
 
+	var purgeMarkets []string
 	// Create any markets in the config that do not already exist. Also create
 	// any missing tables for existing markets.
 	for _, mkt := range mktConfig {
@@ -203,9 +201,12 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 				return nil, fmt.Errorf("newMarket failed: %w", err)
 			}
 		} else {
-			// TODO: check params, inc. lot size
 			if mkt.LotSize != existingMkt.LotSize {
-				panic("lot size change: unimplemented") // TODO
+				err = updateLotSize(db, publicSchema, mkt.Name, mkt.LotSize)
+				if err != nil {
+					return nil, fmt.Errorf("unable to update lot size for %s: %w", mkt.Name, err)
+				}
+				purgeMarkets = append(purgeMarkets, mkt.Name)
 			}
 		}
 
@@ -216,5 +217,21 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 		}
 	}
 
-	return marketMap, nil
+	return purgeMarkets, nil
+}
+
+// updateLotSize updates the lot size for a market. Must only be called on an
+// existing market.
+func updateLotSize(db sqlQueryExecutor, schema, mktName string, lotSize uint64) error {
+	if schema == "" {
+		schema = publicSchema
+	}
+	nameSpacedTable := schema + "." + marketsTableName
+	stmt := fmt.Sprintf(internal.UpdateLotSize, nameSpacedTable)
+	_, err := db.Exec(stmt, mktName, lotSize)
+	if err != nil {
+		return err
+	}
+	log.Debugf("Updated %s lot size to %d.", mktName, lotSize)
+	return nil
 }

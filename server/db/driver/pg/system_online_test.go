@@ -176,7 +176,7 @@ func cleanTables(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	err = prepareTables(context.Background(), db, mktConfig())
+	_, err = prepareTables(context.Background(), db, mktConfig())
 	if err != nil {
 		return err
 	}
