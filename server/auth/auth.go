@@ -181,11 +181,6 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	return handler
 }
 
-type feeAsset struct {
-	confs uint32
-	amt   uint64
-}
-
 // AuthManager handles authentication-related tasks, including validating client
 // signatures, maintaining association between accounts and `comms.Link`s, and
 // signing messages with the DEX's private key. AuthManager manages requests to
@@ -198,7 +193,7 @@ type AuthManager struct {
 	unbookFun      func(account.AccountID)
 
 	feeAddress func(assetID uint32) string
-	feeAssets  map[uint32]*feeAsset
+	feeAssets  map[uint32]*msgjson.FeeAsset
 
 	anarchy           bool
 	freeCancels       bool
@@ -377,12 +372,10 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	if absTakerLotLimit == 0 {
 		absTakerLotLimit = defaultAbsTakerLotLimit
 	}
-	feeAssets := make(map[uint32]*feeAsset)
+	// Re-key the map for efficiency in AuthManager methods.
+	feeAssets := make(map[uint32]*msgjson.FeeAsset)
 	for _, asset := range cfg.FeeAssets {
-		feeAssets[asset.ID] = &feeAsset{
-			amt:   asset.Amt,
-			confs: asset.Confs,
-		}
+		feeAssets[asset.ID] = asset
 	}
 	auth := &AuthManager{
 		storage:           cfg.Storage,

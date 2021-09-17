@@ -1740,7 +1740,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		f(accountExistsResp)
 		return nil
 	})
-	queueResponses() // Queing an extra config response here, but we're done anyway.
+	queueResponses() // Queueing an extra config response here, but we're done anyway.
 
 	_, err = tCore.Register(form)
 	if err != nil {
@@ -1750,7 +1750,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	if len(rig.db.acct.EncKeyV2) != 0 || len(rig.db.acct.LegacyEncKey) == 0 {
 		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
 	}
-	getFeeAndBalanceNote() // payment in progres
+	getFeeAndBalanceNote() // payment in progress
 	getFeeAndBalanceNote() // account registered
 }
 

@@ -105,7 +105,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 		// Resend RegisterResult with the existing fee address.
 		feeAsset := auth.feeAssets[ai.FeeAsset]
-		if feeAsset == nil || feeAsset.amt == 0 || ai.FeeAddress == "" ||
+		if feeAsset == nil || feeAsset.Amt == 0 || ai.FeeAddress == "" ||
 			regAsset != ai.FeeAsset /* sanity */ {
 			// NOTE: Allowing register.Asset != ai.FeeAsset would require
 			// clearing this account's previously recorded fee address.
@@ -114,7 +114,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 				Message: "asset not supported for registration",
 			}
 		}
-		return sendRegRes(ai.FeeAsset, ai.FeeAddress, feeAsset.amt)
+		return sendRegRes(ai.FeeAsset, ai.FeeAddress, feeAsset.Amt)
 	}
 	if !db.IsErrAccountUnknown(err) {
 		log.Errorf("AccountInfo error for ID %s: %v", acct.ID, err)
@@ -161,7 +161,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 
 	log.Infof("Created new user account %v from %v with fee address %v (%v)",
 		acct.ID, conn.Addr(), feeAddr, dex.BipIDSymbol(regAsset))
-	return sendRegRes(regAsset, feeAddr, feeAsset.amt)
+	return sendRegRes(regAsset, feeAddr, feeAsset.Amt)
 }
 
 // handleNotifyFee handles requests to the 'notifyfee' route.
@@ -189,6 +189,9 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	ai, err := auth.storage.AccountInfo(acctID)
 	if ai == nil || err != nil {
+		if err != nil && !db.IsErrAccountUnknown(err) {
+			log.Warnf("Unexpected AccountInfo(%v) failure: %v", acctID, err)
+		}
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "no account found for ID " + notifyFee.AccountID.String(),
@@ -332,11 +335,11 @@ func (auth *AuthManager) validateFee(conn comms.Link, msgID uint64, acctID accou
 		}
 		return wait.TryAgain
 	}
-	if confs < int64(feeAsset.confs) {
+	if confs < int64(feeAsset.Confs) {
 		return wait.TryAgain
 	}
 
-	if val < feeAsset.amt {
+	if val < feeAsset.Amt {
 		msgErr = &msgjson.Error{
 			Code:    msgjson.FeeError,
 			Message: "fee too low",

@@ -5067,7 +5067,7 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	if !dc.acct.locked() && len(dc.acct.feeCoin) > 0 {
+	if !dc.acct.locked() && dc.acct.feePaid() {
 		err = c.authDEX(dc)
 		if err != nil {
 			c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)

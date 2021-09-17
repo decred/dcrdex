@@ -139,24 +139,23 @@ type configResponse struct {
 }
 
 func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+	dcrAsset := regAssets["dcr"]
+	if dcrAsset == nil {
+		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
+	}
+
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
+		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
+		Fee:              dcrAsset.Amt, // DEPRECATED - DCR only
 		APIVersion:       uint16(APIVersion),
 		BinSizes:         apidata.BinSizes,
 		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
 		RegFees:          regAssets,
 	}
-
-	// Set the deprecated DCR fee fields.
-	dcrAsset := regAssets["dcr"]
-	if dcrAsset == nil {
-		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
-	}
-	configMsg.Fee = dcrAsset.Amt
-	configMsg.RegFeeConfirms = uint16(dcrAsset.Confs)
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
 	// a channel from Market to push status changes back to DEX manager.

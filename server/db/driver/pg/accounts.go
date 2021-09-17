@@ -125,7 +125,7 @@ func (a *Archiver) CreateAccount(acct *account.Account, assetID uint32, regAddr 
 	return createAccount(a.db, a.tables.accounts, acct, assetID, regAddr)
 }
 
-// AccountRegAddr retrieves the registration fee address and corresponding the
+// AccountRegAddr retrieves the registration fee address and the corresponding
 // asset ID created for the the specified account.
 func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, uint32, error) {
 	return accountRegAddr(a.db, a.tables.accounts, aid)

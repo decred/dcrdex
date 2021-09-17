@@ -465,36 +465,36 @@ func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64
 		return
 	}
 
-	var txOut *TxOutData
-	txOut, confs, err = dcr.OutputSummary(txHash, vout)
+	var txOut *txOutData
+	txOut, confs, err = dcr.outputSummary(txHash, vout)
 	if err != nil {
 		return
 	}
 
-	if len(txOut.Addresses) != 1 || txOut.SigsRequired != 1 ||
-		txOut.ScriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
-		txOut.ScriptType&dexdcr.ScriptStake != 0 {
+	if len(txOut.addresses) != 1 || txOut.sigsRequired != 1 ||
+		txOut.scriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
+		txOut.scriptType&dexdcr.ScriptStake != 0 {
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
-	addr = txOut.Addresses[0]
-	val = txOut.Value
+	addr = txOut.addresses[0]
+	val = txOut.value
 	return
 }
 
-// TxOutData is transaction output data, including recipient addresses, value,
+// txOutData is transaction output data, including recipient addresses, value,
 // script type, and number of required signatures.
-type TxOutData struct {
-	Value        uint64
-	Addresses    []string
-	SigsRequired int
-	ScriptType   dexdcr.DCRScriptType
+type txOutData struct {
+	value        uint64
+	addresses    []string
+	sigsRequired int
+	scriptType   dexdcr.DCRScriptType
 }
 
-// OutputSummary gets transaction output data, including recipient addresses,
+// outputSummary gets transaction output data, including recipient addresses,
 // value, script type, and number of required signatures, plus the current
 // confirmations of a transaction output. If the output does not exist, an error
 // will be returned. Non-standard scripts are not an error.
-func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
+func (dcr *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *txOutData, confs int64, err error) {
 	var verboseTx *chainjson.TxRawResult
 	verboseTx, err = dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
 	if err != nil {
@@ -522,11 +522,11 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 		return nil, -1, dex.UnsupportedScriptError
 	}
 
-	txOut = &TxOutData{
-		Value:        toAtoms(out.Value),
-		Addresses:    addrs,       // out.ScriptPubKey.Addresses
-		SigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
-		ScriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
+	txOut = &txOutData{
+		value:        toAtoms(out.Value),
+		addresses:    addrs,       // out.ScriptPubKey.Addresses
+		sigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
+		scriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
 	}
 
 	confs = verboseTx.Confirmations
