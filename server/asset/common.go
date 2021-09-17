@@ -19,7 +19,7 @@ type Addresser interface {
 // HDKeyIndexer retrieves and stores child indexes for an extended public key.
 type HDKeyIndexer interface {
 	KeyIndex(xpub string) (uint32, error)
-	SetKeyIndex(idx uint32, xpub string) error
+	SetKeyIndex(idx uint32, xpub string)
 }
 
 // CoinNotFoundError is to be returned from Contract, Redemption, and

@@ -46,11 +46,8 @@ func NewAddressDeriver(xpub string, keyIndexer asset.HDKeyIndexer, chainParams *
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("(btc) Starting at key index %d\n", next)
 	storKey := func(idx uint32) {
-		if err := keyIndexer.SetKeyIndex(idx, xpub); err != nil {
-			fmt.Println(err)
-		}
+		keyIndexer.SetKeyIndex(idx, xpub)
 	}
 	return &AddressDeriver{
 		params:   chainParams,
@@ -69,9 +66,7 @@ func getChild(xkey *hdkeychain.ExtendedKey, i uint32) (*hdkeychain.ExtendedKey, 
 			continue
 		case err == nil:
 			return child, i
-		default:
-			// Should never happen. Bad xkey or something?
-			fmt.Println("ExtendedKey.Derive:", err)
+		default: // Should never happen with a valid xpub.
 			return nil, 0
 		}
 	}

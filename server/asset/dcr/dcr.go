@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
@@ -60,17 +61,29 @@ func (d *Driver) Version() uint32 {
 	return version
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The HDKeyIndexer will be used for discovering the
 // current child index, and storing the index as new addresses are generated
 // with the NextAddress method of the Addresser. The Backend must have been
 // created with NewBackend (or Setup) to initialize the chain parameters.
-func (*Backend) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer) (asset.Addresser, error) {
-	return NewAddressDeriver(xPub, keyIndexer, chainParams)
+func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, network dex.Network) (asset.Addresser, error) {
+	var params NetParams
+	switch network {
+	case dex.Simnet:
+		params = chaincfg.SimNetParams()
+	case dex.Testnet:
+		params = chaincfg.TestNet3Params()
+	case dex.Mainnet:
+		params = chaincfg.MainNetParams()
+	default:
+		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
+
+	return NewAddressDeriver(xPub, keyIndexer, params)
+}
+
+func init() {
+	asset.Register(assetName, &Driver{})
 }
 
 var (

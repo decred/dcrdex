@@ -51,16 +51,28 @@ func (d *Driver) Version() uint32 {
 	return version
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The HDKeyIndexer will be used for discovering the
 // current child index, and storing the index as new addresses are generated
 // with the NextAddress method of the Addresser.
-func (btc *Backend) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer) (asset.Addresser, error) {
-	return NewAddressDeriver(xPub, keyIndexer, btc.chainParams)
+func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, network dex.Network) (asset.Addresser, error) {
+	var params *chaincfg.Params
+	switch network {
+	case dex.Simnet:
+		params = &chaincfg.RegressionNetParams
+	case dex.Testnet:
+		params = &chaincfg.TestNet3Params
+	case dex.Mainnet:
+		params = &chaincfg.MainNetParams
+	default:
+		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
+
+	return NewAddressDeriver(xPub, keyIndexer, params)
+}
+
+func init() {
+	asset.Register(assetName, &Driver{})
 }
 
 var (

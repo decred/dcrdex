@@ -239,11 +239,6 @@ type FeeCoiner interface {
 	FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error)
 }
 
-// AddresserFactory describes a type that can construct new asset.Addressers.
-type AddresserFactory interface {
-	NewAddresser(acctXPub string, keyIndexer asset.HDKeyIndexer) (asset.Addresser, error)
-}
-
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly. The Context is used to abort setup.
 //  1. Validate each specified asset.
@@ -430,11 +425,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				return nil, fmt.Errorf("asset %v is not a FeeCoiner", symbol)
 			}
 			// Make sure we can derive addresses from an extended public key.
-			af, ok := be.(AddresserFactory)
-			if !ok {
-				return nil, fmt.Errorf("asset %v is not an AddresserFactory", symbol)
-			}
-			addresser, err := af.NewAddresser(assetConf.RegXPub, &hdKeyIndexer{storage})
+			addresser, err := asset.NewAddresser(symbol, assetConf.RegXPub, &hdKeyIndexer{storage}, cfg.Network)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
 			}
@@ -734,8 +725,10 @@ func (ki *hdKeyIndexer) KeyIndex(xpub string) (uint32, error) {
 }
 
 // SetKeyIndex stores an index for the given pubkey.
-func (ki *hdKeyIndexer) SetKeyIndex(idx uint32, xpub string) error {
-	return ki.SetFeeKeyIndex(idx, xpub)
+func (ki *hdKeyIndexer) SetKeyIndex(idx uint32, xpub string) {
+	if err := ki.SetFeeKeyIndex(idx, xpub); err != nil {
+		log.Errorf("Failed to store key index for xpub %s: %v", xpub, err)
+	}
 }
 
 // Asset retrieves an asset backend by its ID.
