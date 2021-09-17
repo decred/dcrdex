@@ -114,8 +114,12 @@ class Chart {
     this.plotRegion = new Region(this.ctx, plotExtents)
     this.xRegion = new Region(this.ctx, xLblExtents)
     this.yRegion = new Region(this.ctx, yLblExtents)
-    this.rect = this.canvas.getBoundingClientRect()
-    this.resized()
+    // After changing the visibility, this.canvas.getBoundingClientRect will
+    // return nonsense until a render.
+    window.requestAnimationFrame(() => {
+      this.rect = this.canvas.getBoundingClientRect()
+      this.resized()
+    })
   }
 
   /* zoom is called when the user scrolls the mouse wheel on the canvas. */

@@ -10,7 +10,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
-func TestCandleCache(t *testing.T) {
+func TestCache(t *testing.T) {
 	// ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 	const binSize = 10

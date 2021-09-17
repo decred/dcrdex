@@ -26,15 +26,14 @@ var (
 	BinSizes = []string{"24h", "1h", "5m"}
 )
 
-// Candle is a report about the trading activity of a market over some
-// specified period of time. Candles are managed with a CandleCache, which takes
-// into account bin sizes and handles candle addition.
+// Candle is a report about the trading activity of a market over some specified
+// period of time. Candles are managed with a Cache, which takes into account
+// bin sizes and handles candle addition.
 type Candle = msgjson.Candle
 
-// Cache is a sized cache of candles. CandleCache provides methods for
-// adding to the cache and reading cache data out. CandleCache is a typical
-// slice until it reaches capacity, when it becomes a "circular array" to avoid
-// re-allocations.
+// Cache is a sized cache of candles. Cache provides methods for adding to the
+// cache and reading cache data out. Candles is a typical slice until it reaches
+// capacity, when it becomes a "circular array" to avoid re-allocations.
 type Cache struct {
 	Candles []Candle
 	BinSize uint64
@@ -51,9 +50,9 @@ func NewCache(cap int, binSize uint64) *Cache {
 	}
 }
 
-// Add adds a new candle TO THE END of the CandleCache. The caller is
-// responsible to ensure that candles added with Add are always newer than
-// the last candle added.
+// Add adds a new candle TO THE END of the Cache. The caller is responsible to
+// ensure that candles added with Add are always newer than the last candle
+// added.
 func (c *Cache) Add(candle *Candle) {
 	sz := len(c.Candles)
 	if sz == 0 {
@@ -78,8 +77,8 @@ func (c *Cache) Reset() {
 }
 
 // WireCandles encodes up to 'count' most recent candles as
-// *msgjson.WireCandles. If the CandleCache contains fewer than 'count', only
-// those available will be returned, with no indication of error.
+// *msgjson.WireCandles. If the Cache contains fewer than 'count', only those
+// available will be returned, with no indication of error.
 func (c *Cache) WireCandles(count int) *msgjson.WireCandles {
 	n := count
 	sz := len(c.Candles)

@@ -37,6 +37,8 @@ type BookFeed interface {
 
 // bookFeed implements BookFeed.
 type bookFeed struct {
+	// c is the update channel. Access to c is synchronized by the bookie's
+	// feedMtx.
 	c      chan *BookUpdate
 	bookie *bookie
 	id     uint32
@@ -55,30 +57,10 @@ func (f *bookFeed) Close() {
 // Candles subscribes to the candlestick duration and sends the initial set
 // of sticks over the update channel.
 func (f *bookFeed) Candles(durStr string) error {
-	dur, err := time.ParseDuration(durStr)
-	if err != nil {
-		return err
-	}
-
-	candles, err := f.bookie.candles(durStr)
-	if err != nil {
-		return err
-	}
-
-	f.c <- &BookUpdate{
-		Action:   FreshCandlesAction,
-		Host:     f.bookie.dc.acct.host,
-		MarketID: marketName(f.bookie.base, f.bookie.quote),
-		Payload: &CandlesPayload{
-			Dur:          durStr,
-			DurMilliSecs: uint64(dur.Milliseconds()),
-			Candles:      candles,
-		},
-	}
-	return nil
+	return f.bookie.candles(durStr, f.id)
 }
 
-// candleCache adds syncrhonization and an on/off switch to *candles.Cache.
+// candleCache adds synchronization and an on/off switch to *candles.Cache.
 type candleCache struct {
 	*candles.Cache
 	candleMtx sync.RWMutex
@@ -142,7 +124,7 @@ type bookie struct {
 // newBookie is a constructor for a bookie. The caller should provide a callback
 // function to be called when there are no subscribers and the close timer has
 // expired.
-func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger dex.Logger, close func()) *bookie {
+func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger dex.Logger) *bookie {
 	candleCaches := make(map[string]*candleCache, len(binSizes))
 	for _, durStr := range binSizes {
 		dur, err := time.ParseDuration(durStr)
@@ -197,9 +179,9 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 	return nil
 }
 
-// feed gets a new *bookFeed and cancels the close timer. feed must be called
-// with the bookie.mtx locked.
-func (b *bookie) feed() *bookFeed {
+// newFeed gets a new *bookFeed and cancels the close timer. feed must be called
+// with the bookie.mtx locked. The feed is primed with the provided *BookUpdate.
+func (b *bookie) newFeed(u *BookUpdate) *bookFeed {
 	b.timerMtx.Lock()
 	if b.closeTimer != nil {
 		// If Stop returns true, the timer did not fire. If false, the timer
@@ -218,6 +200,7 @@ func (b *bookie) feed() *bookFeed {
 		bookie: b,
 		id:     atomic.AddUint32(&feederID, 1),
 	}
+	feed.c <- u
 	b.feedsMtx.Lock()
 	b.feeds[feed.id] = feed
 	b.feedsMtx.Unlock()
@@ -237,29 +220,53 @@ func (b *bookie) closeFeeds() {
 
 // candles fetches the candle set from the server and activates the candle
 // cache.
-func (b *bookie) candles(dur string) ([]candles.Candle, error) {
-	cache := b.candleCaches[dur]
+func (b *bookie) candles(durStr string, feedID uint32) error {
+	cache := b.candleCaches[durStr]
 	if cache == nil {
-		return nil, fmt.Errorf("no candles for %s-%s %q", unbip(b.base), unbip(b.quote), dur)
+		return fmt.Errorf("no candles for %s-%s %q", unbip(b.base), unbip(b.quote), durStr)
 	}
+	var err error
+	defer func() {
+		if err != nil {
+			return
+		}
+		b.feedsMtx.RLock()
+		defer b.feedsMtx.RUnlock()
+		f, ok := b.feeds[feedID]
+		if !ok {
+			// Feed must have been closed in another thread.
+			return
+		}
+		dur, _ := time.ParseDuration(durStr)
+		f.c <- &BookUpdate{
+			Action:   FreshCandlesAction,
+			Host:     b.dc.acct.host,
+			MarketID: marketName(b.base, b.quote),
+			Payload: &CandlesPayload{
+				Dur:          durStr,
+				DurMilliSecs: uint64(dur.Milliseconds()),
+				Candles:      cache.copy(),
+			},
+		}
+	}()
 	if atomic.LoadUint32(&cache.on) == 1 {
-		return cache.copy(), nil
+		return nil
 	}
 	// Subscribe to the feed.
 	payload := &msgjson.CandlesRequest{
 		BaseID:     b.base,
 		QuoteID:    b.quote,
-		BinSize:    dur,
+		BinSize:    durStr,
 		NumCandles: candles.CacheSize,
 	}
 	wireCandles := new(msgjson.WireCandles)
-	err := sendRequest(b.dc.WsConn, msgjson.CandlesRoute, payload, wireCandles, DefaultResponseTimeout)
+	err = sendRequest(b.dc.WsConn, msgjson.CandlesRoute, payload, wireCandles, DefaultResponseTimeout)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	cache.init(wireCandles.Candles())
 	atomic.StoreUint32(&cache.on, 1)
-	return cache.copy(), nil
+	return nil
 }
 
 // closeFeed closes the specified feed, and if no more feeds are open, sets a
@@ -352,9 +359,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
 			return nil, err
 		}
 
-		booky = newBookie(dc, base, quote, cfg.BinSizes, dc.log.SubLogger(mktID), func() {
-
-		})
+		booky = newBookie(dc, base, quote, cfg.BinSizes, dc.log.SubLogger(mktID))
 		err = booky.Sync(obRes)
 		if err != nil {
 			return nil, err
@@ -364,9 +369,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
 
 	// Get the feed and the book under a single lock to make sure the first
 	// message is the book.
-	feed := booky.feed()
-
-	feed.c <- &BookUpdate{
+	feed := booky.newFeed(&BookUpdate{
 		Action:   FreshBookAction,
 		Host:     dc.acct.host,
 		MarketID: mktID,
@@ -375,7 +378,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
 			Quote: quote,
 			Book:  booky.book(),
 		},
-	}
+	})
 
 	return feed, nil
 }
