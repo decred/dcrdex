@@ -74,8 +74,6 @@ const (
 	// TODO: When the contract is solidified, break down evm functions
 	// called and the gas used for each. (◍•﹏•)
 	InitGas = 180000 // gas
-
-	RedeemGas = 63000 // gas
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.

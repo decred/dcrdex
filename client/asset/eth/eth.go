@@ -40,6 +40,8 @@ const (
 	BipID              = 60
 	defaultGasFee      = 82  // gwei
 	defaultGasFeeLimit = 200 // gwei
+
+	RedeemGas = 63000 // gas
 )
 
 var (

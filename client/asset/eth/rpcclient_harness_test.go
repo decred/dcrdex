@@ -493,11 +493,11 @@ func TestRedeemGas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error getting gas for redeem function: %v", err)
 	}
-	if gas > eth.RedeemGas {
-		t.Fatalf("actual gas %v is greater than eth.RedeemGas %v", gas, eth.RedeemGas)
+	if gas > RedeemGas {
+		t.Fatalf("actual gas %v is greater than RedeemGas %v", gas, RedeemGas)
 	}
-	if gas+3000 < eth.RedeemGas {
-		t.Fatalf("actual gas %v is much less than eth.RedeemGas %v", gas, eth.InitGas)
+	if gas+3000 < RedeemGas {
+		t.Fatalf("actual gas %v is much less than RedeemGas %v", gas, RedeemGas)
 	}
 	fmt.Printf("Gas used for redeem: %v \n", gas)
 }
