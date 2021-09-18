@@ -17,7 +17,7 @@ var (
 
 // AddresserFactory describes a type that can construct new Addressers.
 type AddresserFactory interface {
-	NewAddresser(acctXPub string, keyIndexer HDKeyIndexer, network dex.Network) (Addresser, error)
+	NewAddresser(acctXPub string, keyIndexer KeyIndexer, network dex.Network) (Addresser, uint32, error)
 }
 
 // Driver is the interface required of all assets. A Driver may or may not also
@@ -47,16 +47,16 @@ func DecodeCoinID(name string, coinID []byte) (string, error) {
 // NewAddresser creates an Addresser for a named asset for deriving addresses
 // for the given extended public key on a certain network while maintaining the
 // address index in an external HDKeyIndex.
-func NewAddresser(name string, acctXPub string, keyIndexer HDKeyIndexer, network dex.Network) (Addresser, error) {
+func NewAddresser(name string, acctXPub string, keyIndexer KeyIndexer, network dex.Network) (Addresser, uint32, error) {
 	driversMtx.Lock()
 	drv, ok := drivers[name]
 	driversMtx.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("unknown asset driver %q", name)
+		return nil, 0, fmt.Errorf("unknown asset driver %q", name)
 	}
 	af, ok := drv.(AddresserFactory)
 	if !ok {
-		return nil, fmt.Errorf("asset does not support NewAddresser")
+		return nil, 0, fmt.Errorf("asset does not support NewAddresser")
 	}
 	return af.NewAddresser(acctXPub, keyIndexer, network)
 }

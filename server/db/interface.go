@@ -52,12 +52,11 @@ type PreimageResult struct {
 	ID   order.OrderID
 }
 
-// FeeKeyIndexer are the functions required to track an extended public key and
+// KeyIndexer are the functions required to track an extended public key and
 // derived children by index.
-type FeeKeyIndexer interface {
-	FeeKeyIndex(xpub string) (uint32, error)
-	SetFeeKeyIndex(idx uint32, xpub string) error
-	CreateFeeKeyEntryFromPubKey(xpub string) (child uint32, err error)
+type KeyIndexer interface {
+	KeyIndex(xpub string) (uint32, error)
+	SetKeyIndex(idx uint32, xpub string) error
 }
 
 // DEXArchivist will be composed of several different interfaces. Starting with
@@ -83,7 +82,7 @@ type DEXArchivist interface {
 
 	OrderArchiver
 	AccountArchiver
-	FeeKeyIndexer
+	KeyIndexer
 	MatchArchiver
 	SwapArchiver
 }

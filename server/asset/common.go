@@ -13,13 +13,13 @@ import (
 
 // Addresser retrieves unique addresses.
 type Addresser interface {
-	NextAddress() string
+	NextAddress() (string, error)
 }
 
-// HDKeyIndexer retrieves and stores child indexes for an extended public key.
-type HDKeyIndexer interface {
+// KeyIndexer retrieves and stores child indexes for an extended public key.
+type KeyIndexer interface {
 	KeyIndex(xpub string) (uint32, error)
-	SetKeyIndex(idx uint32, xpub string)
+	SetKeyIndex(idx uint32, xpub string) error
 }
 
 // CoinNotFoundError is to be returned from Contract, Redemption, and

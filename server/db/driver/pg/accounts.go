@@ -144,50 +144,37 @@ func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
 	return nil
 }
 
-// createKeyEntry creates an entry for the pubkey (hash) if it doesn't already
-// exist, and returns the child index.
-func createKeyEntry(db *sql.DB, tableName string, keyHash []byte) (uint32, error) {
-	stmt := fmt.Sprintf(internal.InsertKeyIfMissing, tableName)
+// KeyIndex returns the current child index for the an xpub. If it is not
+// known, this creates a new entry with index zero.
+func (a *Archiver) KeyIndex(xpub string) (uint32, error) {
+	keyHash := dcrutil.Hash160([]byte(xpub))
+
 	var child uint32
-	err := db.QueryRow(stmt, keyHash).Scan(&child)
+	stmt := fmt.Sprintf(internal.CurrentKeyIndex, feeKeysTableName)
+	err := a.db.QueryRow(stmt, keyHash).Scan(&child)
+	switch {
+	case errors.Is(err, sql.ErrNoRows): // continue to create new entry
+	case err == nil:
+		return child, nil
+	default:
+		return 0, err
+	}
+
+	log.Debugf("Inserting key entry for xpub %.40s..., hash160 = %x", xpub, keyHash)
+	stmt = fmt.Sprintf(internal.InsertKeyIfMissing, feeKeysTableName)
+	err = a.db.QueryRow(stmt, keyHash).Scan(&child)
 	if err != nil {
 		return 0, err
 	}
 	return child, nil
 }
 
-// CreateFeeKeyEntryFromPubKey an entry for the pubkey, which should be of
-// length secp256k1.PubKeyBytesLenCompressed. Decred's HASH160 will be applied
-// internally. The current child index is returned.
-func (a *Archiver) CreateFeeKeyEntryFromPubKey(xpub string) (child uint32, err error) {
-	keyHash := dcrutil.Hash160([]byte(xpub))
-	log.Debugf("Inserting key entry for xpub %.40s..., hash160 = %x", xpub, keyHash)
-	return createKeyEntry(a.db, a.tables.feeKeys, keyHash)
-}
-
-// FeeKeyIndex returns the current child index for the an xpub. If it is not
-// known, this returns an ErrUnknownFeeKey coded ArchiveError.
-func (a *Archiver) FeeKeyIndex(xpub string) (uint32, error) {
-	keyHash := dcrutil.Hash160([]byte(xpub))
-	stmt := fmt.Sprintf(internal.CurrentKeyIndex, feeKeysTableName)
-	var child uint32
-	err := a.db.QueryRow(stmt, keyHash).Scan(&child)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return 0, db.ArchiveError{Code: db.ErrUnknownFeeKey}
-	case err == nil:
-	default:
-		return 0, err
-	}
-	return child, nil
-}
-
-// SetFeeKeyIndex records the child index for an xpub. An error is returned
-// unless exactly 1 row is updated.
-func (a *Archiver) SetFeeKeyIndex(idx uint32, xpub string) error {
+// SetKeyIndex records the child index for an xpub. An error is returned
+// unless exactly 1 row is updated or created.
+func (a *Archiver) SetKeyIndex(idx uint32, xpub string) error {
 	keyHash := dcrutil.Hash160([]byte(xpub))
 	log.Debugf("Recording new index %d for xpub %.40s... (%x)", idx, xpub, keyHash)
-	stmt := fmt.Sprintf(internal.SetKeyIndex, feeKeysTableName)
+	stmt := fmt.Sprintf(internal.UpsertKeyIndex, feeKeysTableName)
 	res, err := a.db.Exec(stmt, idx, keyHash)
 	if err != nil {
 		return err

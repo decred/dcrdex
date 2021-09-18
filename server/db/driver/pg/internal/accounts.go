@@ -25,17 +25,16 @@ const (
 		ON CONFLICT (key_hash) DO NOTHING
 		RETURNING child;`
 
-	// IncrementKey increments the child counter and returns the new value.
-	IncrementKey = `UPDATE %s
-		SET child = child + 1
-		WHERE key_hash = $1
-		RETURNING child;`
-
 	CurrentKeyIndex = `SELECT child FROM %s WHERE key_hash = $1;`
 
 	SetKeyIndex = `UPDATE %s
 		SET child = $1
 		WHERE key_hash = $2;`
+
+	UpsertKeyIndex = `INSERT INTO %s (child, key_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (key_hash) DO UPDATE
+		SET child = $1;`
 
 	// CloseAccount sets the broken_rule column for the account, which signifies
 	// that the account is closed.

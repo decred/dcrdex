@@ -52,13 +52,13 @@ func (d *Driver) Version() uint32 {
 }
 
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
-// extended public key. The HDKeyIndexer will be used for discovering the
-// current child index, and storing the index as new addresses are generated
-// with the NextAddress method of the Addresser.
-func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, network dex.Network) (asset.Addresser, error) {
+// extended public key. The KeyIndexer will be used for discovering the current
+// child index, and storing the index as new addresses are generated with the
+// NextAddress method of the Addresser.
+func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network dex.Network) (asset.Addresser, uint32, error) {
 	params, err := netParams(network)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	return NewAddressDeriver(xPub, keyIndexer, params)

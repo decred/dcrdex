@@ -425,7 +425,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				return nil, fmt.Errorf("asset %v is not a FeeCoiner", symbol)
 			}
 			// Make sure we can derive addresses from an extended public key.
-			addresser, err := asset.NewAddresser(symbol, assetConf.RegXPub, &hdKeyIndexer{storage}, cfg.Network)
+			addresser, startChild, err := asset.NewAddresser(symbol, assetConf.RegXPub, storage, cfg.Network)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
 			}
@@ -440,8 +440,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			}
 			feeCoiners[assetID] = fc
 			feeAddressers[assetID] = addresser
-			log.Infof("Registration fees permitted using %s: amount %d, confs %d",
-				symbol, assetConf.RegFee, assetConf.RegConfs)
+			log.Infof("Registration fees permitted using %s: amount %d, confs %d, next child %d",
+				symbol, assetConf.RegFee, assetConf.RegConfs, startChild)
 		}
 
 		initTxSize := uint64(be.InitTxSize())
@@ -503,7 +503,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		if addresser == nil {
 			return ""
 		}
-		return addresser.NextAddress()
+		addr, err := addresser.NextAddress()
+		if err != nil {
+			log.Errorf("Failed to retrieve new address for asset %d: %v", assetID, err)
+			return ""
+		}
+		return addr
 	}
 
 	feeChecker := func(assetID uint32, coinID []byte) (addr string, val uint64, confs int64, err error) {
@@ -702,33 +707,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	ready = true // don't shut down on return
 
 	return dexMgr, nil
-}
-
-// hdKeyIndexer translates between db.FeeKeyIndexer and asset.HDKeyIndexer.
-type hdKeyIndexer struct {
-	db.FeeKeyIndexer
-}
-
-// KeyIndex gets the current index for the given extended public key, or if it
-// is unknown, creates a new entry for the key and returns the initial index.
-func (ki *hdKeyIndexer) KeyIndex(xpub string) (uint32, error) {
-	idx, err := ki.FeeKeyIndex(xpub)
-	if err == nil {
-		log.Infof("Resuming fee keys at index %d for extended pubkey %.40s...", idx, xpub)
-		return idx, nil
-	}
-	if !db.IsErrUnknownFeeKey(err) {
-		return 0, err
-	}
-	log.Infof("Creating new fee key entry for extended pubkey %.40s...", xpub)
-	return ki.CreateFeeKeyEntryFromPubKey(xpub)
-}
-
-// SetKeyIndex stores an index for the given pubkey.
-func (ki *hdKeyIndexer) SetKeyIndex(idx uint32, xpub string) {
-	if err := ki.SetFeeKeyIndex(idx, xpub); err != nil {
-		log.Errorf("Failed to store key index for xpub %.40s...: %v", xpub, err)
-	}
 }
 
 // Asset retrieves an asset backend by its ID.

@@ -62,11 +62,11 @@ func (d *Driver) Version() uint32 {
 }
 
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
-// extended public key. The HDKeyIndexer will be used for discovering the
-// current child index, and storing the index as new addresses are generated
-// with the NextAddress method of the Addresser. The Backend must have been
-// created with NewBackend (or Setup) to initialize the chain parameters.
-func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, network dex.Network) (asset.Addresser, error) {
+// extended public key. The KeyIndexer will be used for discovering the current
+// child index, and storing the index as new addresses are generated with the
+// NextAddress method of the Addresser. The Backend must have been created with
+// NewBackend (or Setup) to initialize the chain parameters.
+func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network dex.Network) (asset.Addresser, uint32, error) {
 	var params NetParams
 	switch network {
 	case dex.Simnet:
@@ -76,7 +76,7 @@ func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, networ
 	case dex.Mainnet:
 		params = chaincfg.MainNetParams()
 	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+		return nil, 0, fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
 
 	return NewAddressDeriver(xPub, keyIndexer, params)
