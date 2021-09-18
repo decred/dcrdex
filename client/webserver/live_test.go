@@ -234,7 +234,7 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 
 	return &core.SimpleOrder{
 		Qty:   uint64(math.Exp(-rand.Float64()*5) * maxQty),
-		Rate:  uint64(rate * calc.RateEncodingFactor),
+		Rate:  uint64(rate),
 		Sell:  sell,
 		Token: nextToken(),
 		Epoch: epochIdx,
