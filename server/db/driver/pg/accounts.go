@@ -11,7 +11,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	"github.com/decred/dcrd/dcrutil/v4" // deprecated usage, move to "crypto/sha256"
+	"github.com/decred/dcrd/dcrutil/v4" // TODO: consider a move to "crypto/sha256" instead of dcrutil.Hash160
 )
 
 // CloseAccount closes the account by setting the value of the rule column to

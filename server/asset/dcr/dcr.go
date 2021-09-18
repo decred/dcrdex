@@ -526,11 +526,11 @@ func (dcr *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *t
 
 	out := verboseTx.Vout[vout]
 
-	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
+	script, err := hex.DecodeString(out.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, scriptHex, chainParams)
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, script, chainParams)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}

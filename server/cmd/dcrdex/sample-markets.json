@@ -25,7 +25,7 @@
             "swapConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf",
             "regConfs": 2,
-            "regFee": 0.1,
+            "regFee": 10000000,
             "regXPub": "xpubdecredonlyadsf"
         },
         "DCR_testnet": {
@@ -41,7 +41,7 @@
             "maxFeeRate": 100,
             "swapConf": 3,
             "regConfs": 2,
-            "regFee": 0.0005,
+            "regFee": 500000,
             "regXPub": "xpubbitcoinonlyasdf"
         },
         "BTC_testnet": {

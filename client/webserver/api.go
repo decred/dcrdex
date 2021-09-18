@@ -81,7 +81,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	wallet := s.core.WalletState(assetID)
 	if wallet == nil {
-		s.writeAPIError(w, errors.New("No Decred wallet"))
+		s.writeAPIError(w, errors.New("no wallet"))
 		return
 	}
 	pass, err := s.resolvePass(reg.Password, r)

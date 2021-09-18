@@ -70,8 +70,7 @@ type Signer interface {
 	PubKey() *secp256k1.PublicKey
 }
 
-// FeeChecker is a function for retrieving the details for a fee payment. It
-// is satisfied by (dcr.Backend).FeeCoin.
+// FeeChecker is a function for retrieving the details for a fee payment.
 type FeeChecker func(assetID uint32, coinID []byte) (addr string, val uint64, confs int64, err error)
 
 type TxDataSource func([]byte) ([]byte, error)

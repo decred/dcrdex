@@ -56,16 +56,9 @@ func (d *Driver) Version() uint32 {
 // current child index, and storing the index as new addresses are generated
 // with the NextAddress method of the Addresser.
 func (d *Driver) NewAddresser(xPub string, keyIndexer asset.HDKeyIndexer, network dex.Network) (asset.Addresser, error) {
-	var params *chaincfg.Params
-	switch network {
-	case dex.Simnet:
-		params = &chaincfg.RegressionNetParams
-	case dex.Testnet:
-		params = &chaincfg.TestNet3Params
-	case dex.Mainnet:
-		params = &chaincfg.MainNetParams
-	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+	params, err := netParams(network)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewAddressDeriver(xPub, keyIndexer, params)
@@ -87,6 +80,21 @@ const (
 	assetName                = "btc"
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
+
+func netParams(network dex.Network) (*chaincfg.Params, error) {
+	var params *chaincfg.Params
+	switch network {
+	case dex.Simnet:
+		params = &chaincfg.RegressionNetParams
+	case dex.Testnet:
+		params = &chaincfg.TestNet3Params
+	case dex.Mainnet:
+		params = &chaincfg.MainNetParams
+	default:
+		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
+	return params, nil
+}
 
 // Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
 // fetching UTXO information and subscribing to block updates. It maintains a
@@ -123,16 +131,9 @@ var _ asset.Backend = (*Backend)(nil)
 // backend. The configPath can be an empty string, in which case the standard
 // system location of the bitcoind config file is assumed.
 func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	var params *chaincfg.Params
-	switch network {
-	case dex.Mainnet:
-		params = &chaincfg.MainNetParams
-	case dex.Testnet:
-		params = &chaincfg.TestNet3Params
-	case dex.Regtest:
-		params = &chaincfg.RegressionNetParams
-	default:
-		return nil, fmt.Errorf("unknown network ID %v", network)
+	params, err := netParams(network)
+	if err != nil {
+		return nil, err
 	}
 
 	if configPath == "" {
@@ -428,11 +429,11 @@ func (btc *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *t
 
 	out := verboseTx.Vout[vout]
 
-	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
+	script, err := hex.DecodeString(out.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	scriptType, addrs, numRequired, err := dexbtc.ExtractScriptData(scriptHex, btc.chainParams)
+	scriptType, addrs, numRequired, err := dexbtc.ExtractScriptData(script, btc.chainParams)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
