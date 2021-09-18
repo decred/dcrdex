@@ -115,6 +115,28 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
+	// Validate any deprecated fields that are still set in the .conf file.
+	var dcrValidated bool
+	for _, asset := range assets {
+		if strings.ToLower(asset.Symbol) != "dcr" {
+			continue // the config fields applied to DCR
+		}
+		if cfg.RegFeeXPub != "" && cfg.RegFeeXPub != asset.RegXPub {
+			return fmt.Errorf("Decred fee xpub in config file does not match xpub in markets.json")
+		}
+		if cfg.RegFeeAmount > 0 && cfg.RegFeeAmount != asset.RegFee {
+			return fmt.Errorf("Decred fee amount in config file does not match amount in markets.json")
+		}
+		if cfg.RegFeeConfirms != 0 && cfg.RegFeeConfirms != int64(asset.RegConfs) {
+			return fmt.Errorf("Decred fee confirms in config file does not match confirms in markets.json")
+		}
+		dcrValidated = true
+		break
+	}
+	if !dcrValidated {
+		return fmt.Errorf("Decred asset not specified")
+	}
+
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
 		DataDir:    cfg.DataDir,
@@ -130,9 +152,6 @@ func mainCore(ctx context.Context) error {
 			Pass:         cfg.DBPass,
 			ShowPGConfig: cfg.ShowPGConfig,
 		},
-		RegFeeXPub:        cfg.RegFeeXPub,
-		RegFeeAmount:      cfg.RegFeeAmount,
-		RegFeeConfirms:    cfg.RegFeeConfirms,
 		BroadcastTimeout:  cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
 		Anarchy:           cfg.Anarchy,

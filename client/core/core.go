@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/url"
 	"os"
@@ -43,13 +42,8 @@ import (
 )
 
 const (
-	keyParamsKey      = "keyParams"
-	conversionFactor  = 1e8
-	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
-
-	// regConfirmationsPaid is used to indicate completed registration to
-	// (*Core).setRegConfirms.
-	regConfirmationsPaid uint32 = math.MaxUint32
+	keyParamsKey     = "keyParams"
+	conversionFactor = 1e8
 
 	// tickCheckDivisions is how many times to tick trades per broadcast timeout
 	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
@@ -99,6 +93,11 @@ func (dt *dexTicker) Dur() time.Duration {
 	return time.Duration(atomic.LoadInt64(&dt.dur))
 }
 
+type pendingFeeState struct {
+	confs uint32
+	asset uint32
+}
+
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
@@ -129,8 +128,8 @@ type dexConnection struct {
 	// connected is a best guess on the ws connection status.
 	connected uint32
 
-	regConfMtx  sync.RWMutex
-	regConfirms *uint32 // nil regConfirms means no pending registration.
+	pendingFeeMtx sync.RWMutex
+	pendingFee    *pendingFeeState
 
 	reportingConnects uint32
 }
@@ -151,6 +150,16 @@ func (dc *dexConnection) running(mkt string) bool {
 		return false // not found means not running
 	}
 	return mktCfg.Running()
+}
+
+func (dc *dexConnection) feeAsset(assetID uint32) *msgjson.FeeAsset {
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+	if dc.cfg == nil {
+		return nil
+	}
+	symb := unbip(assetID)
+	return dc.cfg.RegFees[symb]
 }
 
 // marketConfig is the market's configuration, as returned by the server in the
@@ -227,25 +236,32 @@ func (dc *dexConnection) marketTrades(mktID string) []*trackedTrade {
 	return trades
 }
 
-// getRegConfirms returns the number of confirmations received for the
-// dex registration or nil if the registration is completed
-func (dc *dexConnection) getRegConfirms() *uint32 {
-	dc.regConfMtx.RLock()
-	defer dc.regConfMtx.RUnlock()
-	return dc.regConfirms
+func (dc *dexConnection) setPendingFee(asset, confs uint32) {
+	dc.pendingFeeMtx.Lock()
+	dc.pendingFee = &pendingFeeState{asset: asset, confs: confs}
+	dc.pendingFeeMtx.Unlock()
 }
 
-// setRegConfirms sets the number of confirmations received
-// for the dex registration
-func (dc *dexConnection) setRegConfirms(confs uint32) {
-	dc.regConfMtx.Lock()
-	defer dc.regConfMtx.Unlock()
-	if confs == regConfirmationsPaid {
-		// A nil regConfirms indicates that there is no pending registration.
-		dc.regConfirms = nil
-		return
+func (dc *dexConnection) clearPendingFee() {
+	dc.pendingFeeMtx.Lock()
+	dc.pendingFee = nil
+	dc.pendingFeeMtx.Unlock()
+}
+
+// getPendingFee returns the PendingFeeState for the dex registration or nil if
+// no registration fee is pending.
+func (dc *dexConnection) getPendingFee() *PendingFeeState {
+	dc.pendingFeeMtx.RLock()
+	defer dc.pendingFeeMtx.RUnlock()
+	pf := dc.pendingFee
+	if pf == nil {
+		return nil
 	}
-	dc.regConfirms = &confs
+	return &PendingFeeState{
+		AssetID: pf.asset,
+		Symbol:  unbip(pf.asset),
+		Confs:   pf.confs,
+	}
 }
 
 func (dc *dexConnection) exchangeInfo() *Exchange {
@@ -263,9 +279,8 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		return &Exchange{
 			Host:       dc.acct.host,
 			AcctID:     acctID,
-			FeePending: dc.acct.feePending(),
 			Connected:  atomic.LoadUint32(&dc.connected) == 1,
-			// RegConfirms:   dc.getRegConfirms(), // could show, but we don't know required
+			PendingFee: dc.getPendingFee(),
 		}
 	}
 
@@ -276,20 +291,33 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	}
 	dc.assetsMtx.RUnlock()
 
-	return &Exchange{
-		Host:          dc.acct.host,
-		AcctID:        acctID,
-		Markets:       dc.marketMap(),
-		Assets:        assets,
-		FeePending:    dc.acct.feePending(),
-		Connected:     atomic.LoadUint32(&dc.connected) == 1,
-		ConfsRequired: uint32(cfg.RegFeeConfirms),
-		RegConfirms:   dc.getRegConfirms(),
-		Fee: &FeeAsset{ // v0 is only DCR, but there will be a RegFees map[string]*FeeAsset field
+	feeAssets := make(map[string]*FeeAsset, len(cfg.RegFees))
+	for symb, asset := range cfg.RegFees {
+		feeAssets[symb] = &FeeAsset{
+			ID:    asset.ID,
+			Confs: asset.Confs,
+			Amt:   asset.Amt,
+		}
+	}
+	dcrAsset := feeAssets["dcr"]
+	if dcrAsset == nil { // should have happened in refreshServerConfig
+		dcrAsset = &FeeAsset{
 			ID:    42,
 			Amt:   cfg.Fee,
 			Confs: uint32(cfg.RegFeeConfirms),
-		},
+		}
+		feeAssets["dcr"] = dcrAsset
+	}
+
+	return &Exchange{
+		Host:       dc.acct.host,
+		AcctID:     acctID,
+		Markets:    dc.marketMap(),
+		Assets:     assets,
+		Connected:  atomic.LoadUint32(&dc.connected) == 1,
+		Fee:        dcrAsset,
+		RegFees:    feeAssets,
+		PendingFee: dc.getPendingFee(),
 	}
 }
 
@@ -1413,7 +1441,8 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	wallet, exists := c.wallet(assetID)
 	if !exists {
-		return nil, newError(missingWalletErr, "no configured wallet found %s (%d)", unbip(assetID), assetID)
+		return nil, newError(missingWalletErr, "no configured wallet found for %s (%d)",
+			strings.ToUpper(unbip(assetID)), assetID)
 	}
 	if !wallet.connected() {
 		err := c.connectAndUpdateWallet(wallet)
@@ -1822,9 +1851,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
 		state.Address)
 
-	if dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol); assetID == dcrID {
-		go c.checkUnpaidFees(wallet)
-	}
+	go c.checkUnpaidFees(wallet)
 
 	c.notify(newWalletStateNote(state))
 
@@ -2208,18 +2235,6 @@ func (c *Core) isRegistered(host string) bool {
 	return len(dc.acct.encKey) > 0 // should be for all in conns map, but check
 }
 
-// GetFee creates a temporary connection to the specified DEX Server and fetches
-// the registration fee. The connection is closed after the fee is retrieved.
-// Returns an error if user is already registered to the DEX. A TLS certificate,
-// certI, can be provided as either a string filename, or []byte file contents.
-func (c *Core) GetFee(dexAddr string, certI interface{}) (uint64, error) {
-	xc, err := c.GetDEXConfig(dexAddr, certI)
-	if err != nil {
-		return 0, err
-	}
-	return xc.Fee.Amt, nil
-}
-
 // tempDexConnection creates an unauthenticated dexConnection. The caller must
 // dc.connMaster.Disconnect when done with the connection.
 func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnection, error) {
@@ -2345,6 +2360,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	// Actual fee asset ID and coin are unknown, but paid.
 	dc.acct.isPaid = true
 	dc.acct.feeCoin = []byte("DUMMY COIN")
+	dc.acct.feeAssetID = 42
 
 	err = c.db.CreateAccount(&db.AccountInfo{
 		Host:         dc.acct.host,
@@ -2352,6 +2368,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 		DEXPubKey:    dc.acct.dexPubKey,
 		EncKeyV2:     encKey,
 		LegacyEncKey: nil,
+		FeeAssetID:   dc.acct.feeAssetID,
 		FeeCoin:      dc.acct.feeCoin,
 		// Paid set with AccountPaid below.
 	})
@@ -2403,7 +2420,13 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
 	}
 
-	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	// Default to using DCR unless specified.
+	regFeeAssetID := uint32(42)
+	if form.Asset != nil {
+		regFeeAssetID = *form.Asset
+	}
+	regFeeAssetSymbol := dex.BipIDSymbol(regFeeAssetID)
+
 	wallet, err := c.connectedWallet(regFeeAssetID)
 	if err != nil {
 		// Wrap the error from connectedWallet, a core.Error coded as
@@ -2435,6 +2458,17 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, codedError(connectionErr, err)
 	}
 
+	// Ensure this DEX supports this asset for registration fees, and get the
+	// required confirmations and fee amount.
+	dc.cfgMtx.RLock()
+	feeAsset, supported := dc.cfg.RegFees[regFeeAssetSymbol]
+	dc.cfgMtx.RUnlock()
+	if !supported || feeAsset == nil {
+		return nil, newError(assetSupportErr, "dex server does not accept registration fees in asset %q", regFeeAssetSymbol)
+	}
+	reqConfs := feeAsset.Confs
+	// TODO: basic sanity check on required confirms, e.g. > 1000, but asset-specific
+
 	// close the connection to the dex server if the registration fails.
 	var registrationComplete bool
 	defer func() {
@@ -2443,23 +2477,16 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	}()
 
-	dc.assetsMtx.RLock()
-	regAsset, found := dc.assets[regFeeAssetID]
-	dc.assetsMtx.RUnlock()
-	if !found {
-		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
-	}
-
 	var incompleteReg *incompleteRegistration
 	dexSupportsHDAccts := dc.acct.dexPubKey != nil
 	if dexSupportsHDAccts {
 		var paid bool
-		incompleteReg, paid, err = c.registerHD(dc, crypter)
+		incompleteReg, paid, err = c.registerHD(dc, crypter, feeAsset.ID)
 		if err != nil {
 			return nil, err
 		}
 		if paid {
-			res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}
+			res := &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin) /* NOTE: no asset ID */, ReqConfirms: 0}
 			return res, nil
 		}
 	}
@@ -2477,7 +2504,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		c.log.Infof("Generating a legacy-style key to register with %s.", dc.acct.host)
 		var paid bool
 		dc.acct.resetKeys() // clear any previously set HD acct keys
-		incompleteReg, paid, err = c.registerLegacy(dc, crypter)
+		incompleteReg, paid, err = c.registerLegacy(dc, crypter, feeAsset.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -2498,9 +2525,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	if err := dc.acct.unlock(crypter); err != nil {
 		return nil, newError(authErr, "failed to unlock account: %v", err)
 	}
-	fee := dc.cfg.Fee
-
 	// Check that the fee is non-zero.
+	fee := feeAsset.Amt // expected amount according to DEX config
 	if incompleteReg.regRes.Fee == 0 {
 		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
@@ -2515,7 +2541,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	acctID := account.NewID(incompleteReg.acctPub)
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
-		incompleteReg.regRes.Address, acctID, incompleteReg.regRes.Fee, regAsset.Symbol)
+		incompleteReg.regRes.Address, acctID, incompleteReg.regRes.Fee, regFeeAssetSymbol)
 	coin, err := wallet.PayFee(incompleteReg.regRes.Address, incompleteReg.regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
@@ -2523,10 +2549,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Set the dexConnection account fields and save account info to db.
 	dc.acct.feeCoin = coin.ID()
+	dc.acct.feeAssetID = feeAsset.ID
 
 	// Registration complete.
 	registrationComplete = true
-	requiredConfs := dc.cfg.RegFeeConfirms
 	c.connMtx.Lock()
 	c.conns[host] = dc
 	c.connMtx.Unlock()
@@ -2534,10 +2560,12 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	err = c.db.CreateAccount(&db.AccountInfo{
 		Host:         dc.acct.host,
 		Cert:         dc.acct.cert,
-		LegacyEncKey: incompleteReg.encKeyLegacy,
-		EncKeyV2:     incompleteReg.encKey,
 		DEXPubKey:    dc.acct.dexPubKey,
+		EncKeyV2:     incompleteReg.encKey,
+		LegacyEncKey: incompleteReg.encKeyLegacy,
+		FeeAssetID:   dc.acct.feeAssetID,
 		FeeCoin:      dc.acct.feeCoin,
+		// Paid set with AccountPaid after notifyFee.
 	})
 	if err != nil {
 		c.log.Errorf("error saving account: %v\n", err)
@@ -2546,15 +2574,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	c.updateAssetBalance(regFeeAssetID)
 
-	subject, details := c.formatDetails(TopicFeePaymentInProgress, requiredConfs, dc.acct.host)
+	subject, details := c.formatDetails(TopicFeePaymentInProgress, reqConfs, dc.acct.host)
 	c.notify(newFeePaymentNote(TopicFeePaymentInProgress, subject, details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter, which waits for the required number of
 	// confirmations to notify the DEX and establish an authenticated
 	// connection.
-	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
-
-	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
+	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0, reqConfs)
+	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: uint16(reqConfs)}
 	return res, nil
 }
 
@@ -2563,7 +2590,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // indicates that this is a new account. The first return variable contains
 // info that the caller can use to complete this registration by paying the
 // fee where necessary.
-func (c *Core) registerHD(dc *dexConnection, crypter encrypt.Crypter) (*incompleteRegistration, bool, error) {
+func (c *Core) registerHD(dc *dexConnection, crypter encrypt.Crypter, assetID uint32) (*incompleteRegistration, bool, error) {
 	if dc.acct.dexPubKey == nil {
 		return nil, false, fmt.Errorf("DEX %s does not support HD account registration", dc.acct.host)
 	}
@@ -2574,7 +2601,7 @@ func (c *Core) registerHD(dc *dexConnection, crypter encrypt.Crypter) (*incomple
 		return nil, false, newError(acctKeyErr, "setupCryptoV2 error: %v", err)
 	}
 
-	return c.register(dc, encKey, nil, acctPubB)
+	return c.register(dc, encKey, nil, acctPubB, assetID)
 }
 
 // registerLegacy sets up a legacy-style account for this DEX and submits a new
@@ -2582,12 +2609,12 @@ func (c *Core) registerHD(dc *dexConnection, crypter encrypt.Crypter) (*incomple
 // response indicates that this is a new account. The first return variable
 // contains info that the caller can use to complete this registration by paying
 // the fee where necessary.
-func (c *Core) registerLegacy(dc *dexConnection, crypter encrypt.Crypter) (*incompleteRegistration, bool, error) {
+func (c *Core) registerLegacy(dc *dexConnection, crypter encrypt.Crypter, assetID uint32) (*incompleteRegistration, bool, error) {
 	encKeyLegacy, acctPubB, err := dc.acct.setupCryptoLegacy(crypter)
 	if err != nil {
 		return nil, false, codedError(acctKeyErr, err)
 	}
-	return c.register(dc, nil, encKeyLegacy, acctPubB)
+	return c.register(dc, nil, encKeyLegacy, acctPubB, assetID)
 }
 
 // register submits a new 'register' request to the server. Only one of encKey
@@ -2601,7 +2628,7 @@ func (c *Core) registerLegacy(dc *dexConnection, crypter encrypt.Crypter) (*inco
 // the account exists and fee is paid, the account is restored, the dc is auth'ed
 // and added to the conns map and a goroutine is started to listen for server
 // messages.
-func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte) (incompleteReg *incompleteRegistration, paid bool, err error) {
+func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte, assetID uint32) (incompleteReg *incompleteRegistration, paid bool, err error) {
 	if len(encKey) > 0 && len(encKeyLegacy) > 0 {
 		return nil, false, fmt.Errorf("cannot register with BOTH HD acct key and legacy acct key")
 	}
@@ -2609,6 +2636,7 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 	dexReg := &msgjson.Register{
 		PubKey: acctPubB,
 		Time:   encode.UnixMilliU(time.Now()),
+		Asset:  &assetID,
 	}
 	regRes := new(msgjson.RegisterResult)
 	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
@@ -2635,6 +2663,13 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 		if err != nil {
 			return nil, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
 		}
+		// Compatibility with older servers that do not include asset ID.
+		if regRes.AssetID != nil && assetID != *regRes.AssetID {
+			return nil, false, fmt.Errorf("requested fee payment with asset %d, got details for %d", assetID, regRes.AssetID)
+		}
+		if regRes.AssetID == nil && assetID != 42 {
+			return nil, false, fmt.Errorf("server only supports registration with DCR")
+		}
 		// Fresh account registration success.
 		return
 	}
@@ -2656,13 +2691,13 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 			// This is now account recovery, which is great news since we don't
 			// have to pay the fee. Server provides fee coin as the error message.
 			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+			dc.acct.feeAssetID = 42 // actual asset ID unknown, but paid
 			dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
 			if err != nil || len(dc.acct.feeCoin) == 0 { // err may be nil but feeCoin is empty, e.g. if msgErr.Message == ""
 				c.log.Errorf("Failed to decode fee coin from pre-paid account info message = %q, err = %v", msgErr.Message, err)
 				dc.acct.feeCoin = []byte("DUMMY COIN")
 			} else {
-				regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-				cid, err := asset.DecodeCoinID(regFeeAssetID, dc.acct.feeCoin)
+				cid, err := asset.DecodeCoinID(dc.acct.feeAssetID, dc.acct.feeCoin)
 				if err != nil {
 					c.log.Errorf("Failed to decode coin ID for pre-paid account from feeCoin = %x, err = %v", dc.acct.feeCoin, err)
 				} else {
@@ -2673,10 +2708,12 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 			err = c.db.CreateAccount(&db.AccountInfo{
 				Host:         dc.acct.host,
 				Cert:         dc.acct.cert,
-				LegacyEncKey: encKeyLegacy,
-				EncKeyV2:     encKey,
 				DEXPubKey:    dc.acct.dexPubKey,
+				EncKeyV2:     encKey,
+				LegacyEncKey: encKeyLegacy,
+				FeeAssetID:   dc.acct.feeAssetID,
 				FeeCoin:      dc.acct.feeCoin,
+				// Paid set with AccountPaid below.
 			})
 			if err != nil {
 				// Shouldn't let the client trade with this server if we can't store
@@ -2725,12 +2762,8 @@ func (c *Core) register(dc *dexConnection, encKey, encKeyLegacy, acctPubB []byte
 // If the server acknowledgment is successful, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID []byte, confs uint32) {
-	dc.cfgMtx.RLock()
-	reqConfs := uint32(dc.cfg.RegFeeConfirms)
-	dc.cfgMtx.RUnlock()
-
-	dc.setRegConfirms(confs)
+func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID []byte, confs, reqConfs uint32) {
+	dc.setPendingFee(assetID, confs)
 
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
@@ -2741,9 +2774,9 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		}
 
 		if confs < reqConfs {
-			dc.setRegConfirms(confs)
+			dc.setPendingFee(assetID, confs)
 			subject, details := c.formatDetails(TopicRegUpdate, confs, reqConfs)
-			c.notify(newFeePaymentNoteWithConfirmations(TopicRegUpdate, subject, details, db.Data, confs, dc.acct.host))
+			c.notify(newFeePaymentNoteWithConfirmations(TopicRegUpdate, subject, details, db.Data, assetID, confs, dc.acct.host))
 		}
 
 		return confs >= reqConfs, nil
@@ -2757,7 +2790,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 				subject, details := c.formatDetails(TopicFeePaymentError, dc.acct.host, err)
 				c.notify(newFeePaymentNote(TopicFeePaymentError, subject, details, db.ErrorLevel, dc.acct.host))
 			} else {
-				dc.setRegConfirms(regConfirmationsPaid)
+				dc.clearPendingFee()
 				subject, details := c.formatDetails(TopicAccountRegistered, dc.acct.host)
 				c.notify(newFeePaymentNote(TopicAccountRegistered, subject, details, db.Success, dc.acct.host))
 			}
@@ -3323,7 +3356,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			continue // authDEX already done
 		}
 		result.AcctID = dc.acct.ID().String()
-		dcrID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+
 		if !dc.acct.feePaid() {
 			if len(dc.acct.feeCoin) == 0 {
 				subject, details := c.formatDetails(TopicFeeCoinError, dc.acct.host)
@@ -3331,9 +3364,9 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				result.AuthErr = details
 				continue
 			}
-			// Try to unlock the Decred wallet, which should run the reFee cycle, and
+			// Try to unlock the fee wallet, which should run the reFee cycle, and
 			// in turn will run authDEX.
-			dcrWallet, err := c.connectedWallet(dcrID)
+			feeWallet, err := c.connectedWallet(dc.acct.feeAssetID)
 			if err != nil {
 				c.log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
 				subject, details := c.formatDetails(TopicWalletConnectionWarning, dc.acct.host)
@@ -3341,8 +3374,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				result.AuthErr = details
 				continue
 			}
-			if !dcrWallet.unlocked() {
-				err = dcrWallet.Unlock(crypter)
+			if !feeWallet.unlocked() {
+				err = feeWallet.Unlock(crypter)
 				if err != nil {
 					subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
 					c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
@@ -3350,9 +3383,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 					continue
 				}
 			}
-			c.reFee(dcrWallet, dc)
+			c.reFee(feeWallet, dc)
 			continue
 		}
+
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
@@ -4299,7 +4333,6 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 	}
 
 	c.connMtx.Lock()
-
 	c.conns[host] = dc
 	c.connMtx.Unlock()
 
@@ -4312,7 +4345,7 @@ var feeLock uint32
 
 // checkUnpaidFees checks whether the registration fee info has an acceptable
 // state, and tries to rectify any inconsistencies.
-func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
+func (c *Core) checkUnpaidFees(wallet *xcWallet) {
 	if !atomic.CompareAndSwapUint32(&feeLock, 0, 1) {
 		return
 	}
@@ -4321,13 +4354,16 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 		if dc.acct.feePaid() {
 			continue
 		}
+		if dc.acct.feeAssetID != wallet.AssetID {
+			continue // different wallet
+		}
 		if len(dc.acct.feeCoin) == 0 {
 			c.log.Errorf("empty fee coin found for unpaid account")
 			continue
 		}
 		wg.Add(1)
 		go func(dc *dexConnection) {
-			c.reFee(dcrWallet, dc)
+			c.reFee(wallet, dc)
 			wg.Done()
 		}(dc)
 	}
@@ -4338,19 +4374,16 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 // reFee attempts to finish the fee payment process for a DEX. reFee might be
 // called if the client was shutdown after a fee was paid, but before it had the
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
-func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
-
-	// cfg can be null if connection to dex server fails.
-	dc.cfgMtx.RLock()
-	cfg := dc.cfg
-	dc.cfgMtx.RUnlock()
-	if cfg == nil {
+func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
+	feeAsset := dc.feeAsset(wallet.AssetID)
+	if feeAsset == nil {
+		c.log.Errorf("DEX not connected, or does not accept registration fees in asset %q", unbip(wallet.AssetID))
 		return
 	}
+	reqConfs := feeAsset.Confs
 
 	// Return if the coin is already in blockWaiters.
-	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-	if c.existsWaiter(coinIDString(regFeeAssetID, dc.acct.feeCoin)) {
+	if c.existsWaiter(coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)) {
 		return
 	}
 
@@ -4360,9 +4393,13 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		c.log.Errorf("reFee %s - error retrieving account info: %v", dc.acct.host, err)
 		return
 	}
-	// A couple sanity checks.
+	// A few sanity checks.
 	if !bytes.Equal(acctInfo.FeeCoin, dc.acct.feeCoin) {
 		c.log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.host, acctInfo.FeeCoin, dc.acct.feeCoin)
+		return
+	}
+	if acctInfo.FeeAssetID != dc.acct.feeAssetID {
+		c.log.Errorf("reFee %s - fee asset mismatch. %d != %d", dc.acct.host, acctInfo.FeeAssetID, dc.acct.feeAssetID)
 		return
 	}
 	if acctInfo.Paid {
@@ -4370,13 +4407,13 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// Get the coin for the fee.
-	confs, _, err := dcrWallet.Confirmations(c.ctx, acctInfo.FeeCoin)
+	confs, _, err := wallet.Confirmations(c.ctx, acctInfo.FeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
 	}
 
-	if confs >= uint32(cfg.RegFeeConfirms) {
+	if confs >= reqConfs {
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			c.log.Errorf("reFee %s - notifyfee error: %v", dc.acct.host, err)
@@ -4395,7 +4432,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	c.verifyRegistrationFee(dcrWallet.AssetID, dc, acctInfo.FeeCoin, confs)
+	c.verifyRegistrationFee(wallet.AssetID, dc, acctInfo.FeeCoin, confs, reqConfs)
 }
 
 func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
@@ -5030,7 +5067,7 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	if !dc.acct.locked() {
+	if !dc.acct.locked() && dc.acct.feePaid() {
 		err = c.authDEX(dc)
 		if err != nil {
 			c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)

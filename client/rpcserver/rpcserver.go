@@ -39,7 +39,7 @@ const (
 	// RPC version. Move major up one for breaking changes. Move minor for
 	// backwards compatible features. Move patch for bug fixes.
 	rpcSemverMajor = 0
-	rpcSemverMinor = 1
+	rpcSemverMinor = 2
 	rpcSemverPatch = 0
 )
 
@@ -64,7 +64,7 @@ type clientCore interface {
 	Login(appPass []byte) (*core.LoginResult, error)
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
-	GetFee(addr string, cert interface{}) (fee uint64, err error)
+	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)

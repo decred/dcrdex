@@ -417,17 +417,18 @@ export default class Application {
    * updateExchangeRegistration updates the information for the exchange
    * registration payment
    */
-  updateExchangeRegistration (dexAddr, isPaid, confs) {
+  updateExchangeRegistration (dexAddr, isPaid, confs, asset) {
     const dex = this.exchanges[dexAddr]
 
     if (isPaid) {
       // setting the null value in the 'confs' field indicates that the fee
       // payment was completed
-      dex.confs = null
+      dex.pendingFee = null
       return
     }
 
-    dex.confs = confs
+    const symbol = this.assets[asset].symbol
+    dex.pendingFee = { confs, asset, symbol }
   }
 
   /*
@@ -437,7 +438,7 @@ export default class Application {
   handleFeePaymentNote (note) {
     switch (note.topic) {
       case 'RegUpdate':
-        this.updateExchangeRegistration(note.dex, false, note.confirmations)
+        this.updateExchangeRegistration(note.dex, false, note.confirmations, note.asset)
         break
       case 'AccountRegistered':
         this.updateExchangeRegistration(note.dex, true)

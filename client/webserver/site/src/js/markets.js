@@ -374,8 +374,7 @@ export default class MarketsPage extends BasePage {
 
   /* hasFeePending is true if the fee payment is pending */
   hasFeePending () {
-    const dex = this.market.dex
-    return typeof dex.confs === 'number' && dex.confs < dex.confsrequired
+    return !!this.market.dex.pendingFee
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
@@ -462,19 +461,19 @@ export default class MarketsPage extends BasePage {
    * updateRegistrationStatusView updates the view based on the current
    * registration status
    */
-  updateRegistrationStatusView (dexAddr, feePaid, confirmationsRequired, confirmations) {
-    const page = this.page
+  updateRegistrationStatusView () {
+    const { page, market: { dex } } = this
+    page.regStatusDex.textContent = dex.host
 
-    page.confReq.textContent = confirmationsRequired
-    page.regStatusDex.textContent = dexAddr
-
-    if (feePaid) {
+    const pending = dex.pendingFee
+    if (!pending) {
       this.setRegistrationStatusView('Registration fee payment successful!', '', 'completed')
       return
     }
 
-    const confStatusMsg = `${confirmations} / ${confirmationsRequired}`
-
+    const confirmationsRequired = dex.regFees[pending.symbol].confs
+    page.confReq.textContent = confirmationsRequired
+    const confStatusMsg = `${pending.confs} / ${confirmationsRequired}`
     this.setRegistrationStatusView('Waiting for confirmations...', confStatusMsg, 'waiting')
   }
 
@@ -484,16 +483,14 @@ export default class MarketsPage extends BasePage {
    */
   setRegistrationStatusVisibility () {
     const { page, market: { dex } } = this
-    const { confs, confsrequired } = dex
-    const feePending = this.hasFeePending()
 
     // If dex is not connected to server, is not possible to know fee
     // registration status.
     if (!dex.connected) return
 
-    this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
+    this.updateRegistrationStatusView()
 
-    if (feePending) {
+    if (dex.pendingFee) {
       Doc.show(page.registrationStatus)
     } else {
       const toggle = () => {

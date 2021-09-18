@@ -19,7 +19,6 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/apidata"
 	"decred.org/dcrdex/server/asset"
-	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
@@ -50,6 +49,9 @@ type AssetConf struct {
 	MaxFeeRate  uint64 `json:"maxFeeRate"`
 	SwapConf    uint32 `json:"swapConf"`
 	ConfigPath  string `json:"configPath"`
+	RegFee      uint64 `json:"regFee,omitempty"`
+	RegConfs    uint32 `json:"regConfs,omitempty"`
+	RegXPub     string `json:"regXPub,omitempty"`
 }
 
 // DBConf groups the database configuration parameters.
@@ -73,9 +75,6 @@ type DexConf struct {
 	Assets            []*AssetConf
 	Network           dex.Network
 	DBConf            *DBConf
-	RegFeeXPub        string
-	RegFeeConfirms    int64
-	RegFeeAmount      uint64
 	BroadcastTimeout  time.Duration
 	CancelThreshold   float64
 	Anarchy           bool
@@ -139,17 +138,23 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
+	dcrAsset := regAssets["dcr"]
+	if dcrAsset == nil {
+		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
+	}
+
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
+		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
-		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
-		Fee:              cfg.RegFeeAmount,
+		Fee:              dcrAsset.Amt, // DEPRECATED - DCR only
 		APIVersion:       uint16(APIVersion),
 		BinSizes:         apidata.BinSizes,
 		DEXPubKey:        cfg.DEXPrivKey.PubKey().SerializeCompressed(),
+		RegFees:          regAssets,
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
@@ -226,6 +231,12 @@ func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 	return dm.configResp.configEnc, nil
+}
+
+// FeeCoiner describes a type that can check a transaction output, namely a fee
+// payment, for a particular asset.
+type FeeCoiner interface {
+	FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error)
 }
 
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
@@ -336,11 +347,48 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 	}
 
+	// Create DEXArchivist with the pg DB driver. The fee Addressers require the
+	// archivist for key index storage and retrieval.
+	pgCfg := &pg.Config{
+		Host:         cfg.DBConf.Host,
+		Port:         strconv.Itoa(int(cfg.DBConf.Port)),
+		User:         cfg.DBConf.User,
+		Pass:         cfg.DBConf.Pass,
+		DBName:       cfg.DBConf.DBName,
+		ShowPGConfig: cfg.DBConf.ShowPGConfig,
+		QueryTimeout: 20 * time.Minute,
+		MarketCfg:    cfg.Markets,
+	}
+	// After DEX construction, the storage subsystem should be stopped
+	// gracefully with its Close method, and in coordination with other
+	// subsystems via Stop. To abort its setup, rig a temporary link to the
+	// caller's Context.
+	running := make(chan struct{})
+	defer close(running) // break the link
+	go func() {
+		select {
+		case <-ctx.Done(): // cancelled construction
+			cancelDB()
+		case <-running: // DB shutdown now only via dex.Stop=>db.Close
+		}
+	}()
+	storage, err := db.Open(ctxDB, "pg", pgCfg)
+	if err != nil {
+		return nil, fmt.Errorf("db.Open: %w", err)
+	}
+
+	dataAPI := apidata.NewDataAPI(storage)
+
 	// Create a MasterCoinLocker for each asset.
 	dexCoinLocker := coinlock.NewDEXCoinLocker(assetIDs)
 
+	// Prepare registration fee assets.
+	feeAssets := make(map[string]*msgjson.FeeAsset)
+	feeCoiners := make(map[uint32]FeeCoiner)
+	feeAddressers := make(map[uint32]asset.Addresser)
+	xpubs := make(map[string]string) // to enforce uniqueness
+
 	// Start asset backends.
-	var dcrBackend *dcrasset.Backend
 	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
 	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
@@ -365,17 +413,35 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("failed to setup asset %q: %w", symbol, err)
 		}
 
-		if symbol == "dcr" {
-			var ok bool
-			dcrBackend, ok = be.(*dcrasset.Backend)
-			if !ok {
-				return nil, fmt.Errorf("dcr backend is invalid")
-			}
-		}
-
 		err = startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
 		if err != nil {
 			return nil, fmt.Errorf("failed to start asset %q: %w", symbol, err)
+		}
+
+		if assetConf.RegFee > 0 {
+			// Make sure we can check on fee transactions.
+			fc, ok := be.(FeeCoiner)
+			if !ok {
+				return nil, fmt.Errorf("asset %v is not a FeeCoiner", symbol)
+			}
+			// Make sure we can derive addresses from an extended public key.
+			addresser, startChild, err := asset.NewAddresser(symbol, assetConf.RegXPub, storage, cfg.Network)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
+			}
+			if other := xpubs[assetConf.RegXPub]; other != "" {
+				return nil, fmt.Errorf("reused xpub for assets %v and %v forbidden", other, symbol)
+			}
+			xpubs[assetConf.RegXPub] = symbol
+			feeAssets[symbol] = &msgjson.FeeAsset{
+				ID:    assetID,
+				Amt:   assetConf.RegFee,
+				Confs: assetConf.RegConfs,
+			}
+			feeCoiners[assetID] = fc
+			feeAddressers[assetID] = addresser
+			log.Infof("Registration fees permitted using %s: amount %d, confs %d, next child %d",
+				symbol, assetConf.RegFee, assetConf.RegConfs, startChild)
 		}
 
 		initTxSize := uint64(be.InitTxSize())
@@ -416,15 +482,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		txDataSources[assetID] = be.TxData
 	}
 
-	// Ensure their is a DCR asset backend.
-	if dcrBackend == nil {
-		return nil, fmt.Errorf("no DCR backend configured")
-	}
-	// Validate the registration fee extended public key.
-	if err := dcrBackend.ValidateXPub(cfg.RegFeeXPub); err != nil {
-		return nil, fmt.Errorf("invalid regfeexpub: %w", err)
-	}
-
 	for _, mkt := range cfg.Markets {
 		mkt.Name = strings.ToLower(mkt.Name)
 	}
@@ -432,40 +489,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	// Create DEXArchivist with the pg DB driver.
-	pgCfg := &pg.Config{
-		Host:         cfg.DBConf.Host,
-		Port:         strconv.Itoa(int(cfg.DBConf.Port)),
-		User:         cfg.DBConf.User,
-		Pass:         cfg.DBConf.Pass,
-		DBName:       cfg.DBConf.DBName,
-		ShowPGConfig: cfg.DBConf.ShowPGConfig,
-		QueryTimeout: 20 * time.Minute,
-		MarketCfg:    cfg.Markets,
-		//CheckedStores: true,
-		Net:    cfg.Network,
-		FeeKey: cfg.RegFeeXPub,
-	}
-	// After DEX construction, the storage subsystem should be stopped
-	// gracefully with its Close method, and in coordination with other
-	// subsystems via Stop. To abort its setup, rig a temporary link to the
-	// caller's Context.
-	running := make(chan struct{})
-	defer close(running) // break the link
-	go func() {
-		select {
-		case <-ctx.Done(): // cancelled construction
-			cancelDB()
-		case <-running: // DB shutdown now only via dex.Stop=>db.Close
-		}
-	}()
-	storage, err := db.Open(ctxDB, "pg", pgCfg)
-	if err != nil {
-		return nil, fmt.Errorf("db.Open: %w", err)
-	}
-
-	dataAPI := apidata.NewDataAPI(storage)
 
 	// Create the user order unbook dispatcher for the AuthManager.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
@@ -475,12 +498,34 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 	}
 
+	feeAddresser := func(assetID uint32) string {
+		addresser := feeAddressers[assetID]
+		if addresser == nil {
+			return ""
+		}
+		addr, err := addresser.NextAddress()
+		if err != nil {
+			log.Errorf("Failed to retrieve new address for asset %d: %v", assetID, err)
+			return ""
+		}
+		return addr
+	}
+
+	feeChecker := func(assetID uint32, coinID []byte) (addr string, val uint64, confs int64, err error) {
+		fc := feeCoiners[assetID]
+		if fc == nil {
+			err = fmt.Errorf("unsupported fee asset")
+			return
+		}
+		return fc.FeeCoin(coinID)
+	}
+
 	authCfg := auth.Config{
 		Storage:           storage,
 		Signer:            signer{cfg.DEXPrivKey},
-		RegistrationFee:   cfg.RegFeeAmount,
-		FeeConfs:          cfg.RegFeeConfirms,
-		FeeChecker:        dcrBackend.FeeCoin,
+		FeeAddress:        feeAddresser,
+		FeeAssets:         feeAssets,
+		FeeChecker:        feeChecker,
 		UserUnbooker:      userUnbookFun,
 		MiaUserTimeout:    cfg.BroadcastTimeout,
 		CancelThreshold:   cfg.CancelThreshold,
@@ -636,7 +681,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewServer failed: %w", err)
 	}
 
-	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
+	cfgResp, err := newConfigResponse(cfg, feeAssets, cfgAssets, cfgMarkets)
 	if err != nil {
 		return nil, err
 	}

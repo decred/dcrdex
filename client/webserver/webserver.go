@@ -91,7 +91,6 @@ type clientCore interface {
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
-	GetFee(url string, cert interface{}) (uint64, error)
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
 	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
@@ -114,7 +113,7 @@ type clientCore interface {
 var _ clientCore = (*core.Core)(nil)
 
 // cachedPassword consists of the seralized crypter and an encrypted password.
-// A key stored in the cookies is used to deserlialize the crypter, then
+// A key stored in the cookies is used to deserialize the crypter, then
 // the crypter is used to decrypt the password.
 type cachedPassword struct {
 	EncryptedPass     []byte
@@ -293,7 +292,6 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
-			apiInit.Post("/getfee", s.apiGetFee)
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
 		})

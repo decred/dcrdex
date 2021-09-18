@@ -1319,10 +1319,16 @@ func (client *tClient) registerDEX(ctx context.Context) error {
 		client.core.connMtx.Unlock()
 	}
 
-	dexFee, err := client.core.GetFee(dexHost, dexCert)
+	dexConf, err := client.core.GetDEXConfig(dexHost, dexCert)
 	if err != nil {
 		return err
 	}
+	feeAsset := dexConf.RegFees["dcr"]
+	if feeAsset == nil {
+		return errors.New("dcr not supported!")
+	}
+	dexFee := feeAsset.Amt
+	assetID := feeAsset.ID
 
 	// connect dex and pay fee
 	regRes, err := client.core.Register(&RegisterForm{
@@ -1330,6 +1336,7 @@ func (client *tClient) registerDEX(ctx context.Context) error {
 		Cert:    dexCert,
 		AppPass: client.appPass,
 		Fee:     dexFee,
+		Asset:   &assetID,
 	})
 	if err != nil {
 		return err

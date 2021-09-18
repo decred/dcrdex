@@ -34,10 +34,11 @@ func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
 		Host: ordertest.RandomAddress(),
 		// LegacyEncKey: randBytes(32),
-		EncKeyV2:  randBytes(32),
-		DEXPubKey: randomPubKey(),
-		FeeCoin:   randBytes(32),
-		Cert:      randBytes(100),
+		EncKeyV2:   randBytes(32),
+		DEXPubKey:  randomPubKey(),
+		FeeAssetID: uint32(rand.Intn(64)),
+		FeeCoin:    randBytes(32),
+		Cert:       randBytes(100),
 	}
 }
 

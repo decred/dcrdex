@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 2
+const dbVersion = 3
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -32,6 +32,9 @@ var upgrades = []func(db *sql.Tx) error{
 	// book_sells* columns since this data requires a book snapshot at the time
 	// of matching to generate.
 	v2Upgrade,
+
+	// v3 upgrade adds the fee_asset column to the accounts table.
+	v3Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -251,6 +254,18 @@ func v2Upgrade(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+func v3Upgrade(tx *sql.Tx) error {
+	// Create the fee_asset column.
+	_, err := tx.Exec(`ALTER TABLE ` + accountsTableName + ` ADD COLUMN IF NOT EXISTS fee_asset INT4;`)
+	if err != nil {
+		return err
+	}
+	// Set existing rows fee_asset to 42, Decred's asset ID, since prior to this
+	// upgrade, only DCR was accepted for registration.
+	_, err = tx.Exec(`UPDATE ` + accountsTableName + ` SET fee_asset = 42;`) // not as default in ALTER
+	return err
 }
 
 // DBVersion retrieves the database version from the meta table.

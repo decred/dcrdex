@@ -43,11 +43,6 @@ func (vr versionResponse) String() string {
 	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
 }
 
-// getFeeResponse is used when responding to the getfee route.
-type getFeeResponse struct {
-	Fee uint64 `json:"fee"`
-}
-
 // tradeResponse is used when responding to the trade route.
 type tradeResponse struct {
 	OrderID string `json:"orderID"`
@@ -298,7 +293,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parseGetFeeArgs(params *RawParams) (host string, cert []byte, err error) {
+func parseGetDEXConfigArgs(params *RawParams) (host string, cert []byte, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return "", nil, err
 	}
@@ -309,21 +304,27 @@ func parseGetFeeArgs(params *RawParams) (host string, cert []byte, err error) {
 }
 
 func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{3, 4}); err != nil {
 		return nil, err
 	}
 	fee, err := checkUIntArg(params.Args[1], "fee", 64)
 	if err != nil {
 		return nil, err
 	}
+	asset, err := checkUIntArg(params.Args[2], "asset", 32)
+	if err != nil {
+		return nil, err
+	}
+	asset32 := uint32(asset)
 	var cert []byte
-	if len(params.Args) > 2 {
-		cert = []byte(params.Args[2])
+	if len(params.Args) > 3 {
+		cert = []byte(params.Args[3])
 	}
 	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],
 		Addr:    params.Args[0],
 		Fee:     fee,
+		Asset:   &asset32,
 		Cert:    cert,
 	}
 	return req, nil

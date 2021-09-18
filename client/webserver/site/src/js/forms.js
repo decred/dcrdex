@@ -317,8 +317,9 @@ export class ConfirmRegistrationForm {
    */
   setExchange (xc) {
     const fields = this.fields
-    this.fee = xc.feeAsset.amount
-    fields.feeDisplay.textContent = Doc.formatCoinValue(this.fee / 1e8)
+    this.fees = xc.regFees
+    const dcr = this.fees.dcr // TODO: display all options and give choice
+    fields.feeDisplay.textContent = `${Doc.formatCoinValue(dcr.amount / 1e8)} ${app.assets[dcr.id].symbol.toUpperCase()}`
     while (fields.marketsTableRows.firstChild) {
       fields.marketsTableRows.removeChild(fields.marketsTableRows.firstChild)
     }
@@ -354,10 +355,12 @@ export class ConfirmRegistrationForm {
     Doc.hide(fields.regErr)
     const cert = await this.getCertFile()
     const dexAddr = this.getDexAddr()
+    const feeAsset = this.fees.dcr // this.fees[fields.symbol]
     const registration = {
       addr: dexAddr,
       pass: fields.appPass.value,
-      fee: this.fee,
+      fee: feeAsset.amount,
+      asset: feeAsset.id,
       cert: cert
     }
     fields.appPass.value = ''

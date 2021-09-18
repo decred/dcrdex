@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/wait"
@@ -56,12 +57,89 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
-	// Register account and get a fee payment address.
-	feeAddr, err := auth.storage.CreateAccount(acct)
-	if err != nil {
+	sendRegRes := func(feeAsset uint32, feeAddr string, feeAmt uint64) *msgjson.Error {
+		// Prepare, sign, and send response.
+		regRes := &msgjson.RegisterResult{
+			DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
+			ClientPubKey: register.PubKey,
+			AssetID:      &feeAsset,
+			Address:      feeAddr,
+			Fee:          feeAmt,
+			Time:         encode.UnixMilliU(unixMsNow()),
+		}
+		auth.Sign(regRes)
+
+		resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
+		if err != nil {
+			log.Errorf("error creating new response for registration result: %v", err)
+			return &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "internal error",
+			}
+		}
+
+		err = conn.Send(resp)
+		if err != nil {
+			log.Warnf("Error sending register result to link: %v", err)
+		}
+		return nil
+	}
+
+	regAsset := uint32(42)
+	if register.Asset != nil {
+		regAsset = *register.Asset
+	}
+
+	// See if the account already exists. If it is paid, just respond with
+	// AccountExistsError and the known fee coin. If it exists but is not paid,
+	// resend the RegisterResult with the previously recorded fee address and
+	// asset ID. Note that this presently does not permit a user to change from
+	// the initially requested asset to another.
+	ai, err := auth.storage.AccountInfo(acct.ID)
+	if err == nil {
+		if len(ai.FeeCoin) > 0 {
+			return &msgjson.Error{
+				Code:    msgjson.AccountExistsError,
+				Message: ai.FeeCoin.String(), // Fee coin TODO: supplement with asset ID
+			}
+		}
+		// Resend RegisterResult with the existing fee address.
+		feeAsset := auth.feeAssets[ai.FeeAsset]
+		if feeAsset == nil || feeAsset.Amt == 0 || ai.FeeAddress == "" ||
+			regAsset != ai.FeeAsset /* sanity */ {
+			// NOTE: Allowing register.Asset != ai.FeeAsset would require
+			// clearing this account's previously recorded fee address.
+			return &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "asset not supported for registration",
+			}
+		}
+		return sendRegRes(ai.FeeAsset, ai.FeeAddress, feeAsset.Amt)
+	}
+	if !db.IsErrAccountUnknown(err) {
+		log.Errorf("AccountInfo error for ID %s: %v", acct.ID, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "failed to create new account",
+		}
+	} // else account unknown, create it
+
+	// Try to get a fee address and amount for the requested asset.
+	feeAsset := auth.feeAssets[regAsset]
+	feeAddr := auth.feeAddress(regAsset)
+	if feeAsset == nil || feeAddr == "" {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "asset not supported for registration",
+		}
+	}
+
+	// Register the new account with the fee address.
+	if err = auth.storage.CreateAccount(acct, regAsset, feeAddr); err != nil {
 		log.Debugf("CreateAccount(%s) failed: %v", acct.ID, err)
-		var archiveErr *db.ArchiveError
+		var archiveErr db.ArchiveError // CreateAccount returns by value.
 		if errors.As(err, &archiveErr) {
+			// These cases should have been caught above.
 			switch archiveErr.Code {
 			case db.ErrAccountExists:
 				return &msgjson.Error{
@@ -77,37 +155,13 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
-			Message: "failed to create new account (already registered?)",
+			Message: "failed to create new account",
 		}
 	}
 
-	log.Infof("Created new user account %v from %v with fee address %v", acct.ID, conn.Addr(), feeAddr)
-
-	// Prepare, sign, and send response.
-	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
-		ClientPubKey: register.PubKey,
-		Address:      feeAddr,
-		Fee:          auth.regFee,
-		Time:         encode.UnixMilliU((unixMsNow())),
-	}
-	auth.Sign(regRes)
-
-	resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
-	if err != nil {
-		log.Errorf("error creating new response for registration result: %v", err)
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal error",
-		}
-	}
-
-	err = conn.Send(resp)
-	if err != nil {
-		log.Warnf("Error sending register result to link: %v", err)
-	}
-
-	return nil
+	log.Infof("Created new user account %v from %v with fee address %v (%v)",
+		acct.ID, conn.Addr(), feeAddr, dex.BipIDSymbol(regAsset))
+	return sendRegRes(regAsset, feeAddr, feeAsset.Amt)
 }
 
 // handleNotifyFee handles requests to the 'notifyfee' route.
@@ -133,34 +187,66 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	var acctID account.AccountID
 	copy(acctID[:], notifyFee.AccountID)
 
-	acct, paid, open := auth.storage.Account(acctID)
-	if acct == nil {
+	ai, err := auth.storage.AccountInfo(acctID)
+	if ai == nil || err != nil {
+		if err != nil && !db.IsErrAccountUnknown(err) {
+			log.Warnf("Unexpected AccountInfo(%v) failure: %v", acctID, err)
+		}
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "no account found for ID " + notifyFee.AccountID.String(),
 		}
 	}
-	if !open {
+	if ai.BrokenRule != account.NoRule {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
-			Message: "account closed and cannot be reopen",
-		}
-	}
-	if paid {
-		return &msgjson.Error{
-			Code:    msgjson.AuthenticationError,
-			Message: "'notifyfee' send for paid account",
+			Message: "account closed and cannot be reopened",
 		}
 	}
 
 	// Check signature
 	sigMsg := notifyFee.Serialize()
+	acct, err := account.NewAccountFromPubKey(ai.Pubkey)
+	if err != nil {
+		// Shouldn't happen.
+		log.Warnf("Pubkey decode failure for %v: %v", acctID, err)
+		return &msgjson.Error{
+			Code:    msgjson.AuthenticationError,
+			Message: "pubkey decode failure",
+		}
+	}
 	err = checkSigS256(sigMsg, notifyFee.SigBytes(), acct.PubKey)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.SignatureError,
 			Message: "signature error: " + err.Error(),
 		}
+	}
+
+	if len(ai.FeeCoin) > 0 {
+		// No need to search for txn, and storage.PayAccount would fail to store
+		// the Coin again, so just respond if fee coin matches.
+		if !notifyFee.CoinID.Equal(ai.FeeCoin) {
+			return &msgjson.Error{
+				Code:    msgjson.FeeError,
+				Message: "invalid fee coin",
+			}
+		}
+		// Account ID and fee coin are good, sign the request and respond.
+		auth.Sign(notifyFee)
+		notifyRes := new(msgjson.NotifyFeeResult)
+		notifyRes.SetSig(notifyFee.SigBytes())
+		resp, err := msgjson.NewResponse(msg.ID, notifyRes, nil)
+		if err != nil {
+			return &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "internal encoding error",
+			}
+		}
+		if err = conn.Send(resp); err != nil {
+			log.Warnf("error sending notifyfee result to link: %v", err)
+		}
+		return nil
 	}
 
 	auth.feeWaiterMtx.Lock()
@@ -173,7 +259,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	}
 
 	// Get the registration fee address assigned to the client's account.
-	regAddr, err := auth.storage.AccountRegAddr(acctID)
+	regAddr, assetID, err := auth.storage.AccountRegAddr(acctID)
 	if err != nil {
 		auth.feeWaiterMtx.Unlock()
 		log.Infof("AccountRegAddr failed to load info for account %v: %v", acctID, err)
@@ -195,7 +281,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	auth.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			res := auth.validateFee(conn, acctID, notifyFee, msg.ID, notifyFee.CoinID, regAddr)
+			res := auth.validateFee(conn, msg.ID, acctID, notifyFee, assetID, regAddr)
 			if res == wait.DontTryAgain {
 				removeWaiter()
 			}
@@ -211,30 +297,49 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 // validateFee is a coin waiter that validates a client's notifyFee request and
 // responds with an Acknowledgement.
-func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, notifyFee *msgjson.NotifyFee, msgID uint64, coinID []byte, regAddr string) bool {
-	addr, val, confs, err := auth.checkFee(coinID)
-	if err != nil || confs < auth.feeConfs {
-		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+func (auth *AuthManager) validateFee(conn comms.Link, msgID uint64, acctID account.AccountID,
+	notifyFee *msgjson.NotifyFee, assetID uint32, regAddr string) bool {
+	// If there is a problem, respond with an error.
+	var msgErr *msgjson.Error
+	defer func() {
+		if msgErr == nil {
+			return
+		}
+		resp, err := msgjson.NewResponse(msgID, nil, msgErr)
+		if err != nil {
+			log.Errorf("error encoding notifyfee error response: %v", err)
+			return
+		}
+		err = conn.Send(resp)
+		if err != nil {
+			log.Warnf("error sending notifyfee error response: %v", err)
+		}
+	}()
+
+	// Required confirmations and amount.
+	feeAsset := auth.feeAssets[assetID]
+	if feeAsset == nil { // shouldn't be possible
+		msgErr = &msgjson.Error{
+			Code:    msgjson.FeeError,
+			Message: "unsupported asset",
+		}
+		return wait.DontTryAgain
+	}
+
+	coinID := notifyFee.CoinID
+	addr, val, confs, err := auth.checkFee(assetID, coinID)
+	if err != nil {
+		if !errors.Is(err, asset.CoinNotFoundError) {
 			log.Warnf("Unexpected error checking fee coin confirmations: %v", err)
 			// return wait.DontTryAgain // maybe
 		}
 		return wait.TryAgain
 	}
-	var msgErr *msgjson.Error
-	defer func() {
-		if msgErr != nil {
-			resp, err := msgjson.NewResponse(msgID, nil, msgErr)
-			if err != nil {
-				log.Errorf("error encoding notifyfee error response: %v", err)
-				return
-			}
-			err = conn.Send(resp)
-			if err != nil {
-				log.Warnf("error sending notifyfee result to link: %v", err)
-			}
-		}
-	}()
-	if val < auth.regFee {
+	if confs < int64(feeAsset.Confs) {
+		return wait.TryAgain
+	}
+
+	if val < feeAsset.Amt {
 		msgErr = &msgjson.Error{
 			Code:    msgjson.FeeError,
 			Message: "fee too low",

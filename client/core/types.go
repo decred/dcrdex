@@ -125,6 +125,7 @@ type RegisterForm struct {
 	Addr    string           `json:"url"`
 	AppPass encode.PassBytes `json:"appPass"`
 	Fee     uint64           `json:"fee"`
+	Asset   *uint32          `json:"assetID,omitempty"` // do not default to 0
 	// Cert can be a string, which is interpreted as a filepath, or a []byte,
 	// which is interpreted as the file contents of the certificate.
 	Cert interface{} `json:"cert"`
@@ -448,25 +449,32 @@ func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
 }
 
-// FeeAsset will also be a msgjson type with preregister/payfee PR 1017.
+// FeeAsset has an analogous msgjson type for server providing supported
+// registration fee assets.
 type FeeAsset struct {
 	ID    uint32 `json:"id"`
 	Confs uint32 `json:"confs"`
 	Amt   uint64 `json:"amount"`
 }
 
+// PendingFeeState conveys a pending registration fee's asset and current
+// confirmation count.
+type PendingFeeState struct {
+	Symbol  string `json:"symbol"`
+	AssetID uint32 `json:"assetID"`
+	Confs   uint32 `json:"confs"`
+}
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host          string                `json:"host"`
-	AcctID        string                `json:"acctID"`
-	Markets       map[string]*Market    `json:"markets"`
-	Assets        map[uint32]*dex.Asset `json:"assets"`
-	FeePending    bool                  `json:"feePending"`
-	Connected     bool                  `json:"connected"`
-	ConfsRequired uint32                `json:"confsrequired"` // DEPRECATED. RegFees will support multi-asset reg
-	RegConfirms   *uint32               `json:"confs,omitempty"`
-	Fee           *FeeAsset             `json:"feeAsset"` // DEPRECATED
-	// RegFees       map[string]*FeeAsset  `json:"regfees"`
+	Host       string                `json:"host"`
+	AcctID     string                `json:"acctID"`
+	Markets    map[string]*Market    `json:"markets"`
+	Assets     map[uint32]*dex.Asset `json:"assets"`
+	Connected  bool                  `json:"connected"`
+	Fee        *FeeAsset             `json:"feeAsset"` // DEPRECATED. DCR.
+	RegFees    map[string]*FeeAsset  `json:"regFees"`
+	PendingFee *PendingFeeState      `json:"pendingFee,omitempty"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.
@@ -538,10 +546,11 @@ type dexAccount struct {
 	privKey *secp256k1.PrivateKey
 	id      account.AccountID
 
-	feeCoin []byte
+	feeAssetID uint32
+	feeCoin    []byte
 
 	authMtx     sync.RWMutex
-	isPaid      bool
+	isPaid      bool // feeCoin fully confirmed, ready to trade
 	isAuthed    bool
 	isSuspended bool
 }
@@ -549,12 +558,13 @@ type dexAccount struct {
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
-		host:      acctInfo.Host,
-		encKey:    acctInfo.EncKey(),
-		dexPubKey: acctInfo.DEXPubKey,
-		isPaid:    acctInfo.Paid,
-		feeCoin:   acctInfo.FeeCoin,
-		cert:      acctInfo.Cert,
+		host:       acctInfo.Host,
+		encKey:     acctInfo.EncKey(),
+		dexPubKey:  acctInfo.DEXPubKey,
+		isPaid:     acctInfo.Paid,
+		feeAssetID: acctInfo.FeeAssetID,
+		feeCoin:    acctInfo.FeeCoin,
+		cert:       acctInfo.Cert,
 		// isSuspended is determined on connect, not stored
 	}
 }

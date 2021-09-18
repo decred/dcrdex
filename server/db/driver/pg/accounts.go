@@ -11,9 +11,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/hdkeychain/v3"
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/dcrutil/v4" // TODO: consider a move to "crypto/sha256" instead of dcrutil.Hash160
 )
 
 // CloseAccount closes the account by setting the value of the rule column to
@@ -67,12 +65,14 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	defer rows.Close()
 	var accts []*db.Account
 	var feeAddress sql.NullString
+	var feeAsset sql.NullInt32
 	for rows.Next() {
 		a := new(db.Account)
-		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAddress, &a.FeeCoin, &a.BrokenRule)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAsset, &feeAddress, &a.FeeCoin, &a.BrokenRule)
 		if err != nil {
 			return nil, err
 		}
+		a.FeeAsset = uint32(feeAsset.Int32)
 		a.FeeAddress = feeAddress.String
 		accts = append(accts, a)
 	}
@@ -84,70 +84,56 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 
 // AccountInfo returns data for an account.
 func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
-
 	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
 	acct := new(db.Account)
 	var feeAddress sql.NullString
-	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAddress,
-		&acct.FeeCoin, &acct.BrokenRule); err != nil {
+	var feeAsset sql.NullInt32
+	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAsset,
+		&feeAddress, &acct.FeeCoin, &acct.BrokenRule); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = db.ArchiveError{Code: db.ErrAccountUnknown}
+		}
 		return nil, err
 	}
 
+	acct.FeeAsset = uint32(feeAsset.Int32)
 	acct.FeeAddress = feeAddress.String
 	return acct, nil
 }
 
-// CreateAccount creates an entry for a new account in the accounts table. A
-// DCR registration fee address is created and returned.
-func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
+// CreateAccount creates an entry for a new account in the accounts table.
+func (a *Archiver) CreateAccount(acct *account.Account, assetID uint32, regAddr string) error {
 	ai, err := a.AccountInfo(acct.ID)
 	if err == nil {
+		if ai.FeeAddress != regAddr || ai.FeeAsset != assetID {
+			return db.ArchiveError{Code: db.ErrAccountBadFeeInfo}
+		}
 		if len(ai.FeeCoin) == 0 {
-			return ai.FeeAddress, nil
-
+			return nil // fee address and asset match, just unpaid
 		}
 		if ai.BrokenRule == account.NoRule {
-			return "", &db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
+			return db.ArchiveError{Code: db.ErrAccountExists, Detail: ai.FeeCoin.String()}
 		}
-		return "", &db.ArchiveError{Code: db.ErrAccountSuspended}
+		return db.ArchiveError{Code: db.ErrAccountSuspended}
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !db.IsErrAccountUnknown(err) {
 		log.Errorf("AccountInfo error for ID %s: %v", acct.ID, err)
-		return "", db.ArchiveError{Code: db.ErrGeneralFailure}
+		return db.ArchiveError{Code: db.ErrGeneralFailure}
 	}
 
-	regAddr, err := a.getNextAddress()
-	if err != nil {
-		return "", fmt.Errorf("error creating registration address: %w", err)
-	}
-	err = createAccount(a.db, a.tables.accounts, acct, regAddr)
-	if err != nil {
-		return "", err
-	}
-	return regAddr, nil
+	// ErrAccountUnknown, so create the account.
+	return createAccount(a.db, a.tables.accounts, acct, assetID, regAddr)
 }
 
-// CreateKeyEntry creates an entry for the pubkey (hash) if one doesn't already
-// exist.
-func (a *Archiver) CreateKeyEntry(keyHash []byte) error {
-	return createKeyEntry(a.db, a.tables.feeKeys, keyHash)
-}
-
-// AccountRegAddr retrieves the registration fee address created for the
-// the specified account.
-func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, error) {
+// AccountRegAddr retrieves the registration fee address and the corresponding
+// asset ID created for the the specified account.
+func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, uint32, error) {
 	return accountRegAddr(a.db, a.tables.accounts, aid)
 }
 
 // PayAccount sets the registration fee payment details for the account,
 // effectively completing the registration process.
 func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
-	// This check is fine for now. If support for an asset with a longer coin ID
-	// is implemented, this restriction would need to be loosened.
-	if len(coinID) != chainhash.HashSize+4 {
-		return fmt.Errorf("incorrect length transaction ID %x. wanted %d, got %d",
-			coinID, chainhash.MaxHashStringSize+4, len(coinID))
-	}
 	ok, err := payAccount(a.db, a.tables.accounts, aid, coinID)
 	if err != nil {
 		return err
@@ -158,37 +144,49 @@ func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
 	return nil
 }
 
-// Get the next address for the current master pubkey.
-func (a *Archiver) getNextAddress() (string, error) {
-	stmt := fmt.Sprintf(internal.IncrementKey, feeKeysTableName)
-	var childExtKey *hdkeychain.ExtendedKey
-out:
-	for {
-		var child uint32
-		err := a.db.QueryRow(stmt, a.keyHash).Scan(&child)
-		if err != nil {
-			return "", err
-		}
-		childExtKey, err = a.feeKeyBranch.Child(child)
-		switch {
-		case errors.Is(err, hdkeychain.ErrInvalidChild):
-			continue
-		case err == nil:
-			break out
-		default:
-			log.Errorf("error creating child key: %v", err)
-			return "", fmt.Errorf("error generating fee address")
-		}
+// KeyIndex returns the current child index for the an xpub. If it is not
+// known, this creates a new entry with index zero.
+func (a *Archiver) KeyIndex(xpub string) (uint32, error) {
+	keyHash := dcrutil.Hash160([]byte(xpub))
+
+	var child uint32
+	stmt := fmt.Sprintf(internal.CurrentKeyIndex, feeKeysTableName)
+	err := a.db.QueryRow(stmt, keyHash).Scan(&child)
+	switch {
+	case errors.Is(err, sql.ErrNoRows): // continue to create new entry
+	case err == nil:
+		return child, nil
+	default:
+		return 0, err
 	}
 
-	pubKeyBytes := childExtKey.SerializedPubKey()
-	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(stdaddr.Hash160(pubKeyBytes), a.keyParams)
+	log.Debugf("Inserting key entry for xpub %.40s..., hash160 = %x", xpub, keyHash)
+	stmt = fmt.Sprintf(internal.InsertKeyIfMissing, feeKeysTableName)
+	err = a.db.QueryRow(stmt, keyHash).Scan(&child)
 	if err != nil {
-		log.Errorf("Failed to create creating new pubkey hash address: %v", err)
-		return "", fmt.Errorf("error encoding fee address: %w", err)
+		return 0, err
 	}
+	return child, nil
+}
 
-	return addr.String(), nil
+// SetKeyIndex records the child index for an xpub. An error is returned
+// unless exactly 1 row is updated or created.
+func (a *Archiver) SetKeyIndex(idx uint32, xpub string) error {
+	keyHash := dcrutil.Hash160([]byte(xpub))
+	log.Debugf("Recording new index %d for xpub %.40s... (%x)", idx, xpub, keyHash)
+	stmt := fmt.Sprintf(internal.UpsertKeyIndex, feeKeysTableName)
+	res, err := a.db.Exec(stmt, idx, keyHash)
+	if err != nil {
+		return err
+	}
+	N, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("updated %d rows, expected 1", N)
+	}
+	return nil
 }
 
 // createAccountTables creates the accounts and fee_keys tables.
@@ -226,9 +224,10 @@ func setRule(dbe sqlExecutor, tableName string, aid account.AccountID, rule acco
 // registered, and whether the account is still open, in that order.
 func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.Account, bool, bool, error) {
 	var coinID, pubkey []byte
+	var assetID sql.NullInt32
 	var rule uint8
 	stmt := fmt.Sprintf(internal.SelectAccount, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &coinID, &rule)
+	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &assetID, &coinID, &rule)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -237,22 +236,23 @@ func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.
 }
 
 // createAccount creates an entry for the account in the accounts table.
-func createAccount(dbe sqlExecutor, tableName string, acct *account.Account, regAddr string) error {
+func createAccount(dbe sqlExecutor, tableName string, acct *account.Account, feeAsset uint32, regAddr string) error {
 	stmt := fmt.Sprintf(internal.CreateAccount, tableName)
-	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), regAddr)
+	_, err := dbe.Exec(stmt, acct.ID, acct.PubKey.SerializeCompressed(), feeAsset, regAddr)
 	return err
 }
 
-// accountRegAddr gets the registration fee address created for the specified
-// account.
-func accountRegAddr(dbe *sql.DB, tableName string, aid account.AccountID) (string, error) {
+// accountRegAddr gets the registration fee address and its asset ID created for
+// the specified account.
+func accountRegAddr(dbe *sql.DB, tableName string, aid account.AccountID) (string, uint32, error) {
 	var addr string
+	var assetID sql.NullInt32
 	stmt := fmt.Sprintf(internal.SelectRegAddress, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&addr)
+	err := dbe.QueryRow(stmt, aid).Scan(&assetID, &addr)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return addr, nil
+	return addr, uint32(assetID.Int32), nil
 }
 
 // payAccount sets the registration fee payment details.
@@ -264,12 +264,4 @@ func payAccount(dbe *sql.DB, tableName string, aid account.AccountID, coinID []b
 	}
 	rows, err := res.RowsAffected()
 	return rows > 0, err
-}
-
-// createKeyEntry creates an entry for the pubkey (hash) if it doesn't already
-// exist.
-func createKeyEntry(db *sql.DB, tableName string, keyHash []byte) error {
-	stmt := fmt.Sprintf(internal.InsertKeyIfMissing, tableName)
-	_, err := db.Exec(stmt, keyHash)
-	return err
 }

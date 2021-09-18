@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
@@ -58,6 +59,27 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Version returns the Backend implementation's version number.
 func (d *Driver) Version() uint32 {
 	return version
+}
+
+// NewAddresser creates an asset.Addresser for deriving addresses for the given
+// extended public key. The KeyIndexer will be used for discovering the current
+// child index, and storing the index as new addresses are generated with the
+// NextAddress method of the Addresser. The Backend must have been created with
+// NewBackend (or Setup) to initialize the chain parameters.
+func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network dex.Network) (asset.Addresser, uint32, error) {
+	var params NetParams
+	switch network {
+	case dex.Simnet:
+		params = chaincfg.SimNetParams()
+	case dex.Testnet:
+		params = chaincfg.TestNet3Params()
+	case dex.Mainnet:
+		params = chaincfg.MainNetParams()
+	default:
+		return nil, 0, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
+
+	return NewAddressDeriver(xPub, keyIndexer, params)
 }
 
 func init() {
@@ -456,36 +478,36 @@ func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64
 		return
 	}
 
-	var txOut *TxOutData
-	txOut, confs, err = dcr.OutputSummary(txHash, vout)
+	var txOut *txOutData
+	txOut, confs, err = dcr.outputSummary(txHash, vout)
 	if err != nil {
 		return
 	}
 
-	if len(txOut.Addresses) != 1 || txOut.SigsRequired != 1 ||
-		txOut.ScriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
-		txOut.ScriptType&dexdcr.ScriptStake != 0 {
+	if len(txOut.addresses) != 1 || txOut.sigsRequired != 1 ||
+		txOut.scriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
+		txOut.scriptType&dexdcr.ScriptStake != 0 {
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
-	addr = txOut.Addresses[0]
-	val = txOut.Value
+	addr = txOut.addresses[0]
+	val = txOut.value
 	return
 }
 
-// TxOutData is transaction output data, including recipient addresses, value,
+// txOutData is transaction output data, including recipient addresses, value,
 // script type, and number of required signatures.
-type TxOutData struct {
-	Value        uint64
-	Addresses    []string
-	SigsRequired int
-	ScriptType   dexdcr.DCRScriptType
+type txOutData struct {
+	value        uint64
+	addresses    []string
+	sigsRequired int
+	scriptType   dexdcr.DCRScriptType
 }
 
-// OutputSummary gets transaction output data, including recipient addresses,
+// outputSummary gets transaction output data, including recipient addresses,
 // value, script type, and number of required signatures, plus the current
 // confirmations of a transaction output. If the output does not exist, an error
 // will be returned. Non-standard scripts are not an error.
-func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
+func (dcr *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *txOutData, confs int64, err error) {
 	var verboseTx *chainjson.TxRawResult
 	verboseTx, err = dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
 	if err != nil {
@@ -504,21 +526,20 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 
 	out := verboseTx.Vout[vout]
 
-	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
+	script, err := hex.DecodeString(out.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	// out.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
-	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.Version, scriptHex, chainParams)
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, script, chainParams)
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
 
-	txOut = &TxOutData{
-		Value:        toAtoms(out.Value),
-		Addresses:    addrs,       // out.ScriptPubKey.Addresses
-		SigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
-		ScriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
+	txOut = &txOutData{
+		value:        toAtoms(out.Value),
+		addresses:    addrs,       // out.ScriptPubKey.Addresses
+		sigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
+		scriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
 	}
 
 	confs = verboseTx.Confirmations
@@ -580,7 +601,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 		sumOut += toAtoms(output.Value)
 		outputs = append(outputs, txOut{
 			value:    toAtoms(output.Value),
-			version:  output.Version, // output.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
+			version:  output.ScriptPubKey.Version,
 			pkScript: pkScript,
 		})
 	}

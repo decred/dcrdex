@@ -56,7 +56,7 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      const fee = xc.feeAsset.amount
+      const fee = xc.feeAsset.amount // DCR, special
       const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
       if (balanceFeeRegistration < fee) {
         const errorMsg = `Looks like there is not enough funds for

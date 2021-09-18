@@ -79,6 +79,7 @@ var (
 	tDcrBtcMktName             = "dcr_btc"
 	tErr                       = fmt.Errorf("test error")
 	tFee                uint64 = 1e8
+	tFeeAsset           uint32 = 42
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
@@ -204,8 +205,9 @@ func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAc
 					},
 				},
 			},
-			Fee:       tFee,
-			DEXPubKey: acct.dexPubKey.SerializeCompressed(),
+			Fee:            tFee,
+			RegFeeConfirms: 0,
+			DEXPubKey:      acct.dexPubKey.SerializeCompressed(),
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
@@ -1382,39 +1384,6 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
-func TestGetFee(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
-	cert := []byte{}
-
-	// DEX already registered
-	_, err := tCore.GetFee(tDexHost, cert)
-	if !errorHasCode(err, dupeDEXErr) {
-		t.Fatalf("wrong account exists error: %v", err)
-	}
-
-	// Lose the dexConnection
-	tCore.connMtx.Lock()
-	delete(tCore.conns, tDexHost)
-	tCore.connMtx.Unlock()
-
-	// connectDEX error
-	_, err = tCore.GetFee(tUnparseableHost, cert)
-	if !errorHasCode(err, addressParseErr) {
-		t.Fatalf("wrong connectDEX error: %v", err)
-	}
-
-	// Queue a config response for success
-	rig.queueConfig()
-
-	// Success
-	_, err = tCore.GetFee(tDexHost, cert)
-	if err != nil {
-		t.Fatalf("GetFee error: %v", err)
-	}
-}
-
 func TestRegister(t *testing.T) {
 	t.Run("TestRegister_legacy", func(t *testing.T) {
 		testRegister(t, true)
@@ -1465,22 +1434,22 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			t.Helper()
 			timeout := time.NewTimer(time.Second * 2)
 			for {
 				select {
-				case <-time.After(time.Millisecond):
-					timeout.Stop()
+				case <-time.After(10 * time.Millisecond):
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
+						timeout.Stop()
 						tWallet.setConfs(tWallet.payFeeCoin.id, 0, nil)
 						tCore.tipChange(tDCR.ID, nil)
 						return
 					}
 				case <-timeout.C:
 					t.Errorf("failed to find waiter before timeout")
+					return
 				}
 			}
 		}()
@@ -1498,6 +1467,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		Addr:    tDexHost,
 		AppPass: tPW,
 		Fee:     tFee,
+		Asset:   &tFeeAsset,
 		Cert:    []byte{},
 	}
 
@@ -1615,17 +1585,17 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	}
 	form.Addr = tDexHost
 
-	// asset not found
-	cfgAssets := dc.cfg.Assets
+	// fee asset not found, no cfg.Fee fallback
 	mkts := dc.cfg.Markets
-	dc.cfg.Assets = dc.cfg.Assets[1:]
+	dc.cfg.RegFees = nil
+	dc.cfg.Fee = 0
 	dc.cfg.Markets = []*msgjson.Market{}
 	rig.queueConfig()
 	run()
 	if !errorHasCode(err, assetSupportErr) {
 		t.Fatalf("wrong error for missing asset: %v", err)
 	}
-	dc.cfg.Assets = cfgAssets
+	dc.cfg.Fee = tFee // next connect will patch up RegFees
 	dc.cfg.Markets = mkts
 
 	// error creating signing key
@@ -1734,6 +1704,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
+	getFeeAndBalanceNote() // account registered
 
 	// Account recovery testing below doesn't apply to legacy servers.
 	if legacyKeys {
@@ -1755,6 +1726,8 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		t.Fatalf("Pre-paid Register error: %v", err)
 	}
 
+	// no fee payment notes
+
 	// Account suspended should force legacy credentials..
 	clearConn()
 	rig.queueConfig()
@@ -1767,7 +1740,7 @@ func testRegister(t *testing.T, legacyKeys bool) {
 		f(accountExistsResp)
 		return nil
 	})
-	queueResponses() // Queing an extra config response here, but we're done anyway.
+	queueResponses() // Queueing an extra config response here, but we're done anyway.
 
 	_, err = tCore.Register(form)
 	if err != nil {
@@ -1777,6 +1750,8 @@ func testRegister(t *testing.T, legacyKeys bool) {
 	if len(rig.db.acct.EncKeyV2) != 0 || len(rig.db.acct.LegacyEncKey) == 0 {
 		t.Fatalf("Keys not generated correctly for suspended account. %d %d", len(rig.db.acct.EncKeyV2), len(rig.db.acct.LegacyEncKey))
 	}
+	getFeeAndBalanceNote() // payment in progress
+	getFeeAndBalanceNote() // account registered
 }
 
 func TestCredentialsUpgrade(t *testing.T) {

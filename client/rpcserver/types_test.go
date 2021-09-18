@@ -252,7 +252,7 @@ func TestCheckBoolArg(t *testing.T) {
 	}
 }
 
-func TestParseGetFeeArgs(t *testing.T) {
+func TestParseGetDEXConfigArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		params  *RawParams
@@ -265,7 +265,7 @@ func TestParseGetFeeArgs(t *testing.T) {
 		params: &RawParams{PWArgs: nil, Args: []string{"host"}},
 	}}
 	for _, test := range tests {
-		host, cert, err := parseGetFeeArgs(test.params)
+		host, cert, err := parseGetDEXConfigArgs(test.params)
 		if test.wantErr != nil {
 			if errors.Is(err, test.wantErr) {
 				continue
@@ -285,10 +285,10 @@ func TestParseGetFeeArgs(t *testing.T) {
 }
 
 func TestParseRegisterArgs(t *testing.T) {
-	paramsWithFee := func(fee string) *RawParams {
+	paramsWithFee := func(fee, assetID string) *RawParams {
 		pw := encode.PassBytes("password123")
 		pwArgs := []encode.PassBytes{pw}
-		args := []string{"dex", fee, "cert"}
+		args := []string{"dex", fee, assetID, "cert"}
 		return &RawParams{PWArgs: pwArgs, Args: args}
 	}
 	tests := []struct {
@@ -297,10 +297,14 @@ func TestParseRegisterArgs(t *testing.T) {
 		wantErr error
 	}{{
 		name:   "ok",
-		params: paramsWithFee("1000"),
+		params: paramsWithFee("1000", "42"),
 	}, {
 		name:    "fee not int",
-		params:  paramsWithFee("1000.0"),
+		params:  paramsWithFee("1000.0", "42"),
+		wantErr: errArgs,
+	}, {
+		name:    "asset not int",
+		params:  paramsWithFee("1000", "asdf"),
 		wantErr: errArgs,
 	}}
 	for _, test := range tests {
@@ -323,7 +327,10 @@ func TestParseRegisterArgs(t *testing.T) {
 		if fmt.Sprint(reg.Fee) != test.params.Args[1] {
 			t.Fatalf("fee doesn't match")
 		}
-		if string(reg.Cert.([]byte)) != test.params.Args[2] {
+		if fmt.Sprint(*reg.Asset) != test.params.Args[2] {
+			t.Fatalf("assetID doesn't match")
+		}
+		if string(reg.Cert.([]byte)) != test.params.Args[3] {
 			t.Fatalf("cert doesn't match")
 		}
 	}

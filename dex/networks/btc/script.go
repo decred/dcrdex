@@ -372,6 +372,31 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	return txOut.Value/(3*int64(totalSize)) < int64(minRelayTxFee)
 }
 
+// ExtractScriptData extracts script type, addresses, and required signature
+// count from a pkScript. Non-standard scripts are not necessarily an error;
+// non-nil errors are only returned if the script cannot be parsed. See also
+// InputInfo for additional signature script size data
+func ExtractScriptData(script []byte, chainParams *chaincfg.Params) (BTCScriptType, []string, int, error) {
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
+	if err != nil {
+		return ScriptUnsupported, nil, 0, err
+	}
+	if class == txscript.NonStandardTy {
+		return ScriptUnsupported, nil, 0, nil
+	}
+
+	// Could switch on class from ExtractPkScriptAddrs, but use ParseScriptType
+	// for internal consistency.
+	scriptType := ParseScriptType(script, nil)
+
+	addresses := make([]string, len(addrs))
+	for i, addr := range addrs {
+		addresses[i] = addr.String()
+	}
+
+	return scriptType, addresses, numRequired, nil
+}
+
 // BtcScriptAddrs is information about the pubkeys or pubkey hashes present in
 // a scriptPubKey (and the redeem script, for p2sh). This information can be
 // used to estimate the spend script size, e.g. pubkeys in a redeem script don't

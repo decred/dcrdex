@@ -52,6 +52,13 @@ type PreimageResult struct {
 	ID   order.OrderID
 }
 
+// KeyIndexer are the functions required to track an extended public key and
+// derived children by index.
+type KeyIndexer interface {
+	KeyIndex(xpub string) (uint32, error)
+	SetKeyIndex(idx uint32, xpub string) error
+}
+
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
 type DEXArchivist interface {
@@ -75,6 +82,7 @@ type DEXArchivist interface {
 
 	OrderArchiver
 	AccountArchiver
+	KeyIndexer
 	MatchArchiver
 	SwapArchiver
 }
@@ -210,12 +218,14 @@ type AccountArchiver interface {
 	// will be returned for unknown or closed accounts.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 
-	// CreateAccount stores a new account. The account is considered unpaid until
-	// PayAccount is used to set the payment details.
-	CreateAccount(*account.Account) (string, error)
+	// CreateAccount stores a new account with an assigned registration address
+	// for a specific asset. The account is considered unpaid until PayAccount
+	// is used to set the payment transaction details.
+	CreateAccount(acct *account.Account, assetID uint32, regAddr string) error
 
-	// AccountRegAddr gets the registration fee address assigned to the account.
-	AccountRegAddr(account.AccountID) (string, error)
+	// AccountRegAddr gets the registration fee address and the corresponding
+	// asset ID for the account.
+	AccountRegAddr(account.AccountID) (string, uint32, error)
 
 	// PayAccount sets the registration fee payment transaction details for the
 	// account, completing the registration process.

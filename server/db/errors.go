@@ -56,6 +56,9 @@ const (
 	ErrUpdateCount
 	ErrAccountExists
 	ErrAccountSuspended
+	ErrAccountUnknown
+	ErrAccountBadFeeInfo
+	ErrUnknownFeeKey
 )
 
 func (ae ArchiveError) Error() string {
@@ -81,6 +84,12 @@ func (ae ArchiveError) Error() string {
 		desc = "account already exists"
 	case ErrAccountSuspended:
 		desc = "account suspended"
+	case ErrAccountUnknown:
+		desc = "account unknown"
+	case ErrAccountBadFeeInfo:
+		desc = "mismatching fee address or asset"
+	case ErrUnknownFeeKey:
+		desc = "unknown fee key"
 	}
 
 	if ae.Detail == "" {
@@ -154,4 +163,18 @@ func IsErrOrderNotExecuted(err error) bool {
 func IsErrUpdateCount(err error) bool {
 	var errA ArchiveError
 	return errors.As(err, &errA) && errA.Code == ErrUpdateCount
+}
+
+// IsErrAccountUnknown returns true if the error is of type ArchiveError and has
+// code ErrAccountUnknown.
+func IsErrAccountUnknown(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrAccountUnknown
+}
+
+// IsErrUnknownFeeKey returns true if the error is of type ArchiveError and has
+// code ErrUnknownFeeKey.
+func IsErrUnknownFeeKey(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrUnknownFeeKey
 }

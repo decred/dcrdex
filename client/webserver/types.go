@@ -48,6 +48,7 @@ type registrationForm struct {
 	Cert     string           `json:"cert"`
 	Password encode.PassBytes `json:"pass"`
 	Fee      uint64           `json:"fee"`
+	AssetID  *uint32          `json:"asset,omitempty"` // prevent out-of-date frontend from paying fee in BTC
 }
 
 // newWalletForm is information necessary to create a new wallet.

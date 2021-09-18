@@ -76,6 +76,7 @@ const (
 	AccountSuspendedError             // 57
 	RPCExportSeedError                // 58
 	TooManyRequestsError              // 59
+	RPCGetDEXConfigError              // 60
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -927,38 +928,48 @@ func (n *PenaltyNote) Serialize() []byte {
 // Register is the payload for the RegisterRoute request.
 type Register struct {
 	Signature
-	PubKey Bytes  `json:"pubkey"`
-	Time   uint64 `json:"timestamp"`
+	PubKey Bytes   `json:"pubkey"`
+	Time   uint64  `json:"timestamp"`
+	Asset  *uint32 `json:"feeAsset,omitempty"` // default to 42 if not set by client
 }
 
 // Serialize serializes the Register data.
 func (r *Register) Serialize() []byte {
-	// serialization: pubkey (33) + time (8) = 41
-	s := make([]byte, 0, 41)
+	// serialization: pubkey (33) + time (8) + asset (4 if set) = 45
+	s := make([]byte, 0, 45)
 	s = append(s, r.PubKey...)
-	return append(s, uint64Bytes(r.Time)...)
+	s = append(s, uint64Bytes(r.Time)...)
+	if r.Asset != nil {
+		s = append(s, uint32Bytes(*r.Asset)...)
+	}
+	return s
 }
 
 // RegisterResult is the result for the response to Register.
 type RegisterResult struct {
 	Signature
-	DEXPubKey    Bytes  `json:"pubkey"`
-	ClientPubKey Bytes  `json:"-"`
-	Address      string `json:"address"`
-	Fee          uint64 `json:"fee"`
-	Time         uint64 `json:"timestamp"`
+	DEXPubKey    Bytes   `json:"pubkey"`
+	ClientPubKey Bytes   `json:"-"`
+	AssetID      *uint32 `json:"feeAsset,omitempty"` // default to 42 if not set by server
+	Address      string  `json:"address"`
+	Fee          uint64  `json:"fee"`
+	Time         uint64  `json:"timestamp"`
 }
 
 // Serialize serializes the RegisterResult data.
 func (r *RegisterResult) Serialize() []byte {
 	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
-	// address (35-ish) = 117
-	b := make([]byte, 0, 117)
+	// address (35-ish) + asset (4 if set) = 121
+	b := make([]byte, 0, 121)
 	b = append(b, r.DEXPubKey...)
 	b = append(b, r.ClientPubKey...)
 	b = append(b, uint64Bytes(r.Time)...)
 	b = append(b, uint64Bytes(r.Fee)...)
-	return append(b, []byte(r.Address)...)
+	b = append(b, []byte(r.Address)...)
+	if r.AssetID != nil {
+		b = append(b, uint32Bytes(*r.AssetID)...)
+	}
+	return b
 }
 
 // NotifyFee is the payload for a client-originating NotifyFeeRoute request.
@@ -1037,17 +1048,26 @@ type Asset struct {
 	SwapConf     uint16 `json:"swapconf"`
 }
 
+// FeeAsset describes an asset for which registration fees are supported.
+type FeeAsset struct {
+	ID    uint32 `json:"id"`
+	Confs uint32 `json:"confs"`
+	Amt   uint64 `json:"amount"`
+}
+
 // ConfigResult is the successful result for the ConfigRoute.
 type ConfigResult struct {
 	CancelMax        float64   `json:"cancelmax"`
 	BroadcastTimeout uint64    `json:"btimeout"`
-	RegFeeConfirms   uint16    `json:"regfeeconfirms"`
+	RegFeeConfirms   uint16    `json:"regfeeconfirms"` // DEPRECATED
 	Assets           []*Asset  `json:"assets"`
 	Markets          []*Market `json:"markets"`
-	Fee              uint64    `json:"fee"`
+	Fee              uint64    `json:"fee"` // DEPRECATED
 	APIVersion       uint16    `json:"apiver"`
 	BinSizes         []string  `json:"binSizes"` // Just apidata.BinSizes for now.
 	DEXPubKey        Bytes     `json:"pubkey"`
+
+	RegFees map[string]*FeeAsset `json:"regFees"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot
