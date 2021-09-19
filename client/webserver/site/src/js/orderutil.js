@@ -76,7 +76,7 @@ export function statusString (order) {
 /* settled sums the quantities of the matches that have completed. */
 export function settled (order) {
   if (!order.matches) return 0
-  const qty = isMarketBuy(order) ? m => m.qty * m.rate * 1e-8 : m => m.qty
+  const qty = isMarketBuy(order) ? m => m.qty * m.rate / RateEncodingFactor : m => m.qty
   return order.matches.reduce((settled, match) => {
     if (match.isCancel) return settled
     const redeemed = (match.side === Maker && match.status >= MakerRedeemed) ||

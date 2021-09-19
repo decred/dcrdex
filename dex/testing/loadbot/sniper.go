@@ -89,7 +89,7 @@ func (s *sniper) snipe(m *Mantle) {
 		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
 	}
 	for _, ord := range targets {
-		qty := ord.Qty
+		qty := ord.QtyAtomic
 		if !sell {
 			if qty/lotSize == 1 {
 				qty *= 2

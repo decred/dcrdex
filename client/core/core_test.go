@@ -1275,7 +1275,7 @@ func TestBookFeed(t *testing.T) {
 	// feed2 should have an update
 	checkAction(feed2, UpdateRemainingAction)
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
-	firstSellQty := book.Sells[0].Qty
+	firstSellQty := book.Sells[0].QtyAtomic
 	if firstSellQty != remaining {
 		t.Fatalf("expected remaining quantity of 500000000 after update_remaining. got %d", firstSellQty)
 	}

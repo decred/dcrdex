@@ -626,10 +626,13 @@ export default class MarketsPage extends BasePage {
   reportDepthVolume (d) {
     const page = this.page
     const { base, quote } = this.market
-    page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase, base.info.unitinfo)
-    page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote, quote.info.unitinfo)
-    page.buyBookedBase.textContent = Doc.formatCoinValue(d.buyBase, base.info.unitinfo)
-    page.buyBookedQuote.textContent = Doc.formatCoinValue(d.buyQuote, quote.info.unitinfo)
+    const [b, q] = [base.info.unitinfo, quote.info.unitinfo]
+    // DepthChart reports volumes in conventional units. We'll still use
+    // formatCoinValue for formatting though.
+    page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase * b.conventional.conversionFactor, b)
+    page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote * q.conventional.conversionFactor, q)
+    page.buyBookedBase.textContent = Doc.formatCoinValue(d.buyBase * b.conventional.conversionFactor, b)
+    page.buyBookedQuote.textContent = Doc.formatCoinValue(d.buyQuote * q.conventional.conversionFactor, q)
   }
 
   /*
@@ -725,7 +728,7 @@ export default class MarketsPage extends BasePage {
     this.depthLines.input = []
     if (adjusted && this.isLimit()) {
       this.depthLines.input = [{
-        rate: order.rate,
+        rate: order.rate / this.market.rateConversionFactor,
         color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
       }]
     }
@@ -736,7 +739,7 @@ export default class MarketsPage extends BasePage {
       return
     }
     const quoteAsset = app.assets[order.quote]
-    const total = Doc.formatCoinValue(order.rate / Order.RateEncodingFactor * order.qty, quoteAsset.info.unitinfo)
+    const total = order.rate * order.qty
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
     else this.preBuy()
@@ -898,22 +901,34 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
+   * midGapConventional is the same as midGap, but returns the mid-gap rate as
+   * the conventional ratio. This is used to convert from a conventional
+   * quantity from base to quote or vice-versa.
+   */
+  midGapConventional () {
+    const gap = this.midGap()
+    if (!gap) return gap
+    const { base, quote } = this.market
+    return gap * base.info.unitinfo.conventional.conversionFactor / quote.info.unitinfo.conventional.conversionFactor
+  }
+
+  /*
    * midGap returns the value in the middle of the best buy and best sell. If
-   * either one of the buy or sell sides are empty, midGap returns the best
-   * rate from the other side. If both sides are empty, midGap returns the
-   * value null.
+   * either one of the buy or sell sides are empty, midGap returns the best rate
+   * from the other side. If both sides are empty, midGap returns the value
+   * null. The rate returned is the atomic ratio.
    */
   midGap () {
     const book = this.book
     if (!book) return
     if (book.buys && book.buys.length) {
       if (book.sells && book.sells.length) {
-        return (book.buys[0].rate + book.sells[0].rate) / 2
+        return (book.buys[0].msgRate + book.sells[0].msgRate) / 2 / Order.RateEncodingFactor
       }
-      return book.buys[0].rate
+      return book.buys[0].msgRate / Order.RateEncodingFactor
     }
     if (book.sells && book.sells.length) {
-      return book.sells[0].rate
+      return book.sells[0].msgRate / Order.RateEncodingFactor
     }
     return null
   }
@@ -927,7 +942,7 @@ export default class MarketsPage extends BasePage {
     const lotSize = market.cfg.lotsize
     const xc = app.user.exchanges[market.dex.host]
     const buffer = xc.markets[market.sid].buybuffer
-    const gap = this.midGap()
+    const gap = this.midGapConventional()
     if (gap) {
       this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, market.base.info.unitinfo)
     }
@@ -1025,17 +1040,18 @@ export default class MarketsPage extends BasePage {
       buys: [],
       sells: []
     }
+    const rateFactor = this.market.rateConversionFactor
     for (const mo of Object.values(this.metaOrders)) {
       const ord = mo.order
       if (ord.rate && ord.status === Order.StatusBooked) {
         if (ord.sell) {
           markers.sells.push({
-            rate: ord.rate,
+            rate: ord.rate / rateFactor,
             active: ord.rate === this.activeMarkerRate
           })
         } else {
           markers.buys.push({
-            rate: ord.rate,
+            rate: ord.rate / rateFactor,
             active: ord.rate === this.activeMarkerRate
           })
         }
@@ -1051,7 +1067,7 @@ export default class MarketsPage extends BasePage {
   updateTitle () {
     // gets first price value from buy or from sell, so we can show it on
     // title.
-    const midGapValue = this.midGap()
+    const midGapValue = this.midGapConventional()
     if (!midGapValue) return
 
     const market = this.market
@@ -1059,7 +1075,7 @@ export default class MarketsPage extends BasePage {
     const baseSymb = b.symbol.toUpperCase()
     const quoteSymb = q.symbol.toUpperCase()
     // more than 6 numbers it gets too big for the title.
-    document.title = `${midGapValue.toFixed(6)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
+    document.title = `${Doc.formatCoinValue(midGapValue)} | ${baseSymb}${quoteSymb} | ${this.ogTitle}`
   }
 
   /* handleBookRoute is the handler for the 'book' notification, which is sent
@@ -1132,7 +1148,7 @@ export default class MarketsPage extends BasePage {
     app.log('book', 'handleUpdateRemainingRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const update = data.payload
-    this.book.updateRemaining(update.token, update.qty)
+    this.book.updateRemaining(update.token, update.qty, update.qtyAtomic)
     this.updateTableOrder(update)
     this.depthChart.draw()
   }
@@ -1142,8 +1158,8 @@ export default class MarketsPage extends BasePage {
     app.log('book', 'handleEpochOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
-    if (order.rate > 0) this.book.add(order) // No cancels or market orders
-    if (order.qty > 0) this.addTableOrder(order) // No cancel orders
+    if (order.msgRate > 0) this.book.add(order) // No cancels or market orders
+    if (order.qtyAtomic > 0) this.addTableOrder(order) // No cancel orders
     this.depthChart.draw()
   }
 
@@ -1567,10 +1583,10 @@ export default class MarketsPage extends BasePage {
       return
     }
     const order = this.parseOrder()
-    const r = (adjusted / this.market.rateConversionFactor)
+    const r = adjusted / this.market.rateConversionFactor
     this.page.rateField.value = r
     this.depthLines.input = [{
-      rate: adjusted,
+      rate: r,
       color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
     }]
     this.drawChartLines()
@@ -1604,16 +1620,16 @@ export default class MarketsPage extends BasePage {
     const bins = []
     let currEpochBin = []
     let currNonEpochBin = []
-    let currRate = orders[0].rate
+    let currRate = orders[0].msgRate
     if (orders[0].epoch) currEpochBin.push(orders[0])
     else currNonEpochBin.push(orders[0])
     for (let i = 1; i < orders.length; i++) {
-      if (orders[i].rate !== currRate) {
+      if (orders[i].msgRate !== currRate) {
         bins.push(currNonEpochBin)
         bins.push(currEpochBin)
         currEpochBin = []
         currNonEpochBin = []
-        currRate = orders[i].rate
+        currRate = orders[i].msgRate
       }
       if (orders[i].epoch) currEpochBin.push(orders[i])
       else currNonEpochBin.push(orders[i])
@@ -1679,11 +1695,9 @@ export default class MarketsPage extends BasePage {
 
   /* updateTableOrder looks for the order in the table and updates the qty */
   updateTableOrder (update) {
-    const token = update.token
-    const qty = update.qty
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
-        if (tr.manager.updateOrderQty(token, qty)) {
+        if (tr.manager.updateOrderQty(update)) {
           return
         }
       }
@@ -1724,7 +1738,7 @@ export default class MarketsPage extends BasePage {
       Doc.bind(tr, 'mouseenter', e => {
         const chart = this.depthChart
         this.depthLines.hover = [{
-          rate: tr.manager.getRate(),
+          rate: tr.manager.getRate() / rateConversionFactor,
           color: tr.manager.isSell() ? chart.theme.sellLine : chart.theme.buyLine
         }]
         this.drawChartLines()
@@ -2218,7 +2232,7 @@ class OrderTableRowManager {
     this.tableRow = tableRow
     this.orderBin = orderBin
     this.sell = orderBin[0].sell
-    this.rate = orderBin[0].rate
+    this.msgRate = orderBin[0].msgRate
     this.epoch = !!orderBin[0].epoch
     this.baseUnitInfo = baseUnitInfo
     this.rateConversionFactor = rateConversionFactor
@@ -2237,11 +2251,11 @@ class OrderTableRowManager {
   // setRateEl popuplates the rate element in the row.
   setRateEl () {
     const rateEl = Doc.tmplElement(this.tableRow, 'rate')
-    if (this.rate === 0) {
+    if (this.msgRate === 0) {
       rateEl.innerText = 'market'
     } else {
       const cssClass = this.isSell() ? 'sellcolor' : 'buycolor'
-      rateEl.innerText = Doc.formatFullPrecision(this.rate / this.rateConversionFactor)
+      rateEl.innerText = Doc.formatFullPrecision(this.msgRate / this.rateConversionFactor)
       rateEl.classList.add(cssClass)
     }
   }
@@ -2250,7 +2264,7 @@ class OrderTableRowManager {
   // displays the number of orders if there is more than one order in the order
   // bin.
   updateQtyNumOrdersEl () {
-    const qty = this.orderBin.reduce((total, curr) => total + curr.qty, 0)
+    const qty = this.orderBin.reduce((total, curr) => total + curr.qtyAtomic, 0)
     const numOrders = this.orderBin.length
     const qtyEl = Doc.tmplElement(this.tableRow, 'qty')
     const numOrdersEl = Doc.tmplElement(this.tableRow, 'numorders')
@@ -2274,10 +2288,12 @@ class OrderTableRowManager {
   // updateOrderQuantity updates the quantity of the order identified by a token,
   // if it exists in the row, and updates the row elements accordingly. The function
   // returns true if the order is in the bin, and false otherwise.
-  updateOrderQty (token, qty) {
+  updateOrderQty (update) {
+    const { token, qty, qtyAtomic } = update
     for (let i = 0; i < this.orderBin.length; i++) {
       if (this.orderBin[i].token === token) {
         this.orderBin[i].qty = qty
+        this.orderBin[i].qtyAtomic = qtyAtomic
         this.updateQtyNumOrdersEl()
         return true
       }
@@ -2310,7 +2326,7 @@ class OrderTableRowManager {
 
   // getRate returns the rate of the orders in the row.
   getRate () {
-    return this.rate
+    return this.msgRate
   }
 
   // isEpoch returns whether the orders in this row are in the epoch queue.
@@ -2329,10 +2345,10 @@ class OrderTableRowManager {
   // buy orders are displayed in descending order, and epoch orders always come
   // after booked orders.
   compare (order) {
-    if (this.getRate() === order.rate && this.isEpoch() === !!order.epoch) {
+    if (this.getRate() === order.msgRate && this.isEpoch() === !!order.epoch) {
       return 0
-    } else if (this.getRate() !== order.rate) {
-      return (this.getRate() > order.rate) === order.sell ? 1 : -1
+    } else if (this.getRate() !== order.msgRate) {
+      return (this.getRate() > order.msgRate) === order.sell ? 1 : -1
     } else {
       return this.isEpoch() ? 1 : -1
     }

@@ -3,7 +3,11 @@
 
 package calc
 
-import "math/big"
+import (
+	"math/big"
+
+	"decred.org/dcrdex/dex"
+)
 
 // RateEncodingFactor is used when encoding an exchange rate as an integer.
 // https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding
@@ -36,4 +40,17 @@ func QuoteToBase(rate uint64, quote uint64) (base uint64) {
 	bigQuote.Mul(bigQuote, bigRateConversionFactor)
 	bigQuote.Div(bigQuote, bigRate)
 	return bigQuote.Uint64()
+}
+
+// ConventionalRate converts an exchange rate in message-rate encoding to a
+// conventional exchange rate, using the base and quote assets' UnitInfo.
+func ConventionalRate(msgRate uint64, baseInfo, quoteInfo dex.UnitInfo) float64 {
+	return ConventionalRateAlt(msgRate, baseInfo.Conventional.ConversionFactor, quoteInfo.Conventional.ConversionFactor)
+}
+
+// ConventionalRateAlt converts an exchange rate in message-rate encoding to a
+// conventional exchange rate using the base and quote assets' conventional
+// conversion factors.
+func ConventionalRateAlt(msgRate uint64, baseFactor, quoteFactor uint64) float64 {
+	return float64(msgRate) / RateEncodingFactor * float64(baseFactor) / float64(quoteFactor)
 }

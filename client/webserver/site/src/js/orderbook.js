@@ -42,19 +42,20 @@ export default class OrderBook {
   }
 
   /* updates the remaining quantity of an order. */
-  updateRemaining (token, qty) {
-    if (this.updateRemainingSide(this.sells, token, qty)) return
-    this.updateRemainingSide(this.buys, token, qty)
+  updateRemaining (token, qty, qtyAtomic) {
+    if (this.updateRemainingSide(this.sells, token, qty, qtyAtomic)) return
+    this.updateRemainingSide(this.buys, token, qty, qtyAtomic)
   }
 
   /*
    * updateRemainingSide looks for the order in the side and updates the
    * quantity, returning true on success, false if order not found.
    */
-  updateRemainingSide (side, token, qty) {
+  updateRemainingSide (side, token, qty, qtyAtomic) {
     const ord = this.findOrder(side, token)[0]
     if (ord) {
       ord.qty = qty
+      ord.qtyAtomic = qtyAtomic
       return true
     }
     return false

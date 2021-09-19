@@ -363,7 +363,7 @@ func mustJSON(thing interface{}) string {
 
 // Convert the conventional units value to atoms/sats.
 func encodeRate(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // valString returns a string representation of the value in conventional

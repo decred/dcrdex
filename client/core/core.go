@@ -3930,11 +3930,10 @@ type walletSet struct {
 	quoteWallet *xcWallet
 }
 
-func (w *walletSet) conventionalRate(atomicRate uint64) float64 {
-	atomicRatio := float64(atomicRate) / calc.RateEncodingFactor
-	baseFactor := float64(w.baseWallet.Info().UnitInfo.Conventional.ConversionFactor)
-	quoteFactor := float64(w.quoteWallet.Info().UnitInfo.Conventional.ConversionFactor)
-	return atomicRatio * (baseFactor / quoteFactor)
+// conventionalRate converts the message-rate encoded rate to a rate in
+// conventional units.
+func (w *walletSet) conventionalRate(msgRate uint64) float64 {
+	return calc.ConventionalRate(msgRate, w.baseWallet.Info().UnitInfo, w.quoteWallet.Info().UnitInfo)
 }
 
 // walletSet constructs a walletSet.

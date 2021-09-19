@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 )
@@ -53,6 +54,7 @@ var (
 	randomPokes           = false
 	randomNotes           = false
 	numUserOrders         = 10
+	conversionFactor      = dexbtc.UnitInfo.Conventional.ConversionFactor
 )
 
 func dummySettings() map[string]string {
@@ -215,7 +217,7 @@ func getEpoch() uint64 {
 	return encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
 }
 
-func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.SimpleOrder {
+func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.MiniOrder {
 	var epochIdx uint64
 	var rate float64
 	var limitRate = midGap - rand.Float64()*marketWidth
@@ -232,26 +234,32 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 		rate = limitRate
 	}
 
-	return &core.SimpleOrder{
-		Qty:   uint64(math.Exp(-rand.Float64()*5) * maxQty),
-		Rate:  uint64(rate),
-		Sell:  sell,
-		Token: nextToken(),
-		Epoch: epochIdx,
+	qty := uint64(math.Exp(-rand.Float64()*5) * maxQty)
+
+	return &core.MiniOrder{
+		Qty:       float64(qty) / float64(conversionFactor),
+		QtyAtomic: qty,
+		Rate:      float64(rate) / float64(conversionFactor),
+		MsgRate:   uint64(rate),
+		Sell:      sell,
+		Token:     nextToken(),
+		Epoch:     epochIdx,
 	}
 }
 
-func miniOrderFromCoreOrder(ord *core.Order) *core.SimpleOrder {
+func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
 	var epoch uint64 = 555
 	if ord.Status > order.OrderStatusEpoch {
 		epoch = 0
 	}
-	return &core.SimpleOrder{
-		Qty:   ord.Qty,
-		Rate:  ord.Rate,
-		Sell:  ord.Sell,
-		Token: ord.ID[:4].String(),
-		Epoch: epoch,
+	return &core.MiniOrder{
+		Qty:       float64(ord.Qty) / float64(conversionFactor),
+		QtyAtomic: ord.Qty,
+		Rate:      float64(ord.Rate) / float64(conversionFactor),
+		MsgRate:   ord.Rate,
+		Sell:      ord.Sell,
+		Token:     ord.ID[:4].String(),
+		Epoch:     epoch,
 	}
 }
 
@@ -361,8 +369,8 @@ type TCore struct {
 
 	bookFeed    *tBookFeed
 	killFeed    context.CancelFunc
-	buys        map[string]*core.SimpleOrder
-	sells       map[string]*core.SimpleOrder
+	buys        map[string]*core.MiniOrder
+	sells       map[string]*core.MiniOrder
 	noteFeed    chan core.Notification
 	orderMtx    sync.Mutex
 	epochOrders []*core.BookUpdate
@@ -469,7 +477,7 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := ord.Qty
+	qty := ord.QtyAtomic
 	quoteQty := calc.BaseToQuote(rate, qty)
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
@@ -492,7 +500,7 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := ord.Qty
+	qty := ord.QtyAtomic
 
 	quoteQty := calc.BaseToQuote(uint64(midGap), qty)
 
@@ -751,7 +759,7 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 						Action:   msgjson.UnbookOrderRoute,
 						Host:     c.dexAddr,
 						MarketID: mktID,
-						Payload:  &core.SimpleOrder{Token: tkn},
+						Payload:  &core.MiniOrder{Token: tkn},
 					})
 				}
 
@@ -885,10 +893,10 @@ func nextToken() string {
 func (c *TCore) book(dexAddr, mktID string) *core.OrderBook {
 	midGap, maxQty := getMarketStats(mktID)
 	// Set the market width to about 5% of midGap.
-	var buys, sells []*core.SimpleOrder
+	var buys, sells []*core.MiniOrder
 	c.orderMtx.Lock()
-	c.buys = make(map[string]*core.SimpleOrder, numBuys)
-	c.sells = make(map[string]*core.SimpleOrder, numSells)
+	c.buys = make(map[string]*core.MiniOrder, numBuys)
+	c.sells = make(map[string]*core.MiniOrder, numSells)
 	c.epochOrders = nil
 
 	mkt := tExchanges[dexAddr].Markets[mktID]
@@ -1265,7 +1273,7 @@ out:
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
-				miniOrder := o.Payload.(*core.SimpleOrder)
+				miniOrder := o.Payload.(*core.MiniOrder)
 				if miniOrder.Rate > 0 {
 					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute

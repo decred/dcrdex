@@ -70,8 +70,9 @@ const (
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker = time.Second
-	configOpts  = []*asset.ConfigOption{
+	blockTicker                  = time.Second
+	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
+	configOpts                   = []*asset.ConfigOption{
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
@@ -2683,7 +2684,7 @@ func (btc *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 
 // Convert the BTC value to satoshi.
 func toSatoshi(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime

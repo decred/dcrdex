@@ -26,7 +26,6 @@ const (
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
-
 	// Version is the Wallet's version number, which is used to signal when
 	// major changes are made to internal details such as coin ID encoding and
 	// contract structure that must be common to a server's.
