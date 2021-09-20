@@ -467,14 +467,14 @@ export default class MarketsPage extends BasePage {
 
     const pending = dex.pendingFee
     if (!pending) {
-      this.setRegistrationStatusView('Registration fee payment successful!', '', 'completed')
+      this.setRegistrationStatusView(intl.prep(intl.ID_REGISTRATION_FEE_SUCCESS), '', 'completed')
       return
     }
 
     const confirmationsRequired = dex.regFees[pending.symbol].confs
     page.confReq.textContent = confirmationsRequired
     const confStatusMsg = `${pending.confs} / ${confirmationsRequired}`
-    this.setRegistrationStatusView('Waiting for confirmations...', confStatusMsg, 'waiting')
+    this.setRegistrationStatusView(intl.prep(intl.ID_WAITING_FOR_CONFS), confStatusMsg, 'waiting')
   }
 
   /*
