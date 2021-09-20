@@ -39,7 +39,7 @@
       {{template "newWalletForm" "Sua carteira decred é necessária para pagar a taxa de registro."}}
     </form>
 
-    {{- /* Unlock Decred wallet. Only shown if not already unlocked. */ -}}
+    {{- /* Unlock wallet. Only shown if not already unlocked. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
       {{template "unlockWalletForm" "Desbloqueie sua carteira decred para pagamento da taxa."}}
     </form>

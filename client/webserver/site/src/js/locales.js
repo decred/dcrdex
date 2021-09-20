@@ -35,8 +35,11 @@ export const ID_SETTLING = 'ID_SETTLING'
 export const ID_NO_MATCH = 'ID_NO_MATCH'
 export const ID_CANCELED = 'ID_CANCELED'
 export const ID_REVOKED = 'ID_REVOKED'
+export const ID_WAITING_FOR_CONFS = 'ID_WAITING_FOR_CONFS'
+export const ID_NONE_SELECTED = 'ID_NONE_SELECTED'
+export const ID_REGISTRATION_FEE_SUCCESS = 'ID_REGISTRATION_FEE_SUCCESS'
 
-export const templateKeys = {
+export const enUS = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
   [ID_NO_APP_PASS_ERROR_MSG]: 'app password cannot be empty',
   [ID_PASSWORD_NOT_MATCH]: 'passwords do not match',
@@ -73,10 +76,13 @@ export const templateKeys = {
   [ID_SETTLING]: 'settling',
   [ID_NO_MATCH]: 'no match',
   [ID_CANCELED]: 'canceled',
-  [ID_REVOKED]: 'revoked'
+  [ID_REVOKED]: 'revoked',
+  [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...',
+  [ID_NONE_SELECTED]: 'none selected',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!'
 }
 
-export const templateKeysPT = {
+export const ptBR = {
   [ID_NO_PASS_ERROR_MSG]: 'senha não pode ser vazia',
   [ID_NO_APP_PASS_ERROR_MSG]: 'senha do app não pode ser vazia',
   [ID_PASSWORD_NOT_MATCH]: 'senhas diferentes',
@@ -113,12 +119,15 @@ export const templateKeysPT = {
   [ID_SETTLING]: 'assentando',
   [ID_NO_MATCH]: 'sem combinações',
   [ID_CANCELED]: 'cancelado',
-  [ID_REVOKED]: 'revocado'
+  [ID_REVOKED]: 'revocado',
+  [ID_WAITING_FOR_CONFS]: 'Esperando confirmações...',
+  [ID_NONE_SELECTED]: 'nenhuma selecionado',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!'
 }
 
 const localesMap = {
-  'en-us': templateKeys,
-  'pt-br': templateKeysPT
+  'en-us': enUS,
+  'pt-br': ptBR
 }
 
 /* locale will hold the locale loaded via setLocale. */
