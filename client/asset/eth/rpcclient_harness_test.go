@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,10 +41,13 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
 	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -376,7 +380,21 @@ func TestInitiateGas(t *testing.T) {
 	now := time.Now().Unix()
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	gas, err := ethClient.initiateGas(ctx, now, secretHash, &participantAddr, &contractAddr)
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+	data, err := parsedAbi.Pack("initiate", big.NewInt(now), secretHash, &participantAddr)
+	if err != nil {
+		t.Fatalf("unexpected error packing abi: %v", err)
+	}
+	msg := ethereum.CallMsg{
+		From: participantAddr,
+		To:   &contractAddr,
+		Gas:  0,
+		Data: data,
+	}
+	gas, err := ethClient.initiateGas(ctx, msg)
 	if err != nil {
 		t.Fatalf("unexpected error from initiateGas: %v", err)
 	}
@@ -489,7 +507,22 @@ func TestRedeemGas(t *testing.T) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	gas, err := ethClient.redeemGas(ctx, secret, secretHash, &participantAddr, &contractAddr)
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+
+	data, err := parsedAbi.Pack("redeem", secret, secretHash)
+	if err != nil {
+		t.Fatalf("unexpected error packing abi: %v", err)
+	}
+	msg := ethereum.CallMsg{
+		From: participantAddr,
+		To:   &contractAddr,
+		Gas:  0,
+		Data: data,
+	}
+	gas, err := ethClient.redeemGas(ctx, msg)
 	if err != nil {
 		t.Fatalf("Error getting gas for redeem function: %v", err)
 	}

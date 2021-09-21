@@ -24,6 +24,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -120,7 +121,7 @@ type ethFetcher interface {
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
-	initiateGas(ctx context.Context, refundTimestamp int64, secretHash [32]byte, participant, contractAddress *common.Address) (uint64, error)
+	initiateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -296,6 +297,28 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return bal, nil
 }
 
+// getInitGas gets an estimate for the gas required for initiating a swap.
+func (eth *ExchangeWallet) getInitGas() (uint64, error) {
+	now := time.Now().Unix()
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		return 0, err
+	}
+	data, err := parsedAbi.Pack("initiate", big.NewInt(now), secretHash, &eth.acct.Address)
+	if err != nil {
+		return 0, err
+	}
+	msg := ethereum.CallMsg{
+		From: eth.acct.Address,
+		To:   &mainnetContractAddr,
+		Gas:  0,
+		Data: data,
+	}
+	return eth.node.initiateGas(eth.ctx, msg)
+}
+
 // MaxOrder generates information about the maximum order size and associated
 // fees that the wallet can support for the given DEX configuration. The fees are an
 // estimate based on current network conditions, and will be <= the fees
@@ -306,10 +329,7 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().Unix()
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	initGas, err := eth.node.initiateGas(eth.ctx, now, secretHash, &eth.acct.Address, &mainnetContractAddr)
+	initGas, err := eth.getInitGas()
 	if err != nil {
 		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
 		initGas = nfo.SwapSize

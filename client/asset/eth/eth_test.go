@@ -119,7 +119,7 @@ func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (
 func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return n.peerInfo, n.peersErr
 }
-func (n *testNode) initiateGas(ctx context.Context, refundTimestamp int64, secretHash [32]byte, participant *common.Address, contractAddress *common.Address) (uint64, error) {
+func (n *testNode) initiateGas(ctx context.Context, callMsg ethereum.CallMsg) (uint64, error) {
 	return n.initGas, n.initGasErr
 }
 

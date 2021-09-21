@@ -7,12 +7,10 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
@@ -259,53 +257,13 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 }
 
 // initiateGas checks the amount of gas that is used for a call to the initiate function.
-func (c *rpcclient) initiateGas(ctx context.Context, refundTimestamp int64, secretHash [32]byte, participant *common.Address, contractAddress *common.Address) (uint64, error) {
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
-	if err != nil {
-		return 0, err
-	}
-	data, err := parsedAbi.Pack("initiate", big.NewInt(refundTimestamp), secretHash, participant)
-	if err != nil {
-		return 0, err
-	}
-	msg := ethereum.CallMsg{
-		From:  *participant,
-		To:    contractAddress,
-		Gas:   0,
-		Value: big.NewInt(1),
-		Data:  data,
-	}
-	gas, err := c.ec.EstimateGas(ctx, msg)
-	if err != nil {
-		return 0, err
-	}
-
-	return gas, nil
+func (c *rpcclient) initiateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	return c.ec.EstimateGas(ctx, msg)
 }
 
 // redeemGas checks the amount of gas that is used for a call to the redeem function.
-func (c *rpcclient) redeemGas(ctx context.Context, secret, secretHash [32]byte, participant *common.Address, contractAddress *common.Address) (uint64, error) {
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
-	if err != nil {
-		return 0, err
-	}
-
-	data, err := parsedAbi.Pack("redeem", secret, secretHash)
-	if err != nil {
-		return 0, err
-	}
-	msg := ethereum.CallMsg{
-		From: *participant,
-		To:   contractAddress,
-		Gas:  0,
-		Data: data,
-	}
-	gas, err := c.ec.EstimateGas(ctx, msg)
-	if err != nil {
-		return 0, err
-	}
-
-	return gas, nil
+func (c *rpcclient) redeemGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	return c.ec.EstimateGas(ctx, msg)
 }
 
 // redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
