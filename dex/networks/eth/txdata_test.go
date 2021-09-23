@@ -1,5 +1,5 @@
-//go:build gpl
-// +build gpl
+//go:build lgpl
+// +build lgpl
 
 package eth
 

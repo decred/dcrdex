@@ -1,6 +1,6 @@
-//go:build !harness && gpl
-// +build !harness,gpl
-//
+//go:build !harness && lgpl
+// +build !harness,lgpl
+
 // These tests will not be run if the harness build tag is set.
 
 package eth

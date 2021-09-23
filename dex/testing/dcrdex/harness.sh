@@ -22,7 +22,7 @@ cd ${HARNESS_DIR}/../../../server/cmd/dcrdex/
 go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
     "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' \
     -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'" \
-    --tags gpl
+    --tags lgpl
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/build"
 
