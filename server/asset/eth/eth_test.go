@@ -1,5 +1,5 @@
-//go:build !harness
-// +build !harness
+//go:build !harness && lgpl
+// +build !harness,lgpl
 
 // These tests will not be run if the harness build tag is set.
 
