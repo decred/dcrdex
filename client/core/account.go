@@ -38,15 +38,10 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 		// Empty bookie's feeds map, close feeds' channels & stop close timers.
 		dc.booksMtx.Lock()
 		if b, found := dc.books[m.Name]; found {
-			b.mtx.Lock()
-			for _, f := range b.feeds {
-				close(f.C)
-			}
-			b.feeds = make(map[uint32]*BookFeed, 1)
+			b.closeFeeds()
 			if b.closeTimer != nil {
 				b.closeTimer.Stop()
 			}
-			b.mtx.Unlock()
 		}
 		dc.booksMtx.Unlock()
 

@@ -2,7 +2,7 @@ import Doc, { WalletIcons } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
-import { DepthChart } from './charts'
+import { CandleChart, DepthChart } from './charts'
 import { postJSON } from './http'
 import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
 import * as Order from './orderutil'
@@ -17,7 +17,8 @@ const bookOrderRoute = 'book_order'
 const unbookOrderRoute = 'unbook_order'
 const updateRemainingRoute = 'update_remaining'
 const epochOrderRoute = 'epoch_order'
-const bookUpdateRoute = 'bookupdate'
+const candlesRoute = 'candles'
+const candleUpdateRoute = 'candle_update'
 const unmarketRoute = 'unmarket'
 
 const lastMarketKey = 'selectedMarket'
@@ -27,6 +28,9 @@ const depthZoomKey = 'depthZoom'
 const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
+
+const depthChart = 'depth_chart'
+const candleChart = 'candle_chart'
 
 const check = document.createElement('span')
 check.classList.add('ico-check')
@@ -64,7 +68,10 @@ export default class MarketsPage extends BasePage {
       // Chart and legend
       'marketChart', 'chartResizer', 'sellBookedBase', 'sellBookedQuote',
       'buyBookedBase', 'buyBookedQuote', 'hoverData', 'hoverPrice',
-      'hoverVolume', 'chartLegend', 'chartErrMsg',
+      'hoverVolume', 'chartLegend', 'chartErrMsg', 'candlestickBttn',
+      'depthBttn', 'epochLine', 'durBttnTemplate', 'durBttnBox',
+      'depthHoverData', 'candleHoverData', 'candleHigh', 'candleLow',
+      'candleStart', 'candleEnd', 'candleVol', 'depthSummary',
       // Max order section
       'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
       'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
@@ -98,13 +105,24 @@ export default class MarketsPage extends BasePage {
     this.ordersSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
-    const reporters = {
-      click: p => { this.reportClick(p) },
-      volume: d => { this.reportVolume(d) },
-      mouse: d => { this.reportMousePosition(d) },
-      zoom: z => { this.reportZoom(z) }
+
+    const depthReporters = {
+      click: p => { this.reportDepthClick(p) },
+      volume: d => { this.reportDepthVolume(d) },
+      mouse: d => { this.reportDepthMouse(d) },
+      zoom: z => { this.reportDepthZoom(z) }
     }
-    this.chart = new DepthChart(page.marketChart, reporters, State.fetch(depthZoomKey))
+    this.depthChart = new DepthChart(page.marketChart, depthReporters, State.fetch(depthZoomKey))
+
+    const candleReporters = {
+      mouse: c => { this.reportMouseCandle(c) }
+    }
+    this.candleChart = new CandleChart(page.marketChart, candleReporters)
+
+    // TODO: Store user's state and reload last known configuration.
+    this.candleChart.hide()
+    this.currentChart = depthChart
+    this.candleDur = ''
 
     // Set up the BalanceWidget.
     {
@@ -124,7 +142,7 @@ export default class MarketsPage extends BasePage {
     }
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    cleanTemplates(page.rowTemplate, page.liveTemplate)
+    cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate)
 
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
@@ -166,7 +184,7 @@ export default class MarketsPage extends BasePage {
       if (!page.rateField.value) return
       this.depthLines.input = [{
         rate: page.rateField.value,
-        color: this.isSell() ? this.chart.theme.sellLine : this.chart.theme.buyLine
+        color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
       this.drawChartLines()
     })
@@ -182,6 +200,12 @@ export default class MarketsPage extends BasePage {
       else page.lotField.value = this.market.maxBuys[this.adjustedRate()].swap.lots
       this.lotChanged()
     })
+    bind(page.depthBttn, 'click', () => {
+      this.depthChartSelected()
+    })
+    bind(page.candlestickBttn, 'click', () => {
+      this.candleChartSelected()
+    })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
 
@@ -195,6 +219,10 @@ export default class MarketsPage extends BasePage {
     ws.registerRoute(updateRemainingRoute, data => { this.handleUpdateRemainingRoute(data) })
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, data => { this.handleEpochOrderRoute(data) })
+    // Handle the intial candlestick data on the 'candles' route.
+    ws.registerRoute(candleUpdateRoute, data => { this.handleCandleUpdateRoute(data) })
+    // Handle the candles update on the 'candles' route.
+    ws.registerRoute(candlesRoute, data => { this.handleCandlesRoute(data) })
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(app, page.openForm, async () => { this.openFunc() })
     // Create a wallet
@@ -290,7 +318,7 @@ export default class MarketsPage extends BasePage {
     bind(page.sellRows, 'mouseleave', clearChartLines)
     bind(page.liveList, 'mouseleave', () => {
       this.activeMarkerRate = null
-      this.setMarkers()
+      this.setDepthMarkers()
     })
 
     // Load the user's layout preferences.
@@ -301,7 +329,8 @@ export default class MarketsPage extends BasePage {
       const h = r * (this.main.clientHeight - app.header.offsetHeight)
       page.marketChart.style.height = `${h}px`
 
-      this.chart.resize(h)
+      this.depthChart.resize(h)
+      this.candleChart.resize(h)
     }
     const chartDivRatio = State.fetch(chartRatioKey)
     if (chartDivRatio) {
@@ -513,6 +542,17 @@ export default class MarketsPage extends BasePage {
     } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: this.market.base.symbol.toUpperCase() })
   }
 
+  setCandleDurBttns () {
+    const { page, market } = this
+    Doc.empty(page.durBttnBox)
+    for (const dur of market.dex.candleDurs) {
+      const bttn = page.durBttnTemplate.cloneNode(true)
+      bttn.textContent = dur
+      Doc.bind(bttn, 'click', () => this.candleDurationSelected(dur))
+      page.durBttnBox.appendChild(bttn)
+    }
+  }
+
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
@@ -551,31 +591,38 @@ export default class MarketsPage extends BasePage {
       baseCfg: baseCfg,
       quoteCfg: quoteCfg,
       maxSell: null,
-      maxBuys: {}
+      maxBuys: {},
+      candleCaches: {}
     }
 
     page.marketLoader.classList.remove('d-none')
-    ws.request('loadmarket', makeMarket(host, base, quote))
+    if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
+    if (this.currentChart === depthChart) ws.request('loadmarket', makeMarket(host, base, quote))
+    else {
+      if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
+      this.loadCandles()
+    }
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
     this.setOrderBttnText()
+    this.setCandleDurBttns()
   }
 
   /*
-   * reportClick is a callback used by the DepthChart when the user clicks
+   * reportDepthClick is a callback used by the DepthChart when the user clicks
    * on the chart area. The rate field is set to the x-value of the click.
    */
-  reportClick (p) {
+  reportDepthClick (p) {
     this.page.rateField.value = p.toFixed(8)
     this.rateFieldChanged()
   }
 
   /*
-   * reportVolume accepts a volume report from the DepthChart and sets the
+   * reportDepthVolume accepts a volume report from the DepthChart and sets the
    * values in the chart legend.
    */
-  reportVolume (d) {
+  reportDepthVolume (d) {
     const page = this.page
     page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase)
     page.sellBookedQuote.textContent = Doc.formatCoinValue(d.sellQuote)
@@ -584,10 +631,10 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportMousePosition accepts informations about the mouse position on the
+   * reportDepthMouse accepts informations about the mouse position on the
    * chart area.
    */
-  reportMousePosition (d) {
+  reportDepthMouse (d) {
     while (this.hovers.length) this.hovers.shift().classList.remove('hover')
     const page = this.page
     if (!d) {
@@ -610,17 +657,31 @@ export default class MarketsPage extends BasePage {
     page.hoverPrice.textContent = Doc.formatCoinValue(d.rate)
     page.hoverVolume.textContent = Doc.formatCoinValue(d.depth)
     page.hoverVolume.style.color = d.dotColor
-    page.chartLegend.style.left = `${d.yAxisWidth}px`
     Doc.show(page.hoverData)
   }
 
   /*
-   * reportZoom accepts informations about the current depth chart zoom level.
+   * reportDepthZoom accepts informations about the current depth chart zoom level.
    * This information is saved to disk so that the zoom level can be maintained
    * across reloads.
    */
-  reportZoom (zoom) {
+  reportDepthZoom (zoom) {
     State.store(depthZoomKey, zoom)
+  }
+
+  reportMouseCandle (candle) {
+    const page = this.page
+    if (!candle) {
+      Doc.hide(page.hoverData)
+      return
+    }
+
+    page.candleStart.textContent = Doc.formatCoinValue(candle.startRate / 1e8)
+    page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / 1e8)
+    page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / 1e8)
+    page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / 1e8)
+    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume / 1e8)
+    Doc.show(page.hoverData)
   }
 
   /*
@@ -664,7 +725,7 @@ export default class MarketsPage extends BasePage {
     if (adjusted && this.isLimit()) {
       this.depthLines.input = [{
         rate: order.rate / 1e8,
-        color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+        color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
     }
     this.drawChartLines()
@@ -825,12 +886,12 @@ export default class MarketsPage extends BasePage {
       this.addTableOrder(order)
     }
     if (!this.book) {
-      this.chart.clear()
+      this.depthChart.clear()
       Doc.empty(this.page.buyRows)
       Doc.empty(this.page.sellRows)
       return
     }
-    this.chart.set(this.book, this.market.cfg.lotsize, this.market.cfg.ratestep)
+    this.depthChart.set(this.book, this.market.cfg.lotsize, this.market.cfg.ratestep)
   }
 
   /*
@@ -919,7 +980,7 @@ export default class MarketsPage extends BasePage {
       }
       Doc.bind(row, 'mouseenter', e => {
         this.activeMarkerRate = ord.rate
-        this.setMarkers()
+        this.setDepthMarkers()
       })
       updateUserOrderRow(row, ord)
       if (ord.type === Order.Limit && (ord.tif === Order.StandingTiF && ord.status < Order.StatusExecuted)) {
@@ -938,11 +999,11 @@ export default class MarketsPage extends BasePage {
       page.liveList.appendChild(row)
       app.bindTooltips(row)
     }
-    this.setMarkers()
+    this.setDepthMarkers()
   }
 
-  /* setMarkers sets the depth chart markers for booked orders. */
-  setMarkers () {
+  /* setDepthMarkers sets the depth chart markers for booked orders. */
+  setDepthMarkers () {
     const markers = {
       buys: [],
       sells: []
@@ -963,8 +1024,8 @@ export default class MarketsPage extends BasePage {
         }
       }
     }
-    this.chart.setMarkers(markers)
-    if (this.book) this.chart.draw()
+    this.depthChart.setMarkers(markers)
+    if (this.book) this.depthChart.draw()
   }
 
   /* updateTitle update the browser title based on the midgap value and the
@@ -1032,7 +1093,7 @@ export default class MarketsPage extends BasePage {
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.updateTitle()
-    this.chart.draw()
+    this.depthChart.draw()
   }
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
@@ -1043,7 +1104,7 @@ export default class MarketsPage extends BasePage {
     this.book.remove(order.token)
     this.removeTableOrder(order)
     this.updateTitle()
-    this.chart.draw()
+    this.depthChart.draw()
   }
 
   /*
@@ -1056,7 +1117,7 @@ export default class MarketsPage extends BasePage {
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty)
     this.updateTableOrder(update)
-    this.chart.draw()
+    this.depthChart.draw()
   }
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
@@ -1066,7 +1127,40 @@ export default class MarketsPage extends BasePage {
     const order = data.payload
     if (order.rate > 0) this.book.add(order) // No cancels or market orders
     if (order.qty > 0) this.addTableOrder(order) // No cancel orders
-    this.chart.draw()
+    this.depthChart.draw()
+  }
+
+  /* handleCandlesRoute is the handler for 'candles' notifications. */
+  handleCandlesRoute (data) {
+    if (this.candlesLoading) {
+      clearTimeout(this.candlesLoading.timer)
+      this.candlesLoading.loaded()
+      this.candlesLoading = null
+    }
+    this.depthChart.hide()
+    this.candleChart.show()
+    if (data.host !== this.market.dex.host) return
+    const dur = data.payload.dur
+    this.market.candleCaches[dur] = data.payload
+    if (this.currentChart !== candleChart || this.candleDur !== dur) return
+    this.candleChart.setCandles(data.payload, this.market.cfg)
+  }
+
+  /* handleCandleUpdateRoute is the handler for 'candle_update' notifications. */
+  handleCandleUpdateRoute (data) {
+    if (data.host !== this.market.dex.host) return
+    const { dur, candle } = data.payload
+    const cache = this.market.candleCaches[dur]
+    if (!cache) return // must not have seen the 'candles' notification yet?
+    const candles = cache.candles
+    if (candles.length === 0) candles.push(candle)
+    else {
+      const last = candles[candles.length - 1]
+      if (last.startStamp === candle.startStamp) candles[candles.length - 1] = candle
+      else candles.push(candle)
+    }
+    if (this.currentChart !== candleChart || this.candleDur !== dur) return
+    this.candleChart.draw()
   }
 
   /* showForm shows a modal form with a little animation. */
@@ -1265,7 +1359,7 @@ export default class MarketsPage extends BasePage {
     updateUserOrderRow(metaOrder.row, order)
     // Only reset markers if there is a change, since the chart is redrawn.
     if ((oldStatus === Order.StatusEpoch && order.status === Order.StatusBooked) ||
-      (oldStatus === Order.StatusBooked && order.status > Order.StatusBooked)) this.setMarkers()
+      (oldStatus === Order.StatusBooked && order.status > Order.StatusBooked)) this.setDepthMarkers()
   }
 
   /*
@@ -1276,8 +1370,9 @@ export default class MarketsPage extends BasePage {
     if (note.host !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
-      this.chart.draw()
+      this.depthChart.draw()
     }
+
     this.clearOrderTableEpochs(note.epoch)
     for (const metaOrder of Object.values(this.metaOrders)) {
       const order = metaOrder.order
@@ -1360,7 +1455,7 @@ export default class MarketsPage extends BasePage {
     // Hide confirmation modal only on success.
     Doc.hide(page.forms)
     this.refreshActiveOrders()
-    this.chart.draw()
+    this.depthChart.draw()
   }
 
   /*
@@ -1459,7 +1554,7 @@ export default class MarketsPage extends BasePage {
     this.page.rateField.value = v
     this.depthLines.input = [{
       rate: v,
-      color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+      color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
     }]
     this.drawChartLines()
     this.previewQuoteAmt(true)
@@ -1605,11 +1700,11 @@ export default class MarketsPage extends BasePage {
     const manager = new OrderTableRowManager(tr, orderBin)
     tr.manager = manager
     bind(tr, 'click', () => {
-      this.reportClick(tr.manager.getRate())
+      this.reportDepthClick(tr.manager.getRate())
     })
     if (tr.manager.getRate() !== 0) {
       Doc.bind(tr, 'mouseenter', e => {
-        const chart = this.chart
+        const chart = this.depthChart
         this.depthLines.hover = [{
           rate: tr.manager.getRate(),
           color: tr.manager.isSell() ? chart.theme.sellLine : chart.theme.buyLine
@@ -1645,8 +1740,78 @@ export default class MarketsPage extends BasePage {
 
   /* drawChartLines draws the hover and input lines on the chart. */
   drawChartLines () {
-    this.chart.setLines([...this.depthLines.hover, ...this.depthLines.input])
-    this.chart.draw()
+    this.depthChart.setLines([...this.depthLines.hover, ...this.depthLines.input])
+    this.depthChart.draw()
+  }
+
+  /*
+   * depthChartSelected is called when the user clicks a button to show the
+   * depth chart.
+  */
+  depthChartSelected () {
+    const page = this.page
+    Doc.hide(page.depthBttn, page.durBttnBox, page.candleHoverData)
+    Doc.show(page.candlestickBttn, page.epochLine, page.depthHoverData, page.depthSummary)
+    this.currentChart = depthChart
+    this.depthChart.show()
+    this.candleChart.hide()
+  }
+
+  /*
+   * candleChartSelected is called when the user clicks a button to show the
+   * historical market data (candlestick) chart.
+  */
+  candleChartSelected () {
+    const page = this.page
+    const dex = this.market.dex
+    this.currentChart = candleChart
+    Doc.hide(page.candlestickBttn, page.epochLine, page.depthHoverData, page.depthSummary)
+    Doc.show(page.depthBttn, page.durBttnBox, page.candleHoverData)
+    if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
+    this.loadCandles()
+  }
+
+  /* candleDurationSelected sets the candleDur and loads the candles. */
+  candleDurationSelected (dur) {
+    this.candleDur = dur
+    this.loadCandles()
+  }
+
+  /*
+   * loadCandles loads the candles for the current candleDur. If a cache is already
+   * active, the cache will be used without a loadcandles request.
+   */
+  loadCandles () {
+    for (const bttn of this.page.durBttnBox.children) {
+      if (bttn.textContent === this.candleDur) bttn.classList.add('selected')
+      else bttn.classList.remove('selected')
+    }
+    const { candleCaches, cfg } = this.market
+    const cache = candleCaches[this.candleDur]
+    if (cache) {
+      this.depthChart.hide()
+      this.candleChart.show()
+      this.candleChart.setCandles(cache, cfg)
+      return
+    }
+    this.requestCandles()
+  }
+
+  /* requestCandles sends the loadcandles request. */
+  requestCandles () {
+    const loaded = app.loading(this.page.marketChart)
+    this.candlesLoading = {
+      loaded: loaded,
+      timer: setTimeout(() => {
+        if (this.candlesLoading) {
+          this.candlesLoading = null
+          loaded()
+          console.error('candles not received')
+        }
+      }, 10000)
+    }
+    const { dex, base, quote } = this.market
+    ws.request('loadcandles', { host: dex.host, base: base.id, quote: quote.id, dur: this.candleDur })
   }
 
   /*
@@ -1656,11 +1821,13 @@ export default class MarketsPage extends BasePage {
   unload () {
     ws.request(unmarketRoute, {})
     ws.deregisterRoute(bookRoute)
-    ws.deregisterRoute(bookUpdateRoute)
     ws.deregisterRoute(epochOrderRoute)
     ws.deregisterRoute(bookOrderRoute)
     ws.deregisterRoute(unbookOrderRoute)
-    this.chart.unattach()
+    ws.deregisterRoute(candlesRoute)
+    ws.deregisterRoute(candleUpdateRoute)
+    this.depthChart.unattach()
+    this.candleChart.unattach()
     Doc.unbind(document, 'keyup', this.keyup)
     clearInterval(this.secondTicker)
   }

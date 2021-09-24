@@ -30,6 +30,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -279,6 +280,7 @@ var tExchanges = map[string]*core.Exchange{
 			Confs: 1,
 			Amt:   1e8,
 		},
+		CandleDurs: []string{"1h", "24h"},
 	},
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
@@ -294,6 +296,7 @@ var tExchanges = map[string]*core.Exchange{
 			Confs: 1,
 			Amt:   1e8,
 		},
+		CandleDurs: []string{"5m", "1h", "24h"},
 	},
 }
 
@@ -325,17 +328,38 @@ type tWalletState struct {
 	settings map[string]string
 }
 
+type tBookFeed struct {
+	core *TCore
+	c    chan *core.BookUpdate
+}
+
+func (t *tBookFeed) Next() <-chan *core.BookUpdate {
+	return t.c
+}
+
+func (t *tBookFeed) Close() {}
+
+func (t *tBookFeed) Candles(dur string) error {
+	t.core.sendCandles(dur)
+	return nil
+}
+
 type TCore struct {
-	reg         *core.RegisterForm
-	inited      bool
-	mtx         sync.RWMutex
-	wallets     map[uint32]*tWalletState
-	balances    map[uint32]*core.WalletBalance
-	dexAddr     string
-	marketID    string
-	base        uint32
-	quote       uint32
-	feed        *core.BookFeed
+	reg       *core.RegisterForm
+	inited    bool
+	mtx       sync.RWMutex
+	wallets   map[uint32]*tWalletState
+	balances  map[uint32]*core.WalletBalance
+	dexAddr   string
+	marketID  string
+	base      uint32
+	quote     uint32
+	candleDur struct {
+		dur time.Duration
+		str string
+	}
+
+	bookFeed    *tBookFeed
 	killFeed    context.CancelFunc
 	buys        map[string]*core.MiniOrder
 	sells       map[string]*core.MiniOrder
@@ -376,7 +400,7 @@ func newTCore() *TCore {
 
 func (c *TCore) trySend(u *core.BookUpdate) {
 	select {
-	case c.feed.C <- u:
+	case c.bookFeed.c <- u:
 	default:
 	}
 }
@@ -634,14 +658,18 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
-func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, error) {
+func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, error) {
 	mktID, _ := dex.MarketName(base, quote)
 	c.mtx.Lock()
 	c.dexAddr = dexAddr
 	c.marketID = mktID
 	c.base = base
 	c.quote = quote
+	c.candleDur.dur = 0
 	c.mtx.Unlock()
+
+	xc := tExchanges[dexAddr]
+	mkt := xc.Markets[mkid(base, quote)]
 
 	usrOrds := tExchanges[dexAddr].Markets[mktID].Orders
 	isUserOrder := func(tkn string) bool {
@@ -653,11 +681,14 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 		return false
 	}
 
-	if c.feed != nil {
+	if c.bookFeed != nil {
 		c.killFeed()
 	}
 
-	c.feed = core.NewBookFeed(func(*core.BookFeed) {})
+	c.bookFeed = &tBookFeed{
+		core: c,
+		c:    make(chan *core.BookUpdate, 1),
+	}
 	var ctx context.Context
 	ctx, c.killFeed = context.WithCancel(tCtx)
 	go func() {
@@ -720,13 +751,34 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 						Payload:  &core.MiniOrder{Token: tkn},
 					})
 				}
+
+				// Send a candle update.
+				c.mtx.RLock()
+				dur := c.candleDur.dur
+				durStr := c.candleDur.str
+				c.mtx.RUnlock()
+				if dur == 0 {
+					continue
+				}
+				c.trySend(&core.BookUpdate{
+					Action:   core.CandleUpdateAction,
+					Host:     dexAddr,
+					MarketID: mktID,
+					Payload: &core.CandleUpdate{
+						Dur:          durStr,
+						DurMilliSecs: uint64(dur.Milliseconds()),
+						Candle:       candle(mkt, dur, time.Now()),
+					},
+				})
+
 			case <-ctx.Done():
 				break out
 			}
+
 		}
 	}()
 
-	c.feed.C <- &core.BookUpdate{
+	c.bookFeed.c <- &core.BookUpdate{
 		Action:   core.FreshBookAction,
 		Host:     dexAddr,
 		MarketID: mktID,
@@ -737,7 +789,85 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.BookFeed, er
 		},
 	}
 
-	return c.feed, nil
+	return c.bookFeed, nil
+}
+
+func candle(mkt *core.Market, dur time.Duration, stamp time.Time) *msgjson.Candle {
+	high, low, start, end, vol := candleStats(mkt.LotSize, mkt.RateStep, dur, stamp)
+	quoteVol := calc.BaseToQuote(end, vol)
+
+	return &msgjson.Candle{
+		StartStamp:  encode.UnixMilliU(stamp.Truncate(dur)),
+		EndStamp:    encode.UnixMilliU(stamp),
+		MatchVolume: vol,
+		QuoteVolume: quoteVol,
+		HighRate:    high,
+		LowRate:     low,
+		StartRate:   start,
+		EndRate:     end,
+	}
+}
+
+func candleStats(lotSize, rateStep uint64, candleDur time.Duration, stamp time.Time) (high, low, start, end, vol uint64) {
+	freq := math.Pi * 2 / float64(candleDur.Milliseconds()*20)
+	maxVol := 1e5 * float64(lotSize)
+	volFactor := (math.Sin(float64(encode.UnixMilliU(stamp))*freq/2) + 1) / 2
+	vol = uint64(maxVol * volFactor)
+
+	waveFactor := (math.Sin(float64(encode.UnixMilliU(stamp))*freq) + 1) / 2
+	priceVariation := 1e5 * float64(rateStep)
+	priceFloor := 0.5 * priceVariation
+	startWaveFactor := (math.Sin(float64(encode.UnixMilliU(stamp.Truncate(candleDur)))*freq) + 1) / 2
+	start = uint64(startWaveFactor*priceVariation + priceFloor)
+	end = uint64(waveFactor*priceVariation + priceFloor)
+
+	if start > end {
+		diff := (start - end) / 2
+		high = start + diff
+		low = end - diff
+	} else {
+		diff := (end - start) / 2
+		high = end + diff
+		low = start - diff
+	}
+	return
+}
+
+func (c *TCore) sendCandles(durStr string) {
+	randomDelay()
+	dur, err := time.ParseDuration(durStr)
+	if err != nil {
+		panic("sendCandles ParseDuration error: " + err.Error())
+	}
+
+	c.mtx.RLock()
+	c.candleDur.dur = dur
+	c.candleDur.str = durStr
+	dexAddr := c.dexAddr
+	mktID := c.marketID
+	xc := tExchanges[c.dexAddr]
+	mkt := xc.Markets[mkid(c.base, c.quote)]
+	c.mtx.RUnlock()
+
+	tNow := time.Now()
+	iStartTime := tNow.Add(-dur * candles.CacheSize).Truncate(dur)
+	candles := make([]msgjson.Candle, 0, candles.CacheSize)
+
+	for iStartTime.Before(tNow) {
+		candles = append(candles, *candle(mkt, dur, iStartTime.Add(dur-1)))
+		iStartTime = iStartTime.Add(dur)
+	}
+
+	c.bookFeed.c <- &core.BookUpdate{
+		Action:   core.FreshCandlesAction,
+		Host:     dexAddr,
+		MarketID: mktID,
+		Payload: &core.CandlesPayload{
+			Dur:          durStr,
+			DurMilliSecs: uint64(dur.Milliseconds()),
+			Candles:      candles,
+		},
+	}
 }
 
 var numBuys = 80
@@ -794,7 +924,7 @@ func (c *TCore) book(dexAddr, mktID string) *core.OrderBook {
 }
 
 func (c *TCore) Unsync(dex string, base, quote uint32) {
-	if c.feed != nil {
+	if c.bookFeed != nil {
 		c.killFeed()
 	}
 }
@@ -1190,7 +1320,7 @@ func TestServer(t *testing.T) {
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
 	initialize := false
-	register := false
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true

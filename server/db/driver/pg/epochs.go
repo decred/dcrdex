@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -83,7 +84,7 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 
 // LoadEpochStats reads all market epoch history from the database, updating the
 // provided caches along the way.
-func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) error {
+func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*candles.Cache) error {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*db.CandleCache) 
 		if err != nil {
 			return err
 		}
-		candle := &db.Candle{
+		candle := &candles.Candle{
 			StartStamp:  uint64(endStamp - epochDur),
 			EndStamp:    uint64(endStamp),
 			MatchVolume: uint64(matchVol),

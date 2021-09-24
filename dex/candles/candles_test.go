@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package db
+package candles
 
 import (
 	"testing"
@@ -10,12 +10,12 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
-func TestCandleCache(t *testing.T) {
+func TestCache(t *testing.T) {
 	// ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 	const binSize = 10
 	const cacheCapacity = 5
-	cache := NewCandleCache(cacheCapacity, binSize)
+	cache := NewCache(cacheCapacity, binSize)
 
 	if cache.BinSize != binSize {
 		t.Fatalf("wrong bin size. wanted %d, got %d", binSize, cache.BinSize)
@@ -75,7 +75,7 @@ func TestCandleCache(t *testing.T) {
 	if len(cache.Candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
-	lastCandle := cache.last()
+	lastCandle := cache.Last()
 	if lastCandle == nil {
 		t.Fatalf("failed to retrieve last candle")
 	}
@@ -90,9 +90,9 @@ func TestCandleCache(t *testing.T) {
 	if len(cache.Candles) != 1 {
 		t.Fatalf("Add didn't add")
 	}
-	checkCandleStamps(cache.last(), 11, 15)
-	checkCandleVolumes(cache.last(), 400, 404, 150)
-	checkCandleRates(cache.last(), 100, 125, 25, 200)
+	checkCandleStamps(cache.Last(), 11, 15)
+	checkCandleVolumes(cache.Last(), 400, 404, 150)
+	checkCandleRates(cache.Last(), 100, 125, 25, 200)
 
 	// Two candles each in a new bin.
 	cache.Add(makeCandle(25, 27, 10, 11, 12, 13, 14, 15, 16))
@@ -100,9 +100,9 @@ func TestCandleCache(t *testing.T) {
 	if len(cache.Candles) != 3 {
 		t.Fatalf("New candles didn't add")
 	}
-	checkCandleStamps(cache.last(), 41, 48)
-	checkCandleVolumes(cache.last(), 17, 18, 19)
-	checkCandleRates(cache.last(), 20, 21, 22, 23)
+	checkCandleStamps(cache.Last(), 41, 48)
+	checkCandleVolumes(cache.Last(), 17, 18, 19)
+	checkCandleRates(cache.Last(), 20, 21, 22, 23)
 
 	// Candle combination is based on end stamp only.
 	cache.Add(makeCandle(49, 51, 24, 25, 26, 27, 28, 29, 30))
@@ -118,7 +118,7 @@ func TestCandleCache(t *testing.T) {
 	}
 	// The cache becomes circular, so the most recent will be at the previously
 	// oldest index, 0.
-	if cache.last() != &cache.Candles[0] {
+	if cache.Last() != &cache.Candles[0] {
 		t.Fatalf("cache didn't wrap")
 	}
 
@@ -144,7 +144,7 @@ func TestDelta(t *testing.T) {
 	aDayAgo := now - 86400*1000
 	var fiveMins uint64 = 5 * 60 * 1000
 
-	c := NewCandleCache(5, fiveMins)
+	c := NewCache(5, fiveMins)
 	// This one shouldn't be included.
 	c.Add(&Candle{
 		MatchVolume: 100,
@@ -176,7 +176,7 @@ func TestDelta(t *testing.T) {
 	}
 
 	// Get a delta that uses a partial stick.
-	c = NewCandleCache(5, fiveMins)
+	c = NewCache(5, fiveMins)
 	c.Add(&Candle{
 		MatchVolume: 444,
 		StartStamp:  aDayAgo,

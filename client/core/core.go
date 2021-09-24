@@ -318,6 +318,7 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		Fee:        dcrAsset,
 		RegFees:    feeAssets,
 		PendingFee: dc.getPendingFee(),
+		CandleDurs: cfg.BinSizes,
 	}
 }
 
@@ -5101,7 +5102,7 @@ func (c *Core) handleReconnect(host string) {
 		}
 
 		// Create a fresh OrderBook for the bookie.
-		err = booky.reset(snap)
+		err = booky.Reset(snap)
 		if err != nil {
 			c.log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.name, err)
 		}

@@ -44,7 +44,7 @@ const (
 	// This signal performs a couple of important roles. First, it informs the
 	// client that the book updates are done, and the book will be static until
 	// the end of the epoch. Second, it sends the candlestick data, so a
-	// subscriber can maintain a up-to-date CandleCache without repeatedly
+	// subscriber can maintain a up-to-date candles.Cache without repeatedly
 	// querying the HTTP API for the data.
 	epochReportAction
 	// matchProofAction means the matching has been performed and will result in

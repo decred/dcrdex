@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package db
+package candles
 
 import (
 	"time"
@@ -10,25 +10,31 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 )
 
-// Candle is a report about the trading activity of a market over some
-// specified period of time. Candles are managed with a CandleCache, which takes
-// into account bin sizes and handles candle addition.
-type Candle struct {
-	StartStamp  uint64
-	EndStamp    uint64
-	MatchVolume uint64
-	QuoteVolume uint64
-	HighRate    uint64
-	LowRate     uint64
-	StartRate   uint64
-	EndRate     uint64
-}
+const (
+	// DefaultCandleRequest is the number of candles to return if the request
+	// does not specify otherwise.
+	DefaultCandleRequest = 50
+	// CacheSize is the default cache size. Also represents the maximum number
+	// of candles that can be requested at once.
+	CacheSize = 1000
+)
 
-// CandleCache is a sized cache of candles. CandleCache provides methods for
-// adding to the cache and reading cache data out. CandleCache is a typical
-// slice until it reaches capacity, when it becomes a "circular array" to avoid
-// re-allocations.
-type CandleCache struct {
+var (
+	// BinSizes is the default bin sizes for candlestick data sets. Exported for
+	// use in the 'config' response. Internally, we will parse these to uint64
+	// milliseconds.
+	BinSizes = []string{"24h", "1h", "5m"}
+)
+
+// Candle is a report about the trading activity of a market over some specified
+// period of time. Candles are managed with a Cache, which takes into account
+// bin sizes and handles candle addition.
+type Candle = msgjson.Candle
+
+// Cache is a sized cache of candles. Cache provides methods for adding to the
+// cache and reading cache data out. Candles is a typical slice until it reaches
+// capacity, when it becomes a "circular array" to avoid re-allocations.
+type Cache struct {
 	Candles []Candle
 	BinSize uint64
 	cap     int
@@ -36,24 +42,24 @@ type CandleCache struct {
 	cursor int
 }
 
-// NewCandleCache is a constructor for a CandleCache.
-func NewCandleCache(cap int, binSize uint64) *CandleCache {
-	return &CandleCache{
+// NewCache is a constructor for a Cache.
+func NewCache(cap int, binSize uint64) *Cache {
+	return &Cache{
 		cap:     cap,
 		BinSize: binSize,
 	}
 }
 
-// Add adds a new candle TO THE END of the CandleCache. The caller is
-// responsible to ensure that candles added with Add are always newer than
-// the last candle added.
-func (c *CandleCache) Add(candle *Candle) {
+// Add adds a new candle TO THE END of the Cache. The caller is responsible to
+// ensure that candles added with Add are always newer than the last candle
+// added.
+func (c *Cache) Add(candle *Candle) {
 	sz := len(c.Candles)
 	if sz == 0 {
 		c.Candles = append(c.Candles, *candle)
 		return
 	}
-	if c.combineCandles(c.last(), candle) {
+	if c.combineCandles(c.Last(), candle) {
 		return
 	}
 	if sz == c.cap { // circular mode
@@ -65,10 +71,15 @@ func (c *CandleCache) Add(candle *Candle) {
 	c.cursor = sz // len(c.candles) - 1
 }
 
+func (c *Cache) Reset() {
+	c.cursor = 0
+	c.Candles = nil
+}
+
 // WireCandles encodes up to 'count' most recent candles as
-// *msgjson.WireCandles. If the CandleCache contains fewer than 'count', only
-// those available will be returned, with no indication of error.
-func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
+// *msgjson.WireCandles. If the Cache contains fewer than 'count', only those
+// available will be returned, with no indication of error.
+func (c *Cache) WireCandles(count int) *msgjson.WireCandles {
 	n := count
 	sz := len(c.Candles)
 	if sz < n {
@@ -96,13 +107,13 @@ func (c *CandleCache) WireCandles(count int) *msgjson.WireCandles {
 // from that candle is linearly interpreted between the endpoints. The caller is
 // responsible for making sure that dur >> binSize, otherwise the results will
 // be of little value.
-func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
+func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
 	cutoff := encode.UnixMilliU(since)
 	sz := len(c.Candles)
 	if sz == 0 {
 		return 0, 0
 	}
-	endRate := c.last().EndRate
+	endRate := c.Last().EndRate
 	var startRate uint64
 	for i := 0; i < sz; i++ {
 		candle := &c.Candles[(c.cursor+sz-i)%sz]
@@ -128,13 +139,13 @@ func (c *CandleCache) Delta(since time.Time) (changePct float64, vol uint64) {
 }
 
 // last gets the most recent candle in the cache.
-func (c *CandleCache) last() *Candle {
+func (c *Cache) Last() *Candle {
 	return &c.Candles[c.cursor]
 }
 
 // combineCandles attempts to add the candidate candle to the target candle
 // in-place, if they're in the same bin, otherwise returns false.
-func (c *CandleCache) combineCandles(target, candidate *Candle) bool {
+func (c *Cache) combineCandles(target, candidate *Candle) bool {
 	if target.EndStamp/c.BinSize != candidate.EndStamp/c.BinSize {
 		// The candidate candle cannot be added.
 		return false

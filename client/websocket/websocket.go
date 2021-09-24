@@ -31,13 +31,20 @@ var (
 	cidCounter int32
 )
 
+type bookFeed struct {
+	core.BookFeed
+	loop        *dex.StartStopWaiter
+	host        string
+	base, quote uint32
+}
+
 // wsClient is a persistent websocket connection to a client.
 type wsClient struct {
 	*ws.WSLink
 	cid int32
 
-	feedLoopMtx sync.RWMutex
-	feedLoop    *dex.StartStopWaiter
+	feedMtx sync.RWMutex
+	feed    *bookFeed
 }
 
 func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
@@ -49,7 +56,7 @@ func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Messag
 
 // Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
 type Core interface {
-	SyncBook(dex string, base, quote uint32) (*core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (core.BookFeed, error)
 	AckNotes([]dex.Bytes)
 }
 
@@ -144,12 +151,12 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.clientsMtx.Unlock()
 
 	defer func() {
-		cl.feedLoopMtx.Lock()
-		if cl.feedLoop != nil {
-			cl.feedLoop.Stop()
-			cl.feedLoop.WaitForShutdown()
+		cl.feedMtx.Lock()
+		if cl.feed != nil {
+			cl.feed.loop.Stop()
+			cl.feed.loop.WaitForShutdown()
 		}
-		cl.feedLoopMtx.Unlock()
+		cl.feedMtx.Unlock()
 
 		s.clientsMtx.Lock()
 		delete(s.clients, cl.cid)
@@ -199,9 +206,10 @@ type wsHandler func(*Server, *wsClient, *msgjson.Message) *msgjson.Error
 // wsHandlers is the map used by the server to locate the router handler for a
 // request.
 var wsHandlers = map[string]wsHandler{
-	"loadmarket": wsLoadMarket,
-	"unmarket":   wsUnmarket,
-	"acknotes":   wsAckNotes,
+	"loadmarket":  wsLoadMarket,
+	"loadcandles": wsLoadCandles,
+	"unmarket":    wsUnmarket,
+	"acknotes":    wsAckNotes,
 }
 
 // marketLoad is sent by websocket clients to subscribe to a market and request
@@ -212,18 +220,23 @@ type marketLoad struct {
 	Quote uint32 `json:"quote"`
 }
 
+type candlesLoad struct {
+	marketLoad
+	Dur string `json:"dur"`
+}
+
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
 // manages a map of clients who are subscribed to the market, and distributes
 // order book updates when received.
 type marketSyncer struct {
 	log  dex.Logger
-	feed *core.BookFeed
+	feed core.BookFeed
 	cl   *wsClient
 }
 
 // newMarketSyncer is the constructor for a marketSyncer, returned as a running
 // *dex.StartStopWaiter.
-func newMarketSyncer(cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
+func newMarketSyncer(cl *wsClient, feed core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
 	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
 		feed: feed,
 		cl:   cl,
@@ -239,7 +252,7 @@ func (m *marketSyncer) Run(ctx context.Context) {
 out:
 	for {
 		select {
-		case update, ok := <-m.feed.C:
+		case update, ok := <-m.feed.Next():
 			if !ok {
 				// We are skipping m.feed.Close if the feed were closed (external sig).
 				return
@@ -264,35 +277,71 @@ out:
 // wsLoadMarket is the handler for the 'loadmarket' websocket route. Subscribes
 // the client to the notification feed and sends the order book.
 func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
-	market := new(marketLoad)
-	err := json.Unmarshal(msg.Payload, market)
+	req := new(marketLoad)
+	err := json.Unmarshal(msg.Payload, req)
 	if err != nil {
 		errMsg := fmt.Sprintf("error unmarshalling marketload payload: %v", err)
 		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
+	_, msgErr := loadMarket(s, cl, req)
+	return msgErr
+}
 
-	name, err := dex.MarketName(market.Base, market.Quote)
+func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.Error) {
+	name, err := dex.MarketName(req.Base, req.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("unknown market: %v", err)
 		s.log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.UnknownMarketError, errMsg)
+		return nil, msgjson.NewError(msgjson.UnknownMarketError, errMsg)
 	}
 
-	feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
+	feed, err := s.core.SyncBook(req.Host, req.Base, req.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		s.log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
+		return nil, msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 	}
 
-	cl.feedLoopMtx.Lock()
-	if cl.feedLoop != nil {
-		cl.feedLoop.Stop()
-		cl.feedLoop.WaitForShutdown()
+	cl.feedMtx.Lock()
+	defer cl.feedMtx.Unlock()
+	if cl.feed != nil {
+		cl.feed.loop.Stop()
+		cl.feed.loop.WaitForShutdown()
 	}
-	cl.feedLoop = newMarketSyncer(cl, feed, s.log.SubLogger(name))
-	cl.feedLoopMtx.Unlock()
+	cl.feed = &bookFeed{
+		BookFeed: feed,
+		loop:     newMarketSyncer(cl, feed, s.log.SubLogger(name)),
+		host:     req.Host,
+		base:     req.Base,
+		quote:    req.Quote,
+	}
+
+	return cl.feed, nil
+}
+
+func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
+	req := new(candlesLoad)
+	err := json.Unmarshal(msg.Payload, req)
+	if err != nil {
+		errMsg := fmt.Sprintf("error unmarshalling candlesLoad payload: %v", err)
+		s.log.Errorf(errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, errMsg)
+	}
+	cl.feedMtx.RLock()
+	feed := cl.feed
+	cl.feedMtx.RUnlock()
+	if feed.host != req.Host || feed.base != req.Base || feed.quote != req.Quote {
+		var msgErr *msgjson.Error
+		feed, msgErr = loadMarket(s, cl, &req.marketLoad)
+		if msgErr != nil {
+			return msgErr
+		}
+	}
+	err = feed.Candles(req.Dur)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, err.Error())
+	}
 	return nil
 }
 
@@ -301,12 +350,12 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 // and potentially unsubscribes from orderbook with the server if there are no
 // other consumers
 func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
-	cl.feedLoopMtx.Lock()
-	defer cl.feedLoopMtx.Unlock()
-	if cl.feedLoop != nil {
-		cl.feedLoop.Stop()
-		cl.feedLoop.WaitForShutdown()
-		cl.feedLoop = nil
+	cl.feedMtx.Lock()
+	defer cl.feedMtx.Unlock()
+	if cl.feed.loop != nil {
+		cl.feed.loop.Stop()
+		cl.feed.loop.WaitForShutdown()
+		cl.feed = nil
 	}
 	return nil
 }
