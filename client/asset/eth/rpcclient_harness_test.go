@@ -377,22 +377,22 @@ func TestPeers(t *testing.T) {
 }
 
 func TestInitiateGas(t *testing.T) {
-	now := time.Now().Unix()
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
-	data, err := parsedAbi.Pack("initiate", big.NewInt(now), secretHash, &participantAddr)
+	data, err := parsedAbi.Pack("initiate", big.NewInt(1), secretHash, &participantAddr)
 	if err != nil {
 		t.Fatalf("unexpected error packing abi: %v", err)
 	}
 	msg := ethereum.CallMsg{
-		From: participantAddr,
-		To:   &contractAddr,
-		Gas:  0,
-		Data: data,
+		From:  participantAddr,
+		To:    &contractAddr,
+		Value: big.NewInt(1),
+		Gas:   0,
+		Data:  data,
 	}
 	gas, err := ethClient.initiateGas(ctx, msg)
 	if err != nil {

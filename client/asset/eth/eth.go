@@ -299,22 +299,22 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 
 // getInitGas gets an estimate for the gas required for initiating a swap.
 func (eth *ExchangeWallet) getInitGas() (uint64, error) {
-	now := time.Now().Unix()
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
 	if err != nil {
 		return 0, err
 	}
-	data, err := parsedAbi.Pack("initiate", big.NewInt(now), secretHash, &eth.acct.Address)
+	data, err := parsedAbi.Pack("initiate", big.NewInt(1), secretHash, &eth.acct.Address)
 	if err != nil {
 		return 0, err
 	}
 	msg := ethereum.CallMsg{
-		From: eth.acct.Address,
-		To:   &mainnetContractAddr,
-		Gas:  0,
-		Data: data,
+		From:  eth.acct.Address,
+		To:    &mainnetContractAddr,
+		Value: big.NewInt(1),
+		Gas:   0,
+		Data:  data,
 	}
 	return eth.node.initiateGas(eth.ctx, msg)
 }
