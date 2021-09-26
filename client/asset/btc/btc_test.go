@@ -1942,7 +1942,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	wallet.checkForNewBlocks(tCtx)
 
 	// Check find redemption result.
-	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, contract)
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -1952,7 +1952,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 
 	// gettransaction error
 	node.getTransactionErr = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -1962,7 +1962,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	redeemVin.PreviousOutPoint.Hash = *otherTxHash
 	ctx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
 	defer cancel()
-	_, k, err := wallet.FindRedemption(ctx, coinID, contract)
+	_, k, err := wallet.FindRedemption(ctx, coinID)
 	if ctx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
@@ -1975,7 +1975,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
 	cancelCtx()
-	_, _, err = wallet.FindRedemption(deadCtx, coinID, contract)
+	_, _, err = wallet.FindRedemption(deadCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
@@ -1986,7 +1986,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	redeemVin.SignatureScript = randBytes(100)
 
 	node.blockchainMtx.Unlock()
-	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
@@ -1996,7 +1996,7 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	node.blockchainMtx.Unlock()
 
 	// Sanity check to make sure it passes again.
-	_, _, err = wallet.FindRedemption(tCtx, coinID, contract)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}
@@ -2033,7 +2033,7 @@ func testRefund(t *testing.T, segwit bool) {
 	node.privKeyForAddr = wif
 
 	contractOutput := newOutput(tTxHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -2042,14 +2042,14 @@ func testRefund(t *testing.T, segwit bool) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), time.Time{})
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract())
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	// gettxout error
 	node.txOutErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for missing utxo")
 	}
@@ -2058,14 +2058,14 @@ func testRefund(t *testing.T, segwit bool) {
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract, time.Time{})
+	_, err = wallet.Refund(badContractOutput.ID(), badContract)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
 
 	// Too small.
 	node.txOutRes = newTxOutResult(nil, 100, 2)
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for value < fees")
 	}
@@ -2073,7 +2073,7 @@ func testRefund(t *testing.T, segwit bool) {
 
 	// getrawchangeaddress error
 	node.changeAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -2081,7 +2081,7 @@ func testRefund(t *testing.T, segwit bool) {
 
 	// signature error
 	node.privKeyForAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -2089,7 +2089,7 @@ func testRefund(t *testing.T, segwit bool) {
 
 	// send error
 	node.sendErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for sendrawtransaction rpc error")
 	}
@@ -2099,14 +2099,14 @@ func testRefund(t *testing.T, segwit bool) {
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.sendHash = &badHash
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err == nil {
 		t.Fatalf("no error for tx hash")
 	}
 	node.sendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract, time.Time{})
+	_, err = wallet.Refund(contractOutput.ID(), contract)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -2588,7 +2588,6 @@ func TestTryRedemptionRequests(t *testing.T) {
 
 		req := &findRedemptionReq{
 			outPt:        newOutPoint(swapTxHash, swapVout),
-			contract:     contract,
 			blockHash:    swapBlockHash,
 			blockHeight:  int32(swapHeight),
 			resultChan:   make(chan *findRedemptionResult, 1),

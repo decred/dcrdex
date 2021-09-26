@@ -399,7 +399,6 @@ type block struct {
 // key.
 type findRedemptionReq struct {
 	outPt        outPoint
-	contract     []byte
 	blockHash    *chainhash.Hash
 	blockHeight  int32
 	resultChan   chan *findRedemptionResult
@@ -1242,7 +1241,7 @@ outer:
 			continue
 		}
 
-		tx, err := btc.node.getTransaction(txHash)
+		tx, err := btc.node.getWalletTransaction(txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -1422,7 +1421,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(&txHash, uint32(i), contract.Value)
-		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i], time.Now().Add(-time.Hour))
+		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i])
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -1748,7 +1747,7 @@ func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 //
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
-func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	exitError := func(s string, a ...interface{}) (dex.Bytes, dex.Bytes, error) {
 		return nil, nil, fmt.Errorf(s, a...)
 	}
@@ -1760,26 +1759,32 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 
 	outPt := newOutPoint(txHash, vout)
 
-	tx, err := btc.node.getTransaction(txHash)
+	tx, err := btc.node.getWalletTransaction(txHash)
 	if err != nil {
-		return exitError("getTransaction error for FindRedemption transaction: %v", err)
+		return nil, nil, fmt.Errorf("error finding wallet transaction: %v", err)
 	}
 
-	contractHash := btc.hashContract(contract)
-
-	contractAddr, err := btc.scriptHashAddress(contract)
+	msgTx, err := msgTxFromBytes(tx.Hex)
 	if err != nil {
-		return exitError("scriptHashAddress error: %w", err)
-	}
-	pkScript, err := txscript.PayToAddrScript(contractAddr)
-	if err != nil {
-		return exitError("PayToAddrScript error: %v", err)
+		return nil, nil, fmt.Errorf("error decoding transaction bytes: %v", err)
 	}
 
+	if len(msgTx.TxOut) <= int(vout) {
+		return nil, nil, fmt.Errorf("no vout %d in tx %s", vout, txHash)
+	}
 	var blockHash *chainhash.Hash
-	var blockHeight int32
 	if tx.BlockHash != "" {
-		blockHash, blockHeight, err = btc.checkRedemptionBlockDetails(outPt, tx.BlockHash, pkScript)
+		blockHash, err = chainhash.NewHashFromStr(tx.BlockHash)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error decoding block hash from string %q: %v", tx.BlockHash, err)
+		}
+	}
+
+	pkScript := msgTx.TxOut[vout].PkScript
+
+	var blockHeight int32
+	if blockHash != nil {
+		blockHeight, err = btc.checkRedemptionBlockDetails(outPt, blockHash, pkScript)
 		if err != nil {
 			return exitError("GetBlockHeight for redemption %s error: %v", outPt, err)
 		}
@@ -1787,12 +1792,11 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract 
 
 	req := &findRedemptionReq{
 		outPt:        outPt,
-		contract:     contract,
 		blockHash:    blockHash,
 		blockHeight:  blockHeight,
 		resultChan:   make(chan *findRedemptionResult, 1),
 		pkScript:     pkScript,
-		contractHash: contractHash,
+		contractHash: dexbtc.ExtractScriptHash(pkScript),
 	}
 
 	btc.findRedemptionMtx.Lock()
@@ -1975,19 +1979,22 @@ func (btc *ExchangeWallet) tryRedemptionRequests(ctx context.Context, startBlock
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, startTime time.Time) (dex.Bytes, error) {
+// NOTE ABOUT PREVIOUS NOTE: If we sent the swap from this wallet, it will spend
+// wallet outputs, and will be available through gettransaction. We could
+// probably drop the contract argument after all.
+func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	utxo, _, err := btc.node.getTxOut(txHash, vout, contract, startTime)
+	utxo, _, err := btc.node.getTxOut(txHash, vout, contract, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", err)
 	}
 	if utxo == nil {
 		return nil, asset.CoinNotFoundError
 	}
-	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, startTime)
+	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -2004,10 +2011,9 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, startTime time.Tim
 	return toCoinID(refundHash, 0), nil
 }
 
-// refundTx crates and signs a contract`s refund transaction. If refundAddr is
-// not supplied, one will be requested from the wallet. If val is not supplied
-// it will be retrieved with gettxout.
-func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, startTime time.Time) (*wire.MsgTx, error) {
+// refundTx creates and signs a contract`s refund transaction. If refundAddr is
+// not supplied, one will be requested from the wallet.
+func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -2120,7 +2126,7 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("SendToAddress error: %w", err)
 	}
-	tx, err := btc.node.getTransaction(txHash)
+	tx, err := btc.node.getWalletTransaction(txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, 0, 0, asset.CoinNotFoundError
@@ -2154,7 +2160,7 @@ func (btc *ExchangeWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) 
 	if err != nil {
 		return 0, err
 	}
-	tx, err := btc.node.getTransaction(txHash)
+	tx, err := btc.node.getWalletTransaction(txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return 0, asset.CoinNotFoundError
@@ -2305,16 +2311,22 @@ func (btc *ExchangeWallet) checkForNewBlocks(ctx context.Context) {
 
 // trySetRedemptionRequestBlock should be called with findRedemptionMtx Lock'ed.
 func (btc *ExchangeWallet) trySetRedemptionRequestBlock(req *findRedemptionReq) {
-	tx, err := btc.node.getTransaction(&req.outPt.txHash)
+	tx, err := btc.node.getWalletTransaction(&req.outPt.txHash)
 	if err != nil {
-		btc.log.Errorf("getTransaction error for FindRedemption transaction: %v", err)
+		btc.log.Errorf("getWalletTransaction error for FindRedemption transaction: %v", err)
 		return
 	}
 
 	if tx.BlockHash == "" {
 		return
 	}
-	blockHash, blockHeight, err := btc.checkRedemptionBlockDetails(req.outPt, tx.BlockHash, req.pkScript)
+	blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
+	if err != nil {
+		btc.log.Errorf("error decoding block hash %q: %v", tx.BlockHash, err)
+		return
+	}
+
+	blockHeight, err := btc.checkRedemptionBlockDetails(req.outPt, blockHash, req.pkScript)
 	if err != nil {
 		btc.log.Error(err)
 		return
@@ -2323,7 +2335,6 @@ func (btc *ExchangeWallet) trySetRedemptionRequestBlock(req *findRedemptionReq) 
 	// protects the map.
 	req = &findRedemptionReq{
 		outPt:        req.outPt,
-		contract:     req.contract,
 		blockHash:    blockHash,
 		blockHeight:  blockHeight,
 		resultChan:   req.resultChan,
@@ -2333,20 +2344,17 @@ func (btc *ExchangeWallet) trySetRedemptionRequestBlock(req *findRedemptionReq) 
 	btc.findRedemptionQueue[req.outPt] = req
 }
 
-// checkRedemptionBlockDetails looks retrieves the block at blockStr and checks
-// that the provided pkScript matches the specified outpoint
-func (btc *ExchangeWallet) checkRedemptionBlockDetails(outPt outPoint, blockStr string, pkScript []byte) (*chainhash.Hash, int32, error) {
-	blockHash, err := chainhash.NewHashFromStr(blockStr)
-	if err != nil {
-		return nil, 0, fmt.Errorf("NewHashFromStr error: %w", err)
-	}
+// checkRedemptionBlockDetails retrieves the block at blockStr and checks that
+// the provided pkScript matches the specified outpoint. The transaction's
+// block height is returned.
+func (btc *ExchangeWallet) checkRedemptionBlockDetails(outPt outPoint, blockHash *chainhash.Hash, pkScript []byte) (int32, error) {
 	blockHeight, err := btc.node.getBlockHeight(blockHash)
 	if err != nil {
-		return nil, 0, fmt.Errorf("GetBlockHeight for redemption block %s error: %w", blockStr, err)
+		return 0, fmt.Errorf("GetBlockHeight for redemption block %s error: %w", blockHash, err)
 	}
 	blk, err := btc.node.getBlock(*blockHash)
 	if err != nil {
-		return nil, 0, fmt.Errorf("error retrieving redemption block for %s: %w", blockStr, err)
+		return 0, fmt.Errorf("error retrieving redemption block for %s: %w", blockHash, err)
 	}
 
 	var tx *wire.MsgTx
@@ -2358,16 +2366,16 @@ out:
 		}
 	}
 	if tx == nil {
-		return nil, 0, fmt.Errorf("transaction %s not found in block %s", outPt.txHash, blockStr)
+		return 0, fmt.Errorf("transaction %s not found in block %s", outPt.txHash, blockHash)
 	}
 	if uint32(len(tx.TxOut)) < outPt.vout+1 {
-		return nil, 0, fmt.Errorf("no output %d in redemption transaction %s found in block %s", outPt.vout, outPt.txHash, blockStr)
+		return 0, fmt.Errorf("no output %d in redemption transaction %s found in block %s", outPt.vout, outPt.txHash, blockHash)
 	}
 	if !bytes.Equal(tx.TxOut[outPt.vout].PkScript, pkScript) {
-		return nil, 0, fmt.Errorf("pubkey script mismatch for redemption at %s", outPt)
+		return 0, fmt.Errorf("pubkey script mismatch for redemption at %s", outPt)
 	}
 
-	return blockHash, blockHeight, nil
+	return blockHeight, nil
 }
 
 func (btc *ExchangeWallet) blockFromHash(hash string) (*block, error) {
@@ -2648,7 +2656,7 @@ outer:
 			sum += utxo.amount
 			continue
 		}
-		tx, err := btc.node.getTransaction(txHash)
+		tx, err := btc.node.getWalletTransaction(txHash)
 		if err != nil {
 			return 0, err
 		}

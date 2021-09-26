@@ -708,11 +708,11 @@ func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
 	return true, time.Now().Add(-time.Minute), nil
 }
 
-func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
-func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, time.Time) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes) (dex.Bytes, error) {
 	return w.refundCoin, w.refundErr
 }
 

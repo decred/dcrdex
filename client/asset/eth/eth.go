@@ -380,17 +380,13 @@ func (*ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, err
 //
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
-func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	return nil, nil, asset.ErrNotImplemented
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-// NOTE: The contract cannot be retrieved from the unspent coin info as the
-// wallet does not store it, even though it was known when the init transaction
-// was created. The client should store this information for persistence across
-// sessions.
-func (*ExchangeWallet) Refund(coinID, contract dex.Bytes, _ time.Time) (dex.Bytes, error) {
+func (*ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	return nil, asset.ErrNotImplemented
 }
 

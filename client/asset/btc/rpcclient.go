@@ -49,13 +49,13 @@ const (
 	methodGetRawTransaction  = "getrawtransaction"
 )
 
-// RawRequester defines dcred's rpcclient RawRequest func where all RPC
+// RawRequester defines decred's rpcclient RawRequest func where all RPC
 // requests sent through. For testing, it can be satisfied by a stub.
 type RawRequester interface {
 	RawRequest(string, []json.RawMessage) (json.RawMessage, error)
 }
 
-// RawRequesterWithContext defines dcred's rpcclient RawRequest func where all
+// RawRequesterWithContext defines decred's rpcclient RawRequest func where all
 // RPC requests sent through. For testing, it can be satisfied by a stub.
 type RawRequesterWithContext interface {
 	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
@@ -147,7 +147,7 @@ func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 func (wc *rpcClient) getTxOut(txHash *chainhash.Hash, index uint32, _ []byte, _ time.Time) (*wire.TxOut, uint32, error) {
 	txOut, err := wc.getTxOutput(txHash, index)
 	if err != nil {
-		return nil, 0, fmt.Errorf("getTxOut error: %v", err)
+		return nil, 0, fmt.Errorf("getTxOut error: %w", err)
 	}
 	if txOut == nil {
 		return nil, 0, nil
@@ -382,8 +382,8 @@ func (wc *rpcClient) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	return wif.PrivKey, nil
 }
 
-// getTransaction retrieves the JSON-RPC gettransaction result.
-func (wc *rpcClient) getTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
+// getWalletTransaction retrieves the JSON-RPC gettransaction result.
+func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	tx := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txHash.String()}, tx)
 	if err != nil {
@@ -491,7 +491,7 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 		return uint32(txOut.Confirmations), nil
 	}
 	// Check wallet transactions.
-	tx, err := wc.getTransaction(txHash)
+	tx, err := wc.getWalletTransaction(txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return 0, asset.CoinNotFoundError

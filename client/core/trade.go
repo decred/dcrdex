@@ -1865,11 +1865,10 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	match.cancelRedemptionSearch = cancel
 	swapCoinID := dex.Bytes(match.MetaData.Proof.TakerSwap)
-	contract := match.MetaData.Proof.Script
 
 	// Run redemption finder in goroutine.
 	go func() {
-		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID, contract)
+		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID)
 
 		// Redemption search done, with or without error.
 		// Keep the mutex locked for the remainder of this goroutine execution to
@@ -1960,7 +1959,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
+		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
 		if err != nil {
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {
 				match.refundErr = err

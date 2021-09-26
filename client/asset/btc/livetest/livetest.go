@@ -314,7 +314,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	swapReceipt := receipts[0]
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*10))
 	defer cancel()
-	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -330,7 +330,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1, true)
-	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -367,7 +367,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	}
 	swapReceipt = receipts[0]
 
-	_, err = rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), tStart)
+	_, err = rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

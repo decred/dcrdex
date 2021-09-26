@@ -1719,7 +1719,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 //
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
-func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot decode contract coin id: %w", err)
@@ -2125,7 +2125,10 @@ func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, _ time.Time) (dex.Bytes, error) {
+// NOTE ABOUT PREVIOUS NOTE: If we sent the swap from this wallet, it will spend
+// wallet outputs, and will be available through gettransaction. We could
+// probably drop the contract argument after all.
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	msgTx, err := dcr.refundTx(coinID, contract, 0, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)

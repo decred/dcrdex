@@ -348,7 +348,7 @@ func runTest(t *testing.T, splitTx bool) {
 	waitNetwork()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -366,7 +366,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
-	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -402,7 +402,7 @@ func runTest(t *testing.T, splitTx bool) {
 	swapReceipt = receipts[0]
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), tStart)
+	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

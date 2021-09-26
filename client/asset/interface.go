@@ -115,10 +115,10 @@ type Wallet interface {
 	// transaction outputs.
 	FundingCoins([]dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can
-	// be used to refund a failed transaction. The Input coins are unlocked where
-	// necessary to ensure accurate balance reporting in cases where the wallet
-	// includes spent coins as part of the locked balance just because they were
-	// previously locked.
+	// be used to refund a failed transaction. The Input coins are unlocked
+	// where necessary to ensure accurate balance reporting in cases where the
+	// wallet includes spent coins as part of the locked balance just because
+	// they were previously locked.
 	Swap(*Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
@@ -131,10 +131,11 @@ type Wallet interface {
 	// blockchain. This would be used to verify the counter-party's contract
 	// during a swap. If the coin cannot be found for the coin ID, the
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
-	// to properly handle network latency. startTime is technically only
+	// to properly handle network latency. The matchTime is provided so that
+	// wallets can limit their scan when matching against transaction filters.
 	// necessary for wallets without full chain backing, but the caller should
-	// provide the match time here regardless.
-	AuditContract(coinID, contract, txData dex.Bytes, startTime time.Time) (*AuditInfo, error)
+	// have it on hand anyway.
+	AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
 	// is also returned, but reaching this time does not necessarily mean the
@@ -142,27 +143,33 @@ type Wallet interface {
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
 	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
-	// FindRedemption watches for the input that spends the specified contract
-	// coin, and returns the spending input and the contract's secret key when
-	// it finds a spender.
-	// For typical blockchains, every input of every block tx (starting at the
-	// contract block) will need to be scanned until a spending input is found.
+	// FindRedemption watches for the input that spends the specified
+	// coin and contract, and returns the spending input and the
+	// secret key when it finds a spender.
 	//
-	// FindRedemption is necessary to deal with the case of a maker redeeming but
-	// not forwarding their redemption information. The DEX does not monitor for
-	// this case. While it will result in the counter-party being penalized, the
-	// input still needs to be found so the swap can be completed.
+	// For typical utxo-based blockchains, every input of every block tx
+	// (starting at the contract block) will need to be scanned until a spending
+	// input is found.
 	//
-	// NOTE: This could potentially be a long and expensive operation if performed
-	// long after the swap is broadcast; might be better executed from a goroutine.
-	FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
+	// FindRedemption is necessary to deal with the case of a maker redeeming
+	// but not forwarding their redemption information. The DEX does not monitor
+	// for this case. While it will result in the counter-party being penalized,
+	// the input still needs to be found so the swap can be completed.
+	//
+	// NOTE: This could potentially be a long and expensive operation if
+	// performed long after the swap is broadcast; might be better executed from
+	// a goroutine.
+	FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
-	// NOTE: The contract cannot be retrieved from the unspent coin info as the
-	// wallet does not store it, even though it was known when the init transaction
-	// was created. The client should store this information for persistence across
-	// sessions.
-	Refund(coinID, contract dex.Bytes, startTime time.Time) (dex.Bytes, error)
+	// NOTE: The contract cannot be retrieved from the unspent coin info
+	// as the wallet does not store it, even though it was known when the init
+	// transaction was created. The client should store this information for
+	// persistence across sessions.
+	// NOTE ABOUT PREVIOUS NOTE: For btc/dcr, if we sent the swap from this
+	// wallet, it will spend wallet outputs, and will be available through
+	// gettransaction. We could probably drop the contract argument after all.
+	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// OwnsAddress indicates if an address belongs to the wallet.
@@ -178,16 +185,16 @@ type Wallet interface {
 	PayFee(address string, feeAmt uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations for the specified coin
 	// ID. If the coin is not unspent, and is not known to this wallet,
-	// Confirmations may return an error. The value of spent should be ignored
-	// if err is non-nil, but Wallet implementations should return spent = false
-	// anyway.
+	// SwapConfirmations may return an error.
 	// If the contract is already redeemed or refunded, the confs value may not
 	// be accurate.
+	// The contract and matchTime are provided so that wallets may search for
+	// the specified coin using light filters.
 	// If the swap is found to be already redeemed or refunded, a ErrSpentSwap
 	// will be returned.
-	SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, err error)
-	// Withdraw withdraws funds to the specified address. Fees are subtracted from
-	// the value.
+	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, err error)
+	// Withdraw withdraws funds to the specified address. Fees are subtracted
+	// from the value.
 	Withdraw(address string, value uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
