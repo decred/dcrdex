@@ -154,7 +154,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	for name, wallet := range rig.backends {
 		bal, err := wallet.Balance()
 		if err != nil {
-			t.Fatalf("error getting available: %v", err)
+			t.Fatalf("error getting available balance: %v", err)
 		}
 		tLogger.Debugf("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)

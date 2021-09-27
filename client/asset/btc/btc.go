@@ -1764,14 +1764,12 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		return nil, nil, fmt.Errorf("error finding wallet transaction: %v", err)
 	}
 
-	msgTx, err := msgTxFromBytes(tx.Hex)
+	txOut, err := txOutFromTxBytes(tx.Hex, vout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error decoding transaction bytes: %v", err)
+		return nil, nil, err
 	}
+	pkScript := txOut.PkScript
 
-	if len(msgTx.TxOut) <= int(vout) {
-		return nil, nil, fmt.Errorf("no vout %d in tx %s", vout, txHash)
-	}
 	var blockHash *chainhash.Hash
 	if tx.BlockHash != "" {
 		blockHash, err = chainhash.NewHashFromStr(tx.BlockHash)
@@ -1779,8 +1777,6 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 			return nil, nil, fmt.Errorf("error decoding block hash from string %q: %v", tx.BlockHash, err)
 		}
 	}
-
-	pkScript := msgTx.TxOut[vout].PkScript
 
 	var blockHeight int32
 	if blockHash != nil {
@@ -1794,18 +1790,13 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		outPt:        outPt,
 		blockHash:    blockHash,
 		blockHeight:  blockHeight,
-		resultChan:   make(chan *findRedemptionResult, 1),
+		resultChan:   make(chan *findRedemptionResult),
 		pkScript:     pkScript,
 		contractHash: dexbtc.ExtractScriptHash(pkScript),
 	}
 
-	btc.findRedemptionMtx.Lock()
-	oldRedemption := btc.findRedemptionQueue[outPt]
-	btc.findRedemptionQueue[outPt] = req
-	btc.findRedemptionMtx.Unlock()
-
-	if oldRedemption != nil {
-		oldRedemption.fail("Duplicate FindRedemption request received. Aborting the old request.")
+	if err := btc.queueFindRedemptionRequest(req); err != nil {
+		return exitError("queueFindRedemptionRequest error for redemption %s: %v", outPt, err)
 	}
 
 	go btc.tryRedemptionRequests(ctx, nil, []*findRedemptionReq{req})
@@ -1833,6 +1824,18 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		return result.redemptionCoinID, result.secret, result.err
 	}
 	return nil, nil, err
+}
+
+// queueFindRedemptionRequest adds the *findRedemptionReq to the queue, erroring
+// if there is already a request queued for this outpoint.
+func (btc *ExchangeWallet) queueFindRedemptionRequest(req *findRedemptionReq) error {
+	btc.findRedemptionMtx.Lock()
+	defer btc.findRedemptionMtx.Unlock()
+	if _, exists := btc.findRedemptionQueue[req.outPt]; exists {
+		return fmt.Errorf("duplicate find redemption request for %s", req.outPt)
+	}
+	btc.findRedemptionQueue[req.outPt] = req
+	return nil
 }
 
 // tryRedemptionRequests searches all mainchain blocks with height >= startBlock
@@ -1979,9 +1982,6 @@ func (btc *ExchangeWallet) tryRedemptionRequests(ctx context.Context, startBlock
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-// NOTE ABOUT PREVIOUS NOTE: If we sent the swap from this wallet, it will spend
-// wallet outputs, and will be available through gettransaction. We could
-// probably drop the contract argument after all.
 func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -2644,7 +2644,6 @@ func (btc *ExchangeWallet) lockedSats() (uint64, error) {
 	var sum uint64
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
-outer:
 	for _, rpcOP := range lockedOutpoints {
 		txHash, err := chainhash.NewHashFromStr(rpcOP.TxID)
 		if err != nil {
@@ -2660,16 +2659,11 @@ outer:
 		if err != nil {
 			return 0, err
 		}
-		for _, item := range tx.Details {
-			if item.Vout == rpcOP.Vout {
-				if item.Amount <= 0 {
-					return 0, fmt.Errorf("unexpected debit at %s:%v", txHash, rpcOP.Vout)
-				}
-				sum += toSatoshi(item.Amount)
-				continue outer
-			}
+		txOut, err := txOutFromTxBytes(tx.Hex, rpcOP.Vout)
+		if err != nil {
+			return 0, err
 		}
-		return 0, fmt.Errorf("output %s:%v not found", txHash, rpcOP.Vout)
+		sum += uint64(txOut.Value)
 	}
 	return sum, nil
 }

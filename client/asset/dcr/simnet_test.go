@@ -275,7 +275,7 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Helper()
 		confs, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
 		spent := errors.Is(err, asset.ErrSpentSwap)
-		if err != nil || !spent {
+		if err != nil && !spent {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
@@ -312,8 +312,7 @@ func runTest(t *testing.T, splitTx bool) {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
 		confs, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
-		spent := errors.Is(err, asset.ErrSpentSwap)
-		if err != nil || !spent {
+		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
 		if confs != 0 {
@@ -321,9 +320,6 @@ func runTest(t *testing.T, splitTx bool) {
 		}
 		if ci.Expiration.Equal(lockTime) {
 			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)
-		}
-		if spent {
-			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
 		return &asset.Redemption{
 			Spends: ci,

@@ -698,3 +698,18 @@ func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 	}
 	return msgTx, nil
 }
+
+// txOutFromTxBytes parses the specified *wire.TxOut from the serialized
+// transaction.
+func txOutFromTxBytes(txB []byte, vout uint32) (*wire.TxOut, error) {
+	msgTx, err := msgTxFromBytes(txB)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding transaction bytes: %v", err)
+	}
+
+	if len(msgTx.TxOut) <= int(vout) {
+		return nil, fmt.Errorf("no vout %d in tx %s", vout, msgTx.TxHash())
+	}
+
+	return msgTx.TxOut[vout], nil
+}

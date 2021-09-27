@@ -166,9 +166,6 @@ type Wallet interface {
 	// as the wallet does not store it, even though it was known when the init
 	// transaction was created. The client should store this information for
 	// persistence across sessions.
-	// NOTE ABOUT PREVIOUS NOTE: For btc/dcr, if we sent the swap from this
-	// wallet, it will spend wallet outputs, and will be available through
-	// gettransaction. We could probably drop the contract argument after all.
 	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)

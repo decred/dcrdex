@@ -2125,9 +2125,6 @@ func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-// NOTE ABOUT PREVIOUS NOTE: If we sent the swap from this wallet, it will spend
-// wallet outputs, and will be available through gettransaction. We could
-// probably drop the contract argument after all.
 func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	msgTx, err := dcr.refundTx(coinID, contract, 0, nil)
 	if err != nil {
@@ -2345,9 +2342,6 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 }
 
 func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	// Could check with gettransaction first, figure out the tree, and look for a
-	// redeem script with listscripts, but the listunspent entry has all the
-	// necessary fields already.
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err
@@ -2377,7 +2371,7 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID dex.Byt
 		return 0, nil
 	}
 	if spent {
-		return 0, asset.ErrSpentSwap
+		return confs, asset.ErrSpentSwap
 	}
 	return confs, nil
 }

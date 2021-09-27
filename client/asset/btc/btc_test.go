@@ -610,17 +610,25 @@ func TestAvailableFund(t *testing.T) {
 	node.listLockUnspent = []*RPCOutpoint{
 		{
 			TxID: tTxID,
-			Vout: 5,
+			Vout: 1,
 		},
 	}
+
+	msgTx := wire.NewMsgTx(wire.TxVersion)
+	msgTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&chainhash.Hash{0x01}, 0), nil, nil))
+	msgTx.AddTxOut(wire.NewTxOut(1, []byte{0x02}))
+	msgTx.AddTxOut(wire.NewTxOut(int64(lockedVal), []byte{0x02}))
+	txBuf := bytes.NewBuffer(make([]byte, 0, dexbtc.MsgTxVBytes(msgTx)))
+	msgTx.Serialize(txBuf)
 
 	node.getTransaction = &GetTransactionResult{
 		Details: []*WalletTxDetails{
 			{
 				Amount: float64(lockedVal) / 1e8,
-				Vout:   5,
+				Vout:   1,
 			},
 		},
+		Hex: txBuf.Bytes(),
 	}
 
 	bal, err = wallet.Balance()
