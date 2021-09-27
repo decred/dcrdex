@@ -154,11 +154,15 @@ func newTWebsocket() *TWebsocket {
 	}
 }
 
-func tNewAccount() *dexAccount {
+func tNewAccount(crypter *tCrypter) *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
+	encKey, err := crypter.Encrypt(privKey.Serialize())
+	if err != nil {
+		panic(err)
+	}
 	return &dexAccount{
 		host:      tDexHost,
-		encKey:    privKey.Serialize(),
+		encKey:    encKey,
 		dexPubKey: tDexKey,
 		privKey:   privKey,
 		id:        tDexAccountID,
@@ -166,11 +170,11 @@ func tNewAccount() *dexAccount {
 	}
 }
 
-func testDexConnection(ctx context.Context) (*dexConnection, *TWebsocket, *dexAccount) {
+func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
 	connMaster := dex.NewConnectionMaster(conn)
 	connMaster.Connect(ctx)
-	acct := tNewAccount()
+	acct := tNewAccount(crypter)
 	return &dexConnection{
 		WsConn:     conn,
 		log:        tLogger,
@@ -872,15 +876,14 @@ func newTestRig() *testRig {
 		queue.Run(ctx)
 	}()
 
-	dc, conn, acct := testDexConnection(ctx)
+	crypter := &tCrypter{}
+	dc, conn, acct := testDexConnection(ctx, crypter) // crypter makes acct.encKey consistent with privKey
 
 	shutdown := func() {
 		cancel()
 		wg.Wait()
 		dc.connMaster.Wait()
 	}
-
-	crypter := &tCrypter{}
 
 	rig := &testRig{
 		shutdown: shutdown,
@@ -922,7 +925,29 @@ func newTestRig() *testRig {
 
 	rig.core.InitializeClient(tPW, nil)
 
+	// tCrypter doesn't actually use random bytes supplied by InitializeClient,
+	// (the crypter is known ahead of time) but if that changes, we would need
+	// to encrypt the acct.privKey here, after InitializeClient generates a new
+	// random inner key/crypter: rig.resetAcctEncKey(tPW)
+
 	return rig
+}
+
+// Encrypt acct.privKey -> acct.encKey if InitializeClient generates a new
+// random inner key/crypter that is different from the one used on construction.
+// Important if Core's crypters actually use their initialization data (random
+// bytes for inner crypter and the pw for outer).
+func (rig *testRig) resetAcctEncKey(pw []byte) error {
+	innerCrypter, err := rig.core.encryptionKey(pw)
+	if err != nil {
+		return fmt.Errorf("encryptionKey error: %w", err)
+	}
+	encKey, err := innerCrypter.Encrypt(rig.acct.privKey.Serialize())
+	if err != nil {
+		return fmt.Errorf("crypter.Encrypt error: %w", err)
+	}
+	rig.acct.encKey = encKey
+	return nil
 }
 
 func (rig *testRig) queueConfig() {
@@ -7194,10 +7219,22 @@ func TestCredentialHandling(t *testing.T) {
 		t.Fatalf("InitializeClient error: %v", err)
 	}
 
+	// Since the actual encrypt package crypter is now used instead of the dummy
+	// tCrypter, the acct.encKey should be updated to reflect acct.privKey.
+	// Although the test does not rely on this, we should keep the dexAccount
+	// self-consistent and avoid confusing messages in the test log.
+	err = rig.resetAcctEncKey(tPW)
+	if err != nil {
+		t.Fatalf("InitializeClient error: %v", err)
+	}
+
 	tCore.Logout()
 
 	_, err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("Login error: %v", err)
 	}
+	// NOTE: a warning note is expected. "Wallet connection warning - Incomplete
+	// registration detected for somedex.tld:7232, but failed to connect to the
+	// Decred wallet"
 }
