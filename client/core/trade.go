@@ -663,15 +663,11 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	coin := match.counterSwap.Coin
 
 	var err error
-	have, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
+	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
-		if errors.Is(err, asset.ErrSpentSwap) {
-			spent = true
-		} else {
-			t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
-				coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
-		}
+		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
+			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
 		return
 	}
 
@@ -900,10 +896,13 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			return ready
 		}
 		// If we're the maker, check the confirmations anyway so we can notify.
-		confs, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
+		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.Script, match.MetaData.Stamp)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		if spent {
+			t.dc.log.Errorf("our (maker) swap for match %s is being reported as spent", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -953,10 +952,13 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 			return ready
 		}
 		// If we're the taker, check the confirmations anyway so we can notify.
-		confs, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
+		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.Script, match.MetaData.Stamp)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		if spent {
+			t.dc.log.Errorf("our (taker) swap for match %s is being reported as spent", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -1070,16 +1072,11 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.Script, match.MetaData.Stamp)
-	var spent bool
+	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.Script, match.MetaData.Stamp)
 	if err != nil {
-		if errors.Is(err, asset.ErrSpentSwap) {
-			spent = true
-		} else {
-			t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
-				coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
-			return false
-		}
+		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
+			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
+		return false
 	}
 	if spent {
 		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())

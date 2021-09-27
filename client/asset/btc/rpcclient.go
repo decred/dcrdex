@@ -484,21 +484,21 @@ func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 // swapConfirmations gets the number of confirmations for the specified coin ID
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (confs uint32, err error) {
+func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (confs uint32, spent bool, err error) {
 	// Check for an unspent output.
 	txOut, err := wc.getTxOutput(txHash, vout)
 	if err == nil && txOut != nil {
-		return uint32(txOut.Confirmations), nil
+		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
 	tx, err := wc.getWalletTransaction(txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
-			return 0, asset.CoinNotFoundError
+			return 0, false, asset.CoinNotFoundError
 		}
-		return 0, err
+		return 0, false, err
 	}
-	return uint32(tx.Confirmations), asset.ErrSpentSwap
+	return uint32(tx.Confirmations), true, nil
 }
 
 // getBlockHeader gets the block header for the specified block hash.

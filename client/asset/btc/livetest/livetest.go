@@ -16,7 +16,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os/exec"
@@ -249,9 +248,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
-		spent := errors.Is(err, asset.ErrSpentSwap)
-		if err != nil && !spent {
+		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
+		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
@@ -278,9 +276,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart)
-		spent := errors.Is(err, asset.ErrSpentSwap)
-		if err != nil && !spent {
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart)
+		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
 		if confs != 0 {

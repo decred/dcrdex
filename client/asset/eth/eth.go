@@ -439,8 +439,8 @@ func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error)
 	return nil, asset.ErrNotImplemented
 }
 
-func (*ExchangeWallet) SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, err error) {
-	return 0, asset.ErrNotImplemented
+func (*ExchangeWallet) SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, spent bool, err error) {
+	return 0, false, asset.ErrNotImplemented
 }
 
 // sendToAddr sends funds from acct to addr.

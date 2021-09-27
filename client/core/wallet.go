@@ -244,9 +244,9 @@ func (w *xcWallet) Disconnect() {
 
 // SwapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout
 // Context. If the coin cannot be located, an asset.CoinNotFoundError is
-// returned. If the coin is found, but is spent, the confirmations will be
-// returned with an asset.ErrSpentSwap.
-func (w *xcWallet) SwapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, error) {
+// returned. If the coin is located, but recognized as spent, no error is
+// returned.
+func (w *xcWallet) SwapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
 	defer cancel()
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, encode.UnixTimeMilli(int64(matchTime)))

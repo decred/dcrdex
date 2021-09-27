@@ -773,8 +773,9 @@ func (w *TXCWallet) tConfirmations(ctx context.Context, coinID dex.Bytes) (uint3
 	return w.confs[id], w.confsErr[id]
 }
 
-func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (uint32, error) {
-	return w.tConfirmations(ctx, coinID)
+func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (uint32, bool, error) {
+	confs, err := w.tConfirmations(ctx, coinID)
+	return confs, false, err
 }
 
 func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {

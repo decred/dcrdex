@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -273,9 +272,8 @@ func runTest(t *testing.T, splitTx bool) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
-		spent := errors.Is(err, asset.ErrSpentSwap)
-		if err != nil && !spent {
+		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
+		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
 		if confs != n {
@@ -311,9 +309,12 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
+		}
+		if spent {
+			t.Fatalf("swap spent")
 		}
 		if confs != 0 {
 			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)

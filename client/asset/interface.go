@@ -19,7 +19,6 @@ const (
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 	ErrConnectionDown = dex.ErrorKind("wallet not connected")
 	ErrNotImplemented = dex.ErrorKind("not implemented")
-	ErrSpentSwap      = dex.ErrorKind("swap has been spent")
 	ErrUnsupported    = dex.ErrorKind("unsupported")
 )
 
@@ -180,16 +179,15 @@ type Wallet interface {
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, feeAmt uint64) (Coin, error)
-	// SwapConfirmations gets the number of confirmations for the specified coin
-	// ID. If the coin is not unspent, and is not known to this wallet,
-	// SwapConfirmations may return an error.
+	// SwapConfirmations gets the number of confirmations and the spend status
+	// for the specified swap. If the swap was not funded by this wallet, and
+	// it is already spent, you may see CoinNotFoundError.
+	// If the coin is located, but recognized as spent, no error is returned.
 	// If the contract is already redeemed or refunded, the confs value may not
 	// be accurate.
 	// The contract and matchTime are provided so that wallets may search for
-	// the specified coin using light filters.
-	// If the swap is found to be already redeemed or refunded, a ErrSpentSwap
-	// will be returned.
-	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, err error)
+	// the coin using light filters.
+	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
 	Withdraw(address string, value uint64) (Coin, error)

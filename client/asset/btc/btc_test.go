@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -2247,7 +2246,7 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin id
-	_, err = wallet.SwapConfirmations(context.Background(), randBytes(35), nil, time.Time{})
+	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2256,7 +2255,7 @@ func TestConfirmations(t *testing.T) {
 	node.txOutRes = &btcjson.GetTxOutResult{
 		Confirmations: 2,
 	}
-	confs, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
@@ -2267,16 +2266,19 @@ func TestConfirmations(t *testing.T) {
 	// gettransaction error
 	node.txOutRes = nil
 	node.getTransactionErr = tErr
-	_, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	node.getTransactionErr = nil
 	node.getTransaction = &GetTransactionResult{}
 
-	confs, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
-	if err == nil || !errors.Is(err, asset.ErrSpentSwap) {
-		t.Fatalf("wrong error. Expected (0, ErrSpentSwap), got (%d, %v)", confs, err)
+	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("error for spent swap: %v", err)
+	}
+	if !spent {
+		t.Fatalf("swap not spent")
 	}
 }
 

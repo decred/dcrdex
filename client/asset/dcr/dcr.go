@@ -2365,15 +2365,8 @@ func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) 
 // SwapConfirmations gets the number of confirmations for the specified coin ID
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, _ dex.Bytes, _ time.Time) (confs uint32, err error) {
-	confs, spent, err := dcr.coinConfirmations(ctx, coinID)
-	if err != nil {
-		return 0, nil
-	}
-	if spent {
-		return confs, asset.ErrSpentSwap
-	}
-	return confs, nil
+func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, _ dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
+	return dcr.coinConfirmations(ctx, coinID)
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
