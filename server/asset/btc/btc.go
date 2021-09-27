@@ -51,6 +51,11 @@ func (d *Driver) Version() uint32 {
 	return version
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return dexbtc.UnitInfo
+}
+
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The KeyIndexer will be used for discovering the current
 // child index, and storing the index as new addresses are generated with the

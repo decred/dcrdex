@@ -30,6 +30,8 @@ type Driver interface {
 	// when major changes are made to internal details such as coin ID encoding
 	// and contract structure that must be common to a client's.
 	Version() uint32
+	// UnitInfo returns the dex.UnitInfo for the asset.
+	UnitInfo() dex.UnitInfo
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for a named
@@ -42,6 +44,17 @@ func DecodeCoinID(name string, coinID []byte) (string, error) {
 		return "", fmt.Errorf("unknown asset driver %q", name)
 	}
 	return drv.DecodeCoinID(coinID)
+}
+
+// asset with a corresponding driver registered with this package.
+func UnitInfo(name string) (dex.UnitInfo, error) {
+	driversMtx.Lock()
+	drv, ok := drivers[name]
+	driversMtx.Unlock()
+	if !ok {
+		return dex.UnitInfo{}, fmt.Errorf("unknown asset driver %q in UnitInfo", name)
+	}
+	return drv.UnitInfo(), nil
 }
 
 // NewAddresser creates an Addresser for a named asset for deriving addresses
@@ -71,6 +84,9 @@ func Register(name string, driver Driver) {
 	}
 	if _, dup := drivers[name]; dup {
 		panic("asset: Register called twice for asset driver " + name)
+	}
+	if driver.UnitInfo().Conventional.ConversionFactor == 0 {
+		panic("asset: Driver registered with unit conversion factor = 0: " + name)
 	}
 	drivers[name] = driver
 }

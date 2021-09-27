@@ -70,6 +70,11 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return coinId.String(), nil
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return swap.UnitInfo
+}
+
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 //

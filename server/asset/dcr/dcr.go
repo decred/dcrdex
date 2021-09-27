@@ -56,6 +56,11 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return dexdcr.UnitInfo
+}
+
 // Version returns the Backend implementation's version number.
 func (d *Driver) Version() uint32 {
 	return version
