@@ -902,7 +902,9 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
-			t.dc.log.Errorf("our (maker) swap for match %s is being reported as spent", match)
+			t.dc.log.Debugf("our (maker) swap for match %s is being reported as spent, "+
+				"but we have not seen the counter-party's redemption yet. This could just"+
+				" be network latency.", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -958,7 +960,9 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
-			t.dc.log.Errorf("our (taker) swap for match %s is being reported as spent", match)
+			t.dc.log.Debugf("our (taker) swap for match %s is being reported as spent, "+
+				"but we have not seen the counter-party's redemption yet. This could just"+
+				" be network latency.", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
