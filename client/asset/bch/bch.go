@@ -5,10 +5,10 @@ package bch
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -198,8 +198,8 @@ func (bch *BCHWallet) Address() (string, error) {
 // AuditContract modifies the *asset.Contract returned by the ExchangeWallet
 // AuditContract method by converting the Recipient to the Cash Address
 // encoding.
-func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) { // AuditInfo has address
-	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData)
+func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*asset.AuditInfo, error) { // AuditInfo has address
+	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData, matchTime)
 	if err != nil {
 		return nil, err
 	}
@@ -244,8 +244,8 @@ func serializeBtcTx(msgTx *wire.MsgTx) ([]byte, error) {
 
 // estimateFee uses Bitcoin Cash's estimatefee RPC, since estimatesmartfee
 // is not implemented.
-func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) (uint64, error) {
-	resp, err := node.RawRequest(ctx, "estimatefee", nil)
+func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
+	resp, err := node.RawRequest("estimatefee", nil)
 	if err != nil {
 		return 0, err
 	}

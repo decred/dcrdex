@@ -115,6 +115,8 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 
+	tStart := time.Now()
+
 	tBlockTick := time.Second
 	tBlockWait := tBlockTick + time.Millisecond*50
 	walletPassword := "abc"
@@ -151,7 +153,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	for name, wallet := range rig.backends {
 		bal, err := wallet.Balance()
 		if err != nil {
-			t.Fatalf("error getting available: %v", err)
+			t.Fatalf("error getting available balance: %v", err)
 		}
 		tLogger.Debugf("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
@@ -243,9 +245,10 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	}
 
 	confCoin := receipts[0].Coin()
+	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.gamma().Confirmations(context.Background(), confCoin.ID())
+		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
@@ -262,7 +265,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		// Alpha should be able to redeem.
-		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil)
+		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil, tStart)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
@@ -273,7 +276,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, spent, err := rig.alpha().Confirmations(context.TODO(), receipt.Coin().ID())
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -306,7 +309,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, lotSize uint
 
 	// Find the redemption
 	swapReceipt := receipts[0]
-	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
+	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*10))
 	defer cancel()
 	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {

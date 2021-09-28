@@ -7,17 +7,16 @@ import "decred.org/dcrdex/dex"
 
 // GetBalancesResult models a successful response from the getbalances request.
 type GetBalancesResult struct {
-	Mine struct {
-		Trusted   float64  `json:"trusted"`
-		Untrusted float64  `json:"untrusted_pending"`
-		Immature  float64  `json:"immature"`
-		Used      *float64 `json:"used,omitempty"`
-	} `json:"mine"`
-	WatchOnly struct {
-		Trusted   float64 `json:"trusted"`
-		Untrusted float64 `json:"untrusted_pending"`
-		Immature  float64 `json:"immature"`
-	} `json:"watchonly"`
+	Mine      Balances `json:"mine"`
+	WatchOnly Balances `json:"watchonly"`
+}
+
+// Balances is a categorical balance breakdown.
+type Balances struct {
+	Trusted   float64  `json:"trusted"`
+	Untrusted float64  `json:"untrusted_pending"`
+	Immature  float64  `json:"immature"`
+	Used      *float64 `json:"used,omitempty"`
 }
 
 // ListUnspentResult models a successful response from the listunspent request.

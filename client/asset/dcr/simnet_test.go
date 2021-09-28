@@ -155,6 +155,7 @@ func TestWallet(t *testing.T) {
 }
 
 func runTest(t *testing.T, splitTx bool) {
+	tStart := time.Now()
 	blockReported := false
 	rig := newTestRig(t, func(name string, err error) {
 		blockReported = true
@@ -268,9 +269,10 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	confCoin := receipts[0].Coin()
+	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.beta().Confirmations(tCtx, confCoin.ID())
+		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
@@ -296,7 +298,7 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil)
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil, tStart)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
@@ -307,18 +309,18 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, spent, err := rig.alpha().Confirmations(context.TODO(), swapOutput.ID())
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
+		}
+		if spent {
+			t.Fatalf("swap spent")
 		}
 		if confs != 0 {
 			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
 		}
 		if ci.Expiration.Equal(lockTime) {
 			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)
-		}
-		if spent {
-			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
 		return &asset.Redemption{
 			Spends: ci,

@@ -2768,7 +2768,7 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 	trigger := func() (bool, error) {
 		// We already know the wallet is there by now.
 		wallet, _ := c.wallet(assetID)
-		confs, _, err := wallet.Confirmations(c.ctx, coinID)
+		confs, err := wallet.RegFeeConfirmations(c.ctx, coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %w", coinIDString(wallet.AssetID, coinID), err)
 		}
@@ -4407,7 +4407,7 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	// Get the coin for the fee.
-	confs, _, err := wallet.Confirmations(c.ctx, acctInfo.FeeCoin)
+	confs, err := wallet.RegFeeConfirmations(c.ctx, acctInfo.FeeCoin)
 	if err != nil {
 		c.log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
@@ -4748,7 +4748,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				// does not actually audit the contract's value, recipient,
 				// expiration, or secret hash (if maker), as that was already
 				// done when it was initially stored as CounterScript.
-				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData)
+				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
 				if err != nil {
 					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
 					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(wallets.toAsset.ID))

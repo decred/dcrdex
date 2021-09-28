@@ -364,7 +364,7 @@ func (*ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
-func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
+func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	return nil, asset.ErrNotImplemented
 }
 
@@ -386,10 +386,6 @@ func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (re
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-// NOTE: The contract cannot be retrieved from the unspent coin info as the
-// wallet does not store it, even though it was known when the init transaction
-// was created. The client should store this information for persistence across
-// sessions.
 func (*ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	return nil, asset.ErrNotImplemented
 }
@@ -441,6 +437,10 @@ func (eth *ExchangeWallet) Locked() bool {
 // NOTE: PayFee is not intended to be used with Ethereum at this time.
 func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
 	return nil, asset.ErrNotImplemented
+}
+
+func (*ExchangeWallet) SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, spent bool, err error) {
+	return 0, false, asset.ErrNotImplemented
 }
 
 // sendToAddr sends funds from acct to addr.
@@ -513,6 +513,10 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 // RefundAddress extracts and returns the refund address from a contract.
 func (eth *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
 	return "", asset.ErrNotImplemented
+}
+
+func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+	return 0, asset.ErrNotImplemented
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

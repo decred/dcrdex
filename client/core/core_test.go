@@ -691,7 +691,7 @@ func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Byte
 	return nil, nil, w.signCoinErr
 }
 
-func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
+func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	defer func() {
 		if w.auditChan != nil {
 			w.auditChan <- struct{}{}
@@ -766,11 +766,20 @@ func (w *TXCWallet) setConfs(coinID dex.Bytes, confs uint32, err error) {
 	w.confsMtx.Unlock()
 }
 
-func (w *TXCWallet) Confirmations(ctx context.Context, coinID dex.Bytes) (uint32, bool, error) {
+func (w *TXCWallet) tConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
 	id := coinID.String()
 	w.confsMtx.RLock()
 	defer w.confsMtx.RUnlock()
-	return w.confs[id], false, w.confsErr[id]
+	return w.confs[id], w.confsErr[id]
+}
+
+func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (uint32, bool, error) {
+	confs, err := w.tConfirmations(ctx, coinID)
+	return confs, false, err
+}
+
+func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
+	return w.tConfirmations(ctx, coinID)
 }
 
 type tCrypterSmart struct {

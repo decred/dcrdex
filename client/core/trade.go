@@ -657,19 +657,17 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	// Check the confirmations on the counter-party's swap. If counterSwap is
 	// not set, we shouldn't be here, but catch this just in case.
 	if match.counterSwap == nil {
-		have = 0
 		t.dc.log.Warnf("counterPartyConfirms: No AuditInfo available to check!")
 		return
 	}
 	coin := match.counterSwap.Coin
 
 	var err error
-	have, spent, err = t.wallets.toWallet.Confirmations(ctx, coin.ID())
+	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
+		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
 			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
-		spent = false // backends should do this for non-nil error, but we'll do it anyway
-		have = 0      // should already be
 		return
 	}
 
@@ -898,9 +896,15 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			return ready
 		}
 		// If we're the maker, check the confirmations anyway so we can notify.
-		confs, _, err := wallet.Confirmations(ctx, match.MetaData.Proof.MakerSwap)
+		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
+			match.MetaData.Proof.Script, match.MetaData.Stamp)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		if spent {
+			t.dc.log.Debugf("our (maker) swap for match %s is being reported as spent, "+
+				"but we have not seen the counter-party's redemption yet. This could just"+
+				" be network latency.", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -950,9 +954,15 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 			return ready
 		}
 		// If we're the taker, check the confirmations anyway so we can notify.
-		confs, _, err := t.wallets.fromWallet.Confirmations(ctx, match.MetaData.Proof.TakerSwap)
+		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
+			match.MetaData.Proof.Script, match.MetaData.Stamp)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		}
+		if spent {
+			t.dc.log.Debugf("our (taker) swap for match %s is being reported as spent, "+
+				"but we have not seen the counter-party's redemption yet. This could just"+
+				" be network latency.", match)
 		}
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -1066,7 +1076,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.Confirmations(ctx, swapCoinID)
+	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.Script, match.MetaData.Stamp)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
 			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
@@ -2067,7 +2077,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData)
+			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
 			if err == nil {
 				// Success.
 				errChan <- nil

@@ -1677,7 +1677,7 @@ func TestAuditContract(t *testing.T) {
 
 	txoutRes.BestBlock = newBlockHash.String() // with 1 conf and this best block hash, the tx is in this block
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
+	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1692,14 +1692,14 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
 	// GetTxOut error
 	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
@@ -1709,7 +1709,7 @@ func TestAuditContract(t *testing.T) {
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
 	_, badContract := wrongAddr.PaymentScript()
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
@@ -2136,7 +2136,7 @@ func Test_sendMinusFees(t *testing.T) {
 	}
 }
 
-func TestConfirmations(t *testing.T) {
+func TestCoinConfirmations(t *testing.T) {
 	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
@@ -2147,7 +2147,7 @@ func TestConfirmations(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, spent, err := wallet.Confirmations(context.Background(), randBytes(35))
+	_, spent, err := wallet.coinConfirmations(context.Background(), randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2157,7 +2157,7 @@ func TestConfirmations(t *testing.T) {
 
 	op := newOutPoint(tTxHash, 0)
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	confs, spent, err := wallet.Confirmations(context.Background(), coinID)
+	confs, spent, err := wallet.coinConfirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
@@ -2171,7 +2171,7 @@ func TestConfirmations(t *testing.T) {
 	// gettransaction error
 	node.walletTxErr = tErr
 	delete(node.txOutRes, op)
-	_, spent, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
@@ -2181,7 +2181,7 @@ func TestConfirmations(t *testing.T) {
 	node.walletTxErr = nil
 
 	node.walletTx = &walletjson.GetTransactionResult{}
-	_, spent, err = wallet.Confirmations(context.Background(), coinID)
+	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}

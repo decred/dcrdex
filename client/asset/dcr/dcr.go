@@ -1625,7 +1625,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
-func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes) (*asset.AuditInfo, error) {
+func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -2341,10 +2341,7 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return bytes.Equal(h[:], secretHash)
 }
 
-// Confirmations gets the number of confirmations for the specified coin ID by
-// first checking for a unspent output, and if not found, searching indexed
-// wallet transactions.
-func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
+func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err
@@ -2363,6 +2360,20 @@ func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (con
 		return 0, false, translateRPCCancelErr(err)
 	}
 	return uint32(tx.Confirmations), true, nil
+}
+
+// SwapConfirmations gets the number of confirmations for the specified coin ID
+// by first checking for a unspent output, and if not found, searching indexed
+// wallet transactions.
+func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, _ dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
+	return dcr.coinConfirmations(ctx, coinID)
+}
+
+// RegFeeConfirmations gets the number of confirmations for the specified
+// output.
+func (dcr *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+	confs, _, err = dcr.coinConfirmations(ctx, coinID)
+	return confs, err
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
