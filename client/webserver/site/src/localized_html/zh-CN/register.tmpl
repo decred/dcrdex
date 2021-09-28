@@ -39,11 +39,6 @@
       {{template "newWalletForm" "你的 decred 钱包需要支付注册费。"}}
     </form>
 
-    {{- /* Unlock wallet. Only shown if not already unlocked. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
-      {{template "unlockWalletForm" "解锁你的 decred 钱包以支付费用。"}}
-    </form>
-
     {{- /* DEX ADDRESS FORM */ -}}
     <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="dexAddrForm">
       {{template "dexAddrForm"}}

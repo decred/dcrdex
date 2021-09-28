@@ -39,6 +39,7 @@ export const ID_WAITING_FOR_CONFS = 'ID_WAITING_FOR_CONFS'
 export const ID_NONE_SELECTED = 'ID_NONE_SELECTED' // unused?
 export const ID_REGISTRATION_FEE_SUCCESS = 'ID_REGISTRATION_FEE_SUCCESS'
 export const ID_API_ERROR = 'ID_API_ERROR'
+export const ID_CHOOSE_WALLET = 'ID_CHOOSE_WALLET'
 
 export const enUS = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -81,7 +82,8 @@ export const enUS = {
   [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...',
   [ID_NONE_SELECTED]: 'none selected',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!',
-  [ID_API_ERROR]: 'API error'
+  [ID_API_ERROR]: 'API error',
+  [ID_CHOOSE_WALLET]: 'Choose Wallet'
 }
 
 export const ptBR = {
@@ -125,7 +127,8 @@ export const ptBR = {
   [ID_WAITING_FOR_CONFS]: 'Esperando confirmações...',
   [ID_NONE_SELECTED]: 'nenhuma selecionado',
   [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!',
-  [ID_API_ERROR]: 'Erro de API'
+  [ID_API_ERROR]: 'Erro de API',
+  [ID_CHOOSE_WALLET]: 'Escolher Carteira'
 }
 
 export const zhCN = {
@@ -169,7 +172,8 @@ export const zhCN = {
   [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...', // TODO - shows when the registration fee transaction is waiting to be mined (needs confirmations)
   [ID_NONE_SELECTED]: 'none selected', // TODO - looks unused, but this indicates nothing is selected in some list
   [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!', // TODO - When the registration fee transaction reaches the required number of confirmations, this is shown
-  [ID_API_ERROR]: '接口错误'
+  [ID_API_ERROR]: '接口错误',
+  [ID_CHOOSE_WALLET]: 'Choose Wallet' // xxx translate
 }
 
 const localesMap = {

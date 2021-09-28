@@ -1,10 +1,9 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, UnlockWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
+import { NewWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
 import * as intl from './locales'
 
-const DCR_ID = 42
 const animationLength = 300
 
 let app
@@ -44,32 +43,11 @@ export default class RegistrationPage extends BasePage {
     // This form is only shown if there is no DCR wallet yet.
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
       this.dexAddrForm.refresh()
-      this.changeForm(page.newWalletForm, page.dexAddrForm)
+      this.confirmRegisterForm.refresh()
+      this.changeForm(page.newWalletForm, page.confirmRegForm)
     }, this.pwCache)
-
-    // OPEN DCR WALLET
-    // This form is only shown if there is a wallet, but it's not open.
-    this.unlockForm = new UnlockWalletForm(app, page.unlockWalletForm, () => {
-      this.dexAddrForm.refresh()
-      this.changeForm(page.unlockWalletForm, page.dexAddrForm)
-    }, this.pwCache)
-
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
-      const fee = xc.feeAsset.amount // DCR, special
-      const balanceFeeRegistration = app.user.assets[DCR_ID].wallet.balance.available
-      if (balanceFeeRegistration < fee) {
-        const errorMsg = `Looks like there is not enough funds for
-        paying the registration fee. Amount needed:
-        ${Doc.formatCoinValue(fee / 1e8)} Amount available:
-        ${Doc.formatCoinValue(balanceFeeRegistration / 1e8)}.
-
-        Deposit funds and try again.`
-        page.regFundsErr.textContent = errorMsg
-        Doc.show(page.regFundsErr)
-        await this.changeForm(page.dexAddrForm, page.failedRegForm)
-        return
-      }
       this.confirmRegisterForm.setExchange(xc)
       await this.changeForm(page.dexAddrForm, page.confirmRegForm)
     }, this.pwCache)
@@ -82,7 +60,12 @@ export default class RegistrationPage extends BasePage {
         getDexAddr: () => this.getDexAddr()
       },
       () => this.registerDEXSuccess(),
-      (msg) => this.registerDEXFundsFail(msg))
+      (msg) => this.registerDEXFundsFail(msg),
+      (assetId) => {
+        this.walletForm.setAsset(assetId)
+        this.walletForm.loadDefaults()
+        this.changeForm(page.confirmRegForm, page.newWalletForm)
+      })
     // Attempt to load the dcrwallet configuration from the default location.
     if (app.user.authed) this.auth()
   }
@@ -94,9 +77,6 @@ export default class RegistrationPage extends BasePage {
   // auth should be called once user is known to be authed with the server.
   async auth () {
     await app.fetchUser()
-    this.walletForm.setAsset(app.assets[DCR_ID])
-    this.unlockForm.setAsset(app.assets[DCR_ID])
-    this.walletForm.loadDefaults()
   }
 
   /* Swap this currently displayed form1 for form2 with an animation. */
@@ -161,7 +141,7 @@ export default class RegistrationPage extends BasePage {
     this.auth()
     app.updateMenuItemsDisplay()
     this.walletForm.refresh()
-    await this.changeForm(page.appPWForm, page.newWalletForm)
+    await this.changeForm(page.appPWForm, page.dexAddrForm)
   }
 
   /* gets the contents of the cert file */

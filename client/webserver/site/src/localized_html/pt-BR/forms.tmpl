@@ -150,6 +150,43 @@
     <table class="marketstable">
       <thead>
         <tr>
+          <th class="text-center">Asset</th>
+          <th class="text-center">Fee</th>
+          <th class="text-center">Confs</th>
+          <th class="text-center"></th>
+        </tr>
+      </thead>
+      <tbody id="feeTableRows">
+        <tr id="feeRowTemplate">
+          <td>
+            <div class="d-flex justify-content-center align-items-center">
+              <img class="micro-icon mr-1" data-tmpl="asseticon">
+              <div data-tmpl="asset"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <div class="d-flex justify-content-center align-items-center">
+              <div data-tmpl="fee"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <div class="d-flex justify-content-center align-items-center">
+              <div data-tmpl="confs"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <button id="setupWallet" type="button" class="justify-content-center p-1 selected">Setup Wallet</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    Todas as trocas são múltiplas do tamanho do lote.
+  </div>
+  <div class="fs16 mt-4">
+    Essa DEX provê os seguintes mercados:
+    <table class="marketstable">
+      <thead>
+        <tr>
           <th class="text-center">Base</th>
           <th class="text-center">Quote</th>
           <th class="text-center">Tamanho do Lote</th>

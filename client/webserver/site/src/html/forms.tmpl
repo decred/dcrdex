@@ -150,6 +150,43 @@
     <table class="marketstable">
       <thead>
         <tr>
+          <th class="text-center">[[[asset_header]]]</th>
+          <th class="text-center">[[[fee_price_header]]]</th>
+          <th class="text-center">[[[fee_confs_header]]]</th>
+          <th class="text-center">[[[wallet_header]]]</th>
+        </tr>
+      </thead>
+      <tbody id="feeTableRows">
+        <tr id="feeRowTemplate">
+          <td>
+            <div class="d-flex justify-content-center align-items-center">
+              <img class="micro-icon mr-1" data-tmpl="asseticon">
+              <div data-tmpl="asset"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <div class="d-flex justify-content-center align-items-center">
+              <div data-tmpl="fee"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <div class="d-flex justify-content-center align-items-center">
+              <div data-tmpl="confs"></div>
+            </div>
+          </td>
+          <td class="text-center">
+            <button id="setupWallet" type="button" class="justify-content-center p-1 selected">[[[SetupWallet]]]</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    [[[lot_size_headsup]]]
+  </div>
+  <div class="fs16 mt-4">
+    [[[provided_markets]]]
+    <table class="marketstable">
+      <thead>
+        <tr>
           <th class="text-center">[[[base_header]]]</th>
           <th class="text-center">[[[quote_header]]]</th>
           <th class="text-center">[[[lot_size_header]]]</th>

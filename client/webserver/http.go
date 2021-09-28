@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
@@ -96,18 +95,14 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: rework register page for paying with other assets.
-	feeAssetID, _ := dex.BipSymbolID("dcr")
-	feeWalletStatus := s.core.WalletState(feeAssetID)
-	feeWalletExists := feeWalletStatus != nil
-	feeWalletOpen := feeWalletExists && feeWalletStatus.Open
+	// feeAssetID, _ := dex.BipSymbolID("dcr")
+	// feeWalletStatus := s.core.WalletState(feeAssetID)
+	// feeWalletExists := feeWalletStatus != nil
+	// feeWalletOpen := feeWalletExists && feeWalletStatus.Open
 
 	switch {
 	case !cArgs.UserInfo.Initialized:
 		data.InitStep = true
-	case !feeWalletExists:
-		data.WalletStep = true
-	case !feeWalletOpen:
-		data.OpenStep = true
 	default:
 		data.DEXStep = true
 	}
