@@ -5,6 +5,7 @@ package pg
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"regexp"
@@ -13,7 +14,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	_ "github.com/lib/pq" // Start the PostgreSQL sql driver
+	pq "github.com/lib/pq" // the "postgres" sql driver
 )
 
 const publicSchema = "public"
@@ -40,10 +41,60 @@ func connect(host, port, user, pass, dbName string) (*sql.DB, error) {
 		psqlInfo += fmt.Sprintf(" port=%s", port)
 	}
 
-	db, err := sql.Open("postgres", psqlInfo)
+	conn, err := pq.NewConnector(psqlInfo)
 	if err != nil {
 		return nil, err
 	}
+
+	var connector driver.Connector = pq.ConnectorWithNoticeHandler(conn, func(notice *pq.Error) {
+		// Notice severities:
+		//   DEBUG, LOG, INFO, NOTICE, WARNING, ERROR, FATAL, and PANIC.
+		//
+		// The LOG severity rank is below NOTICE for clients like us. The INFO
+		// rank varies, but it is neither a warning or an error.
+		//
+		// https://www.postgresql.org/docs/13/runtime-config-logging.html#RUNTIME-CONFIG-SEVERITY-LEVELS
+		//
+		// See also the client_min_messages setting, which applies to us:
+		// https://www.postgresql.org/docs/13/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES
+		// The default setting is NOTICE, which excludes DEBUG and LOG, but not
+		// INFO since that is sent to the client regardless of the setting.
+		var printer func(format string, params ...interface{})
+		switch notice.Severity {
+		case pq.Efatal, pq.Epanic: // error caused database session to abort
+			printer = log.Criticalf
+		// NOTE: postgresql has "ERROR" severity, but there is no pq const!
+		case "ERROR": // error caused current command to abort
+			printer = log.Errorf
+		case pq.Ewarning: // "likely problems"
+			printer = log.Warnf
+		// No INF level logging. Either it's a problem or just debug info.
+		case pq.Enotice, pq.Einfo:
+			printer = log.Debugf
+		case pq.Elog, pq.Edebug:
+			printer = log.Tracef
+		default:
+			printer = log.Warnf
+		}
+
+		// NOTICE often includes "successful completion"-coded notices that are
+		// quite spammy even for Debugf. Cleaner to check this down here.
+		// https://www.postgresql.org/docs/13/errcodes-appendix.html
+		if notice.Severity == pq.Enotice && notice.Code.Class() == "00" { // Class 00 - Successful Completion
+			printer = log.Tracef
+		}
+
+		// Format a string for the notice, which may not include Detail.
+		msg := fmt.Sprintf("pq: %s (%s) - %s: %s", notice.Severity, notice.Code,
+			notice.Code.Name(), notice.Message)
+		if notice.Detail != "" {
+			msg += " - " + notice.Detail
+		}
+
+		printer(msg)
+	})
+
+	db := sql.OpenDB(connector)
 
 	// Establish a connection and verify it is alive.
 	err = db.Ping()
