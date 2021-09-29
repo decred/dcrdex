@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
@@ -351,6 +352,234 @@ func TestBalance(t *testing.T) {
 		}
 		if bal.Available != test.wantBal {
 			t.Fatalf("want available balance %v got %v for test %q", test.wantBal, bal.Available, test.name)
+		}
+	}
+}
+
+func TestGetInitGas(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	node := &testNode{}
+	node.initGas = 1800
+	node.initGasErr = errors.New("")
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: new(accounts.Account),
+	}
+
+	_, err := eth.getInitGas()
+	if err == nil {
+		t.Fatalf("expected error but did not get one")
+	}
+
+	node.initGasErr = nil
+	gas, err := eth.getInitGas()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gas != 1800 {
+		t.Fatalf("expected gas to be 1800 but got %d", gas)
+	}
+
+	node.initGas = 500
+	gas, err = eth.getInitGas()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gas != 1800 {
+		t.Fatalf("expected gas to be 1800 but got %d", gas)
+	}
+
+	node.initGasErr = errors.New("")
+	gas, err = eth.getInitGas()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gas != 1800 {
+		t.Fatalf("expected gas to be 1800 but got %d", gas)
+	}
+
+	cancel()
+}
+
+func TestPreSwap(t *testing.T) {
+	ethToGwei := func(eth uint64) uint64 {
+		return eth * dexeth.GweiFactor
+	}
+
+	ethToWei := func(eth int64) *big.Int {
+		return big.NewInt(0).Mul(big.NewInt(eth*dexeth.GweiFactor), big.NewInt(dexeth.GweiFactor))
+	}
+
+	estimatedInitGas := uint64(180000)
+	hardcodedInitGas := uint64(170000)
+	tests := []struct {
+		name          string
+		bal           *big.Int
+		balErr        error
+		initGasErr    error
+		lotSize       uint64
+		maxFeeRate    uint64
+		feeSuggestion uint64
+		lots          uint64
+
+		wantErr       bool
+		wantLots      uint64
+		wantValue     uint64
+		wantMaxFees   uint64
+		wantWorstCase uint64
+		wantBestCase  uint64
+		wantLocked    uint64
+	}{
+		{
+			name:          "no balance",
+			bal:           big.NewInt(0),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			lots:          1,
+
+			wantErr: true,
+		},
+		{
+			name:          "not enough for fees",
+			bal:           ethToWei(10),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			lots:          1,
+
+			wantErr: true,
+		},
+		{
+			name:          "one lot enough for fees",
+			bal:           ethToWei(11),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			lots:          1,
+
+			wantLots:      1,
+			wantValue:     ethToGwei(10),
+			wantMaxFees:   100 * estimatedInitGas,
+			wantBestCase:  90 * estimatedInitGas,
+			wantWorstCase: 90 * estimatedInitGas,
+			wantLocked:    ethToGwei(10) + (100 * estimatedInitGas),
+		},
+		{
+			name:          "more lots than max lots",
+			bal:           ethToWei(11),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			lots:          2,
+
+			wantErr: true,
+		},
+		{
+			name:          "less than max lots",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			lots:          4,
+
+			wantLots:      4,
+			wantValue:     ethToGwei(40),
+			wantMaxFees:   4 * 100 * estimatedInitGas,
+			wantBestCase:  90 * estimatedInitGas,
+			wantWorstCase: 4 * 90 * estimatedInitGas,
+			wantLocked:    ethToGwei(40) + (4 * 100 * estimatedInitGas),
+		},
+		{
+			name:          "balanceError",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			balErr:        errors.New(""),
+			lots:          1,
+
+			wantErr: true,
+		},
+		{
+			name:          "initGasError",
+			bal:           ethToWei(51),
+			lotSize:       ethToGwei(10),
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			initGasErr:    errors.New(""),
+			lots:          5,
+
+			wantLots:      5,
+			wantValue:     ethToGwei(50),
+			wantMaxFees:   5 * 100 * hardcodedInitGas,
+			wantBestCase:  90 * hardcodedInitGas,
+			wantWorstCase: 5 * 90 * hardcodedInitGas,
+			wantLocked:    ethToGwei(50) + (5 * 100 * hardcodedInitGas),
+		},
+	}
+
+	dexAsset := dex.Asset{
+		ID:           60,
+		Symbol:       "ETH",
+		MaxFeeRate:   100,
+		SwapSize:     hardcodedInitGas,
+		SwapSizeBase: 0,
+		SwapConf:     1,
+	}
+
+	for _, test := range tests {
+		ctx, cancel := context.WithCancel(context.Background())
+		preSwapForm := asset.PreSwapForm{
+			LotSize:       test.lotSize,
+			Lots:          test.lots,
+			AssetConfig:   &dexAsset,
+			FeeSuggestion: test.feeSuggestion,
+		}
+		node := &testNode{}
+		node.bal = test.bal
+		node.balErr = test.balErr
+		node.initGasErr = test.initGasErr
+		node.initGas = estimatedInitGas
+		eth := &ExchangeWallet{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+			acct: new(accounts.Account),
+		}
+		dexAsset.MaxFeeRate = test.maxFeeRate
+		preSwap, err := eth.PreSwap(&preSwapForm)
+		cancel()
+
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+
+		if preSwap.Estimate.Lots != test.wantLots {
+			t.Fatalf("want lots %v got %v for test %q", test.wantLots, preSwap.Estimate.Lots, test.name)
+		}
+		if preSwap.Estimate.Value != test.wantValue {
+			t.Fatalf("want value %v got %v for test %q", test.wantValue, preSwap.Estimate.Value, test.name)
+		}
+		if preSwap.Estimate.MaxFees != test.wantMaxFees {
+			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, preSwap.Estimate.MaxFees, test.name)
+		}
+		if preSwap.Estimate.RealisticBestCase != test.wantBestCase {
+			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, preSwap.Estimate.RealisticBestCase, test.name)
+		}
+		if preSwap.Estimate.RealisticWorstCase != test.wantWorstCase {
+			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, preSwap.Estimate.RealisticWorstCase, test.name)
+		}
+		if preSwap.Estimate.Locked != test.wantLocked {
+			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, preSwap.Estimate.Locked, test.name)
 		}
 	}
 }

@@ -161,6 +161,9 @@ type ExchangeWallet struct {
 	currentTip *types.Block
 
 	acct *accounts.Account
+
+	cachedInitGas    uint64
+	cachedInitGasMtx sync.Mutex
 }
 
 // Info returns basic information about the wallet and asset.
@@ -300,8 +303,18 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return bal, nil
 }
 
-// getInitGas gets an estimate for the gas required for initiating a swap.
+// getInitGas gets an estimate for the gas required for initiating a swap. The
+// result is cached and reused in subsequent requests.
+//
+// This function will return an error if the wallet has a non zero balance.
 func (eth *ExchangeWallet) getInitGas() (uint64, error) {
+	eth.cachedInitGasMtx.Lock()
+	defer eth.cachedInitGasMtx.Unlock()
+
+	if eth.cachedInitGas > 0 {
+		return eth.cachedInitGas, nil
+	}
+
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
@@ -319,7 +332,12 @@ func (eth *ExchangeWallet) getInitGas() (uint64, error) {
 		Gas:   0,
 		Data:  data,
 	}
-	return eth.node.estimateGas(eth.ctx, msg)
+	gas, err := eth.node.estimateGas(eth.ctx, msg)
+	if err != nil {
+		return 0, err
+	}
+	eth.cachedInitGas = gas
+	return gas, nil
 }
 
 // MaxOrder generates information about the maximum order size and associated
@@ -332,18 +350,54 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	if err != nil {
 		return nil, err
 	}
+	if balance.Available == 0 {
+		return &asset.SwapEstimate{}, nil
+	}
+	initGas, err := eth.getInitGas()
+
+	if err != nil {
+		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
+		initGas = nfo.SwapSize
+	}
+	maxTxFee := initGas * nfo.MaxFeeRate
+	lots := balance.Available / (lotSize + maxTxFee)
+	if lots < 1 {
+		return &asset.SwapEstimate{}, nil
+	}
+	est := eth.estimateSwap(lots, lotSize, feeSuggestion, nfo)
+	return est, nil
+}
+
+// PreSwap gets order estimates based on the available funds and the wallet
+// configuration.
+func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
+	maxEst, err := eth.MaxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	if maxEst.Lots < req.Lots {
+		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
+	}
+
+	est := eth.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	return &asset.PreSwap{
+		Estimate: est,
+	}, nil
+}
+
+// estimateSwap prepares an *asset.SwapEstimate.
+func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo *dex.Asset) *asset.SwapEstimate {
+	if lots == 0 {
+		return &asset.SwapEstimate{}
+	}
 	initGas, err := eth.getInitGas()
 	if err != nil {
 		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
 		initGas = nfo.SwapSize
 	}
-	availableBalance := balance.Available
-	maxTxFee := initGas * nfo.MaxFeeRate
 	realisticTxFee := initGas * feeSuggestion
-	lots := availableBalance / (lotSize + maxTxFee)
-	if lots < 1 {
-		return &asset.SwapEstimate{}, nil
-	}
+	maxTxFee := initGas * nfo.MaxFeeRate
 	value := lots * lotSize
 	maxFees := lots * maxTxFee
 	realisticWorstCase := realisticTxFee * lots
@@ -356,13 +410,7 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 		RealisticWorstCase: realisticWorstCase,
 		RealisticBestCase:  realisticBestCase,
 		Locked:             locked,
-	}, nil
-}
-
-// PreSwap gets order estimates based on the available funds and the wallet
-// configuration.
-func (*ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
-	return nil, asset.ErrNotImplemented
+	}
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
