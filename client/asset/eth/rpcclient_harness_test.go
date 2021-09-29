@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,10 +41,13 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
 	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -372,6 +376,37 @@ func TestPeers(t *testing.T) {
 	spew.Dump(peers)
 }
 
+func TestInitiateGas(t *testing.T) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+	data, err := parsedAbi.Pack("initiate", big.NewInt(1), secretHash, &participantAddr)
+	if err != nil {
+		t.Fatalf("unexpected error packing abi: %v", err)
+	}
+	msg := ethereum.CallMsg{
+		From:  participantAddr,
+		To:    &contractAddr,
+		Value: big.NewInt(1),
+		Gas:   0,
+		Data:  data,
+	}
+	gas, err := ethClient.estimateGas(ctx, msg)
+	if err != nil {
+		t.Fatalf("unexpected error from estimateGas: %v", err)
+	}
+	if gas > eth.InitGas {
+		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
+	}
+	if gas+10000 < eth.InitGas {
+		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+	}
+	fmt.Printf("Gas used for initiate: %v \n", gas)
+}
+
 func TestInitiate(t *testing.T) {
 	now := time.Now().Unix()
 	var secretHash [32]byte
@@ -456,6 +491,48 @@ func TestInitiate(t *testing.T) {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
 	}
+}
+
+func TestRedeemGas(t *testing.T) {
+	now := time.Now().Unix()
+	amt := big.NewInt(1e18)
+	txOpts := newTxOpts(ctx, &simnetAddr, amt)
+	var secret [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+	_, err := ethClient.initiate(txOpts, simnetID, now, secretHash, &participantAddr)
+	if err != nil {
+		t.Fatalf("Unable to initiate swap: %v ", err)
+	}
+	if err := waitForMined(t, time.Second*8, true); err != nil {
+		t.Fatalf("unexpected error while waiting to mine: %v", err)
+	}
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+
+	data, err := parsedAbi.Pack("redeem", secret, secretHash)
+	if err != nil {
+		t.Fatalf("unexpected error packing abi: %v", err)
+	}
+	msg := ethereum.CallMsg{
+		From: participantAddr,
+		To:   &contractAddr,
+		Gas:  0,
+		Data: data,
+	}
+	gas, err := ethClient.estimateGas(ctx, msg)
+	if err != nil {
+		t.Fatalf("Error estimating gas for redeem function: %v", err)
+	}
+	if gas > RedeemGas {
+		t.Fatalf("actual gas %v is greater than RedeemGas %v", gas, RedeemGas)
+	}
+	if gas+3000 < RedeemGas {
+		t.Fatalf("actual gas %v is much less than RedeemGas %v", gas, RedeemGas)
+	}
+	fmt.Printf("Gas used for redeem: %v \n", gas)
 }
 
 func TestRedeem(t *testing.T) {

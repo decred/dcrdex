@@ -259,6 +259,11 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
 }
 
+// estimateGas checks the amount of gas that is used for a function call.
+func (c *rpcclient) estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	return c.ec.EstimateGas(ctx, msg)
+}
+
 // redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
 // Any on-chain failure, such as this secret not matching the hash, will not cause
 // this to error.

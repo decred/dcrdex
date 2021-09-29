@@ -21,11 +21,13 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -42,6 +44,8 @@ const (
 	BipID              = 60
 	defaultGasFee      = 82  // gwei
 	defaultGasFeeLimit = 200 // gwei
+
+	RedeemGas = 63000 // gas
 )
 
 var (
@@ -120,6 +124,7 @@ type ethFetcher interface {
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
+	estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -295,13 +300,63 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return bal, nil
 }
 
+// getInitGas gets an estimate for the gas required for initiating a swap.
+func (eth *ExchangeWallet) getInitGas() (uint64, error) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	if err != nil {
+		return 0, err
+	}
+	data, err := parsedAbi.Pack("initiate", big.NewInt(1), secretHash, &eth.acct.Address)
+	if err != nil {
+		return 0, err
+	}
+	msg := ethereum.CallMsg{
+		From:  eth.acct.Address,
+		To:    &mainnetContractAddr,
+		Value: big.NewInt(1),
+		Gas:   0,
+		Data:  data,
+	}
+	return eth.node.estimateGas(eth.ctx, msg)
+}
+
 // MaxOrder generates information about the maximum order size and associated
 // fees that the wallet can support for the given DEX configuration. The fees are an
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
-func (*ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	return nil, asset.ErrNotImplemented
+func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+	balance, err := eth.Balance()
+	if err != nil {
+		return nil, err
+	}
+	initGas, err := eth.getInitGas()
+	if err != nil {
+		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
+		initGas = nfo.SwapSize
+	}
+	availableBalance := balance.Available
+	maxTxFee := initGas * nfo.MaxFeeRate
+	realisticTxFee := initGas * feeSuggestion
+	lots := availableBalance / (lotSize + maxTxFee)
+	if lots < 1 {
+		return &asset.SwapEstimate{}, nil
+	}
+	value := lots * lotSize
+	maxFees := lots * maxTxFee
+	realisticWorstCase := realisticTxFee * lots
+	realisticBestCase := realisticTxFee
+	locked := value + maxFees
+	return &asset.SwapEstimate{
+		Lots:               lots,
+		Value:              value,
+		MaxFees:            maxFees,
+		RealisticWorstCase: realisticWorstCase,
+		RealisticBestCase:  realisticBestCase,
+		Locked:             locked,
+	}, nil
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
