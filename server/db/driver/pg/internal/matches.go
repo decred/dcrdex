@@ -62,9 +62,6 @@ const (
 	RetrieveMatchStatsByEpoch = `SELECT quantity, rate, takerSell FROM %s
 		WHERE takerSell IS NOT NULL AND epochIdx = $1 AND epochDur = $2;`
 
-	AddMatchesForgivenColumn = `ALTER TABLE %s
-		ADD COLUMN IF NOT EXISTS forgiven BOOL;`
-
 	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
 		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,

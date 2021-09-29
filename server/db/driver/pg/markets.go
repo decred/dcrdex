@@ -59,19 +59,12 @@ func newMarket(db *sql.DB, marketsTableName string, mkt *dex.MarketInfo) error {
 	return nil
 }
 
-// Basic idempotent table alteration queries for existing markets tables with a
-// printf specifier for full name of the targeted table. Remove this when scheme
-// versioning and upgrades are implemented (and v1 has the changes already).
-var marketTablesUpdates = map[string]string{
-	matchesTableName: internal.AddMatchesForgivenColumn,
-}
-
 func createMarketTables(db *sql.DB, marketUID string) error {
-	created, err := createSchema(db, marketUID)
+	newMarket, err := createSchema(db, marketUID)
 	if err != nil {
 		return err
 	}
-	if created {
+	if newMarket {
 		log.Debugf("Created new market schema %q", marketUID)
 	} else {
 		log.Tracef("Market schema %q already exists.", marketUID)
@@ -82,17 +75,9 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 		if err != nil {
 			return err
 		}
-		if newTable {
-			if !created {
-				log.Warnf(`Created missing table "%s" for existing market %s.`,
-					c.name, marketUID)
-			}
-		} else if update, found := marketTablesUpdates[c.name]; found {
-			// Remove this with actual upgrades.
-			nameSpacedTable := marketUID + "." + c.name
-			if _, err = db.Exec(fmt.Sprintf(update, nameSpacedTable)); err != nil {
-				return fmt.Errorf("failed to update table %v: %w", nameSpacedTable, err)
-			}
+		if newTable && !newMarket {
+			log.Warnf(`Created missing table "%s" for existing market %s.`,
+				c.name, marketUID)
 		}
 	}
 
