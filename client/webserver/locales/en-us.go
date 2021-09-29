@@ -27,7 +27,7 @@ var EnUS = map[string]string{
 	"Submit":                         "Submit",
 	"Confirm Registration":           "Confirm Registration",
 	"app_pw_reg":                     "Enter your app password to confirm DEX registration.",
-	"reg_confirm_submit":             `When you submit this form, <span id="feeDisplay"></span> will be spent from your Decred wallet to pay registration fees.`, // TODO for multi-asset reg
+	"reg_confirm_submit":             `When you submit this form, it will spent from your chosen wallet to pay the registration fee.`,
 	"provided_markets":               "This DEX provides the following markets:",
 	"base_header":                    "Base",
 	"quote_header":                   "Quote",
@@ -131,8 +131,7 @@ var EnUS = map[string]string{
 	"Set App Password":          "Set App Password",
 	"reg_set_app_pw_msg":        "Set your app password. This password will protect your DEX account keys and connected wallets.",
 	"Password Again":            "Password Again",
-	"reg_dcr_required":          "Your Decred wallet is required to pay registration fees.", // TODO
-	"reg_dcr_unlocked":          "Unlock your Decred wallet to pay registration fees.",      // TODO
+	"reg_dcr_required":          "A wallet is required to pay registration fees. You can set one with this form.",
 	"Add a DEX":                 "Add a DEX",
 	"reg_ssl_needed":            "Looks like we don't have an SSL certificate for this DEX. Add the server's certificate to continue.",
 	"Dark Mode":                 "Dark Mode",
@@ -177,6 +176,5 @@ var EnUS = map[string]string{
 	"asset_header":           "Asset",
 	"fee_price_header":       "Fee",
 	"fee_confs_header":       "Confs",
-	"wallet_header":          "",
 	"SetupWallet":            "Setup Wallet",
 }

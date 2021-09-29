@@ -19,4 +19,17 @@ table.marketstable {
     width: 33.3%;
     padding: 3px 0;
   }
+
+  tr.clickable {
+    cursor: pointer;
+    opacity: 0.5;
+  }
+
+  tr.clickable:hover {
+    opacity: 1;
+  }
+
+  tr.clickable.selected {
+    opacity: 1;
+  }
 }

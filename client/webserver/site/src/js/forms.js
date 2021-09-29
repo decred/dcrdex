@@ -301,9 +301,9 @@ export class WalletConfigForm {
 export class ConfirmRegistrationForm {
   constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
     this.fields = Doc.parsePage(form, [
-      'feeDisplay', 'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
-      'appPassSpan', 'submitConfirm', 'regErr', 'feeRowTemplate', 'feeTableRows',
-      'setupWallet'
+      'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
+      'appPassSpan', 'submitConfirm', 'regErr', 'feeRowTemplate',
+      'feeTableRows', 'setupWallet'
     ])
     app = application
     this.getDexAddr = getDexAddr
@@ -329,8 +329,6 @@ export class ConfirmRegistrationForm {
     this.xc = xc
     const fields = this.fields
     this.fees = xc.regFees
-    const dcr = this.fees.dcr // TODO: display all options and give choice
-    fields.feeDisplay.textContent = `${Doc.formatCoinValue(dcr.amount / 1e8)} ${app.assets[dcr.id].symbol.toUpperCase()}`
     while (fields.marketsTableRows.firstChild) {
       fields.marketsTableRows.removeChild(fields.marketsTableRows.firstChild)
     }
@@ -340,6 +338,15 @@ export class ConfirmRegistrationForm {
     const feeAsset = Object.values(xc.regFees)
     feeAsset.forEach((fee) => {
       const tr = fields.feeRowTemplate.cloneNode(true)
+      Doc.bind(tr, 'click', () => {
+        this.setWalletFee(fee.id)
+        // remove selected class from all others row.
+        const rows = Array.from(fields.feeTableRows.querySelectorAll('tr.selected'))
+        rows.forEach(row => {
+          row.classList.remove('selected')
+        })
+        tr.classList.add('selected')
+      })
       const asset = Doc.assetById(fee.id)
       Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(asset)
       Doc.tmplElement(tr, 'asset').innerText = asset.toUpperCase()
@@ -348,11 +355,16 @@ export class ConfirmRegistrationForm {
 
       const haveWallet = app.user.assets[fee.id] ? app.user.assets[fee.id].wallet : null
       const setupWallet = tr.querySelector('#setupWallet')
+      const walletReady = tr.querySelector('#walletReady')
       if (haveWallet) {
-        setupWallet.innerText = intl.prep(intl.ID_CHOOSE_WALLET)
-        Doc.bind(setupWallet, 'click', () => this.setWalletFee(fee.id))
+        walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
+        Doc.show(walletReady)
+        Doc.hide(setupWallet)
       } else {
+        setupWallet.innerText = intl.prep(intl.ID_SETUP_WALLET)
         Doc.bind(setupWallet, 'click', () => this.setupWalletFn(fee.id))
+        Doc.hide(walletReady)
+        Doc.show(setupWallet)
       }
       fields.feeTableRows.appendChild(tr)
       if (State.passwordIsCached()) {
@@ -394,9 +406,12 @@ export class ConfirmRegistrationForm {
     const fields = this.fields
     const symbol = Doc.assetById(assetId)
     if (!assetId || !symbol) {
-      fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
-      Doc.show(fields.regErr)
-      return
+      // 0 is a valid value for asset id, so we ignore it.
+      if (assetId !== 0) {
+        fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
+        Doc.show(fields.regErr)
+        return
+      }
     }
 
     Doc.hide(fields.regErr)

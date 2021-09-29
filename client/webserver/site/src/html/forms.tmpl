@@ -153,11 +153,11 @@
           <th class="text-center">[[[asset_header]]]</th>
           <th class="text-center">[[[fee_price_header]]]</th>
           <th class="text-center">[[[fee_confs_header]]]</th>
-          <th class="text-center">[[[wallet_header]]]</th>
+          <th class="text-center"></th>
         </tr>
       </thead>
       <tbody id="feeTableRows">
-        <tr id="feeRowTemplate">
+        <tr id="feeRowTemplate" class="clickable">
           <td>
             <div class="d-flex justify-content-center align-items-center">
               <img class="micro-icon mr-1" data-tmpl="asseticon">
@@ -175,7 +175,8 @@
             </div>
           </td>
           <td class="text-center">
-            <button id="setupWallet" type="button" class="justify-content-center p-1 selected">[[[SetupWallet]]]</button>
+            <button id="setupWallet" type="button" class="justify-content-center w-100 selected"></button>
+            <span id="walletReady"></span>
           </td>
         </tr>
       </tbody>

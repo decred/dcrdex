@@ -27,7 +27,7 @@ var PtBr = map[string]string{
 	"Submit":                         "Enviar",
 	"Confirm Registration":           "Confirma Registro",
 	"app_pw_reg":                     "Informe sua senha do app para confirmar seu registro na DEX.",
-	"reg_confirm_submit":             `Quando vc enviar esse formulário, <span id="feeDisplay"></span> DCR será gasto de sua carteira decred para pagar a taxa de registro.`,
+	"reg_confirm_submit":             `Quando vc enviar esse formulário, <span id="feeDisplay"></span> DCR será gasto de sua carteira decred para pagar a taxa de registro.`, // update
 	"provided_markets":               "Essa DEX provê os seguintes mercados:",
 	"base_header":                    "Base",
 	"quote_header":                   "Quote",
@@ -131,8 +131,7 @@ var PtBr = map[string]string{
 	"Set App Password":          "Definir senha de aplicativo",
 	"reg_set_app_pw_msg":        "Definir senha de aplicativo. Esta senha protegerá sua conta DEX e chaves e carteiras conectadas.",
 	"Password Again":            "Senha Novamente",
-	"reg_dcr_required":          "Sua carteira decred é necessária para pagar a taxa de registro.",
-	"reg_dcr_unlocked":          "Desbloqueie sua carteira decred para pagamento da taxa.",
+	"reg_dcr_required":          "Uma carteira é necessária para pagar a taxa de registro.",
 	"Add a DEX":                 "Adicionar uma DEX",
 	"reg_ssl_needed":            "Parece que não temos um certificado SSL para esta DEX. Adicione o certificado do servidor para podermos continuar.",
 	"Dark Mode":                 "Modo Dark",
@@ -177,6 +176,5 @@ var PtBr = map[string]string{
 	"asset_header":           "Asset",
 	"fee_price_header":       "Fee",
 	"fee_confs_header":       "Confs",
-	"wallet_header":          "",
 	"SetupWallet":            "Setup Wallet",
 }

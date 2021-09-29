@@ -4,7 +4,7 @@
   <div class="d-flex flex-column vscroll w-100">
 
     {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
+    <form class="card mx-auto my-5 bg1{{if .Initialized}} d-hide{{end}}" id="appPWForm">
       <div class="bg2 px-2 py-1 text-center fs18">[[[Set App Password]]]</div>
       <div class="p-4">
         <div class="fs16">[[[reg_set_app_pw_msg]]]</div>
@@ -35,12 +35,12 @@
     </form>
 
     {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="newWalletForm">
+    <form class="card mx-auto my-5 bg1 d-hide" id="newWalletForm">
       {{template "newWalletForm" "[[[reg_dcr_required]]]"}}
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="dexAddrForm">
+    <form class="card mx-auto my-5 bg1{{if not .Initialized}} d-hide{{end}}" id="dexAddrForm">
       {{template "dexAddrForm"}}
     </form>
 

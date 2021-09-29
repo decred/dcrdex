@@ -42,7 +42,6 @@ export default class RegistrationPage extends BasePage {
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
-      this.dexAddrForm.refresh()
       this.confirmRegisterForm.refresh()
       this.changeForm(page.newWalletForm, page.confirmRegForm)
     }, this.pwCache)
