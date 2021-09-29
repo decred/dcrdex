@@ -1790,7 +1790,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		outPt:        outPt,
 		blockHash:    blockHash,
 		blockHeight:  blockHeight,
-		resultChan:   make(chan *findRedemptionResult),
+		resultChan:   make(chan *findRedemptionResult, 1),
 		pkScript:     pkScript,
 		contractHash: dexbtc.ExtractScriptHash(pkScript),
 	}
