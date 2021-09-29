@@ -256,13 +256,8 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
 }
 
-// initiateGas checks the amount of gas that is used for a call to the initiate function.
-func (c *rpcclient) initiateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
-	return c.ec.EstimateGas(ctx, msg)
-}
-
-// redeemGas checks the amount of gas that is used for a call to the redeem function.
-func (c *rpcclient) redeemGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+// estimateGas checks the amount of gas that is used for a function call.
+func (c *rpcclient) estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
 	return c.ec.EstimateGas(ctx, msg)
 }
 

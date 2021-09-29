@@ -121,7 +121,7 @@ type ethFetcher interface {
 	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
-	initiateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+	estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -316,7 +316,7 @@ func (eth *ExchangeWallet) getInitGas() (uint64, error) {
 		Gas:   0,
 		Data:  data,
 	}
-	return eth.node.initiateGas(eth.ctx, msg)
+	return eth.node.estimateGas(eth.ctx, msg)
 }
 
 // MaxOrder generates information about the maximum order size and associated

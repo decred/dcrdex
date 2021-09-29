@@ -394,9 +394,9 @@ func TestInitiateGas(t *testing.T) {
 		Gas:   0,
 		Data:  data,
 	}
-	gas, err := ethClient.initiateGas(ctx, msg)
+	gas, err := ethClient.estimateGas(ctx, msg)
 	if err != nil {
-		t.Fatalf("unexpected error from initiateGas: %v", err)
+		t.Fatalf("unexpected error from estimateGas: %v", err)
 	}
 	if gas > eth.InitGas {
 		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
@@ -522,9 +522,9 @@ func TestRedeemGas(t *testing.T) {
 		Gas:  0,
 		Data: data,
 	}
-	gas, err := ethClient.redeemGas(ctx, msg)
+	gas, err := ethClient.estimateGas(ctx, msg)
 	if err != nil {
-		t.Fatalf("Error getting gas for redeem function: %v", err)
+		t.Fatalf("Error estimating gas for redeem function: %v", err)
 	}
 	if gas > RedeemGas {
 		t.Fatalf("actual gas %v is greater than RedeemGas %v", gas, RedeemGas)
