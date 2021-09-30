@@ -34,9 +34,9 @@
       </div>
     </form>
 
-    {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
+    {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
     <form class="card mx-auto my-5 bg1 d-hide" id="newWalletForm">
-      {{template "newWalletForm" "[[[reg_dcr_required]]]"}}
+      {{template "newWalletForm" }}
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}

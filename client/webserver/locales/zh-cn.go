@@ -29,6 +29,7 @@ var ZhCN = map[string]string{
 	"app_pw_reg":                     "输入应用程序密码以确认注册DEX。",
 	"reg_confirm_submit":             `当您发送此表格时, <span id="feeDisplay"></span> DCR将从您指定的钱包中支出，以支付注册费。`, // update
 	"provided_markets":               "当前DEX提供以下市场:",                                                   // alt. DEX提供以下市场
+	"accepted_fee_assets":            "This DEX accepts the following fees:",                           // xxx translate
 	"base_header":                    "Base",                                                           // no good translation
 	"quote_header":                   "Quote",                                                          // no good translation
 	"lot_size_header":                "批量",
@@ -131,7 +132,6 @@ var ZhCN = map[string]string{
 	"Set App Password":          "设置应用密码",
 	"reg_set_app_pw_msg":        "设置应用密码。这个密码将保护你的 DEX 账户和连接的密钥和钱包。",
 	"Password Again":            "再次输入密码",
-	"reg_dcr_required":          "你的 decred 钱包需要支付注册费。", // needs update
 	"Add a DEX":                 "添加一个 DEX",
 	"reg_ssl_needed":            "我们似乎没有此 DEX 的 SSL 证书。添加服务器证书以便我们可以继续。",
 	"Dark Mode":                 "暗模式",

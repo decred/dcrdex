@@ -44,7 +44,7 @@ export default class RegistrationPage extends BasePage {
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
       this.confirmRegisterForm.refresh()
       this.changeForm(page.newWalletForm, page.confirmRegForm)
-    }, this.pwCache)
+    }, this.pwCache, () => this.changeForm(page.newWalletForm, page.confirmRegForm))
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
       this.confirmRegisterForm.setExchange(xc)

@@ -29,6 +29,7 @@ var PtBr = map[string]string{
 	"app_pw_reg":                     "Informe sua senha do app para confirmar seu registro na DEX.",
 	"reg_confirm_submit":             `Quando vc enviar esse formulário, <span id="feeDisplay"></span> DCR será gasto de sua carteira decred para pagar a taxa de registro.`, // update
 	"provided_markets":               "Essa DEX provê os seguintes mercados:",
+	"accepted_fee_assets":            "This DEX accepts the following fees:",
 	"base_header":                    "Base",
 	"quote_header":                   "Quote",
 	"lot_size_header":                "Tamanho do Lote",
@@ -131,7 +132,6 @@ var PtBr = map[string]string{
 	"Set App Password":          "Definir senha de aplicativo",
 	"reg_set_app_pw_msg":        "Definir senha de aplicativo. Esta senha protegerá sua conta DEX e chaves e carteiras conectadas.",
 	"Password Again":            "Senha Novamente",
-	"reg_dcr_required":          "Uma carteira é necessária para pagar a taxa de registro.",
 	"Add a DEX":                 "Adicionar uma DEX",
 	"reg_ssl_needed":            "Parece que não temos um certificado SSL para esta DEX. Adicione o certificado do servidor para podermos continuar.",
 	"Dark Mode":                 "Modo Dark",

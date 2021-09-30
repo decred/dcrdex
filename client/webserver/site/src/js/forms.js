@@ -11,7 +11,7 @@ let app
  * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
-  constructor (application, form, success, pwCache) {
+  constructor (application, form, success, pwCache, closerFn) {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
@@ -21,6 +21,13 @@ export class NewWalletForm {
       'newWalletAppPWBox', 'nwRegMsg'
     ])
     this.refresh()
+
+    if (closerFn) {
+      form.querySelectorAll('.form-closer').forEach(el => {
+        Doc.show(el)
+        Doc.bind(el, 'click', closerFn)
+      })
+    }
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
@@ -324,7 +331,7 @@ export class ConfirmRegistrationForm {
    * setExchange populates the form with the details of an exchange.
    */
   setExchange (xc) {
-    // store xc in case we need to refresh the data, like after setupping
+    // store xc in case we need to refresh the data, like after setting up
     // a new wallet.
     this.xc = xc
     const fields = this.fields
