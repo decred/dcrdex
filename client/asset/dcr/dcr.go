@@ -451,7 +451,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network, 
 	}
 
 	dcr.wallet = wallet
-	err = dcr.wallet.Setup(cfg, walletCfg, chainParams, logger)
+	err = dcr.wallet.Initialize(cfg, walletCfg, chainParams, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -2102,7 +2102,7 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 		return err
 	}
 	if !encryptedAcct {
-		return dcr.wallet.WalletPassphrase(dcr.ctx, string(pw), 0)
+		return dcr.wallet.Unlock(dcr.ctx, string(pw), 0)
 
 	}
 	if unlocked {
@@ -2130,7 +2130,7 @@ func (dcr *ExchangeWallet) Lock() error {
 		return err
 	}
 	if !encryptedAcct {
-		return dcr.wallet.WalletLock(ctx)
+		return dcr.wallet.Lock(ctx)
 	}
 	if !unlocked {
 		return nil
@@ -2687,7 +2687,7 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 
 // getKeys fetches the private/public key pair for the specified address.
 func (dcr *ExchangeWallet) getKeys(addr stdaddr.Address) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
-	wif, err := dcr.wallet.DumpPrivKey(dcr.ctx, addr)
+	wif, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w (is wallet locked?)", err)
 	}

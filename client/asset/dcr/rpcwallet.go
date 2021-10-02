@@ -98,7 +98,10 @@ func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Cli
 	return cl, nil
 }
 
-func (w *rpcWallet) Setup(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) error {
+// Initialize prepares this rpcWallet for use by creating the rpc client
+// connection.
+// Part of the Wallet interface.
+func (w *rpcWallet) Initialize(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) error {
 	w.chainParams = chainParams
 	w.log = logger
 
@@ -129,6 +132,8 @@ func (w *rpcWallet) Setup(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *
 	return nil
 }
 
+// Connect establishes a connection to the previously created rpc client.
+// Part of the Wallet interface.
 func (w *rpcWallet) Connect(ctx context.Context) error {
 	err := w.client.Connect(ctx, false)
 	if err != nil {
@@ -190,15 +195,22 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	return nil
 }
 
+// Disconnect shuts down access to the wallet by disconnecting the rpc client.
+// Part of the Wallet interface.
 func (w *rpcWallet) Disconnect() {
 	w.client.Shutdown()
 	w.client.WaitForShutdown()
 }
 
+// Disconnected returns true if the rpc client is not connected.
+// Part of the Wallet interface.
 func (w *rpcWallet) Disconnected() bool {
 	return w.node.Disconnected()
 }
 
+// AccountOwnsAddress uses the validateaddress rpc to check if the provided
+// address belongs to the specified account.
+// Part of the Wallet interface.
 func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, account, address string) (bool, error) {
 	a, err := stdaddr.DecodeAddress(address, w.chainParams)
 	if err != nil {
@@ -216,11 +228,8 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, account, address str
 	return va.IsMine && va.Account == account, nil
 }
 
-// Balance should return the total available funds in the wallet. Note that
-// after calling Fund, the amount returned by Balance may change by more than
-// the value funded. Part of the asset.Wallet interface. TODO: Since this
-// includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
-// utxos when funding an order.
+// Balance returns the total available funds in the wallet.
+// Part of the Wallet interface.
 func (w *rpcWallet) Balance(ctx context.Context, account string, lockedAmount uint64) (*asset.Balance, error) {
 	balances, err := w.node.GetBalanceMinConf(ctx, account, 0)
 	if err != nil {
@@ -248,14 +257,18 @@ func (w *rpcWallet) Balance(ctx context.Context, account string, lockedAmount ui
 	return &balance, nil
 }
 
-// LockedOutputs fetches locked outputs for the ExchangeWallet account using
-// rpc RawRequest.
+// LockedOutputs fetches locked outputs for the specified account using rpc
+// RawRequest.
+// Part of the Wallet interface.
 func (w *rpcWallet) LockedOutputs(ctx context.Context, account string) ([]chainjson.TransactionInput, error) {
 	var locked []chainjson.TransactionInput
 	err := w.nodeRawRequest(ctx, methodListLockUnspent, anylist{account}, &locked)
 	return locked, translateRPCCancelErr(err)
 }
 
+// EstimateSmartFeeRate returns a smart feerate estimate using the
+// estimatesmartfee rpc.
+// Part of the Wallet interface.
 func (w *rpcWallet) EstimateSmartFeeRate(ctx context.Context, confTarget int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
 	estimateFeeResult, err := w.node.EstimateSmartFee(ctx, confTarget, mode)
 	if err != nil {
@@ -264,8 +277,9 @@ func (w *rpcWallet) EstimateSmartFeeRate(ctx context.Context, confTarget int64, 
 	return estimateFeeResult.FeeRate, nil
 }
 
-// Unspents fetches unspent outputs for the ExchangeWallet account using rpc
+// Unspents fetches unspent outputs for the specified account using rpc
 // RawRequest.
+// Part of the Wallet interface.
 func (w *rpcWallet) Unspents(ctx context.Context, account string) ([]walletjson.ListUnspentResult, error) {
 	var unspents []walletjson.ListUnspentResult
 	// minconf, maxconf (rpcdefault=9999999), [address], account
@@ -274,25 +288,36 @@ func (w *rpcWallet) Unspents(ctx context.Context, account string) ([]walletjson.
 	return unspents, err
 }
 
+// GetChangeAddress returns a change address from the specified account.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetChangeAddress(ctx context.Context, account string) (stdaddr.Address, error) {
 	addr, err := w.node.GetRawChangeAddress(ctx, account, w.chainParams)
 	return addr, translateRPCCancelErr(err)
 }
 
+// LockUnspent locks or unlocks the specified outpoint.
+// Part of the Wallet interface.
 func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error {
 	return translateRPCCancelErr(w.node.LockUnspent(ctx, unlock, ops))
 }
 
+// GetTxOut returns information about an unspent tx output.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 	txOut, err := w.node.GetTxOut(ctx, txHash, index, tree, mempool)
 	return txOut, translateRPCCancelErr(err)
 }
 
+// GetNewAddressGapPolicy returns an address from the specified account using
+// the specified gap policy.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error) {
 	addr, err := w.node.GetNewAddressGapPolicy(ctx, account, gap)
 	return addr, translateRPCCancelErr(err)
 }
 
+// SignRawTransaction signs the provided transaction using rpc RawRequest.
+// Part of the Wallet interface.
 func (w *rpcWallet) SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*walletjson.SignRawTransactionResult, error) {
 	txHex, err := msgTxToHex(tx)
 	if err != nil {
@@ -303,16 +328,32 @@ func (w *rpcWallet) SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*wa
 	return &res, err
 }
 
+// SendRawTransaction broadcasts the provided transaction to the Decred network.
+// Part of the Wallet interface.
 func (w *rpcWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
 	hash, err := w.node.SendRawTransaction(ctx, tx, allowHighFees)
 	return hash, translateRPCCancelErr(err)
 }
 
+// GetBlockHeaderVerbose returns block header info for the specified block hash.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetBlockHeaderVerbose(ctx context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error) {
 	blockHeader, err := w.node.GetBlockHeaderVerbose(ctx, blockHash)
 	return blockHeader, translateRPCCancelErr(err)
 }
 
+// GetBlockVerbose returns information about a block, optionally including verbose
+// tx info.
+// Part of the Wallet interface.
+func (w *rpcWallet) GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+	blk, err := w.node.GetBlockVerbose(ctx, blockHash, verboseTx)
+	return blk, translateRPCCancelErr(err)
+}
+
+// GetTransaction returns the details of a wallet tx, if the wallet contains a
+// tx with the provided hash. Returns asset.CoinNotFoundError if the tx is not
+// found in the wallet.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
 	tx, err := w.node.GetTransaction(ctx, txHash)
 	if err != nil {
@@ -324,31 +365,38 @@ func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 	return tx, nil
 }
 
-func (w *rpcWallet) GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
-	blk, err := w.node.GetBlockVerbose(ctx, blockHash, verboseTx)
-	return blk, translateRPCCancelErr(err)
-}
-
-func (w *rpcWallet) GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
-	mempoolTxs, err := w.node.GetRawMempool(ctx, txType)
-	return mempoolTxs, translateRPCCancelErr(err)
-}
-
+// GetRawTransactionVerbose returns details of the tx with the provided hash.
+// Returns asset.CoinNotFoundError if the tx is not found.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	tx, err := w.node.GetRawTransactionVerbose(ctx, txHash)
 	return tx, translateRPCCancelErr(err)
 }
 
+// GetRawMempool returns hashes for all txs of the specified type in the node's
+// mempool.
+// Part of the Wallet interface.
+func (w *rpcWallet) GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
+	mempoolTxs, err := w.node.GetRawMempool(ctx, txType)
+	return mempoolTxs, translateRPCCancelErr(err)
+}
+
+// GetBestBlock returns the hash and height of the wallet's best block.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error) {
 	hash, height, err := w.node.GetBestBlock(ctx)
 	return hash, height, translateRPCCancelErr(err)
 }
 
+// GetBlockHash returns the hash of the mainchain block at the specified height.
+// Part of the Wallet interface.
 func (w *rpcWallet) GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error) {
 	bh, err := w.node.GetBlockHash(ctx, blockHeight)
 	return bh, translateRPCCancelErr(err)
 }
 
+// BlockCFilter fetches the block filter info for the specified block.
+// Part of the Wallet interface.
 func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash string) (filter, key string, err error) {
 	var cfRes walletjson.GetCFilterV2Result
 	err = w.nodeRawRequest(ctx, methodGetCFilterV2, anylist{blockHash}, &cfRes)
@@ -358,14 +406,20 @@ func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash string) (filter,
 	return cfRes.Filter, cfRes.Key, nil
 }
 
-func (w *rpcWallet) WalletLock(ctx context.Context) error {
+// Lock locks the wallet.
+// Part of the Wallet interface.
+func (w *rpcWallet) Lock(ctx context.Context) error {
 	return translateRPCCancelErr(w.node.WalletLock(ctx))
 }
 
-func (w *rpcWallet) WalletPassphrase(ctx context.Context, passphrase string, timeoutSecs int64) error {
+// Unlock unlocks the wallet.
+// Part of the Wallet interface.
+func (w *rpcWallet) Unlock(ctx context.Context, passphrase string, timeoutSecs int64) error {
 	return translateRPCCancelErr(w.node.WalletPassphrase(ctx, passphrase, timeoutSecs))
 }
 
+// WalletUnlocked returns true if the wallet is unlocked.
+// Part of the Wallet interface.
 func (w *rpcWallet) WalletUnlocked(ctx context.Context) bool {
 	walletInfo, err := w.node.WalletInfo(ctx)
 	if err != nil {
@@ -375,11 +429,15 @@ func (w *rpcWallet) WalletUnlocked(ctx context.Context) bool {
 	return walletInfo.Unlocked
 }
 
+// AccountUnlocked returns true if the specified account is unlocked.
+// Part of the Wallet interface.
 func (w *rpcWallet) AccountUnlocked(ctx context.Context, account string) (*walletjson.AccountUnlockedResult, error) {
 	res, err := w.node.AccountUnlocked(ctx, account)
 	return res, translateRPCCancelErr(err)
 }
 
+// LockAccount locks the specified account.
+// Part of the Wallet interface.
 func (w *rpcWallet) LockAccount(ctx context.Context, account string) error {
 	err := w.node.LockAccount(ctx, account)
 	if isAccountLockedErr(err) {
@@ -388,10 +446,14 @@ func (w *rpcWallet) LockAccount(ctx context.Context, account string) error {
 	return translateRPCCancelErr(err)
 }
 
+// UnlockAccount unlocks the specified account.
+// Part of the Wallet interface.
 func (w *rpcWallet) UnlockAccount(ctx context.Context, account, passphrase string) error {
 	return translateRPCCancelErr(w.node.UnlockAccount(ctx, account, passphrase))
 }
 
+// SyncStatus returns the wallet's sync status.
+// Part of the Wallet interface.
 func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 	chainInfo, err := w.node.GetBlockChainInfo(ctx)
 	if err != nil {
@@ -410,7 +472,9 @@ func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 	return true, 1, nil
 }
 
-func (w *rpcWallet) DumpPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error) {
+// AddressPrivKey fetches the privkey for the specified address.
+// Part of the Wallet interface.
+func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error) {
 	wif, err := w.node.DumpPrivKey(ctx, address)
 	return wif, translateRPCCancelErr(err)
 }
