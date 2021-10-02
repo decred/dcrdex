@@ -103,7 +103,7 @@ var (
 	}
 )
 
-func init() {
+func RegisterDriver() {
 	asset.Register(BipID, &Driver{})
 }
 

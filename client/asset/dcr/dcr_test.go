@@ -159,7 +159,9 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 		shutdown()
 		return nil, nil, nil, err
 	}
-	wallet.node = client
+	wallet.wallet = &rpcWallet{
+		node: client,
+	}
 	wallet.ctx = walletCtx
 
 	// Initialize the best block.
@@ -2293,7 +2295,10 @@ func TestSyncStatus(t *testing.T) {
 	}
 	node.blockchainInfoErr = nil
 
-	wallet.tipAtConnect = 100
+	wallet.wallet = &rpcWallet{
+		node:         node,
+		tipAtConnect: 100,
+	}
 	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
 		Headers: 200,
 		Blocks:  150,

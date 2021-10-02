@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	_ "decred.org/dcrdex/client/asset/bch" // register bch asset
-	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
-	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
-	_ "decred.org/dcrdex/client/asset/ltc" // register ltc asset
+	"decred.org/dcrdex/client/asset/bch"
+	"decred.org/dcrdex/client/asset/btc"
+	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/ltc"
 
 	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/client/core"
@@ -27,6 +27,14 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 )
+
+// Register asset drivers.
+func init() {
+	bch.RegisterDriver()
+	btc.RegisterDriver()
+	dcr.RegisterDriver()
+	ltc.RegisterDriver()
+}
 
 func main() {
 	// Wrap the actual main so defers run in it.

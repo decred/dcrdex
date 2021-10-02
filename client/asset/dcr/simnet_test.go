@@ -76,7 +76,7 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		},
 	}
 	var backend asset.Wallet
-	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet)
+	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet, &rpcWallet{})
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
