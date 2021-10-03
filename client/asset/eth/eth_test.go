@@ -584,6 +584,30 @@ func TestPreSwap(t *testing.T) {
 	}
 }
 
+func TestPreRedeem(t *testing.T) {
+	node := &testNode{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: new(accounts.Account),
+	}
+	preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
+		LotSize:       123456,
+		Lots:          5,
+		FeeSuggestion: 100,
+	})
+	if err != nil {
+		t.Fatalf("unexpected PreRedeem error: %v", err)
+	}
+
+	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
+		t.Fatalf("best case > worst case")
+	}
+}
+
 func TestMaxOrder(t *testing.T) {
 	ethToGwei := func(eth uint64) uint64 {
 		return eth * dexeth.GweiFactor

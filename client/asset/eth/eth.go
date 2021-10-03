@@ -416,7 +416,12 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	return nil, asset.ErrNotImplemented
+	return &asset.PreRedeem{
+		Estimate: &asset.RedeemEstimate{
+			RealisticBestCase:  RedeemGas * req.FeeSuggestion,
+			RealisticWorstCase: RedeemGas * req.FeeSuggestion * req.Lots,
+		},
+	}, nil
 }
 
 // FundOrder selects coins for use in an order. The coins will be locked, and
