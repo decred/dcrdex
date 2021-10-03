@@ -228,33 +228,22 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, account, address str
 	return va.IsMine && va.Account == account, nil
 }
 
-// Balance returns the total available funds in the wallet.
+// AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) Balance(ctx context.Context, account string, lockedAmount uint64) (*asset.Balance, error) {
-	balances, err := w.node.GetBalanceMinConf(ctx, account, 0)
+func (w *rpcWallet) AccountBalance(ctx context.Context, account string, confirms int32) (*walletjson.GetAccountBalanceResult, error) {
+	balances, err := w.node.GetBalanceMinConf(ctx, account, int(confirms))
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
 
-	var balance asset.Balance
-	var acctFound bool
 	for i := range balances.Balances {
 		ab := &balances.Balances[i]
 		if ab.AccountName == account {
-			acctFound = true
-			balance.Available = toAtoms(ab.Spendable) - lockedAmount
-			balance.Immature = toAtoms(ab.ImmatureCoinbaseRewards) +
-				toAtoms(ab.ImmatureStakeGeneration)
-			balance.Locked = lockedAmount + toAtoms(ab.LockedByTickets)
-			break
+			return ab, nil
 		}
 	}
 
-	if !acctFound {
-		return nil, fmt.Errorf("account not found: %q", account)
-	}
-
-	return &balance, nil
+	return nil, fmt.Errorf("account not found: %q", account)
 }
 
 // LockedOutputs fetches locked outputs for the specified account using rpc

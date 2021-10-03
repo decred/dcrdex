@@ -27,8 +27,8 @@ type Wallet interface {
 	// AccountOwnsAddress checks if the provided address belongs to the
 	// specified account.
 	AccountOwnsAddress(ctx context.Context, account, address string) (bool, error)
-	// Balance returns the total available funds in the wallet.
-	Balance(ctx context.Context, account string, lockedAmount uint64) (*asset.Balance, error)
+	// AccountBalance returns the balance breakdown for the specified account.
+	AccountBalance(ctx context.Context, account string, confirms int32) (*walletjson.GetAccountBalanceResult, error)
 	// LockedOutputs fetches locked outputs for the specified account.
 	LockedOutputs(ctx context.Context, account string) ([]chainjson.TransactionInput, error)
 	// EstimateSmartFeeRate returns a smart feerate estimate.

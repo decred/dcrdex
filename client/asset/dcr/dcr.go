@@ -576,7 +576,16 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	return dcr.wallet.Balance(dcr.ctx, dcr.acct, locked)
+	ab, err := dcr.wallet.AccountBalance(dcr.ctx, dcr.acct, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &asset.Balance{
+		Available: toAtoms(ab.Spendable) - locked,
+		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
+			toAtoms(ab.ImmatureStakeGeneration),
+		Locked: locked + toAtoms(ab.LockedByTickets),
+	}, nil
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
