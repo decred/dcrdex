@@ -70,10 +70,10 @@ type Wallet interface {
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// BlockCFilter fetches the block filter info for the specified block.
 	BlockCFilter(ctx context.Context, blockHash string) (filter, key string, err error)
-	// Lock locks the wallet.
-	Lock(ctx context.Context) error
-	// Unlock unlocks the wallet.
-	Unlock(ctx context.Context, passphrase string, timeoutSecs int64) error
+	// LockWallet locks the wallet.
+	LockWallet(ctx context.Context) error
+	// UnlockWallet unlocks the wallet.
+	UnlockWallet(ctx context.Context, passphrase string, timeoutSecs int64) error
 	// WalletUnlocked returns true if the wallet is unlocked.
 	WalletUnlocked(ctx context.Context) bool
 	// AccountUnlocked returns true if the specified account is unlocked.

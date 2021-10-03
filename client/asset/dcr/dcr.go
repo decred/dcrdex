@@ -2102,7 +2102,7 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 		return err
 	}
 	if !encryptedAcct {
-		return dcr.wallet.Unlock(dcr.ctx, string(pw), 0)
+		return dcr.wallet.UnlockWallet(dcr.ctx, string(pw), 0)
 
 	}
 	if unlocked {
@@ -2130,7 +2130,7 @@ func (dcr *ExchangeWallet) Lock() error {
 		return err
 	}
 	if !encryptedAcct {
-		return dcr.wallet.Lock(ctx)
+		return dcr.wallet.LockWallet(ctx)
 	}
 	if !unlocked {
 		return nil

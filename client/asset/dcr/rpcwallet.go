@@ -406,15 +406,15 @@ func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash string) (filter,
 	return cfRes.Filter, cfRes.Key, nil
 }
 
-// Lock locks the wallet.
+// LockWallet locks the wallet.
 // Part of the Wallet interface.
-func (w *rpcWallet) Lock(ctx context.Context) error {
+func (w *rpcWallet) LockWallet(ctx context.Context) error {
 	return translateRPCCancelErr(w.node.WalletLock(ctx))
 }
 
-// Unlock unlocks the wallet.
+// UnlockWallet unlocks the wallet.
 // Part of the Wallet interface.
-func (w *rpcWallet) Unlock(ctx context.Context, passphrase string, timeoutSecs int64) error {
+func (w *rpcWallet) UnlockWallet(ctx context.Context, passphrase string, timeoutSecs int64) error {
 	return translateRPCCancelErr(w.node.WalletPassphrase(ctx, passphrase, timeoutSecs))
 }
 
