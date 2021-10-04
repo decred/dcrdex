@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package dcr
 
 import (
@@ -23,6 +26,19 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+var (
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
+	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
+)
+
+// RawRequest RPC methods
+const (
+	methodGetCFilterV2       = "getcfilterv2"
+	methodListUnspent        = "listunspent"
+	methodListLockUnspent    = "listlockunspent"
+	methodSignRawTransaction = "signrawtransaction"
+)
+
 // Implements Wallet functionality using rpc connections.
 type rpcWallet struct {
 	// 64-bit atomic variables first. See
@@ -36,9 +52,21 @@ type rpcWallet struct {
 	node   rpcClient
 }
 
+// Ensure rpcWallet satisfies the Wallet interface.
 var _ Wallet = (*rpcWallet)(nil)
 
-// rpcClient is an rpcclient.Client, or a stub for testing.
+type walletClient = dcrwallet.Client
+
+type combinedClient struct {
+	*rpcclient.Client
+	*walletClient
+}
+
+// Ensure combinedClient satisfies the rpcClient interface.
+var _ rpcClient = (*combinedClient)(nil)
+
+// rpcClient is a combined rpcclient.Client+dcrwallet.Client,
+// or a stub for testing.
 type rpcClient interface {
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
@@ -386,9 +414,9 @@ func (w *rpcWallet) GetBlockHash(ctx context.Context, blockHeight int64) (*chain
 
 // BlockCFilter fetches the block filter info for the specified block.
 // Part of the Wallet interface.
-func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash string) (filter, key string, err error) {
+func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash *chainhash.Hash) (filter, key string, err error) {
 	var cfRes walletjson.GetCFilterV2Result
-	err = w.nodeRawRequest(ctx, methodGetCFilterV2, anylist{blockHash}, &cfRes)
+	err = w.nodeRawRequest(ctx, methodGetCFilterV2, anylist{blockHash.String()}, &cfRes)
 	if err != nil {
 		return "", "", err
 	}
@@ -466,6 +494,12 @@ func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error) {
 	wif, err := w.node.DumpPrivKey(ctx, address)
 	return wif, translateRPCCancelErr(err)
+}
+
+// ValidateAddress is NOT part of the Wallet interface, but is added here to
+// disambiguate the node and wallet methods of the same name.
+func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return cc.walletClient.ValidateAddress(ctx, address)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

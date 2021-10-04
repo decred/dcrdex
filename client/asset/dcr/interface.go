@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package dcr
 
 import (
@@ -69,7 +72,7 @@ type Wallet interface {
 	// GetBlockHash returns the hash of the mainchain block at the specified height.
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// BlockCFilter fetches the block filter info for the specified block.
-	BlockCFilter(ctx context.Context, blockHash string) (filter, key string, err error)
+	BlockCFilter(ctx context.Context, blockHash *chainhash.Hash) (filter, key string, err error)
 	// LockWallet locks the wallet.
 	LockWallet(ctx context.Context) error
 	// UnlockWallet unlocks the wallet.

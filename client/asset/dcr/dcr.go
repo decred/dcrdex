@@ -33,7 +33,6 @@ import (
 	"github.com/decred/dcrd/gcs/v3"
 	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -60,18 +59,10 @@ const (
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
-	// RawRequest RPC methods
-	methodGetCFilterV2       = "getcfilterv2"
-	methodListUnspent        = "listunspent"
-	methodListLockUnspent    = "listlockunspent"
-	methodSignRawTransaction = "signrawtransaction"
-	walletTypeDcrwRPC        = "dcrwalletRPC"
+	walletTypeDcrwRPC = "dcrwalletRPC"
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
-	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
-
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
@@ -418,18 +409,6 @@ type findRedemptionResult struct {
 	RedemptionCoinID dex.Bytes
 	Secret           dex.Bytes
 	Err              error
-}
-
-type walletClient = dcrwallet.Client
-
-type combinedClient struct {
-	*rpcclient.Client
-	*walletClient
-}
-
-// ValidateAddress disambiguates the node and wallet methods.
-func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
-	return cc.walletClient.ValidateAddress(ctx, address)
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -1819,7 +1798,7 @@ rangeBlocks:
 		dcr.findRedemptionMtx.RUnlock()
 
 		// Check if any of the above p2sh scripts is possibly included in this block.
-		hit, err := dcr.blockMaybeContainsScripts(blockHash.String(), contractP2SHScripts)
+		hit, err := dcr.blockMaybeContainsScripts(blockHash, contractP2SHScripts)
 		if err != nil { // error checking a block's cfilters is a fatal error
 			err = fmt.Errorf("error checking cfilters for block %d (%s) for likely contract inclusion: %w",
 				blockHeight, blockHash, err)
@@ -1969,7 +1948,7 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 
 // blockMaybeContainsScripts uses the cfilters of the specified block to
 // determine if the block likely includes any of the passed scripts.
-func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [][]byte) (bool, error) {
+func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
 	bf, key, err := dcr.wallet.BlockCFilter(dcr.ctx, blockHash)
 	if err != nil {
 		return false, err
@@ -2464,7 +2443,7 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 	res, err := dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
 	if err != nil {
-		return nil, fmt.Errorf("rawrequest error: %w", err)
+		return nil, fmt.Errorf("signrawtransaction error: %w", err)
 	}
 
 	for i := range res.Errors {
