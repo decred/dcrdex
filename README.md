@@ -59,9 +59,9 @@ directory. Instructions are for Linux. For Windows, you will drop the
 `./` prefix for commands.
 
 **WARNING**: If instead of using **dcrinstall** you decide to build from source and
-you plan to trade on mainnet, use the `release-0.2` branch instead of `master`.
+you plan to trade on mainnet, use the `release-v0.3` branch instead of `master`.
 Furthermore, if you build dcrd and dcrwallet from source, you **must** use their
-`release-v1.6` branches, not `master`.
+`release-v1.7` branches, not `master`.
 
 ### Sync Blockchains
 
@@ -240,8 +240,8 @@ for more details about how atomic swaps work.
 
 1. [Go >= 1.16](https://golang.org/doc/install)
 2. [Node 14+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
-3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV), installed from the [v1.6.x release binaries](https://github.com/decred/decred-release/releases/tag/v1.6.1), or built from the `release-v1.6` branch.
-4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
+3. [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet) (non-SPV), installed from the [v1.7.x release binaries](https://github.com/decred/decred-release/releases/tag/v1.7.0), or built from the `release-v1.7` branches.
+4. [Bitcoin Core v0.21.x or v22.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
 5. At least 2 GB of available system memory.
 
 See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
@@ -328,7 +328,7 @@ issued to **Core** for execution. **dexcctl** also requires **dexc**.
 ### Dependencies
 
 1. Linux or MacOS
-2. [Go >= 1.14](https://golang.org/doc/install)
+2. [Go >= 1.16](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
 4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, both with `txindex` enabled.
 
