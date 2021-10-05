@@ -124,6 +124,16 @@ type bookie struct {
 	baseUnits, quoteUnits dex.UnitInfo
 }
 
+func defaultUnitInfo(symbol string) dex.UnitInfo {
+	return dex.UnitInfo{
+		AtomicUnit: "atoms",
+		Conventional: dex.Denomination{
+			ConversionFactor: 1e8,
+			Unit:             symbol,
+		},
+	}
+}
+
 // newBookie is a constructor for a bookie. The caller should provide a callback
 // function to be called when there are no subscribers and the close timer has
 // expired.
@@ -140,9 +150,24 @@ func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger 
 		}
 	}
 
-	// TODO: this be broke
-	baseInfo, _ := asset.Info(base)
-	quoteInfo, _ := asset.Info(quote)
+	parseUnitInfo := func(assetID uint32) dex.UnitInfo {
+		assetInfo, _ := asset.Info(assetID)
+		if assetInfo != nil {
+			return assetInfo.UnitInfo
+		} else {
+			dexAsset := dc.assets[assetID]
+			if dexAsset == nil {
+				dc.log.Errorf("DEX market has no %d asset. Is this even possible?", base)
+				return defaultUnitInfo("XYZ")
+			} else {
+				unitInfo := dexAsset.UnitInfo
+				if unitInfo.Conventional.ConversionFactor == 0 {
+					return defaultUnitInfo(dexAsset.Symbol)
+				}
+				return unitInfo
+			}
+		}
+	}
 
 	return &bookie{
 		OrderBook:    orderbook.NewOrderBook(logger.SubLogger("book")),
@@ -152,8 +177,8 @@ func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger 
 		feeds:        make(map[uint32]*bookFeed, 1),
 		base:         base,
 		quote:        quote,
-		baseUnits:    baseInfo.UnitInfo,
-		quoteUnits:   quoteInfo.UnitInfo,
+		baseUnits:    parseUnitInfo(base),
+		quoteUnits:   parseUnitInfo(quote),
 	}
 }
 

@@ -484,6 +484,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			SwapSize:     initTxSize,
 			SwapSizeBase: initTxSizeBase,
 			SwapConf:     uint16(assetConf.SwapConf),
+			UnitInfo:     unitInfo,
 		})
 
 		txDataSources[assetID] = be.TxData
