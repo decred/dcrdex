@@ -18,7 +18,7 @@ export class NewWalletForm {
     const fields = this.fields = Doc.parsePage(form, [
       'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
       'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
-      'newWalletAppPWBox', 'nwRegMsg'
+      'newWalletAppPWBox'
     ])
     this.refresh()
 
@@ -67,9 +67,9 @@ export class NewWalletForm {
     else Doc.show(this.fields.newWalletAppPWBox)
   }
 
-  async setAsset (assetId) {
+  async setAsset (assetID) {
     const fields = this.fields
-    const asset = app.assets[assetId]
+    const asset = app.assets[assetID]
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
     fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -100,10 +100,6 @@ export class NewWalletForm {
       return
     }
     this.subform.setLoadedConfig(res.config)
-  }
-
-  setRegMsg (msg) {
-    this.fields.nwRegMsg.textContent = msg
   }
 }
 
@@ -323,8 +319,8 @@ export class ConfirmRegistrationForm {
     bind(form, this.fields.submitConfirm, () => this.submitForm(this.feeWallet))
   }
 
-  setWalletFee (assetId) {
-    this.feeWallet = assetId
+  setWalletFee (assetID) {
+    this.feeWallet = assetID
   }
 
   /*
@@ -342,8 +338,8 @@ export class ConfirmRegistrationForm {
     while (fields.feeTableRows.firstChild) {
       fields.feeTableRows.removeChild(fields.feeTableRows.firstChild)
     }
-    const feeAsset = Object.values(xc.regFees)
-    feeAsset.forEach((fee) => {
+    for (const [symbol, fee] of Object.entries(xc.regFees)) {
+      const haveWallet = app.user.assets[fee.id].wallet
       const tr = fields.feeRowTemplate.cloneNode(true)
       Doc.bind(tr, 'click', () => {
         this.setWalletFee(fee.id)
@@ -353,16 +349,21 @@ export class ConfirmRegistrationForm {
           row.classList.remove('selected')
         })
         tr.classList.add('selected')
+        // if wallet is configured, we can active the register button.
+        // Otherwise we do not allow it.
+        if (haveWallet) {
+          this.fields.submitConfirm.classList.add('selected')
+        } else {
+          this.fields.submitConfirm.classList.remove('selected')
+        }
       })
-      const asset = Doc.assetById(fee.id)
-      Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(asset)
-      Doc.tmplElement(tr, 'asset').innerText = asset.toUpperCase()
+      Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(symbol)
+      Doc.tmplElement(tr, 'asset').innerText = symbol.toUpperCase()
       Doc.tmplElement(tr, 'confs').innerText = fee.confs
       Doc.tmplElement(tr, 'fee').innerText = fee.amount / 1e8
 
-      const haveWallet = app.user.assets[fee.id] ? app.user.assets[fee.id].wallet : null
-      const setupWallet = tr.querySelector('#setupWallet')
-      const walletReady = tr.querySelector('#walletReady')
+      const setupWallet = Doc.tmplElement(tr, 'setupWallet')
+      const walletReady = Doc.tmplElement(tr, 'walletReady')
       if (haveWallet) {
         walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
         Doc.show(walletReady)
@@ -381,7 +382,7 @@ export class ConfirmRegistrationForm {
         Doc.show(fields.appPassBox)
         Doc.show(fields.appPassSpan)
       }
-    })
+    }
     const markets = Object.values(xc.markets)
     markets.sort((m1, m2) => {
       const compareBase = m1.basesymbol.localeCompare(m2.basesymbol)
@@ -409,18 +410,18 @@ export class ConfirmRegistrationForm {
   /*
    * submitForm is called when the form is submitted.
    */
-  async submitForm (assetId) {
+  async submitForm (assetID) {
     const fields = this.fields
-    const symbol = Doc.assetById(assetId)
-    if (!assetId || !symbol) {
-      // 0 is a valid value for asset id, so we ignore it.
-      if (assetId !== 0) {
-        fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
-        Doc.show(fields.regErr)
-        return
-      }
+    // if button is selected it can be clickable.
+    if (!fields.submitConfirm.classList.contains('selected')) {
+      return
     }
-
+    if (assetID === null) {
+      fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
+      Doc.show(fields.regErr)
+      return
+    }
+    const symbol = app.user.assets[assetID].wallet.symbol
     Doc.hide(fields.regErr)
     const feeAsset = this.fees[symbol]
     const cert = await this.getCertFile()

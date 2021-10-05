@@ -152,13 +152,6 @@ export default class Doc {
   }
 
   /*
-  * assetById returns the asset string by its id.
-  */
-  static assetById (assetId) {
-    return BipIDs[assetId]
-  }
-
-  /*
    * logoPath creates a path to a png logo for the specified ticker symbol. If
    * the symbol is not a supported asset, the generic letter logo will be
    * requested instead.

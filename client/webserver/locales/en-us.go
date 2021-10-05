@@ -27,7 +27,7 @@ var EnUS = map[string]string{
 	"Submit":                         "Submit",
 	"Confirm Registration":           "Confirm Registration",
 	"app_pw_reg":                     "Enter your app password to confirm DEX registration.",
-	"reg_confirm_submit":             `When you submit this form, it will spend from your chosen wallet to pay the registration fee.`,
+	"reg_confirm_submit":             `When you submit this form, funds will be spent from your chosen wallet to pay the registration fee.`,
 	"provided_markets":               "This DEX provides the following markets:",
 	"accepted_fee_assets":            "This DEX accepts the following fees:",
 	"base_header":                    "Base",

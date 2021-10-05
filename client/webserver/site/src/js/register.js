@@ -39,8 +39,6 @@ export default class RegistrationPage extends BasePage {
       Doc.hide(page.showSeedRestore)
     })
 
-    // NEW DCR WALLET
-    // This form is only shown if there is no DCR wallet yet.
     this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
       this.confirmRegisterForm.refresh()
       this.changeForm(page.newWalletForm, page.confirmRegForm)
@@ -135,7 +133,6 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appPWErrMsg)
       return
     }
-    if (seed) this.walletForm.setRegMsg('Your Decred wallet is required')
     this.pwCache.pw = pw
     this.auth()
     app.updateMenuItemsDisplay()
