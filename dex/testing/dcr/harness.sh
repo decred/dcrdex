@@ -278,14 +278,14 @@ ${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_POR
 # alpha uses walletpassphrase/walletlock.
 
 echo "Creating simnet beta wallet"
-USE_SPV="0"
+USE_SPV="1"
 ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
 ${BETA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT}
 
 # The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
-USE_SPV="0"
+USE_SPV="1"
 ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
 ${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING}

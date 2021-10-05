@@ -25,7 +25,7 @@ type externalTx struct {
 
 	blockFiltersScanner
 
-	// The folowing are protected by the blockFiltersScanner.scanMtx
+	// The following are protected by the blockFiltersScanner.scanMtx
 	// because they are set when the tx's block is found and cleared
 	// when the previously found tx block is orphaned. The scanMtx
 	// lock must be held for read before accessing these fields.
@@ -51,7 +51,7 @@ type blockFiltersScanner struct {
 }
 
 // relevantBlockHash returns the hash of the block relevant to this scanner, if
-// the relevantBlok is set and is a mainchain block. Returns a nil hash and nil
+// the relevantBlock is set and is a mainchain block. Returns a nil hash and nil
 // error if the relevantBlock is set but is no longer part of the mainchain.
 // The scanner's scanMtx MUST be write-locked.
 func (scanner *blockFiltersScanner) relevantBlockHash(nodeGetBlockHashFn func(int64) (*chainhash.Hash, error)) (*chainhash.Hash, error) {
@@ -79,8 +79,7 @@ func (dcr *ExchangeWallet) trackExternalTx(hash *chainhash.Hash, script []byte) 
 		dcr.log.Debugf("Script %x cached for non-wallet tx %s.", script, hash)
 	}()
 
-	tx, tracked := dcr.externalTx(hash)
-	if tracked {
+	if tx, tracked := dcr.externalTx(hash); tracked {
 		tx.mtx.Lock()
 		tx.relevantScripts = append(tx.relevantScripts, script)
 		tx.mtx.Unlock()
@@ -216,11 +215,11 @@ func (dcr *ExchangeWallet) findExternalTxBlock(tx *externalTx) (bool, error) {
 	// mainchain, scan back to the mainchain ancestor of the lastScannedBlock.
 	var lastScannedBlock block
 	if tx.lastScannedBlock != nil {
-		stopBlockHash, stopBlock, err := dcr.mainChainAncestor(tx.lastScannedBlock)
+		stopBlockHash, stopBlockHeight, err := dcr.mainChainAncestor(tx.lastScannedBlock)
 		if err != nil {
 			return false, fmt.Errorf("error looking up mainchain ancestor for block %s", err)
 		}
-		lastScannedBlock.height = stopBlock.Height
+		lastScannedBlock.height = stopBlockHeight
 		lastScannedBlock.hash = stopBlockHash
 		tx.lastScannedBlock = stopBlockHash
 	} else {
@@ -279,8 +278,7 @@ func (dcr *ExchangeWallet) findExternalTxBlock(tx *externalTx) (bool, error) {
 						continue
 					}
 					tx.outputs[uint32(i)] = &externalTxOutput{
-						// TODO: output.ScriptPubKey.Version with dcrd 1.7 *release*, not yet
-						TxOut:  newTxOut(int64(amt), output.Version, pkScript),
+						TxOut:  newTxOut(int64(amt), output.ScriptPubKey.Version, pkScript),
 						txHash: tx.hash,
 						vout:   uint32(i),
 					}
@@ -331,11 +329,12 @@ func (dcr *ExchangeWallet) findExternalTxOutputSpender(output *externalTxOutput,
 	// Use mainChainAncestor to ensure that scanning starts from a mainchain
 	// block in the event that either tx block or lastScannedBlock have been
 	// re-orged out of the mainchain.
-	var startBlock *chainjson.GetBlockVerboseResult
+	var startBlockHash *chainhash.Hash
+	var startBlockHeight int64
 	if output.spender.lastScannedBlock == nil {
-		_, startBlock, err = dcr.mainChainAncestor(txBlockHash)
+		startBlockHash, startBlockHeight, err = dcr.mainChainAncestor(txBlockHash)
 	} else {
-		_, startBlock, err = dcr.mainChainAncestor(output.spender.lastScannedBlock)
+		startBlockHash, startBlockHeight, err = dcr.mainChainAncestor(output.spender.lastScannedBlock)
 	}
 	if err != nil {
 		return false, err
@@ -344,8 +343,8 @@ func (dcr *ExchangeWallet) findExternalTxOutputSpender(output *externalTxOutput,
 	// Search for this output's spender in the blocks between startBlock and bestBlock.
 	bestBlock := dcr.cachedBestBlock()
 	dcr.log.Debugf("Searching for the tx that spends output %s in blocks %d (%s) to %d (%s).",
-		output, startBlock.Height, startBlock.Hash, bestBlock.height, bestBlock.hash)
-	for blockHeight := startBlock.Height; blockHeight <= bestBlock.height; blockHeight++ {
+		output, startBlockHeight, startBlockHash, bestBlock.height, bestBlock.hash)
+	for blockHeight := startBlockHeight; blockHeight <= bestBlock.height; blockHeight++ {
 		blockHash, err := dcr.wallet.GetBlockHash(dcr.ctx, blockHeight)
 		if err != nil {
 			return false, translateRPCCancelErr(err)
@@ -386,7 +385,7 @@ func (dcr *ExchangeWallet) findExternalTxOutputSpender(output *externalTxOutput,
 	}
 
 	dcr.log.Debugf("No spender tx found for %s in blocks %d (%s) to %d (%s).",
-		output, startBlock.Height, startBlock.Hash, bestBlock.height, bestBlock.hash)
+		output, startBlockHeight, startBlockHash, bestBlock.height, bestBlock.hash)
 	return false, nil // scanned up to best block, no spender found
 }
 

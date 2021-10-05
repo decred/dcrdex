@@ -1498,9 +1498,9 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // The information returned would be used to verify the counter-party's contract
 // during a swap.
 //
-// NOTE: For SPV wallets, a successful audit response is no gaurantee that the
+// NOTE: For SPV wallets, a successful audit response is no guarantee that the
 // txData provided to this method was actually broadcasted to the blockchain.
-// An error may have occured while trying to broadcast the txData or even if
+// An error may have occurred while trying to broadcast the txData or even if
 // there was no broadcast error, the tx might still not enter mempool or get
 // mined e.g. if the tx references invalid or already spent inputs.
 //
@@ -1534,7 +1534,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		if err = dcr.validateContractOutputScript(contractOutputScript, scriptVer, contract); err != nil {
 			return nil, err
 		}
-		dcr.log.Debugf("Audited contract coin %s:%d using tx data gotten from the blockchain. SPV mode = %t",
+		dcr.log.Infof("Audited contract coin %s:%d using tx data gotten from the blockchain. SPV mode = %t",
 			txHash, vout, dcr.wallet.SpvMode())
 		return &asset.AuditInfo{
 			Coin:       contractCoin,
@@ -1600,7 +1600,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		// SPV wallets do not produce sendrawtransaction errors for already
 		// broadcasted txs. This must be some other unexpected error.
 		// Do NOT return an asset.CoinNotFoundError so callers do not recall
-		// this method as there's no gaurantee that the broadcast will succeed
+		// this method as there's no guarantee that the broadcast will succeed
 		// on subsequent attempts.
 		// Return a successful audit response because it is possible that the
 		// tx was already broadcasted and the caller can safely begin waiting
@@ -1609,9 +1609,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		// but as explained above, retrying the broadcast isn't a better course
 		// of action, neither is returning an error here because that would cause
 		// the caller to potentially give up on this match prematurely.
-	}
-
-	if err == nil && !finalTxHash.IsEqual(txHash) {
+	} else if !finalTxHash.IsEqual(txHash) {
 		return nil, fmt.Errorf("broadcasted contract tx, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", txHash, finalTxHash)
 	}
@@ -1622,7 +1620,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		dcr.trackExternalTx(txHash, contractTxOut.PkScript)
 	}
 
-	dcr.log.Debugf("Audited contract coin %s:%d using raw tx data. SPV mode = %t", txHash, vout, dcr.wallet.SpvMode())
+	dcr.log.Infof("Audited contract coin %s:%d using raw tx data. SPV mode = %t", txHash, vout, dcr.wallet.SpvMode())
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), determineTxTree(contractTx)),
 		Contract:   contract,
@@ -3056,27 +3054,27 @@ func (dcr *ExchangeWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, err
 
 // mainChainAncestor crawls blocks backwards starting at the provided hash
 // until finding a mainchain block. Returns the first mainchain block found.
-func (dcr *ExchangeWallet) mainChainAncestor(blockHash *chainhash.Hash) (*chainhash.Hash, *chainjson.GetBlockVerboseResult, error) {
+func (dcr *ExchangeWallet) mainChainAncestor(blockHash *chainhash.Hash) (*chainhash.Hash, int64, error) {
 	if *blockHash == zeroHash {
-		return nil, nil, fmt.Errorf("invalid block hash %s", blockHash.String())
+		return nil, 0, fmt.Errorf("invalid block hash %s", blockHash.String())
 	}
 
 	checkHash := blockHash
 	for {
-		checkBlock, err := dcr.wallet.GetBlockVerbose(dcr.ctx, checkHash, false)
+		checkBlock, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, checkHash)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error retrieving block %s: %w", checkHash, translateRPCCancelErr(err))
+			return nil, 0, fmt.Errorf("error retrieving block %s: %w", checkHash, translateRPCCancelErr(err))
 		}
 		if checkBlock.Confirmations > -1 {
 			// This is a mainchain block, return the hash.
-			return checkHash, checkBlock, nil
+			return checkHash, int64(checkBlock.Height), nil
 		}
 		if checkBlock.Height == 0 {
-			return nil, nil, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
+			return nil, 0, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
 		}
 		checkHash, err = chainhash.NewHashFromStr(checkBlock.PreviousHash)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error decoding previous hash %s for block %s: %w",
+			return nil, 0, fmt.Errorf("error decoding previous hash %s for block %s: %w",
 				checkBlock.PreviousHash, checkHash.String(), translateRPCCancelErr(err))
 		}
 	}
