@@ -339,6 +339,10 @@ export class ConfirmRegistrationForm {
       fields.feeTableRows.removeChild(fields.feeTableRows.firstChild)
     }
     for (const [symbol, fee] of Object.entries(xc.regFees)) {
+      // if asset fee is not supported by the client we can skip it.
+      if (app.user.assets[fee.id] === undefined) {
+        continue
+      }
       const haveWallet = app.user.assets[fee.id].wallet
       const tr = fields.feeRowTemplate.cloneNode(true)
       Doc.bind(tr, 'click', () => {
