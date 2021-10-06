@@ -83,7 +83,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelCritical)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelTrace)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
 		UnitInfo: dex.UnitInfo{
@@ -1277,7 +1277,7 @@ func TestBookFeed(t *testing.T) {
 	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	firstSellQty := book.Sells[0].QtyAtomic
 	if firstSellQty != remaining {
-		t.Fatalf("expected remaining quantity of 500000000 after update_remaining. got %d", firstSellQty)
+		t.Fatalf("expected remaining quantity of %d after update_remaining. got %d", remaining, firstSellQty)
 	}
 
 	// Ensure handleUnbookOrderMsg removes a book order from an associated

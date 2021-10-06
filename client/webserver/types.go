@@ -104,6 +104,8 @@ type accountDisableForm struct {
 // Whenever possible, add an orderReader methods rather than a template func.
 type orderReader struct {
 	*core.Order
+	baseUnitInfo  dex.UnitInfo
+	quoteUnitInfo dex.UnitInfo
 }
 
 // FromSymbol is the symbol of the asset which will be sent.
@@ -164,16 +166,18 @@ func (ord *orderReader) TypeString() string {
 
 // BaseQtyString formats the order quantity in units of the base asset.
 func (ord *orderReader) BaseQtyString() string {
-	return precision8(ord.Qty)
+	return formatQty(ord.Qty, ord.baseUnitInfo)
 }
 
 // OfferString formats the order quantity in units of the outgoing asset,
 // performing a conversion if necessary.
 func (ord *orderReader) OfferString() string {
-	if ord.Sell || ord.Type == order.MarketOrderType {
-		return precision8(ord.Qty)
+	if ord.Sell {
+		return formatQty(ord.Qty, ord.baseUnitInfo)
+	} else if ord.Type == order.MarketOrderType {
+		return formatQty(ord.Qty, ord.quoteUnitInfo)
 	}
-	return precision8(calc.BaseToQuote(ord.Rate, ord.Qty))
+	return formatQty(calc.BaseToQuote(ord.Rate, ord.Qty), ord.quoteUnitInfo)
 }
 
 // AskString will print the minimum received amount for the filled limit order.
@@ -183,9 +187,9 @@ func (ord *orderReader) AskString() string {
 		return "market rate"
 	}
 	if ord.Sell {
-		return precision8(calc.BaseToQuote(ord.Rate, ord.Qty))
+		return formatQty(calc.BaseToQuote(ord.Rate, ord.Qty), ord.quoteUnitInfo)
 	}
-	return precision8(ord.Qty)
+	return formatQty(ord.Qty, ord.baseUnitInfo)
 }
 
 // IsMarketBuy is true if this is a market buy order.
@@ -198,14 +202,20 @@ func (ord *orderReader) IsMarketOrder() bool {
 	return ord.Type == order.MarketOrderType
 }
 
-// SettledFrom is the sum settled incoming asset.
+// SettledFrom is the sum settled outgoing asset.
 func (ord *orderReader) SettledFrom() string {
-	return precision8(ord.sumFrom(settledFilter))
+	if ord.Sell {
+		return formatQty(ord.sumFrom(settledFilter), ord.baseUnitInfo)
+	}
+	return formatQty(ord.sumFrom(settledFilter), ord.quoteUnitInfo)
 }
 
-// SettledTo is the sum settled of outgoing asset.
+// SettledTo is the sum settled of incoming asset.
 func (ord *orderReader) SettledTo() string {
-	return precision8(ord.sumTo(settledFilter))
+	if ord.Sell {
+		return formatQty(ord.sumTo(settledFilter), ord.quoteUnitInfo)
+	}
+	return formatQty(ord.sumTo(settledFilter), ord.baseUnitInfo)
 }
 
 // SettledPercent is the percent of the order which has completed settlement.
@@ -215,12 +225,18 @@ func (ord *orderReader) SettledPercent() string {
 
 // FilledFrom is the sum filled in units of the outgoing asset.
 func (ord *orderReader) FilledFrom() string {
-	return precision8(ord.sumFrom(filledNonCancelFilter))
+	if ord.Sell {
+		return formatQty(ord.sumFrom(filledFilter), ord.baseUnitInfo)
+	}
+	return formatQty(ord.sumFrom(filledFilter), ord.quoteUnitInfo)
 }
 
 // FilledTo is the sum filled in units of the incoming asset.
 func (ord *orderReader) FilledTo() string {
-	return precision8(ord.sumTo(filledNonCancelFilter))
+	if ord.Sell {
+		return formatQty(ord.sumTo(filledFilter), ord.quoteUnitInfo)
+	}
+	return formatQty(ord.sumTo(filledFilter), ord.baseUnitInfo)
 }
 
 // FilledPercent is the percent of the order that has filled, without percent
@@ -352,7 +368,7 @@ func (ord *orderReader) StatusString() string {
 
 // SimpleRateString is the formatted match rate.
 func (ord *orderReader) SimpleRateString() string {
-	return precision8(ord.Rate)
+	return ord.formatRate(ord.Rate)
 }
 
 // RateString is a formatted rate with units.
@@ -360,7 +376,7 @@ func (ord *orderReader) RateString() string {
 	if ord.Type == order.MarketOrderType {
 		return "market"
 	}
-	return fmt.Sprintf("%s %s/%s", precision8(ord.Rate), ord.QuoteSymbol, ord.BaseSymbol)
+	return fmt.Sprintf("%s %s/%s", ord.formatRate(ord.Rate), ord.QuoteSymbol, ord.BaseSymbol)
 }
 
 // AverageRateString returns a formatting string containing the average rate of
@@ -369,13 +385,12 @@ func (ord *orderReader) AverageRateString() string {
 	if len(ord.Matches) == 0 {
 		return "0"
 	}
-	var totalQty, totalRate uint64
+	var baseQty, rateProduct uint64
 	for _, match := range ord.Matches {
-		totalQty += match.Qty
-		totalRate += match.Rate * match.Qty
+		baseQty += match.Qty
+		rateProduct += match.Rate * match.Qty // order ~ 1e16
 	}
-	averageRate := totalRate / totalQty
-	return precision8(averageRate)
+	return ord.formatRate(rateProduct / baseQty)
 }
 
 // MatchReaders creates a slice of *matchReader for the order's matches.
@@ -389,12 +404,18 @@ func (ord *orderReader) MatchReaders() []*matchReader {
 
 // SwapFeesString is a formatted string of the paid swap fees.
 func (ord *orderReader) SwapFeesString() string {
-	return precision8(ord.FeesPaid.Swap)
+	if ord.Sell {
+		return formatQty(ord.FeesPaid.Swap, ord.baseUnitInfo)
+	}
+	return formatQty(ord.FeesPaid.Swap, ord.quoteUnitInfo)
 }
 
 // RedemptionFeesString is a formatted string of the paid redemption fees.
 func (ord *orderReader) RedemptionFeesString() string {
-	return precision8(ord.FeesPaid.Redemption)
+	if ord.Sell {
+		return formatQty(ord.FeesPaid.Swap, ord.quoteUnitInfo)
+	}
+	return formatQty(ord.FeesPaid.Swap, ord.baseUnitInfo)
 }
 
 // BaseAssetFees is a formatted string of the fees paid in the base asset.
@@ -419,6 +440,13 @@ func (ord *orderReader) FundingCoinIDs() []string {
 		ids = append(ids, ord.FundingCoins[i].StringID)
 	}
 	return ids
+}
+
+// formatRate formats the specified rate as a conventional rate with trailing
+// zeros trimmed.
+func (ord *orderReader) formatRate(msgRate uint64) string {
+	r := calc.ConventionalRate(msgRate, ord.baseUnitInfo, ord.quoteUnitInfo)
+	return trimTrailingZeros(strconv.FormatFloat(r, 'f', 8, 64))
 }
 
 // matchReader wraps a core.Match and provides methods for info display.
@@ -457,23 +485,23 @@ func (m *matchReader) StatusString() string {
 
 // RateString is the formatted match rate, with units.
 func (m *matchReader) RateString() string {
-	return fmt.Sprintf("%s %s/%s", precision8(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)
+	return fmt.Sprintf("%s %s/%s", m.ord.formatRate(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)
 }
 
 // FromQuantityString is the formatted quantity.
 func (m *matchReader) FromQuantityString() string {
 	if m.ord.Sell {
-		return precision8(m.Qty)
+		return formatQty(m.Qty, m.ord.baseUnitInfo)
 	}
-	return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+	return formatQty(calc.BaseToQuote(m.Rate, m.Qty), m.ord.quoteUnitInfo)
 }
 
 // ToQuantityString is the formatted quantity.
 func (m *matchReader) ToQuantityString() string {
 	if m.ord.Sell {
-		return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+		return formatQty(calc.BaseToQuote(m.Rate, m.Qty), m.ord.quoteUnitInfo)
 	}
-	return precision8(m.Qty)
+	return formatQty(m.Qty, m.ord.baseUnitInfo)
 }
 
 // OrderPortion is the percent of the order that this match represents, without
@@ -541,7 +569,15 @@ func (m *matchReader) CounterSwapConfirmString() string {
 	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
 }
 
-func precision8(v uint64) string {
-	fullPrecision := strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64)
-	return strings.TrimRight(strings.TrimRight(fullPrecision, "0"), ".")
+// formatQty formats the quantity as a conventional string and trims trailing
+// zeros.
+func formatQty(qty uint64, unitInfo dex.UnitInfo) string {
+	return trimTrailingZeros(unitInfo.ConventionalString(qty))
+}
+
+// trimTrailingZeros trims trailing decimal zeros of a formatted float string.
+// The number is assumed to be formatted as a float with non-zero decimal
+// precision, i.e. there should be a decimal point in there.
+func trimTrailingZeros(s string) string {
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
 }

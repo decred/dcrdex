@@ -357,13 +357,13 @@ var ptBR = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicYoloPlaced: {
-		template: "vendendo %.8f %s a taxa de mercado (%s)",
+		template: "vendendo %s %s a taxa de mercado (%s)",
 		subject:  "Ordem de Mercado Colocada",
 	},
 	// [sell string, qty, ticker, rate string, token]
 	TopicOrderPlaced: {
 		subject:  "Ordem Colocada",
-		template: "%sing %.8f %s, valor = %s (%s)",
+		template: "%sing %s %s, valor = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -417,7 +417,7 @@ var ptBR = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {
-		template: "Erro encontrado ao enviar a troca com output(s) no valor de %.8f %s no pedido %s",
+		template: "Erro encontrado ao enviar a troca com output(s) no valor de %s %s no pedido %s",
 		subject:  "Erro ao Enviar Troca",
 	},
 	// [match, error]
@@ -432,27 +432,27 @@ var ptBR = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		template: "Enviar trocas no valor de %.8f %s no pedido %s",
+		template: "Enviar trocas no valor de %s %s no pedido %s",
 		subject:  "Trocas Iniciadas",
 	},
 	// [qty, ticker, token]
 	TopicRedemptionError: {
-		template: "Erro encontrado enviado redenção no valor de %.8f %s no pedido %s",
+		template: "Erro encontrado enviado redenção no valor de %s %s no pedido %s",
 		subject:  "Erro na Redenção",
 	},
 	// [qty, ticker, token]
 	TopicMatchComplete: {
-		template: "Resgatado %.8f %s no pedido %s",
+		template: "Resgatado %s %s no pedido %s",
 		subject:  "Combinação Completa",
 	},
 	// [qty, ticker, token]
 	TopicRefundFailure: {
-		template: "Devolvidos %.8f %s no pedido %s, com algum erro",
+		template: "Devolvidos %s %s no pedido %s, com algum erro",
 		subject:  "Erro no Reembolso",
 	},
 	// [qty, ticker, token]
 	TopicMatchesRefunded: {
-		template: "Devolvidos %.8f %s no pedido %s",
+		template: "Devolvidos %s %s no pedido %s",
 		subject:  "Reembolso Sucedido",
 	},
 	// [match ID token]
@@ -645,12 +645,12 @@ var zhCN = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicYoloPlaced: {
 		subject:  "下达市价单",
-		template: "以市场价格 (%[3]s) 出售 %[1].8f %[2]s",
+		template: "以市场价格 (%[3]s) 出售 %[1]s %[2]s",
 	},
 	// [sell string, qty, ticker, rate string, token]
 	TopicOrderPlaced: {
 		subject:  "已下订单",
-		template: "%sing %.8f %s，值 = %s (%s)", // figure out the "ing" issue (TODO)
+		template: "%sing %s %s，值 = %s (%s)", // figure out the "ing" issue (TODO)
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -705,7 +705,7 @@ var zhCN = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicSwapSendError: {
 		subject:  "发送交换时出错",
-		template: "在以 %[3]s 的顺序发送价值 %[1].8f %[2]s 的输出的交换时遇到错误", // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
+		template: "在以 %[3]s 的顺序发送价值 %[1]s %[2]s 的输出的交换时遇到错误", // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
 	},
 	// [match, error]
 	TopicInitError: {
@@ -720,27 +720,27 @@ var zhCN = map[Topic]*translation{
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
 		subject:  "发起交流",
-		template: "在订单 %[3]s 上发送价值 %[1].8f %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
+		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
 	},
 	// [qty, ticker, token]
 	TopicRedemptionError: {
 		subject:  "赎回错误",
-		template: "在订单 %[3]s 上发送价值 %[1].8f %[2]s 的兑换时遇到错误", // alt. 在订单 %s 上发现发送价值 %.8f %s 的赎回错误
+		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的兑换时遇到错误", // alt. 在订单 %s 上发现发送价值 %.8f %s 的赎回错误
 	},
 	// [qty, ticker, token]
 	TopicMatchComplete: {
 		subject:  "完全匹配",
-		template: "在订单 %s 上兑换了 %.8f %s",
+		template: "在订单 %s 上兑换了 %s %s",
 	},
 	// [qty, ticker, token]
 	TopicRefundFailure: {
 		subject:  "退款错误",
-		template: "按顺序 %[3]s 返回 %[1].8f %[2]s，有一些错误", // alt. 退款％.8f％s的订单％S，但出现一些错误
+		template: "按顺序 %[3]s 返回 %[1]s %[2]s，有一些错误", // alt. 退款％.8f％s的订单％S，但出现一些错误
 	},
 	// [qty, ticker, token]
 	TopicMatchesRefunded: {
 		subject:  "退款成功",
-		template: "在订单 %[3]s 上返回了 %[1].8f %[2]s", // 在订单 %s 上返回了 %.8f %s
+		template: "在订单 %[3]s 上返回了 %[1]s %[2]s", // 在订单 %s 上返回了 %.8f %s
 	},
 	// [match ID token]
 	TopicMatchRevoked: {

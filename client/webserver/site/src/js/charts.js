@@ -440,13 +440,13 @@ export class DepthChart extends Chart {
     const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
 
-    this.doYLabels(this.plotRegion, this.lotSize, this.book.baseSymbol)
-
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
-      dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
+    this.doYLabels(this.plotRegion, this.lotSize, this.baseUnit)
 
     // Print the x labels
-    this.plotXLabels(xLabels, low, high, [`${this.quoteTicker}/`, this.baseTicker])
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
+      dataExtents.x.max, 100, this.rateStep, '')
+
+    this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
     // A function to be run at the end if there is legend data to display.
     let mouseData

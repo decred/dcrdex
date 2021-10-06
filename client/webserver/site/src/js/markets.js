@@ -897,7 +897,7 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
-    this.chart.set(this.book, cfg.lotsize, cfg.ratestep, base.info.unitinfo, quote.info.unitinfo)
+    this.depthChart.set(this.book, cfg.lotsize, cfg.ratestep, base.info.unitinfo, quote.info.unitinfo)
   }
 
   /*

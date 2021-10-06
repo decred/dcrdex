@@ -3906,7 +3906,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	} else {
 		rateString := "market"
 		if form.IsLimit {
-			rateString = strconv.FormatFloat(wallets.conventionalRate(corder.Rate), 'f', 8, 64)
+			rateString = wallets.trimmedConventionalRateString(corder.Rate)
 		}
 		ui := wallets.baseWallet.Info().UnitInfo
 		subject, details := c.formatDetails(TopicOrderPlaced,
@@ -3934,6 +3934,11 @@ type walletSet struct {
 // conventional units.
 func (w *walletSet) conventionalRate(msgRate uint64) float64 {
 	return calc.ConventionalRate(msgRate, w.baseWallet.Info().UnitInfo, w.quoteWallet.Info().UnitInfo)
+}
+
+func (w *walletSet) trimmedConventionalRateString(r uint64) string {
+	s := strconv.FormatFloat(w.conventionalRate(r), 'f', 8, 64)
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
 }
 
 // walletSet constructs a walletSet.
