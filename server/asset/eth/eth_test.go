@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -112,6 +113,16 @@ func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwap
 
 func (n *testNode) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
 	return n.tx, n.txIsMempool, n.txErr
+}
+
+func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *swap.ETHSwapSwap {
+	return &swap.ETHSwapSwap{
+		InitBlockNumber:      big.NewInt(bn),
+		RefundBlockTimestamp: locktime,
+		Participant:          *participantAddr,
+		State:                uint8(state),
+		Value:                value,
+	}
 }
 
 func TestLoad(t *testing.T) {
@@ -462,31 +473,38 @@ func TestContract(t *testing.T) {
 	txCoinIDBytes := tc.Encode()
 	sc := SwapCoinID{}
 	swapCoinIDBytes := sc.Encode()
+	locktime := big.NewInt(initLocktime)
 	tests := []struct {
-		name          string
-		coinID        []byte
-		tx            *types.Transaction
-		swpErr, txErr error
-		wantErr       bool
+		name           string
+		coinID         []byte
+		tx             *types.Transaction
+		swap           *dexeth.ETHSwapSwap
+		swapErr, txErr error
+		wantErr        bool
 	}{{
 		name:   "ok",
 		tx:     tTx(gasPrice, value, contractAddr, initCalldata),
+		swap:   tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
 		coinID: txCoinIDBytes,
 	}, {
-		name:    "bad contract data",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata[1:]),
-		coinID:  txCoinIDBytes,
+		name:    "new coiner error, wrong tx type",
+		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
+		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		coinID:  swapCoinIDBytes,
 		wantErr: true,
 	}, {
-		name:    "new coinder error, wrong tx type",
+		name:    "confirmations error, swap error",
 		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  swapCoinIDBytes,
+		coinID:  txCoinIDBytes,
+		swapErr: errors.New(""),
 		wantErr: true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
-			tx:    test.tx,
-			txErr: test.txErr,
+			tx:     test.tx,
+			txErr:  test.txErr,
+			swp:    test.swap,
+			swpErr: test.swapErr,
 		}
 		eth := &Backend{
 			node:         node,

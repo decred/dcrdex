@@ -198,15 +198,6 @@ func TestConfirmations(t *testing.T) {
 	bigO := big.NewInt(0)
 	oneGweiMore := big.NewInt(1e9)
 	oneGweiMore.Add(oneGweiMore, value)
-	newSwap := func(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *dexeth.ETHSwapSwap {
-		return &dexeth.ETHSwapSwap{
-			InitBlockNumber:      big.NewInt(bn),
-			RefundBlockTimestamp: locktime,
-			Participant:          *participantAddr,
-			State:                uint8(state),
-			Value:                value,
-		}
-	}
 	tests := []struct {
 		name                  string
 		swap                  *dexeth.ETHSwapSwap
@@ -220,25 +211,25 @@ func TestConfirmations(t *testing.T) {
 	}{{
 		name:      "ok has confs value not verified",
 		bn:        100,
-		swap:      newSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:      tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
 		value:     value,
 		ct:        sctInit,
 		wantConfs: 3,
 	}, {
 		name:        "ok no confs",
-		swap:        newSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:        tSwap(0, bigO, bigO, SSNone, nullAddr),
 		value:       value,
 		ct:          sctInit,
 		txIsMempool: true,
 	}, {
 		name:      "ok redeem",
-		swap:      newSwap(97, locktime, value, SSRedeemed, &initParticipantAddr),
+		swap:      tSwap(97, locktime, value, SSRedeemed, &initParticipantAddr),
 		value:     bigO,
 		ct:        sctRedeem,
 		wantConfs: 1,
 	}, {
 		name:        "ok redeem in mempool",
-		swap:        newSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:        tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
 		value:       bigO,
 		txIsMempool: true,
 		ct:          sctRedeem,
@@ -249,13 +240,13 @@ func TestConfirmations(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "redeem bad swap state None",
-		swap:    newSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
 		value:   bigO,
 		ct:      sctRedeem,
 		wantErr: true,
 	}, {
 		name:    "redeem initiated but not in mempool",
-		swap:    newSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
 		value:   bigO,
 		ct:      sctRedeem,
 		wantErr: true,
@@ -267,50 +258,50 @@ func TestConfirmations(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "error getting transaction",
-		swap:    newSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
 		value:   value,
 		ct:      sctInit,
 		txErr:   errors.New(""),
 		wantErr: true,
 	}, {
 		name:    "no confs but tx not in mempool",
-		swap:    newSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "swap value causes ToGwei error",
-		swap:    newSwap(99, locktime, overMaxWei(), SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, locktime, overMaxWei(), SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "value differs from initial transaction",
-		swap:    newSwap(99, locktime, oneGweiMore, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, locktime, oneGweiMore, SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "participant differs from initial transaction",
-		swap:    newSwap(99, locktime, value, SSInitiated, nullAddr),
+		swap:    tSwap(99, locktime, value, SSInitiated, nullAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "locktime not an int64",
-		swap:    newSwap(99, new(big.Int).SetUint64(^uint64(0)), value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, new(big.Int).SetUint64(^uint64(0)), value, SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "locktime differs from initial transaction",
-		swap:    newSwap(99, bigO, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, bigO, value, SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "block number error",
-		swap:    newSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		bnErr:   errors.New(""),

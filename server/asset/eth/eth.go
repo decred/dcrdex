@@ -227,6 +227,12 @@ func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %v", err)
 	}
+	// Confirmations performs some extra swap status checks if the the tx
+	// is mined.
+	_, err = sc.Confirmations(eth.rpcCtx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get confirmations: %v", err)
+	}
 	return &asset.Contract{
 		Coin:         sc,
 		SwapAddress:  sc.counterParty.String(),
