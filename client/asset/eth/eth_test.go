@@ -7,6 +7,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
@@ -67,7 +69,9 @@ func (n *testNode) accounts() []*accounts.Account {
 	return nil
 }
 func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int, error) {
-	return n.bal, n.balErr
+	balCopy := new(big.Int)
+	balCopy.Set(n.bal)
+	return balCopy, n.balErr
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
@@ -356,6 +360,250 @@ func TestBalance(t *testing.T) {
 	}
 }
 
+// badCoin fulfills the asset.Coin interface, but the ID does not match the ID expected in the
+// ETH wallet code.
+type badCoin uint64
+
+func (*badCoin) ID() dex.Bytes {
+	return []byte{123}
+}
+func (*badCoin) String() string {
+	return "abc"
+}
+func (b *badCoin) Value() uint64 {
+	return uint64(*b)
+}
+
+func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := &testNode{}
+	walletBalanceGwei := uint64(dexeth.GweiFactor)
+	node.bal = big.NewInt(int64(walletBalanceGwei) * dexeth.GweiFactor)
+	address := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
+	account := accounts.Account{
+		Address: common.HexToAddress(address),
+	}
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: &account,
+	}
+
+	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+		balance, err := wallet.Balance()
+		if err != nil {
+			t.Fatalf("%v: unexpected error %v", testName, err)
+		}
+		if balance.Available != expectedAvailable {
+			t.Fatalf("%v: expected %v funds to be available but got %v", testName, expectedAvailable, balance.Available)
+		}
+		if balance.Locked != expectedLocked {
+			t.Fatalf("%v: expected %v funds to be locked but got %v", testName, expectedLocked, balance.Locked)
+		}
+	}
+
+	type fundOrderTest struct {
+		testName    string
+		wantErr     bool
+		coinValue   uint64
+		coinAddress string
+	}
+	checkFundOrderResult := func(coins asset.Coins, redeemScripts []dex.Bytes, err error, test fundOrderTest) {
+		if test.wantErr && err == nil {
+			t.Fatalf("%v: expected error but didn't get", test.testName)
+		}
+		if test.wantErr {
+			return
+		}
+		if err != nil {
+			t.Fatalf("%v: unexpected error: %v", test.testName, err)
+		}
+		if len(coins) != 1 {
+			t.Fatalf("%v: expected 1 coins but got %v", test.testName, len(coins))
+		}
+		if len(redeemScripts) != 1 {
+			t.Fatalf("%v: expected 1 redeem script but got %v", test.testName, len(redeemScripts))
+		}
+		coin, err := decodeCoinID(coins[0].ID())
+		if err != nil {
+			t.Fatalf("%v: unexpected error: %v", test.testName, err)
+		}
+		if coin.id.Address.String() != test.coinAddress {
+			t.Fatalf("%v: coin address expected to be %v, but got %v", test.testName, test.coinAddress, coin.id.Address.String())
+		}
+		if coins[0].Value() != test.coinValue {
+			t.Fatalf("%v: expected %v but got %v", test.testName, test.coinValue, coins[0].Value())
+		}
+	}
+
+	order := asset.Order{
+		Value:        500000000,
+		MaxSwapCount: 2,
+		DEXConfig: &dex.Asset{
+			ID:         60,
+			Symbol:     "ETH",
+			Version:    0,
+			MaxFeeRate: 150,
+			SwapSize:   180000,
+		},
+	}
+
+	// Test fund order with less than available funds
+	coins1, redeemScripts1, err := eth.FundOrder(&order)
+	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
+	expectedCoinValue := order.Value + expectedOrderFees
+	checkFundOrderResult(coins1, redeemScripts1, err, fundOrderTest{
+		testName:    "more than enough",
+		coinValue:   expectedCoinValue,
+		coinAddress: address,
+	})
+	checkBalance(eth, walletBalanceGwei-expectedCoinValue, expectedCoinValue, "more than enough")
+
+	// Test fund order with 1 more than available funds
+	order.Value = walletBalanceGwei - expectedCoinValue - expectedOrderFees + 1
+	coins, redeemScripts, err := eth.FundOrder(&order)
+	checkFundOrderResult(coins, redeemScripts, err, fundOrderTest{
+		testName: "not enough",
+		wantErr:  true,
+	})
+	checkBalance(eth, walletBalanceGwei-expectedCoinValue, expectedCoinValue, "not enough")
+
+	// Test fund order with funds equal to available
+	order.Value = order.Value - 1
+	coins2, redeemScripts2, err := eth.FundOrder(&order)
+	checkFundOrderResult(coins2, redeemScripts2, err, fundOrderTest{
+		testName:    "just enough",
+		coinValue:   order.Value + expectedOrderFees,
+		coinAddress: address,
+	})
+	checkBalance(eth, 0, walletBalanceGwei, "just enough")
+
+	// Test returning too much funds fails
+	err = eth.ReturnCoins([]asset.Coin{coins1[0], coins1[0]})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+	checkBalance(eth, 0, walletBalanceGwei, "after redeem too much")
+
+	// Test returning coin with invalid ID
+	var badCoin badCoin
+	err = eth.ReturnCoins([]asset.Coin{&badCoin})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+
+	// Test returning correct coins returns all funds
+	err = eth.ReturnCoins([]asset.Coin{coins1[0], coins2[0]})
+	if err != nil {
+		t.Fatalf("unexpected error")
+	}
+	checkBalance(eth, walletBalanceGwei, 0, "returned correct amount")
+
+	node.balErr = errors.New("")
+	_, _, err = eth.FundOrder(&order)
+	if err == nil {
+		t.Fatalf("balance error should cause error but did not")
+	}
+	node.balErr = nil
+
+	eth2 := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: &account,
+	}
+
+	// Test reloading coins from first order
+	coins, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(coins) != 1 {
+		t.Fatalf("expected 1 coins but got %v", len(coins))
+	}
+	if coins[0].Value() != coins1[0].Value() {
+		t.Fatalf("funding coin value %v != expected %v", coins[0].Value(), coins[1].Value())
+	}
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "funding1")
+
+	// Test reloading more coins than are available in balance
+	_, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID()})
+	if err == nil {
+		t.Fatalf("expected error but didn't get one")
+	}
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 1")
+
+	// Test funding coins with bad coin ID
+	_, err = eth2.FundingCoins([]dex.Bytes{badCoin.ID()})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 2")
+
+	// Test funding coins with coin from different address
+	var differentAddress [20]byte
+	decodedHex, _ := hex.DecodeString("345853e21b1d475582E71cC269124eD5e2dD3422")
+	copy(differentAddress[:], decodedHex)
+	var nonce [8]byte
+	copy(nonce[:], encode.RandomBytes(8))
+	differentAddressCoin := coin{
+		id: dexeth.AmountCoinID{
+			Address: differentAddress,
+			Amount:  100000,
+			Nonce:   nonce,
+		},
+	}
+	_, err = eth2.FundingCoins([]dex.Bytes{differentAddressCoin.ID()})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 3")
+
+	// Test funding coins with balance error
+	node.balErr = errors.New("")
+	_, err = eth2.FundingCoins([]dex.Bytes{badCoin.ID()})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+	node.balErr = nil
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 4")
+
+	// Reloading coins from second order
+	coins, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(coins) != 1 {
+		t.Fatalf("expected 1 coins but got %v", len(coins))
+	}
+	if coins[0].Value() != coins2[0].Value() {
+		t.Fatalf("funding coin value %v != expected %v", coins[0].Value(), coins[1].Value())
+	}
+	checkBalance(eth2, 0, walletBalanceGwei, "funding2")
+
+	// return coin with incorrect address
+	err = eth2.ReturnCoins([]asset.Coin{&differentAddressCoin})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+
+	// return all coins
+	err = eth2.ReturnCoins([]asset.Coin{coins1[0], coins2[0]})
+	if err != nil {
+		t.Fatalf("unexpected error")
+	}
+	checkBalance(eth2, walletBalanceGwei, 0, "return coins after funding")
+
+	// Test funding coins with two coins at the same time
+	_, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID(), coins2[0].ID()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	checkBalance(eth2, 0, walletBalanceGwei, "funding3")
+}
 func TestGetInitGas(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &testNode{}

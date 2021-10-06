@@ -8,16 +8,15 @@ package eth
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
+	"encoding/binary"
 	"errors"
-	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/encode"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -121,129 +120,110 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestDecodeCoinID(t *testing.T) {
-	tests := []struct {
-		name                   string
-		wantFlags              CoinIDFlag
-		wantAddr               *common.Address
-		coinID, wantSecretHash []byte
-		wantErr                bool
-	}{{
-		name: "ok",
-		coinID: []byte{
-			0x00, 0x01, // 2 byte flags
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
-		},
-		wantFlags: CIDTxID,
-		wantAddr: &common.Address{
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05,
-		},
-		wantSecretHash: []byte{
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
-		},
-	}, {
-		name: "wrong length",
-		coinID: []byte{
-			0xFF, 0x01, // 2 byte flags
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, // 31 bytes
-		},
-		wantErr: true,
-	}}
-
-	for _, test := range tests {
-		flags, addr, secretHash, err := DecodeCoinID(test.coinID)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
-		if flags != test.wantFlags {
-			t.Fatalf("want flags value of %v but got %v for test %v",
-				test.wantFlags, flags, test.name)
-		}
-		if *addr != *test.wantAddr {
-			t.Fatalf("want addr value of %v but got %v for test %v",
-				test.wantAddr, addr, test.name)
-		}
-		if !reflect.DeepEqual(secretHash, test.wantSecretHash) {
-			t.Fatalf("want secret hash value of %v but got %v for test %v",
-				test.wantSecretHash, secretHash, test.name)
-		}
+func TestCoinIDs(t *testing.T) {
+	// Decode and encode TxCoinID
+	var txID [32]byte
+	copy(txID[:], encode.RandomBytes(32))
+	originalTxCoin := TxCoinID{
+		TxID: txID,
 	}
-}
+	encodedTxCoin := originalTxCoin.Encode()
+	decodedCoin, err := DecodeCoinID(encodedTxCoin)
+	if err != nil {
+		t.Fatalf("unexpected error decoding tx coin: %v", err)
+	}
+	decodedTxCoin, ok := decodedCoin.(*TxCoinID)
+	if !ok {
+		t.Fatalf("expected coin to be a TxCoin")
+	}
+	if !bytes.Equal(originalTxCoin.TxID[:], decodedTxCoin.TxID[:]) {
+		t.Fatalf("expected txIds to be equal before and after decoding")
+	}
 
-func TestCoinIDToString(t *testing.T) {
-	flags := CIDSwap
-	addr := "18d65fb8d60c1199bb1ad381be47aa692b482605"
-	secretHash := "71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
-	tests := []struct {
-		name, wantCoinID string
-		coinID           []byte
-		wantErr          bool
-	}{{
-		name: "ok",
-		coinID: []byte{
-			0x00, 0x02, // 2 byte flags
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
-		},
-		wantCoinID: fmt.Sprintf("%d:%s:%s", flags, addr, secretHash),
-	}, {
-		name: "wrong length",
-		coinID: []byte{
-			0x00, 0x01, // 2 byte flags
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, // 31 bytes
-		},
-		wantErr: true,
-	}}
+	// Decode tx coin id with incorrect length
+	txCoinID := make([]byte, 33)
+	binary.BigEndian.PutUint16(txCoinID[:2], uint16(CIDTxID))
+	copy(txCoinID[2:], encode.RandomBytes(30))
+	if _, err := DecodeCoinID(txCoinID); err == nil {
+		t.Fatalf("expected error decoding tx coin ID with incorrect length")
+	}
 
-	for _, test := range tests {
-		coinID, err := CoinIDToString(test.coinID)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
-		if coinID != test.wantCoinID {
-			t.Fatalf("want coinID value of %v but got %v for test %v",
-				test.wantCoinID, coinID, test.name)
-		}
+	// Decode and encode SwapCoinID
+	var contractAddress [20]byte
+	var secretHash [32]byte
+	copy(contractAddress[:], encode.RandomBytes(20))
+	copy(secretHash[:], encode.RandomBytes(32))
+	originalSwapCoin := SwapCoinID{
+		ContractAddress: contractAddress,
+		SecretHash:      secretHash,
+	}
+	encodedSwapCoin := originalSwapCoin.Encode()
+	decodedCoin, err = DecodeCoinID(encodedSwapCoin)
+	if err != nil {
+		t.Fatalf("unexpected error decoding swap coin: %v", err)
+	}
+	decodedSwapCoin, ok := decodedCoin.(*SwapCoinID)
+	if !ok {
+		t.Fatalf("expected coin to be a SwapCoinID")
+	}
+	if !bytes.Equal(originalSwapCoin.ContractAddress[:], decodedSwapCoin.ContractAddress[:]) {
+		t.Fatalf("expected contract address to be equal before and after decoding")
+	}
+	if !bytes.Equal(originalSwapCoin.SecretHash[:], decodedSwapCoin.SecretHash[:]) {
+		t.Fatalf("expected secret hash to be equal before and after decoding")
+	}
+
+	// Decode swap coin id with incorrect length
+	swapCoinID := make([]byte, 53)
+	binary.BigEndian.PutUint16(swapCoinID[:2], uint16(CIDSwap))
+	copy(swapCoinID[2:], encode.RandomBytes(50))
+	if _, err := DecodeCoinID(swapCoinID); err == nil {
+		t.Fatalf("expected error decoding swap coin ID with incorrect length")
+	}
+
+	// Decode and encode AmountCoinID
+	var address [20]byte
+	var nonce [8]byte
+	copy(address[:], encode.RandomBytes(20))
+	copy(nonce[:], encode.RandomBytes(8))
+	originalAmountCoin := AmountCoinID{
+		Address: address,
+		Amount:  100,
+		Nonce:   nonce,
+	}
+	encodedAmountCoin := originalAmountCoin.Encode()
+	decodedCoin, err = DecodeCoinID(encodedAmountCoin)
+	if err != nil {
+		t.Fatalf("unexpected error decoding swap coin: %v", err)
+	}
+	decodedAmountCoin, ok := decodedCoin.(*AmountCoinID)
+	if !ok {
+		t.Fatalf("expected coin to be a AmounCoinID")
+	}
+	if !bytes.Equal(originalAmountCoin.Address[:], decodedAmountCoin.Address[:]) {
+		t.Fatalf("expected address to be equal before and after decoding")
+	}
+	if !bytes.Equal(originalAmountCoin.Nonce[:], decodedAmountCoin.Nonce[:]) {
+		t.Fatalf("expected nonce to be equal before and after decoding")
+	}
+	if originalAmountCoin.Amount != decodedAmountCoin.Amount {
+		t.Fatalf("expected amount to be equal before and after decoding")
+	}
+
+	// Decode amount coin id with incorrect length
+	amountCoinId := make([]byte, 37)
+	binary.BigEndian.PutUint16(amountCoinId[:2], uint16(CIDAmount))
+	copy(amountCoinId[2:], encode.RandomBytes(35))
+	if _, err := DecodeCoinID(amountCoinId); err == nil {
+		t.Fatalf("expected error decoding amount coin ID with incorrect length")
+	}
+
+	// Decode coin id with non existant flag
+	nonExistantCoinID := make([]byte, 37)
+	binary.BigEndian.PutUint16(nonExistantCoinID[:2], uint16(5))
+	copy(nonExistantCoinID, encode.RandomBytes(35))
+	if _, err := DecodeCoinID(nonExistantCoinID); err == nil {
+		t.Fatalf("expected error decoding coin id with non existant flag")
 	}
 }
 
@@ -395,107 +375,6 @@ func TestSynced(t *testing.T) {
 		}
 		if synced != test.wantSynced {
 			t.Fatalf("want synced %v got %v for test %q", test.wantSynced, synced, test.name)
-		}
-	}
-}
-
-func TestIsCIDTxID(t *testing.T) {
-	tests := []struct {
-		name string
-		flag CoinIDFlag
-		want bool
-	}{{
-		name: "true",
-		flag: CIDTxID,
-		want: true,
-	}, {
-		name: "false zero",
-	}, {
-		name: "false other",
-		flag: CIDSwap,
-	}, {
-		name: "false txid and other",
-		flag: CIDTxID | CIDSwap,
-	}}
-
-	for _, test := range tests {
-		got := IsCIDTxID(test.flag)
-		if got != test.want {
-			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
-		}
-	}
-}
-
-func TestCIDSwap(t *testing.T) {
-	tests := []struct {
-		name string
-		flag CoinIDFlag
-		want bool
-	}{{
-		name: "true",
-		flag: CIDSwap,
-		want: true,
-	}, {
-		name: "false zero",
-	}, {
-		name: "false other",
-		flag: CIDTxID,
-	}, {
-		name: "false txid and other",
-		flag: CIDTxID | CIDSwap,
-	}}
-
-	for _, test := range tests {
-		got := IsCIDSwap(test.flag)
-		if got != test.want {
-			t.Fatalf("want %v but got %v for test %v", test.want, got, test.name)
-		}
-	}
-}
-
-func TestToCoinID(t *testing.T) {
-	a := common.HexToAddress("18d65fb8d60c1199bb1ad381be47aa692b482605")
-	addr := &a
-	secretHash, err := hex.DecodeString("71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c")
-	if err != nil {
-		panic(err)
-	}
-	tests := []struct {
-		name string
-		flag CoinIDFlag
-		want []byte
-	}{{
-		name: "txid",
-		flag: CIDTxID,
-		want: []byte{
-			0x00, 0x01, // 2 byte flags
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
-		},
-	}, {
-		name: "swap",
-		flag: CIDSwap,
-		want: []byte{
-			0x00, 0x02, // 2 byte flags
-			0x18, 0xd6, 0x5f, 0xb8, 0xd6, 0x0c, 0x11, 0x99, 0xbb,
-			0x1a, 0xd3, 0x81, 0xbe, 0x47, 0xaa, 0x69, 0x2b, 0x48,
-			0x26, 0x05, // 20 byte addr
-			0x71, 0xd8, 0x10, 0xd3, 0x93, 0x33, 0x29, 0x6b, 0x51,
-			0x8c, 0x84, 0x6a, 0x3e, 0x49, 0xec, 0xa5, 0x5f, 0x99,
-			0x8f, 0xd7, 0x99, 0x49, 0x98, 0xbb, 0x3e, 0x50, 0x48,
-			0x56, 0x7f, 0x2f, 0x07, 0x3c, // 32 byte secret hash
-		},
-	}}
-
-	for _, test := range tests {
-		got := ToCoinID(test.flag, addr, secretHash)
-		if !bytes.Equal(got, test.want) {
-			t.Fatalf("want %x but got %x for test %v", test.want, got, test.name)
 		}
 	}
 }

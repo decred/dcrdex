@@ -55,7 +55,11 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	return CoinIDToString(coinID)
+	coinId, err := DecodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return coinId.String(), nil
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
@@ -245,7 +249,11 @@ func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
-	return CoinIDToString(coinID)
+	coinId, err := DecodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return coinId.String(), nil
 }
 
 // ValidateContract ensures that the swap contract is constructed properly, and
