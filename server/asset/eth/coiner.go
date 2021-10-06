@@ -74,7 +74,7 @@ func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, 
 	// Transactions that call contract functions must have extra data to do
 	// so.
 	if len(txdata) == 0 {
-		return nil, errors.New("tx calling contract functions should have extra data")
+		return nil, errors.New("tx calling contract function has no extra data")
 	}
 
 	var (
@@ -199,11 +199,11 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 	case sctInit:
 		// Uninitiated state is zero confs. It could still be in mempool.
 		// It is important to only trust confirmations according to the
-		// swap contract. Until there are confirmations in the contract,
-		// we cannot be sure that initiation happened successfuly. If
-		// the swap has zero confirmations but the init transaction has
-		// confirmations, something is wrong or initialization failed
-		// and this contract should be dropped.
+		// swap contract. Until there are confirmations we cannot be sure
+		// that initiation happened successfuly. If the swap shows an
+		// uninitiated state but the init transaction has confirmations,
+		// something is wrong or initialization failed and this swap
+		// should be dropped.
 		if SwapState(swap.State) == SSNone {
 			if err := assertMempool(); err != nil {
 				return -1, err
@@ -214,9 +214,10 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// Any other swap state is ok. We are sure that initialization
 		// happened.
 
-		// The contract has some number of confirmations, and we are
-		// sure the secret hash belongs to this contract. Assert that
-		// the value, reciever, and locktime are as expected.
+		// The swap initiation transaction has some number of
+		// confirmations, and we are sure the secret hash belongs to
+		// this swap. Assert that the value, reciever, and locktime are
+		// as expected.
 		value, err := ToGwei(big.NewInt(0).Set(swap.Value))
 		if err != nil {
 			return -1, fmt.Errorf("unable to convert value: %v", err)
