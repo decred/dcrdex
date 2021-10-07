@@ -386,10 +386,11 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		Address: common.HexToAddress(address),
 	}
 	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		acct: &account,
+		node:        node,
+		ctx:         ctx,
+		log:         tLogger,
+		acct:        &account,
+		lockedFunds: make(map[string]uint64),
 	}
 
 	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
@@ -510,10 +511,11 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	node.balErr = nil
 
 	eth2 := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		acct: &account,
+		node:        node,
+		ctx:         ctx,
+		log:         tLogger,
+		acct:        &account,
+		lockedFunds: make(map[string]uint64),
 	}
 
 	// Test reloading coins from first order
@@ -536,12 +538,25 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 1")
 
+	// Double the available balance
+	node.bal.Mul(node.bal, big.NewInt(2))
+
+	// Test funding two coins with the same id
+	coins, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID(), coins2[0].ID()})
+	if err == nil {
+		t.Fatalf("expected error but did not get")
+	}
+	checkBalance(eth2, walletBalanceGwei*2-coins1[0].Value(), coins1[0].Value(), "after funding error 2")
+
+	// Return to original available balance
+	node.bal.Div(node.bal, big.NewInt(2))
+
 	// Test funding coins with bad coin ID
 	_, err = eth2.FundingCoins([]dex.Bytes{badCoin.ID()})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 2")
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 3")
 
 	// Test funding coins with coin from different address
 	var differentAddress [20]byte
@@ -560,7 +575,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 3")
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 4")
 
 	// Test funding coins with balance error
 	node.balErr = errors.New("")
@@ -569,7 +584,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		t.Fatalf("expected error but did not get")
 	}
 	node.balErr = nil
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 4")
+	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 5")
 
 	// Reloading coins from second order
 	coins, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID()})
