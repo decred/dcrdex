@@ -315,12 +315,8 @@ export class ConfirmRegistrationForm {
     this.insufficientFundsFail = insufficientFundsFail
     this.form = form
     this.setupWalletFn = setupWalletFn
-    this.feeWallet = null
-    bind(form, this.fields.submitConfirm, () => this.submitForm(this.feeWallet))
-  }
-
-  setWalletFee (assetID) {
-    this.feeWallet = assetID
+    this.feeAssetID = null
+    bind(form, this.fields.submitConfirm, () => this.submitForm())
   }
 
   /*
@@ -332,26 +328,19 @@ export class ConfirmRegistrationForm {
     this.xc = xc
     const fields = this.fields
     this.fees = xc.regFees
-    while (fields.marketsTableRows.firstChild) {
-      fields.marketsTableRows.removeChild(fields.marketsTableRows.firstChild)
-    }
-    while (fields.feeTableRows.firstChild) {
-      fields.feeTableRows.removeChild(fields.feeTableRows.firstChild)
-    }
+    Doc.empty(fields.marketsTableRows)
+    Doc.empty(fields.feeTableRows)
+
     for (const [symbol, fee] of Object.entries(xc.regFees)) {
       // if asset fee is not supported by the client we can skip it.
-      if (app.user.assets[fee.id] === undefined) {
-        continue
-      }
+      if (app.user.assets[fee.id] === undefined) continue
       const haveWallet = app.user.assets[fee.id].wallet
       const tr = fields.feeRowTemplate.cloneNode(true)
       Doc.bind(tr, 'click', () => {
-        this.setWalletFee(fee.id)
+        this.feeAssetID = fee.id
         // remove selected class from all others row.
         const rows = Array.from(fields.feeTableRows.querySelectorAll('tr.selected'))
-        rows.forEach(row => {
-          row.classList.remove('selected')
-        })
+        rows.forEach(row => row.classList.remove('selected'))
         tr.classList.add('selected')
         // if wallet is configured, we can active the register button.
         // Otherwise we do not allow it.
@@ -414,18 +403,18 @@ export class ConfirmRegistrationForm {
   /*
    * submitForm is called when the form is submitted.
    */
-  async submitForm (assetID) {
+  async submitForm () {
     const fields = this.fields
     // if button is selected it can be clickable.
     if (!fields.submitConfirm.classList.contains('selected')) {
       return
     }
-    if (assetID === null) {
+    if (this.feeAssetID === null) {
       fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
       Doc.show(fields.regErr)
       return
     }
-    const symbol = app.user.assets[assetID].wallet.symbol
+    const symbol = app.user.assets[this.feeAssetID].wallet.symbol
     Doc.hide(fields.regErr)
     const feeAsset = this.fees[symbol]
     const cert = await this.getCertFile()

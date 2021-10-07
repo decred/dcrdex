@@ -137,6 +137,7 @@ export default class RegistrationPage extends BasePage {
     this.auth()
     app.updateMenuItemsDisplay()
     this.walletForm.refresh()
+    this.dexAddrForm.refresh()
     await this.changeForm(page.appPWForm, page.dexAddrForm)
   }
 
