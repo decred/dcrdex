@@ -16,6 +16,7 @@ import (
 // exist and be unspent.
 const (
 	CoinNotFoundError = dex.ErrorKind("coin not found")
+	CoinIsSpentError  = dex.ErrorKind("coin is spent")
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 	ErrConnectionDown = dex.ErrorKind("wallet not connected")
 	ErrNotImplemented = dex.ErrorKind("not implemented")
@@ -162,7 +163,7 @@ type Wallet interface {
 	//
 	// NOTE: For SPV wallets, a successful audit response is no gaurantee that
 	// the txData provided was actually broadcasted to the blockchain. An error
-	// may have occured while trying to broadcast the txData or even if there
+	// may have occurred while trying to broadcast the txData or even if there
 	// was no broadcast error, the tx might still not enter mempool or get mined
 	// e.g. if the tx references invalid or already spent inputs.
 	//

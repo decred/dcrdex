@@ -2185,19 +2185,21 @@ func TestCoinConfirmations(t *testing.T) {
 
 	coinID := make([]byte, 36)
 	copy(coinID[:32], tTxHash[:])
+	op := newOutPoint(tTxHash, 0)
 
-	// Bad coin idea
-	_, spent, err := wallet.coinConfirmations(context.Background(), randBytes(35))
+	// Bad output coin
+	op.vout = 10
+	_, spent, err := wallet.walletOutputConfirmations(context.Background(), op)
 	if err == nil {
-		t.Fatalf("no error for bad coin ID")
+		t.Fatalf("no error for bad output coin")
 	}
 	if spent {
-		t.Fatalf("spent is non-zero for non-nil error")
+		t.Fatalf("spent is true for bad output coin")
 	}
+	op.vout = 0
 
-	op := newOutPoint(tTxHash, 0)
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	confs, spent, err := wallet.coinConfirmations(context.Background(), coinID)
+	confs, spent, err := wallet.walletOutputConfirmations(context.Background(), op)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
@@ -2208,25 +2210,17 @@ func TestCoinConfirmations(t *testing.T) {
 		t.Fatalf("expected spent = false for gettxout path, got true")
 	}
 
-	// gettransaction or getrawtransaction error
+	// gettransaction error
 	delete(node.txOutRes, op)
-	if wallet.wallet.SpvMode() {
-		node.walletTxErr = tErr
-	} else {
-		node.rawTxErr = tErr
-	}
-	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
+	node.walletTxErr = tErr
+	_, spent, err = wallet.walletOutputConfirmations(context.Background(), op)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	if spent {
 		t.Fatalf("spent is true with gettransaction error")
 	}
-	if wallet.wallet.SpvMode() {
-		node.walletTxErr = nil
-	} else {
-		node.rawTxErr = nil
-	}
+	node.walletTxErr = nil
 
 	// wallet.Confirmations will check if the tx hex is valid
 	// and contains an output at index 0, for the output to be
@@ -2241,7 +2235,7 @@ func TestCoinConfirmations(t *testing.T) {
 	node.walletTx = &walletjson.GetTransactionResult{
 		Hex: txHex,
 	}
-	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
+	_, spent, err = wallet.walletOutputConfirmations(context.Background(), op)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}
