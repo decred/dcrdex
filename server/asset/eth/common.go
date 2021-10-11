@@ -54,12 +54,188 @@ const (
 	// contract address and secret hash used to fetch data about a swap
 	// from the live contract.
 	CIDSwap
+	// CIDAmount indicates that this coin ID represents a coin which has
+	// not yet been submitted to the swap contract. It contains the address
+	// which holds the ETH, an amount of ETH in gwei, and a random nonce to
+	// avoid duplicate coin IDs.
+	CIDAmount
 )
 
+// CoinID is an interface that objects which represent different types of ETH
+// coin identifiers must implement.
+type CoinID interface {
+	String() string
+	Encode() []byte
+}
+
 const (
-	// coinIdSize = flags (2) + smart contract address where funds are
-	// locked (20) + secret hash map key (32)
-	coinIDSize = 54
+	// coin type id (2) + tx id (32) = 34
+	txCoinIDSize = 34
+	// coin type id (2) + address (20) + secret has (32) = 54
+	swapCoinIDSize = 54
+	// coin type id (2) + address (20) + amount (8) + nonce (8) = 38
+	amountCoinIDSize = 38
+)
+
+// TxCoinID identifies a coin by the transaction ID that was used to send it
+// to the smart contract. This type of ID is useful to identify coins that
+// were sent in transactions that have not yet been mined.
+type TxCoinID struct {
+	TxID [32]byte
+}
+
+// String creates a human readable string.
+func (c *TxCoinID) String() string {
+	return fmt.Sprintf("tx: %x", c.TxID)
+}
+
+// Encode creates a byte slice that can be decoded with DecodeCoinID.
+func (c *TxCoinID) Encode() []byte {
+	b := make([]byte, txCoinIDSize)
+	binary.BigEndian.PutUint16(b[:2], uint16(CIDTxID))
+	copy(b[2:], c.TxID[:])
+	return b
+}
+
+var _ CoinID = (*TxCoinID)(nil)
+
+// decodeTxCoinID decodes a byte slice into an TxCoinID struct.
+func decodeTxCoinID(coinID []byte) (*TxCoinID, error) {
+	if len(coinID) != txCoinIDSize {
+		return nil, fmt.Errorf("decodeTxCoinID: length expected %v, got %v",
+			txCoinIDSize, len(coinID))
+	}
+
+	flag := binary.BigEndian.Uint16(coinID[:2])
+	if CoinIDFlag(flag) != CIDTxID {
+		return nil, fmt.Errorf("decodeTxCoinID: flag expected %v, got %v",
+			flag, CIDTxID)
+	}
+
+	var txID [32]byte
+	copy(txID[:], coinID[2:])
+	return &TxCoinID{
+		TxID: txID,
+	}, nil
+}
+
+// SwapCoinID identifies a coin in a swap contract.
+type SwapCoinID struct {
+	ContractAddress common.Address
+	SecretHash      [32]byte
+}
+
+// String creates a human readable string.
+func (c *SwapCoinID) String() string {
+	return fmt.Sprintf("contract: %v, secret hash:%x",
+		c.ContractAddress, c.SecretHash)
+}
+
+// Encode creates a byte slice that can be decoded with DecodeCoinID.
+func (c *SwapCoinID) Encode() []byte {
+	b := make([]byte, swapCoinIDSize)
+	binary.BigEndian.PutUint16(b[:2], uint16(CIDSwap))
+	copy(b[2:22], c.ContractAddress[:])
+	copy(b[22:], c.SecretHash[:])
+	return b
+}
+
+var _ CoinID = (*SwapCoinID)(nil)
+
+// decodeSwapCoinID decodes a byte slice into an SwapCoinID struct.
+func decodeSwapCoinID(coinID []byte) (*SwapCoinID, error) {
+	if len(coinID) != swapCoinIDSize {
+		return nil, fmt.Errorf("decodeSwapCoinID: length expected %v, got %v",
+			txCoinIDSize, len(coinID))
+	}
+
+	flag := binary.BigEndian.Uint16(coinID[:2])
+	if CoinIDFlag(flag) != CIDSwap {
+		return nil, fmt.Errorf("decodeSwapCoinID: flag expected %v, got %v",
+			flag, CIDSwap)
+	}
+
+	var contractAddress [20]byte
+	var secretHash [32]byte
+	copy(contractAddress[:], coinID[2:22])
+	copy(secretHash[:], coinID[22:])
+	return &SwapCoinID{
+		ContractAddress: contractAddress,
+		SecretHash:      secretHash,
+	}, nil
+}
+
+// AmountCoinID is an identifier for a coin which has not yet been sent to the
+// swap contract.
+type AmountCoinID struct {
+	Address common.Address
+	Amount  uint64
+	Nonce   [8]byte
+}
+
+// String creates a human readable string.
+func (c *AmountCoinID) String() string {
+	return fmt.Sprintf("address: %v, amount:%x, nonce:%x",
+		c.Address, c.Amount, c.Nonce)
+}
+
+// Encode creates a byte slice that can be decoded with DecodeCoinID.
+func (c *AmountCoinID) Encode() []byte {
+	b := make([]byte, amountCoinIDSize)
+	binary.BigEndian.PutUint16(b[:2], uint16(CIDAmount))
+	copy(b[2:22], c.Address[:])
+	binary.BigEndian.PutUint64(b[22:30], c.Amount)
+	copy(b[30:], c.Nonce[:])
+	return b
+}
+
+var _ CoinID = (*AmountCoinID)(nil)
+
+// decodeAmountCoinID decodes a byte slice into an AmountCoinID struct.
+func decodeAmountCoinID(coinID []byte) (*AmountCoinID, error) {
+	if len(coinID) != amountCoinIDSize {
+		return nil, fmt.Errorf("DecodeAmountCoinID: length expected %v, got %v",
+			txCoinIDSize, len(coinID))
+	}
+
+	flag := binary.BigEndian.Uint16(coinID[:2])
+	if CoinIDFlag(flag) != CIDAmount {
+		return nil, fmt.Errorf("DecodeAmountCoinID: flag expected %v, got %v",
+			flag, CIDAmount)
+	}
+
+	var address [20]byte
+	var nonce [8]byte
+	copy(address[:], coinID[2:22])
+	copy(nonce[:], coinID[30:])
+	return &AmountCoinID{
+		Address: address,
+		Amount:  binary.BigEndian.Uint64(coinID[22:30]),
+		Nonce:   nonce,
+	}, nil
+}
+
+// DecodeCoinID decodes the coin id byte slice into an object implementing the
+// CoinID interface.
+func DecodeCoinID(coinID []byte) (CoinID, error) {
+	if len(coinID) < 2 {
+		return nil,
+			fmt.Errorf("DecodeCoinID: coinID length must be > 2, but got %v",
+				len(coinID))
+	}
+	flag := CoinIDFlag(binary.BigEndian.Uint16(coinID[:2]))
+	if flag == CIDTxID {
+		return decodeTxCoinID(coinID)
+	} else if flag == CIDSwap {
+		return decodeSwapCoinID(coinID)
+	} else if flag == CIDAmount {
+		return decodeAmountCoinID(coinID)
+	} else {
+		return nil, fmt.Errorf("DecodeCoinID: invalid coin id flag: %v", flag)
+	}
+}
+
+const (
 	// MaxBlockInterval is the number of seconds since the last header came
 	// in over which we consider the chain to be out of sync.
 	MaxBlockInterval = 180
@@ -105,58 +281,4 @@ func (ss SwapState) String() string {
 		return "refunded"
 	}
 	return "unknown"
-}
-
-// DecodeCoinID decodes the coin ID into flags, a contract address, and hash
-// that represents either a secret or txid depending on flags. The CIDTxID flag
-// indicates that this coinID represents a simple txid. The address return is
-// unused and bytes are a 32 byte txid. Bytes are in the same order as the txid.
-// The CIDSwap flag indicates that this coinID represents a swap contract. The
-// address is the swap contract's address and the bytes return is the 32 byte
-// secret hash of a swap. Errors if the passed coinID is not the expected length.
-func DecodeCoinID(coinID []byte) (CoinIDFlag, *common.Address, []byte, error) {
-	if len(coinID) != coinIDSize {
-		return 0, nil, nil, fmt.Errorf("coin ID wrong length. expected %d, got %d",
-			coinIDSize, len(coinID))
-	}
-	hash, addr := make([]byte, 32), new(common.Address)
-	copy(hash, coinID[22:])
-	copy(addr[:], coinID[2:22])
-	return CoinIDFlag(binary.BigEndian.Uint16(coinID[:2])),
-		addr, hash, nil
-}
-
-// CoinIDToString converts coinID into a human readable string.
-func CoinIDToString(coinID []byte) (string, error) {
-	flags, addr, hash, err := DecodeCoinID(coinID)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x:%x:%x", flags, addr, hash), nil
-}
-
-// ToCoinID converts the address and secret hash, or txid to a coin ID. hash is
-// expected to be 32 bytes long and represent either a txid or a secret hash. A
-// hash longer than 32 bytes is truncated at 32. If a txid, bytes should be
-// kept in the same order as the hex string representation.
-func ToCoinID(flags CoinIDFlag, addr *common.Address, hash []byte) []byte {
-	b := make([]byte, coinIDSize)
-	binary.BigEndian.PutUint16(b[:2], uint16(flags))
-	if IsCIDSwap(flags) {
-		copy(b[2:], addr[:])
-	}
-	copy(b[22:], hash[:])
-	return b
-}
-
-// IsCIDTxID returns whether the passed flags indicate the associated coin ID's
-// hash portion represents a transaction hash.
-func IsCIDTxID(flags CoinIDFlag) bool {
-	return flags == CIDTxID
-}
-
-// IsCIDSwap returns whether the passed flags indicate the associated coin ID
-// represents a swap with an address and secret hash.
-func IsCIDSwap(flags CoinIDFlag) bool {
-	return flags == CIDSwap
 }

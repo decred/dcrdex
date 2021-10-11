@@ -93,7 +93,11 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	return dexeth.CoinIDToString(coinID)
+	id, err := dexeth.DecodeCoinID(coinID)
+	if err != nil {
+		return "", nil
+	}
+	return id.String(), nil
 }
 
 // Info returns basic information about the wallet and asset.
@@ -164,6 +168,9 @@ type ExchangeWallet struct {
 
 	cachedInitGas    uint64
 	cachedInitGasMtx sync.Mutex
+
+	lockedFunds    map[string]uint64 // gwei
+	lockedFundsMtx sync.RWMutex
 }
 
 // Info returns basic information about the wallet and asset.
@@ -191,6 +198,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		log:          logger,
 		tipChange:    assetCFG.TipChange,
 		internalNode: node,
+		lockedFunds:  make(map[string]uint64),
 	}, nil
 }
 
@@ -284,6 +292,15 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 //
 // TODO: Return Immature and Locked values.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
+
+	return eth.balanceImpl()
+}
+
+// balanceImpl returns the total available funds in the account.
+// This function expects eth.lockedFundsMtx to be held.
+func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 	if eth.acct == nil {
 		return nil, errors.New("account not set")
 	}
@@ -291,14 +308,24 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	gwei, err := dexeth.ToGwei(bigBal)
+	gweiBal, err := dexeth.ToGwei(bigBal)
 	if err != nil {
 		return nil, err
 	}
+
+	var amountLocked uint64
+	for _, value := range eth.lockedFunds {
+		amountLocked += value
+	}
+	if amountLocked > gweiBal {
+		return nil,
+			fmt.Errorf("amount locked: %v > available: %v", amountLocked, gweiBal)
+	}
+
 	bal := &asset.Balance{
-		Available: gwei,
+		Available: gweiBal - amountLocked,
+		Locked:    amountLocked,
 		// Immature: , How to know?
-		// Locked: , Not lockable?
 	}
 	return bal, nil
 }
@@ -424,28 +451,168 @@ func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 	}, nil
 }
 
+// coin implements the asset.Coin interface for ETH
+type coin struct {
+	id dexeth.AmountCoinID
+}
+
+// ID is the ETH coins ID. It includes the address the coins came from (20 bytes)
+// and the value of the coin (8 bytes).
+func (c *coin) ID() dex.Bytes {
+	serializedBytes := c.id.Encode()
+	return dex.Bytes(serializedBytes)
+}
+
+// String is a string representation of the coin.
+func (c *coin) String() string {
+	return c.id.String()
+}
+
+// Value returns the value in gwei of the coin.
+func (c *coin) Value() uint64 {
+	return c.id.Amount
+}
+
+var _ asset.Coin = (*coin)(nil)
+
+// decodeCoinID decodes a coin id into a coin object. The coin id
+// must contain an AmountCoinID.
+func decodeCoinID(coinID []byte) (*coin, error) {
+	id, err := dexeth.DecodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	amountCoinID, ok := id.(*dexeth.AmountCoinID)
+	if !ok {
+		return nil,
+			fmt.Errorf("coinID is expected to be an amount coin id")
+	}
+
+	return &coin{
+		id: *amountCoinID,
+	}, nil
+}
+
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
-// The returned []dex.Bytes contains the redeem scripts for the selected coins.
-// Equal number of coins and redeemed scripts must be returned. A nil or empty
-// dex.Bytes should be appended to the redeem scripts collection for coins with
-// no redeem script.
-func (*ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-	return nil, nil, asset.ErrNotImplemented
+// In UTXO based coins, the returned []dex.Bytes contains the redeem scripts for the
+// selected coins, but since there are no redeem scripts in Ethereum, nil is returned.
+// Equal number of coins and redeem scripts must be returned.
+func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+	maxFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
+	fundsNeeded := ord.Value + maxFees
+
+	var nonce [8]byte
+	copy(nonce[:], encode.RandomBytes(8))
+	var address [20]byte
+	copy(address[:], eth.acct.Address.Bytes())
+	coin := coin{
+		id: dexeth.AmountCoinID{
+			Address: address,
+			Amount:  fundsNeeded,
+			Nonce:   nonce,
+		},
+	}
+	coins := asset.Coins{&coin}
+
+	err := eth.lockFunds(coins)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return coins, []dex.Bytes{nil}, nil
 }
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
-func (*ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
-	return asset.ErrNotImplemented
+func (eth *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
+	return eth.unlockFunds(unspents)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
-// This method will only return funding coins, e.g. unspent transaction outputs.
-func (*ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
-	return nil, asset.ErrNotImplemented
+func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
+	coins := make([]asset.Coin, 0, len(ids))
+	for _, id := range ids {
+		coin, err := decodeCoinID(id)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(coin.id.Address.Bytes(), eth.acct.Address.Bytes()) {
+			return nil, fmt.Errorf("FundingCoins: coin address %v != wallet address %v",
+				coin.id.Address, eth.acct.Address)
+		}
+
+		coins = append(coins, coin)
+	}
+
+	err := eth.lockFunds(coins)
+	if err != nil {
+		return nil, err
+	}
+
+	return coins, nil
+}
+
+// lockFunds adds coins to the map of locked funds.
+func (eth *ExchangeWallet) lockFunds(coins asset.Coins) error {
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
+
+	currentlyLocking := make(map[string]bool)
+	var amountToLock uint64
+	for _, coin := range coins {
+		hexID := hex.EncodeToString(coin.ID())
+		if _, ok := eth.lockedFunds[hexID]; ok {
+			return fmt.Errorf("cannot lock funds that are already locked: %v", hexID)
+		}
+		if _, ok := currentlyLocking[hexID]; ok {
+			return fmt.Errorf("attempting to lock duplicate coins: %v", hexID)
+		}
+		currentlyLocking[hexID] = true
+		amountToLock += coin.Value()
+	}
+
+	balance, err := eth.balanceImpl()
+	if err != nil {
+		return err
+	}
+
+	if balance.Available < amountToLock {
+		return fmt.Errorf("currently available %v < locking %v",
+			balance.Available, amountToLock)
+	}
+
+	for _, coin := range coins {
+		eth.lockedFunds[hex.EncodeToString(coin.ID())] = coin.Value()
+	}
+	return nil
+}
+
+// lockFunds removes coins from the map of locked funds.
+func (eth *ExchangeWallet) unlockFunds(coins asset.Coins) error {
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
+
+	currentlyUnlocking := make(map[string]bool)
+	for _, coin := range coins {
+		hexID := hex.EncodeToString(coin.ID())
+		if _, ok := eth.lockedFunds[hexID]; !ok {
+			return fmt.Errorf("cannot unlock coin ID that is not locked: %v", coin.ID())
+		}
+		if _, ok := currentlyUnlocking[hexID]; ok {
+			return fmt.Errorf("attempting to unlock duplicate coins: %v", hexID)
+		}
+		currentlyUnlocking[hexID] = true
+	}
+
+	for _, coin := range coins {
+		delete(eth.lockedFunds, hex.EncodeToString(coin.ID()))
+	}
+
+	return nil
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
