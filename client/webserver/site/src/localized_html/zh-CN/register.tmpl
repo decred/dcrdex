@@ -4,7 +4,7 @@
   <div class="d-flex flex-column vscroll w-100">
 
     {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
+    <form class="card mx-auto my-5 bg1{{if .Initialized}} d-hide{{end}}" id="appPWForm">
       <div class="bg2 px-2 py-1 text-center fs18">设置应用密码</div>
       <div class="p-4">
         <div class="fs16">设置应用密码。这个密码将保护你的 DEX 账户和连接的密钥和钱包。</div>
@@ -34,18 +34,13 @@
       </div>
     </form>
 
-    {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="newWalletForm">
-      {{template "newWalletForm" "你的 decred 钱包需要支付注册费。"}}
-    </form>
-
-    {{- /* Unlock wallet. Only shown if not already unlocked. */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="unlockWalletForm">
-      {{template "unlockWalletForm" "解锁你的 decred 钱包以支付费用。"}}
+    {{- /* Form to set up a wallet. Shown on demand when a user clicks a setupWallet button. */ -}}
+    <form class="card mx-auto my-5 bg1 d-hide" id="newWalletForm">
+      {{template "newWalletForm" }}
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}
-    <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="dexAddrForm">
+    <form class="card mx-auto my-5 bg1{{if not .Initialized}} d-hide{{end}}" id="dexAddrForm">
       {{template "dexAddrForm"}}
     </form>
 

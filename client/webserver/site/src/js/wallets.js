@@ -239,10 +239,9 @@ export default class WalletsPage extends BasePage {
   async showNewWallet (assetID) {
     const page = this.page
     const box = page.walletForm
-    const asset = app.assets[assetID]
     await this.hideBox()
     this.walletAsset = this.lastFormAsset = assetID
-    this.walletForm.setAsset(asset)
+    this.walletForm.setAsset(assetID)
     this.animation = this.showBox(box)
     await this.walletForm.loadDefaults()
   }

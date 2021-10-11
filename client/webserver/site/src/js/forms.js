@@ -11,16 +11,23 @@ let app
  * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
-  constructor (application, form, success, pwCache) {
+  constructor (application, form, success, pwCache, closerFn) {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
     const fields = this.fields = Doc.parsePage(form, [
       'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
       'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
-      'newWalletAppPWBox', 'nwRegMsg'
+      'newWalletAppPWBox'
     ])
     this.refresh()
+
+    if (closerFn) {
+      form.querySelectorAll('.form-closer').forEach(el => {
+        Doc.show(el)
+        Doc.bind(el, 'click', closerFn)
+      })
+    }
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(application, fields.walletSettings, true)
@@ -60,8 +67,9 @@ export class NewWalletForm {
     else Doc.show(this.fields.newWalletAppPWBox)
   }
 
-  async setAsset (asset) {
+  async setAsset (assetID) {
     const fields = this.fields
+    const asset = app.assets[assetID]
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
     fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -92,10 +100,6 @@ export class NewWalletForm {
       return
     }
     this.subform.setLoadedConfig(res.config)
-  }
-
-  setRegMsg (msg) {
-    this.fields.nwRegMsg.textContent = msg
   }
 }
 
@@ -298,10 +302,11 @@ export class WalletConfigForm {
  * ConfirmRegistrationForm should be used with the "confirmRegistrationForm" template.
  */
 export class ConfirmRegistrationForm {
-  constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail) {
+  constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
     this.fields = Doc.parsePage(form, [
-      'feeDisplay', 'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
-      'appPassSpan', 'submitConfirm', 'regErr'
+      'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
+      'appPassSpan', 'submitConfirm', 'regErr', 'feeRowTemplate',
+      'feeTableRows', 'setupWallet'
     ])
     app = application
     this.getDexAddr = getDexAddr
@@ -309,6 +314,8 @@ export class ConfirmRegistrationForm {
     this.success = success
     this.insufficientFundsFail = insufficientFundsFail
     this.form = form
+    this.setupWalletFn = setupWalletFn
+    this.feeAssetID = null
     bind(form, this.fields.submitConfirm, () => this.submitForm())
   }
 
@@ -316,12 +323,58 @@ export class ConfirmRegistrationForm {
    * setExchange populates the form with the details of an exchange.
    */
   setExchange (xc) {
+    // store xc in case we need to refresh the data, like after setting up
+    // a new wallet.
+    this.xc = xc
     const fields = this.fields
     this.fees = xc.regFees
-    const dcr = this.fees.dcr // TODO: display all options and give choice
-    fields.feeDisplay.textContent = `${Doc.formatCoinValue(dcr.amount / 1e8)} ${app.assets[dcr.id].symbol.toUpperCase()}`
-    while (fields.marketsTableRows.firstChild) {
-      fields.marketsTableRows.removeChild(fields.marketsTableRows.firstChild)
+    Doc.empty(fields.marketsTableRows)
+    Doc.empty(fields.feeTableRows)
+
+    for (const [symbol, fee] of Object.entries(xc.regFees)) {
+      // if asset fee is not supported by the client we can skip it.
+      if (app.user.assets[fee.id] === undefined) continue
+      const haveWallet = app.user.assets[fee.id].wallet
+      const tr = fields.feeRowTemplate.cloneNode(true)
+      Doc.bind(tr, 'click', () => {
+        this.feeAssetID = fee.id
+        // remove selected class from all others row.
+        const rows = Array.from(fields.feeTableRows.querySelectorAll('tr.selected'))
+        rows.forEach(row => row.classList.remove('selected'))
+        tr.classList.add('selected')
+        // if wallet is configured, we can active the register button.
+        // Otherwise we do not allow it.
+        if (haveWallet) {
+          this.fields.submitConfirm.classList.add('selected')
+        } else {
+          this.fields.submitConfirm.classList.remove('selected')
+        }
+      })
+      Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(symbol)
+      Doc.tmplElement(tr, 'asset').innerText = symbol.toUpperCase()
+      Doc.tmplElement(tr, 'confs').innerText = fee.confs
+      Doc.tmplElement(tr, 'fee').innerText = fee.amount / 1e8
+
+      const setupWallet = Doc.tmplElement(tr, 'setupWallet')
+      const walletReady = Doc.tmplElement(tr, 'walletReady')
+      if (haveWallet) {
+        walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
+        Doc.show(walletReady)
+        Doc.hide(setupWallet)
+      } else {
+        setupWallet.innerText = intl.prep(intl.ID_SETUP_WALLET)
+        Doc.bind(setupWallet, 'click', () => this.setupWalletFn(fee.id))
+        Doc.hide(walletReady)
+        Doc.show(setupWallet)
+      }
+      fields.feeTableRows.appendChild(tr)
+      if (State.passwordIsCached()) {
+        Doc.hide(fields.appPassBox)
+        Doc.hide(fields.appPassSpan)
+      } else {
+        Doc.show(fields.appPassBox)
+        Doc.show(fields.appPassSpan)
+      }
     }
     const markets = Object.values(xc.markets)
     markets.sort((m1, m2) => {
@@ -352,10 +405,20 @@ export class ConfirmRegistrationForm {
    */
   async submitForm () {
     const fields = this.fields
+    // if button is selected it can be clickable.
+    if (!fields.submitConfirm.classList.contains('selected')) {
+      return
+    }
+    if (this.feeAssetID === null) {
+      fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
+      Doc.show(fields.regErr)
+      return
+    }
+    const symbol = app.user.assets[this.feeAssetID].wallet.symbol
     Doc.hide(fields.regErr)
+    const feeAsset = this.fees[symbol]
     const cert = await this.getCertFile()
     const dexAddr = this.getDexAddr()
-    const feeAsset = this.fees.dcr // this.fees[fields.symbol]
     const registration = {
       addr: dexAddr,
       pass: fields.appPass.value,
@@ -383,6 +446,10 @@ export class ConfirmRegistrationForm {
     }
     loaded()
     this.success()
+  }
+
+  refresh () {
+    this.setExchange(this.xc)
   }
 }
 
