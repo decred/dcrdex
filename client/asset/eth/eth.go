@@ -31,6 +31,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
 )
@@ -141,6 +143,7 @@ type ethFetcher interface {
 	refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error)
 	swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*swap.ETHSwapSwap, error)
 	unlock(ctx context.Context, pw string, acct *accounts.Account) error
+	signData(addr common.Address, data []byte) ([]byte, error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -630,10 +633,30 @@ func (*ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 }
 
 // SignMessage signs the message with the private key associated with the
-// specified funding Coin. A slice of pubkeys required to spend the Coin and a
-// signature for each pubkey are returned.
-func (*ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	return nil, nil, asset.ErrNotImplemented
+// specified funding Coin. Only a coin that came from the address this wallet
+// is initialized with can be used to sign.
+func (e *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+	ethCoin, err := decodeCoinID(coin.ID())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if !bytes.Equal(ethCoin.id.Address.Bytes(), e.acct.Address.Bytes()) {
+		return nil, nil, fmt.Errorf("SignMessage: coin address: %v != wallet address: %v",
+			ethCoin.id.Address, e.acct.Address)
+	}
+
+	sig, err := e.node.signData(e.acct.Address, msg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SignMessage: error signing data: %v", err)
+	}
+
+	pubKey, err := secp256k1.RecoverPubkey(crypto.Keccak256(msg), sig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %v", err)
+	}
+
+	return []dex.Bytes{pubKey}, []dex.Bytes{sig}, nil
 }
 
 // AuditContract retrieves information about a swap contract on the

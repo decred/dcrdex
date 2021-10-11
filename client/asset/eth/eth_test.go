@@ -7,6 +7,7 @@ package eth
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -23,6 +24,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
 )
@@ -33,23 +36,25 @@ var (
 )
 
 type testNode struct {
-	connectErr     error
-	bestHdr        *types.Header
-	bestHdrErr     error
-	bestBlkHash    common.Hash
-	bestBlkHashErr error
-	blk            *types.Block
-	blkErr         error
-	blkNum         uint64
-	blkNumErr      error
-	syncProg       *ethereum.SyncProgress
-	syncProgErr    error
-	peerInfo       []*p2p.PeerInfo
-	peersErr       error
-	bal            *big.Int
-	balErr         error
-	initGas        uint64
-	initGasErr     error
+	connectErr        error
+	bestHdr           *types.Header
+	bestHdrErr        error
+	bestBlkHash       common.Hash
+	bestBlkHashErr    error
+	blk               *types.Block
+	blkErr            error
+	blkNum            uint64
+	blkNumErr         error
+	syncProg          *ethereum.SyncProgress
+	syncProgErr       error
+	peerInfo          []*p2p.PeerInfo
+	peersErr          error
+	bal               *big.Int
+	balErr            error
+	initGas           uint64
+	initGasErr        error
+	signDataErr       error
+	privKeyForSigning *ecdsa.PrivateKey
 }
 
 func (n *testNode) connect(ctx context.Context, node *node.Node, addr *common.Address) error {
@@ -126,6 +131,17 @@ func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 }
 func (n *testNode) estimateGas(ctx context.Context, callMsg ethereum.CallMsg) (uint64, error) {
 	return n.initGas, n.initGasErr
+}
+func (n *testNode) signData(addr common.Address, data []byte) ([]byte, error) {
+	if n.signDataErr != nil {
+		return nil, n.signDataErr
+	}
+
+	if n.privKeyForSigning == nil {
+		return nil, nil
+	}
+
+	return crypto.Sign(crypto.Keccak256(data), n.privKeyForSigning)
 }
 
 func TestLoadConfig(t *testing.T) {
@@ -1017,5 +1033,78 @@ func TestMaxOrder(t *testing.T) {
 		if maxOrder.Locked != test.wantLocked {
 			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, maxOrder.Locked, test.name)
 		}
+	}
+}
+
+func TestSignMessage(t *testing.T) {
+	node := &testNode{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	privKey, _ := crypto.HexToECDSA("9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34")
+	node.privKeyForSigning = privKey
+	address := "2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
+	account := accounts.Account{
+		Address: common.HexToAddress(address),
+	}
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: &account,
+	}
+
+	msg := []byte("msg")
+
+	// Error due to coin with unparsable ID
+	var badCoin badCoin
+	_, _, err := eth.SignMessage(&badCoin, msg)
+	if err == nil {
+		t.Fatalf("expected error for signing message with bad coin")
+	}
+
+	// Error due to coin from with account than wallet
+	differentAddress := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	nonce := [8]byte{}
+	coinDifferentAddress := coin{
+		id: dexeth.AmountCoinID{
+			Address: differentAddress,
+			Amount:  100,
+			Nonce:   nonce,
+		},
+	}
+	_, _, err = eth.SignMessage(&coinDifferentAddress, msg)
+	if err == nil {
+		t.Fatalf("expected error for signing message with different address than wallet")
+	}
+
+	coin := coin{
+		id: dexeth.AmountCoinID{
+			Address: account.Address,
+			Amount:  100,
+			Nonce:   nonce,
+		},
+	}
+
+	// SignData error
+	node.signDataErr = errors.New("")
+	_, _, err = eth.SignMessage(&coin, msg)
+	if err == nil {
+		t.Fatalf("expected error due to error in rpcclient signData")
+	}
+	node.signDataErr = nil
+
+	// Test no error
+	pubKeys, sigs, err := eth.SignMessage(&coin, msg)
+	if err != nil {
+		t.Fatalf("unexpected error signing message: %v", err)
+	}
+	if len(pubKeys) != 1 {
+		t.Fatalf("expected 1 pubKey but got %v", len(pubKeys))
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signature but got %v", len(sigs))
+	}
+	if !secp256k1.VerifySignature(pubKeys[0], crypto.Keccak256(msg), sigs[0][:len(sigs[0])-1]) {
+		t.Fatalf("failed to verify signature")
 	}
 }

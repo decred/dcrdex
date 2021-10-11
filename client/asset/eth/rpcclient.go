@@ -237,6 +237,20 @@ func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
 	return wallet, nil
 }
 
+// signData uses the private key of the address to sign a piece of data.
+// The address must have been imported and unlocked to use this function.
+func (c *rpcclient) signData(addr common.Address, data []byte) ([]byte, error) {
+	account := accounts.Account{Address: addr}
+	wallet, err := c.wallet(account)
+	if err != nil {
+		return nil, err
+	}
+
+	// The mime type argument to SignData is not used in the keystore wallet in geth.
+	// It treats any data like plain text.
+	return wallet.SignData(account, accounts.MimetypeTextPlain, data)
+}
+
 func (c *rpcclient) addSignerToOpts(txOpts *bind.TransactOpts, netID int64) error {
 	wallet, err := c.wallet(accounts.Account{Address: txOpts.From})
 	if err != nil {
