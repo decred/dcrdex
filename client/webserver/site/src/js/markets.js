@@ -1283,7 +1283,7 @@ export default class MarketsPage extends BasePage {
   showCreate (asset) {
     const page = this.page
     this.currentCreate = asset
-    this.walletForm.setAsset(asset)
+    this.walletForm.setAsset(asset.id)
     this.showForm(page.walletForm)
     this.walletForm.loadDefaults()
   }

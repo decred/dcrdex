@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
@@ -76,10 +75,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 // registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
-	InitStep   bool
-	WalletStep bool
-	OpenStep   bool
-	DEXStep    bool
+	Initialized bool
 }
 
 // handleRegister is the handler for the '/register' page request.
@@ -93,23 +89,7 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	data := &registerTmplData{
 		CommonArguments: *cArgs,
-	}
-
-	// TODO: rework register page for paying with other assets.
-	feeAssetID, _ := dex.BipSymbolID("dcr")
-	feeWalletStatus := s.core.WalletState(feeAssetID)
-	feeWalletExists := feeWalletStatus != nil
-	feeWalletOpen := feeWalletExists && feeWalletStatus.Open
-
-	switch {
-	case !cArgs.UserInfo.Initialized:
-		data.InitStep = true
-	case !feeWalletExists:
-		data.WalletStep = true
-	case !feeWalletOpen:
-		data.OpenStep = true
-	default:
-		data.DEXStep = true
+		Initialized:     cArgs.UserInfo.Initialized,
 	}
 
 	s.sendTemplate(w, "register", data)
