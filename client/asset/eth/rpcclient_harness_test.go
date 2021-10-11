@@ -25,6 +25,8 @@ package eth
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -40,16 +42,16 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
-	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
 
 const (
@@ -59,21 +61,23 @@ const (
 )
 
 var (
-	gasPrice         = big.NewInt(82e9)
-	homeDir          = os.Getenv("HOME")
-	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
-	testDir          = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests")
-	alphaNodeDir     = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	ethClient        = new(rpcclient)
-	ctx              context.Context
-	tLogger          = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
-	simnetAddr       = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
-	simnetAcct       = &accounts.Account{Address: simnetAddr}
-	participantAddr  = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
-	participantAcct  = &accounts.Account{Address: participantAddr}
-	contractAddr     common.Address
-	simnetID         = int64(42)
-	newTxOpts        = func(ctx context.Context, from *common.Address, value *big.Int) *bind.TransactOpts {
+	gasPrice           = big.NewInt(82e9)
+	homeDir            = os.Getenv("HOME")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	testDir            = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests")
+	alphaNodeDir       = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
+	ethClient          = new(rpcclient)
+	ctx                context.Context
+	tLogger            = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+	simnetPrivKey      = "9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34"
+	simnetAddr         = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
+	simnetAcct         = &accounts.Account{Address: simnetAddr}
+	participantPrivKey = "0695b9347a4dc096ae5c6f1935380ceba550c70b112f1323c211bade4d11651a"
+	participantAddr    = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	participantAcct    = &accounts.Account{Address: participantAddr}
+	contractAddr       common.Address
+	simnetID           = int64(42)
+	newTxOpts          = func(ctx context.Context, from *common.Address, value *big.Int) *bind.TransactOpts {
 		return &bind.TransactOpts{
 			GasPrice: gasPrice,
 			GasLimit: 1e6,
@@ -237,8 +241,7 @@ func TestImportAccounts(t *testing.T) {
 		fmt.Println("Skipping TestImportAccounts because accounts are already imported.")
 		t.Skip()
 	}
-	// The address of this will be 2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27.
-	privB, err := hex.DecodeString("9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34")
+	privB, err := hex.DecodeString(simnetPrivKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,8 +250,7 @@ func TestImportAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	spew.Dump(acct)
-	// The address of this will be 345853e21b1d475582E71cC269124eD5e2dD3422.
-	privB, err = hex.DecodeString("0695b9347a4dc096ae5c6f1935380ceba550c70b112f1323c211bade4d11651a")
+	privB, err = hex.DecodeString(participantPrivKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -936,5 +938,30 @@ func TestGetCodeAt(t *testing.T) {
 	}
 	if !bytes.Equal(byteCode, c) {
 		t.Fatal("Contract on chain does not match one in code")
+	}
+}
+
+func TestSignMessage(t *testing.T) {
+	msg := []byte("test message")
+	err := ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatalf("error unlocking account: %v", err)
+	}
+	signature, err := ethClient.signData(simnetAddr, msg)
+	if err != nil {
+		t.Fatalf("error signing text: %v", err)
+	}
+	pubKey, err := secp256k1.RecoverPubkey(crypto.Keccak256(msg), signature)
+	x, y := elliptic.Unmarshal(secp256k1.S256(), pubKey)
+	recoveredAddress := crypto.PubkeyToAddress(ecdsa.PublicKey{
+		Curve: secp256k1.S256(),
+		X:     x,
+		Y:     y,
+	})
+	if !bytes.Equal(recoveredAddress.Bytes(), simnetAcct.Address.Bytes()) {
+		t.Fatalf("recovered address: %v != simnet account address: %v", recoveredAddress, simnetAcct.Address)
+	}
+	if !secp256k1.VerifySignature(pubKey, crypto.Keccak256(msg), signature[:len(signature)-1]) {
+		t.Fatalf("failed to verify signature")
 	}
 }
