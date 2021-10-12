@@ -2342,7 +2342,6 @@ func (dcr *ExchangeWallet) walletOutputConfirmations(ctx context.Context, op out
 //
 // If the swap was not funded by this wallet, and it is already spent, this
 // method may return asset.CoinNotFoundError. Compare dcr.externalTxOut.
-// TODO: Could this method be called for wallet-funded swaps?
 //
 // If the coin is located, but recognized as spent, no error is returned.
 func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error) {
@@ -2352,14 +2351,26 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	}
 	op := newOutPoint(txHash, vout)
 
-	// First attempt to find this contract in the wallet. TODO: Any need?
+	// First attempt to find this contract in the wallet.
 	confs, spent, err = dcr.walletOutputConfirmations(ctx, op)
-	if err != nil && err != asset.CoinNotFoundError {
+	if err == nil || err != asset.CoinNotFoundError {
+		// nil err means success, non-nil err that is not CoinNotFoundError means trouble
 		return confs, spent, err
 	}
 
-	// Perform an external txout lookup. Prepare the pkScript to use in
-	// finding the txout using block filters.
+	// Perform an external txout lookup.
+	if !dcr.wallet.SpvMode() {
+		// Calling dcr.externalTxOut for non-spv wallets will only
+		// re-attempt dcr.unspentTxOut which was already done by
+		// dcr.walletOutputConfirmations above.
+		// TODO: It might still be necessary to call dcr.externalTxOut
+		// to use block filters to determine if the output exists but
+		// is spent, because dcr.unspentTxOut doesn't return results for
+		// non-wallet outputs that are spent.
+		return 0, false, asset.CoinNotFoundError
+	}
+
+	// Prepare the pkScript to use in finding the txout using block filters.
 	scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
 	if err != nil {
 		return 0, false, fmt.Errorf("error encoding script address: %w", err)

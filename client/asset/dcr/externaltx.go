@@ -385,7 +385,7 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 // during the search.
 func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
 	bestBlock := dcr.cachedBestBlock()
-	dcr.log.Debugf("Searching for the tx that spends output %s in blocks %d (%s) to %d (%s) using output pkScript %x.",
+	dcr.log.Debugf("Searching if output %s is spent in blocks %d (%s) to %d (%s) using pkScript %x.",
 		op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash, outputPkScript)
 
 	iHeight := startBlock.height
@@ -397,8 +397,8 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 		}
 
 		if blockFilter.Match(outputPkScript) {
-			dcr.log.Debugf("Block %d (%s) likely contains a tx that spends %s. Confirming.",
-				iHeight, iHash, op)
+			dcr.log.Debugf("Output %s is likely spent in block %d (%s). Confirming.",
+				op, iHeight, iHash)
 			blk, err := dcr.getBlock(ctx, iHash, true)
 			if err != nil {
 				return nil, iHash, err
@@ -412,19 +412,21 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 					return blkTx, iHash, nil
 				}
 			}
-			dcr.log.Debugf("Block %d (%s) does NOT contain a tx that spends %s.", iHeight, iHash, op)
+			dcr.log.Debugf("Output %s is NOT spent in block %d (%s).", op, iHeight, iHash)
 		}
 
 		// Block does not include the output spender, check the next block.
-		iHeight++
-		nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
-		if err != nil {
-			return nil, iHash, translateRPCCancelErr(err)
+		if iHeight < bestBlock.height {
+			iHeight++
+			nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
+			if err != nil {
+				return nil, iHash, translateRPCCancelErr(err)
+			}
+			iHash = nextHash
 		}
-		iHash = nextHash
 	}
 
-	dcr.log.Debugf("No spender tx found for %s in blocks %d (%s) to %d (%s).",
+	dcr.log.Debugf("Output %s is NOT spent in blocks %d (%s) to %d (%s).",
 		op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash)
 	return nil, bestBlock.hash, nil // scanned up to best block, no spender found
 }
@@ -432,6 +434,9 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 // txSpendsOutput returns true if the passed tx has an input that spends the
 // specified output.
 func txSpendsOutput(tx *chainjson.TxRawResult, op outPoint) bool {
+	if tx.Txid == op.txHash.String() {
+		return false // no need to check inputs if this tx is the same tx that pays to the specified op
+	}
 	for i := range tx.Vin {
 		input := &tx.Vin[i]
 		if input.Vout == op.vout && input.Txid == op.txHash.String() {

@@ -277,6 +277,11 @@ ENABLE_VOTING="2" # 2 = enable voting and ticket buyer
 ${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT}
 # alpha uses walletpassphrase/walletlock.
 
+# SPV wallets will declare peers stalled and disconnect with only ancient blocks
+# from the archive, so we must mine a couple blocks first, but only now after the
+# voting wallet (alpha) is running.
+tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
+
 echo "Creating simnet beta wallet"
 USE_SPV="1"
 ENABLE_VOTING="0"
@@ -300,9 +305,8 @@ sleep 15
 
 # Give beta's "default" account a password, so it uses unlockaccount/lockaccount.
 tmux send-keys -t $SESSION:0 "./beta setaccountpassphrase default ${WALLET_PASS}${WAIT}" C-m\; wait-for donedcr
-# Lock the wallet so we know we can function with just account unlocking. There
-# is also a bug in dcrwallet that breaks validateaddress if the wallet is
-# unlocked but not the account, so keep the wallet locked.
+
+# Lock the wallet so we know we can function with just account unlocking.
 tmux send-keys -t $SESSION:0 "./beta walletlock${WAIT}" C-m\; wait-for donedcr
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.
