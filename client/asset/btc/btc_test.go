@@ -136,7 +136,6 @@ type testData struct {
 	blockchainMtx sync.RWMutex
 	verboseBlocks map[string]*msgBlockWithHeight
 	dbBlockForTx  map[chainhash.Hash]*hashEntry
-	dbSpendingTxs map[outPoint]*hashEntry
 	mainchain     map[int64]*chainhash.Hash
 
 	getBestBlockHashErr error
@@ -172,6 +171,7 @@ type testData struct {
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
 	getCFilterScripts map[chainhash.Hash][][]byte
+	checkpoints       map[outPoint]*scanCheckpoint
 	confs             uint32
 	confsSpent        bool
 	confsErr          error
@@ -186,8 +186,7 @@ func newTestData() *testData {
 		verboseBlocks: map[string]*msgBlockWithHeight{
 			genesisHash.String(): {msgBlock: &wire.MsgBlock{}},
 		},
-		dbBlockForTx:  make(map[chainhash.Hash]*hashEntry),
-		dbSpendingTxs: make(map[outPoint]*hashEntry),
+		dbBlockForTx: make(map[chainhash.Hash]*hashEntry),
 		mainchain: map[int64]*chainhash.Hash{
 			0: genesisHash,
 		},
@@ -195,6 +194,7 @@ func newTestData() *testData {
 		fetchInputInfoTx:  dummyTx(),
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
+		checkpoints:       make(map[outPoint]*scanCheckpoint),
 	}
 }
 
@@ -599,7 +599,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 				chainClient: nil,
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
-				spendingTxs: data.dbSpendingTxs,
+				checkpoints: data.checkpoints,
 				log:         cfg.Logger.SubLogger("SPV"),
 				loader:      nil,
 			}
@@ -1938,6 +1938,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 
 	txHash := tx.TxHash()
 	const vout = 0
+	outPt := newOutPoint(&txHash, vout)
 
 	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
 	if err != nil {
@@ -1962,6 +1963,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	// GetTxOut error
 	node.txOutErr = tErr
 	delete(node.getCFilterScripts, *blockHash)
+	delete(node.checkpoints, outPt)
 	_, err = wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
@@ -2147,8 +2149,10 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.privKeyForAddr = wif
 
 	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
-	tx.TxOut[0].Value = 1e8
+	const vout = 0
+	tx.TxOut[vout].Value = 1e8
 	txHash := tx.TxHash()
+	outPt := newOutPoint(&txHash, vout)
 	blockHash, _ := node.addRawTx(1, tx)
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 	node.getTransactionErr = WalletTransactionNotFound
@@ -2168,13 +2172,18 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("no error for bad receipt")
 	}
 
+	ensureErr := func(tag string) {
+		delete(node.checkpoints, outPt)
+		_, err = wallet.Refund(contractOutput.ID(), contract)
+		if err == nil {
+			t.Fatalf("no error for %q", tag)
+		}
+	}
+
 	// gettxout error
 	node.txOutErr = tErr
 	node.getCFilterScripts[*blockHash] = nil
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for missing utxo")
-	}
+	ensureErr("no utxo")
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 	node.txOutErr = nil
 
@@ -2189,45 +2198,30 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	// Too small.
 	node.txOutRes = newTxOutResult(nil, 100, 2)
 	tx.TxOut[0].Value = 2
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for value < fees")
-	}
+	ensureErr("value < fees")
 	node.txOutRes = bigTxOut
 	tx.TxOut[0].Value = 1e8
 
 	// getrawchangeaddress error
 	node.changeAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for getrawchangeaddress rpc error")
-	}
+	ensureErr("getchangeaddress error")
 	node.changeAddrErr = nil
 
 	// signature error
 	node.privKeyForAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for dumpprivkey rpc error")
-	}
+	ensureErr("dumpprivkey error")
 	node.privKeyForAddrErr = nil
 
 	// send error
 	node.sendErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for sendrawtransaction rpc error")
-	}
+	ensureErr("send error")
 	node.sendErr = nil
 
 	// bad checkhash
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.badSendHash = &badHash
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for tx hash")
-	}
+	ensureErr("checkhash error")
 	node.badSendHash = nil
 
 	// Sanity check that we can succeed again.

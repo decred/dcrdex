@@ -413,10 +413,15 @@ func TestSwapConfirmations(t *testing.T) {
 	// DB path.
 	node.dbBlockForTx[swapTxHash] = &hashEntry{hash: *swapBlockHash}
 	node.dbBlockForTx[spendTxHash] = &hashEntry{hash: *spendBlockHash}
-	node.dbSpendingTxs[swapOutPt] = &hashEntry{hash: spendTxHash}
+	node.checkpoints[swapOutPt] = &scanCheckpoint{res: &filterScanResult{
+		blockHash:   swapBlockHash,
+		blockHeight: swapHeight,
+		spend:       &spendingInput{},
+		checkpoint:  *spendBlockHash,
+	}}
 	checkSuccess("GetSpend", swapConfs, true)
+	delete(node.checkpoints, swapOutPt)
 	delete(node.dbBlockForTx, swapTxHash)
-	delete(node.dbSpendingTxs, swapOutPt)
 
 	// Neutrino scan
 
@@ -427,14 +432,17 @@ func TestSwapConfirmations(t *testing.T) {
 
 	// spent
 	node.getCFilterScripts[*spendBlockHash] = [][]byte{pkScript}
+	delete(node.checkpoints, swapOutPt)
 	checkSuccess("spend", 0, true)
 	node.getCFilterScripts[*spendBlockHash] = nil
 
 	// Not found
+	delete(node.checkpoints, swapOutPt)
 	checkFailure("no utxo")
 
 	// Found.
 	node.getCFilterScripts[*swapBlockHash] = [][]byte{pkScript}
+	delete(node.checkpoints, swapOutPt)
 	checkSuccess("scan find", swapConfs, false)
 }
 
@@ -511,7 +519,6 @@ func TestGetTxOut(t *testing.T) {
 	node.addRawTx(tipHeight, dummyTx())
 	spendingTx := dummyTx()
 	spendingTx.TxIn[0].PreviousOutPoint.Hash = txHash
-	spendTxHash := spendingTx.TxHash()
 	spendBlockHash, _ := node.addRawTx(tipHeight-1, spendingTx)
 
 	// Prime the db
@@ -544,21 +551,22 @@ func TestGetTxOut(t *testing.T) {
 	// No wallet transaction, but we have a spend recorded.
 	node.getTransactionErr = WalletTransactionNotFound
 	node.getTransaction = nil
-	node.dbSpendingTxs[outPt] = &hashEntry{hash: spendTxHash}
-	node.dbBlockForTx[spendTxHash] = &hashEntry{hash: *spendBlockHash}
+	node.checkpoints[outPt] = &scanCheckpoint{res: &filterScanResult{
+		blockHash:  blockHash,
+		spend:      &spendingInput{},
+		checkpoint: *spendBlockHash,
+	}}
 	op, confs, err := spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if op != nil || confs != 0 || err != nil {
 		t.Fatal("wrong result for spent txout", op != nil, confs, err)
 	}
-	delete(node.dbSpendingTxs, outPt)
-	delete(node.dbBlockForTx, spendTxHash)
+	delete(node.checkpoints, outPt)
 
 	// no spend record. gotta scan
 
 	// case 1: we have a block hash in the database
 	node.dbBlockForTx[txHash] = &hashEntry{hash: *blockHash}
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
-
 	_, _, err = spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if err != nil {
 		t.Fatalf("error for GetUtxo with cached hash: %v", err)
@@ -566,6 +574,7 @@ func TestGetTxOut(t *testing.T) {
 
 	// case 2: no block hash in db. Will do scan and store them.
 	delete(node.dbBlockForTx, txHash)
+	delete(node.checkpoints, outPt)
 	_, _, err = spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if err != nil {
 		t.Fatalf("error for GetUtxo with no cached hash: %v", err)
@@ -575,6 +584,7 @@ func TestGetTxOut(t *testing.T) {
 	}
 
 	// case 3: spending tx found first
+	delete(node.checkpoints, outPt)
 	node.getCFilterScripts[*spendBlockHash] = [][]byte{pkScript}
 	txOut, _, err := spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if err != nil {
@@ -582,5 +592,16 @@ func TestGetTxOut(t *testing.T) {
 	}
 	if txOut != nil {
 		t.Fatalf("spend output returned from getTxOut")
+	}
+
+	// Make sure we can find it with the checkpoint.
+	node.checkpoints[outPt].res.spend = nil
+	node.getCFilterScripts[*spendBlockHash] = nil
+	// We won't actually scan for the output itself, so nil'ing these should
+	// have no effect.
+	node.getCFilterScripts[*blockHash] = nil
+	_, _, err = spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
+	if err != nil {
+		t.Fatalf("error for checkpointed output: %v", err)
 	}
 }

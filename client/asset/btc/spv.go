@@ -226,6 +226,14 @@ type hashEntry struct {
 	lastAccess time.Time
 }
 
+// scanCheckpoint is a cached, incomplete filterScanResult. When another scan
+// is requested for an outpoint with a cached *scanCheckpoint, the scan can
+// pick up where it left off.
+type scanCheckpoint struct {
+	res        *filterScanResult
+	lastAccess time.Time
+}
+
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
@@ -241,8 +249,8 @@ type spvWallet struct {
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
 
-	spendingTxMtx sync.Mutex
-	spendingTxs   map[outPoint]*hashEntry
+	checkpointMtx sync.Mutex
+	checkpoints   map[outPoint]*scanCheckpoint
 
 	log    dex.Logger
 	loader *wallet.Loader
@@ -269,33 +277,10 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		wallet:      &walletExtender{w, chainParams},
 		neutrinoDB:  neutrinoDB,
 		txBlocks:    make(map[chainhash.Hash]*hashEntry),
-		spendingTxs: make(map[outPoint]*hashEntry),
+		checkpoints: make(map[outPoint]*scanCheckpoint),
 		log:         logger,
 		loader:      loader,
 	}, nil
-}
-
-// storeSpendingTx caches the spending tx hash for the output.
-func (w *spvWallet) storeSpendingTx(outPt outPoint, txHash chainhash.Hash) {
-	w.spendingTxMtx.Lock()
-	defer w.spendingTxMtx.Unlock()
-	w.spendingTxs[outPt] = &hashEntry{
-		hash:       txHash,
-		lastAccess: time.Now(),
-	}
-}
-
-// storeSpendingTx attempts to retrieve the spending tx hash for the output
-// from the cache.
-func (w *spvWallet) spendingTx(outPt outPoint) (chainhash.Hash, bool) {
-	w.spendingTxMtx.Lock()
-	defer w.spendingTxMtx.Unlock()
-	entry, found := w.spendingTxs[outPt]
-	if !found {
-		return chainhash.Hash{}, false
-	}
-	entry.lastAccess = time.Now()
-	return entry.hash, found
 }
 
 // storeTxBlock stores the block hash for the tx in the cache.
@@ -318,6 +303,52 @@ func (w *spvWallet) txBlock(txHash chainhash.Hash) (chainhash.Hash, bool) {
 	}
 	entry.lastAccess = time.Now()
 	return entry.hash, found
+}
+
+// cacheCheckpoint caches a *filterScanResult so that future scans can be
+// skipped or shortened.
+func (w *spvWallet) cacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *filterScanResult) {
+	if res.spend != nil && res.blockHash == nil {
+		// Probably set the start time too late. Don't cache anything
+		return
+	}
+	w.checkpointMtx.Lock()
+	defer w.checkpointMtx.Unlock()
+	w.checkpoints[newOutPoint(txHash, vout)] = &scanCheckpoint{
+		res:        res,
+		lastAccess: time.Now(),
+	}
+}
+
+// checkpoint returns any cached *filterScanResult for the outpoint.
+func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
+	w.checkpointMtx.Lock()
+	defer w.checkpointMtx.Unlock()
+	check, found := w.checkpoints[newOutPoint(txHash, vout)]
+	if !found {
+		return nil
+	}
+	check.lastAccess = time.Now()
+	return check.res
+}
+
+// checkpointBlock returns a filterScanResult and the checkpoint block hash. If
+// a result is found with an orphaned checkpoint block hash, it is cleared from
+// the cache and not returned.
+func (w *spvWallet) checkpointBlock(txHash *chainhash.Hash, vout uint32) (*filterScanResult, *chainhash.Hash) {
+	res := w.checkpoint(txHash, vout)
+	if res == nil {
+		return nil, nil
+	}
+	blockHash := &res.checkpoint
+	if !w.blockIsMainchain(blockHash, -1) {
+		// reorg detected, abandon the checkpoint.
+		w.checkpointMtx.Lock()
+		delete(w.checkpoints, newOutPoint(txHash, vout))
+		w.checkpointMtx.Unlock()
+		return nil, nil
+	}
+	return res, blockHash
 }
 
 func (w *spvWallet) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
@@ -611,11 +642,10 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	// First, check if it's a wallet transaction. We probably won't be able
 	// to see the spend status, since the wallet doesn't track the swap contract
 	// output, but we can get the block if it's been mined.
-	blockHash, blockHeight, confs, spent, err := w.confirmations(txHash, vout)
+	blockHash, confs, spent, err := w.confirmations(txHash, vout)
 	if err == nil {
 		return confs, spent, nil
 	}
-	height := int32(blockHeight)
 	var assumedMempool bool
 	switch err {
 	case WalletTransactionNotFound:
@@ -634,28 +664,12 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 		return 0, false, err
 	}
 
-	// Get the current best block.
-	bestBlock, err := w.cl.BestBlock()
-	if err != nil {
-		return
-	}
-
 	// If we still don't have the block hash, we may have it stored. Check the
 	// dex database first. This won't give us the confirmations and spent
 	// status, but it will allow us to short circuit a longer scan if we already
 	// know the output is spent.
 	if blockHash == nil {
-		blockHash, height = w.mainchainBlockForStoredTx(txHash)
-	}
-
-	if blockHash != nil {
-		spendTxHash, found := w.spendingTx(newOutPoint(txHash, vout))
-		if found {
-			spendBlockHash, found := w.txBlock(spendTxHash)
-			if found && w.blockIsMainchain(&spendBlockHash, -1) {
-				return uint32(confirms(height, bestBlock.Height)), true, nil
-			}
-		}
+		blockHash, _ = w.mainchainBlockForStoredTx(txHash)
 	}
 
 	// Our last option is neutrino.
@@ -796,14 +810,6 @@ func (w *spvWallet) connect(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				w.spendingTxMtx.Lock()
-				for outPt, entry := range w.spendingTxs {
-					if time.Since(entry.lastAccess) > expiration {
-						delete(w.spendingTxs, outPt)
-					}
-				}
-				w.spendingTxMtx.Unlock()
-
 				w.txBlocksMtx.Lock()
 				for txHash, entry := range w.txBlocks {
 					if time.Since(entry.lastAccess) > expiration {
@@ -811,6 +817,14 @@ func (w *spvWallet) connect(ctx context.Context) error {
 					}
 				}
 				w.txBlocksMtx.Unlock()
+
+				w.checkpointMtx.Lock()
+				for outPt, check := range w.checkpoints {
+					if time.Since(check.lastAccess) > expiration {
+						delete(w.checkpoints, outPt)
+					}
+				}
+				w.checkpointMtx.Unlock()
 			case <-ctx.Done():
 				return
 			}
@@ -967,7 +981,21 @@ func (w *spvWallet) findBlockForTime(matchTime time.Time) (*chainhash.Hash, int3
 func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time, blockHash *chainhash.Hash) (*filterScanResult, error) {
 	// Check if we know the block hash for the tx.
 	var limitHeight int32
-	if blockHash == nil {
+	// See if we have a checkpoint to use.
+	checkPt, checkBlock := w.checkpointBlock(txHash, vout)
+	if checkPt != nil {
+		if checkPt.blockHash != nil && checkPt.spend != nil {
+			// We already have the output and the spending input, and
+			// checkpointBlock already verified it's still mainchain.
+			return checkPt, nil
+		}
+		height, err := w.getBlockHeight(checkBlock)
+		if err != nil {
+			return nil, fmt.Errorf("getBlockHeight error: %w", err)
+		}
+		limitHeight = height + 1
+		blockHash = checkBlock
+	} else if blockHash == nil {
 		blockHash, limitHeight = w.mainchainBlockForStoredTx(txHash)
 		// blockHash nil if not found
 	} else {
@@ -990,7 +1018,7 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 	}
 
 	// Do a filter scan.
-	utxo, err := w.filterScanFromHeight(*txHash, vout, pkScript, limitHeight)
+	utxo, err := w.filterScanFromHeight(*txHash, vout, pkScript, limitHeight, checkPt)
 	if err != nil {
 		return nil, fmt.Errorf("filterScanFromHeight error: %w", err)
 	}
@@ -1004,15 +1032,7 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 		w.storeTxBlock(*txHash, *utxo.blockHash)
 	}
 
-	if utxo.spend != nil {
-		spendBlockHash, err := w.cl.GetBlockHash(int64(utxo.spend.blockHeight))
-		if err != nil {
-			w.log.Errorf("error getting spending tx hash")
-		} else {
-			w.storeTxBlock(utxo.spend.txHash, *spendBlockHash)
-			w.storeSpendingTx(newOutPoint(txHash, vout), utxo.spend.txHash)
-		}
-	}
+	w.cacheCheckpoint(txHash, vout, utxo)
 
 	return utxo, nil
 }
@@ -1020,7 +1040,7 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 // getTxOut finds an unspent transaction output and its number of confirmations.
 // To match the behavior of the RPC method, even if an output is found, if it's
 // known to be spent, no *wire.TxOut and no error will be returned.
-func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error) {
+func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error) {
 	// Check for a wallet transaction first
 	txDetails, err := w.wallet.walletTransaction(txHash)
 	if err == nil {
@@ -1034,10 +1054,10 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []by
 			confs = uint32(tip.Height - txDetails.Block.Height + 1)
 		}
 		msgTx := &txDetails.MsgTx
-		if len(msgTx.TxOut) < int(index+1) {
-			return nil, 0, fmt.Errorf("wallet transaction %s found, but not enough outputs for index %d", txHash, index)
+		if len(msgTx.TxOut) < int(vout+1) {
+			return nil, 0, fmt.Errorf("wallet transaction %s found, but not enough outputs for vout %d", txHash, vout)
 		}
-		return msgTx.TxOut[index], confs, nil
+		return msgTx.TxOut[vout], confs, nil
 	}
 	if !errors.Is(err, WalletTransactionNotFound) {
 		return nil, 0, fmt.Errorf("walletTransaction error: %w", err)
@@ -1048,21 +1068,8 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []by
 		blockHash = &txDetails.Block.Hash
 	}
 
-	// First, check the dex db and look for record of a spending tx. If we have
-	// one, and it's still mainchain, we can return early.
-	spendHash, found := w.spendingTx(newOutPoint(txHash, index))
-	if found {
-		// Check that the spending tx's block is still mainchain.
-		spendBlockHash, found := w.txBlock(spendHash)
-		if found && w.blockIsMainchain(&spendBlockHash, -1) {
-			// return nil, 0, fmt.Errorf("tx %s is spent by tx %s in block %s", txHash, spendHash, spendBlockHash)
-			// Match the behavior of rpcClient
-			return nil, 0, nil
-		}
-	}
-
 	// We don't really know if it's spent, so we'll need to scan.
-	utxo, err := w.scanFilters(txHash, index, pkScript, startTime, blockHash)
+	utxo, err := w.scanFilters(txHash, vout, pkScript, startTime, blockHash)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1072,7 +1079,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []by
 	}
 
 	if utxo.blockHash == nil {
-		return nil, 0, fmt.Errorf("output %s:%v not found", txHash, index)
+		return nil, 0, fmt.Errorf("output %s:%v not found", txHash, vout)
 	}
 
 	tip, err := w.cl.BestBlock()
@@ -1087,13 +1094,16 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []by
 
 // filterScanFromHeight scans BIP158 filters beginning at the specified block
 // height until the tip, or until a spending transaction is found.
-func (w *spvWallet) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, startBlockHeight int32) (*filterScanResult, error) {
+func (w *spvWallet) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, startBlockHeight int32, checkPt *filterScanResult) (*filterScanResult, error) {
 	tip, err := w.getBestBlockHeight()
 	if err != nil {
 		return nil, err
 	}
 
-	res := new(filterScanResult)
+	res := checkPt
+	if res == nil {
+		res = new(filterScanResult)
+	}
 
 search:
 	for height := startBlockHeight; height <= tip; height++ {
@@ -1106,6 +1116,7 @@ search:
 		if err != nil {
 			return nil, fmt.Errorf("error getting block hash for height %d: %w", height, err)
 		}
+		res.checkpoint = *blockHash
 		matched, err := w.matchPkScript(blockHash, [][]byte{pkScript})
 		if err != nil {
 			return nil, fmt.Errorf("matchPkScript error: %w", err)
@@ -1234,28 +1245,27 @@ func (w *spvWallet) findRedemptionsInMempool(ctx context.Context, reqs map[outPo
 
 // confirmations looks for the confirmation count and spend status on a
 // transaction output that pays to this wallet.
-func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHash *chainhash.Hash, blockHeight, confs uint32, spent bool, err error) {
+func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHash *chainhash.Hash, confs uint32, spent bool, err error) {
 	details, err := w.wallet.walletTransaction(txHash)
 	if err != nil {
-		return nil, 0, 0, false, err
+		return nil, 0, false, err
 	}
 	if details == nil {
-		return nil, 0, 0, false, WalletTransactionNotFound
+		return nil, 0, false, WalletTransactionNotFound
 	}
 
 	if details.Block.Hash != (chainhash.Hash{}) {
 		blockHash = &details.Block.Hash
-		blockHeight = uint32(details.Block.Height)
 	}
 
 	for _, credit := range details.Credits {
 		if credit.Index == vout {
 			syncBlock := w.wallet.syncedTo() // Better than chainClient.GetBestBlockHeight() ?
-			return blockHash, blockHeight, uint32(confirms(details.Block.Height, syncBlock.Height)), credit.Spent, nil
+			return blockHash, uint32(confirms(details.Block.Height, syncBlock.Height)), credit.Spent, nil
 		}
 	}
 
-	return blockHash, blockHeight, 0, false, SpentStatusUnknown
+	return blockHash, 0, false, SpentStatusUnknown
 }
 
 // getTransaction retrieves the specified wallet-related transaction.
@@ -1437,6 +1447,9 @@ type filterScanResult struct {
 	txOut *wire.TxOut
 	// spend will be set if a spending input is found.
 	spend *spendingInput
+	// checkpoint is used to track the last block scanned so that future scans
+	// can skip scanned blocks.
+	checkpoint chainhash.Hash
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a
