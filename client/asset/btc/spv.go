@@ -591,8 +591,8 @@ func (w *spvWallet) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 }
 
 // Unlock unlocks the wallet.
-func (w *spvWallet) Unlock(pass string) error {
-	return w.wallet.Unlock([]byte(pass), time.After(time.Duration(math.MaxInt64)))
+func (w *spvWallet) Unlock(pw []byte) error {
+	return w.wallet.Unlock(pw, time.After(time.Duration(math.MaxInt64)))
 }
 
 // Lock locks the wallet.
@@ -716,8 +716,8 @@ func (w *spvWallet) walletLock() error {
 	return nil
 }
 
-func (w *spvWallet) walletUnlock(pass string) error {
-	return w.Unlock(pass)
+func (w *spvWallet) walletUnlock(pw []byte) error {
+	return w.Unlock(pw)
 }
 
 func (w *spvWallet) getBlockHeader(hashStr string) (*blockHeader, error) {
@@ -994,10 +994,15 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 			return nil, fmt.Errorf("getBlockHeight error: %w", err)
 		}
 		limitHeight = height + 1
-		blockHash = checkBlock
 	} else if blockHash == nil {
 		blockHash, limitHeight = w.mainchainBlockForStoredTx(txHash)
-		// blockHash nil if not found
+		if blockHash == nil {
+			var err error
+			_, limitHeight, err = w.findBlockForTime(startTime)
+			if err != nil {
+				return nil, err
+			}
+		}
 	} else {
 		var err error
 		limitHeight, err = w.getBlockHeight(blockHash)
@@ -1009,13 +1014,6 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 	// We only care about the limitHeight now, but we can tell if it's been set
 	// by whether blockHash is nil, since that means it wasn't passed in, and
 	// it wasn't found in the database.
-	if blockHash == nil {
-		var err error
-		_, limitHeight, err = w.findBlockForTime(startTime)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	// Do a filter scan.
 	utxo, err := w.filterScanFromHeight(*txHash, vout, pkScript, limitHeight, checkPt)

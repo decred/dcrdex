@@ -2241,7 +2241,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		if err != nil {
 			return newError(encryptionErr, "encryption error: %v", err)
 		}
-		err = wallet.Wallet.Unlock(string(newPW))
+		err = wallet.Wallet.Unlock(newPW)
 		if err != nil {
 			return newError(authErr,
 				"setWalletPassword unlocking wallet error, is the new password correct?: %v", err)

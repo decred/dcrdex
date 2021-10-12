@@ -32,9 +32,8 @@ import (
 )
 
 const (
-	walletPassword = "abc"
-	alphaAddress   = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
-	betaAddress    = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
+	alphaAddress = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
+	betaAddress  = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
 )
 
 var (
@@ -51,6 +50,7 @@ var (
 		MaxFeeRate:   10,
 		SwapConf:     1,
 	}
+	walletPassword = []byte("abc")
 )
 
 func mineAlpha() error {

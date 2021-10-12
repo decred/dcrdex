@@ -195,7 +195,7 @@ type Wallet interface {
 	// OwnsAddress indicates if an address belongs to the wallet.
 	OwnsAddress(address string) (bool, error)
 	// Unlock unlocks the exchange wallet.
-	Unlock(pw string) error
+	Unlock(pw []byte) error
 	// Lock locks the exchange wallet.
 	Lock() error
 	// Locked will be true if the wallet is currently locked.

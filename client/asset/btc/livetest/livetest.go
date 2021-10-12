@@ -130,7 +130,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tStart := time.Now()
 
-	walletPassword := "abc"
+	walletPassword := []byte("abc")
 
 	var blockReported uint32
 	blkFunc := func(name string, err error) {

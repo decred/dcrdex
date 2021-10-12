@@ -1465,7 +1465,7 @@ outer:
 
 // Unlock unlocks the ExchangeWallet. The pw supplied should be the same as the
 // password for the underlying bitcoind wallet which will also be unlocked.
-func (btc *ExchangeWallet) Unlock(pw string) error {
+func (btc *ExchangeWallet) Unlock(pw []byte) error {
 	return btc.node.walletUnlock(pw)
 }
 

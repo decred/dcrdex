@@ -30,7 +30,7 @@ type Wallet interface {
 	addressWPKH() (btcutil.Address, error)
 	signTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
 	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
-	walletUnlock(pass string) error
+	walletUnlock(pw []byte) error
 	walletLock() error
 	sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error)
 	locked() bool

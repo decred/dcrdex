@@ -395,9 +395,9 @@ func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 }
 
 // walletUnlock unlocks the wallet.
-func (wc *rpcClient) walletUnlock(pass string) error {
+func (wc *rpcClient) walletUnlock(pw []byte) error {
 	// 100000000 comes from bitcoin-cli help walletpassphrase
-	return wc.call(methodUnlock, anylist{pass, 100000000}, nil)
+	return wc.call(methodUnlock, anylist{string(pw), 100000000}, nil)
 }
 
 // walletLock locks the wallet.

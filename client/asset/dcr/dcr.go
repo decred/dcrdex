@@ -2295,20 +2295,20 @@ func (dcr *ExchangeWallet) accountUnlocked(ctx context.Context, acct string) (en
 }
 
 // Unlock unlocks the exchange wallet.
-func (dcr *ExchangeWallet) Unlock(pw string) error {
+func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 	encryptedAcct, unlocked, err := dcr.accountUnlocked(dcr.ctx, dcr.acct)
 	if err != nil {
 		return err
 	}
 	if !encryptedAcct {
-		return translateRPCCancelErr(dcr.node.WalletPassphrase(dcr.ctx, pw, 0))
+		return translateRPCCancelErr(dcr.node.WalletPassphrase(dcr.ctx, string(pw), 0))
 
 	}
 	if unlocked {
 		return nil
 	}
 
-	return translateRPCCancelErr(dcr.node.UnlockAccount(dcr.ctx, dcr.acct, pw))
+	return translateRPCCancelErr(dcr.node.UnlockAccount(dcr.ctx, dcr.acct, string(pw)))
 }
 
 // Lock locks the exchange wallet.

@@ -733,8 +733,8 @@ func (eth *ExchangeWallet) Address() (string, error) {
 }
 
 // Unlock unlocks the exchange wallet.
-func (eth *ExchangeWallet) Unlock(pw string) error {
-	return eth.node.unlock(eth.ctx, pw, eth.acct)
+func (eth *ExchangeWallet) Unlock(pw []byte) error {
+	return eth.node.unlock(eth.ctx, string(pw), eth.acct)
 }
 
 // Lock locks the exchange wallet.

@@ -175,7 +175,7 @@ func TestWallet(t *testing.T) {
 
 		// The test expects beta and gamma to be unlocked.
 		if name == "beta" || name == "gamma" {
-			if err := w.Unlock(string(tPW)); err != nil {
+			if err := w.Unlock(tPW); err != nil {
 				return nil, err
 			}
 		}

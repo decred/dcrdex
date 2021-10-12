@@ -2244,13 +2244,15 @@ func testLockUnlock(t *testing.T, segwit bool, walletType string) {
 		t.Fatal(err)
 	}
 
+	pw := []byte("pass")
+
 	// just checking that the errors come through.
-	err = wallet.Unlock("pass")
+	err = wallet.Unlock(pw)
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
 	node.unlockErr = tErr
-	err = wallet.Unlock("pass")
+	err = wallet.Unlock(pw)
 	if err == nil {
 		t.Fatalf("no error for walletpassphrase error")
 	}

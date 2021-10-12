@@ -74,7 +74,7 @@ var (
 	tDexKey             *secp256k1.PublicKey
 	tDexAccountID       account.AccountID
 	tPW                        = []byte("dexpw")
-	wPW                        = "walletpw"
+	wPW                        = []byte("walletpw")
 	tDexHost                   = "somedex.tld:7232"
 	tDcrBtcMktName             = "dcr_btc"
 	tErr                       = fmt.Errorf("test error")
@@ -595,7 +595,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		encPass:      []byte{0x01},
 		synced:       true,
 		syncProgress: 1,
-		pw:           string(tPW),
+		pw:           tPW,
 	}
 
 	return xcWallet, w
@@ -735,7 +735,7 @@ func (w *TXCWallet) Address() (string, error) {
 	return "", w.addrErr
 }
 
-func (w *TXCWallet) Unlock(pw string) error {
+func (w *TXCWallet) Unlock(pw []byte) error {
 	return w.unlockErr
 }
 
@@ -1431,7 +1431,7 @@ func TestCreateWallet(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		t.Helper()
-		err := tCore.CreateWallet(tPW, []byte(wPW), form)
+		err := tCore.CreateWallet(tPW, wPW, form)
 		if err == nil {
 			t.Fatalf("no %s error", tag)
 		}
@@ -1493,7 +1493,7 @@ func TestCreateWallet(t *testing.T) {
 
 	// Success
 	delete(tCore.wallets, tILT.ID)
-	err := tCore.CreateWallet(tPW, []byte(wPW), form)
+	err := tCore.CreateWallet(tPW, wPW, form)
 	if err != nil {
 		t.Fatalf("error when should be no error: %v", err)
 	}
