@@ -390,7 +390,7 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 
 	iHeight := startBlock.height
 	iHash := startBlock.hash
-	for iHeight <= bestBlock.height {
+	for {
 		blockFilter, err := dcr.getBlockFilterV2(ctx, iHash)
 		if err != nil {
 			return nil, nil, err
@@ -415,15 +415,17 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 			dcr.log.Debugf("Output %s is NOT spent in block %d (%s).", op, iHeight, iHash)
 		}
 
-		// Block does not include the output spender, check the next block.
-		if iHeight < bestBlock.height {
-			iHeight++
-			nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
-			if err != nil {
-				return nil, iHash, translateRPCCancelErr(err)
-			}
-			iHash = nextHash
+		if iHeight >= bestBlock.height { // reached the tip, stop searching
+			break
 		}
+
+		// Block does not include the output spender, check the next block.
+		iHeight++
+		nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
+		if err != nil {
+			return nil, iHash, translateRPCCancelErr(err)
+		}
+		iHash = nextHash
 	}
 
 	dcr.log.Debugf("Output %s is NOT spent in blocks %d (%s) to %d (%s).",

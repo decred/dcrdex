@@ -617,10 +617,16 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 // feeRateWithFallback attempts to get the optimal fee rate in atoms / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
 func (dcr *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	feeRate, err := dcr.feeRate(confTarget)
-	if err == nil {
-		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
-		return feeRate
+	var err error
+	if !dcr.wallet.SpvMode() {
+		var feeRate uint64
+		feeRate, err = dcr.feeRate(confTarget)
+		if err == nil {
+			dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+			return feeRate
+		}
+	} else {
+		err = errors.New("SPV does not support estimatesmartfee")
 	}
 	if feeSuggestion > 0 && feeSuggestion < dcr.fallbackFeeRate && feeSuggestion < dcr.feeRateLimit {
 		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
@@ -2351,10 +2357,10 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	}
 	op := newOutPoint(txHash, vout)
 
-	// First attempt to find this contract in the wallet.
+	// First attempt to find this contract in the wallet. Only continue if
+	// err is CoinNotFoundError.
 	confs, spent, err = dcr.walletOutputConfirmations(ctx, op)
-	if err == nil || err != asset.CoinNotFoundError {
-		// nil err means success, non-nil err that is not CoinNotFoundError means trouble
+	if err != asset.CoinNotFoundError {
 		return confs, spent, err
 	}
 

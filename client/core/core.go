@@ -2725,8 +2725,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, dc.fetchFeeRate(feeAsset.ID))
+	feeRateSuggestion := dc.fetchFeeRate(feeAsset.ID)
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRateSuggestion)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
