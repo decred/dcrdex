@@ -38,7 +38,7 @@ const (
 )
 
 var (
-	NetPorts = dexbtc.NetPorts{
+	netPorts = dexbtc.NetPorts{
 		Mainnet: "8332",
 		Testnet: "18332",
 		Simnet:  "18443",
@@ -110,10 +110,12 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
+// Exists checks the existence of the wallet. For the RPC wallet, this attempts
+// to connect and request getnetworkinfo to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {
 	case "", walletTypeRPC:
-		_, client, err := btc.ParseRPCWalletConfig(settings, "bch", net, NetPorts)
+		_, client, err := btc.ParseRPCWalletConfig(settings, "bch", net, netPorts)
 		if err != nil {
 			return false, err
 		}
@@ -175,7 +177,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Logger:             logger,
 		Network:            network,
 		ChainParams:        params,
-		Ports:              NetPorts,
+		Ports:              netPorts,
 		DefaultFallbackFee: defaultFee,
 		Segwit:             false,
 		LegacyBalance:      true,

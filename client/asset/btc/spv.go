@@ -2,23 +2,18 @@
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
 // spvWallet implements a Wallet backed by a built-in btcwallet + Neutrino.
-// There are two major challenges presented in using an SPV wallet for DEX.
+//
+// There are a few challenges presented in using an SPV wallet for DEX.
 // 1. Finding non-wallet related blockchain data requires posession of the
 //    pubkey script, not just transction hash and output index
 // 2. Finding non-wallet related blockchain data can often entail extensive
 //    scanning of compact filters. We can limit these scans with more
-//    information, but every new scan-limiting filter added entails some
-//    substantial logic.
-//
-// There is now also a new DB to store come auxiliary data to reduce search
-// times on repeated asks. For instance, every time a Neutrino GetUtxo search
-// returns a result, we'll store any txHash -> blockHash or txOut ->
-// spendingHash associations so that we can possibly short-circut the GetUtxo
-// scan the next time info for that output is requested, e.g. in Confirmations.
-//
-// Confirmations, GetTxOut, and other methods typically follow a three-part
-// search. First, check for info in the dcrwallet DB, then the new database,
-// and finally, if we still haven't found it, use a filter scan.
+//    information, such as the match time, which would be the earliest a
+//    transaction could be found on-chain.
+// 3. We don't see a mempool. We're blind to new transactions until they are
+//    mined. This requires special handling by the caller. We've been
+//    anticipating this, so Core and Swapper are permissive of missing acks for
+//    audit requests.
 
 package btc
 
@@ -33,11 +28,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/asset/btc/hashmap"
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
@@ -225,6 +219,13 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, net *chaincfg.P
 	return nil
 }
 
+// hashEntry stores a chainhash.Hash with a last-access time that can be used
+// for cache maintenance.
+type hashEntry struct {
+	hash       chainhash.Hash
+	lastAccess time.Time
+}
+
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
@@ -236,10 +237,15 @@ type spvWallet struct {
 	chainClient *chain.NeutrinoClient
 	acctNum     uint32
 	neutrinoDB  walletdb.DB
-	txBlocks    hashMap
-	spendingTxs hashMap
-	log         dex.Logger
-	loader      *wallet.Loader
+
+	txBlocksMtx sync.Mutex
+	txBlocks    map[chainhash.Hash]*hashEntry
+
+	spendingTxMtx sync.Mutex
+	spendingTxs   map[outPoint]*hashEntry
+
+	log    dex.Logger
+	loader *wallet.Loader
 }
 
 var _ Wallet = (*spvWallet)(nil)
@@ -255,32 +261,6 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		return nil, err
 	}
 
-	loadHashMap := func(name string) (*hashmap.Map, error) {
-		dbLogger := logger.SubLogger(strings.ToUpper(name))
-		dbName := name + ".hashmap"
-		hm, err := hashmap.New(dbDir, dbName, dbLogger)
-		if err != nil {
-			logger.Errorf("Error opening hash map database at %s: %v", dbDir, dbName)
-			// I kinda just want to wipe the db in this case. Everything would
-			// still be fully functional, just with more disk i/o and block
-			// requests.
-			// os.RemoveAll(filepath.Join(dbDir, dbName))
-			// return hashmap.New(dbDir, dbName, dbLogger)
-			return nil, err
-		}
-		return hm, nil
-	}
-
-	txBlocks, err := loadHashMap("txblocks")
-	if err != nil {
-		return nil, err
-	}
-
-	spendingTxs, err := loadHashMap("spends")
-	if err != nil {
-		return nil, err
-	}
-
 	return &spvWallet{
 		chainParams: chainParams,
 		cl:          chainService,
@@ -288,11 +268,56 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		acctNum:     0,
 		wallet:      &walletExtender{w, chainParams},
 		neutrinoDB:  neutrinoDB,
-		txBlocks:    txBlocks,
-		spendingTxs: spendingTxs,
+		txBlocks:    make(map[chainhash.Hash]*hashEntry),
+		spendingTxs: make(map[outPoint]*hashEntry),
 		log:         logger,
 		loader:      loader,
 	}, nil
+}
+
+// storeSpendingTx caches the spending tx hash for the output.
+func (w *spvWallet) storeSpendingTx(outPt outPoint, txHash chainhash.Hash) {
+	w.spendingTxMtx.Lock()
+	defer w.spendingTxMtx.Unlock()
+	w.spendingTxs[outPt] = &hashEntry{
+		hash:       txHash,
+		lastAccess: time.Now(),
+	}
+}
+
+// storeSpendingTx attempts to retrieve the spending tx hash for the output
+// from the cache.
+func (w *spvWallet) spendingTx(outPt outPoint) (chainhash.Hash, bool) {
+	w.spendingTxMtx.Lock()
+	defer w.spendingTxMtx.Unlock()
+	entry, found := w.spendingTxs[outPt]
+	if !found {
+		return chainhash.Hash{}, false
+	}
+	entry.lastAccess = time.Now()
+	return entry.hash, found
+}
+
+// storeTxBlock stores the block hash for the tx in the cache.
+func (w *spvWallet) storeTxBlock(txHash, blockHash chainhash.Hash) {
+	w.txBlocksMtx.Lock()
+	defer w.txBlocksMtx.Unlock()
+	w.txBlocks[txHash] = &hashEntry{
+		hash:       blockHash,
+		lastAccess: time.Now(),
+	}
+}
+
+// txBlock attempts to retrieve the block hash for the tx from the cache.
+func (w *spvWallet) txBlock(txHash chainhash.Hash) (chainhash.Hash, bool) {
+	w.txBlocksMtx.Lock()
+	defer w.txBlocksMtx.Unlock()
+	entry, found := w.txBlocks[txHash]
+	if !found {
+		return chainhash.Hash{}, false
+	}
+	entry.lastAccess = time.Now()
+	return entry.hash, found
 }
 
 func (w *spvWallet) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
@@ -624,10 +649,10 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	}
 
 	if blockHash != nil {
-		spendTxHash := w.spendingTxs.Get(*txHash)
-		if spendTxHash != nil {
-			spendBlockHash := w.txBlocks.Get(*spendTxHash)
-			if spendBlockHash != nil && w.blockIsMainchain(spendBlockHash, -1) {
+		spendTxHash, found := w.spendingTx(newOutPoint(txHash, vout))
+		if found {
+			spendBlockHash, found := w.txBlock(spendTxHash)
+			if found && w.blockIsMainchain(&spendBlockHash, -1) {
 				return uint32(confirms(height, bestBlock.Height)), true, nil
 			}
 		}
@@ -763,8 +788,34 @@ func (w *spvWallet) connect(ctx context.Context) error {
 	// *Rescan supplied with a QuitChan-type RescanOption.
 	// Actually, should use btcwallet.Wallet.NtfnServer ?
 
-	go w.txBlocks.Run(ctx)
-	go w.spendingTxs.Run(ctx)
+	// Nanny for the spendingTxs cache. We'll keep the cache entries for 2 hours
+	// past their last access time.
+	go func() {
+		ticker := time.NewTicker(time.Minute * 20)
+		expiration := time.Hour * 2
+		for {
+			select {
+			case <-ticker.C:
+				w.spendingTxMtx.Lock()
+				for outPt, entry := range w.spendingTxs {
+					if time.Since(entry.lastAccess) > expiration {
+						delete(w.spendingTxs, outPt)
+					}
+				}
+				w.spendingTxMtx.Unlock()
+
+				w.txBlocksMtx.Lock()
+				for txHash, entry := range w.txBlocks {
+					if time.Since(entry.lastAccess) > expiration {
+						delete(w.txBlocks, txHash)
+					}
+				}
+				w.txBlocksMtx.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	return nil
 }
@@ -784,12 +835,6 @@ func (w *spvWallet) stop() {
 	if err := w.neutrinoDB.Close(); err != nil {
 		w.log.Errorf("wallet db close error: %v", err)
 	}
-	if err := w.txBlocks.Close(); err != nil {
-		w.log.Errorf("txblocks hashmap close error: %v", err)
-	}
-	if err := w.spendingTxs.Close(); err != nil {
-		w.log.Errorf("spends hashmap close error: %v", err)
-	}
 
 	w.log.Debugf("SPV wallet closed")
 }
@@ -797,17 +842,17 @@ func (w *spvWallet) stop() {
 // blockForStoredTx looks for a block hash in the txBlocks index.
 func (w *spvWallet) blockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32, error) {
 	// Check if we know the block hash for the tx.
-	blockHash := w.txBlocks.Get(*txHash)
-	if blockHash == nil {
+	blockHash, found := w.txBlock(*txHash)
+	if !found {
 		return nil, 0, nil
 	}
 	// Check that the block is still mainchain.
-	blockHeight, err := w.cl.GetBlockHeight(blockHash)
+	blockHeight, err := w.cl.GetBlockHeight(&blockHash)
 	if err != nil {
 		w.log.Errorf("Error retrieving block height for hash %s: %v", blockHash, err)
 		return nil, 0, err
 	}
-	return blockHash, blockHeight, nil
+	return &blockHash, blockHeight, nil
 }
 
 // blockIsMainchain will be true if the blockHash is that of a mainchain block.
@@ -956,7 +1001,7 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 	// If we found a block, let's store a reference in our local database so we
 	// can maybe bypass a long search next time.
 	if utxo.blockHash != nil {
-		w.txBlocks.Set(*txHash, *utxo.blockHash)
+		w.storeTxBlock(*txHash, *utxo.blockHash)
 	}
 
 	if utxo.spend != nil {
@@ -964,8 +1009,8 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 		if err != nil {
 			w.log.Errorf("error getting spending tx hash")
 		} else {
-			w.txBlocks.Set(utxo.spend.txHash, *spendBlockHash)
-			w.spendingTxs.Set(*txHash, utxo.spend.txHash)
+			w.storeTxBlock(utxo.spend.txHash, *spendBlockHash)
+			w.storeSpendingTx(newOutPoint(txHash, vout), utxo.spend.txHash)
 		}
 	}
 
@@ -1005,11 +1050,11 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, index uint32, pkScript []by
 
 	// First, check the dex db and look for record of a spending tx. If we have
 	// one, and it's still mainchain, we can return early.
-	spendHash := w.spendingTxs.Get(*txHash)
-	if spendHash != nil {
+	spendHash, found := w.spendingTx(newOutPoint(txHash, index))
+	if found {
 		// Check that the spending tx's block is still mainchain.
-		spendBlockHash := w.txBlocks.Get(*spendHash)
-		if spendBlockHash != nil && w.blockIsMainchain(spendBlockHash, -1) {
+		spendBlockHash, found := w.txBlock(spendHash)
+		if found && w.blockIsMainchain(&spendBlockHash, -1) {
 			// return nil, 0, fmt.Errorf("tx %s is spent by tx %s in block %s", txHash, spendHash, spendBlockHash)
 			// Match the behavior of rpcClient
 			return nil, 0, nil

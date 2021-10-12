@@ -135,8 +135,8 @@ type testData struct {
 
 	blockchainMtx sync.RWMutex
 	verboseBlocks map[string]*msgBlockWithHeight
-	dbBlockForTx  tHashMap
-	dbSpendingTxs tHashMap
+	dbBlockForTx  map[chainhash.Hash]*hashEntry
+	dbSpendingTxs map[outPoint]*hashEntry
 	mainchain     map[int64]*chainhash.Hash
 
 	getBestBlockHashErr error
@@ -186,8 +186,8 @@ func newTestData() *testData {
 		verboseBlocks: map[string]*msgBlockWithHeight{
 			genesisHash.String(): {msgBlock: &wire.MsgBlock{}},
 		},
-		dbBlockForTx:  make(tHashMap),
-		dbSpendingTxs: make(tHashMap),
+		dbBlockForTx:  make(map[chainhash.Hash]*hashEntry),
+		dbSpendingTxs: make(map[outPoint]*hashEntry),
 		mainchain: map[int64]*chainhash.Hash{
 			0: genesisHash,
 		},
@@ -464,7 +464,7 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 func (c *testData) addDBBlockForTx(txHash, blockHash *chainhash.Hash) {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
-	c.dbBlockForTx[*txHash] = blockHash
+	c.dbBlockForTx[*txHash] = &hashEntry{hash: *blockHash}
 }
 
 func (c *testData) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {

@@ -13,12 +13,6 @@ require (
 	github.com/btcsuite/btcwallet/wallet/txsizes v1.1.0 // indirect
 	github.com/btcsuite/btcwallet/walletdb v1.4.0
 	github.com/btcsuite/btcwallet/wtxmgr v1.3.0
-	// github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
-	// github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
-	// github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
-	// github.com/btcsuite/btcwallet v0.11.1-0.20201207233335-415f37ff11a1
-	// github.com/btcsuite/btcwallet/walletdb v1.3.4
-	// github.com/btcsuite/btcwallet/wtxmgr v1.2.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210914193033-2efb9bda71fe
 	github.com/decred/dcrd/certgen v1.1.2-0.20210901152745-8830d9c9cdba
@@ -39,7 +33,6 @@ require (
 	github.com/decred/dcrd/wire v1.4.1-0.20210901152745-8830d9c9cdba
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
-	github.com/dgraph-io/badger v1.6.2
 	github.com/ethereum/go-ethereum v1.10.6
 	github.com/gcash/bchd v0.17.2-0.20201218180520-5708823e0e99
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000

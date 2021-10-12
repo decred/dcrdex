@@ -116,6 +116,8 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
+// Exists checks the existence of the wallet. For the RPC wallet, this attempts
+// to connect and request getnetworkinfo to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {
 	case "", walletTypeRPC:

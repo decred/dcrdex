@@ -404,7 +404,7 @@ func ParseRPCWalletConfig(settings map[string]string, symbol string, net dex.Net
 type Driver struct{}
 
 // Exists checks the existence of the wallet. For the RPC wallet, this attempts
-// to connect and request the version to verify existence. For the SPV wallet,
+// to connect and request getnetworkinfo to verify existence. For the SPV wallet,
 // we ultimately just look for wallet files.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {

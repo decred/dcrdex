@@ -148,7 +148,7 @@ func Run(t *testing.T, cfg *Config) {
 	var expConfs uint32
 	blockWait := time.Second
 	if cfg.SPV {
-		blockWait = time.Second * 5
+		blockWait = time.Second * 3
 	}
 	mine := func() {
 		rig.mineAlpha()

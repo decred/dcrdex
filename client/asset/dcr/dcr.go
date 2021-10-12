@@ -382,6 +382,8 @@ type fundingCoin struct {
 // Driver implements asset.Driver.
 type Driver struct{}
 
+// Exists checks the existence of the wallet. For the RPC wallet, this attempts
+// to connect and request the version to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	if walletType != walletTypeDcrwRPC {
 		return false, fmt.Errorf("no Decred wallet type %q available", walletType)

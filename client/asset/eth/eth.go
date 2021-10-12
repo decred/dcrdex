@@ -119,6 +119,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// Exists checks the existence of the wallet.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	return false, fmt.Errorf("unimplemented")
 }

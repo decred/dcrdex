@@ -131,7 +131,7 @@ func TestWallet(t *testing.T) {
 			return fmt.Errorf("loadAddress error: %v", err)
 		}
 
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Second * 3)
 
 		for {
 			synced, progress, err := w.SyncStatus()

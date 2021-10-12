@@ -7,7 +7,6 @@
 package btc
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -339,22 +338,6 @@ func (p *tSPVPeer) LastBlock() int32 {
 	return p.lastHeight
 }
 
-type tHashMap map[chainhash.Hash]*chainhash.Hash
-
-func (m tHashMap) Get(k chainhash.Hash) *chainhash.Hash {
-	return m[k]
-}
-
-func (m tHashMap) Set(k, v chainhash.Hash) {
-	m[k] = &v
-}
-
-func (m tHashMap) Run(context.Context) {}
-
-func (m tHashMap) Close() error {
-	return nil
-}
-
 func TestSwapConfirmations(t *testing.T) {
 	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
 	defer shutdown()
@@ -376,6 +359,7 @@ func TestSwapConfirmations(t *testing.T) {
 	swapTx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
 	swapTxHash := swapTx.TxHash()
 	const vout = 0
+	swapOutPt := newOutPoint(&swapTxHash, vout)
 	swapBlockHash, _ := node.addRawTx(swapHeight, swapTx)
 
 	spendTx := dummyTx()
@@ -427,12 +411,12 @@ func TestSwapConfirmations(t *testing.T) {
 	node.confsErr = WalletTransactionNotFound
 
 	// DB path.
-	node.dbBlockForTx[swapTxHash] = swapBlockHash
-	node.dbBlockForTx[spendTxHash] = spendBlockHash
-	node.dbSpendingTxs[swapTxHash] = &spendTxHash
+	node.dbBlockForTx[swapTxHash] = &hashEntry{hash: *swapBlockHash}
+	node.dbBlockForTx[spendTxHash] = &hashEntry{hash: *spendBlockHash}
+	node.dbSpendingTxs[swapOutPt] = &hashEntry{hash: spendTxHash}
 	checkSuccess("GetSpend", swapConfs, true)
 	delete(node.dbBlockForTx, swapTxHash)
-	node.dbSpendingTxs[swapTxHash] = nil
+	delete(node.dbSpendingTxs, swapOutPt)
 
 	// Neutrino scan
 
@@ -521,6 +505,7 @@ func TestGetTxOut(t *testing.T) {
 	const tipHeight = 20
 	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
 	txHash := tx.TxHash()
+	outPt := newOutPoint(&txHash, vout)
 	blockHash, _ := node.addRawTx(blockHeight, tx)
 	txB, _ := serializeMsgTx(tx)
 	node.addRawTx(tipHeight, dummyTx())
@@ -559,19 +544,19 @@ func TestGetTxOut(t *testing.T) {
 	// No wallet transaction, but we have a spend recorded.
 	node.getTransactionErr = WalletTransactionNotFound
 	node.getTransaction = nil
-	node.dbSpendingTxs[txHash] = &spendTxHash
-	node.dbBlockForTx[spendTxHash] = spendBlockHash
+	node.dbSpendingTxs[outPt] = &hashEntry{hash: spendTxHash}
+	node.dbBlockForTx[spendTxHash] = &hashEntry{hash: *spendBlockHash}
 	op, confs, err := spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if op != nil || confs != 0 || err != nil {
 		t.Fatal("wrong result for spent txout", op != nil, confs, err)
 	}
-	delete(node.dbSpendingTxs, txHash)
+	delete(node.dbSpendingTxs, outPt)
 	delete(node.dbBlockForTx, spendTxHash)
 
 	// no spend record. gotta scan
 
 	// case 1: we have a block hash in the database
-	node.dbBlockForTx[txHash] = blockHash
+	node.dbBlockForTx[txHash] = &hashEntry{hash: *blockHash}
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 
 	_, _, err = spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
