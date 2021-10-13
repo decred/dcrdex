@@ -107,6 +107,7 @@ type sigDataEpochReport struct {
 	epochIdx     int64
 	epochDur     int64
 	stats        *matcher.MatchCycleStats
+	spot         *msgjson.Spot
 	baseFeeRate  uint64
 	quoteFeeRate uint64
 }
@@ -271,6 +272,10 @@ func (book *msgBook) addBulkOrders(epoch int64, orderSets ...[]*order.LimitOrder
 type BookRouter struct {
 	books     map[string]*msgBook
 	feeSource FeeSource
+
+	priceFeeders *subscribers
+	spotsMtx     sync.RWMutex
+	spots        map[string]*msgjson.Spot
 }
 
 // NewBookRouter is a constructor for a BookRouter. Routes are registered with
@@ -281,6 +286,10 @@ func NewBookRouter(sources map[string]BookSource, feeSource FeeSource) *BookRout
 	router := &BookRouter{
 		books:     make(map[string]*msgBook),
 		feeSource: feeSource,
+		priceFeeders: &subscribers{
+			conns: make(map[uint64]comms.Link),
+		},
+		spots: make(map[string]*msgjson.Spot),
 	}
 	for mkt, src := range sources {
 		subs := &subscribers{
@@ -299,6 +308,7 @@ func NewBookRouter(sources map[string]BookSource, feeSource FeeSource) *BookRout
 	comms.Route(msgjson.OrderBookRoute, router.handleOrderBook)
 	comms.Route(msgjson.UnsubOrderBookRoute, router.handleUnsubOrderBook)
 	comms.Route(msgjson.FeeRateRoute, router.handleFeeRate)
+	comms.Route(msgjson.PriceFeedRoute, router.handlePriceFeeder)
 
 	return router
 }
@@ -348,6 +358,7 @@ out:
 			// Prepare the book/unbook/epoch note.
 			var note interface{}
 			var route string
+			var spot *msgjson.Spot
 			switch sigData := u.data.(type) {
 			case sigDataNewEpoch:
 				// New epoch index should be sent here by the market following
@@ -400,6 +411,7 @@ out:
 				startStamp := sigData.epochIdx * sigData.epochDur
 				endStamp := startStamp + sigData.epochDur
 				stats := sigData.stats
+				spot = sigData.spot
 
 				note = &msgjson.EpochReportNote{
 					MarketID:     book.name,
@@ -502,6 +514,10 @@ out:
 			}
 
 			r.sendNote(route, subs, note)
+
+			if spot != nil {
+				r.sendNote(msgjson.PriceUpdateRoute, r.priceFeeders, spot)
+			}
 		case <-ctx.Done():
 			break out
 		}
@@ -655,6 +671,25 @@ func (r *BookRouter) handleFeeRate(conn comms.Link, msg *msgjson.Message) *msgjs
 	if err != nil {
 		log.Debugf("error sending fee_rate response: %v", err)
 	}
+	return nil
+}
+
+func (r *BookRouter) handlePriceFeeder(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	r.spotsMtx.RLock()
+	msg, err := msgjson.NewResponse(msg.ID, r.spots, nil)
+	r.spotsMtx.RUnlock()
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternal,
+			Message: "encoding error",
+		}
+	}
+	r.priceFeeders.add(conn)
+	err = conn.Send(msg)
+	if err != nil {
+		log.Debugf("error sending price_feed response: %v", err)
+	}
+
 	return nil
 }
 

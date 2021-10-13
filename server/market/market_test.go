@@ -1309,7 +1309,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 				{bookAction, sigDataBookedOrder{lo, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestBuy, epochIdx}},
 				{unbookAction, sigDataUnbookedOrder{bestSell, epochIdx}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, nil, 10, 10}},
 			},
 		},
 		{
@@ -1317,7 +1317,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 			eq2,
 			[]*updateSignal{
 				{matchProofAction, sigDataMatchProof{mp2}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, nil, 10, 10}},
 			},
 		},
 		{
@@ -1325,7 +1325,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 			NewEpoch(epochIdx, epochDur),
 			[]*updateSignal{
 				{matchProofAction, sigDataMatchProof{mp0}},
-				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, 10, 10}},
+				{epochReportAction, sigDataEpochReport{epochIdx, epochDur, nil, nil, 10, 10}},
 			},
 		},
 	}

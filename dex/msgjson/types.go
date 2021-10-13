@@ -187,6 +187,12 @@ const (
 	// FeeRateRoute is the client-originating request asking for the most
 	// recently recorded transaction fee estimate for an asset.
 	FeeRateRoute = "fee_rate"
+	// PriceFeedRoute is the client-originating request subscribing to the
+	// market overview feed.
+	PriceFeedRoute = "price_feed"
+	// PriceUpdateRoute is a dex-originating notification updating the current
+	// spot price for a market.
+	PriceUpdateRoute = "price_update"
 	// CandlesRoute is the HTTP request to get the set of candlesticks
 	// representing market activity history.
 	CandlesRoute = "candles"

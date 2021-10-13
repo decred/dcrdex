@@ -1904,3 +1904,51 @@ func TestBadMessages(t *testing.T) {
 	rpcErr = router.handleUnsubOrderBook(link, unsub)
 	checkErr("bad payload", rpcErr, msgjson.NotSubscribedError)
 }
+
+func TestPriceFeed(t *testing.T) {
+	mktID := "abc_123"
+	rig.router.spots[mktID] = &msgjson.Spot{Vol24: 54321}
+
+	link := tNewLink()
+	sub, _ := msgjson.NewRequest(1, msgjson.PriceFeedRoute, nil)
+	if err := rig.router.handlePriceFeeder(link, sub); err != nil {
+		t.Fatalf("handlePriceFeeder: %v", err)
+	}
+
+	primerMsg := link.getSend()
+	var spots map[string]*msgjson.Spot
+	err := primerMsg.UnmarshalResult(&spots)
+	if err != nil {
+		t.Fatalf("error unmarshaling initial price_feed response: %v", err)
+	}
+
+	if len(spots) != 1 {
+		t.Fatalf("expected 1 spot, got %d", len(spots))
+	}
+
+	spot, found := spots[mktID]
+	if !found {
+		t.Fatal("spot not communicated")
+	}
+
+	if spot.Vol24 != 54321 {
+		t.Fatal("spot volume not communicated")
+	}
+
+	rig.source1.feed <- &updateSignal{
+		action: epochReportAction,
+		data: sigDataEpochReport{
+			spot:  &msgjson.Spot{Vol24: 12345},
+			stats: &matcher.MatchCycleStats{},
+		},
+	}
+
+	update := link.getSend()
+	spot = new(msgjson.Spot)
+	if err := update.Unmarshal(spot); err != nil {
+		t.Fatalf("error unmarhsaling spot: %v", err)
+	}
+	if spot.Vol24 != 12345 {
+		t.Fatal("update volume not communicated")
+	}
+}
