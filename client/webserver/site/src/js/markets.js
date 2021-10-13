@@ -615,7 +615,7 @@ export default class MarketsPage extends BasePage {
    * on the chart area. The rate field is set to the x-value of the click.
    */
   reportDepthClick (r) {
-    this.page.rateField.value = Doc.formatCoinValue(r / this.market.rateConversionFactor)
+    this.page.rateField.value = Doc.formatCoinValue(r)
     this.rateFieldChanged()
   }
 
@@ -680,11 +680,11 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    page.candleStart.textContent = Doc.formatCoinValue(candle.startRate / 1e8)
-    page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / 1e8)
-    page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / 1e8)
-    page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / 1e8)
-    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume / 1e8)
+    page.candleStart.textContent = Doc.formatCoinValue(candle.startRate / this.market.rateConversionFactor)
+    page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / this.market.rateConversionFactor)
+    page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
+    page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / this.market.rateConversionFactor)
+    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.base.unitInfo)
     Doc.show(page.hoverData)
   }
 
@@ -729,7 +729,7 @@ export default class MarketsPage extends BasePage {
     if (adjusted && this.isLimit()) {
       this.depthLines.input = [{
         rate: order.rate / this.market.rateConversionFactor,
-        color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+        color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
     }
     this.drawChartLines()
@@ -1176,7 +1176,7 @@ export default class MarketsPage extends BasePage {
     const dur = data.payload.dur
     this.market.candleCaches[dur] = data.payload
     if (this.currentChart !== candleChart || this.candleDur !== dur) return
-    this.candleChart.setCandles(data.payload, this.market.cfg)
+    this.candleChart.setCandles(data.payload, this.market.cfg, this.market.base.info.unitinfo, this.market.quote.info.unitinfo)
   }
 
   /* handleCandleUpdateRoute is the handler for 'candle_update' notifications. */
@@ -1587,7 +1587,7 @@ export default class MarketsPage extends BasePage {
     this.page.rateField.value = r
     this.depthLines.input = [{
       rate: r,
-      color: order.sell ? this.chart.theme.sellLine : this.chart.theme.buyLine
+      color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
     }]
     this.drawChartLines()
     this.previewQuoteAmt(true)

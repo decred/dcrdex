@@ -318,7 +318,8 @@ export class DepthChart extends Chart {
   set (book, lotSize, rateStep, baseUnitInfo, quoteUnitInfo) {
     this.book = book
     this.lotSize = lotSize / baseUnitInfo.conventional.conversionFactor
-    this.rateStep = rateStep / RateEncodingFactor
+    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
+    this.rateStep = rateStep / RateEncodingFactor * qFactor / bFactor
     this.baseUnit = baseUnitInfo.conventional.unit
     this.quoteUnit = quoteUnitInfo.conventional.unit
     if (!this.zoomLevel) {
@@ -764,7 +765,8 @@ export class CandleChart extends Chart {
     this.dataExtents = dataExtents
 
     // Apply labels.
-    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / 1e8))
+    const rFactor = this.rateConversionFactor
+    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / rFactor))
     this.candleRegion.extents.x.min = this.yRegion.extents.x.max
     this.volumeRegion.extents.x.min = this.yRegion.extents.x.max
 
@@ -848,10 +850,12 @@ export class CandleChart extends Chart {
   }
 
   /* setCandles sets the candle data and redraws the chart. */
-  setCandles (data, market) {
+  setCandles (data, market, baseUnitInfo, quoteUnitInfo) {
     this.data = data
     if (!data.candles) return
     this.market = market
+    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
+    this.rateConversionFactor = RateEncodingFactor * bFactor / qFactor
     let n = 25
     this.zoomLevels = []
     const maxCandles = Math.max(data.candles.length, 1000)
