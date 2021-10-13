@@ -6,12 +6,14 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -34,6 +36,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
+	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/go-socks/socks"
@@ -1678,13 +1681,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return err
 	}
-	var encPW []byte
-	if len(walletPW) > 0 {
-		encPW, err = crypter.Encrypt(walletPW)
-		if err != nil {
-			return fmt.Errorf("wallet password encryption error: %w", err)
-		}
-	}
 
 	walletInfo, err := asset.Info(assetID)
 	if err != nil {
@@ -1704,6 +1700,24 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	for key := range form.Config {
 		if !expectedKeys[key] {
 			delete(form.Config, key)
+		}
+	}
+
+	if walletInfo.Seeded {
+		if len(walletPW) > 0 {
+			return fmt.Errorf("external password incompatible with seeded wallet")
+		}
+		walletPW, err = c.createSeededWallet(assetID, crypter, form)
+		if err != nil {
+			return err
+		}
+	}
+
+	var encPW []byte
+	if len(walletPW) > 0 {
+		encPW, err = crypter.Encrypt(walletPW)
+		if err != nil {
+			return fmt.Errorf("wallet password encryption error: %w", err)
 		}
 	}
 
@@ -1764,6 +1778,48 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	return nil
 }
 
+// createSeededWallet initializes a seeded wallet with an asset-specific seed
+// derived deterministically from the app seed and a random password. The
+// password is returned for encrypting and storing.
+func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
+	creds := c.creds()
+	if creds == nil {
+		return nil, fmt.Errorf("no v2 credentials stored")
+	}
+
+	root, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, fmt.Errorf("seed decryption error: %w", err)
+	}
+
+	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
+
+	b := make([]byte, len(root)+4)
+	copy(b, root)
+	assetB := make([]byte, 4)
+	binary.BigEndian.PutUint32(assetB, assetID)
+	copy(b[len(root):], assetB)
+
+	seed := blake256.Sum256(b)
+	pw := encode.RandomBytes(32)
+	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
+		Seed:     seed[:],
+		Pass:     pw[:],
+		Settings: form.Config,
+		DataDir:  c.assetDataDirectory(assetID),
+		Net:      c.net,
+	}); err != nil {
+		return nil, fmt.Errorf("Error creating wallet: %w", err)
+	}
+
+	return pw, nil
+}
+
+// assetDataDirectory is a directory for a wallet to use for local storage.
+func (c *Core) assetDataDirectory(assetID uint32) string {
+	return filepath.Join(filepath.Dir(c.cfg.DBPath), "assetdb", unbip(assetID))
+}
+
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
@@ -1779,10 +1835,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			go c.tipChange(assetID, err)
 		},
 	}
+
 	logger := c.log.SubLogger(unbip(assetID))
-	w, err := asset.Setup(assetID, walletCfg, logger, c.net)
+	w, err := asset.OpenWallet(assetID, walletCfg, logger, c.net)
 	if err != nil {
-		return nil, fmt.Errorf("error creating wallet: %w", err)
+		return nil, fmt.Errorf("error opening wallet: %w", err)
 	}
 
 	// Construct the unconnected xcWallet.
@@ -1953,6 +2010,11 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		EncryptedPW: oldWallet.encPW(),
 		Address:     oldDepositAddr,
 	}
+	seeded := oldWallet.Info().Seeded
+	if seeded && len(newWalletPW) > 0 {
+		return newError(passwordErr, "cannot set a password on a seeded wallet")
+	}
+
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {

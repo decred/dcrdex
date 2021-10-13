@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -612,12 +613,6 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 		return fmt.Errorf("seed decryption error: %w", err)
 	}
 
-	// Get the root key.
-	root, err := hdkeychain.NewMaster(seed, &rootKeyParams{})
-	if err != nil {
-		return fmt.Errorf("NewMaster error: %w", err)
-	}
-
 	dexPkB := a.dexPubKey.SerializeCompressed()
 	// And because I'm neurotic.
 	if len(dexPkB) != 33 {
@@ -628,23 +623,6 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	// keys. We could surmise a hundred different algorithms to derive the DEX
 	// key, and there's nothing particularly special about doing it this way,
 	// but it works.
-
-	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
-		// While extremely unlikely, it may be necessary to skip indexes.
-		err := hdkeychain.ErrInvalidChild
-		for err == hdkeychain.ErrInvalidChild {
-			var kid *hdkeychain.ExtendedKey
-			// Hardened child by modding i first, technically doubling the
-			// collision rate, but OK.
-			kid, err = parent.Child(childIdx%hdkeychain.HardenedKeyStart + hdkeychain.HardenedKeyStart)
-			if err == nil {
-				return kid, nil
-			}
-			fmt.Printf("Child derive skipped a key index %d -> %d", childIdx, childIdx+1) // < 1 in 2^127 chance
-			childIdx++
-		}
-		return nil, err
-	}
 
 	// Prepare the chain of child indices.
 	kids := make([]uint32, 0, 11) // 1 x purpose, 1 x version (incl. oddness), 8 x 4-byte uint32s, 1 x acct key index.
@@ -660,13 +638,15 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	// Last child is the account key index.
 	kids = append(kids, keyIndex)
 
-	// Start with the root key.
-	extKey := root
-	for _, childIdx := range kids {
-		extKey, err = genChild(extKey, childIdx)
-		if err != nil {
-			return fmt.Errorf("genChild error: %w", err)
-		}
+	// Harden children by modding i first, technically doubling the
+	// collision rate, but OK.
+	for i := 0; i < len(kids); i++ {
+		kids[i] = kids[i]%hdkeychain.HardenedKeyStart + hdkeychain.HardenedKeyStart
+	}
+
+	extKey, err := keygen.GenDeepChild(seed, kids)
+	if err != nil {
+		return fmt.Errorf("GenDeepChild error: %w", err)
 	}
 
 	privB, err := extKey.SerializedPrivKey()
@@ -900,15 +880,4 @@ type MaxOrderEstimate struct {
 type OrderEstimate struct {
 	Swap   *asset.PreSwap   `json:"swap"`
 	Redeem *asset.PreRedeem `json:"redeem"`
-}
-
-// RootKeyParams implements hdkeychain.NetworkParams for master
-// hdkeychain.ExtendedKey creation.
-type rootKeyParams struct{}
-
-func (*rootKeyParams) HDPrivKeyVersion() [4]byte {
-	return [4]byte{0x74, 0x61, 0x63, 0x6f} // ASCII "taco"
-}
-func (*rootKeyParams) HDPubKeyVersion() [4]byte {
-	return [4]byte{0x64, 0x65, 0x78, 0x63} // ASCII "dexc"
 }

@@ -379,8 +379,12 @@ type TCore struct {
 // TDriver implements the interface required of all exchange wallets.
 type TDriver struct{}
 
-func (*TDriver) Setup(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error) {
+func (*TDriver) Open(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error) {
 	return nil, nil
+}
+
+func (*TDriver) Create(*asset.CreateWalletParams) error {
+	return nil
 }
 
 func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {

@@ -8,12 +8,15 @@ package eth
 
 import (
 	"crypto/ecdsa"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -133,7 +136,8 @@ func SetSimnetGenesis(sng string) {
 	simnetGenesis = sng
 }
 
-func runNode(cfg *nodeConfig) (*node.Node, error) {
+// prepareNode sets up a geth node, but does not start it.
+func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 	stackConf := &node.Config{DataDir: cfg.appDir}
 
 	stackConf.Logger = &ethLogger{dl: cfg.logger}
@@ -190,8 +194,13 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 		return nil, err
 	}
 
+	return stack, nil
+}
+
+// startNode starts a geth node.
+func startNode(node *node.Node, network dex.Network) error {
 	ethCfg := ethconfig.Defaults
-	switch cfg.net {
+	switch network {
 	case dex.Simnet:
 		var sp core.Genesis
 		if simnetGenesis == "" {
@@ -199,17 +208,17 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 			genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
 			genBytes, err := os.ReadFile(genesisFile)
 			if err != nil {
-				return nil, fmt.Errorf("error reading genesis file: %v", err)
+				return fmt.Errorf("error reading genesis file: %v", err)
 			}
 			genLen := len(genBytes)
 			if genLen == 0 {
-				return nil, fmt.Errorf("no genesis found at %v", genesisFile)
+				return fmt.Errorf("no genesis found at %v", genesisFile)
 			}
 			genBytes = genBytes[:genLen-1]
 			SetSimnetGenesis(string(genBytes))
 		}
 		if err := json.Unmarshal([]byte(simnetGenesis), &sp); err != nil {
-			return nil, fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
+			return fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
 		}
 		ethCfg.Genesis = &sp
 		ethCfg.NetworkId = 42
@@ -219,22 +228,41 @@ func runNode(cfg *nodeConfig) (*node.Node, error) {
 	case dex.Mainnet:
 		// urls = params.MainnetBootnodes
 		// TODO: Allow.
-		return nil, fmt.Errorf("eth cannot be used on mainnet")
+		return fmt.Errorf("eth cannot be used on mainnet")
 	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(cfg.net))
+		return fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
 
 	ethCfg.SyncMode = downloader.LightSync
 
-	if _, err := les.New(stack, &ethCfg); err != nil {
-		return nil, err
+	if _, err := les.New(node, &ethCfg); err != nil {
+		return err
 	}
 
-	if err := stack.Start(); err != nil {
-		return nil, err
+	if err := node.Start(); err != nil {
+		return err
 	}
 
-	return stack, nil
+	return nil
+}
+
+// importAccountToNode imports an account into the ethereum wallet by private key
+// that can be unlocked with password.
+func importAccountToNode(node *node.Node, privateKey, password []byte) error {
+	ecdsaPrivateKey, err := crypto.ToECDSA(privateKey)
+	if err != nil {
+		return err
+	}
+	ks := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+	_, err = ks.ImportECDSA(ecdsaPrivateKey, hex.EncodeToString(password))
+	return err
+}
+
+// exportAccountsFromNode returns all the accounts for which a the ethereum wallet
+// has stored a private key.
+func exportAccountsFromNode(node *node.Node) []accounts.Account {
+	ks := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+	return ks.Accounts()
 }
 
 //

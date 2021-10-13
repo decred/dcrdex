@@ -41,6 +41,8 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
+	// Seeded
+	Seeded bool
 }
 
 // ConfigOption is a wallet configuration option.

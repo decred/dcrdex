@@ -42,8 +42,10 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
+	"decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -55,9 +57,10 @@ import (
 )
 
 const (
-	pw        = "abc"
-	alphaNode = "enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304"
-	alphaAddr = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	pw            = "abc"
+	alphaNode     = "enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304"
+	alphaAddr     = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	walletSeedHex = "5c52e2ef5f5298ec41107e4e9573df4488577fb3504959cbc26c88437205dd2c0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
 )
 
 var (
@@ -151,7 +154,24 @@ func TestMain(m *testing.M) {
 			"appdir":         testDir,
 			"nodelistenaddr": "localhost:30355",
 		}
-		wallet, err := NewWallet(&asset.WalletConfig{Settings: settings}, tLogger, dex.Simnet)
+		walletSeed, _ := hex.DecodeString(walletSeedHex)
+		pass := encode.RandomBytes(64)
+		walletConfig := asset.WalletConfig{
+			Settings: settings,
+			DataDir:  testDir,
+		}
+		createWalletParams := asset.CreateWalletParams{
+			Seed:     walletSeed,
+			Pass:     pass,
+			Settings: settings,
+			DataDir:  testDir,
+			Net:      dex.Simnet,
+		}
+		err = CreateWallet(&createWalletParams)
+		if err != nil {
+			return 1, fmt.Errorf("error creating node: %v\n", err)
+		}
+		wallet, err := NewWallet(&walletConfig, tLogger, dex.Simnet)
 		if err != nil {
 			return 1, fmt.Errorf("error starting node: %v\n", err)
 		}

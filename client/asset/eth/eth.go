@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,9 +23,11 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/keygen"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -78,6 +81,7 @@ var (
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
 		UnitInfo:          swap.UnitInfo,
+		Seeded:            true,
 	}
 	mainnetContractAddr = common.HexToAddress("")
 )
@@ -88,8 +92,8 @@ var _ asset.Driver = (*Driver)(nil)
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the ETH exchange wallet. Start the wallet with its Run method.
-func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+// Open opens the ETH exchange wallet. Start the wallet with its Run method.
+func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
 
@@ -105,6 +109,10 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	return CreateWallet(params)
 }
 
 // rawWallet is an unexported return type from the eth client. Watch for changes at
@@ -181,28 +189,83 @@ func (*ExchangeWallet) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// CreateWallet creates a new internal ETH wallet and stores the private key
+// derived from the wallet seed.
+func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
+	walletDir := getWalletDir(createWalletParams.DataDir, createWalletParams.Net)
+	nodeCFG := &nodeConfig{
+		net:    createWalletParams.Net,
+		appDir: walletDir,
+	}
+	node, err := prepareNode(nodeCFG)
+	if err != nil {
+		return err
+	}
+
+	// m/44'/60'/0'/0/0
+	path := []uint32{hdkeychain.HardenedKeyStart + 44,
+		hdkeychain.HardenedKeyStart + 60,
+		hdkeychain.HardenedKeyStart,
+		0,
+		0}
+	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, path)
+	defer extKey.Zero()
+	if err != nil {
+		return err
+	}
+
+	privateKey, err := extKey.SerializedPrivKey()
+	defer keygen.ZeroBytes(privateKey)
+	if err != nil {
+		return err
+	}
+
+	importAccountToNode(node, privateKey, createWalletParams.Pass)
+	if err != nil {
+		return err
+	}
+
+	return node.Close()
+}
+
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. It starts an internal light node.
 func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
-	cfg, err := loadConfig(assetCFG.Settings, network)
-	if err != nil {
-		return nil, err
-	}
+	walletDir := getWalletDir(assetCFG.DataDir, network)
 	nodeCFG := &nodeConfig{
 		net:    network,
-		appDir: cfg.AppDir,
+		appDir: walletDir,
 		logger: logger.SubLogger("NODE"),
 	}
-	node, err := runNode(nodeCFG)
+
+	node, err := prepareNode(nodeCFG)
 	if err != nil {
 		return nil, err
 	}
+
+	err = startNode(node, network)
+	if err != nil {
+		return nil, err
+	}
+
+	accounts := exportAccountsFromNode(node)
+	if len(accounts) != 1 {
+		return nil,
+			fmt.Errorf("NewWallet: eth node keystore should only contain 1 account, but contains %v",
+				len(accounts))
+	}
+
 	return &ExchangeWallet{
 		log:          logger,
 		tipChange:    assetCFG.TipChange,
 		internalNode: node,
 		lockedFunds:  make(map[string]uint64),
+		acct:         &accounts[0],
 	}, nil
+}
+
+func getWalletDir(dataDir string, network dex.Network) string {
+	return filepath.Join(dataDir, network.String())
 }
 
 func (eth *ExchangeWallet) shutdown() {
@@ -220,11 +283,6 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 	eth.node = &c
 	eth.ctx = ctx
-
-	eth.acct, err = eth.initAccount()
-	if err != nil {
-		return nil, err
-	}
 
 	// Initialize the best block.
 	bestHash, err := eth.node.bestBlockHash(ctx)
@@ -250,37 +308,6 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		eth.shutdown()
 	}()
 	return &wg, nil
-}
-
-// initAccount checks to see if the internal client has an account. If found
-// returns the account. If not it imports the account via private key.
-//
-// Currently this only imports a test account. However, in the future this will
-// need to be created deterministically from the app seed.
-func (eth *ExchangeWallet) initAccount() (*accounts.Account, error) {
-	testAcctAddr := common.HexToAddress("b6de8bb5ed28e6be6d671975cad20c03931be981")
-	accts := eth.node.accounts()
-	for _, acct := range accts {
-		if bytes.Equal(acct.Address[:], testAcctAddr[:]) {
-			return acct, nil
-		}
-	}
-	testAcctPrivHex := "0695b9347a4dc096ae5c6f1935380ceba550c70b112f1323c211bade4d11651b"
-	pw := "abc"
-	privB, err := hex.DecodeString(testAcctPrivHex)
-	if err != nil {
-		return nil, err
-	}
-	acct, err := eth.node.importAccount(pw, privB)
-	if err != nil {
-		return nil, err
-	}
-	// core expects an account to be unlocked during initialization.
-	err = eth.node.unlock(eth.ctx, pw, acct)
-	if err != nil {
-		return nil, err
-	}
-	return acct, nil
 }
 
 // OwnsAddress indicates if an address belongs to the wallet.
