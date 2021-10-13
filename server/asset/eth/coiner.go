@@ -38,13 +38,13 @@ type swapCoin struct {
 	sct                        swapCoinType
 }
 
-// newSwapCoin creats a new swapCoin that stores and retrieves info about a
+// newSwapCoin creates a new swapCoin that stores and retrieves info about a
 // swap. It requires a coinID that is a txid type of the initial transaction
 // initializing or redeeming the swap. A txid type and not a swap type is
 // required because the contract will give us no useful information about the
 // swap before it is mined. Having the initial transaction allows us to track
 // it in the mempool. It also tells us all the data we need to confirm a tx
-// will do what we expect if mined and satisfies contract contraints. These
+// will do what we expect if mined and satisfies contract constraints. These
 // fields are verified the first time the Confirmations method is called, and
 // an error is returned then if something is different than expected. As such,
 // the swapCoin expects Confirmations to be called with confirmations
@@ -107,10 +107,7 @@ func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, 
 		return nil, fmt.Errorf("unable to convert gas price: %v", err)
 	}
 
-	// Value is stored in the swap but it is also this value. Because we
-	// can't yet be sure this transaction represents the passed secret
-	// hash, value should be checked by using the contract once it has
-	// confirmations.
+	// Value is stored in the swap with the initialization transaction.
 	value, err := ToGwei(tx.Value())
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert value: %v", err)
@@ -136,12 +133,7 @@ func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, 
 }
 
 // Confirmations returns the number of confirmations for a Coin's
-// transaction. Because a Coin can become invalid after once being
-// considered valid, this condition should be checked for during
-// confirmation counting and an error returned if this Coin is no longer
-// ready to spend. An unmined transaction should have zero confirmations. A
-// transaction in the current best block should have one confirmation. A
-// negative number can be returned if error is not nil.
+// transaction.
 //
 // In the case of ethereum it is extra important to check confirmations before
 // confirming a swap. Even though we check the initial transaction's data, if
@@ -153,17 +145,6 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 	swap, err := c.backend.node.swap(c.backend.rpcCtx, c.secretHash)
 	if err != nil {
 		return -1, err
-	}
-
-	assertMempool := func() error {
-		_, mempool, err := c.backend.node.transaction(c.backend.rpcCtx, common.HexToHash(c.txid))
-		if err != nil {
-			return fmt.Errorf("unable to fetch transaction: %v", err)
-		}
-		if !mempool {
-			return fmt.Errorf("critical problem with swap coin: tx not in mempool but swap state is %s", SwapState(swap.State))
-		}
-		return nil
 	}
 
 	switch c.sct {
@@ -181,12 +162,9 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 			// confirmation.
 			return 1, nil
 		}
-		// If swap is in the Initiated state, the transaction must be
+		// If swap is in the Initiated state, the transaction may be
 		// unmined.
 		if ss == SSInitiated {
-			if err := assertMempool(); err != nil {
-				return -1, err
-			}
 			// Assume the tx still has a chance of being mined.
 			return 0, nil
 		}
@@ -200,14 +178,8 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// Uninitiated state is zero confs. It could still be in mempool.
 		// It is important to only trust confirmations according to the
 		// swap contract. Until there are confirmations we cannot be sure
-		// that initiation happened successfuly. If the swap shows an
-		// uninitiated state but the init transaction has confirmations,
-		// something is wrong or initialization failed and this swap
-		// should be dropped.
+		// that initiation happened successfuly.
 		if SwapState(swap.State) == SSNone {
-			if err := assertMempool(); err != nil {
-				return -1, err
-			}
 			// Assume the tx still has a chance of being mined.
 			return 0, nil
 		}

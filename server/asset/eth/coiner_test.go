@@ -199,15 +199,14 @@ func TestConfirmations(t *testing.T) {
 	oneGweiMore := big.NewInt(1e9)
 	oneGweiMore.Add(oneGweiMore, value)
 	tests := []struct {
-		name                  string
-		swap                  *dexeth.ETHSwapSwap
-		txIsMempool           bool
-		bn                    uint64
-		value                 *big.Int
-		ct                    swapCoinType
-		wantConfs             int64
-		swapErr, txErr, bnErr error
-		wantErr, setCT        bool
+		name           string
+		swap           *dexeth.ETHSwapSwap
+		bn             uint64
+		value          *big.Int
+		ct             swapCoinType
+		wantConfs      int64
+		swapErr, bnErr error
+		wantErr, setCT bool
 	}{{
 		name:      "ok has confs value not verified",
 		bn:        100,
@@ -216,23 +215,21 @@ func TestConfirmations(t *testing.T) {
 		ct:        sctInit,
 		wantConfs: 3,
 	}, {
-		name:        "ok no confs",
-		swap:        tSwap(0, bigO, bigO, SSNone, nullAddr),
-		value:       value,
-		ct:          sctInit,
-		txIsMempool: true,
+		name:  "ok no confs",
+		swap:  tSwap(0, bigO, bigO, SSNone, nullAddr),
+		value: value,
+		ct:    sctInit,
 	}, {
-		name:      "ok redeem",
+		name:      "ok redeem swap status redeemed",
 		swap:      tSwap(97, locktime, value, SSRedeemed, &initParticipantAddr),
 		value:     bigO,
 		ct:        sctRedeem,
 		wantConfs: 1,
 	}, {
-		name:        "ok redeem in mempool",
-		swap:        tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
-		value:       bigO,
-		txIsMempool: true,
-		ct:          sctRedeem,
+		name:  "ok redeem swap status initiated",
+		swap:  tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		value: bigO,
+		ct:    sctRedeem,
 	}, {
 		name:    "unknown coin type",
 		ct:      sctInit,
@@ -245,27 +242,8 @@ func TestConfirmations(t *testing.T) {
 		ct:      sctRedeem,
 		wantErr: true,
 	}, {
-		name:    "redeem initiated but not in mempool",
-		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
-		value:   bigO,
-		ct:      sctRedeem,
-		wantErr: true,
-	}, {
 		name:    "error getting swap",
 		swapErr: errors.New(""),
-		value:   value,
-		ct:      sctInit,
-		wantErr: true,
-	}, {
-		name:    "error getting transaction",
-		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
-		value:   value,
-		ct:      sctInit,
-		txErr:   errors.New(""),
-		wantErr: true,
-	}, {
-		name:    "no confs but tx not in mempool",
-		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
@@ -313,12 +291,11 @@ func TestConfirmations(t *testing.T) {
 			txdata = redeemCalldata
 		}
 		node := &testNode{
-			tx:          tTx(gasPrice, test.value, contractAddr, txdata),
-			txIsMempool: test.txIsMempool,
-			swp:         test.swap,
-			swpErr:      test.swapErr,
-			blkNum:      test.bn,
-			blkNumErr:   test.bnErr,
+			tx:        tTx(gasPrice, test.value, contractAddr, txdata),
+			swp:       test.swap,
+			swpErr:    test.swapErr,
+			blkNum:    test.bn,
+			blkNumErr: test.bnErr,
 		}
 		eth := &Backend{
 			node:         node,
@@ -337,7 +314,6 @@ func TestConfirmations(t *testing.T) {
 			sc.sct = swapCoinType(^uint8(0))
 		}
 
-		node.txErr = test.txErr
 		confs, err := sc.Confirmations(nil)
 		if test.wantErr {
 			if err == nil {

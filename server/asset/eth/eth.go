@@ -34,10 +34,12 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	// TODO: Fill in with an address. Also consider upgrades where one
+	// TODO: Fill in with an addresses. Also consider upgrades where one
 	// contract will be good for current active swaps, but a new one is
 	// required for new swaps.
 	mainnetContractAddr = ""
+	testnetContractAddr = ""
+	simnetContractAddr  = ""
 )
 
 var (
@@ -70,11 +72,16 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
+//
+// TODO: At some point multiple contracts will need to be used, at least for
+// transitory periods when updating the contract, and possibly a random
+// contract setup, and so contract addresses may need to be an argument in some
+// of these methods.
 type ethFetcher interface {
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
-	connect(ctx context.Context, IPC string, contractAddr *common.Address) error
+	connect(ctx context.Context, ipc string, contractAddr *common.Address) error
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
@@ -120,7 +127,19 @@ var _ asset.Backend = (*Backend)(nil)
 // before use.
 func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 	ctx, cancel := context.WithCancel(context.Background())
-	mainnetContractAddr := common.HexToAddress(mainnetContractAddr)
+	// TODO: At some point multiple contracts will need to be used, at
+	// least for transitory periods when updating the contract, and
+	// possibly a random contract setup, and so this section will need to
+	// change to support multiple contracts.
+	var contractAddr common.Address
+	switch cfg.network {
+	case dex.Simnet:
+		contractAddr = common.HexToAddress(simnetContractAddr)
+	case dex.Testnet:
+		contractAddr = common.HexToAddress(testnetContractAddr)
+	case dex.Mainnet:
+		contractAddr = common.HexToAddress(mainnetContractAddr)
+	}
 	return &Backend{
 		rpcCtx:       ctx,
 		cancelRPCs:   cancel,
@@ -128,7 +147,7 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 		blockCache:   newBlockCache(logger),
 		log:          logger,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-		contractAddr: mainnetContractAddr,
+		contractAddr: contractAddr,
 	}
 }
 
@@ -149,7 +168,7 @@ func (eth *Backend) shutdown() {
 // Connect connects to the node RPC server and initializes some variables.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	if err := c.connect(ctx, eth.cfg.IPC, &eth.contractAddr); err != nil {
+	if err := c.connect(ctx, eth.cfg.ipc, &eth.contractAddr); err != nil {
 		return nil, err
 	}
 	eth.node = &c

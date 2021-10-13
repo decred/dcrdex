@@ -73,7 +73,7 @@ type testNode struct {
 	txErr          error
 }
 
-func (n *testNode) connect(ctx context.Context, IPC string, contractAddr *common.Address) error {
+func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
 	return n.connectErr
 }
 
@@ -127,29 +127,29 @@ func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr 
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name, IPC, wantIPC string
+		name, ipc, wantIPC string
 		network            dex.Network
 		wantErr            bool
 	}{{
 		name:    "ok ipc supplied",
-		IPC:     "/home/john/bleh.ipc",
+		ipc:     "/home/john/bleh.ipc",
 		wantIPC: "/home/john/bleh.ipc",
 		network: dex.Simnet,
 	}, {
 		name:    "ok ipc not supplied",
-		IPC:     "",
+		ipc:     "",
 		wantIPC: defaultIPC,
 		network: dex.Simnet,
 	}, {
 		name:    "mainnet not allowed",
-		IPC:     "",
+		ipc:     "",
 		wantIPC: defaultIPC,
 		network: dex.Mainnet,
 		wantErr: true,
 	}}
 
 	for _, test := range tests {
-		cfg, err := load(test.IPC, test.network)
+		cfg, err := load(test.ipc, test.network)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -159,8 +159,8 @@ func TestLoad(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		if cfg.IPC != test.wantIPC {
-			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.IPC, test.name)
+		if cfg.ipc != test.wantIPC {
+			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.ipc, test.name)
 		}
 	}
 }

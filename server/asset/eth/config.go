@@ -20,14 +20,16 @@ var (
 )
 
 type config struct {
-	// IPC is the location of the inner process communication socket.
-	IPC string `long:"ipc" description:"Location of the geth ipc socket."`
+	// ipc is the location of the inner process communication socket.
+	ipc string
+	// network is the network the dex is meant to be running on.
+	network dex.Network
 }
 
 // load checks the network and sets the ipc location if not supplied.
 //
 // TODO: Test this with windows.
-func load(IPC string, network dex.Network) (*config, error) {
+func load(ipc string, network dex.Network) (*config, error) {
 	switch network {
 	case dex.Simnet:
 	case dex.Testnet:
@@ -39,11 +41,12 @@ func load(IPC string, network dex.Network) (*config, error) {
 	}
 
 	cfg := &config{
-		IPC: IPC,
+		ipc:     ipc,
+		network: network,
 	}
 
-	if cfg.IPC == "" {
-		cfg.IPC = defaultIPC
+	if cfg.ipc == "" {
+		cfg.ipc = defaultIPC
 	}
 
 	return cfg, nil
