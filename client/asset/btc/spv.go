@@ -4,8 +4,8 @@
 // spvWallet implements a Wallet backed by a built-in btcwallet + Neutrino.
 //
 // There are a few challenges presented in using an SPV wallet for DEX.
-// 1. Finding non-wallet related blockchain data requires posession of the
-//    pubkey script, not just transction hash and output index
+// 1. Finding non-wallet related blockchain data requires possession of the
+//    pubkey script, not just transaction hash and output index
 // 2. Finding non-wallet related blockchain data can often entail extensive
 //    scanning of compact filters. We can limit these scans with more
 //    information, such as the match time, which would be the earliest a
@@ -39,6 +39,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btclog"
 	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/btcutil/gcs"
 	"github.com/btcsuite/btcutil/psbt"
@@ -47,8 +48,9 @@ import (
 	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wallet/txauthor"
 	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	_ "github.com/btcsuite/btcwallet/walletdb/bdb" // bdb init() registers a driver
 	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/jrick/logrotate/rotator"
 	"github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
 )
@@ -58,13 +60,11 @@ const (
 	SpentStatusUnknown        = dex.ErrorKind("spend status not known")
 
 	// see btcd/blockchain/validate.go
-	maxBlockTimeOffset = 2 * time.Hour
+	maxFutureBlockTime = 2 * time.Hour
 	neutrinoDBName     = "neutrino.db"
-)
-
-var (
-	SimnetSeed    = []byte("simnet-seed-of-considerable-length")
-	SimnetAddress = "bcrt1qq8t6vmptznycut4f3vxtguxgknmcnmpqlvd8wf"
+	logDirName         = "logs"
+	defaultAcctNum     = 0
+	defaultAcctName    = "default"
 )
 
 // btcWallet is satisfied by *btcwallet.Wallet.
@@ -109,114 +109,68 @@ type neutrinoService interface {
 	Stop() error
 }
 
-// hashMap manages a mapping of chainhash.Hash -> chainhash.Hash. hashMap is
-// satisfied by hashmap.Map, or a stub for testing purposes.
-type hashMap interface {
-	Get(chainhash.Hash) *chainhash.Hash
-	Set(k, v chainhash.Hash)
-	Run(context.Context)
-	Close() error
-}
-
-// spvConfig is configuration for the built-in SPV wallet.
-type spvConfig struct {
-	dbDir        string
-	chainParams  *chaincfg.Params
-	connectPeers []string
-}
-
-// loadChainClient initializes the *btcwallet.Wallet and its supporting players.
-// The returned wallet is not syncing.
-func loadChainClient(cfg *spvConfig) (*wallet.Wallet, *wallet.Loader, *neutrino.ChainService, walletdb.DB, error) {
-	netDir := filepath.Join(cfg.dbDir, cfg.chainParams.Name)
-
-	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	loader := wallet.NewLoader(cfg.chainParams, netDir, true, 60*time.Second, 250)
-
-	exists, err := loader.WalletExists()
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("error verifying wallet existence: %v", err)
-	}
-	if !exists {
-		return nil, nil, nil, nil, fmt.Errorf("wallet not found")
-	}
-
-	w, err := loader.OpenExistingWallet([]byte(wallet.InsecurePubPassphrase), false)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("couldn't load wallet")
-	}
-
-	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
-	neutrinoDB, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
-	}
-
-	// If we're on regtest and the peers haven't been explicitly set, add the
-	// simnet harness alpha node as an additional peer so we don't have to type
-	// it in.
-	var addPeers []string
-	if cfg.chainParams.Name == "regtest" && len(cfg.connectPeers) == 0 {
-		addPeers = append(addPeers, "localhost:20575")
-	}
-
-	chainService, err := neutrino.NewChainService(neutrino.Config{
-		DataDir:      netDir,
-		Database:     neutrinoDB,
-		ChainParams:  *cfg.chainParams,
-		ConnectPeers: cfg.connectPeers,
-		AddPeers:     addPeers,
-	})
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("couldn't create Neutrino ChainService: %v", err)
-	}
-
-	return w, loader, chainService, neutrinoDB, nil
-}
-
-// startWallet starts neutrino and begins the wallet sync.
-func startWallet(loader *wallet.Loader, chainClient *chain.NeutrinoClient) error {
-	w, loaded := loader.LoadedWallet()
-	if !loaded {
-		return fmt.Errorf("wallet not loaded")
-	}
-	err := chainClient.Start()
-	if err != nil {
-		return fmt.Errorf("couldn't start Neutrino client: %v", err)
-	}
-
-	w.SynchronizeRPC(chainClient)
-	return nil
-}
-
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, dbDir string, net *chaincfg.Params) error {
+func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger, net *chaincfg.Params) error {
 	netDir := filepath.Join(dbDir, net.Name)
-	err := os.MkdirAll(netDir, 0777)
+	logDir := filepath.Join(netDir, logDirName)
+	err := os.MkdirAll(logDir, 0777)
 	if err != nil {
 		return fmt.Errorf("error creating wallet directories: %v", err)
 	}
 
 	loader := wallet.NewLoader(net, netDir, true, 60*time.Second, 250)
-	defer loader.UnloadWallet()
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
-
 	_, err = loader.CreateNewWallet(pubPass, privPass, seed, time.Now())
 	if err != nil {
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
 
+	bailOnWallet := func() {
+		if err := loader.UnloadWallet(); err != nil {
+			log.Errorf("Error unloading wallet after createSPVWallet error: %v", err)
+		}
+	}
+
 	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
 	if err != nil {
+		go bailOnWallet()
 		return fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
 	}
-	if err := db.Close(); err != nil {
+	if err = db.Close(); err != nil {
+		go bailOnWallet()
 		return fmt.Errorf("error closing newly created wallet database: %w", err)
 	}
 
+	if err := loader.UnloadWallet(); err != nil {
+		return fmt.Errorf("error unloading wallet: %w", err)
+	}
+
 	return nil
+}
+
+// spendingInput is added to a filterScanResult if a spending input is found.
+type spendingInput struct {
+	txHash      chainhash.Hash
+	vin         uint32
+	blockHash   chainhash.Hash
+	blockHeight uint32
+}
+
+// filterScanResult is the result from a filter scan.
+type filterScanResult struct {
+	// blockHash is the block that the output was found in.
+	blockHash *chainhash.Hash
+	// blockHeight is the height of the block that the output was found in.
+	blockHeight uint32
+	// txOut is the output itself.
+	txOut *wire.TxOut
+	// spend will be set if a spending input is found.
+	spend *spendingInput
+	// checkpoint is used to track the last block scanned so that future scans
+	// can skip scanned blocks.
+	checkpoint chainhash.Hash
 }
 
 // hashEntry stores a chainhash.Hash with a last-access time that can be used
@@ -234,17 +188,29 @@ type scanCheckpoint struct {
 	lastAccess time.Time
 }
 
+// logWriter implements an io.Writer that outputs to a rotating log file.
+type logWriter struct {
+	*rotator.Rotator
+}
+
+// Write writes the data in p to the log file.
+func (w logWriter) Write(p []byte) (n int, err error) {
+	return w.Rotator.Write(p)
+}
+
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	ctx         context.Context
-	chainParams *chaincfg.Params
-	wallet      btcWallet
-	cl          neutrinoService
-	chainClient *chain.NeutrinoClient
-	acctNum     uint32
-	neutrinoDB  walletdb.DB
+	chainParams  *chaincfg.Params
+	wallet       btcWallet
+	cl           neutrinoService
+	chainClient  *chain.NeutrinoClient
+	acctNum      uint32
+	acctName     string
+	netDir       string
+	neutrinoDB   walletdb.DB
+	connectPeers []string
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -260,26 +226,17 @@ var _ Wallet = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
 func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params) (*spvWallet, error) {
-	w, loader, chainService, neutrinoDB, err := loadChainClient(&spvConfig{
-		dbDir:        dbDir,
-		chainParams:  chainParams,
-		connectPeers: connectPeers,
-	})
-	if err != nil {
-		return nil, err
-	}
+	netDir := filepath.Join(dbDir, chainParams.Name)
 
 	return &spvWallet{
-		chainParams: chainParams,
-		cl:          chainService,
-		chainClient: chain.NewNeutrinoClient(chainParams, chainService),
-		acctNum:     0,
-		wallet:      &walletExtender{w, chainParams},
-		neutrinoDB:  neutrinoDB,
-		txBlocks:    make(map[chainhash.Hash]*hashEntry),
-		checkpoints: make(map[outPoint]*scanCheckpoint),
-		log:         logger,
-		loader:      loader,
+		chainParams:  chainParams,
+		acctNum:      defaultAcctNum,
+		acctName:     defaultAcctName,
+		netDir:       netDir,
+		txBlocks:     make(map[chainhash.Hash]*hashEntry),
+		checkpoints:  make(map[outPoint]*scanCheckpoint),
+		log:          logger,
+		connectPeers: connectPeers,
 	}, nil
 }
 
@@ -320,8 +277,8 @@ func (w *spvWallet) cacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *fi
 	}
 }
 
-// checkpoint returns any cached *filterScanResult for the outpoint.
-func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
+// unvalidatedCheckpoint returns any cached *filterScanResult for the outpoint.
+func (w *spvWallet) unvalidatedCheckpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
 	w.checkpointMtx.Lock()
 	defer w.checkpointMtx.Unlock()
 	check, found := w.checkpoints[newOutPoint(txHash, vout)]
@@ -329,26 +286,26 @@ func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanR
 		return nil
 	}
 	check.lastAccess = time.Now()
-	return check.res
+	res := *check.res
+	return &res
 }
 
-// checkpointBlock returns a filterScanResult and the checkpoint block hash. If
-// a result is found with an orphaned checkpoint block hash, it is cleared from
+// checkpoint returns a filterScanResult and the checkpoint block hash. If a
+// result is found with an orphaned checkpoint block hash, it is cleared from
 // the cache and not returned.
-func (w *spvWallet) checkpointBlock(txHash *chainhash.Hash, vout uint32) (*filterScanResult, *chainhash.Hash) {
-	res := w.checkpoint(txHash, vout)
+func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
+	res := w.unvalidatedCheckpoint(txHash, vout)
 	if res == nil {
-		return nil, nil
+		return nil
 	}
-	blockHash := &res.checkpoint
-	if !w.blockIsMainchain(blockHash, -1) {
+	if !w.blockIsMainchain(&res.checkpoint, -1) {
 		// reorg detected, abandon the checkpoint.
 		w.checkpointMtx.Lock()
 		delete(w.checkpoints, newOutPoint(txHash, vout))
 		w.checkpointMtx.Unlock()
-		return nil, nil
+		return nil
 	}
-	return res, blockHash
+	return res
 }
 
 func (w *spvWallet) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
@@ -463,7 +420,7 @@ func (w *spvWallet) balances() (*GetBalancesResult, error) {
 
 // ListUnspent retrieves list of the wallet's UTXOs.
 func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, "default")
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -479,16 +436,22 @@ func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error decoding txid %q: %v", utxo.TxID, err)
 			}
-			tx, _, _, _, err := w.wallet.FetchInputInfo(wire.NewOutPoint(txHash, utxo.Vout))
+			txDetails, err := w.wallet.walletTransaction(txHash)
 			if err != nil {
-				return nil, fmt.Errorf("FetchInputInfo error: %v", err)
+				return nil, fmt.Errorf("walletTransaction error: %v", err)
 			}
 			// To be "safe", we need to show that we own the inputs for the
 			// utxo's transaction. We'll just try to find one.
-			for _, txIn := range tx.TxIn {
+			safe = true
+			// TODO: Keep a cache of our redemption outputs and allow those as
+			// safe inputs.
+			for _, txIn := range txDetails.MsgTx.TxIn {
 				_, _, _, _, err := w.wallet.FetchInputInfo(&txIn.PreviousOutPoint)
-				if err == nil {
-					safe = true
+				if err != nil {
+					if !errors.Is(err, wallet.ErrNotMine) {
+						w.log.Warnf("FetchInputInfo error: %v", err)
+					}
+					safe = false
 					break
 				}
 			}
@@ -592,7 +555,7 @@ func (w *spvWallet) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 
 // Unlock unlocks the wallet.
 func (w *spvWallet) Unlock(pw []byte) error {
-	return w.wallet.Unlock(pw, time.After(time.Duration(math.MaxInt64)))
+	return w.wallet.Unlock(pw, nil)
 }
 
 // Lock locks the wallet.
@@ -602,7 +565,7 @@ func (w *spvWallet) Lock() error {
 }
 
 // sendToAddress sends the amount to the address. feeRate is in units of
-// atoms/byte.
+// sats/byte.
 func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	addr, err := btcutil.DecodeAddress(address, w.chainParams)
 	if err != nil {
@@ -616,10 +579,8 @@ func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtrac
 
 	wireOP := wire.NewTxOut(int64(value), pkScript)
 
-	feeRateAmt, err := btcutil.NewAmount(float64(feeRate) / 1e5)
-	if err != nil {
-		return nil, err
-	}
+	// converting sats/vB -> sats/kvB
+	feeRateAmt := btcutil.Amount(feeRate * 1e3)
 
 	// Could try with minconf 1 first.
 	tx, err := w.wallet.SendOutputs([]*wire.TxOut{wireOP}, nil, w.acctNum, 0, feeRateAmt, "")
@@ -632,7 +593,7 @@ func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtrac
 	return &txHash, nil
 }
 
-// swapConfirmations attempts to get the numbe of confirmations and the spend
+// swapConfirmations attempts to get the number of confirmations and the spend
 // status for the specified tx output. For swap outputs that were not generated
 // by this wallet, startTime must be supplied to limit the search. Use the match
 // time assigned by the server.
@@ -791,9 +752,19 @@ func (w *spvWallet) calcMedianTime(blockHash *chainhash.Hash) (time.Time, error)
 
 // connect will start the wallet and begin syncing.
 func (w *spvWallet) connect(ctx context.Context) error {
-	w.ctx = ctx
+	const maxLogRolls = 8
+	logFilename := filepath.Join(w.netDir, logDirName, "neutrino.log")
+	rotator, err := rotator.New(logFilename, 32*1024, false, maxLogRolls)
+	if err != nil {
+		return fmt.Errorf("error initializing neutrino log files: %w", err)
+	}
+	backendLog := btclog.NewBackend(logWriter{rotator})
+	neutrino.UseLogger(backendLog.Logger("NTRNO"))
+	wallet.UseLogger(backendLog.Logger("BTCW"))
+	wtxmgr.UseLogger(backendLog.Logger("TXMGR"))
+	chain.UseLogger(backendLog.Logger("CHAIN"))
 
-	err := startWallet(w.loader, w.chainClient)
+	err = w.startWallet()
 	if err != nil {
 		return err
 	}
@@ -807,6 +778,7 @@ func (w *spvWallet) connect(ctx context.Context) error {
 	go func() {
 		ticker := time.NewTicker(time.Minute * 20)
 		expiration := time.Hour * 2
+	out:
 		for {
 			select {
 			case <-ticker.C:
@@ -826,10 +798,94 @@ func (w *spvWallet) connect(ctx context.Context) error {
 				}
 				w.checkpointMtx.Unlock()
 			case <-ctx.Done():
-				return
+				break out
 			}
 		}
+		w.stop()
 	}()
+
+	return nil
+}
+
+// startWallet initializes the *btcwallet.Wallet and its supporting players and
+// starts syncing.
+func (w *spvWallet) startWallet() error {
+	// timeout and recoverWindow arguments borrowed from btcwallet directly.
+	w.loader = wallet.NewLoader(w.chainParams, w.netDir, true, 60*time.Second, 250)
+
+	exists, err := w.loader.WalletExists()
+	if err != nil {
+		return fmt.Errorf("error verifying wallet existence: %v", err)
+	}
+	if !exists {
+		return fmt.Errorf("wallet not found")
+	}
+
+	btcw, err := w.loader.OpenExistingWallet([]byte(wallet.InsecurePubPassphrase), false)
+	if err != nil {
+		return fmt.Errorf("couldn't load wallet")
+	}
+
+	bailOnWallet := func() {
+		if err := w.loader.UnloadWallet(); err != nil {
+			w.log.Errorf("Error unloading wallet after loadChainClient error: %v", err)
+		}
+	}
+
+	neutrinoDBPath := filepath.Join(w.netDir, neutrinoDBName)
+	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, wallet.DefaultDBTimeout)
+	if err != nil {
+		go bailOnWallet()
+		return fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
+	}
+
+	bailOnWalletAndDB := func() {
+		if err := w.neutrinoDB.Close(); err != nil {
+			w.log.Errorf("Error closing neutrino database after loadChainClient error: %v", err)
+		}
+		bailOnWallet()
+	}
+
+	// If we're on regtest and the peers haven't been explicitly set, add the
+	// simnet harness alpha node as an additional peer so we don't have to type
+	// it in.
+	var addPeers []string
+	if w.chainParams.Name == "regtest" && len(w.connectPeers) == 0 {
+		addPeers = append(addPeers, "localhost:20575")
+	}
+
+	chainService, err := neutrino.NewChainService(neutrino.Config{
+		DataDir:      w.netDir,
+		Database:     w.neutrinoDB,
+		ChainParams:  *w.chainParams,
+		ConnectPeers: w.connectPeers,
+		AddPeers:     addPeers,
+	})
+	if err != nil {
+		go bailOnWalletAndDB()
+		return fmt.Errorf("couldn't create Neutrino ChainService: %v", err)
+	}
+
+	bailOnEverything := func() {
+		if err := chainService.Stop(); err != nil {
+			w.log.Errorf("Error closing neutrino chain service after loadChainClient error: %v", err)
+		}
+		bailOnWalletAndDB()
+	}
+
+	w.cl = chainService
+	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
+	w.wallet = &walletExtender{btcw, w.chainParams}
+
+	if err = w.chainClient.Start(); err != nil {
+		go bailOnEverything()
+		if err != nil {
+			w.log.Errorf("error unloading wallet after chain client start error: %v", err)
+		}
+		return fmt.Errorf("couldn't start Neutrino client: %v", err)
+	}
+
+	btcw.SynchronizeRPC(w.chainClient)
 
 	return nil
 }
@@ -881,7 +937,7 @@ func (w *spvWallet) blockIsMainchain(blockHash *chainhash.Hash, blockHeight int3
 	}
 	checkHash, err := w.cl.GetBlockHash(int64(blockHeight))
 	if err != nil {
-		w.log.Errorf("Error retriving block hash for height %d", blockHeight)
+		w.log.Errorf("Error retrieving block hash for height %d", blockHeight)
 		return false
 	}
 
@@ -889,7 +945,7 @@ func (w *spvWallet) blockIsMainchain(blockHash *chainhash.Hash, blockHeight int3
 }
 
 // mainchainBlockForStoredTx gets the block hash and height for the transaction
-// IFF an entry has been stored in the blockTxs index.
+// IFF an entry has been stored in the txBlocks index.
 func (w *spvWallet) mainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32) {
 	// Check that the block is still mainchain.
 	blockHash, blockHeight, err := w.blockForStoredTx(txHash)
@@ -907,14 +963,14 @@ func (w *spvWallet) mainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhas
 }
 
 // findBlockForTime locates a good start block so that a search beginning at the
-// returned block has a very low likelyhood of missing any blocks that have time
+// returned block has a very low likelihood of missing any blocks that have time
 // > matchTime. This is done by performing a binary search (sort.Search) to find
-// a block with a block time MAX_FUTURE_BLOCK_TIME before matchTime. To ensure
+// a block with a block time maxFutureBlockTime before matchTime. To ensure
 // we also accommodate the median-block time rule and aren't missing anything
 // due to out of sequence block times we use an unsophisticated algorithm of
 // choosing the first block in an 11 block window with no times >= matchTime.
 func (w *spvWallet) findBlockForTime(matchTime time.Time) (*chainhash.Hash, int32, error) {
-	offsetTime := matchTime.Add(-maxBlockTimeOffset)
+	offsetTime := matchTime.Add(-maxFutureBlockTime)
 
 	bestHeight, err := w.getBestBlockHeight()
 	if err != nil {
@@ -946,9 +1002,8 @@ func (w *spvWallet) findBlockForTime(matchTime time.Time) (*chainhash.Hash, int3
 	}
 
 	// We're actually breaking an assumption of sort.Search here because block
-	// times aren't always monotonically increasing. This won't matter though
-	// as long as there are not > blockTimeSearchBuffer blocks with inverted
-	// time order.
+	// times aren't always monotonically increasing. This won't matter though as
+	// long as there are not > medianTimeBlocks blocks with inverted time order.
 	var count int
 	var iHash *chainhash.Hash
 	var iTime time.Time
@@ -979,22 +1034,25 @@ func (w *spvWallet) findBlockForTime(matchTime time.Time) (*chainhash.Hash, int3
 // supplied, and the blockHash for the output is not known to the wallet, a
 // candidate block will be selected with findBlockTime.
 func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time, blockHash *chainhash.Hash) (*filterScanResult, error) {
+	// TODO: Check that any blockHash supplied is not orphaned?
+
 	// Check if we know the block hash for the tx.
 	var limitHeight int32
 	// See if we have a checkpoint to use.
-	checkPt, checkBlock := w.checkpointBlock(txHash, vout)
+	checkPt := w.checkpoint(txHash, vout)
 	if checkPt != nil {
 		if checkPt.blockHash != nil && checkPt.spend != nil {
 			// We already have the output and the spending input, and
 			// checkpointBlock already verified it's still mainchain.
 			return checkPt, nil
 		}
-		height, err := w.getBlockHeight(checkBlock)
+		height, err := w.getBlockHeight(&checkPt.checkpoint)
 		if err != nil {
 			return nil, fmt.Errorf("getBlockHeight error: %w", err)
 		}
 		limitHeight = height + 1
 	} else if blockHash == nil {
+		// No checkpoint and no block hash. Gotta guess based on time.
 		blockHash, limitHeight = w.mainchainBlockForStoredTx(txHash)
 		if blockHash == nil {
 			var err error
@@ -1004,16 +1062,13 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 			}
 		}
 	} else {
+		// No checkpoint, but user supplied a block hash.
 		var err error
 		limitHeight, err = w.getBlockHeight(blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error getting height for supplied block hash %s", blockHash)
 		}
 	}
-
-	// We only care about the limitHeight now, but we can tell if it's been set
-	// by whether blockHash is nil, since that means it wasn't passed in, and
-	// it wasn't found in the database.
 
 	// Do a filter scan.
 	utxo, err := w.filterScanFromHeight(*txHash, vout, pkScript, limitHeight, checkPt)
@@ -1425,29 +1480,6 @@ func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
 	return walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
 		return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 	})
-}
-
-// spendingInput is added to a filterScanResult if a spending input is found.
-type spendingInput struct {
-	txHash      chainhash.Hash
-	vin         uint32
-	blockHash   chainhash.Hash
-	blockHeight uint32
-}
-
-// filterScanResult is the result from a filter scan.
-type filterScanResult struct {
-	// blockHash is the block that the output was found in.
-	blockHash *chainhash.Hash
-	// blockHeight is the height of the block that the output was found in.
-	blockHeight uint32
-	// txOut is the output itself.
-	txOut *wire.TxOut
-	// spend will be set if a spending input is found.
-	spend *spendingInput
-	// checkpoint is used to track the last block scanned so that future scans
-	// can skip scanned blocks.
-	checkpoint chainhash.Hash
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a

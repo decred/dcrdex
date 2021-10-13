@@ -448,7 +448,7 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return fmt.Errorf("error parsing chain: %w", err)
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, params.DataDir, chainParams)
+	return createSPVWallet(params.Pass, params.Seed, params.DataDir, params.Logger, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -787,7 +787,6 @@ func (btc *ExchangeWallet) shutdown() {
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
-	btc.node.stop()
 }
 
 // getBlockchainInfoResult models the data returned from the getblockchaininfo

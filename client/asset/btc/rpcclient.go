@@ -111,8 +111,6 @@ func (wc *rpcClient) connect(ctx context.Context) error {
 	return nil
 }
 
-func (wc *rpcClient) stop() {}
-
 // RawRequest passes the reqeuest to the wallet's RawRequester.
 func (wc *rpcClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
 	return wc.requester.RawRequest(wc.ctx, method, params)
@@ -406,7 +404,7 @@ func (wc *rpcClient) walletLock() error {
 }
 
 // sendToAddress sends the amount to the address. feeRate is in units of
-// atoms/byte.
+// sats/byte.
 func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	var success bool
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.

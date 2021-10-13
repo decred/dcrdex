@@ -160,6 +160,23 @@ func Run(t *testing.T, cfg *Config) {
 	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
 	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, cfg, "alpha", "gamma", tLogger.SubLogger("gamma"), blkFunc)
 	defer rig.close()
+
+	// Unlock the wallet for use.
+	err := rig.alpha().Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking gamma wallet: %v", err)
+	}
+
+	if cfg.SPV {
+		// The test expects beta and gamma to be unlocked.
+		if err := rig.beta().Unlock(walletPassword); err != nil {
+			t.Fatalf("beta Unlock error: %v", err)
+		}
+		if err := rig.gamma().Unlock(walletPassword); err != nil {
+			t.Fatalf("gamma Unlock error: %v", err)
+		}
+	}
+
 	var lots uint64 = 2
 	contractValue := lots * cfg.LotSize
 
@@ -182,12 +199,6 @@ func Run(t *testing.T, cfg *Config) {
 		}
 		tLogger.Infof("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
-	}
-
-	// Unlock the wallet for use.
-	err := rig.alpha().Unlock(walletPassword)
-	if err != nil {
-		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}
 
 	ord := &asset.Order{

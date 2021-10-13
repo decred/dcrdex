@@ -99,6 +99,7 @@ func TestWallet(t *testing.T) {
 			Pass:    tPW, // match walletPassword in livetest.go -> Run
 			DataDir: cfg.DataDir,
 			Net:     dex.Simnet,
+			Logger:  logger,
 		})
 		if err != nil {
 			return fmt.Errorf("error creating SPV wallet: %w", err)
@@ -171,13 +172,6 @@ func TestWallet(t *testing.T) {
 		w, err := btc.NewWallet(cfg, logger, network)
 		if err != nil {
 			return nil, err
-		}
-
-		// The test expects beta and gamma to be unlocked.
-		if name == "beta" || name == "gamma" {
-			if err := w.Unlock(tPW); err != nil {
-				return nil, err
-			}
 		}
 
 		return w, nil

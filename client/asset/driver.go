@@ -25,6 +25,7 @@ type CreateWalletParams struct {
 	Settings map[string]string
 	DataDir  string
 	Net      dex.Network
+	Logger   dex.Logger
 }
 
 // Driver is the interface required of all exchange wallets.

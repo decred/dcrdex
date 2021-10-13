@@ -1818,6 +1818,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
+		Logger:   c.log.SubLogger("CREATE"),
 	}); err != nil {
 		return nil, fmt.Errorf("Error creating wallet: %w", err)
 	}

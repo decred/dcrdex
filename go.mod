@@ -6,7 +6,7 @@ require (
 	decred.org/dcrwallet/v2 v2.0.0-20210913145543-714c2f555f04
 	github.com/btcsuite/btcd v0.22.0-beta.0.20210803133449-f5a1fb9965e4
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
-	github.com/btcsuite/btcutil v1.0.3-0.20201208143702-a53e38424cce
+	github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
 	github.com/btcsuite/btcutil/psbt v1.0.3-0.20201208143702-a53e38424cce
 	github.com/btcsuite/btcwallet v0.12.0
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.1.0

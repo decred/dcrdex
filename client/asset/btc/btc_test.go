@@ -428,7 +428,7 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 const testBlocksPerBlockTimeOffset = 4
 
 func generateTestBlockTime(blockHeight int64) time.Time {
-	return time.Unix(1e6, 0).Add(time.Duration(blockHeight) * maxBlockTimeOffset / testBlocksPerBlockTimeOffset)
+	return time.Unix(1e6, 0).Add(time.Duration(blockHeight) * maxFutureBlockTime / testBlocksPerBlockTimeOffset)
 }
 
 func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash, *wire.MsgBlock) {
