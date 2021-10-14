@@ -170,6 +170,16 @@ export default class Doc {
   }
 
   /*
+  * parseTemplate returns an object of data-tmpl elements, keyed by their
+  * data-tmpl values.
+  */
+  static parseTemplate (ancestor) {
+    const d = {}
+    for (const el of ancestor.querySelectorAll('[data-tmpl')) d[el.dataset.tmpl] = el
+    return d
+  }
+
+  /*
    * timeSince returns a string representation of the duration since the specified
    * unix timestamp.
    */

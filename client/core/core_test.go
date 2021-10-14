@@ -220,6 +220,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		apiVer:            serverdex.PreAPIVersion,
 		connected:         1,
 		reportingConnects: 1,
+		spots:             make(map[string]*msgjson.Spot),
 	}, conn, acct
 }
 

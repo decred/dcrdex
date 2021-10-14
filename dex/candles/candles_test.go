@@ -10,6 +10,8 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
+const fiveMins = 5 * 60 * 1000
+
 func TestCache(t *testing.T) {
 	// ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
@@ -142,7 +144,6 @@ func TestDelta(t *testing.T) {
 	tNow := time.Now()
 	now := encode.UnixMilliU(tNow)
 	aDayAgo := now - 86400*1000
-	var fiveMins uint64 = 5 * 60 * 1000
 
 	c := NewCache(5, fiveMins)
 	// This one shouldn't be included.
@@ -167,13 +168,39 @@ func TestDelta(t *testing.T) {
 		StartRate:   125,
 		EndRate:     175,
 	})
-	delta24, vol24 := c.Delta(tNow.Add(-time.Hour * 24))
-	if delta24 < 0.74 || delta24 > 0.76 {
-		t.Fatalf("wrong delta24. expected 0.75, got, %.3f", delta24)
+
+	check24 := func(expDelta float64, expVol uint64) {
+		high, low := (expDelta + 0.01), (expDelta - 0.01)
+		delta24, vol24 := c.Delta(tNow.Add(-time.Hour * 24))
+		if delta24 < low || delta24 > high {
+			t.Fatalf("wrong delta24. expected 0.75, got, %.3f", delta24)
+		}
+		if vol24 != expVol {
+			t.Fatalf("wrong 24-hour volume. wanted 200, got %d", vol24)
+		}
 	}
-	if vol24 != 200 {
-		t.Fatalf("wrong 24-hour volume. wanted 200, got %d", vol24)
-	}
+
+	// Basic function test.
+	check24(0.75, 200)
+
+	// Zero-handling tests.
+
+	// A zero start rate on the first (used) candle should result in the EndRate
+	// being used as the base point instead. 125 -> 175 = 40% increase
+	c.Candles[1].StartRate = 0
+	check24(0.40, 200)
+
+	// A zero on the end rate too should result in that stick being skipped, but
+	// same result since start rate of next candle is same as end rate of this
+	// candle.
+	c.Candles[1].EndRate = 0
+	check24(0.40, 200)
+
+	// Set that EndRate again, but delete the last candles EndRate, forcing use
+	// of the start rate instead. 100 -> 125 = 25% increase
+	c.Candles[1].EndRate = 100
+	c.Candles[2].EndRate = 0
+	check24(0.25, 200)
 
 	// Get a delta that uses a partial stick.
 	c = NewCache(5, fiveMins)

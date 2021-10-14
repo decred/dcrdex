@@ -59,6 +59,7 @@ func (c *Cache) Add(candle *Candle) {
 		c.Candles = append(c.Candles, *candle)
 		return
 	}
+
 	if c.combineCandles(c.Last(), candle) {
 		return
 	}
@@ -113,24 +114,38 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
 	if sz == 0 {
 		return 0, 0
 	}
-	endRate := c.Last().EndRate
-	var startRate uint64
+	var startRate, endRate uint64
 	for i := 0; i < sz; i++ {
 		candle := &c.Candles[(c.cursor+sz-i)%sz]
 		if candle.EndStamp <= cutoff {
 			break
-		} else if candle.StartStamp <= cutoff {
+		}
+
+		if endRate == 0 {
+			endRate = candle.EndRate
+			if endRate == 0 {
+				endRate = candle.StartRate
+			}
+		}
+
+		if candle.StartStamp <= cutoff && candle.StartRate != 0 {
 			// Interpret the point linearly between the start and end stamps
 			cut := float64(cutoff-candle.StartStamp) / float64(candle.EndStamp-candle.StartStamp)
 			rateDelta := candle.EndRate - candle.StartRate
-			startRate = candle.StartRate + uint64(cut*float64(rateDelta))
+			r := candle.StartRate + uint64(cut*float64(rateDelta))
+			if r > 0 {
+				startRate = r
+			}
 			vol += uint64((1 - cut) * float64(candle.MatchVolume))
 
 			break
+		} else if candle.StartRate != 0 {
+			startRate = candle.StartRate
+		} else if candle.EndRate != 0 {
+			startRate = candle.EndRate
 		}
-		startRate = candle.StartRate
-		vol += candle.MatchVolume
 
+		vol += candle.MatchVolume
 	}
 	if startRate == 0 {
 		return 0, vol

@@ -132,6 +132,9 @@ type dexConnection struct {
 	pendingFee    *pendingFeeState
 
 	reportingConnects uint32
+
+	spotsMtx sync.RWMutex
+	spots    map[string]*msgjson.Spot
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -208,6 +211,13 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 
 		marketMap[mktID] = mkt
 	}
+
+	// Populate spots.
+	dc.spotsMtx.RLock()
+	for mktID, mkt := range marketMap {
+		mkt.SpotPrice = dc.spots[mktID]
+	}
+	dc.spotsMtx.RUnlock()
 
 	return marketMap
 }
@@ -4938,6 +4948,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		trades:            make(map[order.OrderID]*trackedTrade),
 		apiVer:            -1,
 		reportingConnects: reporting,
+		spots:             make(map[string]*msgjson.Spot),
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -4998,6 +5009,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
 
+	go dc.subPriceFeed()
+
 	if listen {
 		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
 	} else {
@@ -5028,6 +5041,8 @@ func (c *Core) handleReconnect(host string) {
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
+
+	go dc.subPriceFeed()
 
 	if !dc.acct.locked() && dc.acct.feePaid() {
 		err = c.authDEX(dc)
@@ -5275,6 +5290,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.BookOrderRoute:       handleBookOrderMsg,
 	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
+	msgjson.PriceUpdateRoute:     handlePriceUpdateNote,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.EpochReportRoute:     handleEpochReportMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,

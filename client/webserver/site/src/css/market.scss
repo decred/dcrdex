@@ -1,8 +1,9 @@
 div.marketlist {
-  width: 175px;
+  // width: 175px;
   border-right: 1px solid #626262;
   z-index: 99;
   background-color: #dbdbdb;
+  min-width: 175px;
 
   .selected {
     border-style: solid none solid none;
@@ -13,31 +14,70 @@ div.marketlist {
   .header {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+  }
+
+  .xc:not(:first-child) .header {
+    padding-top: 15px;
+  }
+
+  .grey {
+    color: #555;
   }
 }
 
 div.marketrow {
-  font-size: 17px;
-  padding: 0.3em;
-  font-family: 'demi-sans', sans-serif;
+  font-size: 16px;
+  padding: 3px 4px;
   cursor: pointer;
-}
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 3px;
+  background-color: #34383e;
+  border-radius: 3px;
+  // border: 1px solid #7775;
 
-div.marketrow:hover,
-div.marketrow.selected {
-  background-color: #f0f7f7;
+  & > div {
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    line-height: 1;
+    padding: 2px 0;
+  }
+
+  &:hover,
+  &.selected {
+    padding: 2px 3px;
+    border: 1px solid #7a97;
+  }
+
+  span.upgreen {
+    color: #35b97c;
+  }
+
+  span.downred {
+    color: #c33b3b;
+  }
+
+  span.pct-change {
+    min-width: 50px;
+    text-align: right;
+  }
 }
 
 label.market-search {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
   margin: 1px;
   background-color: white;
 
   input {
     border: none;
-    width: 150px;
+    max-width: 75px;
   }
 
   span {

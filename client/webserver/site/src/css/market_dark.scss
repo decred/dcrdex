@@ -29,13 +29,12 @@ body.dark {
   }
 
   div.marketlist {
-    background-color: #232428;
+    background-color: #1c1c1f;
     border-right-color: black;
-  }
 
-  div.marketrow:hover,
-  div.marketrow.selected {
-    background-color: #1d2936;
+    .grey {
+      color: #999;
+    }
   }
 
   label.market-search {
@@ -64,10 +63,6 @@ body.dark {
   .market-bal {
     border: 1px solid #3a3a3a;
     border-radius: 3px;
-  }
-
-  .selected {
-    border-style: none;
   }
 
   .brdrleft {
