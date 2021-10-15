@@ -266,8 +266,11 @@ func importAccountToNode(node *node.Node, privateKey, password []byte) error {
 				"but node already contains imported account: %v"
 			return fmt.Errorf(errMsg, address, accounts[0].Address)
 		}
+	} else {
+		return fmt.Errorf("importAccountToNode: eth wallet keystore contains %v accounts", accounts)
 	}
-	return fmt.Errorf("importAccountToNode: eth wallet keystore contains %v accounts", accounts)
+
+	return nil
 }
 
 // exportAccountsFromNode returns all the accounts for which a the ethereum wallet
