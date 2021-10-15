@@ -1705,7 +1705,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	if walletInfo.Seeded {
 		if len(walletPW) > 0 {
-			return fmt.Errorf("external password incompatible with seeded wallet")
+			return fmt.Errorf("external password incompatible with built in wallet")
 		}
 		walletPW, err = c.createSeededWallet(assetID, crypter, form)
 		if err != nil {
@@ -1778,33 +1778,30 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	return nil
 }
 
-// createSeededWallet initializes a seeded wallet with an asset-specific seed
-// derived deterministically from the app seed and a random password. The
-// password is returned for encrypting and storing.
+// createSeededWallet creates a seeded wallet with an asset-specific seed derived
+// deterministically from the app seed.
 func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
 	creds := c.creds()
 	if creds == nil {
 		return nil, fmt.Errorf("no v2 credentials stored")
 	}
 
-	root, err := crypter.Decrypt(creds.EncSeed)
+	appSeed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
-		return nil, fmt.Errorf("seed decryption error: %w", err)
+		return nil, fmt.Errorf("app seed decryption error: %w", err)
 	}
 
 	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
 
-	b := make([]byte, len(root)+4)
-	copy(b, root)
-	assetB := make([]byte, 4)
-	binary.BigEndian.PutUint32(assetB, assetID)
-	copy(b[len(root):], assetB)
+	b := make([]byte, len(appSeed)+4)
+	copy(b, appSeed)
+	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
 
 	seed := blake256.Sum256(b)
 	pw := encode.RandomBytes(32)
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Seed:     seed[:],
-		Pass:     pw[:],
+		Pass:     pw,
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
@@ -2002,6 +1999,10 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
+	seeded := oldWallet.Info().Seeded
+	if seeded && len(newWalletPW) > 0 {
+		return newError(passwordErr, "cannot set a password on a seeded wallet")
+	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
 	dbWallet := &db.Wallet{
 		AssetID:     oldWallet.AssetID,
@@ -2009,10 +2010,6 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
 		EncryptedPW: oldWallet.encPW(),
 		Address:     oldDepositAddr,
-	}
-	seeded := oldWallet.Info().Seeded
-	if seeded && len(newWalletPW) > 0 {
-		return newError(passwordErr, "cannot set a password on a seeded wallet")
 	}
 
 	// Reload the wallet with the new settings.
@@ -2882,7 +2879,7 @@ func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
 
 	seed, err := crypter.Decrypt(creds.EncSeed)
 	if err != nil {
-		return nil, fmt.Errorf("seed decryption error: %w", err)
+		return nil, fmt.Errorf("app seed decryption error: %w", err)
 	}
 
 	return seed, nil

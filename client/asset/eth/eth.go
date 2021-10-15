@@ -92,6 +92,10 @@ var _ asset.Driver = (*Driver)(nil)
 // Driver implements asset.Driver.
 type Driver struct{}
 
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	return CreateWallet(params)
+}
+
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
@@ -109,10 +113,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
-}
-
-func (d *Driver) Create(params *asset.CreateWalletParams) error {
-	return CreateWallet(params)
 }
 
 // rawWallet is an unexported return type from the eth client. Watch for changes at
@@ -135,7 +135,6 @@ type ethFetcher interface {
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	connect(ctx context.Context, node *node.Node, contractAddr *common.Address) error
-	importAccount(pw string, privKeyB []byte) (*accounts.Account, error)
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
 	estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)

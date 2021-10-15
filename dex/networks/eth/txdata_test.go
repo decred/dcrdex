@@ -19,7 +19,7 @@ func mustParseHex(s string) []byte {
 }
 
 func TestParseInitiateData(t *testing.T) {
-	participantAddr := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	participantAddr := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	secretHashSlice := mustParseHex("4aec4dc47fc6bd1fd5091c1aa4067c7fbd6bbcdb476209756354ec784d6082dc")
 	var secretHash [32]byte
 	copy(secretHash[:], secretHashSlice)
@@ -27,7 +27,7 @@ func TestParseInitiateData(t *testing.T) {
 	calldata := mustParseHex("ae0521470000000000000000000000000000000000" +
 		"0000000000000000000000614811144aec4dc47fc6bd1fd5091c1aa4067" +
 		"c7fbd6bbcdb476209756354ec784d6082dc000000000000000000000000" +
-		"345853e21b1d475582e71cc269124ed5e2dd3422")
+		"8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 
 	redeemCalldata := mustParseHex("b31597ad87eac09638c0c38b4e735b79f053" +
 		"cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d64459" +
@@ -86,7 +86,7 @@ func TestParseRedeemData(t *testing.T) {
 	initiateCalldata := mustParseHex("ae05214700000000000000000000000000" +
 		"000000000000000000000000000000614811144aec4dc47fc6bd1fd5091" +
 		"c1aa4067c7fbd6bbcdb476209756354ec784d6082dc0000000000000000" +
-		"00000000345853e21b1d475582e71cc269124ed5e2dd3422")
+		"000000008d83B207674bfd53B418a6E47DA148F5bFeCc652")
 
 	tests := []struct {
 		name     string

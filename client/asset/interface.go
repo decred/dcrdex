@@ -41,7 +41,8 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
-	// Seeded
+	// Seeded represents a built-in wallet. If Seeded is true, the wallet must be
+	// created with a deterministic seed using (Driver).Create before it can be opened.
 	Seeded bool
 }
 

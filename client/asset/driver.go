@@ -61,7 +61,8 @@ func Register(assetID uint32, driver Driver) {
 	drivers[assetID] = driver
 }
 
-// CreateWallet creates a new wallet. Only use Create for seeded wallet types.
+// CreateWallet creates a new wallet. This method should only be used once to create a
+// seeded wallet, after which OpenWallet should be used to load and access the wallet.
 func CreateWallet(assetID uint32, seedParams *CreateWalletParams) error {
 	return withDriver(assetID, func(drv Driver) error {
 		return drv.Create(seedParams)

@@ -15,10 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -188,21 +186,6 @@ func (c *rpcclient) sendTransaction(ctx context.Context, tx map[string]string) (
 // syncProgress return the current sync progress. Returns no error and nil when not syncing.
 func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
 	return c.ec.SyncProgress(ctx)
-}
-
-// importAccount imports an account into the ethereum wallet by private key
-// that can be unlocked with password.
-func (c *rpcclient) importAccount(pw string, privKeyB []byte) (*accounts.Account, error) {
-	privKey, err := crypto.ToECDSA(privKeyB)
-	if err != nil {
-		return new(accounts.Account), fmt.Errorf("error parsing private key: %v", err)
-	}
-	ks := c.n.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-	acct, err := ks.ImportECDSA(privKey, pw)
-	if err != nil {
-		return nil, err
-	}
-	return &acct, nil
 }
 
 // peers returns connected peers.

@@ -7,6 +7,7 @@
 package eth
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
@@ -254,8 +255,19 @@ func importAccountToNode(node *node.Node, privateKey, password []byte) error {
 		return err
 	}
 	ks := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-	_, err = ks.ImportECDSA(ecdsaPrivateKey, hex.EncodeToString(password))
-	return err
+	accounts := ks.Accounts()
+	if len(accounts) == 0 {
+		_, err = ks.ImportECDSA(ecdsaPrivateKey, hex.EncodeToString(password))
+		return err
+	} else if len(accounts) == 1 {
+		address := crypto.PubkeyToAddress(ecdsaPrivateKey.PublicKey)
+		if !bytes.Equal(accounts[0].Address.Bytes(), address.Bytes()) {
+			errMsg := "importAccountToNode: attemping to import account to eth wallet: %v, " +
+				"but node already contains imported account: %v"
+			return fmt.Errorf(errMsg, address, accounts[0].Address)
+		}
+	}
+	return fmt.Errorf("importAccountToNode: eth wallet keystore contains %v accounts", accounts)
 }
 
 // exportAccountsFromNode returns all the accounts for which a the ethereum wallet
