@@ -395,7 +395,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	cl, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         cfg.RPCListen + "/wallet/" + cfg.Account,
+		Host:         cfg.RPCListen,
 		User:         cfg.RPCUser,
 		Pass:         cfg.RPCPass,
 	}, nil)

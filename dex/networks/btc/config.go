@@ -31,50 +31,6 @@ const (
 	defaultHost = "localhost"
 )
 
-// // Config holds the parameters needed to initialize an RPC connection to a btc
-// // wallet or backend. When constructed with LoadConfigFromPath or
-// // LoadConfigFromSettings from a settings map, the following is true:
-// //  - Default values are used for RPCBind and/or RPCPort if not set.
-// //  - RPCPort is ignored if RPCBind already includes a port, otherwise if set,
-// //    RPCPort is joined with the host in RPCBind.
-// //  - If set, RPCConnect will be reflected in RPCBind, overriding any host
-// //    originally from that setting.
-// // In short, RPCBind will contain both host and port that may or may not be
-// // specified in RPCConnect and RPCPort.
-// type Config struct {
-// 	RPCUser    string `ini:"rpcuser"`
-// 	RPCPass    string `ini:"rpcpassword"`
-// 	RPCBind    string `ini:"rpcbind"`
-// 	RPCPort    int    `ini:"rpcport"`    // reflected in RPCBind unless it already included a port
-// 	RPCConnect string `ini:"rpcconnect"` // (bitcoin-cli) if set, reflected in RPCBind
-
-// 	// Below fields are only used on the client. They would not be in the
-// 	// bitcoin.conf file.
-
-// 	UseSplitTx       bool    `ini:"txsplit"`
-// 	FallbackFeeRate  float64 `ini:"fallbackfee"`
-// 	FeeRateLimit     float64 `ini:"feeratelimit"`
-// 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-// }
-
-// // LoadConfigFromPath loads the configuration settings from the specified filepath.
-// func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
-// 	cfg := &Config{}
-// 	if err := config.ParseInto(cfgPath, cfg); err != nil {
-// 		return nil, fmt.Errorf("error parsing config file: %w", err)
-// 	}
-// 	return checkConfig(cfg, name, network, ports)
-// }
-
-// // LoadConfigFromSettings loads the configuration settings from a settings map.
-// func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts) (*Config, error) {
-// 	cfg := &Config{}
-// 	if err := config.Unmapify(settings, cfg); err != nil {
-// 		return nil, fmt.Errorf("error parsing connection settings: %w", err)
-// 	}
-// 	return checkConfig(cfg, name, network, ports)
-
-// }
 // RPCConfig holds the parameters needed to initialize an RPC connection to a btc
 // wallet or backend. Default values are used for RPCBind and/or RPCPort if not
 // set.
@@ -85,22 +41,6 @@ type RPCConfig struct {
 	RPCPort    int    `ini:"rpcport"`
 	RPCConnect string `ini:"rpcconnect"` // (bitcoin-cli) if set, reflected in RPCBind
 }
-
-// // LoadConfigFromPath loads the configuration settings from the specified filepath.
-// func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts, cfg interface{}) error {
-// 	if err := config.ParseInto(cfgPath, cfg); err != nil {
-// 		return fmt.Errorf("error parsing config file: %w", err)
-// 	}
-// 	return checkConfig(cfg, name, network, ports)
-// }
-
-// // LoadConfigFromSettings loads the configuration settings from a settings map.
-// func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts, cfg interface{}) (error) {
-// 	if err := config.Unmapify(settings, cfg); err != nil {
-// 		return nil, fmt.Errorf("error parsing connection settings: %w", err)
-// 	}
-// 	return checkConfig(cfg, name, network, ports)
-// }
 
 func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetPorts) error {
 	if cfg.RPCUser == "" {

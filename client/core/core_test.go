@@ -1391,10 +1391,6 @@ func (drv *tDriver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Net
 	return drv.f(cfg, logger, net)
 }
 
-func (drv *tDriver) Create(params *asset.CreateWalletParams) error {
-	return fmt.Errorf("unimplemented")
-}
-
 func (drv *tDriver) DecodeCoinID(coinID []byte) (string, error) {
 	return drv.decoder(coinID)
 }

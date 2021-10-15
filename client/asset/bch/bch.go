@@ -35,6 +35,7 @@ const (
 	defaultFee        = 100
 	minNetworkVersion = 221100
 	walletTypeRPC     = "bitcoindRPC"
+	walletTypeLegacy  = ""
 )
 
 var (
@@ -114,7 +115,7 @@ type Driver struct{}
 // to connect and request getnetworkinfo to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {
-	case "", walletTypeRPC:
+	case walletTypeLegacy, walletTypeRPC:
 		_, client, err := btc.ParseRPCWalletConfig(settings, "bch", net, netPorts)
 		if err != nil {
 			return false, err

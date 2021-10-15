@@ -695,7 +695,7 @@ export default class Application {
   async fetchBalance (assetID) {
     const res = await postJSON('/api/balance', { assetID: assetID })
     if (!this.checkResponse(res)) {
-      console.error('failed to fetch balance for asset ID', assetID)
+      throw new Error(`failed to fetch balance for asset ID ${assetID}`)
     }
     return res.balance
   }

@@ -713,7 +713,7 @@ var helpMsgs = map[string]helpMsg{
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-	walletType (string): The wallet type.
+    walletType (string): The wallet type.
      path (string): Optional. The path to a configuration file.
      settings (string): A JSON-encoded string->string mapping of additional
        configuration settings. These settings take precedence over any settings

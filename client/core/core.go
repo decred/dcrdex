@@ -1713,7 +1713,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		}
 	}
 
-	if walletInfo.Seeded {
+	if walletDef.Seeded {
 		if len(walletPW) > 0 {
 			return fmt.Errorf("external password incompatible with built-in wallet")
 		}

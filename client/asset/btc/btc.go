@@ -408,7 +408,7 @@ type Driver struct{}
 // we ultimately just look for wallet files.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {
-	case "", WalletTypeRPC:
+	case WalletTypeLegacy, WalletTypeRPC:
 		_, client, err := ParseRPCWalletConfig(settings, "btc", net, dexbtc.RPCPorts)
 		if err != nil {
 			return false, err
@@ -432,7 +432,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
 }
 
-// Create cretes a new SPV wallet.
+// Create creates a new SPV wallet.
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
 	if params.Type != WalletTypeSPV {
 		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", WalletTypeSPV, params.Type)
@@ -723,10 +723,8 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		peers = append(peers, walletCfg.Peer)
 	}
 
-	btc.node, err = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
-	if err != nil {
-		return nil, err
-	}
+	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
+
 	return btc, nil
 }
 
@@ -1000,7 +998,12 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 
 	val := lots * lotSize
 
-	sum, inputsSize, _, _, _, _, err := btc.fund(val, lots, utxos, nfo)
+	enough := func(inputsSize, inputsVal uint64) bool {
+		reqFunds := calc.RequiredOrderFunds(val, inputsSize, lots, nfo)
+		return inputsVal >= reqFunds
+	}
+
+	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1115,7 +1118,12 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ordValStr, amount(avail))
 	}
 
-	sum, size, coins, fundingCoins, redeemScripts, spents, err := btc.fund(ord.Value, ord.MaxSwapCount, utxos, ord.DEXConfig)
+	enough := func(inputsSize, inputsVal uint64) bool {
+		reqFunds := calc.RequiredOrderFunds(ord.Value, inputsSize, ord.MaxSwapCount, ord.DEXConfig)
+		return inputsVal >= reqFunds
+	}
+
+	sum, size, coins, fundingCoins, redeemScripts, spents, err := fund(utxos, enough)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1146,14 +1154,15 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	return coins, redeemScripts, nil
 }
 
-func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *dex.Asset) (
+func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 	sum uint64, size uint32, coins asset.Coins, fundingCoins map[outPoint]*utxo, redeemScripts []dex.Bytes, spents []*output, err error) {
 
 	fundingCoins = make(map[outPoint]*utxo)
 
 	isEnoughWith := func(unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
-		return sum+unspent.amount >= reqFunds
+		return enough(uint64(size+unspent.input.VBytes()), sum+unspent.amount)
+		// reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
+		// return sum+unspent.amount >= reqFunds
 	}
 
 	addUTXO := func(unspent *compositeUTXO) {
@@ -1202,8 +1211,7 @@ func (btc *ExchangeWallet) fund(val, lots uint64, utxos []*compositeUTXO, nfo *d
 	// First try with confs>0, falling back to allowing 0-conf outputs.
 	if !tryUTXOs(1) {
 		if !tryUTXOs(0) {
-			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds (%s %s + tx fees). %s available",
-				amount(val), btc.symbol, amount(sum))
+			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds %s available", amount(sum))
 		}
 	}
 
@@ -2797,6 +2805,25 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	utxos, utxoMap, sum, err := convertUnspent(confs, unspents, btc.chainParams)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	for _, utxo := range utxos {
+		// Guard against inconsistencies between the wallet's view of
+		// spendable unlocked UTXOs and ExchangeWallet's. e.g. User manually
+		// unlocked something or even restarted the wallet software.
+		pt := newOutPoint(utxo.txHash, utxo.vout)
+		if btc.fundingCoins[pt] != nil {
+			btc.log.Warnf("Known order-funding coin %s returned by listunspent!", pt)
+			// TODO: Consider relocking the coin in the wallet.
+			//continue
+		}
+	}
+	return utxos, utxoMap, sum, nil
+}
+
+func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *chaincfg.Params) ([]*compositeUTXO, map[outPoint]*compositeUTXO, uint64, error) {
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
 	var sum uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
@@ -2808,17 +2835,7 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 				return nil, nil, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %w", err)
 			}
 
-			// Guard against inconsistencies between the wallet's view of
-			// spendable unlocked UTXOs and ExchangeWallet's. e.g. User manually
-			// unlocked something or even restarted the wallet software.
-			pt := newOutPoint(txHash, txout.Vout)
-			if btc.fundingCoins[pt] != nil {
-				btc.log.Warnf("Known order-funding coin %s returned by listunspent!", pt)
-				// TODO: Consider relocking the coin in the wallet.
-				//continue
-			}
-
-			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
+			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, chainParams)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("error reading asset info: %w", err)
 			}
@@ -2835,7 +2852,7 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 				input:        nfo,
 			}
 			utxos = append(utxos, utxo)
-			utxoMap[pt] = utxo
+			utxoMap[newOutPoint(txHash, txout.Vout)] = utxo
 			sum += toSatoshi(txout.Amount)
 		}
 	}
@@ -3007,4 +3024,39 @@ func toBTC(v uint64) float64 {
 // signature hash and ECDSA algorithm.
 func rawTxInSig(tx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, _ uint64) ([]byte, error) {
 	return txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, key)
+}
+
+// findRedemptionsInTx searches the MsgTx for the redemptions for the specified
+// swaps.
+func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*findRedemptionReq, msgTx *wire.MsgTx,
+	chainParams *chaincfg.Params) (discovered map[outPoint]*findRedemptionResult) {
+
+	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
+
+	for vin, txIn := range msgTx.TxIn {
+		if ctx.Err() != nil {
+			return discovered
+		}
+		poHash, poVout := txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index
+		for outPt, req := range reqs {
+			if discovered[outPt] != nil {
+				continue
+			}
+			if outPt.txHash == poHash && outPt.vout == poVout {
+				// Match!
+				txHash := msgTx.TxHash()
+				secret, err := dexbtc.FindKeyPush(txIn.Witness, txIn.SignatureScript, req.contractHash[:], segwit, chainParams)
+				if err != nil {
+					req.fail("no secret extracted from redemption input %s:%d for swap output %s: %v",
+						msgTx.TxHash(), vin, outPt, err)
+					continue
+				}
+				discovered[outPt] = &findRedemptionResult{
+					redemptionCoinID: toCoinID(&txHash, uint32(vin)),
+					secret:           secret,
+				}
+			}
+		}
+	}
+	return
 }

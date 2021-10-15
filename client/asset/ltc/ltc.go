@@ -26,6 +26,7 @@ const (
 	defaultFeeRateLimit = 100
 	minNetworkVersion   = 180100
 	walletTypeRPC       = "litecoindRPC"
+	walletTypeLegacy    = ""
 )
 
 var (
@@ -120,7 +121,7 @@ type Driver struct{}
 // to connect and request getnetworkinfo to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	switch walletType {
-	case "", walletTypeRPC:
+	case walletTypeLegacy, walletTypeRPC:
 		_, client, err := btc.ParseRPCWalletConfig(settings, "ltc", net, NetPorts)
 		if err != nil {
 			return false, err
@@ -141,10 +142,6 @@ func (d *Driver) Create(*asset.CreateWalletParams) error {
 // Open creates the LTC exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
-}
-
-func (d *Driver) Create(*asset.CreateWalletParams) error {
-	return fmt.Errorf("no creatable wallet types")
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for

@@ -1,4 +1,4 @@
-// go:build harness
+//go:build harness
 // +build harness
 
 package livetest
@@ -19,8 +19,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"github.com/btcsuite/btclog"
-	"github.com/lightninglabs/neutrino"
 )
 
 const (
@@ -45,23 +43,6 @@ var (
 	tPW           = []byte("abc")
 )
 
-type logWriter struct{}
-
-func (logWriter) Write(p []byte) (n int, err error) {
-	os.Stdout.Write(p)
-	return len(p), nil
-}
-
-func logNeutrino(lvl btclog.Level) {
-	backendLog := btclog.NewBackend(logWriter{})
-	neutrinoLogger := backendLog.Logger("NTRNO")
-	neutrinoLogger.SetLevel(lvl)
-	// wallet.UseLogger(logger("WLLT"))
-	// chain.UseLogger(logger("CHAIN"))
-	// wtxmgr.UseLogger(logger("TXMGR"))
-	neutrino.UseLogger(neutrinoLogger)
-}
-
 func TestWallet(t *testing.T) {
 	const lotSize = 1e6
 
@@ -79,8 +60,6 @@ func TestWallet(t *testing.T) {
 		Asset:   tBTC,
 		SplitTx: true,
 	})
-
-	// logNeutrino(btclog.LevelDebug)
 
 	spvDir, err := os.MkdirTemp("", "")
 	if err != nil {

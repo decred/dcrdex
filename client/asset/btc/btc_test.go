@@ -2322,12 +2322,17 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		Vout:          vout,
 		ScriptPubKey:  pkScript,
 		Safe:          true,
+		Spendable:     true,
 	}}
 	node.listUnspent = unspents
 
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
+	}
+
 	_, err = sender(addr.String(), toSatoshi(fee))
 	if err != nil {
-		t.Fatalf("PayFee error: %v", err)
+		t.Fatalf("send error: %v", err)
 	}
 
 	// SendToAddress error

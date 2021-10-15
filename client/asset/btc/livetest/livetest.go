@@ -434,6 +434,13 @@ func Run(t *testing.T, cfg *Config) {
 	}
 	swapReceipt = receipts[0]
 
+	// SPV doesn't recognize ownership of the swap output, so we need to mine
+	// the transaction in order to establish spent status. In theory, we could
+	// just yolo and refund regardless of spent status.
+	if cfg.SPV {
+		mine()
+	}
+
 	coinID, err := rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)

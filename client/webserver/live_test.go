@@ -412,10 +412,6 @@ func (*TDriver) Open(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet
 	return nil, nil
 }
 
-func (*TDriver) Create(*asset.CreateWalletParams) error {
-	return nil
-}
-
 func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
 	return asset.DecodeCoinID(0, coinID) // btc decoder
 }

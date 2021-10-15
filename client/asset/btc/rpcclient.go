@@ -592,41 +592,6 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 	return
 }
 
-// findRedemptionsInTx searches the MsgTx for the redemptions for the specified
-// swaps.
-func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*findRedemptionReq, msgTx *wire.MsgTx,
-	chainParams *chaincfg.Params) (discovered map[outPoint]*findRedemptionResult) {
-
-	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
-
-	for vin, txIn := range msgTx.TxIn {
-		if ctx.Err() != nil {
-			return discovered
-		}
-		poHash, poVout := txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index
-		for outPt, req := range reqs {
-			if discovered[outPt] != nil {
-				continue
-			}
-			if outPt.txHash == poHash && outPt.vout == poVout {
-				// Match!
-				txHash := msgTx.TxHash()
-				secret, err := dexbtc.FindKeyPush(txIn.Witness, txIn.SignatureScript, req.contractHash[:], segwit, chainParams)
-				if err != nil {
-					req.fail("no secret extracted from redemption input %s:%d for swap output %s: %v",
-						msgTx.TxHash(), vin, outPt, err)
-					continue
-				}
-				discovered[outPt] = &findRedemptionResult{
-					redemptionCoinID: toCoinID(&txHash, uint32(vin)),
-					secret:           secret,
-				}
-			}
-		}
-	}
-	return
-}
-
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
 func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {

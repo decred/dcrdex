@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -41,6 +42,9 @@ func (c *tBtcWallet) PublishTransaction(tx *wire.MsgTx, label string) error {
 	c.sentRawTx = tx
 	if c.sendErr != nil {
 		return c.sendErr
+	}
+	if c.sendToAddressErr != nil {
+		return c.sendToAddressErr
 	}
 	if c.badSendHash != nil {
 		// testData would return the badSendHash. We'll do something similar
@@ -603,5 +607,92 @@ func TestGetTxOut(t *testing.T) {
 	_, _, err = spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if err != nil {
 		t.Fatalf("error for checkpointed output: %v", err)
+	}
+}
+
+func TestSendWithSubtract(t *testing.T) {
+	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
+	defer shutdown()
+	spv := wallet.node.(*spvWallet)
+
+	const availableFunds = 5e8
+	const feeRate = 100
+	const inputSize = dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
+	const feesWithChange = (dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize + inputSize) * feeRate
+	const feesWithoutChange = (dexbtc.MinimumTxOverhead + dexbtc.P2WPKHOutputSize + inputSize) * feeRate
+
+	addr, _ := btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
+	pkScript, _ := txscript.PayToAddrScript(addr)
+
+	node.changeAddr = tP2WPKHAddr
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, true)
+	}
+	node.listUnspent = []*ListUnspentResult{{
+		TxID:          tTxID,
+		Address:       tP2WPKHAddr,
+		Confirmations: 5,
+		ScriptPubKey:  pkScript,
+		Spendable:     true,
+		Solvable:      true,
+		Safe:          true,
+		Amount:        float64(availableFunds) / 1e8,
+	}}
+
+	test := func(req, expVal int64, expChange bool) {
+		t.Helper()
+		_, err := spv.sendWithSubtract(pkScript, uint64(req), feeRate)
+		if err != nil {
+			t.Fatalf("half withdraw error: %v", err)
+		}
+		opCount := len(node.sentRawTx.TxOut)
+		if (opCount == 1 && expChange) || (opCount == 2 && !expChange) {
+			t.Fatalf("%d outputs when expChange = %t", opCount, expChange)
+		}
+		received := node.sentRawTx.TxOut[opCount-1].Value
+		if received != expVal {
+			t.Fatalf("wrong value received. expected %d, got %d", expVal, received)
+		}
+	}
+
+	// No change
+	var req int64 = availableFunds / 2
+	test(req, req-feesWithChange, true)
+
+	// Drain it
+	test(availableFunds, availableFunds-feesWithoutChange, false)
+
+	// Requesting just a little less shouldn't result in a reduction of the
+	// amount received, since the change would be dust.
+	test(availableFunds-10, availableFunds-feesWithoutChange, false)
+
+	// Requesting too
+
+	// listUnspent error
+	node.listUnspentErr = tErr
+	_, err := spv.sendWithSubtract(pkScript, availableFunds/2, feeRate)
+	if err == nil {
+		t.Fatalf("test passed with listUnspent error")
+	}
+	node.listUnspentErr = nil
+
+	node.changeAddrErr = tErr
+	_, err = spv.sendWithSubtract(pkScript, availableFunds/2, feeRate)
+	if err == nil {
+		t.Fatalf("test passed with NewChangeAddress error")
+	}
+	node.changeAddrErr = nil
+
+	node.signTxErr = tErr
+	_, err = spv.sendWithSubtract(pkScript, availableFunds/2, feeRate)
+	if err == nil {
+		t.Fatalf("test passed with SignTransaction error")
+	}
+	node.signTxErr = nil
+
+	// outrageous fees
+	_, err = spv.sendWithSubtract(pkScript, availableFunds/2, 1e8)
+	if err == nil {
+		t.Fatalf("test passed with fees > available error")
 	}
 }
