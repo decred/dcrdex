@@ -34,6 +34,8 @@ import (
 	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/jrick/logrotate/rotator"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -459,6 +461,28 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+var (
+	logRotator        atomic.Value
+	teardownWaitGroup sync.WaitGroup
+)
+
+// Initialize sets up a routines to close the log rotator if it's initialized
+// before shutdown.
+func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		if rotatorI := logRotator.Load(); rotatorI != nil {
+			teardownWaitGroup.Wait()
+			rotator := rotatorI.(*rotator.Rotator)
+			if err := rotator.Close(); err != nil {
+				logger.Errorf("error closing log rotator: %v", err)
+			}
+		}
+	}()
 }
 
 func init() {

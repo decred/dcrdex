@@ -1399,6 +1399,9 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 	return drv.winfo
 }
 
+func (drv *tDriver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
+}
+
 func TestCreateWallet(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()

@@ -4,8 +4,10 @@
 package ltc
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -13,6 +15,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -142,6 +145,9 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the

@@ -36,6 +36,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -424,6 +425,9 @@ func (*TDriver) Info() *asset.WalletInfo {
 			},
 		},
 	}
+}
+
+func (*TDriver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 func newTCore() *TCore {

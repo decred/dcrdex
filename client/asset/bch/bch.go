@@ -5,10 +5,12 @@ package bch
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -23,6 +25,7 @@ import (
 	"github.com/gcash/bchd/bchec"
 	bchscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -136,6 +139,9 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the

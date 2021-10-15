@@ -23,9 +23,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/btc"
 	_ "decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/dex"
@@ -33,6 +35,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexsrv "decred.org/dcrdex/server/dex"
 	toxiproxy "github.com/Shopify/toxiproxy/client"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -272,6 +275,9 @@ func main() {
 		return res.output
 	}
 
+	var wg sync.WaitGroup
+	asset.Initialize(ctx, &wg, log, language.AmericanEnglish)
+
 	alphaAddrDCR = getAddress(dcr, "./alpha", "getnewaddress", "default", "ignore")
 	betaAddrDCR = getAddress(dcr, "./beta", "getnewaddress", "default", "ignore")
 	alphaAddrBTC = getAddress(btc, "./alpha", "getnewaddress", "''", "bech32")
@@ -423,6 +429,7 @@ func main() {
 		log.Infof("LoadBot ran for %s, during which time %d orders were placed, resulting in %d separate matches, a rate of %.3g matches / minute",
 			since, orderCounter, matchCounter, rate)
 	}
+	wg.Wait()
 }
 
 // marketsDotJSON models the server's markets.json configuration file.

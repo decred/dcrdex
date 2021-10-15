@@ -181,10 +181,12 @@ func logNeutrino(netDir string) error {
 		return fmt.Errorf("error initializing neutrino log files: %w", err)
 	}
 
+	logRotator.Store(rotator)
+
 	backendLog := btclog.NewBackend(logWriter{rotator})
 
 	logger := func(name string, lvl btclog.Level) btclog.Logger {
-		l := backendLog.Logger("NTRNO")
+		l := backendLog.Logger(name)
 		l.SetLevel(lvl)
 		return l
 	}
@@ -887,7 +889,9 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 	// Nanny for the spendingTxs cache. We'll keep the cache entries for 2 hours
 	// past their last access time.
 	wg.Add(1)
+	teardownWaitGroup.Add(1)
 	go func() {
+		defer teardownWaitGroup.Done()
 		defer wg.Done()
 		defer w.stop()
 
@@ -962,9 +966,8 @@ func (w *spvWallet) startWallet() error {
 	// If we're on regtest and the peers haven't been explicitly set, add the
 	// simnet harness alpha node as an additional peer so we don't have to type
 	// it in.
-	var addPeers []string
 	if w.chainParams.Name == "regtest" && len(w.connectPeers) == 0 {
-		addPeers = append(addPeers, "localhost:20575")
+		w.connectPeers = append(w.connectPeers, "localhost:20575")
 	}
 
 	chainService, err := neutrino.NewChainService(neutrino.Config{
@@ -972,7 +975,6 @@ func (w *spvWallet) startWallet() error {
 		Database:     w.neutrinoDB,
 		ChainParams:  *w.chainParams,
 		ConnectPeers: w.connectPeers,
-		AddPeers:     addPeers,
 	})
 	if err != nil {
 		bailOnWalletAndDB()

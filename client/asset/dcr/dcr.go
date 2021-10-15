@@ -42,6 +42,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -411,6 +412,9 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // (*ExchangeWallet).Info when possible.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 func init() {
