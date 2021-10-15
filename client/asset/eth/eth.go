@@ -40,7 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 )
 
-func RegisterDriver() {
+func init() {
 	asset.Register(BipID, &Driver{})
 }
 

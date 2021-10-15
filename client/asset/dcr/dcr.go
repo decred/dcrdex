@@ -355,7 +355,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
-func RegisterDriver() {
+func init() {
 	asset.Register(BipID, &Driver{})
 }
 
