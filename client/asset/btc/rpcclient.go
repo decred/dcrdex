@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -95,7 +96,7 @@ func newRPCClient(requester RawRequesterWithContext, segwit bool, addrDecoder de
 	}
 }
 
-func (wc *rpcClient) connect(ctx context.Context) error {
+func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	wc.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := wc.getVersion()

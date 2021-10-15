@@ -202,7 +202,7 @@ type Wallet interface {
 	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, feeAmt uint64) (Coin, error)
+	PayFee(address string, regFee, feeRateSuggestion uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.

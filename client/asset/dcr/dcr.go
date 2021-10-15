@@ -385,45 +385,16 @@ type Driver struct{}
 // Exists checks the existence of the wallet. For the RPC wallet, this attempts
 // to connect and request the version to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	if walletType != walletTypeDcrwRPC {
-		return false, fmt.Errorf("no Decred wallet type %q available", walletType)
-	}
-	cfg, _, err := loadConfig(settings, net)
-	if err != nil {
-		return false, err
-	}
-	cl, err := rpcclient.New(&rpcclient.ConnConfig{
-		HTTPPostMode: true,
-		DisableTLS:   true,
-		Host:         cfg.RPCListen,
-		User:         cfg.RPCUser,
-		Pass:         cfg.RPCPass,
-	}, nil)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		cl.Shutdown()
-		cl.WaitForShutdown()
-	}()
+	return false, fmt.Errorf("no seeded-type Decred wallets available")
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-	defer cancel()
-
-	_, err = cl.Version(ctx)
-	if err != nil {
-		return false, fmt.Errorf("DCR ExchangeWallet version fetch error: %w", err)
-	}
-	return err == nil, nil
+func (d *Driver) Create(*asset.CreateWalletParams) error {
+	return errors.New("no creatable wallet types")
 }
 
 // Open creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
-}
-
-func (d *Driver) Create(*asset.CreateWalletParams) error {
-	return fmt.Errorf("no creatable wallet types")
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Decred.
@@ -1702,7 +1673,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
 		}
 		if len(tx.TxOut) <= int(vout) {
-			return nil, fmt.Errorf("specified output not found in decoded tx")
+			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
 		}
 		txOut := tx.TxOut[vout]
 		pkScript = txOut.PkScript
@@ -2366,14 +2337,14 @@ func (dcr *ExchangeWallet) Locked() bool {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return nil, err
 	}
 	// TODO: Evaluate SendToAddress and how it deals with the change output
 	// address index to see if it can be used here instead.
-	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(1, 0))
+	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(1, feeRateSuggestion))
 	if err != nil {
 		return nil, err
 	}

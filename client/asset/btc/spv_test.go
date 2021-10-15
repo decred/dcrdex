@@ -311,7 +311,7 @@ func (c *tNeutrinoClient) GetBlockHeight(hash *chainhash.Hash) (int32, error) {
 func (c *tNeutrinoClient) GetBlockHeader(blkHash *chainhash.Hash) (*wire.BlockHeader, error) {
 	block := c.getBlock(blkHash.String())
 	if block == nil {
-		return nil, fmt.Errorf("no block verbose found")
+		return nil, errors.New("no block verbose found")
 	}
 	return &block.msgBlock.Header, nil
 }

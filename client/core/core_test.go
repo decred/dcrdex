@@ -757,7 +757,7 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 	return time.Time{}, nil
 }
 
-func (w *TXCWallet) PayFee(address string, fee uint64) (asset.Coin, error) {
+func (w *TXCWallet) PayFee(address string, fee, feeRateSuggestion uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 

@@ -1715,7 +1715,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	if walletDef.Seeded {
 		if len(walletPW) > 0 {
-			return fmt.Errorf("external password incompatible with built-in wallet")
+			return errors.New("external password incompatible with seeded wallet")
 		}
 		walletPW, err = c.createSeededWallet(assetID, crypter, form)
 		if err != nil {
@@ -1795,7 +1795,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
 	creds := c.creds()
 	if creds == nil {
-		return nil, fmt.Errorf("no v2 credentials stored")
+		return nil, errors.New("no v2 credentials stored")
 	}
 
 	appSeed, err := crypter.Decrypt(creds.EncSeed)
@@ -2664,7 +2664,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
+
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, dc.fetchFeeRate(feeAsset.ID))
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}

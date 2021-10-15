@@ -405,7 +405,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	// Test PayFee
-	coin, err := rig.beta().PayFee(alphaAddress, 1e8)
+	coin, err := rig.beta().PayFee(alphaAddress, 1e8, defaultFee)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}

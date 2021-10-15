@@ -407,29 +407,18 @@ type Driver struct{}
 // to connect and request getnetworkinfo to verify existence. For the SPV wallet,
 // we ultimately just look for wallet files.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	switch walletType {
-	case WalletTypeLegacy, WalletTypeRPC:
-		_, client, err := ParseRPCWalletConfig(settings, "btc", net, dexbtc.RPCPorts)
-		if err != nil {
-			return false, err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-		defer cancel()
-		_, err = client.RawRequest(ctx, methodGetNetworkInfo, nil)
-		return err == nil, nil
-
-	case WalletTypeSPV:
-		chainParams, err := parseChainParams(net)
-		if err != nil {
-			return false, err
-		}
-		netDir := filepath.Join(dataDir, chainParams.Name)
-		// timeout and recoverWindow arguments borrowed from btcwallet directly.
-		loader := wallet.NewLoader(chainParams, netDir, true, 60*time.Second, 250)
-		return loader.WalletExists()
+	if walletType != WalletTypeSPV {
+		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
 	}
 
-	return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+	chainParams, err := parseChainParams(net)
+	if err != nil {
+		return false, err
+	}
+	netDir := filepath.Join(dataDir, chainParams.Name)
+	// timeout and recoverWindow arguments borrowed from btcwallet directly.
+	loader := wallet.NewLoader(chainParams, netDir, true, 60*time.Second, 250)
+	return loader.WalletExists()
 }
 
 // Create creates a new SPV wallet.
@@ -438,10 +427,10 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", WalletTypeSPV, params.Type)
 	}
 	if len(params.Seed) == 0 {
-		return fmt.Errorf("wallet seed cannot be empty")
+		return errors.New("wallet seed cannot be empty")
 	}
 	if len(params.DataDir) == 0 {
-		return fmt.Errorf("must specify wallet data directory")
+		return errors.New("must specify wallet data directory")
 	}
 	chainParams, err := parseChainParams(params.Net)
 	if err != nil {
@@ -744,7 +733,8 @@ func (btc *ExchangeWallet) Net() *chaincfg.Params {
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	if err := btc.node.connect(ctx); err != nil {
+	var wg sync.WaitGroup
+	if err := btc.node.connect(ctx, &wg); err != nil {
 		return nil, err
 	}
 	// Initialize the best block.
@@ -765,7 +755,6 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error parsing best block for %s: %w", btc.symbol, err)
 	}
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
-	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -1852,7 +1841,7 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
 		}
 		if len(tx.TxOut) <= int(vout) {
-			return nil, fmt.Errorf("specified output not found in decoded tx")
+			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
 		}
 		txOut = tx.TxOut[vout]
 	}
@@ -2290,8 +2279,8 @@ func (btc *ExchangeWallet) Address() (string, error) {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1, 0), false)
+func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1, feeRateSuggestion), false)
 	if err != nil {
 		btc.log.Errorf("PayFee error - address = '%s', fee = %s: %v", address, amount(regFee), err)
 		return nil, err

@@ -5,8 +5,8 @@ package bch
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -114,23 +114,11 @@ type Driver struct{}
 // Exists checks the existence of the wallet. For the RPC wallet, this attempts
 // to connect and request getnetworkinfo to verify existence.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	switch walletType {
-	case walletTypeLegacy, walletTypeRPC:
-		_, client, err := btc.ParseRPCWalletConfig(settings, "bch", net, netPorts)
-		if err != nil {
-			return false, err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-		defer cancel()
-		_, err = client.RawRequest(ctx, "getnetworkinfo", nil)
-		return err == nil, nil
-	}
-
-	return false, fmt.Errorf("no Bitcoin Cash wallet of type %q available", walletType)
+	return false, fmt.Errorf("no seeded-type Bitcoin Cash wallets")
 }
 
 func (d *Driver) Create(*asset.CreateWalletParams) error {
-	return fmt.Errorf("no creatable wallet types")
+	return errors.New("no creatable wallet types")
 }
 
 // Open creates the BCH exchange wallet. Start the wallet with its Run method.

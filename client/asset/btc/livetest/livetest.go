@@ -99,7 +99,7 @@ func (rig *testRig) close() {
 		}()
 		select {
 		case <-closed:
-		case <-time.NewTimer(time.Second * 5).C:
+		case <-time.NewTimer(time.Second * 30).C:
 			rig.t.Fatalf("failed to disconnect from %s", name)
 		}
 	}
@@ -124,7 +124,7 @@ type Config struct {
 }
 
 func Run(t *testing.T, cfg *Config) {
-	tLogger := dex.StdOutLogger("TEST", dex.LevelInfo)
+	tLogger := dex.StdOutLogger("TEST", dex.LevelDebug)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 
@@ -156,6 +156,7 @@ func Run(t *testing.T, cfg *Config) {
 		time.Sleep(blockWait)
 	}
 
+	t.Log("Setting up alpha/beta/gamma wallet backends...")
 	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(tCtx, t, cfg, "alpha", "", tLogger.SubLogger("alpha"), blkFunc)
 	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
 	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, cfg, "alpha", "gamma", tLogger.SubLogger("gamma"), blkFunc)
@@ -449,7 +450,8 @@ func Run(t *testing.T, cfg *Config) {
 	tLogger.Infof("Refunded with %s", c)
 
 	// Test PayFee
-	coin, err := rig.gamma().PayFee(address, 1e8)
+	const defaultFee = 100
+	coin, err := rig.gamma().PayFee(address, 1e8, defaultFee)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}

@@ -121,7 +121,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 
 // Exists checks the existence of the wallet.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	return false, fmt.Errorf("unimplemented")
+	return false, errors.New("unimplemented")
 }
 
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
@@ -772,7 +772,7 @@ func (eth *ExchangeWallet) Locked() bool {
 // the registration fee, and the fee rate is taken from the DEX configuration.
 //
 // NOTE: PayFee is not intended to be used with Ethereum at this time.
-func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
+func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
 	return nil, asset.ErrNotImplemented
 }
 

@@ -2286,7 +2286,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		t.Fatal(err)
 	}
 	sender := func(addr string, val uint64) (asset.Coin, error) {
-		return wallet.PayFee(addr, val)
+		return wallet.PayFee(addr, val, defaultFee)
 	}
 	if senderType == tWithdrawSender {
 		sender = func(addr string, val uint64) (asset.Coin, error) {
