@@ -44,6 +44,8 @@ export const ID_SETUP_WALLET = 'ID_SETUP_WALLET'
 export const ID_WALLET_READY = 'ID_WALLET_READY'
 export const ID_CHANGE_WALLET_TYPE = 'ID_CHANGE_WALLET_TYPE'
 export const ID_KEEP_WALLET_TYPE = 'ID_KEEP_WALLET_TYPE'
+export const WALLET_READY = 'WALLET_READY'
+export const SETUP_NEEDED = 'SETUP_NEEDED'
 
 export const enUS = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -90,7 +92,9 @@ export const enUS = {
   [ID_WALLET_READY]: 'Ready',
   [ID_SETUP_WALLET]: 'Setup',
   [ID_CHANGE_WALLET_TYPE]: 'change the wallet type',
-  [ID_KEEP_WALLET_TYPE]: 'don\'t change the wallet type'
+  [ID_KEEP_WALLET_TYPE]: 'don\'t change the wallet type',
+  [WALLET_READY]: 'Wallet Ready',
+  [SETUP_NEEDED]: 'Setup Needed'
 }
 
 export const ptBR = {

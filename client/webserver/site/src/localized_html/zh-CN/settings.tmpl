@@ -58,58 +58,105 @@
   </div>
 
   {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+  <div id="forms" class="d-hide">
     
     {{- /* DEX ADDRESS */ -}}
+<<<<<<< HEAD
     <form class="card mx-auto my-5 bg1 border1 text-left" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm"}}
+=======
+    <form class="position-relative text-left" id="dexAddrForm" autocomplete="off">
+      {{template "dexAddrForm" .}}
     </form>
-    
+
+    {{- /* REG ASSET SELECTOR */ -}}
+    <form class="d-hide" id="regAssetForm">
+      {{template "regAssetForm"}}
+>>>>>>> improved registration sequence and form design
+    </form>
     {{- /* CONFIRM REGISTRATION */ -}}
+<<<<<<< HEAD
     <form class="card mx-auto my-5 bg1 border1 text-left d-hide" id="confirmRegForm">
       {{template "confirmRegistrationForm" .}}
     </form>
 
     {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
     <form class="card bg1 border1 d-hide" id="authorizeAccountExportForm">
+=======
+    <form class="d-hide" id="confirmRegForm">
+      {{template "confirmRegistrationForm"}}
+    </form>
+
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
+    <form class="d-hide" id="authorizeAccountExportForm">
+>>>>>>> improved registration sequence and form design
       {{template "authorizeAccountExportForm"}}
     </form>
 
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
+<<<<<<< HEAD
     <form class="card bg1 border1 d-hide" id="authorizeAccountImportForm">
+=======
+    <form class="d-hide" id="authorizeAccountImportForm">
+>>>>>>> improved registration sequence and form design
       {{template "authorizeAccountImportForm" .}}
     </form>
 
+    {{- /* NEW WALLET */ -}}
+    <form class="d-hide" id="newWalletForm">
+      {{template "newWalletForm" }}
+    </form>
+
     {{- /* DISABLE ACCOUNT */ -}}
+<<<<<<< HEAD
     <form class="card bg1 border1 d-hide" id="disableAccountForm">
       {{template "disableAccountForm"}}
     </form>
 	
 	{{- /* CHANGE APP PASSWORD */ -}}
     <form class="card bg1 border1 d-hide" id="changeAppPWForm">
+=======
+    <form class="d-hide" id="disableAccountForm">
+      {{template "disableAccountForm"}}
+    </form>
+
+    {{- /* CHANGE APP PASSWORD */ -}}
+    <form class="d-hide" id="changeAppPWForm">
+>>>>>>> improved registration sequence and form design
       {{template "changeAppPWForm"}}
     </form>
+
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
+<<<<<<< HEAD
     <form class="card bg1 border1 p-4 d-hide position-relative" id="exportSeedAuth">
+=======
+    <form class="d-hide" id="exportSeedAuth">
+>>>>>>> improved registration sequence and form design
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="fs16">
+      <div class="py-1 text-center position-relative fs22 sans-light">
+        Export Seed
+      </div>
+      <div class="fs15 text-left mt-2">
         输入您的应用密码以显示您的种子。确保没有其它人可以看到您的屏幕。
       </div>
-      <hr class="dashed my-4">
-      <div>
+      <div class="text-left mt-2">
         <label for="exportSeedPW" class="pl-1 mb-1">密码</label>
         <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
-        <button id="exportSeedSubmit" type="button" class="col-8 justify-content-center fs15 bg2 selected">展示</button>
+        <button id="exportSeedSubmit" type="button" class="justify-content-center fs15 bg2 selected">展示</button>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor" id="exportSeedErr"></div>
     </form>
 
     {{- /* SEED DISPLAY */ -}}
+<<<<<<< HEAD
     <form class="card bg1 border1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
+=======
+    <form class="d-hide" id="authorizeSeedDisplay">
+>>>>>>> improved registration sequence and form design
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      请好好保存切勿分享它。
+      <div class="fs18 sans-light text-center mb-2">请好好保存切勿分享它。</div>
       <div id="seedDiv"></div>
     </form>
 

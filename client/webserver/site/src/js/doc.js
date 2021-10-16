@@ -224,6 +224,17 @@ export default class Doc {
   }
 
   /*
+  * cleanTemplates removes the elements from the DOM and deletes the id
+  * attribute.
+  */
+  static cleanTemplates (...tmpls) {
+    tmpls.forEach(tmpl => {
+      tmpl.remove()
+      tmpl.removeAttribute('id')
+    })
+  }
+
+  /*
   * tmplElement is a helper function for grabbing sub-elements of the market list
   * template.
   */

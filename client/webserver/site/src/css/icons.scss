@@ -95,3 +95,9 @@
 .ico-arrowdown::before {
   content: "\e90c";
 }
+
+.ico-arrowback::before {
+  content: "\e90c";
+  display: inline-block;
+  transform: rotate(90deg);
+}

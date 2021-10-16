@@ -74,23 +74,6 @@ table.wallets {
   }
 }
 
-div.asset-market {
-  font-size: 15px;
-  font-family: $demi-sans;
-  text-align: center;
-  margin: 5px;
-  width: 90px;
-  cursor: pointer;
-
-  img {
-    margin-bottom: 5px;
-  }
-}
-
-div.asset-market:hover {
-  background-color: $dark_bg_2;
-}
-
 #marketBox {
   position: relative;
   max-width: 80%;

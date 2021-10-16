@@ -34,17 +34,41 @@ export default class SettingsPage extends BasePage {
     page.commitHash.textContent = app().commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
 
-    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(
-      page.confirmRegForm,
-      {
-        getCertFile: () => this.getCertFile(),
-        getDexAddr: () => this.getDexAddr()
-      },
-      () => this.registerDEXSuccess())
+    // Asset selection
+    this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, assetID => {
+      const asset = app().assets[assetID]
+      this.confirmRegistrationForm.setAsset(assetID)
+      if (asset.wallet) {
+        // TODO: After #1230 is in, we'll want to check the balance here and
+        // show the low balance modal if appropriate.
+        this.animateConfirmForm(page.regAssetForm)
+        return
+      }
+      this.newWalletForm.setAsset(assetID)
+      this.newWalletForm.loadDefaults()
+      this.currentForm = page.newWalletForm
+      forms.slideSwap(page.regAssetForm, page.newWalletForm)
+    })
 
-    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc) => {
-      this.confirmRegistrationForm.setExchange(xc)
-      await this.showForm(page.confirmRegForm)
+    // Approve fee payment
+    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+      this.registerDEXSuccess()
+    }, () => {
+      this.animateRegAsset(page.confirmRegForm)
+    }, this.pwCache)
+
+    // Create a new wallet
+    this.newWalletForm = new forms.NewWalletForm(page.newWalletForm, () => {
+      this.regAssetForm.refresh()
+      this.currentForm = page.confirmRegForm
+      forms.slideSwap(page.newWalletForm, page.confirmRegForm)
+    }, this.pwCache, () => this.animateRegAsset(page.newWalletForm))
+
+    // Enter an address for a new DEX
+    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
+      this.confirmRegistrationForm.setExchange(xc, certFile)
+      this.regAssetForm.setExchange(xc)
+      this.animateRegAsset(page.dexAddrForm)
     })
 
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
@@ -349,5 +373,23 @@ export default class SettingsPage extends BasePage {
    */
   unload () {
     Doc.unbind(document, 'keyup', this.keyup)
+  }
+
+  /* Swap in the asset selection form and run the animation. */
+  async animateRegAsset (oldForm) {
+    Doc.hide(oldForm)
+    const form = this.page.regAssetForm
+    this.currentForm = form
+    this.regAssetForm.animate()
+    Doc.show(form)
+  }
+
+  /* Swap in the confirmation form and run the animation. */
+  async animateConfirmForm (oldForm) {
+    this.confirmRegistrationForm.animate()
+    const form = this.page.confirmRegForm
+    this.currentForm = form
+    Doc.hide(oldForm)
+    Doc.show(form)
   }
 }

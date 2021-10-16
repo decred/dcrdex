@@ -78,20 +78,16 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 type registerTmplData struct {
 	CommonArguments
 	Initialized bool
+	Authed      bool
 }
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	cArgs := commonArgs(r, "Register | Decred DEX")
-	if cArgs.UserInfo.Initialized && !cArgs.UserInfo.Authed {
-		// Initialized app should login before using the Register page.
-		http.Redirect(w, r, loginRoute, http.StatusSeeOther)
-		return
-	}
-
 	data := &registerTmplData{
-		CommonArguments: *cArgs,
+		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
 		Initialized:     cArgs.UserInfo.Initialized,
+		Authed:          cArgs.UserInfo.Authed,
 	}
 
 	s.sendTemplate(w, "register", data)

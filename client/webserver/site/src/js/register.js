@@ -2,10 +2,8 @@ import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
+import { NewWalletForm, DEXAddressForm, LoginForm, ConfirmRegistrationForm, FeeAssetSelectionForm, slideSwap, bind as bindForm } from './forms'
 import * as intl from './locales'
-
-const animationLength = 300
 
 export default class RegistrationPage extends BasePage {
   constructor (body) {
@@ -26,37 +24,64 @@ export default class RegistrationPage extends BasePage {
       Doc.hide(page.showSeedRestore)
     })
 
-    this.walletForm = new NewWalletForm(page.newWalletForm, assetID => { this.newWalletCreated(assetID) },
-      this.pwCache, () => this.changeForm(page.confirmRegForm))
-    // ADD DEX
-    this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc) => {
-      this.confirmRegisterForm.setExchange(xc)
-      this.currentDEX = xc
-      await this.changeForm(page.confirmRegForm)
+    this.loginForm = new LoginForm(page.loginForm, async () => {
+      await app().fetchUser()
+      this.dexAddrForm.refresh()
+      slideSwap(page.loginForm, page.dexAddrForm)
     }, this.pwCache)
 
-    // SUBMIT DEX REGISTRATION
-    this.confirmRegisterForm = new ConfirmRegistrationForm(
-      page.confirmRegForm,
-      {
-        getCertFile: () => this.getCertFile(),
-        getDexAddr: () => this.getDexAddr()
-      },
-      () => this.registerDEXSuccess(),
-      (msg) => this.registerDEXFundsFail(msg),
-      (assetId) => {
-        this.walletForm.setAsset(assetId)
-        this.walletForm.loadDefaults()
-        this.changeForm(page.newWalletForm)
-      })
+    this.newWalletForm = new NewWalletForm(page.newWalletForm, () => {
+      this.regAssetForm.refresh()
+      slideSwap(page.newWalletForm, page.confirmRegForm)
+    }, this.pwCache, () => this.animateRegAsset(page.newWalletForm))
 
-    Doc.bind(page.depoWaitClose, 'click', () => {
-      if (this.balanceTimer) {
-        clearInterval(this.balanceTimer)
-        this.balanceTimer = null
-        this.changeForm(page.confirmRegForm)
+    // ADD DEX
+    this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
+      this.confirmRegisterForm.setExchange(xc, certFile)
+      this.regAssetForm.setExchange(xc)
+      this.animateRegAsset(page.dexAddrForm)
+    }, this.pwCache)
+
+    // SELECT REG ASSET
+    this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, assetID => {
+      const asset = app().assets[assetID]
+      this.confirmRegisterForm.setAsset(assetID)
+      if (asset.wallet) {
+        // TODO: After #1230 is in, we'll want to check the balance here and
+        // show the low balance modal if appropriate.
+        this.animateConfirmForm(page.regAssetForm)
+        return
       }
+      this.newWalletForm.setAsset(assetID)
+      this.newWalletForm.loadDefaults()
+      slideSwap(page.regAssetForm, page.newWalletForm)
     })
+
+    // TODO: handle wallet syncing
+    // Doc.bind(page.depoWaitClose, 'click', () => {
+    //   if (this.balanceTimer) {
+    //     clearInterval(this.balanceTimer)
+    //     this.balanceTimer = null
+    //     this.changeForm(page.confirmRegForm)
+    //   }
+    // })
+
+    // SUBMIT DEX REGISTRATION
+    this.confirmRegisterForm = new ConfirmRegistrationForm(page.confirmRegForm, () => {
+      this.registerDEXSuccess()
+    }, () => {
+      this.animateRegAsset(page.confirmRegForm)
+    }, this.pwCache)
+
+    const currentForm = page.forms.querySelector(':scope > form:not(.d-hide)')
+    switch (currentForm) {
+      case page.loginForm:
+        this.loginForm.animate()
+        break
+      case page.dexAddrForm:
+        this.dexAddrForm.animate()
+    }
+
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
     this.notifiers = {
@@ -73,25 +98,18 @@ export default class RegistrationPage extends BasePage {
     await app().fetchUser()
   }
 
-  /* Swap this currently displayed form1 for form2 with an animation. */
-  async changeForm (newForm) {
-    const oldForm = this.currentForm
-    this.currentForm = newForm
-    const shift = this.body.offsetWidth / 2
-    await Doc.animate(animationLength, progress => {
-      oldForm.style.right = `${progress * shift}px`
-    }, 'easeInHard')
+  /* Swap in the asset selection form and run the animation. */
+  async animateRegAsset (oldForm) {
     Doc.hide(oldForm)
-    oldForm.style.right = '0'
-    newForm.style.right = -shift
-    Doc.show(newForm)
-    if (newForm.querySelector('input')) {
-      newForm.querySelector('input').focus()
-    }
-    await Doc.animate(animationLength, progress => {
-      newForm.style.right = `${-shift + progress * shift}px`
-    }, 'easeOutHard')
-    newForm.style.right = '0'
+    this.regAssetForm.animate()
+    Doc.show(this.page.regAssetForm)
+  }
+
+  /* Swap in the confirmation form and run the animation. */
+  async animateConfirmForm (oldForm) {
+    this.confirmRegisterForm.animate()
+    Doc.hide(oldForm)
+    Doc.show(this.page.confirmRegForm)
   }
 
   /* Set the application password. Attached to form submission. */
@@ -135,9 +153,9 @@ export default class RegistrationPage extends BasePage {
     this.pwCache.pw = pw
     this.auth()
     app().updateMenuItemsDisplay()
-    this.walletForm.refresh()
+    this.newWalletForm.refresh()
     this.dexAddrForm.refresh()
-    await this.changeForm(page.dexAddrForm)
+    await slideSwap(page.appPWForm, page.dexAddrForm)
   }
 
   /* gets the contents of the cert file */
@@ -152,14 +170,6 @@ export default class RegistrationPage extends BasePage {
   /* gets the dex address input by the user */
   getDexAddr () {
     return this.page.dexAddr.value
-  }
-
-  /* Called when dex registration failed due to insufficient funds. */
-  async registerDEXFundsFail (msg) {
-    const page = this.page
-    page.regFundsErr.textContent = msg
-    Doc.show(page.regFundsErr)
-    await this.changeForm(page.failedRegForm)
   }
 
   /* Called after successful registration to a DEX. */

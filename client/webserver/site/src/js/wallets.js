@@ -42,12 +42,10 @@ export default class WalletsPage extends BasePage {
     }
 
     // Prepare templates
-    page.dexTitle.removeAttribute('id')
-    page.dexTitle.remove()
+    page.marketCard.removeAttribute('id')
+    page.marketCard.remove()
     page.oneMarket.removeAttribute('id')
     page.oneMarket.remove()
-    page.markets.removeAttribute('id')
-    page.markets.remove()
 
     // Methods to switch the item displayed on the right side, with a little
     // fade-in animation.
@@ -59,13 +57,13 @@ export default class WalletsPage extends BasePage {
     this.reconfigAsset = null
 
     // Bind the new wallet form.
-    this.walletForm = new NewWalletForm(page.walletForm, () => { this.createWalletSuccess() })
+    this.newWalletForm = new NewWalletForm(page.newWalletForm, () => { this.createWalletSuccess() })
 
     // Bind the wallet reconfig form.
     this.reconfigForm = new WalletConfigForm(page.reconfigInputs, false)
 
     // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(page.openForm, () => { this.openWalletSuccess() })
+    this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, () => { this.openWalletSuccess() })
 
     // Bind the withdraw form.
     bindForm(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
@@ -198,17 +196,17 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     Doc.empty(card)
     page.marketsFor.textContent = rowInfo.name
+    page.marketsForLogo.src = Doc.logoPath(app().assets[assetID].symbol)
     for (const [host, xc] of Object.entries(app().user.exchanges)) {
       let count = 0
       for (const market of Object.values(xc.markets)) {
         if (market.baseid === assetID || market.quoteid === assetID) count++
       }
       if (count === 0) continue
-      const header = page.dexTitle.cloneNode(true)
-      header.textContent = host
-      card.appendChild(header)
-      const marketsBox = page.markets.cloneNode(true)
-      card.appendChild(marketsBox)
+      const marketBox = page.marketCard.cloneNode(true)
+      const tmpl = Doc.parseTemplate(marketBox)
+      tmpl.dexTitle.textContent = host
+      card.appendChild(marketBox)
       for (const market of Object.values(xc.markets)) {
         // Only show markets where this is the base or quote asset.
         if (market.baseid !== assetID && market.quoteid !== assetID) continue
@@ -220,7 +218,7 @@ export default class WalletsPage extends BasePage {
         // Bind the click to a load of the markets page.
         const pageData = { host: host, base: market.baseid, quote: market.quoteid }
         bind(mBox, 'click', () => { app().loadPage('markets', pageData) })
-        marketsBox.appendChild(mBox)
+        tmpl.markets.appendChild(mBox)
       }
     }
     this.animation = this.showBox(box)
@@ -229,12 +227,12 @@ export default class WalletsPage extends BasePage {
   /* Show the new wallet form. */
   async showNewWallet (assetID) {
     const page = this.page
-    const box = page.walletForm
+    const box = page.newWalletForm
     await this.hideBox()
     this.walletAsset = this.lastFormAsset = assetID
-    this.walletForm.setAsset(assetID)
+    this.newWalletForm.setAsset(assetID)
     this.animation = this.showBox(box)
-    await this.walletForm.loadDefaults()
+    await this.newWalletForm.loadDefaults()
   }
 
   /* Show the open wallet form if the password is not cached, and otherwise
@@ -264,7 +262,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     this.unlockForm.setAsset(app().assets[assetID])
     if (errorMsg) this.unlockForm.showErrorOnly(errorMsg)
-    this.animation = this.showBox(page.openForm, page.walletPass)
+    this.animation = this.showBox(page.unlockWalletForm, page.walletPass)
   }
 
   /* Show the form used to change wallet configuration settings. */
@@ -486,7 +484,7 @@ export default class WalletsPage extends BasePage {
   /* lock instructs the API to lock the wallet. */
   async lock (assetID, asset) {
     const page = this.page
-    const loaded = app().loading(page.walletForm)
+    const loaded = app().loading(page.newWalletForm)
     const res = await postJSON('/api/closewallet', { assetID: assetID })
     loaded()
     if (!app().checkResponse(res)) return

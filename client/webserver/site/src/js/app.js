@@ -246,7 +246,6 @@ export default class Application {
     delete page.pokeTmpl.id
     page.pokeTmpl.remove()
     page.loader.remove()
-    page.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
     Doc.show(page.loader)
 
     bind(page.noteMenuEntry, 'click', async () => {

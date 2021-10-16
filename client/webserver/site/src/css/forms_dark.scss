@@ -2,6 +2,34 @@ body.dark {
   table.marketstable {
     color: #a1a1a1;
   }
+
+  #regAssetForm {
+    div.reg-asset {
+      .fader {
+        background-image:
+          linear-gradient(
+            to bottom,
+            #13202b00,
+            #13202b
+            90%
+          );
+      }
+
+      &:hover {
+        background-color: #202c35;
+
+        .fader {
+          background-image:
+            linear-gradient(
+              to bottom,
+              #202c3500,
+              #202c35
+              90%
+            );
+        }
+      }
+    }
+  }
 }
 
 .wallet-tabs {

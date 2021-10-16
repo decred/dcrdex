@@ -2,26 +2,25 @@ import { app } from './registry'
 import Doc from './doc'
 import { postJSON } from './http'
 import State from './state'
-import { feeSendErr } from './constants'
 import * as intl from './locales'
+import { RateEncodingFactor } from './orderutil'
 
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
-  constructor (form, success, pwCache, closerFn) {
+  constructor (form, success, pwCache, backFunc) {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
     const page = this.page = Doc.idDescendants(form)
+    this.pwHiders = Array.from(form.querySelectorAll('.hide-pw'))
     this.refresh()
 
-    if (closerFn) {
-      form.querySelectorAll('.form-closer').forEach(el => {
-        Doc.show(el)
-        Doc.bind(el, 'click', closerFn)
-      })
+    if (backFunc) {
+      Doc.show(page.nwGoBack)
+      Doc.bind(page.nwGoBack, 'click', () => { backFunc() })
     }
 
     Doc.empty(page.walletTabTmpl)
@@ -65,8 +64,8 @@ export class NewWalletForm {
 
   refresh () {
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    if (hidePWBox) Doc.hide(this.page.newWalletAppPWBox)
-    else Doc.show(this.page.newWalletAppPWBox)
+    if (hidePWBox) Doc.hide(...this.pwHiders)
+    else Doc.show(...this.pwHiders)
   }
 
   async setAsset (assetID) {
@@ -356,19 +355,21 @@ export class WalletConfigForm {
 }
 
 /*
- * ConfirmRegistrationForm should be used with the "confirmRegistrationForm" template.
+ * ConfirmRegistrationForm should be used with the "confirmRegistrationForm"
+ * template.
  */
 export class ConfirmRegistrationForm {
-  constructor (form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
-    this.page = Doc.idDescendants(form)
-    this.getDexAddr = getDexAddr
-    this.getCertFile = getCertFile
-    this.success = success
-    this.insufficientFundsFail = insufficientFundsFail
+  constructor (form, success, goBack, pwCache) {
     this.form = form
-    this.setupWalletFn = setupWalletFn
+    this.success = success
+    this.page = Doc.parseTemplate(form)
+    this.xc = null
+    this.certFile = ''
     this.feeAssetID = null
+    this.pwCache = pwCache
     this.syncWaiters = {}
+
+    Doc.bind(this.page.goBack, 'click', () => goBack())
     bind(form, this.page.submitConfirm, () => this.submitForm())
   }
 
@@ -387,88 +388,35 @@ export class ConfirmRegistrationForm {
     }
   }
 
-  /*
-   * setExchange populates the form with the details of an exchange.
-   */
-  setExchange (xc) {
-    // store xc in case we need to refresh the data, like after setting up
-    // a new wallet.
+  setExchange (xc, certFile) {
     this.xc = xc
+    this.certFile = certFile
     const page = this.page
-    this.fees = xc.regFees
-    Doc.empty(page.marketsTableRows, page.feeTableRows)
-    this.walletRows = {}
+    if (State.passwordIsCached() || (this.pwCache && this.pwCache.pw)) Doc.hide(page.passBox)
+    else Doc.show(page.passBox)
+    page.host.textContent = xc.host
+  }
 
-    for (const [symbol, fee] of Object.entries(xc.regFees)) {
-      // if asset fee is not supported by the client we can skip it.
-      if (app().user.assets[fee.id] === undefined) continue
-      const unitInfo = app().assets[fee.id].info.unitinfo
-      const wallet = app().user.assets[fee.id].wallet
-      const tr = page.feeRowTemplate.cloneNode(true)
-      this.walletRows[fee.id] = tr
-      Doc.bind(tr, 'click', () => { this.selectRow(fee.id) })
-      Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(symbol)
-      Doc.tmplElement(tr, 'asset').innerText = unitInfo.conventional.unit
-      Doc.tmplElement(tr, 'confs').innerText = fee.confs
-      Doc.tmplElement(tr, 'fee').innerText = Doc.formatCoinValue(fee.amount, unitInfo)
+  setAsset (assetID) {
+    const asset = app().assets[assetID]
+    const unitInfo = asset.info.unitinfo
+    this.feeAssetID = asset.id
+    const page = this.page
+    const regAsset = this.xc.regFees[asset.symbol]
+    const s = Doc.formatCoinValue(regAsset.amount, unitInfo)
+    page.fee.textContent = `${s} ${unitInfo.conventional.unit}`
+    page.logo.src = Doc.logoPath(asset.symbol)
+  }
 
-      const setupWallet = Doc.tmplElement(tr, 'setupWallet')
-      const walletReady = Doc.tmplElement(tr, 'walletReady')
-      const walletSyncing = Doc.tmplElement(tr, 'walletSyncing')
-      if (wallet) {
-        if (wallet.synced) {
-          walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
-          Doc.show(walletReady)
-          Doc.hide(walletSyncing)
-        } else {
-          walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
-          Doc.show(walletSyncing)
-          Doc.hide(walletReady)
-          this.registerSyncWaiter(fee.id, () => {
-            Doc.show(walletReady)
-            Doc.hide(walletSyncing)
-            if (this.feeAssetID === fee.id) page.submitConfirm.classList.add('selected')
-          })
-        }
-        Doc.hide(setupWallet)
-      } else {
-        setupWallet.innerText = intl.prep(intl.ID_SETUP_WALLET)
-        Doc.bind(setupWallet, 'click', () => this.setupWalletFn(fee.id))
-        Doc.hide(walletReady)
-        Doc.show(setupWallet)
-      }
-      page.feeTableRows.appendChild(tr)
-      if (State.passwordIsCached()) {
-        Doc.hide(page.appPassBox)
-        Doc.hide(page.appPassSpan)
-      } else {
-        Doc.show(page.appPassBox)
-        Doc.show(page.appPassSpan)
-      }
-    }
-    const markets = Object.values(xc.markets)
-    markets.sort((m1, m2) => {
-      const compareBase = m1.basesymbol.localeCompare(m2.basesymbol)
-      const compareQuote = m1.quotesymbol.localeCompare(m2.quotesymbol)
-      return compareBase === 0 ? compareQuote : compareBase
-    })
-    markets.forEach((market) => {
-      const tr = page.marketRowTemplate.cloneNode(true)
-      Doc.tmplElement(tr, 'baseicon').src = Doc.logoPath(market.basesymbol)
-      Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
-      Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
-      Doc.tmplElement(tr, 'quote').innerText = market.quotesymbol.toUpperCase()
-      const baseUnitInfo = app().unitInfo(market.baseid)
-      const fmtVal = Doc.formatCoinValue(market.lotsize, baseUnitInfo)
-      Doc.tmplElement(tr, 'lotsize').innerText = `${fmtVal} ${baseUnitInfo.conventional.unit}`
-      page.marketsTableRows.appendChild(tr)
-      if (State.passwordIsCached()) {
-        Doc.hide(page.appPassBox)
-        Doc.hide(page.appPassSpan)
-      } else {
-        Doc.show(page.appPassBox)
-        Doc.show(page.appPassSpan)
-      }
+  /* Form expands into its space quickly from the lower-right as it fades in. */
+  async animate () {
+    const form = this.form
+    Doc.animate(400, prog => {
+      form.style.transform = `scale(${prog})`
+      form.style.opacity = Math.pow(prog, 4)
+      const offset = `${(1 - prog) * 500}px`
+      form.style.top = offset
+      form.style.left = offset
     })
   }
 
@@ -495,7 +443,7 @@ export class ConfirmRegistrationForm {
   async submitForm () {
     const page = this.page
     // if button is selected it can be clickable.
-    if (!page.submitConfirm.classList.contains('selected')) {
+    if (!page.submit.classList.contains('selected')) {
       return
     }
     if (this.feeAssetID === null) {
@@ -505,12 +453,13 @@ export class ConfirmRegistrationForm {
     }
     const symbol = app().user.assets[this.feeAssetID].wallet.symbol
     Doc.hide(page.regErr)
-    const feeAsset = this.fees[symbol]
-    const cert = await this.getCertFile()
-    const dexAddr = this.getDexAddr()
+    const feeAsset = this.xc.regFees[symbol]
+    const cert = await this.certFile
+    const dexAddr = this.xc.host
+    const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
     const registration = {
       addr: dexAddr,
-      pass: page.appPass.value,
+      pass: pw,
       fee: feeAsset.amount,
       asset: feeAsset.id,
       cert: cert
@@ -518,27 +467,109 @@ export class ConfirmRegistrationForm {
     page.appPass.value = ''
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/register', registration)
+    loaded()
     if (!app().checkResponse(res)) {
-      // This form is used both in the register workflow and the
-      // settings page. The register workflow handles a failure
-      // where the user does not have enough funds to pay for the
-      // registration fee in a different way.
-      if (res.code === feeSendErr && this.insufficientFundsFail) {
-        loaded()
-        this.insufficientFundsFail(res.msg)
-        return
-      }
       page.regErr.textContent = res.msg
       Doc.show(page.regErr)
-      loaded()
       return
     }
-    loaded()
     this.success()
+  }
+}
+
+/*
+ * FeeAssetSelectionForm should be used with the "regAssetForm" template.
+ */
+export class FeeAssetSelectionForm {
+  constructor (form, success) {
+    this.form = form
+    this.success = success
+    this.xc = null
+    this.page = Doc.parseTemplate(form)
+    Doc.cleanTemplates(this.page.marketTmpl, this.page.assetTmpl)
+  }
+
+  setExchange (xc) {
+    this.xc = xc
+    const page = this.page
+    Doc.empty(page.assets)
+    for (const [symbol, feeAsset] of Object.entries(xc.regFees)) {
+      const asset = app().assets[feeAsset.id]
+      if (!asset) continue // We don't support this asset
+      const unitInfo = asset.info.unitinfo
+      const assetNode = page.assetTmpl.cloneNode(true)
+      Doc.bind(assetNode, 'click', () => { this.success(feeAsset.id) })
+      const assetTmpl = Doc.parseTemplate(assetNode)
+      page.assets.appendChild(assetNode)
+      assetTmpl.logo.src = Doc.logoPath(symbol)
+      const fee = Doc.formatCoinValue(feeAsset.amount, unitInfo)
+      assetTmpl.fee.textContent = `${fee} ${unitInfo.conventional.unit}`
+      assetTmpl.confs.textContent = feeAsset.confs
+      assetTmpl.ready.textContent = asset.wallet ? intl.prep(intl.WALLET_READY) : intl.prep(intl.SETUP_NEEDED)
+      assetTmpl.ready.classList.add(asset.wallet ? 'readygreen' : 'setuporange')
+
+      let count = 0
+      for (const mkt of Object.values(xc.markets)) {
+        if (mkt.baseid !== feeAsset.id && mkt.quoteid !== feeAsset.id) continue
+        count++
+        const marketNode = page.marketTmpl.cloneNode(true)
+        assetTmpl.markets.appendChild(marketNode)
+
+        const marketTmpl = Doc.parseTemplate(marketNode)
+
+        const isBase = mkt.baseid === feeAsset.id
+        const otherAsset = app().assets[isBase ? mkt.quoteid : mkt.baseid]
+        if (!otherAsset) continue // not supported
+        const baseAsset = app().assets[mkt.baseid]
+        const quoteAsset = app().assets[mkt.quoteid]
+        const baseSymbol = baseAsset.symbol.toUpperCase()
+        const quoteSymbol = quoteAsset.symbol.toUpperCase()
+
+        marketTmpl.logo.src = Doc.logoPath(otherAsset.symbol)
+        marketTmpl.name.textContent = `${baseSymbol}-${quoteSymbol}`
+        const s = Doc.formatCoinValue(mkt.lotsize, baseAsset.info.unitinfo) // TODO: Use UnitInfo
+        marketTmpl.lotSize.textContent = `${s} ${baseSymbol}`
+
+        if (!isBase && mkt.spot) {
+          Doc.show(marketTmpl.quoteLotSize)
+          const cFactor = asset => asset.info.unitinfo.conventional.conversionFactor
+          const r = cFactor(quoteAsset) / cFactor(baseAsset)
+          const quoteLot = mkt.lotsize * mkt.spot.rate / RateEncodingFactor * r
+          const s = Doc.formatCoinValue(quoteLot, quoteAsset.info.unitinfo)
+          marketTmpl.quoteLotSize.textContent = `(~${s} ${otherAsset.symbol.toUpperCase()})`
+        }
+      }
+      if (count < 3) Doc.hide(assetTmpl.fader)
+    }
   }
 
   refresh () {
     this.setExchange(this.xc)
+  }
+
+  /*
+   * Animation to make the elements sort of expand into their space from the
+   * bottom as they fade in.
+   */
+  async animate () {
+    const { page, form } = this
+    const how = page.how
+    const extraMargin = 75
+    const extraTop = 50
+    const fontSize = 24
+    const regAssetElements = Array.from(page.assets.children)
+    form.style.opacity = '0'
+
+    const aniLen = 350
+    await Doc.animate(aniLen, prog => {
+      for (const el of regAssetElements) {
+        el.style.marginTop = `${(1 - prog) * extraMargin}px`
+        el.style.transform = `scale(${prog})`
+      }
+      form.style.opacity = Math.pow(prog, 4).toFixed(1)
+      form.style.paddingTop = `${(1 - prog) * extraTop}px`
+      how.style.fontSize = `${fontSize * prog}px`
+    }, 'easeOut')
   }
 }
 
@@ -607,6 +638,7 @@ export class UnlockWalletForm {
   }
 }
 
+/* DEXAddressForm accepts a DEX address and performs account discovery. */
 export class DEXAddressForm {
   constructor (form, success, pwCache) {
     this.form = form
@@ -633,6 +665,15 @@ export class DEXAddressForm {
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     if (hidePWBox) Doc.hide(this.page.dexAddrAppPWBox)
     else Doc.show(this.page.dexAddrAppPWBox)
+  }
+
+  /* Just a small size tweak and fade-in. */
+  async animate () {
+    const form = this.form
+    Doc.animate(550, prog => {
+      form.style.transform = `scale(${0.9 + 0.1 * prog})`
+      form.style.opacity = Math.pow(prog, 4)
+    }, 'easeOut')
   }
 
   async checkDEX () {
@@ -682,7 +723,7 @@ export class DEXAddressForm {
     }
 
     if (this.pwCache) this.pwCache.pw = pw
-    this.success(res.xc)
+    this.success(res.xc, cert)
   }
 
   /**
@@ -706,6 +747,81 @@ export class DEXAddressForm {
     Doc.hide(page.removeCert)
     Doc.show(page.addCert)
   }
+}
+
+/* LoginForm is used to sign into the app. */
+export class LoginForm {
+  constructor (form, success, pwCache) {
+    this.success = success
+    this.form = form
+    this.pwCache = pwCache
+    const page = this.page = Doc.parseTemplate(form)
+    this.headerTxt = page.header.textContent
+    page.header.style.height = `${page.header.offsetHeight}px`
+
+    bind(form, page.submit, () => { this.submit() })
+  }
+
+  focus () {
+    this.page.pw.focus()
+  }
+
+  async submit (e) {
+    const page = this.page
+    Doc.hide(page.errMsg)
+    const pw = page.pw.value
+    page.pw.value = ''
+    const rememberPass = page.rememberPass.checked
+    if (pw === '') {
+      page.errMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
+      Doc.show(page.errMsg)
+      return
+    }
+    const loaded = app().loading(this.form)
+    const res = await postJSON('/api/login', { pass: pw, rememberPass })
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.errMsg.textContent = res.msg
+      Doc.show(page.errMsg)
+      return
+    }
+    if (res.notes) {
+      res.notes.reverse()
+    }
+    app().setNotes(res.notes || [])
+    if (this.pwCache) this.pwCache.pw = pw
+    this.success()
+  }
+
+  /* Just a small size tweak and fade-in. */
+  async animate () {
+    const form = this.form
+    Doc.animate(550, prog => {
+      form.style.transform = `scale(${0.9 + 0.1 * prog})`
+      form.style.opacity = Math.pow(prog, 4)
+    }, 'easeOut')
+  }
+}
+
+const animationLength = 300
+
+/* Swap form1 for form2 with an animation. */
+export async function slideSwap (form1, form2) {
+  const shift = document.body.offsetWidth / 2
+  await Doc.animate(animationLength, progress => {
+    form1.style.right = `${progress * shift}px`
+  }, 'easeInHard')
+  Doc.hide(form1)
+  form1.style.right = '0'
+  form2.style.right = -shift
+  Doc.show(form2)
+  if (form2.querySelector('input')) {
+    form2.querySelector('input').focus()
+  }
+  await Doc.animate(animationLength, progress => {
+    form2.style.right = `${-shift + progress * shift}px`
+  }, 'easeOutHard')
+  form2.style.right = '0'
 }
 
 /*
