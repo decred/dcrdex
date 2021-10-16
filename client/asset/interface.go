@@ -23,8 +23,9 @@ const (
 )
 
 type WalletDefinition struct {
-	// If seeded is true, the Setup method will be provided a detereministic
-	// seed. This might be true for built-in wallets.
+	// If seeded is true, the Create method will be called with a deterministic
+	// seed that should be used to set the wallet key(s). This would be
+	// true for built-in wallets.
 	Seeded bool `json:"seeded"`
 	// Type is a string identifying the wallet type.
 	Type string `json:"type"`
