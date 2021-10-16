@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"testing"
@@ -17,6 +18,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -24,9 +27,28 @@ import (
 )
 
 var (
-	_       ethFetcher = (*testNode)(nil)
-	tLogger            = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+	_            ethFetcher = (*testNode)(nil)
+	tLogger                 = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+	initCalldata            = mustParseHex("ae0521470000000000000000000000000000000000" +
+		"000000000000000000000061481114ebdc4c31b88d0c8f4d644591a8e00" +
+		"e92b607f920ad8050deb7c7469767d9c561000000000000000000000000" +
+		"345853e21b1d475582e71cc269124ed5e2dd3422")
+	redeemCalldata = mustParseHex("b31597ad87eac09638c0c38b4e735b79f053" +
+		"cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d64459" +
+		"1a8e00e92b607f920ad8050deb7c7469767d9c561")
+	initParticipantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	initLocktime        = int64(1632112916)
+	secretHashSlice     = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
+	secretSlice         = mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
 )
+
+func mustParseHex(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
 
 type testNode struct {
 	connectErr     error
@@ -44,9 +66,14 @@ type testNode struct {
 	sugGasPriceErr error
 	peerInfo       []*p2p.PeerInfo
 	peersErr       error
+	swp            *swap.ETHSwapSwap
+	swpErr         error
+	tx             *types.Transaction
+	txIsMempool    bool
+	txErr          error
 }
 
-func (n *testNode) connect(ctx context.Context, IPC string) error {
+func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
 	return n.connectErr
 }
 
@@ -80,31 +107,49 @@ func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return n.sugGasPrice, n.sugGasPriceErr
 }
 
+func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
+	return n.swp, n.swpErr
+}
+
+func (n *testNode) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
+	return n.tx, n.txIsMempool, n.txErr
+}
+
+func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *swap.ETHSwapSwap {
+	return &swap.ETHSwapSwap{
+		InitBlockNumber:      big.NewInt(bn),
+		RefundBlockTimestamp: locktime,
+		Participant:          *participantAddr,
+		State:                uint8(state),
+		Value:                value,
+	}
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name, IPC, wantIPC string
+		name, ipc, wantIPC string
 		network            dex.Network
 		wantErr            bool
 	}{{
 		name:    "ok ipc supplied",
-		IPC:     "/home/john/bleh.ipc",
+		ipc:     "/home/john/bleh.ipc",
 		wantIPC: "/home/john/bleh.ipc",
 		network: dex.Simnet,
 	}, {
 		name:    "ok ipc not supplied",
-		IPC:     "",
+		ipc:     "",
 		wantIPC: defaultIPC,
 		network: dex.Simnet,
 	}, {
 		name:    "mainnet not allowed",
-		IPC:     "",
+		ipc:     "",
 		wantIPC: defaultIPC,
 		network: dex.Mainnet,
 		wantErr: true,
 	}}
 
 	for _, test := range tests {
-		cfg, err := load(test.IPC, test.network)
+		cfg, err := load(test.ipc, test.network)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -114,8 +159,8 @@ func TestLoad(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		if cfg.IPC != test.wantIPC {
-			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.IPC, test.name)
+		if cfg.ipc != test.wantIPC {
+			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.ipc, test.name)
 		}
 	}
 }
@@ -237,7 +282,8 @@ func TestRun(t *testing.T) {
 		bestBlkHash: blockHash1,
 		blk:         block1,
 	}
-	backend := unconnectedETH(tLogger, nil)
+
+	backend := unconnectedETH(tLogger, new(config))
 	ch := backend.BlockChannel(1)
 	backend.node = node
 	go func() {
@@ -401,5 +447,83 @@ func TestRequiredOrderFunds(t *testing.T) {
 	got := calc.RequiredOrderFunds(swapVal, initSize, numSwaps, nfo)
 	if got != want {
 		t.Fatalf("want %v got %v for fees", want, got)
+	}
+}
+
+func tTx(gasPrice, value *big.Int, to *common.Address, data []byte) *types.Transaction {
+	return types.NewTx(&types.LegacyTx{
+		GasPrice: gasPrice,
+		To:       to,
+		Value:    value,
+		Data:     data,
+	})
+}
+
+func TestContract(t *testing.T) {
+	receiverAddr, contractAddr := new(common.Address), new(common.Address)
+	copy(receiverAddr[:], encode.RandomBytes(20))
+	copy(contractAddr[:], encode.RandomBytes(20))
+	var txHash [32]byte
+	copy(txHash[:], encode.RandomBytes(32))
+	gasPrice := big.NewInt(3e10)
+	value := big.NewInt(5e18)
+	tc := TxCoinID{
+		TxID: txHash,
+	}
+	txCoinIDBytes := tc.Encode()
+	sc := SwapCoinID{}
+	swapCoinIDBytes := sc.Encode()
+	locktime := big.NewInt(initLocktime)
+	tests := []struct {
+		name           string
+		coinID         []byte
+		tx             *types.Transaction
+		swap           *dexeth.ETHSwapSwap
+		swapErr, txErr error
+		wantErr        bool
+	}{{
+		name:   "ok",
+		tx:     tTx(gasPrice, value, contractAddr, initCalldata),
+		swap:   tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		coinID: txCoinIDBytes,
+	}, {
+		name:    "new coiner error, wrong tx type",
+		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
+		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		coinID:  swapCoinIDBytes,
+		wantErr: true,
+	}, {
+		name:    "confirmations error, swap error",
+		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:  txCoinIDBytes,
+		swapErr: errors.New(""),
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			tx:     test.tx,
+			txErr:  test.txErr,
+			swp:    test.swap,
+			swpErr: test.swapErr,
+		}
+		eth := &Backend{
+			node:         node,
+			log:          tLogger,
+			contractAddr: *contractAddr,
+		}
+		contract, err := eth.Contract(test.coinID, nil)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if contract.SwapAddress != initParticipantAddr.String() ||
+			contract.LockTime.Unix() != initLocktime/1000 {
+			t.Fatalf("returns do not match expected for test %q", test.name)
+		}
 	}
 }

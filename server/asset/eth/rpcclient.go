@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"math/big"
 
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -27,16 +29,22 @@ type rpcclient struct {
 	ec *ethclient.Client
 	// c is a direct client for raw calls.
 	c *rpc.Client
+	// es is a wrapper for contract calls.
+	es *swap.ETHSwap
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easil use.
-func (c *rpcclient) connect(ctx context.Context, IPC string) error {
+func (c *rpcclient) connect(ctx context.Context, IPC string, contractAddr *common.Address) error {
 	client, err := rpc.DialIPC(ctx, IPC)
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
 	c.ec = ethclient.NewClient(client)
+	c.es, err = swap.NewETHSwap(*contractAddr, c.ec)
+	if err != nil {
+		return fmt.Errorf("unable to find swap contract: %v", err)
+	}
 	c.c = client
 	return nil
 }
@@ -83,7 +91,7 @@ func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, e
 	return c.ec.SyncProgress(ctx)
 }
 
-// blockNumber returns the current block number.
+// blockNumber gets the chain length at the time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 	return c.ec.BlockNumber(ctx)
 }
@@ -92,4 +100,23 @@ func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	var peers []*p2p.PeerInfo
 	return peers, c.c.CallContext(ctx, &peers, "admin_peers")
+}
+
+// swap gets a swap keyed by secretHash in the contract.
+func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
+	callOpts := &bind.CallOpts{
+		Pending: true,
+		Context: ctx,
+	}
+	swap, err := c.es.Swap(callOpts, secretHash)
+	if err != nil {
+		return nil, err
+	}
+	return &swap, nil
+}
+
+// transaction gets the transaction that hashes to hash from the chain or
+// mempool. Errors if tx does not exist.
+func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
+	return c.ec.TransactionByHash(ctx, hash)
 }

@@ -36,6 +36,7 @@ type rpcclient struct {
 	// ec wraps the client with some useful calls.
 	ec *ethclient.Client
 	n  *node.Node
+	// es is a wrapper for contract calls.
 	es *swap.ETHSwap
 }
 

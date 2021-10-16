@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
+	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -32,6 +34,12 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
+	// TODO: Fill in with an addresses. Also consider upgrades where one
+	// contract will be good for current active swaps, but a new one is
+	// required for new swaps.
+	mainnetContractAddr = ""
+	testnetContractAddr = ""
+	simnetContractAddr  = ""
 )
 
 var (
@@ -64,16 +72,23 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
+//
+// TODO: At some point multiple contracts will need to be used, at least for
+// transitory periods when updating the contract, and possibly a random
+// contract setup, and so contract addresses may need to be an argument in some
+// of these methods.
 type ethFetcher interface {
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
-	connect(ctx context.Context, IPC string) error
+	connect(ctx context.Context, ipc string, contractAddr *common.Address) error
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
+	swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error)
+	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -97,6 +112,12 @@ type Backend struct {
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
 	log dex.Logger
+	// contractAddr is the address of the swap contract used for swaps.
+	//
+	// TODO: Allow supporting multiple addresses/contracts. Needed in the
+	// case of updating where two contracts may be valid for some time,
+	// possibly disallowing initialization for the deprecated one only.
+	contractAddr common.Address
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -106,13 +127,27 @@ var _ asset.Backend = (*Backend)(nil)
 // before use.
 func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 	ctx, cancel := context.WithCancel(context.Background())
+	// TODO: At some point multiple contracts will need to be used, at
+	// least for transitory periods when updating the contract, and
+	// possibly a random contract setup, and so this section will need to
+	// change to support multiple contracts.
+	var contractAddr common.Address
+	switch cfg.network {
+	case dex.Simnet:
+		contractAddr = common.HexToAddress(simnetContractAddr)
+	case dex.Testnet:
+		contractAddr = common.HexToAddress(testnetContractAddr)
+	case dex.Mainnet:
+		contractAddr = common.HexToAddress(mainnetContractAddr)
+	}
 	return &Backend{
-		rpcCtx:     ctx,
-		cancelRPCs: cancel,
-		cfg:        cfg,
-		blockCache: newBlockCache(logger),
-		log:        logger,
-		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+		rpcCtx:       ctx,
+		cancelRPCs:   cancel,
+		cfg:          cfg,
+		blockCache:   newBlockCache(logger),
+		log:          logger,
+		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
+		contractAddr: contractAddr,
 	}
 }
 
@@ -133,7 +168,7 @@ func (eth *Backend) shutdown() {
 // Connect connects to the node RPC server and initializes some variables.
 func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	c := rpcclient{}
-	if err := c.connect(ctx, eth.cfg.IPC); err != nil {
+	if err := c.connect(ctx, eth.cfg.ipc, &eth.contractAddr); err != nil {
 		return nil, err
 	}
 	eth.node = &c
@@ -206,8 +241,23 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 }
 
 // Contract is part of the asset.Backend interface.
-func (eth *Backend) Contract(coinID []byte, redeemScript []byte) (*asset.Contract, error) {
-	return nil, notImplementedErr
+func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
+	sc, err := newSwapCoin(eth, coinID, sctInit)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create coiner: %v", err)
+	}
+	// Confirmations performs some extra swap status checks if the the tx
+	// is mined.
+	_, err = sc.Confirmations(eth.rpcCtx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get confirmations: %v", err)
+	}
+	return &asset.Contract{
+		Coin:         sc,
+		SwapAddress:  sc.counterParty.String(),
+		RedeemScript: sc.secretHash[:],
+		LockTime:     encode.UnixTimeMilli(sc.locktime),
+	}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.

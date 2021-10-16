@@ -13,13 +13,17 @@ import (
 
 	"context"
 	"testing"
+
+	"decred.org/dcrdex/dex/encode"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 var (
-	homeDir   = os.Getenv("HOME")
-	ipc       = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
-	ethClient = new(rpcclient)
-	ctx       context.Context
+	homeDir          = os.Getenv("HOME")
+	ipc              = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
+	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	ethClient        = new(rpcclient)
+	ctx              context.Context
 )
 
 func TestMain(m *testing.M) {
@@ -31,8 +35,24 @@ func TestMain(m *testing.M) {
 			cancel()
 			ethClient.shutdown()
 		}()
-		if err := ethClient.connect(ctx, ipc); err != nil {
-			return 1, fmt.Errorf("Connect error: %v\n", err)
+		ctx, cancel = context.WithCancel(context.Background())
+		defer func() {
+			cancel()
+			ethClient.shutdown()
+		}()
+		addrBytes, err := os.ReadFile(contractAddrFile)
+		if err != nil {
+			return 1, fmt.Errorf("error reading contract address: %v", err)
+		}
+		addrLen := len(addrBytes)
+		if addrLen == 0 {
+			return 1, fmt.Errorf("no contract address found at %v", contractAddrFile)
+		}
+		addrStr := string(addrBytes[:addrLen-1])
+		contractAddr := common.HexToAddress(addrStr)
+		fmt.Printf("Contract address is %v\n", addrStr)
+		if err := ethClient.connect(ctx, ipc, &contractAddr); err != nil {
+			return 1, fmt.Errorf("Connect error: %v", err)
 		}
 		return m.Run(), nil
 	}
@@ -92,6 +112,25 @@ func TestSyncProgress(t *testing.T) {
 func TestSuggestGasPrice(t *testing.T) {
 	_, err := ethClient.suggestGasPrice(ctx)
 	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSwap(t *testing.T) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	_, err := ethClient.swap(ctx, secretHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTransaction(t *testing.T) {
+	var hash [32]byte
+	copy(hash[:], encode.RandomBytes(32))
+	_, _, err := ethClient.transaction(ctx, hash)
+	// TODO: Test positive route.
+	if err.Error() != "not found" {
 		t.Fatal(err)
 	}
 }
