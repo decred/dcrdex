@@ -42,6 +42,8 @@ export const ID_API_ERROR = 'ID_API_ERROR'
 export const ID_CHOOSE_WALLET = 'ID_CHOOSE_WALLET'
 export const ID_SETUP_WALLET = 'ID_SETUP_WALLET'
 export const ID_WALLET_READY = 'ID_WALLET_READY'
+export const ID_CHANGE_WALLET_TYPE = 'ID_CHANGE_WALLET_TYPE'
+export const ID_KEEP_WALLET_TYPE = 'ID_KEEP_WALLET_TYPE'
 
 export const enUS = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -86,7 +88,9 @@ export const enUS = {
   [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!',
   [ID_API_ERROR]: 'API error',
   [ID_WALLET_READY]: 'Ready',
-  [ID_SETUP_WALLET]: 'Setup'
+  [ID_SETUP_WALLET]: 'Setup',
+  [ID_CHANGE_WALLET_TYPE]: 'change the wallet type',
+  [ID_KEEP_WALLET_TYPE]: 'don\'t change the wallet type'
 }
 
 export const ptBR = {
@@ -190,6 +194,8 @@ const localesMap = {
 /* locale will hold the locale loaded via setLocale. */
 let locale
 
+const defaultLocale = enUS
+
 /*
  * setLocale read the language tag from the current document's html element lang
  * attribute and sets the locale. setLocale should be called once by the
@@ -199,7 +205,7 @@ export function setLocale () { locale = localesMap[document.documentElement.lang
 
 /* prep will format the message to the current locale. */
 export function prep (k, args = undefined) {
-  return stringTemplateParser(locale[k], args)
+  return stringTemplateParser(locale[k] || defaultLocale[k], args)
 }
 
 /*
@@ -216,4 +222,14 @@ function stringTemplateParser (expression, valueObj) {
   // text can be anything, but brackets '{}' and space '\s'
   const templateMatcher = /{{\s?([^{}\s]*)\s?}}/g
   return expression.replace(templateMatcher, (_, value) => valueObj[value])
+}
+
+window.localeDiscrepancies = () => {
+  const ref = enUS
+  for (const [lang, dict] of Object.entries(localesMap)) {
+    if (dict === ref) continue
+    for (const [k, s] of Object.entries(ref)) {
+      if (!dict[k]) console.log(`${lang} needs a tranlation for: ${s}`)
+    }
+  }
 }

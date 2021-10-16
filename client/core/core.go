@@ -1058,6 +1058,7 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
+	walletWait    sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
 	log           dex.Logger
@@ -1264,6 +1265,9 @@ func (c *Core) Run(ctx context.Context) {
 		}
 		wallet.Disconnect()
 	}
+
+	// Let the wallet backends shut down cleanly.
+	c.walletWait.Wait()
 
 	c.log.Infof("DEX client core off")
 }
@@ -4332,7 +4336,7 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 // initialize pulls the known DEXes from the database and attempts to connect
 // and retrieve the DEX configuration.
 func (c *Core) initialize() {
-	asset.Initialize(c.ctx, &c.wg, c.cfg.Logger, c.lang)
+	asset.Initialize(c.ctx, &c.walletWait, c.cfg.Logger, c.lang)
 
 	accts, err := c.db.Accounts()
 	if err != nil {

@@ -72,9 +72,8 @@ func main() {
 				dict := locales.Locales[lang]
 				replacement, found := dict[key]
 				if !found {
-					replacement := enDict[key]
+					replacement = enDict[key]
 					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
-					os.Exit(1)
 				}
 				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement), -1) // Could just do 1
 			}

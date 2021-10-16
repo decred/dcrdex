@@ -51,7 +51,7 @@
 
     {{- /* registration failed low balance. */ -}}
     <form class="card mx-auto my-5 bg1 border1 d-hide" id="failedRegForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Insufficient funds</div>
+      <div class="bg2 px-2 py-1 text-center fs18"></div>
       <div class="p-4">
         <div class="fs16">
           Registration failed. Look below for more details:
@@ -65,17 +65,15 @@
     <form class="card mx-auto my-5 bg1 border1 d-hide pt-4 px-3" id="depoWait">
       <div class="corner-bttn hoverbg" id="depoWaitClose"><span class="ico-cross"></span></div>
       <div class="fs15">
-        You need to pay your registration fee, but your new wallet doesn't have the balance yet.
-        Send at least <span id="depoWaitFee"></span> plus some more for transaction
-        fees to your deposit address.
+        
       </div>
-      <div class="mono demi mt-2 bg2 p-2" id="depoAddr">bcrt1qrjg0pd80sfw5pvu05hq899w20kwcg4lqvzjt6c</div>
+      <div class="mono demi mt-2 bg2 p-2" id="depoAddr"></div>
       <div class="d-flex align-items-center justify-content-center py-3">
-        <div class="fs14 demi mr-2">Current Balance:</div>
-        <div id="depoWaitBal">1.25785432</div>
+        <div class="fs14 demi mr-2">:</div>
+        <div id="depoWaitBal"></div>
       </div>
 
-      <div class="fs12">refreshing in <span id="depoRefresh">15</span> seconds</div>
+      <div class="fs12"></div>
 
     </form>
 

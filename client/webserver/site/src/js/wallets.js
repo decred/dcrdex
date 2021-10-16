@@ -133,7 +133,7 @@ export default class WalletsPage extends BasePage {
       if (Doc.isHidden(page.changeWalletType)) {
         Doc.show(page.changeWalletType, page.changeTypeHideIcon)
         Doc.hide(page.changeTypeShowIcon)
-        page.changeTypeMsg.textContent = 'don\'t change the wallet type'
+        page.changeTypeMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_TYPE)
       } else this.showReconfig(this.reconfigAsset)
     })
 
@@ -283,7 +283,7 @@ export default class WalletsPage extends BasePage {
     if (asset.info.availablewallets.length > 1) {
       Doc.empty(page.changeWalletTypeSelect)
       Doc.show(page.showChangeType, page.changeTypeShowIcon)
-      page.changeTypeMsg.textContent = 'change the wallet type'
+      page.changeTypeMsg.textContent = intl.prep(intl.ID_CHANGE_WALLET_TYPE)
       for (const wDef of asset.info.availablewallets) {
         const option = document.createElement('option')
         if (wDef.type === currentDef.type) option.selected = '1'
