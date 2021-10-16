@@ -37,6 +37,14 @@ body.dark {
     }
   }
 
+  .marketrow {
+    background-color: #34383e;
+
+    &.selected {
+      border: 1px solid #7a97;
+    }
+  }
+
   label.market-search {
     background-color: black;
   }
