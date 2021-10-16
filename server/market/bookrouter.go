@@ -684,9 +684,10 @@ func (r *BookRouter) handlePriceFeeder(conn comms.Link, msg *msgjson.Message) *m
 			Message: "encoding error",
 		}
 	}
-	r.priceFeeders.add(conn)
-	err = conn.Send(msg)
-	if err != nil {
+
+	if err := conn.Send(msg); err == nil {
+		r.priceFeeders.add(conn)
+	} else {
 		log.Debugf("error sending price_feed response: %v", err)
 	}
 

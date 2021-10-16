@@ -890,6 +890,11 @@ func (dc *dexConnection) subPriceFeed() {
 		return
 	}
 
+	// We expect there to be a map in handlePriceUpdateNote.
+	if spots == nil {
+		spots = make(map[string]*msgjson.Spot)
+	}
+
 	dc.spotsMtx.Lock()
 	dc.spots = spots
 	dc.spotsMtx.Unlock()

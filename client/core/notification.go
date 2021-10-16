@@ -363,7 +363,7 @@ type SpotPriceNote struct {
 	Spots map[string]*msgjson.Spot `json:"spots"`
 }
 
-const TopicSpotsUpdate = "SpotsUpdate"
+const TopicSpotsUpdate Topic = "SpotsUpdate"
 
 func newSpotPriceNote(host string, spots map[string]*msgjson.Spot) *SpotPriceNote {
 	return &SpotPriceNote{
