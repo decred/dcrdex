@@ -471,11 +471,14 @@ func (d *Driver) Info() *asset.WalletInfo {
 var (
 	logRotator        atomic.Value
 	teardownWaitGroup sync.WaitGroup
+	initialized       uint32
 )
 
-// Initialize sets up a routines to close the log rotator if it's initialized
-// before shutdown.
+// Initialize sets up a routine to close any existing log rotator.
 func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
+	if !atomic.CompareAndSwapUint32(&initialized, 0, 1) {
+		return
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -608,6 +611,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case WalletTypeSPV:
+		if atomic.LoadUint32(&initialized) == 0 {
+			return nil, fmt.Errorf("must call asset.Initialize if you want to create an SPV wallet")
+		}
 		return openSPVWallet(cloneCFG)
 	case WalletTypeRPC, WalletTypeLegacy:
 		return BTCCloneWallet(cloneCFG)

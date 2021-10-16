@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -44,6 +46,10 @@ var (
 )
 
 func TestWallet(t *testing.T) {
+	var ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	(&btc.Driver{}).Initialize(ctx, &sync.WaitGroup{}, dex.StdOutLogger("INIT", dex.LevelWarn), language.AmericanEnglish)
+
 	const lotSize = 1e6
 
 	fmt.Println("////////// RPC WALLET W/O SPLIT //////////")
