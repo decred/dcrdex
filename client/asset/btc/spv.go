@@ -191,7 +191,7 @@ func logNeutrino(netDir string) error {
 		return l
 	}
 
-	neutrino.UseLogger(logger("NTRNO", btclog.LevelInfo))
+	neutrino.UseLogger(logger("NTRNO", btclog.LevelDebug))
 	wallet.UseLogger(logger("BTCW", btclog.LevelInfo))
 	wtxmgr.UseLogger(logger("TXMGR", btclog.LevelInfo))
 	chain.UseLogger(logger("CHAIN", btclog.LevelInfo))
@@ -971,10 +971,11 @@ func (w *spvWallet) startWallet() error {
 	}
 
 	chainService, err := neutrino.NewChainService(neutrino.Config{
-		DataDir:      w.netDir,
-		Database:     w.neutrinoDB,
-		ChainParams:  *w.chainParams,
-		ConnectPeers: w.connectPeers,
+		DataDir:          w.netDir,
+		Database:         w.neutrinoDB,
+		ChainParams:      *w.chainParams,
+		ConnectPeers:     w.connectPeers,
+		BroadcastTimeout: 10 * time.Second,
 	})
 	if err != nil {
 		bailOnWalletAndDB()

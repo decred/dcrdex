@@ -380,7 +380,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	swapReceipt := receipts[0]
-	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*10))
+	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*30))
 	defer cancel()
 
 	tLogger.Info("Testing FindRedemption")
