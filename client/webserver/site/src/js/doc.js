@@ -175,7 +175,7 @@ export default class Doc {
   */
   static parseTemplate (ancestor) {
     const d = {}
-    for (const el of ancestor.querySelectorAll('[data-tmpl')) d[el.dataset.tmpl] = el
+    for (const el of ancestor.querySelectorAll('[data-tmpl]')) d[el.dataset.tmpl] = el
     return d
   }
 
