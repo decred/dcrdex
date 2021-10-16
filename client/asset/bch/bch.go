@@ -5,12 +5,9 @@ package bch
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -25,7 +22,6 @@ import (
 	"github.com/gcash/bchd/bchec"
 	bchscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -114,15 +110,8 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Exists checks the existence of the wallet. For the RPC wallet, this attempts
-// to connect and request getnetworkinfo to verify existence.
-func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	return false, fmt.Errorf("no seeded-type Bitcoin Cash wallets")
-}
-
-func (d *Driver) Create(*asset.CreateWalletParams) error {
-	return errors.New("no creatable wallet types")
-}
+// Check that Driver implements asset.Driver.
+var _ asset.Driver = (*Driver)(nil)
 
 // Open creates the BCH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -139,9 +128,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
-}
-
-func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the

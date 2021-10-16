@@ -42,7 +42,6 @@ import (
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -383,15 +382,8 @@ type fundingCoin struct {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Exists checks the existence of the wallet. For the RPC wallet, this attempts
-// to connect and request the version to verify existence.
-func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	return false, fmt.Errorf("no seeded-type Decred wallets available")
-}
-
-func (d *Driver) Create(*asset.CreateWalletParams) error {
-	return errors.New("no creatable wallet types")
-}
+// Check that Driver implements asset.Driver.
+var _ asset.Driver = (*Driver)(nil)
 
 // Open creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -412,9 +404,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // (*ExchangeWallet).Info when possible.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
-}
-
-func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 func init() {

@@ -405,6 +405,11 @@ func ParseRPCWalletConfig(settings map[string]string, symbol string, net dex.Net
 // Driver implements asset.Driver.
 type Driver struct{}
 
+// Check that Driver implements Driver, Creator, and Initializer.s
+var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
+var _ asset.Initializer = (*Driver)(nil)
+
 // Exists checks the existence of the wallet. For the RPC wallet, this attempts
 // to connect and request getnetworkinfo to verify existence. For the SPV wallet,
 // we ultimately just look for wallet files.

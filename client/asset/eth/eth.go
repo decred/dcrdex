@@ -38,7 +38,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
-	"golang.org/x/text/language"
 )
 
 func init() {
@@ -97,9 +96,14 @@ var (
 
 // Check that Driver implements asset.Driver.
 var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
 
 // Driver implements asset.Driver.
 type Driver struct{}
+
+// Check that Driver implements Driver and Creator.
+var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
 
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -118,9 +122,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
-}
-
-func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 // Exists checks the existence of the wallet.

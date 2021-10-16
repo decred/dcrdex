@@ -33,11 +33,22 @@ type CreateWalletParams struct {
 
 // Driver is the interface required of all exchange wallets.
 type Driver interface {
-	Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error)
-	Create(*CreateWalletParams) error
 	Open(*WalletConfig, dex.Logger, dex.Network) (Wallet, error)
 	DecodeCoinID(coinID []byte) (string, error)
 	Info() *WalletInfo
+}
+
+// Creator defines methods for Drivers that will be called to initialize seeded
+// wallets during CreateWallet. Only assets that provide seeded wallets need to
+// implement Creator.
+type Creator interface {
+	Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error)
+	Create(*CreateWalletParams) error
+}
+
+// Initializer defines an optional method for Drivers that will be called when
+// the Initialize package function is called.
+type Initializer interface {
 	Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag)
 }
 
@@ -71,7 +82,11 @@ func Register(assetID uint32, driver Driver) {
 // WalletExists will be true if the specified wallet exists.
 func WalletExists(assetID uint32, walletType, dataDir string, settings map[string]string, net dex.Network) (exists bool, err error) {
 	return exists, withDriver(assetID, func(drv Driver) error {
-		exists, err = drv.Exists(walletType, dataDir, settings, net)
+		creator, is := drv.(Creator)
+		if !is {
+			return fmt.Errorf("driver has no Create method")
+		}
+		exists, err = creator.Exists(walletType, dataDir, settings, net)
 		return err
 	})
 }
@@ -79,7 +94,11 @@ func WalletExists(assetID uint32, walletType, dataDir string, settings map[strin
 // CreateWallet creates a new wallet. Only use Create for seeded wallet types.
 func CreateWallet(assetID uint32, seedParams *CreateWalletParams) error {
 	return withDriver(assetID, func(drv Driver) error {
-		return drv.Create(seedParams)
+		creator, is := drv.(Creator)
+		if !is {
+			return fmt.Errorf("driver has no Create method")
+		}
+		return creator.Create(seedParams)
 	})
 }
 
@@ -136,7 +155,8 @@ func Info(assetID uint32) (*WalletInfo, error) {
 var assetsInited uint32
 
 // Initialize will initialize asset backends. This allows backends to setup
-// teardown routines to synchronize shutdown with the caller.
+// teardown routines to synchronize shutdown with the caller. Only Drivers which
+// implement Initializer will be initialized.
 func Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 	if !atomic.CompareAndSwapUint32(&assetsInited, 0, 1) {
 		return
@@ -144,6 +164,10 @@ func Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang
 	driversMtx.RLock()
 	defer driversMtx.RUnlock()
 	for assetID, drv := range drivers {
-		drv.Initialize(ctx, wg, logger.SubLogger(dex.BipIDSymbol(assetID)), lang)
+		initer, is := drv.(Initializer)
+		if !is {
+			continue
+		}
+		initer.Initialize(ctx, wg, logger.SubLogger(dex.BipIDSymbol(assetID)), lang)
 	}
 }
