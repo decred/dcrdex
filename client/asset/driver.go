@@ -84,7 +84,7 @@ func WalletExists(assetID uint32, walletType, dataDir string, settings map[strin
 	return exists, withDriver(assetID, func(drv Driver) error {
 		creator, is := drv.(Creator)
 		if !is {
-			return fmt.Errorf("driver has no Create method")
+			return fmt.Errorf("driver has no Exists method")
 		}
 		exists, err = creator.Exists(walletType, dataDir, settings, net)
 		return err
