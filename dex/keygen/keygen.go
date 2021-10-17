@@ -51,10 +51,3 @@ func GenDeepChild(seed []byte, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 
 	return extKey, nil
 }
-
-// ZeroBytes assigns 0 to each element in a byte slice.
-func ZeroBytes(b []byte) {
-	for i := 0; i < len(b); i++ {
-		b[i] = byte(0)
-	}
-}

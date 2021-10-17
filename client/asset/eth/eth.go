@@ -214,12 +214,12 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 	}
 
 	privateKey, err := extKey.SerializedPrivKey()
-	defer keygen.ZeroBytes(privateKey)
+	defer encode.ClearBytes(privateKey)
 	if err != nil {
 		return err
 	}
 
-	importAccountToNode(node, privateKey, createWalletParams.Pass)
+	importKeyToNode(node, privateKey, createWalletParams.Pass)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 	accounts := exportAccountsFromNode(node)
 	if len(accounts) != 1 {
 		return nil,
-			fmt.Errorf("NewWallet: eth node keystore should only contain 1 account, but contains %v",
+			fmt.Errorf("NewWallet: eth node keystore should only contain 1 account, but contains %d",
 				len(accounts))
 	}
 

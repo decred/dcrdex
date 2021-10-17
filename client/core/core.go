@@ -1705,7 +1705,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	if walletInfo.Seeded {
 		if len(walletPW) > 0 {
-			return fmt.Errorf("external password incompatible with built in wallet")
+			return fmt.Errorf("external password incompatible with built-in wallet")
 		}
 		walletPW, err = c.createSeededWallet(assetID, crypter, form)
 		if err != nil {
@@ -2001,7 +2001,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	}
 	seeded := oldWallet.Info().Seeded
 	if seeded && len(newWalletPW) > 0 {
-		return newError(passwordErr, "cannot set a password on a seeded wallet")
+		return newError(passwordErr, "cannot set a password on a built-in wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
 	dbWallet := &db.Wallet{

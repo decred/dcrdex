@@ -136,17 +136,13 @@ func TestMain(m *testing.M) {
 		}()
 		// Create dir if none yet exists. This persists for the life of the
 		// testing harness.
-		if _, err := os.Stat(simnetWalletDir); os.IsNotExist(err) {
-			err := os.MkdirAll(simnetWalletDir, 0755)
-			if err != nil {
-				return 1, fmt.Errorf("error creating temp dir: %v\n", err)
-			}
+		err := os.MkdirAll(simnetWalletDir, 0755)
+		if err != nil {
+			return 1, fmt.Errorf("error creating simnet wallet dir dir: %v\n", err)
 		}
-		if _, err := os.Stat(participantWalletDir); os.IsNotExist(err) {
-			err := os.MkdirAll(participantWalletDir, 0755)
-			if err != nil {
-				return 1, fmt.Errorf("error creating temp dir: %v\n", err)
-			}
+		err = os.MkdirAll(participantWalletDir, 0755)
+		if err != nil {
+			return 1, fmt.Errorf("error creating participant wallet dir: %v\n", err)
 		}
 		addrBytes, err := os.ReadFile(contractAddrFile)
 		if err != nil {

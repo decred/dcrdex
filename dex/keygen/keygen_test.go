@@ -50,11 +50,3 @@ func TestGenDeepChild(t *testing.T) {
 		t.Fatalf("private keys not equal:\n%x\n%x", expectedSerializedPrivKey, serializedPrivKey)
 	}
 }
-
-func TestZeroBytes(t *testing.T) {
-	b := []byte{1, 2, 3}
-	ZeroBytes(b)
-	if !bytes.Equal(b, []byte{0, 0, 0}) {
-		t.Fatalf("expected bytes to be zerod but got %v", b)
-	}
-}

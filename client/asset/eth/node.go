@@ -247,9 +247,9 @@ func startNode(node *node.Node, network dex.Network) error {
 	return nil
 }
 
-// importAccountToNode imports an account into the ethereum wallet by private key
-// that can be unlocked with password.
-func importAccountToNode(node *node.Node, privateKey, password []byte) error {
+// importKeyToNode imports an private key into an ethereum node that can be
+// unlocked with password.
+func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 	ecdsaPrivateKey, err := crypto.ToECDSA(privateKey)
 	if err != nil {
 		return err
@@ -262,12 +262,12 @@ func importAccountToNode(node *node.Node, privateKey, password []byte) error {
 	} else if len(accounts) == 1 {
 		address := crypto.PubkeyToAddress(ecdsaPrivateKey.PublicKey)
 		if !bytes.Equal(accounts[0].Address.Bytes(), address.Bytes()) {
-			errMsg := "importAccountToNode: attemping to import account to eth wallet: %v, " +
+			errMsg := "importKeyToNode: attemping to import account to eth wallet: %v, " +
 				"but node already contains imported account: %v"
 			return fmt.Errorf(errMsg, address, accounts[0].Address)
 		}
 	} else {
-		return fmt.Errorf("importAccountToNode: eth wallet keystore contains %v accounts", accounts)
+		return fmt.Errorf("importKeyToNode: eth wallet keystore contains %v accounts", accounts)
 	}
 
 	return nil
