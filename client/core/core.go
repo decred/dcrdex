@@ -1703,11 +1703,11 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		}
 	}
 
-	if walletInfo.BuiltIn {
+	if walletInfo.Seeded {
 		if len(walletPW) > 0 {
 			return fmt.Errorf("external password incompatible with built in wallet")
 		}
-		walletPW, err = c.createBuiltInWallet(assetID, crypter, form)
+		walletPW, err = c.createSeededWallet(assetID, crypter, form)
 		if err != nil {
 			return err
 		}
@@ -1778,9 +1778,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	return nil
 }
 
-// createBuiltInWallet creates a built-in wallet with an asset-specific seed derived
+// createSeededWallet creates a seeded wallet with an asset-specific seed derived
 // deterministically from the app seed.
-func (c *Core) createBuiltInWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
+func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
 	creds := c.creds()
 	if creds == nil {
 		return nil, fmt.Errorf("no v2 credentials stored")
@@ -1999,9 +1999,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
-	builtIn := oldWallet.Info().BuiltIn
-	if builtIn && len(newWalletPW) > 0 {
-		return newError(passwordErr, "cannot set a password on a built-in wallet")
+	seeded := oldWallet.Info().Seeded
+	if seeded && len(newWalletPW) > 0 {
+		return newError(passwordErr, "cannot set a password on a seeded wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
 	dbWallet := &db.Wallet{
