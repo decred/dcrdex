@@ -118,11 +118,11 @@ func randBytes(l int) []byte {
 }
 
 type Config struct {
-	New     WalletConstructor
-	LotSize uint64
-	Asset   *dex.Asset
-	SplitTx bool
-	SPV     bool
+	NewWallet WalletConstructor
+	LotSize   uint64
+	Asset     *dex.Asset
+	SplitTx   bool
+	SPV       bool
 }
 
 func Run(t *testing.T, cfg *Config) {

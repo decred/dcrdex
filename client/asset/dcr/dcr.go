@@ -482,8 +482,7 @@ func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.A
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The wallet will shut down when the provided context is
-// canceled.
+// exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.

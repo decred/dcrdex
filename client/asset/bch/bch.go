@@ -131,9 +131,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The wallet will shut down when the provided context is
-// canceled. The configPath can be an empty string, in which case the standard
-// system location of the daemon config file is assumed.
+// exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params
 	switch network {

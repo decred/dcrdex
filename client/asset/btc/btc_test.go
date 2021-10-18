@@ -586,9 +586,9 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 	var wallet *ExchangeWallet
 	var err error
 	switch walletType {
-	case WalletTypeRPC:
+	case walletTypeRPC:
 		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &WalletConfig{})
-	case WalletTypeSPV:
+	case walletTypeSPV:
 		wallet, err = newUnconnectedWallet(cfg, &WalletConfig{})
 		if err == nil {
 			neutrinoClient := &tNeutrinoClient{data}
@@ -653,13 +653,13 @@ type testFunc func(t *testing.T, segwit bool, walletType string)
 
 func runRubric(t *testing.T, f testFunc) {
 	t.Run("rpc|segwit", func(t *testing.T) {
-		f(t, true, WalletTypeRPC)
+		f(t, true, walletTypeRPC)
 	})
 	t.Run("rpc|non-segwit", func(t *testing.T) {
-		f(t, false, WalletTypeRPC)
+		f(t, false, walletTypeRPC)
 	})
 	t.Run("spv|segwit", func(t *testing.T) {
-		f(t, true, WalletTypeSPV)
+		f(t, true, walletTypeSPV)
 	})
 }
 
@@ -824,7 +824,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// Negative response when locking outputs.
 	// There is no way to error locking outpoints in spv
-	if walletType != WalletTypeSPV {
+	if walletType != walletTypeSPV {
 		node.lockUnspentErr = tErr
 		_, _, err = wallet.FundOrder(ord)
 		if err == nil {
@@ -1035,7 +1035,7 @@ func (c *tCoin) String() string { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64  { return 100 }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true, WalletTypeRPC)
+	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1073,7 +1073,7 @@ func TestReturnCoins(t *testing.T) {
 
 func TestFundingCoins(t *testing.T) {
 	// runRubric(t, testFundingCoins)
-	testFundingCoins(t, false, WalletTypeRPC)
+	testFundingCoins(t, false, walletTypeRPC)
 }
 
 func testFundingCoins(t *testing.T, segwit bool, walletType string) {
@@ -1194,7 +1194,7 @@ func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, max
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(false, WalletTypeRPC)
+	wallet, node, shutdown, err := tNewWallet(false, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1414,7 +1414,7 @@ func TestFundEdges(t *testing.T) {
 }
 
 func TestFundEdgesSegwit(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true, WalletTypeRPC)
+	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -2258,7 +2258,7 @@ func testLockUnlock(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Locking can't error on SPV.
-	if walletType == WalletTypeRPC {
+	if walletType == walletTypeRPC {
 		err = wallet.Lock()
 		if err != nil {
 			t.Fatalf("lock error: %v", err)
@@ -2703,7 +2703,7 @@ func testPreRedeem(t *testing.T, segwit bool, walletType string) {
 
 func TestTryRedemptionRequests(t *testing.T) {
 	// runRubric(t, testTryRedemptionRequests)
-	testTryRedemptionRequests(t, true, WalletTypeSPV)
+	testTryRedemptionRequests(t, true, walletTypeSPV)
 }
 
 func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
@@ -2911,7 +2911,7 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 
 	for _, tt := range tests {
 		// Skip tests where we're expected to see mempool in SPV.
-		if walletType == WalletTypeSPV && isMempoolTest(tt) {
+		if walletType == walletTypeSPV && isMempoolTest(tt) {
 			continue
 		}
 

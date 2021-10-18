@@ -71,9 +71,9 @@ const (
 	splitTxBaggageSegwit = dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize +
 		dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
 
-	WalletTypeLegacy = ""
-	WalletTypeRPC    = "bitcoindRPC"
-	WalletTypeSPV    = "SPV"
+	walletTypeLegacy = ""
+	walletTypeRPC    = "bitcoindRPC"
+	walletTypeSPV    = "SPV"
 )
 
 var (
@@ -151,14 +151,14 @@ var (
 		},
 	}
 	rpcWalletDefinition = &asset.WalletDefinition{
-		Type:              WalletTypeRPC,
+		Type:              walletTypeRPC,
 		Tab:               "External",
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        append(append([]*asset.ConfigOption(nil), rpcOpts...), commonOpts...),
+		ConfigOpts:        append(rpcOpts, commonOpts...),
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
-		Type:        WalletTypeSPV,
+		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
 		ConfigOpts:  commonOpts,
@@ -373,8 +373,8 @@ type WalletConfig struct {
 	Peer             string  `ini:"peer"`       // SPV
 }
 
-// PrepareConfig parses the settings map into a *RPCWalletConfig.
-func PrepareConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (cfg *RPCWalletConfig, err error) {
+// readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
+func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (cfg *RPCWalletConfig, err error) {
 	cfg = new(RPCWalletConfig)
 	err = config.Unmapify(settings, &cfg.WalletConfig)
 	if err != nil {
@@ -388,14 +388,21 @@ func PrepareConfig(settings map[string]string, symbol string, net dex.Network, p
 	return
 }
 
-// ParseRPCWalletConfig parses a *RPCWalletConfig from the settings map and
+// parseRPCWalletConfig parses a *RPCWalletConfig from the settings map and
 // creates the unconnected *rpcclient.Client.
-func ParseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (*RPCWalletConfig, *rpcclient.Client, error) {
-	cfg, err := PrepareConfig(settings, symbol, net, ports)
+func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (*RPCWalletConfig, *rpcclient.Client, error) {
+	cfg, err := readRPCWalletConfig(settings, symbol, net, ports)
 	if err != nil {
 		return nil, nil, err
 	}
-	cl, err := newRPCWalletConnection(cfg)
+	endpoint := cfg.RPCBind + "/wallet/" + cfg.WalletName
+	cl, err := rpcclient.New(&rpcclient.ConnConfig{
+		HTTPPostMode: true,
+		DisableTLS:   true,
+		Host:         endpoint,
+		User:         cfg.RPCUser,
+		Pass:         cfg.RPCPass,
+	}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -405,16 +412,15 @@ func ParseRPCWalletConfig(settings map[string]string, symbol string, net dex.Net
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Check that Driver implements Driver, Creator, and Initializer.s
+// Check that Driver implements Driver and Creator.
 var _ asset.Driver = (*Driver)(nil)
 var _ asset.Creator = (*Driver)(nil)
 var _ asset.Initializer = (*Driver)(nil)
 
-// Exists checks the existence of the wallet. For the RPC wallet, this attempts
-// to connect and request getnetworkinfo to verify existence. For the SPV wallet,
-// we ultimately just look for wallet files.
+// Exists checks the existence of the wallet. Part of the Creator interface, so
+// only used for wallets with WalletDefinition.Seeded = true.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	if walletType != WalletTypeSPV {
+	if walletType != walletTypeSPV {
 		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
 	}
 
@@ -430,8 +436,8 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 // Create creates a new SPV wallet.
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
-	if params.Type != WalletTypeSPV {
-		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", WalletTypeSPV, params.Type)
+	if params.Type != walletTypeSPV {
+		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", walletTypeSPV, params.Type)
 	}
 	if len(params.Seed) == 0 {
 		return errors.New("wallet seed cannot be empty")
@@ -586,9 +592,7 @@ func parseChainParams(net dex.Network) (*chaincfg.Params, error) {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The wallet will shut down when the provided context is
-// canceled. The configPath can be an empty string, in which case the standard
-// system location of the bitcoind config file is assumed.
+// exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 	params, err := parseChainParams(net)
 	if err != nil {
@@ -610,12 +614,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 	}
 
 	switch cfg.Type {
-	case WalletTypeSPV:
+	case walletTypeSPV:
 		if atomic.LoadUint32(&initialized) == 0 {
 			return nil, fmt.Errorf("must call asset.Initialize if you want to create an SPV wallet")
 		}
 		return openSPVWallet(cloneCFG)
-	case WalletTypeRPC, WalletTypeLegacy:
+	case walletTypeRPC, walletTypeLegacy:
 		return BTCCloneWallet(cloneCFG)
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
@@ -627,7 +631,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
-	clientCfg, client, err := ParseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +733,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeW
 	return w, nil
 }
 
-// openSPVWallet opens the pre-existing native SPV wallet.
+// openSPVWallet opens the previously created native SPV wallet.
 func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 	walletCfg := new(WalletConfig)
 	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)

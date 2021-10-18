@@ -343,7 +343,7 @@ func (p *tSPVPeer) LastBlock() int32 {
 }
 
 func TestSwapConfirmations(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
 	defer shutdown()
 
 	spv := wallet.node.(*spvWallet)
@@ -451,7 +451,7 @@ func TestSwapConfirmations(t *testing.T) {
 }
 
 func TestFindBlockForTime(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
 	defer shutdown()
 	spv := wallet.node.(*spvWallet)
 
@@ -507,7 +507,7 @@ func TestFindBlockForTime(t *testing.T) {
 }
 
 func TestGetTxOut(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
 	defer shutdown()
 	spv := wallet.node.(*spvWallet)
 
@@ -611,7 +611,7 @@ func TestGetTxOut(t *testing.T) {
 }
 
 func TestSendWithSubtract(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet(true, WalletTypeSPV)
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
 	defer shutdown()
 	spv := wallet.node.(*spvWallet)
 

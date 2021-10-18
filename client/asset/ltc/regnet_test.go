@@ -41,8 +41,8 @@ var (
 
 func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
-		New:     NewWallet,
-		LotSize: tLotSize,
-		Asset:   tLTC,
+		NewWallet: NewWallet,
+		LotSize:   tLotSize,
+		Asset:     tLTC,
 	})
 }
