@@ -17,7 +17,7 @@ var (
 
 // CreateWalletParams are the parameters for internal wallet creation. The
 // Settings provided should be the same wallet configuration settings passed to
-// Create.
+// Open.
 type CreateWalletParams struct {
 	Seed     []byte
 	Pass     []byte
