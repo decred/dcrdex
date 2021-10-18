@@ -51,6 +51,11 @@ func (d *Driver) Version() uint32 {
 	return version
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return dexbtc.UnitInfo
+}
+
 // NewAddresser creates an asset.Addresser for deriving addresses for the given
 // extended public key. The KeyIndexer will be used for discovering the current
 // child index, and storing the index as new addresses are generated with the
@@ -72,7 +77,8 @@ var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
 	// check for new blocks.
-	blockPollInterval = time.Second
+	blockPollInterval            = time.Second
+	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 )
 
 const (
@@ -1066,7 +1072,7 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 
 // Convert the BTC value to satoshis.
 func toSat(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // isTxNotFoundErr will return true if the error indicates that the requested

@@ -7,6 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
+import { RateEncodingFactor } from './orderutil'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -506,10 +507,11 @@ export default class Application {
         // assets can be null if failed to connect to dex server.
         if (!this.assets) return
         const wallet = note.wallet
-        this.assets[wallet.assetID].wallet = wallet
+        const asset = this.assets[wallet.assetID]
+        asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
+        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo) })
         break
       }
       case 'match': {
@@ -668,6 +670,16 @@ export default class Application {
         }
       }
     }
+  }
+
+  /* unitInfo fetches unit info [dex.UnitInfo] for the asset */
+  unitInfo (assetID) { return this.assets[assetID].info.unitinfo }
+
+  /* conventionalRate converts the encoded atomic rate to a conventional rate */
+  conventionalRate (baseID, quoteID, encRate) {
+    const [b, q] = [this.unitInfo(baseID), this.unitInfo(quoteID)]
+    const r = b.conventional.conversionFactor / q.conventional.conversionFactor
+    return encRate / RateEncodingFactor * r
   }
 
   /*

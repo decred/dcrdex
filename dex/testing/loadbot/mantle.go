@@ -362,8 +362,8 @@ func mustJSON(thing interface{}) string {
 }
 
 // Convert the conventional units value to atoms/sats.
-func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+func encodeRate(v float64) uint64 {
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // valString returns a string representation of the value in conventional
@@ -391,12 +391,12 @@ func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 func midGap(book *core.OrderBook, rateStep uint64) uint64 {
 	if len(book.Sells) > 0 {
 		if len(book.Buys) > 0 {
-			return toAtoms((book.Buys[0].Rate + book.Sells[0].Rate) / 2)
+			return encodeRate((book.Buys[0].Rate + book.Sells[0].Rate) / 2)
 		}
-		return toAtoms(book.Sells[0].Rate)
+		return encodeRate(book.Sells[0].Rate)
 	} else {
 		if len(book.Buys) > 0 {
-			return toAtoms(book.Buys[0].Rate)
+			return encodeRate(book.Buys[0].Rate)
 		}
 	}
 	return truncate(defaultBtcPerDcr*1e8, int64(rateStep))

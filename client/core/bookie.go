@@ -10,9 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -118,7 +120,18 @@ type bookie struct {
 	timerMtx   sync.Mutex
 	closeTimer *time.Timer
 
-	base, quote uint32
+	base, quote           uint32
+	baseUnits, quoteUnits dex.UnitInfo
+}
+
+func defaultUnitInfo(symbol string) dex.UnitInfo {
+	return dex.UnitInfo{
+		AtomicUnit: "atoms",
+		Conventional: dex.Denomination{
+			ConversionFactor: 1e8,
+			Unit:             symbol,
+		},
+	}
 }
 
 // newBookie is a constructor for a bookie. The caller should provide a callback
@@ -137,6 +150,25 @@ func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger 
 		}
 	}
 
+	parseUnitInfo := func(assetID uint32) dex.UnitInfo {
+		assetInfo, _ := asset.Info(assetID)
+		if assetInfo != nil {
+			return assetInfo.UnitInfo
+		} else {
+			dexAsset := dc.assets[assetID]
+			if dexAsset == nil {
+				dc.log.Errorf("DEX market has no %d asset. Is this even possible?", base)
+				return defaultUnitInfo("XYZ")
+			} else {
+				unitInfo := dexAsset.UnitInfo
+				if unitInfo.Conventional.ConversionFactor == 0 {
+					return defaultUnitInfo(dexAsset.Symbol)
+				}
+				return unitInfo
+			}
+		}
+	}
+
 	return &bookie{
 		OrderBook:    orderbook.NewOrderBook(logger.SubLogger("book")),
 		dc:           dc,
@@ -145,6 +177,8 @@ func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger 
 		feeds:        make(map[uint32]*bookFeed, 1),
 		base:         base,
 		quote:        quote,
+		baseUnits:    parseUnitInfo(base),
+		quoteUnits:   parseUnitInfo(quote),
 	}
 }
 
@@ -322,9 +356,23 @@ func (b *bookie) send(u *BookUpdate) {
 func (b *bookie) book() *OrderBook {
 	buys, sells, epoch := b.Orders()
 	return &OrderBook{
-		Buys:  translateBookSide(buys),
-		Sells: translateBookSide(sells),
-		Epoch: translateBookSide(epoch),
+		Buys:  b.translateBookSide(buys),
+		Sells: b.translateBookSide(sells),
+		Epoch: b.translateBookSide(epoch),
+	}
+}
+
+// minifyOrder creates a MiniOrder from a TradeNote. The epoch and order ID must
+// be supplied.
+func (b *bookie) minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrder {
+	return &MiniOrder{
+		Qty:       float64(trade.Quantity) / float64(b.baseUnits.Conventional.ConversionFactor),
+		QtyAtomic: trade.Quantity,
+		Rate:      calc.ConventionalRate(trade.Rate, b.baseUnits, b.quoteUnits),
+		MsgRate:   trade.Rate,
+		Sell:      trade.Side == msgjson.SellOrderNum,
+		Token:     token(oid),
+		Epoch:     epoch,
 	}
 }
 
@@ -519,21 +567,23 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 
 	buys, sells, epoch := ob.Orders()
 	return &OrderBook{
-		Buys:  translateBookSide(buys),
-		Sells: translateBookSide(sells),
-		Epoch: translateBookSide(epoch),
+		Buys:  book.translateBookSide(buys),
+		Sells: book.translateBookSide(sells),
+		Epoch: book.translateBookSide(epoch),
 	}, nil
 }
 
 // translateBookSide translates from []*orderbook.Order to []*MiniOrder.
-func translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
+func (b *bookie) translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
 	for _, o := range ins {
 		outs = append(outs, &MiniOrder{
-			Qty:   float64(o.Quantity) / conversionFactor,
-			Rate:  float64(o.Rate) / conversionFactor,
-			Sell:  o.Side == msgjson.SellOrderNum,
-			Token: token(o.OrderID[:]),
-			Epoch: o.Epoch,
+			Qty:       float64(o.Quantity) / float64(b.baseUnits.Conventional.ConversionFactor),
+			QtyAtomic: o.Quantity,
+			Rate:      calc.ConventionalRate(o.Rate, b.baseUnits, b.quoteUnits),
+			MsgRate:   o.Rate,
+			Sell:      o.Side == msgjson.SellOrderNum,
+			Token:     token(o.OrderID[:]),
+			Epoch:     o.Epoch,
 		})
 	}
 	return
@@ -560,7 +610,7 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		Action:   BookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  minifyOrder(note.OrderID, &note.TradeNote, 0),
+		Payload:  book.minifyOrder(note.OrderID, &note.TradeNote, 0),
 	})
 	return nil
 }
@@ -926,9 +976,10 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		Action:   UpdateRemainingAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload: &RemainingUpdate{
-			Token: token(note.OrderID),
-			Qty:   float64(note.Remaining) / conversionFactor,
+		Payload: &RemainderUpdate{
+			Token:     token(note.OrderID),
+			Qty:       float64(note.Remaining) / float64(book.baseUnits.Conventional.ConversionFactor),
+			QtyAtomic: note.Remaining,
 		},
 	})
 	return nil
@@ -978,20 +1029,8 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		Action:   EpochOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
+		Payload:  book.minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
 	})
 
 	return nil
-}
-
-// minifyOrder creates a MiniOrder from a TradeNote. The epoch and order ID must
-// be supplied.
-func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrder {
-	return &MiniOrder{
-		Qty:   float64(trade.Quantity) / conversionFactor,
-		Rate:  float64(trade.Rate) / conversionFactor,
-		Sell:  trade.Side == msgjson.SellOrderNum,
-		Token: token(oid),
-		Epoch: epoch,
-	}
 }

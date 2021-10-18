@@ -9,11 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
@@ -103,8 +103,20 @@ func v2Upgrade(tx *sql.Tx) error {
 		return fmt.Errorf("failed to read markets table: %w", err)
 	}
 
+	unitInfo := func(assetID uint32) dex.UnitInfo {
+		symbol := dex.BipIDSymbol(assetID)
+		ui, err := asset.UnitInfo(symbol)
+		if err != nil {
+			log.Errorf("no unit info found for %q", symbol)
+			ui.Conventional.ConversionFactor = 1e8
+		}
+		return ui
+	}
+
 	doMarketMatches := func(mkt *dex.MarketInfo) error {
 		log.Infof("Populating %s with volume data for market %q matches...", epochsTableName, mkt.Name)
+
+		baseUnitInfo, quoteUnitInfo := unitInfo(mkt.Base), unitInfo(mkt.Quote)
 
 		// Create the epochs_report table if it does not already exist.
 		_, err := createTable(tx, mkt.Name, epochReportsTableName)
@@ -242,8 +254,8 @@ func v2Upgrade(tx *sql.Tx) error {
 			}
 		} // range durs
 		log.Debugf("Processed %d matches doing %s in %s volume (%s in %s volume)", totalMatches,
-			strconv.FormatFloat(float64(totalVolume)/1e8, 'f', -1, 64), strings.ToUpper(dex.BipIDSymbol(mkt.Base)),
-			strconv.FormatFloat(float64(totalQVolume)/1e8, 'f', -1, 64), strings.ToUpper(dex.BipIDSymbol(mkt.Quote)))
+			baseUnitInfo.ConventionalString(totalVolume), strings.ToUpper(dex.BipIDSymbol(mkt.Base)),
+			quoteUnitInfo.ConventionalString(totalQVolume), strings.ToUpper(dex.BipIDSymbol(mkt.Quote)))
 		return nil
 	}
 

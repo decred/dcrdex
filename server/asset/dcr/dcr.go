@@ -56,6 +56,11 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return dexdcr.UnitInfo
+}
+
 // Version returns the Backend implementation's version number.
 func (d *Driver) Version() uint32 {
 	return version
@@ -93,6 +98,8 @@ var (
 	blockPollInterval = time.Second
 
 	requiredNodeVersion = dex.Semver{Major: 7, Minor: 0, Patch: 0}
+
+	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
 )
 
 const (
@@ -1123,7 +1130,7 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 
 // Convert the DCR value to atoms.
 func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // isTxNotFoundErr will return true if the error indicates that the requested

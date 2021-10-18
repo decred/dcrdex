@@ -1166,14 +1166,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
 		corder := t.coreOrderInternal()
+		ui := t.wallets.fromWallet.Info().UnitInfo
 		if err != nil {
 			errs.addErr(err)
-			subject, details := c.formatDetails(TopicSwapSendError,
-				float64(qty)/conversionFactor, unbip(fromID), t.token())
+			subject, details := c.formatDetails(TopicSwapSendError, ui.ConventionalString(qty), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicSwapSendError, subject, details, db.ErrorLevel, corder))
 		} else {
-			subject, details := c.formatDetails(TopicSwapsInitiated,
-				float64(qty)/conversionFactor, unbip(fromID), t.token())
+			subject, details := c.formatDetails(TopicSwapsInitiated, ui.ConventionalString(qty), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicSwapsInitiated, subject, details, db.Poke, corder))
 		}
 	}
@@ -1196,14 +1195,15 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 		err = c.redeemMatches(t, redeems)
 		corder := t.coreOrderInternal()
+		ui := t.wallets.toWallet.Info().UnitInfo
 		if err != nil {
 			errs.addErr(err)
 			subject, details := c.formatDetails(TopicRedemptionError,
-				float64(qty)/conversionFactor, unbip(toAsset), t.token())
+				ui.ConventionalString(qty), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicRedemptionError, subject, details, db.ErrorLevel, corder))
 		} else {
 			subject, details := c.formatDetails(TopicMatchComplete,
-				float64(qty)/conversionFactor, unbip(toAsset), t.token())
+				ui.ConventionalString(qty), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicMatchComplete, subject, details, db.Poke, corder))
 		}
 	}
@@ -1219,14 +1219,15 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 		refunded, err := t.refundMatches(refunds)
 		corder := t.coreOrderInternal()
+		ui := t.wallets.fromWallet.Info().UnitInfo
 		if err != nil {
 			errs.addErr(err)
 			subject, details := c.formatDetails(TopicRefundFailure,
-				float64(refunded)/conversionFactor, unbip(fromID), t.token())
+				ui.ConventionalString(refunded), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicRefundFailure, subject, details, db.ErrorLevel, corder))
 		} else {
 			subject, details := c.formatDetails(TopicMatchesRefunded,
-				float64(refunded)/conversionFactor, unbip(fromID), t.token())
+				ui.ConventionalString(refunded), ui.Conventional.Unit, t.token())
 			t.notify(newOrderNote(TopicMatchesRefunded, subject, details, db.WarningLevel, corder))
 		}
 	}

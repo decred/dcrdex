@@ -19,10 +19,58 @@ const BipSymbols = Object.values(BipIDs)
 
 const intFormatter = new Intl.NumberFormat(navigator.languages)
 
-const decimalFormatter = new Intl.NumberFormat(navigator.languages, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 8
-})
+/* A cache for formatters used for Doc.formatCoinValue. */
+const decimalFormatters = {}
+
+/*
+ * decimalFormatter gets the formatCoinValue formatter for the specified decimal
+ * precision.
+ */
+function decimalFormatter (prec) {
+  return formatter(decimalFormatters, 2, prec)
+}
+
+/* A cache for formatters used for Doc.formatFullPrecision. */
+const fullPrecisionFormatters = {}
+
+/*
+ * fullPrecisionFormatter gets the formatFullPrecision formatter for the
+ * specified decimal precision.
+ */
+function fullPrecisionFormatter (prec) {
+  return formatter(fullPrecisionFormatters, prec, prec)
+}
+
+/*
+ * formatter gets the formatter from the supplied cache if it already exists,
+ * else creates it.
+ */
+function formatter (formatters, min, max) {
+  const k = `${min}-${max}`
+  let fmt = formatters[k]
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(navigator.languages, {
+      minimumFractionDigits: min,
+      maximumFractionDigits: max
+    })
+    formatters[k] = fmt
+  }
+  return fmt
+}
+
+/*
+ * convertToConventional converts the value in atomic units to conventional
+ * units.
+ */
+function convertToConventional (v, unitInfo) {
+  let prec = 8
+  if (unitInfo) {
+    const f = unitInfo.conventional.conversionFactor
+    v = v / unitInfo.conventional.conversionFactor
+    prec = Math.round(Math.log10(f))
+  }
+  return [v, prec]
+}
 
 // Helpers for working with the DOM.
 export default class Doc {
@@ -146,9 +194,25 @@ export default class Doc {
     return page
   }
 
-  static formatCoinValue (v) {
+  /*
+   * formatCoinValue formats the value in atomic units into a string
+   * representation in conventional units. If the value happens to be an
+   * integer, no decimals are displayed. Trailing zeros may be truncated.
+   */
+  static formatCoinValue (vAtomic, unitInfo) {
+    const [v, prec] = convertToConventional(vAtomic, unitInfo)
     if (Number.isInteger(v)) return intFormatter.format(v)
-    return decimalFormatter.format(v)
+    return decimalFormatter(prec).format(v)
+  }
+
+  /*
+   * formatFullPrecision formats the value in atomic units into a string
+   * representation in conventional units using the full decimal precision
+   * associated with the conventional unit's conversion factor.
+   */
+  static formatFullPrecision (vAtomic, unitInfo) {
+    const [v, prec] = convertToConventional(vAtomic, unitInfo)
+    return fullPrecisionFormatter(prec).format(v)
   }
 
   /*

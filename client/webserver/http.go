@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
@@ -261,7 +263,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	wf.Flush()
 
 	for _, ord := range ords {
-		ordReader := orderReader{ord}
+		ordReader := s.orderReader(ord)
 
 		timestamp := encode.UnixTimeMilli(int64(ord.Stamp)).Local().Format(time.RFC3339Nano)
 		err = csvWriter.Write([]string{
@@ -318,7 +320,38 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sendTemplate(w, "order", &orderTmplData{
 		CommonArguments: *commonArgs(r, "Order | Decred DEX"),
-		Order:           &orderReader{Order: ord},
+		Order:           s.orderReader(ord),
 		Net:             uint8(s.core.Network()),
 	})
+}
+
+func defaultUnitInfo(symbol string) dex.UnitInfo {
+	return dex.UnitInfo{
+		AtomicUnit: "atoms",
+		Conventional: dex.Denomination{
+			ConversionFactor: 1e8,
+			Unit:             symbol,
+		},
+	}
+}
+
+func (s *WebServer) orderReader(ord *core.Order) *orderReader {
+	unitInfo := func(assetID uint32, symbol string) dex.UnitInfo {
+		assetInfo, err := asset.Info(assetID)
+		if err != nil {
+			xc := s.core.Exchanges()[ord.Host]
+			asset, found := xc.Assets[assetID]
+			if !found || asset.UnitInfo.Conventional.ConversionFactor == 0 {
+				return defaultUnitInfo(symbol)
+			}
+		}
+		return assetInfo.UnitInfo
+	}
+
+	return &orderReader{
+		Order:         ord,
+		baseUnitInfo:  unitInfo(ord.BaseID, ord.BaseSymbol),
+		quoteUnitInfo: unitInfo(ord.QuoteID, ord.QuoteSymbol),
+	}
+
 }

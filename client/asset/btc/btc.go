@@ -70,8 +70,9 @@ const (
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker = time.Second
-	configOpts  = []*asset.ConfigOption{
+	blockTicker                  = time.Second
+	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
+	configOpts                   = []*asset.ConfigOption{
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
@@ -140,10 +141,10 @@ var (
 	// WalletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
-		Units:             "Satoshis",
 		Version:           version,
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexbtc.UnitInfo,
 	}
 )
 
@@ -505,7 +506,7 @@ func newWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, btcCfg *dexb
 		fallbackFeesPerByte = cfg.DefaultFallbackFee
 	}
 	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
-		fallbackFeesPerByte, cfg.WalletInfo.Units)
+		fallbackFeesPerByte, cfg.WalletInfo.UnitInfo.AtomicUnit)
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
 	// Convert to sats/byte & error if value is smaller than smallest unit.
@@ -2683,7 +2684,7 @@ func (btc *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 
 // Convert the BTC value to satoshi.
 func toSatoshi(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime

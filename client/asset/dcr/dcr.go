@@ -78,8 +78,9 @@ var (
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker = time.Second
-	configOpts  = []*asset.ConfigOption{
+	blockTicker                  = time.Second
+	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
+	configOpts                   = []*asset.ConfigOption{
 		{
 			Key:         "account",
 			DisplayName: "Account Name",
@@ -148,10 +149,10 @@ var (
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
-		Units:             "atoms",
 		Version:           version,
 		DefaultConfigPath: defaultConfigPath,
 		ConfigOpts:        configOpts,
+		UnitInfo:          dexdcr.UnitInfo,
 	}
 )
 
@@ -3030,7 +3031,7 @@ func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing int
 
 // Convert the DCR value to atoms.
 func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
+	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.

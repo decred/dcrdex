@@ -492,18 +492,23 @@ func newDisplayIDFromSymbols(base, quote string) string {
 }
 
 // MiniOrder is minimal information about an order in a market's order book.
+// Replaced MiniOrder, which had a float Qty in conventional units.
 type MiniOrder struct {
-	Qty   float64 `json:"qty"`
-	Rate  float64 `json:"rate"`
-	Epoch uint64  `json:"epoch,omitempty"`
-	Sell  bool    `json:"sell"`
-	Token string  `json:"token"`
+	Qty       float64 `json:"qty"`
+	QtyAtomic uint64  `json:"qtyAtomic"`
+	Rate      float64 `json:"rate"`
+	MsgRate   uint64  `json:"msgRate"`
+	Epoch     uint64  `json:"epoch,omitempty"`
+	Sell      bool    `json:"sell"`
+	Token     string  `json:"token"`
 }
 
-// RemainingUpdate is an update to the quantity for an order on the order book.
-type RemainingUpdate struct {
-	Token string  `json:"token"`
-	Qty   float64 `json:"qty"`
+// RemainderUpdate is an update to the quantity for an order on the order book.
+// Replaced RemainingUpdate, which had a float Qty in conventional units.
+type RemainderUpdate struct {
+	Token     string  `json:"token"`
+	Qty       float64 `json:"qty"`
+	QtyAtomic uint64  `json:"qtyAtomic"`
 }
 
 // OrderBook represents an order book, which are sorted buys and sells, and

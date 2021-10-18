@@ -36,6 +36,11 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
+// UnitInfo returns the dex.UnitInfo for the asset.
+func (d *Driver) UnitInfo() dex.UnitInfo {
+	return dexbch.UnitInfo
+}
+
 func init() {
 	asset.Register(assetName, &Driver{})
 }

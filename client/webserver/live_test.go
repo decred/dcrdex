@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 )
@@ -53,6 +54,7 @@ var (
 	randomPokes           = false
 	randomNotes           = false
 	numUserOrders         = 10
+	conversionFactor      = dexbtc.UnitInfo.Conventional.ConversionFactor
 )
 
 func dummySettings() map[string]string {
@@ -148,8 +150,8 @@ func mkMrkt(base, quote string) *core.Market {
 	lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
 	rateStep := lotSize / 1e3
 	if _, exists := marketStats[mktID]; !exists {
-		midGap := float64(rateStep) / 1e8 * float64(rand.Intn(1e6))
-		maxQty := float64(lotSize) / 1e8 * float64(rand.Intn(1e3))
+		midGap := float64(rateStep) * float64(rand.Intn(1e6))
+		maxQty := float64(lotSize) * float64(rand.Intn(1e3))
 		marketStats[mktID] = [2]float64{midGap, maxQty}
 	}
 
@@ -179,7 +181,7 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 			Running:      state.running,
 			Address:      ordertest.RandomAddress(),
 			Balance:      bal,
-			Units:        winfo.Units,
+			Units:        winfo.UnitInfo.AtomicUnit,
 			Encrypted:    true,
 			Synced:       false,
 			SyncProgress: 0.5,
@@ -232,12 +234,16 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 		rate = limitRate
 	}
 
+	qty := uint64(math.Exp(-rand.Float64()*5) * maxQty)
+
 	return &core.MiniOrder{
-		Qty:   math.Exp(-rand.Float64()*5) * maxQty,
-		Rate:  rate,
-		Sell:  sell,
-		Token: nextToken(),
-		Epoch: epochIdx,
+		Qty:       float64(qty) / float64(conversionFactor),
+		QtyAtomic: qty,
+		Rate:      float64(rate) / float64(conversionFactor),
+		MsgRate:   uint64(rate),
+		Sell:      sell,
+		Token:     nextToken(),
+		Epoch:     epochIdx,
 	}
 }
 
@@ -247,11 +253,13 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
 		epoch = 0
 	}
 	return &core.MiniOrder{
-		Qty:   float64(ord.Qty) / 1e8,
-		Rate:  float64(ord.Rate) / 1e8,
-		Sell:  ord.Sell,
-		Token: ord.ID[:4].String(),
-		Epoch: epoch,
+		Qty:       float64(ord.Qty) / float64(conversionFactor),
+		QtyAtomic: ord.Qty,
+		Rate:      float64(ord.Rate) / float64(conversionFactor),
+		MsgRate:   ord.Rate,
+		Sell:      ord.Sell,
+		Token:     ord.ID[:4].String(),
+		Epoch:     epoch,
 	}
 }
 
@@ -380,7 +388,13 @@ func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
 }
 
 func (*TDriver) Info() *asset.WalletInfo {
-	return nil
+	return &asset.WalletInfo{
+		UnitInfo: dex.UnitInfo{
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e8,
+			},
+		},
+	}
 }
 
 func newTCore() *TCore {
@@ -463,7 +477,7 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := toAtoms(ord.Qty)
+	qty := ord.QtyAtomic
 	quoteQty := calc.BaseToQuote(rate, qty)
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
@@ -486,9 +500,9 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)
 	ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
-	qty := toAtoms(ord.Qty)
+	qty := ord.QtyAtomic
 
-	quoteQty := calc.BaseToQuote(toAtoms(midGap), qty)
+	quoteQty := calc.BaseToQuote(uint64(midGap), qty)
 
 	return &core.MaxOrderEstimate{
 		Swap: &asset.SwapEstimate{
@@ -513,9 +527,6 @@ func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
-func toAtoms(v float64) uint64 {
-	return uint64(math.Round(v * 1e8))
-}
 
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)
@@ -986,19 +997,48 @@ var winfos = map[uint32]*asset.WalletInfo{
 	2:  ltc.WalletInfo,
 	42: dcr.WalletInfo,
 	22: {
-		Units:      "atoms",
 		Name:       "Monacoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "atoms",
+			Conventional: dex.Denomination{
+				Unit:             "MONA",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 	3: {
-		Units:      "atoms",
 		Name:       "Dogecoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "atoms",
+			Conventional: dex.Denomination{
+				Unit:             "DOGE",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 	28: {
-		Units:      "Satoshis",
 		Name:       "Vertcoin",
 		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				Unit:             "VTC",
+				ConversionFactor: 1e8,
+			},
+		},
+	},
+	141: {
+		Name:       "Komodo",
+		ConfigOpts: configOpts,
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Sats",
+			Conventional: dex.Denomination{
+				Unit:             "KMD",
+				ConversionFactor: 1e8,
+			},
+		},
 	},
 }
 
@@ -1021,7 +1061,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Running:   w.running,
 		Address:   ordertest.RandomAddress(),
 		Balance:   c.balances[assetID],
-		Units:     winfos[assetID].Units,
+		Units:     winfos[assetID].UnitInfo.AtomicUnit,
 		Encrypted: true,
 	}
 }
@@ -1098,7 +1138,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running:   wallet.running,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
-			Units:     winfos[assetID].Units,
+			Units:     winfos[assetID].UnitInfo.AtomicUnit,
 			Encrypted: true,
 		})
 	}
@@ -1148,12 +1188,13 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		141: mkSupportedAsset("kmd", c.wallets[141], c.balances[141]),
 	}
 }
 

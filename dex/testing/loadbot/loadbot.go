@@ -30,6 +30,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexsrv "decred.org/dcrdex/server/dex"
 	toxiproxy "github.com/Shopify/toxiproxy/client"
 )
@@ -49,12 +50,13 @@ var (
 	dcrID, _ = dex.BipSymbolID("dcr")
 	btcID, _ = dex.BipSymbolID("btc")
 	// ltcID, _    = dex.BipSymbolID("ltc") // TODO
-	loggerMaker *dex.LoggerMaker
-	hostAddr    = "127.0.0.1:17273"
-	pass        = []byte("abc")
-	log         dex.Logger
-	unbip       = dex.BipIDSymbol
-	portCounter uint32
+	loggerMaker                  *dex.LoggerMaker
+	hostAddr                     = "127.0.0.1:17273"
+	pass                         = []byte("abc")
+	log                          dex.Logger
+	unbip                        = dex.BipIDSymbol
+	portCounter                  uint32
+	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 
 	usr, _     = user.Current()
 	dextestDir = filepath.Join(usr.HomeDir, "dextest")

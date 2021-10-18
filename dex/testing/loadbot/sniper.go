@@ -89,12 +89,12 @@ func (s *sniper) snipe(m *Mantle) {
 		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
 	}
 	for _, ord := range targets {
-		qty := toAtoms(ord.Qty)
+		qty := ord.QtyAtomic
 		if !sell {
 			if qty/lotSize == 1 {
 				qty *= 2
 			}
-			qty = calc.BaseToQuote(toAtoms(ord.Rate), qty)
+			qty = calc.BaseToQuote(encodeRate(ord.Rate), qty)
 
 		}
 		m.marketOrder(sell, qty)

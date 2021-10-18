@@ -1,4 +1,5 @@
 import Doc from './doc'
+import { RateEncodingFactor } from './orderutil'
 import State from './state'
 
 const bind = Doc.bind
@@ -308,13 +309,19 @@ export class DepthChart extends Chart {
     this.reporters.click(translator.unx(x))
   }
 
-  /* set sets the current data set and draws. */
-  set (book, lotSize, rateStep) {
+  // clear the canvas.
+  clear () {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+  }
+
+  // set sets the current data set and draws.
+  set (book, lotSize, rateStep, baseUnitInfo, quoteUnitInfo) {
     this.book = book
-    this.lotSize = lotSize / 1e8
-    this.rateStep = rateStep / 1e8
-    this.baseTicker = book.baseSymbol.toUpperCase()
-    this.quoteTicker = book.quoteSymbol.toUpperCase()
+    this.lotSize = lotSize / baseUnitInfo.conventional.conversionFactor
+    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
+    this.rateStep = rateStep / RateEncodingFactor * qFactor / bFactor
+    this.baseUnit = baseUnitInfo.conventional.unit
+    this.quoteUnit = quoteUnitInfo.conventional.unit
     if (!this.zoomLevel) {
       const [midGap, gapWidth] = this.gap()
       // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing
@@ -434,13 +441,13 @@ export class DepthChart extends Chart {
     const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
 
-    this.doYLabels(this.plotRegion, this.lotSize, this.book.baseSymbol)
-
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
-      dataExtents.x.max, 100, this.rateStep, `${this.book.quoteSymbol}/${this.book.baseSymbol}`)
+    this.doYLabels(this.plotRegion, this.lotSize, this.baseUnit)
 
     // Print the x labels
-    this.plotXLabels(xLabels, low, high, [`${this.quoteTicker}/`, this.baseTicker])
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
+      dataExtents.x.max, 100, this.rateStep, '')
+
+    this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
     // A function to be run at the end if there is legend data to display.
     let mouseData
@@ -758,7 +765,8 @@ export class CandleChart extends Chart {
     this.dataExtents = dataExtents
 
     // Apply labels.
-    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / 1e8))
+    const rFactor = this.rateConversionFactor
+    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / rFactor))
     this.candleRegion.extents.x.min = this.yRegion.extents.x.max
     this.volumeRegion.extents.x.min = this.yRegion.extents.x.max
 
@@ -842,10 +850,12 @@ export class CandleChart extends Chart {
   }
 
   /* setCandles sets the candle data and redraws the chart. */
-  setCandles (data, market) {
+  setCandles (data, market, baseUnitInfo, quoteUnitInfo) {
     this.data = data
     if (!data.candles) return
     this.market = market
+    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
+    this.rateConversionFactor = RateEncodingFactor * bFactor / qFactor
     let n = 25
     this.zoomLevels = []
     const maxCandles = Math.max(data.candles.length, 1000)

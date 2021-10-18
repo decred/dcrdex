@@ -445,6 +445,11 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				symbol, assetConf.RegFee, assetConf.RegConfs, startChild)
 		}
 
+		unitInfo, err := asset.UnitInfo(symbol)
+		if err != nil {
+			return nil, err
+		}
+
 		initTxSize := uint64(be.InitTxSize())
 		initTxSizeBase := uint64(be.InitTxSizeBase())
 		ba := &asset.BackedAsset{
@@ -456,6 +461,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				SwapSize:     initTxSize,
 				SwapSizeBase: initTxSizeBase,
 				SwapConf:     assetConf.SwapConf,
+				UnitInfo:     unitInfo,
 			},
 			Backend: be,
 		}
@@ -478,6 +484,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			SwapSize:     initTxSize,
 			SwapSizeBase: initTxSizeBase,
 			SwapConf:     uint16(assetConf.SwapConf),
+			UnitInfo:     unitInfo,
 		})
 
 		txDataSources[assetID] = be.TxData

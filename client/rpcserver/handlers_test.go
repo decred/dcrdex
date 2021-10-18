@@ -868,12 +868,12 @@ func TestHandleOrderBook(t *testing.T) {
 }
 
 func TestTruncateOrderBook(t *testing.T) {
-	lowRate := 1.0
-	medRate := 1.5
-	highRate := 2.0
-	lowRateOrder := &core.MiniOrder{Rate: lowRate}
-	medRateOrder := &core.MiniOrder{Rate: medRate}
-	highRateOrder := &core.MiniOrder{Rate: highRate}
+	var lowRate uint64 = 1e8
+	var medRate uint64 = 1.5e8
+	var highRate uint64 = 2.0e8
+	lowRateOrder := &core.MiniOrder{MsgRate: lowRate}
+	medRateOrder := &core.MiniOrder{MsgRate: medRate}
+	highRateOrder := &core.MiniOrder{MsgRate: highRate}
 	book := &core.OrderBook{
 		Buys: []*core.MiniOrder{
 			highRateOrder,
@@ -905,10 +905,10 @@ func TestTruncateOrderBook(t *testing.T) {
 	if len(book.Buys) != 1 && len(book.Sells) != 1 {
 		t.Fatal("buys and sells not truncated")
 	}
-	if book.Buys[0].Rate != highRate {
+	if book.Buys[0].MsgRate != highRate {
 		t.Fatal("expected high rate order")
 	}
-	if book.Sells[0].Rate != lowRate {
+	if book.Sells[0].MsgRate != lowRate {
 		t.Fatal("expected low rate order")
 	}
 }

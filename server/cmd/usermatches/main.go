@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
@@ -149,6 +150,17 @@ func mainCore() error {
 		Quote: quote,
 	}
 
+	baseAsset := assets[base]
+	if baseAsset == nil {
+		return fmt.Errorf("asset %d not found", base)
+	}
+	baseUnitInfo := baseAsset.UnitInfo()
+	quoteAsset := assets[quote]
+	if quoteAsset == nil {
+		return fmt.Errorf("asset %d not found", quote)
+	}
+	quoteUnitInfo := quoteAsset.UnitInfo()
+
 	pgCfg := &pg.Config{
 		Host:      *dbhost,
 		Port:      strconv.Itoa(*dbport),
@@ -240,8 +252,8 @@ func mainCore() error {
 			strconv.FormatUint(md.Epoch.Idx*md.Epoch.Dur/1000, 10),
 			md.MakerAcct.String(),
 			md.TakerAcct.String(),
-			strconv.FormatInt(int64(md.Quantity)/1e8, 10),
-			strconv.FormatFloat(float64(md.Rate)/1e8, 'f', -1, 64),
+			baseUnitInfo.ConventionalString(md.Quantity),
+			strconv.FormatFloat(calc.ConventionalRate(md.Rate, baseUnitInfo, quoteUnitInfo), 'f', -1, 64),
 			strconv.FormatBool(md.TakerSell),
 			makerSwapTx, makerSwapVout, makerRedeemTx, makerRedeemVin,
 			takerSwapTx, takerSwapVout, takerRedeemTx, takerRedeemVin,
