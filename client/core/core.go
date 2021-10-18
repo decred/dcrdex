@@ -1064,7 +1064,6 @@ type Core struct {
 	log           dex.Logger
 	db            db.DB
 	net           dex.Network
-	lang          language.Tag
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 
@@ -1164,7 +1163,6 @@ func New(cfg *Config) (*Core, error) {
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
 		net:           cfg.Net,
-		lang:          lang,
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[string]*blockWaiter),
@@ -3609,7 +3607,8 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	coin, err := wallet.Withdraw(address, value)
+	const feeSuggestion = 100
+	coin, err := wallet.Withdraw(address, value, feeSuggestion)
 	if err != nil {
 		subject, details := c.formatDetails(TopicWithdrawError, unbip(assetID), err)
 		c.notify(newWithdrawNote(TopicWithdrawError, subject, details, db.ErrorLevel))
@@ -4336,8 +4335,6 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 // initialize pulls the known DEXes from the database and attempts to connect
 // and retrieve the DEX configuration.
 func (c *Core) initialize() {
-	asset.Initialize(c.ctx, &c.walletWait, c.cfg.Logger, c.lang)
-
 	accts, err := c.db.Accounts()
 	if err != nil {
 		c.log.Errorf("Error retrieving accounts from database: %v", err) // panic?

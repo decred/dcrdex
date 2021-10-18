@@ -1438,7 +1438,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(&txHash, uint32(i), contract.Value, wire.TxTreeRegular)
-		signedRefundTx, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i])
+		signedRefundTx, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -2151,8 +2151,8 @@ func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
-	msgTx, err := dcr.refundTx(coinID, contract, 0, nil)
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+	msgTx, err := dcr.refundTx(coinID, contract, 0, nil, feeSuggestion)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -2172,7 +2172,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 // refundTx crates and signs a contract`s refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
-func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address) (*wire.MsgTx, error) {
+func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeSuggestion uint64) (*wire.MsgTx, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -2194,7 +2194,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := dcr.feeRateWithFallback(2, 0)
+	feeRate := dcr.feeRateWithFallback(2, feeSuggestion)
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
@@ -2349,12 +2349,12 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
-func (dcr *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return nil, err
 	}
-	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(2, 0))
+	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(2, feeSuggestion))
 	if err != nil {
 		return nil, err
 	}

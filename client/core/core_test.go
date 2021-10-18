@@ -727,7 +727,7 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redem
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
-func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, uint64) (dex.Bytes, error) {
 	return w.refundCoin, w.refundErr
 }
 
@@ -761,7 +761,7 @@ func (w *TXCWallet) PayFee(address string, fee, feeRateSuggestion uint64) (asset
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
+func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 
@@ -1397,9 +1397,6 @@ func (drv *tDriver) DecodeCoinID(coinID []byte) (string, error) {
 
 func (drv *tDriver) Info() *asset.WalletInfo {
 	return drv.winfo
-}
-
-func (drv *tDriver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
 }
 
 func TestCreateWallet(t *testing.T) {
@@ -4218,7 +4215,7 @@ func TestRefunds(t *testing.T) {
 			t.Fatalf("%s's swap not refundable", match.Side)
 		}
 		// Check refund.
-		amtRefunded, err := tracker.refundMatches([]*matchTracker{match})
+		amtRefunded, err := rig.core.refundMatches(tracker, []*matchTracker{match})
 		if err != nil {
 			t.Fatalf("unexpected refund error %v", err)
 		}
@@ -4231,7 +4228,7 @@ func TestRefunds(t *testing.T) {
 			t.Fatalf("%s's swap refundable after being refunded", match.Side)
 		}
 		// Expect refund re-attempt to not refund any coin.
-		amtRefunded, err = tracker.refundMatches([]*matchTracker{match})
+		amtRefunded, err = rig.core.refundMatches(tracker, []*matchTracker{match})
 		if err != nil {
 			t.Fatalf("unexpected refund error %v", err)
 		}

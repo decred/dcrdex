@@ -190,7 +190,7 @@ type Wallet interface {
 	// as the wallet does not store it, even though it was known when the init
 	// transaction was created. The client should store this information for
 	// persistence across sessions.
-	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
+	Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// OwnsAddress indicates if an address belongs to the wallet.
@@ -215,7 +215,7 @@ type Wallet interface {
 	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value uint64) (Coin, error)
+	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.

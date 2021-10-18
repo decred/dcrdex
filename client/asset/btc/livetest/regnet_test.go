@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -20,13 +19,13 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"golang.org/x/text/language"
 )
 
 const (
-	alphaAddress = "bcrt1qaujcvxuvp9vdcqaa6s3acyh8kxmuyqnyg4jcfl"
-	betaAddress  = "bcrt1qwhxklx3vms6xc0lxlunez93m9wn8qzxkkn5dy2"
-	gammaAddress = "bcrt1qll362edf4levwg7yqyt7kawjklvejvj74w87py"
+	alphaAddress  = "bcrt1qaujcvxuvp9vdcqaa6s3acyh8kxmuyqnyg4jcfl"
+	betaAddress   = "bcrt1qwhxklx3vms6xc0lxlunez93m9wn8qzxkkn5dy2"
+	gammaAddress  = "bcrt1qll362edf4levwg7yqyt7kawjklvejvj74w87py"
+	walletTypeSPV = "SPV"
 )
 
 var (
@@ -46,25 +45,21 @@ var (
 )
 
 func TestWallet(t *testing.T) {
-	var ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
-	(&btc.Driver{}).Initialize(ctx, &sync.WaitGroup{}, dex.StdOutLogger("INIT", dex.LevelWarn), language.AmericanEnglish)
-
 	const lotSize = 1e6
 
 	fmt.Println("////////// RPC WALLET W/O SPLIT //////////")
 	Run(t, &Config{
-		New:     btc.NewWallet,
-		LotSize: lotSize,
-		Asset:   tBTC,
+		NewWallet: btc.NewWallet,
+		LotSize:   lotSize,
+		Asset:     tBTC,
 	})
 
 	fmt.Println("////////// RPC WALLET WITH SPLIT //////////")
 	Run(t, &Config{
-		New:     btc.NewWallet,
-		LotSize: lotSize,
-		Asset:   tBTC,
-		SplitTx: true,
+		NewWallet: btc.NewWallet,
+		LotSize:   lotSize,
+		Asset:     tBTC,
+		SplitTx:   true,
 	})
 
 	spvDir, err := os.MkdirTemp("", "")
@@ -79,7 +74,7 @@ func TestWallet(t *testing.T) {
 		seed := encode.RandomBytes(32)
 
 		err = (&btc.Driver{}).Create(&asset.CreateWalletParams{
-			Type:    btc.WalletTypeSPV,
+			Type:    walletTypeSPV,
 			Seed:    seed[:],
 			Pass:    tPW, // match walletPassword in livetest.go -> Run
 			DataDir: cfg.DataDir,
@@ -139,7 +134,7 @@ func TestWallet(t *testing.T) {
 
 	spvConstructor := func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 		token := hex.EncodeToString(encode.RandomBytes(4))
-		cfg.Type = btc.WalletTypeSPV
+		cfg.Type = walletTypeSPV
 		cfg.DataDir = filepath.Join(spvDir, token)
 
 		name := parseName(cfg.Settings)
@@ -164,19 +159,19 @@ func TestWallet(t *testing.T) {
 
 	fmt.Println("////////// SPV WALLET W/O SPLIT //////////")
 	Run(t, &Config{
-		New:     spvConstructor,
-		LotSize: lotSize,
-		Asset:   tBTC,
-		SPV:     true,
+		NewWallet: spvConstructor,
+		LotSize:   lotSize,
+		Asset:     tBTC,
+		SPV:       true,
 	})
 
 	fmt.Println("////////// SPV WALLET WITH SPLIT //////////")
 	Run(t, &Config{
-		New:     spvConstructor,
-		LotSize: lotSize,
-		Asset:   tBTC,
-		SPV:     true,
-		SplitTx: true,
+		NewWallet: spvConstructor,
+		LotSize:   lotSize,
+		Asset:     tBTC,
+		SPV:       true,
+		SplitTx:   true,
 	})
 }
 

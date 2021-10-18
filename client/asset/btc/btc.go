@@ -34,8 +34,6 @@ import (
 	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
-	"github.com/jrick/logrotate/rotator"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -415,7 +413,6 @@ type Driver struct{}
 // Check that Driver implements Driver and Creator.
 var _ asset.Driver = (*Driver)(nil)
 var _ asset.Creator = (*Driver)(nil)
-var _ asset.Initializer = (*Driver)(nil)
 
 // Exists checks the existence of the wallet. Part of the Creator interface, so
 // only used for wallets with WalletDefinition.Seeded = true.
@@ -472,31 +469,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
-}
-
-var (
-	logRotator        atomic.Value
-	teardownWaitGroup sync.WaitGroup
-	initialized       uint32
-)
-
-// Initialize sets up a routine to close any existing log rotator.
-func (d *Driver) Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
-	if !atomic.CompareAndSwapUint32(&initialized, 0, 1) {
-		return
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ctx.Done()
-		if rotatorI := logRotator.Load(); rotatorI != nil {
-			teardownWaitGroup.Wait()
-			rotator := rotatorI.(*rotator.Rotator)
-			if err := rotator.Close(); err != nil {
-				logger.Errorf("error closing log rotator: %v", err)
-			}
-		}
-	}()
 }
 
 func init() {
@@ -615,9 +587,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		if atomic.LoadUint32(&initialized) == 0 {
-			return nil, fmt.Errorf("must call asset.Initialize if you want to create an SPV wallet")
-		}
 		return openSPVWallet(cloneCFG)
 	case walletTypeRPC, walletTypeLegacy:
 		return BTCCloneWallet(cloneCFG)
@@ -1620,7 +1589,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(&txHash, uint32(i), contract.Value)
-		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i])
+		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -2202,7 +2171,7 @@ func (btc *ExchangeWallet) tryRedemptionRequests(ctx context.Context, startBlock
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
+func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -2220,7 +2189,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	if utxo == nil {
 		return nil, asset.CoinNotFoundError
 	}
-	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil)
+	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeSuggestion)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -2239,14 +2208,14 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 
 // refundTx creates and signs a contract`s refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet.
-func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address) (*wire.MsgTx, error) {
+func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, feeSuggestion uint64) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := btc.feeRateWithFallback(2, 0) // meh level urgency
+	feeRate := btc.feeRateWithFallback(2, feeSuggestion) // meh level urgency
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
@@ -2329,8 +2298,8 @@ func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
-func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2, 0), true)
+func (btc *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2, feeSuggestion), true)
 	if err != nil {
 		btc.log.Errorf("Withdraw error - address = '%s', amount = %s: %v", address, amount(value), err)
 		return nil, err

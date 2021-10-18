@@ -60,7 +60,7 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
 		},
 	}
 
-	w, err := cfg.New(walletCfg, logger, dex.Regtest)
+	w, err := cfg.NewWallet(walletCfg, logger, dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
@@ -444,7 +444,7 @@ func Run(t *testing.T, cfg *Config) {
 		mine()
 	}
 
-	coinID, err := rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
+	coinID, err := rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -462,7 +462,7 @@ func Run(t *testing.T, cfg *Config) {
 	tLogger.Info("Testing Withdraw")
 
 	// Test Withdraw
-	coin, err = rig.gamma().Withdraw(address, 5e7)
+	coin, err = rig.gamma().Withdraw(address, 5e7, 100)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

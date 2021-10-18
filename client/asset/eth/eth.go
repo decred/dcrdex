@@ -728,7 +728,7 @@ func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (re
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (*ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
+func (*ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	return nil, asset.ErrNotImplemented
 }
 
@@ -800,7 +800,7 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.In
 //
 // TODO: Return the asset.Coin.
 // TODO: Subtract fees from the value.
-func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
+func (eth *ExchangeWallet) Withdraw(addr string, value, feeSuggestion uint64) (asset.Coin, error) {
 	bigVal := big.NewInt(0).SetUint64(value)
 	gweiFactorBig := big.NewInt(srveth.GweiFactor)
 	_, err := eth.sendToAddr(common.HexToAddress(addr),

@@ -2139,6 +2139,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut // rpc
 	node.changeAddr = addr.String()
+	const feeSuggestion = 100
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -2158,7 +2159,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.getTransactionErr = WalletTransactionNotFound
 
 	contractOutput := newOutput(&txHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -2167,14 +2168,14 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract())
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	ensureErr := func(tag string) {
 		delete(node.checkpoints, outPt)
-		_, err = wallet.Refund(contractOutput.ID(), contract)
+		_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 		if err == nil {
 			t.Fatalf("no error for %q", tag)
 		}
@@ -2190,7 +2191,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract)
+	_, err = wallet.Refund(badContractOutput.ID(), badContract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
@@ -2225,7 +2226,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.badSendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -2285,12 +2286,13 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 	if err != nil {
 		t.Fatal(err)
 	}
+	const feeSuggestion = 100
 	sender := func(addr string, val uint64) (asset.Coin, error) {
 		return wallet.PayFee(addr, val, defaultFee)
 	}
 	if senderType == tWithdrawSender {
 		sender = func(addr string, val uint64) (asset.Coin, error) {
-			return wallet.Withdraw(addr, val)
+			return wallet.Withdraw(addr, val, feeSuggestion)
 		}
 	}
 	addr := btcAddr(segwit)

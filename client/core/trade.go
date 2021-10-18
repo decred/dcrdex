@@ -1217,7 +1217,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if didUnlock {
 			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a refund", t.wallets.fromAsset.Symbol)
 		}
-		refunded, err := t.refundMatches(refunds)
+		refunded, err := c.refundMatches(t, refunds)
 		corder := t.coreOrderInternal()
 		ui := t.wallets.fromWallet.Info().UnitInfo
 		if err != nil {
@@ -1926,7 +1926,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
+func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, error) {
 	errs := newErrorSet("refundMatches: order %s - ", t.ID())
 
 	refundWallet, refundAsset := t.wallets.fromWallet, t.wallets.fromAsset // refunding to our wallet
@@ -1961,7 +1961,8 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
+		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID, refundAsset.ID == t.Base())
+		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {
 				match.refundErr = err

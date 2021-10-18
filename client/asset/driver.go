@@ -4,13 +4,10 @@
 package asset
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"decred.org/dcrdex/dex"
-	"golang.org/x/text/language"
 )
 
 var (
@@ -44,12 +41,6 @@ type Driver interface {
 type Creator interface {
 	Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error)
 	Create(*CreateWalletParams) error
-}
-
-// Initializer defines an optional method for Drivers that will be called when
-// the Initialize package function is called.
-type Initializer interface {
-	Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag)
 }
 
 func withDriver(assetID uint32, f func(Driver) error) error {
@@ -150,24 +141,4 @@ func Info(assetID uint32) (*WalletInfo, error) {
 		return nil, fmt.Errorf("asset: unsupported asset %d", assetID)
 	}
 	return drv.Info(), nil
-}
-
-var assetsInited uint32
-
-// Initialize will initialize asset backends. This allows backends to setup
-// teardown routines to synchronize shutdown with the caller. Only Drivers which
-// implement Initializer will be initialized.
-func Initialize(ctx context.Context, wg *sync.WaitGroup, logger dex.Logger, lang language.Tag) {
-	if !atomic.CompareAndSwapUint32(&assetsInited, 0, 1) {
-		return
-	}
-	driversMtx.RLock()
-	defer driversMtx.RUnlock()
-	for assetID, drv := range drivers {
-		initer, is := drv.(Initializer)
-		if !is {
-			continue
-		}
-		initer.Initialize(ctx, wg, logger.SubLogger(dex.BipIDSymbol(assetID)), lang)
-	}
 }
