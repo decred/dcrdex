@@ -17,6 +17,8 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
 
 type swapCoinType uint8
@@ -283,4 +285,152 @@ func (c *swapCoin) Value() uint64 {
 // the swapCoin.
 func (c *swapCoin) FeeRate() uint64 {
 	return c.gasPrice
+}
+
+var _ asset.FundingCoin = (*amountCoin)(nil)
+
+type amountCoin struct {
+	backend *Backend
+	cID     *AmountCoinID
+}
+
+func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
+	cID, err := DecodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+	aCoinID, ok := cID.(*AmountCoinID)
+	if !ok {
+		return nil, errors.New("coin ID not an amount")
+	}
+	if _, err := accountHasBalance(backend, &aCoinID.Address, aCoinID.Amount); err != nil {
+		return nil, err
+	}
+	return &amountCoin{
+		backend: backend,
+		cID:     aCoinID,
+	}, nil
+}
+
+func accountHasBalance(backend *Backend, addr *common.Address, gwei uint64) (isConfirmed bool, err error) {
+	// Checking in order of pending, mined in order to avoid the problem of
+	// a block being mined inbetween that causes us to miss the balance.
+	bigPendingBal, err := backend.node.pendingBalance(backend.rpcCtx, addr)
+	if err != nil {
+		return false, err
+	}
+	bigBal, err := backend.node.balance(backend.rpcCtx, addr)
+	if err != nil {
+		return false, err
+	}
+	bal, err := ToGwei(bigBal)
+	if err != nil {
+		return false, err
+	}
+	if gwei <= bal {
+		// Confirmed balance is enough.
+		return true, nil
+	}
+	// Check if unconfirmed balance is enough.
+	pendingBal, err := ToGwei(bigPendingBal)
+	if err != nil {
+		return false, err
+	}
+	if gwei <= pendingBal {
+		// Unconfirmed balance is enough.
+		return false, nil
+	}
+	// There is not enough balance confirmed or pending. Error with the
+	// balance that was higher.
+	holding := fmt.Sprintf("%d", bal)
+	if pendingBal > bal {
+		holding = fmt.Sprintf("%d pending", pendingBal)
+	}
+	return false, fmt.Errorf("account %s only holds %s gwie but need %d gwei", addr, holding, gwei)
+}
+
+// Confirmations returns one if an account currently has the funds to satisfy
+// its funding amount.
+func (c *amountCoin) Confirmations(_ context.Context) (int64, error) {
+	isConfirmed, err := accountHasBalance(c.backend, &c.cID.Address, c.cID.Amount)
+	if err != nil {
+		return -1, err
+	}
+	if isConfirmed {
+		// While not completely accurate, node.balance will only
+		// return funds that have been mined, and therefore have at
+		// least one confirmation.
+		return 1, nil
+	}
+	// The pending balance was found to be enough.
+	return 0, nil
+}
+
+// ID is the amount's coin ID.
+func (c *amountCoin) ID() []byte {
+	return c.cID.Encode()
+}
+
+// There is no one TxID leading to an amountCoin, and no way to know which
+// transactions led to this state beyond a certain window without an archival
+// node.
+func (c *amountCoin) TxID() string {
+	return ""
+}
+
+// String is a human readable representation of the amount coin.
+func (c *amountCoin) String() string {
+	return c.cID.String()
+}
+
+// Value is the amount held in this amountCoin.
+func (c *amountCoin) Value() uint64 {
+	return c.cID.Amount
+}
+
+// FeeRate is not applicable to value held in an account.
+func (c *amountCoin) FeeRate() uint64 {
+	return 0
+}
+
+// Auth ensures that a user really has the keys to spend a funding coin by
+// sending a message signed by the funding coin address and its signature.
+func (c *amountCoin) Auth(pubkeys, sigs [][]byte, msg []byte) error {
+	if len(pubkeys) != 1 {
+		return fmt.Errorf("expected one pubkey but got %d", len(pubkeys))
+	}
+	if len(sigs) != 1 {
+		return fmt.Errorf("expected one signature but got %d", len(sigs))
+	}
+	sig := sigs[0]
+	if len(sig) != 65 {
+		return fmt.Errorf("expected sig length of sixty five bytes but got %d", len(sig))
+	}
+	pk, err := crypto.UnmarshalPubkey(pubkeys[0])
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal pubkey: %v", err)
+	}
+	// Ensure the pubkey matches the funding coin's account address.
+	// Internally, this will take the last twenty bytes of crypto.Keccak256
+	// of all but the first byte of the pubkey bytes and wrap it as a
+	// common.Address.
+	addr := crypto.PubkeyToAddress(*pk)
+	if addr != c.cID.Address {
+		return errors.New("pubkey does not correspond to amount coin's address")
+	}
+	// The last byte is a recovery byte (zero or one) and unused here. It
+	// could be used to recover the pubkey from the signature, but we are
+	// being sent that anyway, so no need to.
+	sig = sig[:64]
+	// Verify the signature.
+	if !secp256k1.VerifySignature(pubkeys[0], crypto.Keccak256(msg), sig) {
+		return errors.New("cannot verify signature")
+	}
+	return nil
+}
+
+// The gas size required to "spend" this coin is variable. This returns the
+// current highest possible gas, which is for a swap initialization.
+func (c *amountCoin) SpendSize() uint32 {
+	return c.backend.InitTxSize()
 }

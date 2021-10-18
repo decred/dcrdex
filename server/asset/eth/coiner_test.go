@@ -142,7 +142,6 @@ func TestNewSwapCoin(t *testing.T) {
 		}
 		eth := &Backend{
 			node:         node,
-			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
 		sc, err := newSwapCoin(eth, test.coinID, test.ct)
@@ -299,7 +298,6 @@ func TestConfirmations(t *testing.T) {
 		}
 		eth := &Backend{
 			node:         node,
-			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
 
@@ -307,8 +305,6 @@ func TestConfirmations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-
-		_ = sc.String() // unrelated panic test
 
 		if test.setCT {
 			sc.sct = swapCoinType(^uint8(0))
@@ -397,6 +393,281 @@ func TestValidateRedeem(t *testing.T) {
 	}}
 	for _, test := range tests {
 		err := test.sc.validateRedeem(test.contractID)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+	}
+}
+
+func TestNewAmountCoin(t *testing.T) {
+	addr := new(common.Address)
+	copy(addr[:], encode.RandomBytes(20))
+	amt := uint64(3)
+	acID := &AmountCoinID{
+		Address: *addr,
+		Amount:  amt,
+	}
+
+	tests := []struct {
+		name    string
+		wantErr bool
+		acID    []byte
+		bal     uint64
+		balErr  error
+	}{{
+		name: "ok",
+		acID: acID.Encode(),
+		bal:  amt,
+	}, {
+		name:    "cannot decode coin ID",
+		bal:     amt,
+		wantErr: true,
+	}, {
+		name:    "not an amount coin",
+		acID:    new(SwapCoinID).Encode(),
+		bal:     amt,
+		wantErr: true,
+	}, {
+		name:    "account has balance error from balance error",
+		acID:    acID.Encode(),
+		balErr:  errors.New(""),
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			bal:    big.NewInt(int64(test.bal * GweiFactor)),
+			balErr: test.balErr,
+		}
+		eth := &Backend{
+			node: node,
+		}
+		cnr, err := newAmountCoin(eth, test.acID)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if cnr.cID.Amount != amt ||
+			cnr.cID.Address != *addr {
+			t.Fatalf("unexpected coiner values for test %v", test.name)
+		}
+	}
+}
+
+func TestAccountHasBalance(t *testing.T) {
+	addr := new(common.Address)
+	copy(addr[:], encode.RandomBytes(20))
+	amt := uint64(3)
+
+	tests := []struct {
+		name                  string
+		wantErr               bool
+		bal, pendingBal       *big.Int
+		balErr, pendingBalErr error
+		wantConfirmed         bool
+	}{{
+		name:          "ok has confirmed balance",
+		bal:           big.NewInt(int64(amt * GweiFactor)),
+		pendingBal:    big.NewInt(0),
+		wantConfirmed: true,
+	}, {
+		name:       "ok has pending balance",
+		pendingBal: big.NewInt(int64(amt * GweiFactor)),
+		bal:        big.NewInt(0),
+	}, {
+		name:          "pending balance error",
+		pendingBalErr: errors.New(""),
+		wantErr:       true,
+	}, {
+		name:       "balance error",
+		pendingBal: big.NewInt(0),
+		balErr:     errors.New(""),
+		wantErr:    true,
+	}, {
+		name:       "balance too big",
+		pendingBal: big.NewInt(0),
+		bal:        overMaxWei(),
+		wantErr:    true,
+	}, {
+		name:       "pending balance too big",
+		pendingBal: overMaxWei(),
+		bal:        big.NewInt(0),
+		wantErr:    true,
+	}, {
+		name:       "not enough balance",
+		bal:        big.NewInt(int64((amt - 1) * GweiFactor)),
+		pendingBal: big.NewInt(int64((amt - 1) * GweiFactor)),
+		wantErr:    true,
+	}, {
+		name:       "not enough balance but higher pending",
+		bal:        big.NewInt(int64((amt - 2) * GweiFactor)),
+		pendingBal: big.NewInt(int64((amt - 1) * GweiFactor)),
+		wantErr:    true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			bal:           test.bal,
+			balErr:        test.balErr,
+			pendingBal:    test.pendingBal,
+			pendingBalErr: test.pendingBalErr,
+		}
+		eth := &Backend{
+			node: node,
+		}
+		confirmed, err := accountHasBalance(eth, addr, amt)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if confirmed != test.wantConfirmed {
+			t.Fatalf("want %v but got %v for isConfirmed for test %v",
+				test.wantConfirmed, confirmed, test.name)
+		}
+	}
+}
+
+func TestAmountCoinConfirmations(t *testing.T) {
+	addr := new(common.Address)
+	copy(addr[:], encode.RandomBytes(20))
+	amt := uint64(3)
+
+	tests := []struct {
+		name            string
+		wantErr         bool
+		bal, pendingBal *big.Int
+		pendingBalErr   error
+		wantConfs       int64
+	}{{
+		name:       "ok has confirmed balance",
+		bal:        big.NewInt(int64(amt * GweiFactor)),
+		pendingBal: big.NewInt(0),
+		wantConfs:  1,
+	}, {
+		name:       "ok has pending balance",
+		pendingBal: big.NewInt(int64(amt * GweiFactor)),
+		bal:        big.NewInt(0),
+	}, {
+		name:          "account has balance error",
+		pendingBalErr: errors.New(""),
+		wantErr:       true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			bal:           test.bal,
+			pendingBal:    test.pendingBal,
+			pendingBalErr: test.pendingBalErr,
+		}
+		eth := &Backend{
+			node: node,
+		}
+		ac := &amountCoin{
+			backend: eth,
+			cID: &AmountCoinID{
+				Amount: amt,
+			},
+		}
+		confs, err := ac.Confirmations(nil)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if confs != test.wantConfs {
+			t.Fatalf("want %d but got %d confs for test %v",
+				test.wantConfs, confs, test.name)
+		}
+	}
+}
+
+func TestAuth(t *testing.T) {
+	// "ok" values used are the same as tests in client/assets/eth.
+	pkBytes := mustParseHex("04b911d1f39f7792e165767e35aa134083e2f70ac7de6945d7641a3015d09a54561b71112b8d60f63831f0e62c23c6921ec627820afedf8236155b9e9bd82b6523")
+	msg := []byte("msg")
+	sigBytes := mustParseHex("ffd26911d3fdaf11ac44801744f2df015a16539b6e688aff4cabc092b747466e7bc8036a03d1479a1570dd11bf042120301c34a65b237267720ef8a9e56f2eb101")
+	addr := common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
+	ac := &amountCoin{
+		cID: &AmountCoinID{
+			Address: addr,
+		},
+	}
+	tests := []struct {
+		name              string
+		wantErr           bool
+		ac                *amountCoin
+		pkBytes, sigBytes [][]byte
+		msg               []byte
+	}{{
+		name:     "ok",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes},
+		msg:      msg,
+		sigBytes: [][]byte{sigBytes},
+	}, {
+		name:     "not one pubkey bytes",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes, nil},
+		msg:      msg,
+		sigBytes: [][]byte{sigBytes},
+		wantErr:  true,
+	}, {
+		name:     "not one sig bytes",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes},
+		msg:      msg,
+		sigBytes: [][]byte{sigBytes, nil},
+		wantErr:  true,
+	}, {
+		name:     "sig too short",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes},
+		msg:      msg,
+		sigBytes: [][]byte{nil},
+		wantErr:  true,
+	}, {
+		name: "pubkey doesn't match amount coin address",
+		ac: &amountCoin{
+			cID: new(AmountCoinID),
+		},
+		pkBytes:  [][]byte{pkBytes},
+		msg:      msg,
+		sigBytes: [][]byte{sigBytes},
+		wantErr:  true,
+	}, {
+		name:     "bad pubkey",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes[1:]},
+		msg:      msg,
+		sigBytes: [][]byte{sigBytes},
+		wantErr:  true,
+	}, {
+		name:     "cannot verify signature, bad msg",
+		ac:       ac,
+		pkBytes:  [][]byte{pkBytes},
+		sigBytes: [][]byte{sigBytes},
+		wantErr:  true,
+	}}
+
+	for _, test := range tests {
+		err := test.ac.Auth(test.pkBytes, test.sigBytes, test.msg)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

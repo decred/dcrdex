@@ -120,3 +120,15 @@ func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwa
 func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
 	return c.ec.TransactionByHash(ctx, hash)
 }
+
+// balance gets the current balance held by an address.
+func (c *rpcclient) balance(ctx context.Context, addr *common.Address) (*big.Int, error) {
+	// The last argument is block number. nil will use the latest know
+	// block.
+	return c.ec.BalanceAt(ctx, *addr, nil)
+}
+
+// pendingBalance gets the current pending balance held by an address.
+func (c *rpcclient) pendingBalance(ctx context.Context, addr *common.Address) (*big.Int, error) {
+	return c.ec.PendingBalanceAt(ctx, *addr)
+}

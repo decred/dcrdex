@@ -96,6 +96,8 @@ type ethFetcher interface {
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
+	balance(ctx context.Context, addr *common.Address) (bigBal *big.Int, err error)
+	pendingBalance(ctx context.Context, addr *common.Address) (bigPendingBal *big.Int, err error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -317,9 +319,10 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 	return cnr, nil
 }
 
-// FundingCoin is an unspent output.
-func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
-	return nil, notImplementedErr
+// FundingCoin is an unspent amount on the blockchain. It points to an account
+// that should maintain at least a certain value.
+func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, _ []byte) (asset.FundingCoin, error) {
+	return newAmountCoin(eth, coinID)
 }
 
 // ValidateCoinID attempts to decode the coinID.
