@@ -160,7 +160,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 		return nil, nil, nil, err
 	}
 	wallet.wallet = &rpcWallet{
-		node: client,
+		rpcClient: client,
 	}
 	wallet.ctx = walletCtx
 
@@ -325,6 +325,10 @@ func newTRPCClient() *tRPCClient {
 		rawRes:   make(map[string]json.RawMessage),
 		rawErr:   make(map[string]error),
 	}
+}
+
+func (c *tRPCClient) GetCurrentNet(context.Context) (wire.CurrencyNet, error) {
+	return tChainParams.Net, nil
 }
 
 func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error) {
@@ -2296,7 +2300,7 @@ func TestSyncStatus(t *testing.T) {
 	node.blockchainInfoErr = nil
 
 	wallet.wallet = &rpcWallet{
-		node:         node,
+		rpcClient:    node,
 		tipAtConnect: 100,
 	}
 	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{

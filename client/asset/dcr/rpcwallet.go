@@ -39,7 +39,8 @@ const (
 	methodSignRawTransaction = "signrawtransaction"
 )
 
-// Implements Wallet functionality using rpc connections.
+// rpcWallet implements Wallet functionality using an rpc client to communicate
+// with the json-rpc server of an external dcrwallet daemon.
 type rpcWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
@@ -48,8 +49,12 @@ type rpcWallet struct {
 	chainParams *chaincfg.Params
 	log         dex.Logger
 
-	client *rpcclient.Client
-	node   rpcClient
+	// rpcConnector is a rpcclient.Client, does not need to be
+	// set for testing.
+	rpcConnector
+	// rpcClient is a combined rpcclient.Client+dcrwallet.Client,
+	// or a stub for testing.
+	rpcClient
 }
 
 // Ensure rpcWallet satisfies the Wallet interface.
@@ -65,9 +70,25 @@ type combinedClient struct {
 // Ensure combinedClient satisfies the rpcClient interface.
 var _ rpcClient = (*combinedClient)(nil)
 
-// rpcClient is a combined rpcclient.Client+dcrwallet.Client,
-// or a stub for testing.
+// ValidateAddress disambiguates the node and wallet methods of the same name.
+func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
+	return cc.walletClient.ValidateAddress(ctx, address)
+}
+
+// rpcConnector defines methods required by *rpcWallet for connecting and
+// disconnecting the rpcClient to/from the json-rpc server.
+type rpcConnector interface {
+	Connect(ctx context.Context, retry bool) error
+	Version(ctx context.Context) (map[string]chainjson.VersionResult, error)
+	Disconnected() bool
+	Shutdown()
+	WaitForShutdown()
+}
+
+// rpcClient defines rpc request methods that are used by *rpcWallet.
+// This is a *combinedClient or a stub for testing.
 type rpcClient interface {
+	GetCurrentNet(ctx context.Context) (wire.CurrencyNet, error)
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
@@ -89,10 +110,42 @@ type rpcClient interface {
 	AccountUnlocked(ctx context.Context, account string) (*walletjson.AccountUnlockedResult, error)
 	LockAccount(ctx context.Context, account string) error
 	UnlockAccount(ctx context.Context, account, passphrase string) error
-	Disconnected() bool
 	RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error)
 	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
 	ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error)
+}
+
+// newRPCWallet creates an rpcClient and uses it to construct a new instance
+// of the rpcWallet. The rpcClient isn't connected to the server yet, use the
+// Connect method of the returned *rpcWallet to connect the rpcClient to the
+// server.
+func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (*rpcWallet, error) {
+	// Check rpc connection config values
+	missing := ""
+	if cfg.RPCUser == "" {
+		missing += " username"
+	}
+	if cfg.RPCPass == "" {
+		missing += " password"
+	}
+	if missing != "" {
+		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
+	}
+
+	log := logger.SubLogger("rpcw")
+	log.Infof("Setting up rpc client to communicate with dcrwallet at %s with TLS certificate %q.",
+		cfg.RPCListen, cfg.RPCCert)
+	nodeRPCClient, err := newClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, log)
+	if err != nil {
+		return nil, fmt.Errorf("error setting up rpc client: %w", err)
+	}
+
+	return &rpcWallet{
+		chainParams:  chainParams,
+		log:          log,
+		rpcConnector: nodeRPCClient,
+		rpcClient:    &combinedClient{nodeRPCClient, dcrwallet.NewClient(dcrwallet.RawRequestCaller(nodeRPCClient), chainParams)},
+	}, nil
 }
 
 // newClient attempts to create a new websocket connection to a dcrwallet
@@ -126,46 +179,12 @@ func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Cli
 	return cl, nil
 }
 
-// Initialize prepares this rpcWallet for use by creating the rpc client
-// connection.
-// Part of the Wallet interface.
-func (w *rpcWallet) Initialize(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) error {
-	w.chainParams = chainParams
-	w.log = logger
-
-	// Check rpc connection config values
-	missing := ""
-	if dcrCfg.RPCUser == "" {
-		missing += " username"
-	}
-	if dcrCfg.RPCPass == "" {
-		missing += " password"
-	}
-	if missing != "" {
-		return fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
-	}
-
-	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
-		dcrCfg.RPCListen, dcrCfg.RPCCert)
-	var err error
-	w.client, err = newClient(dcrCfg.RPCListen, dcrCfg.RPCUser,
-		dcrCfg.RPCPass, dcrCfg.RPCCert, logger)
-	if err != nil {
-		return fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
-	}
-
-	// Beyond this point, only node
-	w.node = &combinedClient{w.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(w.client), chainParams)}
-
-	return nil
-}
-
 // Connect establishes a connection to the previously created rpc client.
 // Part of the Wallet interface.
 func (w *rpcWallet) Connect(ctx context.Context) error {
-	err := w.client.Connect(ctx, false)
+	err := w.rpcConnector.Connect(ctx, false)
 	if err != nil {
-		return fmt.Errorf("Decred Wallet connect error: %w", err)
+		return fmt.Errorf("dcrwallet connect error: %w", err)
 	}
 
 	// The websocket client is connected now, so if any of the following checks
@@ -175,15 +194,15 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	var success bool
 	defer func() {
 		if !success {
-			w.client.Shutdown()
-			w.client.WaitForShutdown()
+			w.rpcConnector.Shutdown()
+			w.rpcConnector.WaitForShutdown()
 		}
 	}()
 
 	// Check the required API versions.
-	versions, err := w.client.Version(ctx)
+	versions, err := w.rpcConnector.Version(ctx)
 	if err != nil {
-		return fmt.Errorf("DCR ExchangeWallet version fetch error: %w", err)
+		return fmt.Errorf("dcrwallet version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrwalletjsonrpcapi"]
@@ -205,12 +224,7 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 			nodeSemver, requiredNodeVersion)
 	}
 
-	curnet, err := w.client.GetCurrentNet(ctx)
-	if err != nil {
-		return fmt.Errorf("getcurrentnet failure: %w", err)
-	}
-
-	// Set the tipAtConnect
+	// Set the tipAtConnect, we'll use it later in determining SyncStatus.
 	_, currentTip, err := w.GetBestBlock(ctx)
 	if err != nil {
 		return fmt.Errorf("error getting best block height: %w", translateRPCCancelErr(err))
@@ -219,21 +233,28 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 
 	success = true
 	w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, curnet)
+		walletSemver, nodeSemver, w.chainParams.Name)
 	return nil
 }
 
 // Disconnect shuts down access to the wallet by disconnecting the rpc client.
 // Part of the Wallet interface.
 func (w *rpcWallet) Disconnect() {
-	w.client.Shutdown()
-	w.client.WaitForShutdown()
+	w.rpcConnector.Shutdown()
+	w.rpcConnector.WaitForShutdown()
 }
 
 // Disconnected returns true if the rpc client is not connected.
 // Part of the Wallet interface.
 func (w *rpcWallet) Disconnected() bool {
-	return w.node.Disconnected()
+	return w.rpcConnector.Disconnected()
+}
+
+// Disconnected returns true if the rpc client is not connected.
+// Part of the Wallet interface.
+func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
+	net, err := w.rpcClient.GetCurrentNet(ctx)
+	return net, translateRPCCancelErr(err)
 }
 
 // AccountOwnsAddress uses the validateaddress rpc to check if the provided
@@ -244,13 +265,8 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, account, address str
 	if err != nil {
 		return false, err
 	}
-	va, err := w.node.ValidateAddress(ctx, a)
+	va, err := w.rpcClient.ValidateAddress(ctx, a)
 	if err != nil {
-		// Work around a bug with dcrwallet that prevents validateaddress for
-		// locked accounts.
-		if isAccountNotEncryptedErr(err) {
-			return false, nil
-		}
 		return false, translateRPCCancelErr(err)
 	}
 	return va.IsMine && va.Account == account, nil
@@ -259,7 +275,7 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, account, address str
 // AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) AccountBalance(ctx context.Context, account string, confirms int32) (*walletjson.GetAccountBalanceResult, error) {
-	balances, err := w.node.GetBalanceMinConf(ctx, account, int(confirms))
+	balances, err := w.rpcClient.GetBalanceMinConf(ctx, account, int(confirms))
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
@@ -279,7 +295,7 @@ func (w *rpcWallet) AccountBalance(ctx context.Context, account string, confirms
 // Part of the Wallet interface.
 func (w *rpcWallet) LockedOutputs(ctx context.Context, account string) ([]chainjson.TransactionInput, error) {
 	var locked []chainjson.TransactionInput
-	err := w.nodeRawRequest(ctx, methodListLockUnspent, anylist{account}, &locked)
+	err := w.rpcClientRawRequest(ctx, methodListLockUnspent, anylist{account}, &locked)
 	return locked, translateRPCCancelErr(err)
 }
 
@@ -287,7 +303,7 @@ func (w *rpcWallet) LockedOutputs(ctx context.Context, account string) ([]chainj
 // estimatesmartfee rpc.
 // Part of the Wallet interface.
 func (w *rpcWallet) EstimateSmartFeeRate(ctx context.Context, confTarget int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
-	estimateFeeResult, err := w.node.EstimateSmartFee(ctx, confTarget, mode)
+	estimateFeeResult, err := w.rpcClient.EstimateSmartFee(ctx, confTarget, mode)
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
@@ -301,27 +317,27 @@ func (w *rpcWallet) Unspents(ctx context.Context, account string) ([]walletjson.
 	var unspents []walletjson.ListUnspentResult
 	// minconf, maxconf (rpcdefault=9999999), [address], account
 	params := anylist{0, 9999999, nil, account}
-	err := w.nodeRawRequest(ctx, methodListUnspent, params, &unspents)
+	err := w.rpcClientRawRequest(ctx, methodListUnspent, params, &unspents)
 	return unspents, err
 }
 
 // GetChangeAddress returns a change address from the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetChangeAddress(ctx context.Context, account string) (stdaddr.Address, error) {
-	addr, err := w.node.GetRawChangeAddress(ctx, account, w.chainParams)
+	addr, err := w.rpcClient.GetRawChangeAddress(ctx, account, w.chainParams)
 	return addr, translateRPCCancelErr(err)
 }
 
 // LockUnspent locks or unlocks the specified outpoint.
 // Part of the Wallet interface.
 func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error {
-	return translateRPCCancelErr(w.node.LockUnspent(ctx, unlock, ops))
+	return translateRPCCancelErr(w.rpcClient.LockUnspent(ctx, unlock, ops))
 }
 
 // GetTxOut returns information about an unspent tx output.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
-	txOut, err := w.node.GetTxOut(ctx, txHash, index, tree, mempool)
+	txOut, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, mempool)
 	return txOut, translateRPCCancelErr(err)
 }
 
@@ -329,33 +345,29 @@ func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index 
 // the specified gap policy.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error) {
-	addr, err := w.node.GetNewAddressGapPolicy(ctx, account, gap)
+	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, account, gap)
 	return addr, translateRPCCancelErr(err)
 }
 
 // SignRawTransaction signs the provided transaction using rpc RawRequest.
 // Part of the Wallet interface.
-func (w *rpcWallet) SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*walletjson.SignRawTransactionResult, error) {
-	txHex, err := msgTxToHex(tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
-	}
+func (w *rpcWallet) SignRawTransaction(ctx context.Context, txHex string) (*walletjson.SignRawTransactionResult, error) {
 	var res walletjson.SignRawTransactionResult
-	err = w.nodeRawRequest(ctx, methodSignRawTransaction, anylist{txHex}, &res)
+	err := w.rpcClientRawRequest(ctx, methodSignRawTransaction, anylist{txHex}, &res)
 	return &res, err
 }
 
 // SendRawTransaction broadcasts the provided transaction to the Decred network.
 // Part of the Wallet interface.
 func (w *rpcWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
-	hash, err := w.node.SendRawTransaction(ctx, tx, allowHighFees)
+	hash, err := w.rpcClient.SendRawTransaction(ctx, tx, allowHighFees)
 	return hash, translateRPCCancelErr(err)
 }
 
 // GetBlockHeaderVerbose returns block header info for the specified block hash.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetBlockHeaderVerbose(ctx context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error) {
-	blockHeader, err := w.node.GetBlockHeaderVerbose(ctx, blockHash)
+	blockHeader, err := w.rpcClient.GetBlockHeaderVerbose(ctx, blockHash)
 	return blockHeader, translateRPCCancelErr(err)
 }
 
@@ -363,7 +375,7 @@ func (w *rpcWallet) GetBlockHeaderVerbose(ctx context.Context, blockHash *chainh
 // tx info.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
-	blk, err := w.node.GetBlockVerbose(ctx, blockHash, verboseTx)
+	blk, err := w.rpcClient.GetBlockVerbose(ctx, blockHash, verboseTx)
 	return blk, translateRPCCancelErr(err)
 }
 
@@ -372,7 +384,7 @@ func (w *rpcWallet) GetBlockVerbose(ctx context.Context, blockHash *chainhash.Ha
 // found in the wallet.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
-	tx, err := w.node.GetTransaction(ctx, txHash)
+	tx, err := w.rpcClient.GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
@@ -386,7 +398,7 @@ func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 // Returns asset.CoinNotFoundError if the tx is not found.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
-	tx, err := w.node.GetRawTransactionVerbose(ctx, txHash)
+	tx, err := w.rpcClient.GetRawTransactionVerbose(ctx, txHash)
 	return tx, translateRPCCancelErr(err)
 }
 
@@ -394,21 +406,21 @@ func (w *rpcWallet) GetRawTransactionVerbose(ctx context.Context, txHash *chainh
 // mempool.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
-	mempoolTxs, err := w.node.GetRawMempool(ctx, txType)
+	mempoolTxs, err := w.rpcClient.GetRawMempool(ctx, txType)
 	return mempoolTxs, translateRPCCancelErr(err)
 }
 
 // GetBestBlock returns the hash and height of the wallet's best block.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error) {
-	hash, height, err := w.node.GetBestBlock(ctx)
+	hash, height, err := w.rpcClient.GetBestBlock(ctx)
 	return hash, height, translateRPCCancelErr(err)
 }
 
 // GetBlockHash returns the hash of the mainchain block at the specified height.
 // Part of the Wallet interface.
 func (w *rpcWallet) GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error) {
-	bh, err := w.node.GetBlockHash(ctx, blockHeight)
+	bh, err := w.rpcClient.GetBlockHash(ctx, blockHeight)
 	return bh, translateRPCCancelErr(err)
 }
 
@@ -416,7 +428,7 @@ func (w *rpcWallet) GetBlockHash(ctx context.Context, blockHeight int64) (*chain
 // Part of the Wallet interface.
 func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash *chainhash.Hash) (filter, key string, err error) {
 	var cfRes walletjson.GetCFilterV2Result
-	err = w.nodeRawRequest(ctx, methodGetCFilterV2, anylist{blockHash.String()}, &cfRes)
+	err = w.rpcClientRawRequest(ctx, methodGetCFilterV2, anylist{blockHash.String()}, &cfRes)
 	if err != nil {
 		return "", "", err
 	}
@@ -426,19 +438,19 @@ func (w *rpcWallet) BlockCFilter(ctx context.Context, blockHash *chainhash.Hash)
 // LockWallet locks the wallet.
 // Part of the Wallet interface.
 func (w *rpcWallet) LockWallet(ctx context.Context) error {
-	return translateRPCCancelErr(w.node.WalletLock(ctx))
+	return translateRPCCancelErr(w.rpcClient.WalletLock(ctx))
 }
 
 // UnlockWallet unlocks the wallet.
 // Part of the Wallet interface.
 func (w *rpcWallet) UnlockWallet(ctx context.Context, passphrase string, timeoutSecs int64) error {
-	return translateRPCCancelErr(w.node.WalletPassphrase(ctx, passphrase, timeoutSecs))
+	return translateRPCCancelErr(w.rpcClient.WalletPassphrase(ctx, passphrase, timeoutSecs))
 }
 
 // WalletUnlocked returns true if the wallet is unlocked.
 // Part of the Wallet interface.
 func (w *rpcWallet) WalletUnlocked(ctx context.Context) bool {
-	walletInfo, err := w.node.WalletInfo(ctx)
+	walletInfo, err := w.rpcClient.WalletInfo(ctx)
 	if err != nil {
 		w.log.Errorf("walletinfo error: %v", err)
 		return true // assume wallet is unlocked?
@@ -449,14 +461,14 @@ func (w *rpcWallet) WalletUnlocked(ctx context.Context) bool {
 // AccountUnlocked returns true if the specified account is unlocked.
 // Part of the Wallet interface.
 func (w *rpcWallet) AccountUnlocked(ctx context.Context, account string) (*walletjson.AccountUnlockedResult, error) {
-	res, err := w.node.AccountUnlocked(ctx, account)
+	res, err := w.rpcClient.AccountUnlocked(ctx, account)
 	return res, translateRPCCancelErr(err)
 }
 
 // LockAccount locks the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) LockAccount(ctx context.Context, account string) error {
-	err := w.node.LockAccount(ctx, account)
+	err := w.rpcClient.LockAccount(ctx, account)
 	if isAccountLockedErr(err) {
 		return nil // it's already locked
 	}
@@ -466,13 +478,13 @@ func (w *rpcWallet) LockAccount(ctx context.Context, account string) error {
 // UnlockAccount unlocks the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) UnlockAccount(ctx context.Context, account, passphrase string) error {
-	return translateRPCCancelErr(w.node.UnlockAccount(ctx, account, passphrase))
+	return translateRPCCancelErr(w.rpcClient.UnlockAccount(ctx, account, passphrase))
 }
 
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
 func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
-	chainInfo, err := w.node.GetBlockChainInfo(ctx)
+	chainInfo, err := w.rpcClient.GetBlockChainInfo(ctx)
 	if err != nil {
 		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
 	}
@@ -492,24 +504,18 @@ func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 // AddressPrivKey fetches the privkey for the specified address.
 // Part of the Wallet interface.
 func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error) {
-	wif, err := w.node.DumpPrivKey(ctx, address)
+	wif, err := w.rpcClient.DumpPrivKey(ctx, address)
 	return wif, translateRPCCancelErr(err)
-}
-
-// ValidateAddress is NOT part of the Wallet interface, but is added here to
-// disambiguate the node and wallet methods of the same name.
-func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
-	return cc.walletClient.ValidateAddress(ctx, address)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via nodeRawRequest.
 type anylist []interface{}
 
-// nodeRawRequest is used to marshal parameters and send requests to the RPC
-// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
-// will be marshaled into `thing`.
-func (w *rpcWallet) nodeRawRequest(ctx context.Context, method string, args anylist, thing interface{}) error {
+// rpcClientRawRequest is used to marshal parameters and send requests to the
+// RPC server via rpcClient.RawRequest. If `thing` is non-nil, the resul will
+// be marshaled into `thing`.
+func (w *rpcWallet) rpcClientRawRequest(ctx context.Context, method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])
@@ -518,7 +524,7 @@ func (w *rpcWallet) nodeRawRequest(ctx context.Context, method string, args anyl
 		}
 		params = append(params, p)
 	}
-	b, err := w.node.RawRequest(ctx, method, params)
+	b, err := w.rpcClient.RawRequest(ctx, method, params)
 	if err != nil {
 		return fmt.Errorf("rawrequest error: %w", translateRPCCancelErr(err))
 	}
@@ -545,12 +551,6 @@ func translateRPCCancelErr(err error) error {
 func isTxNotFoundErr(err error) bool {
 	var rpcErr *dcrjson.RPCError
 	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
-}
-
-func isAccountNotEncryptedErr(err error) bool {
-	var rpcErr *dcrjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCWallet &&
-		strings.Contains(rpcErr.Message, "account is not encrypted") // ... with a unique passphrase
 }
 
 func isAccountLockedErr(err error) bool {

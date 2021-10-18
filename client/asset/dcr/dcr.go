@@ -336,7 +336,7 @@ var _ asset.Driver = (*Driver)(nil)
 
 // Open creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	return NewWallet(cfg, logger, network, &rpcWallet{})
+	return NewWallet(cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Decred.
@@ -416,9 +416,9 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
-func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network, wallet Wallet) (*ExchangeWallet, error) {
+func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
-	// package variable.
+	// variable.
 	walletCfg, chainParams, err := loadConfig(cfg.Settings, network)
 	if err != nil {
 		return nil, err
@@ -429,10 +429,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network, 
 		return nil, err
 	}
 
-	dcr.wallet = wallet
-	err = dcr.wallet.Initialize(cfg, walletCfg, chainParams, logger)
-	if err != nil {
-		return nil, err
+	// Set dcr.wallet using either the default rpcWallet or a custom wallet.
+	if customWalletConstructor == nil {
+		dcr.wallet, err = newRPCWallet(walletCfg, chainParams, logger)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dcr.wallet, err = customWalletConstructor(walletCfg, chainParams, logger)
+		if err != nil {
+			return nil, fmt.Errorf("custom wallet setup error: %v", err)
+		}
 	}
 
 	return dcr, nil
@@ -519,6 +526,14 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 			dcr.wallet.Disconnect()
 		}
 	}()
+
+	curnet, err := dcr.wallet.Network(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch wallet network: %w", err)
+	}
+	if curnet != dcr.chainParams.Net {
+		return nil, fmt.Errorf("unexpected wallet network %s, expected %s", curnet, dcr.chainParams.Net)
+	}
 
 	// Initialize the best block.
 	dcr.tipMtx.Lock()
@@ -2441,7 +2456,11 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 // signTx attempts to sign all transaction inputs. If it fails to completely
 // sign the transaction, it is an error and a nil *wire.MsgTx is returned.
 func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
-	res, err := dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
+	txHex, err := msgTxToHex(baseTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
+	}
+	res, err := dcr.wallet.SignRawTransaction(dcr.ctx, txHex)
 	if err != nil {
 		return nil, fmt.Errorf("signrawtransaction error: %w", err)
 	}

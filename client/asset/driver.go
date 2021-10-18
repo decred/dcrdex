@@ -133,6 +133,8 @@ func Assets() map[uint32]RegisteredAsset {
 }
 
 // Info returns the WalletInfo for the specified asset, if supported.
+// WARNING: An ExchangeWallet instance may have different config values set,
+// so use (*ExchangeWallet).Info when possible.
 func Info(assetID uint32) (*WalletInfo, error) {
 	driversMtx.RLock()
 	drv, ok := drivers[assetID]

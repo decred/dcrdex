@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"context"
+	"fmt"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -18,15 +19,40 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+// WalletConstructor defines a function that can be invoked to create a custom
+// implementation of the Wallet interface.
+type WalletConstructor func(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (Wallet, error)
+
+// customWalletConstructor is a function that can be invoked when setting up
+// the ExchangeWallet to set up a custom implementation of the Wallet interface
+// which will be used instead of the default rpcWallet implementation.
+var customWalletConstructor WalletConstructor
+
+// RegisterCustomWallet specifies the function that should be used in creating
+// a wallet implementation that the ExchangeWallet will use in place of the
+// default rpcWallet implementation. External consumers can use this function
+// to provide alternative Wallet implementations, and must do so before an
+// ExchangeWallet instance is created.
+func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefinition) error {
+	for _, availableWallets := range WalletInfo.AvailableWallets {
+		if def.Type == availableWallets.Type {
+			return fmt.Errorf("already support %q wallets", def.Type)
+		}
+	}
+	customWalletConstructor = constructor
+	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
+	return nil
+}
+
 type Wallet interface {
-	// Initialize prepares the wallet for use.
-	Initialize(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) error
 	// Connect establishes a connection to the wallet.
 	Connect(ctx context.Context) error
 	//  Disconnect shuts down access to the wallet.
 	Disconnect()
 	// Disconnected returns true if the wallet is not connected.
 	Disconnected() bool
+	// Network returns the network of the connected wallet.
+	Network(ctx context.Context) (wire.CurrencyNet, error)
 	// AccountOwnsAddress checks if the provided address belongs to the
 	// specified account.
 	AccountOwnsAddress(ctx context.Context, account, address string) (bool, error)
@@ -48,7 +74,7 @@ type Wallet interface {
 	// the specified gap policy.
 	GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error)
 	// SignRawTransaction signs the provided transaction.
-	SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*walletjson.SignRawTransactionResult, error)
+	SignRawTransaction(ctx context.Context, txHex string) (*walletjson.SignRawTransactionResult, error)
 	// SendRawTransaction broadcasts the provided transaction to the Decred
 	// network.
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
