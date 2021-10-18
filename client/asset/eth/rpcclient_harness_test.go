@@ -43,9 +43,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swap "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
-	"decred.org/dcrdex/server/asset/eth"
+	srveth "decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -394,7 +393,7 @@ func TestPeers(t *testing.T) {
 func TestInitiateGas(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
@@ -413,11 +412,11 @@ func TestInitiateGas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error from estimateGas: %v", err)
 	}
-	if gas > eth.InitGas {
-		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
+	if gas > srveth.InitGas {
+		t.Fatalf("actual gas %v is greater than srveth.InitGas %v", gas, srveth.InitGas)
 	}
-	if gas+10000 < eth.InitGas {
-		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+	if gas+10000 < srveth.InitGas {
+		t.Fatalf("actual gas %v is much less than srveth.InitGas %v", gas, srveth.InitGas)
 	}
 	fmt.Printf("Gas used for initiate: %v \n", gas)
 }
@@ -437,24 +436,24 @@ func TestInitiate(t *testing.T) {
 		t.Fatal("unable to get swap state")
 	}
 	spew.Dump(swap)
-	state := eth.SwapState(swap.State)
-	if state != eth.SSNone {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
+	state := srveth.SwapState(swap.State)
+	if state != srveth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", srveth.SSNone, state)
 	}
 
 	tests := []struct {
 		name       string
 		subAmt     bool
-		finalState eth.SwapState
+		finalState srveth.SwapState
 	}{{
 		name:       "ok",
-		finalState: eth.SSInitiated,
+		finalState: srveth.SSInitiated,
 		subAmt:     true,
 	}, {
 		// If the hash already exists, the contract should subtract only
 		// the tx fee from the account.
 		name:       "secret hash already exists",
-		finalState: eth.SSInitiated,
+		finalState: srveth.SSInitiated,
 	}}
 
 	for _, test := range tests {
@@ -501,7 +500,7 @@ func TestInitiate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state := eth.SwapState(swap.State)
+		state := srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -522,7 +521,7 @@ func TestRedeemGas(t *testing.T) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
@@ -558,33 +557,33 @@ func TestRedeem(t *testing.T) {
 		sleep             time.Duration
 		redeemerClient    *rpcclient
 		redeemer          *accounts.Account
-		finalState        eth.SwapState
+		finalState        srveth.SwapState
 		addAmt, badSecret bool
 	}{{
 		name:           "ok before locktime",
 		sleep:          time.Second * 8,
 		redeemerClient: participantEthClient,
 		redeemer:       participantAcct,
-		finalState:     eth.SSRedeemed,
+		finalState:     srveth.SSRedeemed,
 		addAmt:         true,
 	}, {
 		name:           "ok after locktime",
 		sleep:          time.Second * 16,
 		redeemerClient: participantEthClient,
 		redeemer:       participantAcct,
-		finalState:     eth.SSRedeemed,
+		finalState:     srveth.SSRedeemed,
 		addAmt:         true,
 	}, {
 		name:           "bad secret",
 		sleep:          time.Second * 8,
 		redeemerClient: participantEthClient,
 		redeemer:       participantAcct,
-		finalState:     eth.SSInitiated,
+		finalState:     srveth.SSInitiated,
 		badSecret:      true,
 	}, {
 		name:           "wrong redeemer",
 		sleep:          time.Second * 8,
-		finalState:     eth.SSInitiated,
+		finalState:     srveth.SSInitiated,
 		redeemerClient: ethClient,
 		redeemer:       simnetAcct,
 	}}
@@ -607,9 +606,9 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
-		state := eth.SwapState(swap.State)
-		if state != eth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
 		}
 
 		// Create a secret that doesn't has to secretHash.
@@ -670,7 +669,7 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state = eth.SwapState(swap.State)
+		state = srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -685,7 +684,7 @@ func TestRefund(t *testing.T) {
 		sleep          time.Duration
 		refunder       *accounts.Account
 		refunderClient *rpcclient
-		finalState     eth.SwapState
+		finalState     srveth.SwapState
 		addAmt, redeem bool
 	}{{
 		name:           "ok",
@@ -693,26 +692,26 @@ func TestRefund(t *testing.T) {
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		addAmt:         true,
-		finalState:     eth.SSRefunded,
+		finalState:     srveth.SSRefunded,
 	}, {
 		name:           "before locktime",
 		sleep:          time.Second * 8,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
-		finalState:     eth.SSInitiated,
+		finalState:     srveth.SSInitiated,
 	}, {
 		name:           "wrong refunder",
 		sleep:          time.Second * 16,
 		refunderClient: participantEthClient,
 		refunder:       participantAcct,
-		finalState:     eth.SSInitiated,
+		finalState:     srveth.SSInitiated,
 	}, {
 		name:           "already redeemed",
 		sleep:          time.Second * 16,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		redeem:         true,
-		finalState:     eth.SSRedeemed,
+		finalState:     srveth.SSRedeemed,
 	}}
 
 	for _, test := range tests {
@@ -733,9 +732,9 @@ func TestRefund(t *testing.T) {
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
-		state := eth.SwapState(swap.State)
-		if state != eth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
 		}
 
 		inLocktime := time.Now().Add(locktime).Unix()
@@ -804,7 +803,7 @@ func TestRefund(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state = eth.SwapState(swap.State)
+		state = srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -932,9 +931,9 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := eth.SwapState(swap.State)
-	if state != eth.SSNone {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
+	state := srveth.SwapState(swap.State)
+	if state != srveth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", srveth.SSNone, state)
 	}
 
 	// The contract should hold four more ether because initiation of one

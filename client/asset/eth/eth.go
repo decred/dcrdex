@@ -24,8 +24,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
-	swap "decred.org/dcrdex/dex/networks/eth"
-	dexeth "decred.org/dcrdex/server/asset/eth"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
+	srveth "decred.org/dcrdex/server/asset/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -80,7 +80,7 @@ var (
 		Name:              "Ethereum",
 		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
 		ConfigOpts:        configOpts,
-		UnitInfo:          swap.UnitInfo,
+		UnitInfo:          dexeth.UnitInfo,
 		Seeded:            true,
 	}
 	mainnetContractAddr = common.HexToAddress("")
@@ -103,7 +103,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	id, err := dexeth.DecodeCoinID(coinID)
+	id, err := srveth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", nil
 	}
@@ -148,7 +148,7 @@ type ethFetcher interface {
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error)
 	refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error)
-	swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*swap.ETHSwapSwap, error)
+	swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*dexeth.ETHSwapSwap, error)
 	unlock(ctx context.Context, pw string, acct *accounts.Account) error
 	signData(addr common.Address, data []byte) ([]byte, error)
 }
@@ -337,7 +337,7 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	gweiBal, err := dexeth.ToGwei(bigBal)
+	gweiBal, err := srveth.ToGwei(bigBal)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +373,7 @@ func (eth *ExchangeWallet) getInitGas() (uint64, error) {
 
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		return 0, err
 	}
@@ -482,7 +482,7 @@ func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 
 // coin implements the asset.Coin interface for ETH
 type coin struct {
-	id dexeth.AmountCoinID
+	id srveth.AmountCoinID
 }
 
 // ID is the ETH coins ID. It includes the address the coins came from (20 bytes)
@@ -507,12 +507,12 @@ var _ asset.Coin = (*coin)(nil)
 // decodeCoinID decodes a coin id into a coin object. The coin id
 // must contain an AmountCoinID.
 func decodeCoinID(coinID []byte) (*coin, error) {
-	id, err := dexeth.DecodeCoinID(coinID)
+	id, err := srveth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
 
-	amountCoinID, ok := id.(*dexeth.AmountCoinID)
+	amountCoinID, ok := id.(*srveth.AmountCoinID)
 	if !ok {
 		return nil,
 			fmt.Errorf("coinID is expected to be an amount coin id")
@@ -538,7 +538,7 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	var address [20]byte
 	copy(address[:], eth.acct.Address.Bytes())
 	coin := coin{
-		id: dexeth.AmountCoinID{
+		id: srveth.AmountCoinID{
 			Address: address,
 			Amount:  fundsNeeded,
 			Nonce:   nonce,
@@ -784,7 +784,7 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.In
 // TODO: Subtract fees from the value.
 func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
 	bigVal := big.NewInt(0).SetUint64(value)
-	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
+	gweiFactorBig := big.NewInt(srveth.GweiFactor)
 	_, err := eth.sendToAddr(common.HexToAddress(addr),
 		bigVal.Mul(bigVal, gweiFactorBig), big.NewInt(0).SetUint64(defaultGasFee))
 	if err != nil {
@@ -808,7 +808,7 @@ func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs u
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
-	// check that the best header came in under dexeth.MaxBlockInterval.
+	// check that the best header came in under srveth.MaxBlockInterval.
 	sp, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
 		return false, 0, err
@@ -828,7 +828,7 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	nowInSecs := time.Now().Unix() / 1000
 	timeDiff := nowInSecs - int64(bh.Time)
 	var progress float32
-	if timeDiff < dexeth.MaxBlockInterval {
+	if timeDiff < srveth.MaxBlockInterval {
 		progress = 1
 	}
 	return progress == 1, progress, nil
