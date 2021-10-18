@@ -905,6 +905,10 @@ func (w *spvWallet) calcMedianTime(blockHash *chainhash.Hash) (time.Time, error)
 
 // connect will start the wallet and begin syncing.
 func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
+	if err := logNeutrino(w.netDir); err != nil {
+		return fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
+	}
+
 	err := w.startWallet()
 	if err != nil {
 		return err
@@ -914,16 +918,11 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 	// *Rescan supplied with a QuitChan-type RescanOption.
 	// Actually, should use btcwallet.Wallet.NtfnServer ?
 
-	// Nanny for the spendingTxs cache. We'll keep the cache entries for 2 hours
-	// past their last access time.
+	// Nanny for the caches checkpoints and txBlocks caches.
 	wg.Add(1)
 	go func() {
-		if err := logNeutrino(w.netDir); err != nil {
-			w.log.Warnf("error initializing btcwallet+neutrino logging: %v", err)
-		} else {
-			defer unlogNeutrino()
-		}
 		defer wg.Done()
+		defer unlogNeutrino()
 		defer w.stop()
 
 		ticker := time.NewTicker(time.Minute * 20)
