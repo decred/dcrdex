@@ -14,32 +14,7 @@ export default class SettingsPage extends BasePage {
     super()
     app = application
     this.body = body
-    const page = this.page = Doc.parsePage(body, [
-      'darkMode', 'commitHash',
-      'addADex',
-      // Form to configure DEX server
-      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
-      'submitDEXAddr', 'dexAddrErr',
-      // Form to confirm DEX registration and pay fee
-      'forms', 'confirmRegForm',
-      // Export Account
-      'exchanges', 'authorizeAccountExportForm', 'exportAccountAppPass', 'authorizeExportAccountConfirm',
-      'exportAccountHost', 'exportAccountErr',
-      // Import Account
-      'importAccount', 'authorizeAccountImportForm', 'authorizeImportAccountConfirm', 'importAccountAppPass',
-      'accountFile', 'selectedAccount', 'removeAccount', 'addAccount', 'importAccountErr',
-      // Disable Account
-      'disableAccount', 'disableAccountForm', 'disableAccountConfirm', 'disableAccountAppPW',
-      'disableAccountHost', 'disableAccountErr',
-      // Change App Password
-      'changeAppPW', 'changeAppPWForm', 'appPW', 'newAppPW', 'confirmNewPW',
-      'submitNewPW', 'changePWErrMsg',
-      // Application seed
-      'exportSeedAuth', 'exportSeedPW', 'exportSeedSubmit', 'exportSeedErr',
-      'exportSeed', 'authorizeSeedDisplay', 'seedDiv',
-      // Others
-      'showPokes'
-    ])
+    const page = this.page = Doc.idDescendants(body)
 
     this.forms = page.forms.querySelectorAll(':scope > form')
 

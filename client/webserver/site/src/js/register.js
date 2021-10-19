@@ -15,19 +15,7 @@ export default class RegistrationPage extends BasePage {
     this.body = body
     this.notifiers = {}
     this.pwCache = {}
-    const page = this.page = Doc.parsePage(body, [
-      // Form 1: Set the application password
-      'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
-      'showSeedRestore', 'seedRestore', 'seedInput', 'rememberPass',
-      // Form 2: Create Decred wallet
-      'newWalletForm',
-      // Form 3: Unlock Decred wallet
-      'unlockWalletForm',
-      // Form 4: Configure DEX server
-      'dexAddrForm', 'dexAddr',
-      // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'failedRegForm', 'regFundsErr'
-    ])
+    const page = this.page = Doc.idDescendants(body)
 
     // Hide the form closers for the registration process.
     body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))

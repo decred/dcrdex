@@ -240,63 +240,57 @@ export default class Application {
     this.popupTmpl = Doc.tmplElement(this.popupNotes, 'note')
     this.popupTmpl.remove()
     this.tooltip = idel(document.body, 'tooltip')
-    const pg = this.page = Doc.parsePage(this.header, [
-      'noteIndicator', 'noteList', 'noteTmpl', 'marketsMenuEntry',
-      'walletsMenuEntry', 'noteMenuEntry', 'loader', 'profileMenuEntry',
-      'profileIndicator', 'profileSignout', 'innerNoteIcon', 'innerProfileIcon',
-      'noteBox', 'profileBox', 'pokeCat', 'noteCat', 'pokeBox', 'pokeList',
-      'pokeTmpl'
-    ])
-    delete pg.noteTmpl.id
-    pg.noteTmpl.remove()
-    delete pg.pokeTmpl.id
-    pg.pokeTmpl.remove()
-    pg.loader.remove()
-    pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
-    Doc.show(pg.loader)
+    const page = this.page = Doc.idDescendants(this.header)
+    delete page.noteTmpl.id
+    page.noteTmpl.remove()
+    delete page.pokeTmpl.id
+    page.pokeTmpl.remove()
+    page.loader.remove()
+    page.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
+    Doc.show(page.loader)
 
-    bind(pg.noteMenuEntry, 'click', async () => {
-      Doc.hide(pg.pokeList)
-      Doc.show(pg.noteList)
+    bind(page.noteMenuEntry, 'click', async () => {
+      Doc.hide(page.pokeList)
+      Doc.show(page.noteList)
       this.ackNotes()
-      pg.noteCat.classList.add('active')
-      pg.pokeCat.classList.remove('active')
-      this.showDropdown(pg.noteMenuEntry, pg.noteBox)
-      Doc.hide(pg.noteIndicator)
+      page.noteCat.classList.add('active')
+      page.pokeCat.classList.remove('active')
+      this.showDropdown(page.noteMenuEntry, page.noteBox)
+      Doc.hide(page.noteIndicator)
       for (const note of this.notes) {
         if (note.acked) {
           note.el.classList.remove('firstview')
         }
       }
-      this.setNoteTimes(pg.noteList)
-      this.setNoteTimes(pg.pokeList)
+      this.setNoteTimes(page.noteList)
+      this.setNoteTimes(page.pokeList)
       this.storeNotes()
     })
 
-    bind(pg.profileMenuEntry, 'click', () => {
-      this.showDropdown(pg.profileMenuEntry, pg.profileBox)
+    bind(page.profileMenuEntry, 'click', () => {
+      this.showDropdown(page.profileMenuEntry, page.profileBox)
     })
 
-    bind(pg.innerNoteIcon, 'click', () => { Doc.hide(pg.noteBox) })
-    bind(pg.innerProfileIcon, 'click', () => { Doc.hide(pg.profileBox) })
+    bind(page.innerNoteIcon, 'click', () => { Doc.hide(page.noteBox) })
+    bind(page.innerProfileIcon, 'click', () => { Doc.hide(page.profileBox) })
 
-    bind(pg.profileSignout, 'click', async e => await this.signOut())
+    bind(page.profileSignout, 'click', async e => await this.signOut())
 
-    bind(pg.pokeCat, 'click', () => {
-      this.setNoteTimes(pg.pokeList)
-      pg.pokeCat.classList.add('active')
-      pg.noteCat.classList.remove('active')
-      Doc.hide(pg.noteList)
-      Doc.show(pg.pokeList)
+    bind(page.pokeCat, 'click', () => {
+      this.setNoteTimes(page.pokeList)
+      page.pokeCat.classList.add('active')
+      page.noteCat.classList.remove('active')
+      Doc.hide(page.noteList)
+      Doc.show(page.pokeList)
       this.ackNotes()
     })
 
-    bind(pg.noteCat, 'click', () => {
-      this.setNoteTimes(pg.noteList)
-      pg.noteCat.classList.add('active')
-      pg.pokeCat.classList.remove('active')
-      Doc.hide(pg.pokeList)
-      Doc.show(pg.noteList)
+    bind(page.noteCat, 'click', () => {
+      this.setNoteTimes(page.noteList)
+      page.noteCat.classList.add('active')
+      page.pokeCat.classList.remove('active')
+      Doc.hide(page.pokeList)
+      Doc.show(page.noteList)
       this.ackNotes()
     })
   }
@@ -346,7 +340,7 @@ export default class Application {
 
   /*
    * bindInternalNavigation hijacks navigation by click on any local links that
-   * are descendents of ancestor.
+   * are descendants of ancestor.
    */
   bindInternalNavigation (ancestor) {
     const pageURL = new URL(window.location)
@@ -391,21 +385,21 @@ export default class Application {
    * and when the user registers a DEX.
    */
   updateMenuItemsDisplay () {
-    const pg = this.page
-    if (!pg) {
+    const page = this.page
+    if (!page) {
       // initial page load, header elements not yet attached but menu items
       // would already be hidden/displayed as appropriate.
       return
     }
     if (!this.user.authed) {
-      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry, pg.profileMenuEntry)
+      Doc.hide(page.noteMenuEntry, page.walletsMenuEntry, page.marketsMenuEntry, page.profileMenuEntry)
       return
     }
-    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry, pg.profileMenuEntry)
+    Doc.show(page.noteMenuEntry, page.walletsMenuEntry, page.profileMenuEntry)
     if (Object.keys(this.user.exchanges).length > 0) {
-      Doc.show(pg.marketsMenuEntry)
+      Doc.show(page.marketsMenuEntry)
     } else {
-      Doc.hide(pg.marketsMenuEntry)
+      Doc.hide(page.marketsMenuEntry)
     }
   }
 

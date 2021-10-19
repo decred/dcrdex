@@ -16,10 +16,7 @@ export default class OrdersPage extends BasePage {
     // never-ending scrolling.
     this.offset = ''
     this.loading = false
-    const page = this.page = Doc.parsePage(main, [
-      'rowTmpl', 'tableBody', 'hostFilter', 'assetFilter', 'statusFilter',
-      'orderLoader', 'ordersTable', 'exportOrders'
-    ])
+    const page = this.page = Doc.idDescendants(main)
     this.orderTmpl = page.rowTmpl
     this.orderTmpl.remove()
 

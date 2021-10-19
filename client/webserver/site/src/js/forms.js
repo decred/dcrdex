@@ -15,11 +15,7 @@ export class NewWalletForm {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
-    const fields = this.fields = Doc.parsePage(form, [
-      'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
-      'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr',
-      'newWalletAppPWBox'
-    ])
+    const fields = this.fields = Doc.idDescendants(form)
     this.refresh()
 
     if (closerFn) {
@@ -303,11 +299,7 @@ export class WalletConfigForm {
  */
 export class ConfirmRegistrationForm {
   constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
-    this.fields = Doc.parsePage(form, [
-      'marketRowTemplate', 'marketsTableRows', 'appPass', 'appPassBox',
-      'appPassSpan', 'submitConfirm', 'regErr', 'feeRowTemplate',
-      'feeTableRows', 'setupWallet'
-    ])
+    this.fields = Doc.idDescendants(form)
     app = application
     this.getDexAddr = getDexAddr
     this.getCertFile = getCertFile
@@ -458,10 +450,7 @@ export class ConfirmRegistrationForm {
 
 export class UnlockWalletForm {
   constructor (application, form, success, pwCache) {
-    this.fields = Doc.parsePage(form, [
-      'uwAssetLogo', 'uwAssetName', 'uwAppPassBox', 'uwAppPass', 'submitUnlock',
-      'unlockErr', 'submitUnlockDiv'
-    ])
+    this.fields = Doc.idDescendants(form)
     app = application
     this.form = form
     this.pwCache = pwCache
@@ -533,11 +522,7 @@ export class DEXAddressForm {
     this.pwCache = pwCache
     this.defaultTLSText = 'none selected'
 
-    const page = this.page = Doc.parsePage(form, [
-      'dexAddr', 'dexShowMore', 'dexCertBox', 'dexNeedCert', 'certFile',
-      'removeCert', 'addCert', 'selectedCert', 'dexAddrAppPWBox', 'dexAddrAppPW',
-      'submitDEXAddr', 'dexAddrErr'
-    ])
+    const page = this.page = Doc.idDescendants(form)
 
     page.selectedCert.textContent = this.defaultTLSText
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
