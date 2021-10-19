@@ -297,10 +297,15 @@ func (eth *Backend) Synced() (bool, error) {
 
 // Redemption returns a coin that represents a contract redemption. coinID should
 // be the transaction that sent a redemption.
-func (eth *Backend) Redemption(coinID, _ []byte) (asset.Coin, error) {
-	cnr, err := newSwapCoin(eth, coinID, sctRedeem)
+func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
+	cnr, err := newSwapCoin(eth, redeemCoinID, sctRedeem)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %v", err)
+	}
+	// Ensure that the redeem is for the same coin hash and contract as the
+	// contract coin.
+	if err = cnr.validateRedeem(contractCoinID); err != nil {
+		return nil, fmt.Errorf("unable to validate redeem: %v", err)
 	}
 	// Confirmations performs some extra swap status checks if the the tx
 	// is mined.

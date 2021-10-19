@@ -560,14 +560,18 @@ func TestRedemption(t *testing.T) {
 	receiverAddr, contractAddr := new(common.Address), new(common.Address)
 	copy(receiverAddr[:], encode.RandomBytes(20))
 	copy(contractAddr[:], encode.RandomBytes(20))
-	secretHash, txHash := make([]byte, 32), make([]byte, 32)
-	copy(secretHash[:], encode.RandomBytes(32))
+	secretHash, txHash := [32]byte{}, make([]byte, 32)
+	copy(secretHash[:], secretHashSlice)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
 	bigO := big.NewInt(0)
+	ccID := &SwapCoinID{
+		SecretHash:      secretHash,
+		ContractAddress: *contractAddr,
+	}
 	tests := []struct {
 		name               string
-		coinID, secretHash []byte
+		coinID, contractID []byte
 		swp                *swap.ETHSwapSwap
 		tx                 *types.Transaction
 		txIsMempool        bool
@@ -576,21 +580,28 @@ func TestRedemption(t *testing.T) {
 	}{{
 		name:       "ok",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		secretHash: secretHash,
+		contractID: ccID.Encode(),
 		coinID:     new(TxCoinID).Encode(),
 		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		secretHash: secretHash,
+		contractID: ccID.Encode(),
 		coinID:     new(SwapCoinID).Encode(),
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		secretHash: secretHash,
+		contractID: ccID.Encode(),
 		swp:        tSwap(0, bigO, bigO, SSRefunded, receiverAddr),
 		coinID:     new(TxCoinID).Encode(),
+		wantErr:    true,
+	}, {
+		name:       "validate redeem error",
+		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
+		contractID: new(SwapCoinID).Encode(),
+		coinID:     new(TxCoinID).Encode(),
+		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}
 	for _, test := range tests {
@@ -606,7 +617,7 @@ func TestRedemption(t *testing.T) {
 			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
-		_, err := eth.Redemption(test.coinID, test.secretHash)
+		_, err := eth.Redemption(test.coinID, test.contractID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

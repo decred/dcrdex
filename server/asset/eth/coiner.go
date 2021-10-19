@@ -132,6 +132,31 @@ func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, 
 	}, nil
 }
 
+// validateRedeem ensures that a redeem swap coin redeems a certain contract by
+// comparing the contract and secret hash.
+func (c *swapCoin) validateRedeem(contractID []byte) error {
+	if c.sct != sctRedeem {
+		return errors.New("can only validate redeem")
+	}
+	cID, err := DecodeCoinID(contractID)
+	if err != nil {
+		return err
+	}
+	scID, ok := cID.(*SwapCoinID)
+	if !ok {
+		return errors.New("contract ID not a swap")
+	}
+	if c.secretHash != scID.SecretHash {
+		return fmt.Errorf("redeem secret hash %x does not match contract %x",
+			c.secretHash, scID.SecretHash)
+	}
+	if c.contractAddr != scID.ContractAddress {
+		return fmt.Errorf("redeem contract address %q does not match contract address %q",
+			c.contractAddr, scID.ContractAddress)
+	}
+	return nil
+}
+
 // Confirmations returns the number of confirmations for a Coin's
 // transaction.
 //
