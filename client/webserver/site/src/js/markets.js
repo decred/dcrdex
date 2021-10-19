@@ -35,6 +35,11 @@ const candleChart = 'candle_chart'
 const check = document.createElement('span')
 check.classList.add('ico-check')
 
+const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 2
+})
+
 export default class MarketsPage extends BasePage {
   constructor (application, main, data) {
     super()
@@ -147,9 +152,9 @@ export default class MarketsPage extends BasePage {
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
     for (const xc of this.marketList.xcSections) {
-      for (const mkt of xc.marketRows) {
-        bind(mkt.row, 'click', () => {
-          this.setMarket(xc.host, mkt.baseID, mkt.quoteID)
+      for (const row of xc.marketRows) {
+        bind(row.node, 'click', () => {
+          this.setMarket(xc.host, row.mkt.baseid, row.mkt.quoteid)
         })
       }
     }
@@ -362,7 +367,8 @@ export default class MarketsPage extends BasePage {
       conn: note => { this.handleConnNote(note) },
       balance: note => { this.handleBalanceNote(note) },
       feepayment: note => { this.handleFeePayment(note) },
-      walletstate: note => { this.handleWalletStateNote(note) }
+      walletstate: note => { this.handleWalletStateNote(note) },
+      spots: note => { this.handlePriceUpdate(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -1356,6 +1362,14 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(note.wallet.assetID)
   }
 
+  handlePriceUpdate (note) {
+    const xcSection = this.marketList.xcSection(note.host)
+    for (const spot of Object.values(note.spots)) {
+      const marketRow = xcSection.marketRow(spot.baseID, spot.quoteID)
+      if (marketRow) marketRow.setSpot(spot)
+    }
+  }
+
   /*
    * handleFeePayment is the handler for the 'feepayment' notification type.
    * This is used to update the registration status of the current exchange.
@@ -1881,7 +1895,7 @@ class MarketList {
     }
     // Initial sort is alphabetical.
     for (const xc of this.sortedSections()) {
-      div.appendChild(xc.box)
+      div.appendChild(xc.node)
     }
   }
 
@@ -1924,9 +1938,9 @@ class MarketList {
 
   /* select sets the specified market as selected. */
   select (host, baseID, quoteID) {
-    if (this.selected) this.selected.row.classList.remove('selected')
+    if (this.selected) this.selected.node.classList.remove('selected')
     this.selected = this.xcSection(host).marketRow(baseID, quoteID)
-    this.selected.row.classList.add('selected')
+    this.selected.node.classList.add('selected')
   }
 
   /* setConnectionStatus sets the visibility of the disconnected icon based
@@ -1950,28 +1964,25 @@ class MarketList {
  * ExchangeSection is a top level section of the MarketList.
  */
 class ExchangeSection {
-  constructor (tmpl, dex) {
+  constructor (template, dex) {
     this.dex = dex
     this.host = dex.host
-    const box = tmpl.cloneNode(true)
-    this.box = box
-    const header = Doc.tmplElement(box, 'header')
-    this.disconnectedIcon = Doc.tmplElement(header, 'disconnected')
-    if (dex.connected) Doc.hide(this.disconnectedIcon)
-    header.append(dex.host)
+    this.node = template.cloneNode(true)
+    const tmpl = Doc.parseTemplate(this.node)
+    tmpl.header.textContent = dex.host
+    if (dex.connected) Doc.hide(tmpl.disconnected)
 
-    this.marketRows = []
-    this.rows = Doc.tmplElement(box, 'mkts')
-    const rowTmpl = Doc.tmplElement(this.rows, 'mktrow')
-    this.rows.removeChild(rowTmpl)
+    tmpl.mkts.removeChild(tmpl.mktrow)
     // If disconnected is not possible to get the markets from the server.
     if (!dex.markets) return
 
-    for (const mkt of Object.values(dex.markets)) {
-      this.marketRows.push(new MarketRow(rowTmpl, mkt))
-    }
+    this.marketRows = Object.values(dex.markets).map(mkt => new MarketRow(tmpl.mktrow, mkt))
+
+    // for (const mkt of Object.values(dex.markets)) {
+    //   this.marketRows.push(new MarketRow(tmpl.mktrow, mkt))
+    // }
     for (const market of this.sortedMarkets()) {
-      this.rows.appendChild(market.row)
+      tmpl.mkts.appendChild(market.node)
     }
   }
 
@@ -2003,8 +2014,8 @@ class ExchangeSection {
 
   /* setConnected sets the visiblity of the disconnected icon. */
   setConnected (isConnected) {
-    if (isConnected) Doc.hide(this.disconnectedIcon)
-    else Doc.show(this.disconnectedIcon)
+    if (isConnected) Doc.hide(this.tmpl.disconnected)
+    else Doc.show(this.tmpl.disconnected)
   }
 
   /*
@@ -2012,8 +2023,8 @@ class ExchangeSection {
    */
   setFilter (filter) {
     for (const mkt of this.marketRows) {
-      if (filter(mkt)) Doc.show(mkt.row)
-      else Doc.hide(mkt.row)
+      if (filter(mkt)) Doc.show(mkt.node)
+      else Doc.hide(mkt.node)
     }
   }
 }
@@ -2023,17 +2034,40 @@ class ExchangeSection {
  * of the ExchangeSection.
  */
 class MarketRow {
-  constructor (tmpl, mkt) {
+  constructor (template, mkt) {
+    this.mkt = mkt
     this.name = mkt.name
     this.baseID = mkt.baseid
     this.quoteID = mkt.quoteid
     this.lotSize = mkt.lotsize
     this.rateStep = mkt.ratestep
-    const row = tmpl.cloneNode(true)
-    this.row = row
-    Doc.tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)
-    Doc.tmplElement(row, 'quoteicon').src = Doc.logoPath(mkt.quotesymbol)
-    row.append(`${mkt.basesymbol.toUpperCase()}-${mkt.quotesymbol.toUpperCase()}`)
+    this.node = template.cloneNode(true)
+    const tmpl = this.tmpl = Doc.parseTemplate(this.node)
+    tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
+    tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
+    tmpl.baseSymbol.textContent = mkt.basesymbol.toUpperCase()
+    tmpl.quoteSymbol.textContent = mkt.quotesymbol.toUpperCase()
+    this.setSpot(mkt.spot)
+  }
+
+  setSpot (spot) {
+    if (!spot) return
+    const { tmpl, mkt } = this
+
+    Doc.show(tmpl.pctChange)
+    const pct = spot.change24 * 100
+    const num = percentFormatter.format(pct)
+    const sign = pct > 0 ? '+' : ''
+    tmpl.pctChange.textContent = `${sign}${num}%`
+    tmpl.pctChange.classList.remove('upgreen', 'downred', 'grey')
+    tmpl.pctChange.classList.add(pct === 0 ? 'grey' : pct > 0 ? 'upgreen' : 'downred')
+
+    const baseAsset = app.assets[mkt.baseid]
+    if (baseAsset) {
+      Doc.show(tmpl.bottomRow)
+      tmpl.assetName.textContent = baseAsset.info.name
+      tmpl.price.textContent = Doc.formatCoinValue(spot.rate / 1e8)
+    }
   }
 }
 

@@ -926,6 +926,51 @@ func (dc *dexConnection) refreshServerConfig() error {
 	return nil
 }
 
+// subPriceFeed subscribes to the price_feed notification feed and primes the
+// initial prices.
+func (dc *dexConnection) subPriceFeed() {
+	var spots map[string]*msgjson.Spot
+	err := sendRequest(dc.WsConn, msgjson.PriceFeedRoute, nil, &spots, DefaultResponseTimeout)
+	if err != nil {
+		var msgErr *msgjson.Error
+		// Ignore old servers' errors.
+		if !errors.As(err, &msgErr) || msgErr.Code != msgjson.UnknownMessageType {
+			dc.log.Errorf("unable to fetch market overview: %w", err)
+		}
+		return
+	}
+
+	// We expect there to be a map in handlePriceUpdateNote.
+	if spots == nil {
+		spots = make(map[string]*msgjson.Spot)
+	}
+
+	dc.spotsMtx.Lock()
+	dc.spots = spots
+	dc.spotsMtx.Unlock()
+
+	dc.notify(newSpotPriceNote(dc.acct.host, spots))
+}
+
+// handlePriceUpdateNote handles the price_update note that is part of the
+// price feed.
+func handlePriceUpdateNote(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+	spot := new(msgjson.Spot)
+	if err := msg.Unmarshal(spot); err != nil {
+		return fmt.Errorf("error unmarshaling price update: %v", err)
+	}
+	mktName, err := dex.MarketName(spot.BaseID, spot.QuoteID)
+	if err != nil {
+		return fmt.Errorf("error parsing market for base = %d, quote = %d: %v", spot.BaseID, spot.QuoteID, err)
+	}
+	dc.spotsMtx.Lock()
+	dc.spots[mktName] = spot
+	dc.spotsMtx.Unlock()
+
+	dc.notify(newSpotPriceNote(dc.acct.host, map[string]*msgjson.Spot{mktName: spot}))
+	return nil
+}
+
 // handleUnbookOrderMsg is called when an unbook_order notification is
 // received.
 func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {

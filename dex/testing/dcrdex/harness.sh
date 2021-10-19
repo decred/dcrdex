@@ -75,9 +75,9 @@ if [ $LTC_ON -eq 0 ]; then
     cat << EOF >> "./markets.json"
         },
         {
-            "base": "DCR_simnet",
-            "quote": "LTC_simnet",
-            "lotSize": 100000000,
+            "base": "LTC_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 10000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
@@ -89,9 +89,9 @@ if [ $BCH_ON -eq 0 ]; then
     cat << EOF >> "./markets.json"
         },
         {
-            "base": "DCR_simnet",
-            "quote": "BCH_simnet",
-            "lotSize": 100000000,
+            "base": "BCH_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 1000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2

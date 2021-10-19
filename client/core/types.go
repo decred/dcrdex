@@ -373,17 +373,18 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 
 // Market is market info.
 type Market struct {
-	Name            string   `json:"name"`
-	BaseID          uint32   `json:"baseid"`
-	BaseSymbol      string   `json:"basesymbol"`
-	QuoteID         uint32   `json:"quoteid"`
-	QuoteSymbol     string   `json:"quotesymbol"`
-	LotSize         uint64   `json:"lotsize"`
-	RateStep        uint64   `json:"ratestep"`
-	EpochLen        uint64   `json:"epochlen"`
-	StartEpoch      uint64   `json:"startepoch"`
-	MarketBuyBuffer float64  `json:"buybuffer"`
-	Orders          []*Order `json:"orders"`
+	Name            string        `json:"name"`
+	BaseID          uint32        `json:"baseid"`
+	BaseSymbol      string        `json:"basesymbol"`
+	QuoteID         uint32        `json:"quoteid"`
+	QuoteSymbol     string        `json:"quotesymbol"`
+	LotSize         uint64        `json:"lotsize"`
+	RateStep        uint64        `json:"ratestep"`
+	EpochLen        uint64        `json:"epochlen"`
+	StartEpoch      uint64        `json:"startepoch"`
+	MarketBuyBuffer float64       `json:"buybuffer"`
+	Orders          []*Order      `json:"orders"`
+	SpotPrice       *msgjson.Spot `json:"spot"`
 }
 
 // BaseContractLocked is the amount of base asset locked in un-redeemed

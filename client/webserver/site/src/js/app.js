@@ -520,8 +520,13 @@ export default class Application {
         break
       }
       case 'conn': {
-        const dex = this.user.exchanges[note.host]
-        if (dex) dex.connected = note.connected
+        const xc = this.user.exchanges[note.host]
+        if (xc) xc.connected = note.connected
+        break
+      }
+      case 'spots': {
+        const xc = this.user.exchanges[note.host]
+        for (const [mktName, spot] of Object.entries(note.spots)) xc.markets[mktName].spot = spot
       }
     }
 

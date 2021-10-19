@@ -155,6 +155,9 @@ func mkMrkt(base, quote string) *core.Market {
 		marketStats[mktID] = [2]float64{midGap, maxQty}
 	}
 
+	rate := uint64(rand.Intn(1e3)) * rateStep
+	change24 := rand.Float64()*0.3 - .15
+
 	return &core.Market{
 		Name:            fmt.Sprintf("%s_%s", base, quote),
 		BaseID:          baseID,
@@ -166,6 +169,15 @@ func mkMrkt(base, quote string) *core.Market {
 		MarketBuyBuffer: rand.Float64() + 1,
 		EpochLen:        uint64(epochDuration.Milliseconds()),
 		Orders:          userOrders(mktID),
+		SpotPrice: &msgjson.Spot{
+			Stamp:   encode.UnixMilliU(time.Now()),
+			BaseID:  baseID,
+			QuoteID: quoteID,
+			Rate:    rate,
+			// BookVolume: ,
+			Change24: change24,
+			// Vol24: ,
+		},
 	}
 }
 
@@ -1259,11 +1271,34 @@ out:
 				quoteConnected = true
 			}
 			c.mtx.RUnlock()
+
+			if c.dexAddr == "" {
+				continue
+			}
+
 			c.noteFeed <- &core.EpochNotification{
 				Host:         dexAddr,
 				MarketID:     mktID,
 				Notification: db.NewNotification(core.NoteTypeEpoch, core.TopicEpoch, "", "", db.Data),
 				Epoch:        getEpoch(),
+			}
+
+			rateStep := tExchanges[dexAddr].Markets[mktID].RateStep
+			rate := uint64(rand.Intn(1e3)) * rateStep
+			change24 := rand.Float64()*0.3 - .15
+
+			c.noteFeed <- &core.SpotPriceNote{
+				Host:         dexAddr,
+				Notification: db.NewNotification(core.NoteTypeSpots, core.TopicSpotsUpdate, "", "", db.Data),
+				Spots: map[string]*msgjson.Spot{mktID: &msgjson.Spot{
+					Stamp:   encode.UnixMilliU(time.Now()),
+					BaseID:  baseID,
+					QuoteID: quoteID,
+					Rate:    rate,
+					// BookVolume: ,
+					Change24: change24,
+					// Vol24: ,
+				}},
 			}
 
 			// randomize the balance

@@ -8,7 +8,7 @@
 
 {{define "markets"}}
 {{template "top" .}}
-<div id="main" data-handler="markets" class="row main clear m-0 flex-nowrap">
+<div id="main" data-handler="markets" class="main clear m-0 flex-nowrap">
 
   {{- /* MARKET LIST */ -}}
   <div class="marketlist">
@@ -16,19 +16,34 @@
     {{- /* SEARCH INPUT */ -}}
     <label class="market-search">
       <div><span class="ico-search px-2"></span></div>
-      <div><input type="text" id="marketSearch" class="w-100 px-1"></div>
+      <div class="flex-grow-1 position-relative">
+        <div class="fill-abs"><input type="text" id="marketSearch" class="px-1 fill-abs"></div>
+      </div>
     </label>
 
     {{- /* LIST OF EXCHANGE SECTIONS WITH MARKETS */ -}}
     <div id="marketList">
-      <div data-tmpl="xc">
-        <div class="header fs16 py-1 pl-2 bg1" data-tmpl="header">
+      <div data-tmpl="xc" class="xc">
+        <div class="header d-flex justify-content-start align-items-center pl-1 fs14 grey">
           <span class="ico-disconnected" title="disconnected" data-tmpl="disconnected"></span>
+          <span data-tmpl="header"></span>
         </div>
+        
         <div data-tmpl="mkts">
           <div class="marketrow" data-tmpl="mktrow">
-            <img class="micro-icon mr-1" data-tmpl="baseicon">
-            <img class="micro-icon mr-1" data-tmpl="quoteicon">
+            <div>
+              <img class="micro-icon mr-1" data-tmpl="baseIcon">
+              <img class="micro-icon mr-1" data-tmpl="quoteIcon">
+              <div class="pl-1 pr-2 flex-grow-1">
+                <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+              </div>
+              <span data-tmpl="pctChange" class="upgreen fs14 demi d-hide pct-change"></span>
+            </div>
+            <div class="justify-content-between fs12 grey d-hide" data-tmpl="bottomRow">
+              <span data-tmpl="assetName">Decred</span>
+              <span data-tmpl="price">0.00296</span>
+            </div>
+            
           </div>
         </div>
       </div>

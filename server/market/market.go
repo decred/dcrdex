@@ -2298,12 +2298,19 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		}
 	}
 
+	// Update the API data collector.
+	spot, err := m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
+	if err != nil {
+		log.Errorf("Error updating API data collector: %v", err)
+	}
+
 	// Send "epoch_report" notifications.
 	notifyChan <- &updateSignal{
 		action: epochReportAction,
 		data: sigDataEpochReport{
 			epochIdx:     epoch.Epoch,
 			epochDur:     epoch.Duration,
+			spot:         spot,
 			stats:        stats,
 			baseFeeRate:  feeRateBase,
 			quoteFeeRate: feeRateQuote,
@@ -2315,12 +2322,6 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
 		m.swapper.Negotiate(matches)
-	}
-
-	// Update the API data collector.
-	_, err = m.dataCollector.ReportEpoch(m.Base(), m.Quote(), uint64(epoch.Epoch), stats)
-	if err != nil {
-		log.Errorf("Error updating API data collector: %v", err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 // Notifications should use the following note type strings.
@@ -19,6 +20,7 @@ const (
 	NoteTypeEpoch        = "epoch"
 	NoteTypeConnEvent    = "conn"
 	NoteTypeBalance      = "balance"
+	NoteTypeSpots        = "spots"
 	NoteTypeWalletConfig = "walletconfig"
 	NoteTypeWalletState  = "walletstate"
 	NoteTypeServerNotify = "notify"
@@ -351,6 +353,23 @@ func newBalanceNote(assetID uint32, bal *WalletBalance) *BalanceNote {
 		Notification: db.NewNotification(NoteTypeBalance, TopicBalanceUpdated, "balance updated", "", db.Data),
 		AssetID:      assetID,
 		Balance:      bal, // Once created, balance is never modified by Core.
+	}
+}
+
+// SpotPriceNote is a notification of an update to the market's spot price.
+type SpotPriceNote struct {
+	db.Notification
+	Host  string                   `json:"host"`
+	Spots map[string]*msgjson.Spot `json:"spots"`
+}
+
+const TopicSpotsUpdate Topic = "SpotsUpdate"
+
+func newSpotPriceNote(host string, spots map[string]*msgjson.Spot) *SpotPriceNote {
+	return &SpotPriceNote{
+		Notification: db.NewNotification(NoteTypeSpots, TopicSpotsUpdate, "", "", db.Data),
+		Host:         host,
+		Spots:        spots,
 	}
 }
 
