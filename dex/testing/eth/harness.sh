@@ -102,10 +102,10 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "4f8ef3892b65ed7fc356ff473a2ef2ae5ec27a06": {
         "balance": "11000000000000000000000"
     },
-    "2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27": {
+    "dd93b447f7eBCA361805eBe056259853F3912E04": {
         "balance": "11000000000000000000000"
     },
-    "345853e21b1d475582E71cC269124eD5e2dD3422": {
+    "8d83B207674bfd53B418a6E47DA148F5bFeCc652": {
         "balance": "11000000000000000000000"
     }
   }

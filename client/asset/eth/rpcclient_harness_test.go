@@ -42,8 +42,9 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	swap "decred.org/dcrdex/dex/networks/eth"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/internal/eth/reentryattack"
+	srveth "decred.org/dcrdex/server/asset/eth"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -55,29 +56,33 @@ import (
 )
 
 const (
-	pw        = "abc"
 	alphaNode = "enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304"
 	alphaAddr = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	pw        = "bee75192465cef9f8ab1198093dfed594e93ae810ccbbf2b3b12e1771cc6cb19"
 )
 
 var (
-	gasPrice           = big.NewInt(82e9)
-	homeDir            = os.Getenv("HOME")
-	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
-	testDir            = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests")
-	alphaNodeDir       = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	ethClient          = new(rpcclient)
-	ctx                context.Context
-	tLogger            = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
-	simnetPrivKey      = "9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34"
-	simnetAddr         = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
-	simnetAcct         = &accounts.Account{Address: simnetAddr}
-	participantPrivKey = "0695b9347a4dc096ae5c6f1935380ceba550c70b112f1323c211bade4d11651a"
-	participantAddr    = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
-	participantAcct    = &accounts.Account{Address: participantAddr}
-	contractAddr       common.Address
-	simnetID           = int64(42)
-	newTxOpts          = func(ctx context.Context, from *common.Address, value *big.Int) *bind.TransactOpts {
+	gasPrice              = big.NewInt(82e9)
+	homeDir               = os.Getenv("HOME")
+	contractAddrFile      = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	simnetWalletDir       = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "simnet")
+	participantWalletDir  = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "participant")
+	alphaNodeDir          = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
+	ctx                   context.Context
+	tLogger               = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+	simnetWalletSeed      = "5c52e2ef5f5298ec41107e4e9573df4488577fb3504959cbc26c88437205dd2c0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
+	simnetPrivKey         = "8b19650a41e740f3b7ebb7ad112a91f63df9f005320489147cdf6f8d8f585500"
+	simnetAddr            = common.HexToAddress("dd93b447f7eBCA361805eBe056259853F3912E04")
+	simnetAcct            = &accounts.Account{Address: simnetAddr}
+	ethClient             = new(rpcclient)
+	participantWalletSeed = "b99fb787fc5886eb539830d103c0017eff5241ace28ee137d40f135fd02212b1a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
+	participantPrivKey    = "88daaaa2cb839a08d90dbe910b4603184bd669ae3316e7a7bae581493b927e61"
+	participantAddr       = common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
+	participantAcct       = &accounts.Account{Address: participantAddr}
+	participantEthClient  = new(rpcclient)
+	contractAddr          common.Address
+	simnetID              = int64(42)
+	newTxOpts             = func(ctx context.Context, from *common.Address, value *big.Int) *bind.TransactOpts {
 		return &bind.TransactOpts{
 			GasPrice: gasPrice,
 			GasLimit: 1e6,
@@ -130,11 +135,13 @@ func TestMain(m *testing.M) {
 		}()
 		// Create dir if none yet exists. This persists for the life of the
 		// testing harness.
-		if _, err := os.Stat(testDir); os.IsNotExist(err) {
-			err := os.Mkdir(testDir, 0755)
-			if err != nil {
-				return 1, fmt.Errorf("error creating temp dir: %v\n", err)
-			}
+		err := os.MkdirAll(simnetWalletDir, 0755)
+		if err != nil {
+			return 1, fmt.Errorf("error creating simnet wallet dir dir: %v\n", err)
+		}
+		err = os.MkdirAll(participantWalletDir, 0755)
+		if err != nil {
+			return 1, fmt.Errorf("error creating participant wallet dir: %v\n", err)
 		}
 		addrBytes, err := os.ReadFile(contractAddrFile)
 		if err != nil {
@@ -147,21 +154,24 @@ func TestMain(m *testing.M) {
 		addrStr := string(addrBytes[:addrLen-1])
 		contractAddr = common.HexToAddress(addrStr)
 		fmt.Printf("Contract address is %v\n", addrStr)
-		settings := map[string]string{
-			"appdir":         testDir,
-			"nodelistenaddr": "localhost:30355",
-		}
-		wallet, err := NewWallet(&asset.WalletConfig{Settings: settings}, tLogger, dex.Simnet)
+		simnetWallet, err := setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355")
 		if err != nil {
-			return 1, fmt.Errorf("error starting node: %v\n", err)
+			return 1, err
 		}
-		fmt.Printf("Node created at: %v\n", testDir)
 		defer func() {
-			wallet.internalNode.Close()
-			wallet.internalNode.Wait()
+			simnetWallet.internalNode.Close()
+			simnetWallet.internalNode.Wait()
+		}()
+		participantWallet, err := setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356")
+		defer func() {
+			participantWallet.internalNode.Close()
+			participantWallet.internalNode.Wait()
 		}()
 		addr := common.HexToAddress(addrStr)
-		if err := ethClient.connect(ctx, wallet.internalNode, &addr); err != nil {
+		if err := ethClient.connect(ctx, simnetWallet.internalNode, &addr); err != nil {
+			return 1, fmt.Errorf("connect error: %v\n", err)
+		}
+		if err := participantEthClient.connect(ctx, participantWallet.internalNode, &addr); err != nil {
 			return 1, fmt.Errorf("connect error: %v\n", err)
 		}
 		return m.Run(), nil
@@ -171,6 +181,35 @@ func TestMain(m *testing.M) {
 		fmt.Println(err)
 	}
 	os.Exit(exitCode)
+}
+
+func setupWallet(walletDir, seed, listenAddress string) (*ExchangeWallet, error) {
+	settings := map[string]string{
+		"appdir":         walletDir,
+		"nodelistenaddr": listenAddress,
+	}
+	seedB, _ := hex.DecodeString(seed)
+	walletConfig := asset.WalletConfig{
+		Settings: settings,
+		DataDir:  walletDir,
+	}
+	walletPass, _ := hex.DecodeString(pw)
+	createWalletParams := asset.CreateWalletParams{
+		Seed:     seedB,
+		Pass:     walletPass,
+		Settings: settings,
+		DataDir:  walletDir,
+		Net:      dex.Simnet,
+	}
+	err := CreateWallet(&createWalletParams)
+	if err != nil {
+		return nil, fmt.Errorf("error creating node: %v\n", err)
+	}
+	wallet, err := NewWallet(&walletConfig, tLogger, dex.Simnet)
+	if err != nil {
+		return nil, fmt.Errorf("error starting node: %v\n", err)
+	}
+	return wallet, nil
 }
 
 func TestNodeInfo(t *testing.T) {
@@ -232,33 +271,6 @@ func TestBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	spew.Dump(b)
-}
-
-func TestImportAccounts(t *testing.T) {
-	// Unable to import a second time.
-	accts := ethClient.accounts()
-	if len(accts) > 1 {
-		fmt.Println("Skipping TestImportAccounts because accounts are already imported.")
-		t.Skip()
-	}
-	privB, err := hex.DecodeString(simnetPrivKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	acct, err := ethClient.importAccount(pw, privB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spew.Dump(acct)
-	privB, err = hex.DecodeString(participantPrivKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	acct, err = ethClient.importAccount(pw, privB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spew.Dump(acct)
 }
 
 func TestAccounts(t *testing.T) {
@@ -381,7 +393,7 @@ func TestPeers(t *testing.T) {
 func TestInitiateGas(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
@@ -396,15 +408,15 @@ func TestInitiateGas(t *testing.T) {
 		Gas:   0,
 		Data:  data,
 	}
-	gas, err := ethClient.estimateGas(ctx, msg)
+	gas, err := participantEthClient.estimateGas(ctx, msg)
 	if err != nil {
 		t.Fatalf("unexpected error from estimateGas: %v", err)
 	}
-	if gas > eth.InitGas {
-		t.Fatalf("actual gas %v is greater than eth.InitGas %v", gas, eth.InitGas)
+	if gas > srveth.InitGas {
+		t.Fatalf("actual gas %v is greater than srveth.InitGas %v", gas, srveth.InitGas)
 	}
-	if gas+10000 < eth.InitGas {
-		t.Fatalf("actual gas %v is much less than eth.InitGas %v", gas, eth.InitGas)
+	if gas+10000 < srveth.InitGas {
+		t.Fatalf("actual gas %v is much less than srveth.InitGas %v", gas, srveth.InitGas)
 	}
 	fmt.Printf("Gas used for initiate: %v \n", gas)
 }
@@ -424,24 +436,24 @@ func TestInitiate(t *testing.T) {
 		t.Fatal("unable to get swap state")
 	}
 	spew.Dump(swap)
-	state := eth.SwapState(swap.State)
-	if state != eth.SSNone {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
+	state := srveth.SwapState(swap.State)
+	if state != srveth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", srveth.SSNone, state)
 	}
 
 	tests := []struct {
 		name       string
 		subAmt     bool
-		finalState eth.SwapState
+		finalState srveth.SwapState
 	}{{
 		name:       "ok",
-		finalState: eth.SSInitiated,
+		finalState: srveth.SSInitiated,
 		subAmt:     true,
 	}, {
 		// If the hash already exists, the contract should subtract only
 		// the tx fee from the account.
 		name:       "secret hash already exists",
-		finalState: eth.SSInitiated,
+		finalState: srveth.SSInitiated,
 	}}
 
 	for _, test := range tests {
@@ -488,7 +500,7 @@ func TestInitiate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state := eth.SwapState(swap.State)
+		state := srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -509,7 +521,7 @@ func TestRedeemGas(t *testing.T) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
@@ -524,7 +536,7 @@ func TestRedeemGas(t *testing.T) {
 		Gas:  0,
 		Data: data,
 	}
-	gas, err := ethClient.estimateGas(ctx, msg)
+	gas, err := participantEthClient.estimateGas(ctx, msg)
 	if err != nil {
 		t.Fatalf("Error estimating gas for redeem function: %v", err)
 	}
@@ -543,32 +555,37 @@ func TestRedeem(t *testing.T) {
 	tests := []struct {
 		name              string
 		sleep             time.Duration
+		redeemerClient    *rpcclient
 		redeemer          *accounts.Account
-		finalState        eth.SwapState
+		finalState        srveth.SwapState
 		addAmt, badSecret bool
 	}{{
-		name:       "ok before locktime",
-		sleep:      time.Second * 8,
-		redeemer:   participantAcct,
-		finalState: eth.SSRedeemed,
-		addAmt:     true,
+		name:           "ok before locktime",
+		sleep:          time.Second * 8,
+		redeemerClient: participantEthClient,
+		redeemer:       participantAcct,
+		finalState:     srveth.SSRedeemed,
+		addAmt:         true,
 	}, {
-		name:       "ok after locktime",
-		sleep:      time.Second * 16,
-		redeemer:   participantAcct,
-		finalState: eth.SSRedeemed,
-		addAmt:     true,
+		name:           "ok after locktime",
+		sleep:          time.Second * 16,
+		redeemerClient: participantEthClient,
+		redeemer:       participantAcct,
+		finalState:     srveth.SSRedeemed,
+		addAmt:         true,
 	}, {
-		name:       "bad secret",
-		sleep:      time.Second * 8,
-		redeemer:   participantAcct,
-		finalState: eth.SSInitiated,
-		badSecret:  true,
+		name:           "bad secret",
+		sleep:          time.Second * 8,
+		redeemerClient: participantEthClient,
+		redeemer:       participantAcct,
+		finalState:     srveth.SSInitiated,
+		badSecret:      true,
 	}, {
-		name:       "wrong redeemer",
-		sleep:      time.Second * 8,
-		finalState: eth.SSInitiated,
-		redeemer:   simnetAcct,
+		name:           "wrong redeemer",
+		sleep:          time.Second * 8,
+		finalState:     srveth.SSInitiated,
+		redeemerClient: ethClient,
+		redeemer:       simnetAcct,
 	}}
 
 	for _, test := range tests {
@@ -576,7 +593,7 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = ethClient.unlock(ctx, pw, participantAcct)
+		err = participantEthClient.unlock(ctx, pw, participantAcct)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -589,9 +606,9 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
-		state := eth.SwapState(swap.State)
-		if state != eth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
 		}
 
 		// Create a secret that doesn't has to secretHash.
@@ -609,12 +626,12 @@ func TestRedeem(t *testing.T) {
 		if err := waitForMined(t, test.sleep, true); err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		originalBal, err := ethClient.balance(ctx, &test.redeemer.Address)
+		originalBal, err := test.redeemerClient.balance(ctx, &test.redeemer.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 		txOpts = newTxOpts(ctx, &test.redeemer.Address, nil)
-		tx, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
+		tx, err := test.redeemerClient.redeem(txOpts, simnetID, secret, secretHash)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -625,7 +642,7 @@ func TestRedeem(t *testing.T) {
 		}
 
 		// It appears the receipt is only accessable after the tx is mined.
-		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := test.redeemerClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -635,7 +652,7 @@ func TestRedeem(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := ethClient.balance(ctx, &test.redeemer.Address)
+		bal, err := test.redeemerClient.balance(ctx, &test.redeemer.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -652,7 +669,7 @@ func TestRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state = eth.SwapState(swap.State)
+		state = srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -666,30 +683,35 @@ func TestRefund(t *testing.T) {
 		name           string
 		sleep          time.Duration
 		refunder       *accounts.Account
-		finalState     eth.SwapState
+		refunderClient *rpcclient
+		finalState     srveth.SwapState
 		addAmt, redeem bool
 	}{{
-		name:       "ok",
-		sleep:      time.Second * 16,
-		refunder:   simnetAcct,
-		addAmt:     true,
-		finalState: eth.SSRefunded,
+		name:           "ok",
+		sleep:          time.Second * 16,
+		refunderClient: ethClient,
+		refunder:       simnetAcct,
+		addAmt:         true,
+		finalState:     srveth.SSRefunded,
 	}, {
-		name:       "before locktime",
-		sleep:      time.Second * 8,
-		refunder:   simnetAcct,
-		finalState: eth.SSInitiated,
+		name:           "before locktime",
+		sleep:          time.Second * 8,
+		refunderClient: ethClient,
+		refunder:       simnetAcct,
+		finalState:     srveth.SSInitiated,
 	}, {
-		name:       "wrong refunder",
-		sleep:      time.Second * 16,
-		refunder:   participantAcct,
-		finalState: eth.SSInitiated,
+		name:           "wrong refunder",
+		sleep:          time.Second * 16,
+		refunderClient: participantEthClient,
+		refunder:       participantAcct,
+		finalState:     srveth.SSInitiated,
 	}, {
-		name:       "already redeemed",
-		sleep:      time.Second * 16,
-		refunder:   simnetAcct,
-		redeem:     true,
-		finalState: eth.SSRedeemed,
+		name:           "already redeemed",
+		sleep:          time.Second * 16,
+		refunderClient: ethClient,
+		refunder:       simnetAcct,
+		redeem:         true,
+		finalState:     srveth.SSRedeemed,
 	}}
 
 	for _, test := range tests {
@@ -697,7 +719,7 @@ func TestRefund(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = ethClient.unlock(ctx, pw, participantAcct)
+		err = participantEthClient.unlock(ctx, pw, participantAcct)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -710,9 +732,9 @@ func TestRefund(t *testing.T) {
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
-		state := eth.SwapState(swap.State)
-		if state != eth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, eth.SSNone, state)
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
 		}
 
 		inLocktime := time.Now().Add(locktime).Unix()
@@ -726,7 +748,7 @@ func TestRefund(t *testing.T) {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}
 			txOpts = newTxOpts(ctx, &participantAddr, nil)
-			_, err := ethClient.redeem(txOpts, simnetID, secret, secretHash)
+			_, err := participantEthClient.redeem(txOpts, simnetID, secret, secretHash)
 			if err != nil {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}
@@ -737,13 +759,13 @@ func TestRefund(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		originalBal, err := ethClient.balance(ctx, &test.refunder.Address)
+		originalBal, err := test.refunderClient.balance(ctx, &test.refunder.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
 		txOpts = newTxOpts(ctx, &test.refunder.Address, nil)
-		tx, err := ethClient.refund(txOpts, simnetID, secretHash)
+		tx, err := test.refunderClient.refund(txOpts, simnetID, secretHash)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -754,7 +776,7 @@ func TestRefund(t *testing.T) {
 		}
 
 		// It appears the receipt is only accessable after the tx is mined.
-		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -764,7 +786,7 @@ func TestRefund(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := ethClient.balance(ctx, &test.refunder.Address)
+		bal, err := test.refunderClient.balance(ctx, &test.refunder.Address)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -777,11 +799,11 @@ func TestRefund(t *testing.T) {
 			t.Fatalf("unexpected balance change for test %v: want %v got %v", test.name, wantBal, bal)
 		}
 
-		swap, err = ethClient.swap(ctx, simnetAcct, secretHash)
+		swap, err = test.refunderClient.swap(ctx, simnetAcct, secretHash)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		state = eth.SwapState(swap.State)
+		state = srveth.SwapState(swap.State)
 		if state != test.finalState {
 			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
 		}
@@ -909,9 +931,9 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := eth.SwapState(swap.State)
-	if state != eth.SSNone {
-		t.Fatalf("unexpected swap state: want %s got %s", eth.SSNone, state)
+	state := srveth.SwapState(swap.State)
+	if state != srveth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", srveth.SSNone, state)
 	}
 
 	// The contract should hold four more ether because initiation of one

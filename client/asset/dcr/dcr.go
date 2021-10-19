@@ -378,9 +378,13 @@ type fundingCoin struct {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the DCR exchange wallet. Start the wallet with its Run method.
-func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+// Open opens the DCR exchange wallet. Start the wallet with its Run method.
+func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
+}
+
+func (d *Driver) Create(*asset.CreateWalletParams) error {
+	return fmt.Errorf("no creatable wallet types")
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Decred.

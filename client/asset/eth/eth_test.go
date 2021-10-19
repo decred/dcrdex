@@ -93,9 +93,6 @@ func (n *testNode) lock(ctx context.Context, acct *accounts.Account) error {
 func (n *testNode) listWallets(ctx context.Context) ([]rawWallet, error) {
 	return nil, nil
 }
-func (n *testNode) importAccount(pw string, privKeyB []byte) (*accounts.Account, error) {
-	return nil, nil
-}
 func (n *testNode) addPeer(ctx context.Context, peer string) error {
 	return nil
 }
@@ -576,7 +573,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 
 	// Test funding coins with coin from different address
 	var differentAddress [20]byte
-	decodedHex, _ := hex.DecodeString("345853e21b1d475582E71cC269124eD5e2dD3422")
+	decodedHex, _ := hex.DecodeString("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	copy(differentAddress[:], decodedHex)
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
@@ -1063,7 +1060,7 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	// Error due to coin from with account than wallet
-	differentAddress := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	differentAddress := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	nonce := [8]byte{}
 	coinDifferentAddress := coin{
 		id: dexeth.AmountCoinID{

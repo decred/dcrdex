@@ -1372,8 +1372,12 @@ type tDriver struct {
 	winfo   *asset.WalletInfo
 }
 
-func (drv *tDriver) Setup(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
+func (drv *tDriver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 	return drv.f(cfg, logger, net)
+}
+
+func (drv *tDriver) Create(params *asset.CreateWalletParams) error {
+	return fmt.Errorf("unimplemented")
 }
 
 func (drv *tDriver) DecodeCoinID(coinID []byte) (string, error) {
