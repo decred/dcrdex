@@ -945,11 +945,11 @@ func (dc *dexConnection) subPriceFeed() {
 		spots = make(map[string]*msgjson.Spot)
 	}
 
+	dc.notify(newSpotPriceNote(dc.acct.host, spots)) // before putting the map in dc.spots
+
 	dc.spotsMtx.Lock()
 	dc.spots = spots
 	dc.spotsMtx.Unlock()
-
-	dc.notify(newSpotPriceNote(dc.acct.host, spots))
 }
 
 // handlePriceUpdateNote handles the price_update note that is part of the
