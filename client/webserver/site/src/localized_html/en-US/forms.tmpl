@@ -154,7 +154,7 @@
 {{define "regAssetForm"}}
 <div class="text-center sans-light fs24 mb-3" data-tmpl="how">How will you pay the registration fee?</div>
 <div data-tmpl="assets">
-  <div data-tmpl="assetTmpl" class="reg-asset d-flex align-items-stretch">
+  <div data-tmpl="assetTmpl" class="reg-asset pointer d-flex align-items-stretch">
     <div class="reg-asset-logo-wrapper d-flex align-items-center justify-content-center">
       <img class="reg-asset-logo" data-tmpl="logo">
     </div>
@@ -188,7 +188,24 @@
       </table>
       <div class="fader" data-tmpl="fader"></div>
     </div>
-
+  </div>
+</div>
+<div class="d-flex align-items-stretch reg-asset nohover" data-tmpl="allmkts">
+  <div class="reg-asset-allmkts flex-grow-1 flex-column d-flex align-items-center justify-content-center">
+    <div class="fs20 sans-light">All markets at</div>
+    <span class="fs18" data-tmpl="host"></span>
+  </div>
+  <div class="reg-assets-markets-wrap flex-grow-1 text-left">
+    <table class="reg-asset-markets">
+      <thead>
+        <tr>
+          <th class="grey">Market</th>
+          <th class="grey">Lot Size</th>
+        </tr>
+      </thead>
+      <tbody data-tmpl="allMarkets"></tbody>
+    </table>
+    <div class="fader" data-tmpl="fader"></div>
   </div>
 </div>
 {{end}}

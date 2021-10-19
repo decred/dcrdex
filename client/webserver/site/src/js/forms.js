@@ -492,10 +492,53 @@ export class FeeAssetSelectionForm {
   setExchange (xc) {
     this.xc = xc
     const page = this.page
-    Doc.empty(page.assets)
+    Doc.empty(page.assets, page.allMarkets)
+
+    const cFactor = ui => ui.conventional.conversionFactor
+
+    const marketNode = (mkt, excludeIcon) => {
+      const marketNode = page.marketTmpl.cloneNode(true)
+      const marketTmpl = Doc.parseTemplate(marketNode)
+
+      const baseAsset = xc.assets[mkt.baseid]
+      const baseUnitInfo = unitInfo(xc, mkt.baseid)
+      const quoteAsset = xc.assets[mkt.quoteid]
+      const quoteUnitInfo = unitInfo(xc, mkt.quoteid)
+
+      if (cFactor(baseUnitInfo) === 0 || cFactor(quoteUnitInfo) === 0) return null
+
+      if (typeof excludeIcon !== 'undefined') {
+        const excludeBase = excludeIcon === mkt.baseid
+        const otherSymbol = xc.assets[excludeBase ? mkt.quoteid : mkt.baseid].symbol
+        marketTmpl.logo.src = Doc.logoPath(otherSymbol)
+      } else {
+        const otherLogo = marketTmpl.logo.cloneNode(true)
+        marketTmpl.logo.src = Doc.logoPath(baseAsset.symbol)
+        otherLogo.src = Doc.logoPath(quoteAsset.symbol)
+        marketTmpl.logo.parentNode.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
+      }
+
+      const baseSymbol = baseAsset.symbol.toUpperCase()
+      const quoteSymbol = quoteAsset.symbol.toUpperCase()
+
+      marketTmpl.name.textContent = `${baseSymbol}-${quoteSymbol}`
+      const s = Doc.formatCoinValue(mkt.lotsize, baseUnitInfo)
+      marketTmpl.lotSize.textContent = `${s} ${baseSymbol}`
+
+      if (mkt.spot) {
+        Doc.show(marketTmpl.quoteLotSize)
+        const r = cFactor(quoteUnitInfo) / cFactor(baseUnitInfo)
+        const quoteLot = mkt.lotsize * mkt.spot.rate / RateEncodingFactor * r
+        const s = Doc.formatCoinValue(quoteLot, quoteUnitInfo)
+        marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteSymbol})`
+      }
+      return marketNode
+    }
+
     for (const [symbol, feeAsset] of Object.entries(xc.regFees)) {
       const asset = app().assets[feeAsset.id]
-      if (!asset) continue // We don't support this asset
+      if (!asset) continue
+      const haveWallet = asset.wallet
       const unitInfo = asset.info.unitinfo
       const assetNode = page.assetTmpl.cloneNode(true)
       Doc.bind(assetNode, 'click', () => { this.success(feeAsset.id) })
@@ -505,41 +548,25 @@ export class FeeAssetSelectionForm {
       const fee = Doc.formatCoinValue(feeAsset.amount, unitInfo)
       assetTmpl.fee.textContent = `${fee} ${unitInfo.conventional.unit}`
       assetTmpl.confs.textContent = feeAsset.confs
-      assetTmpl.ready.textContent = asset.wallet ? intl.prep(intl.WALLET_READY) : intl.prep(intl.SETUP_NEEDED)
-      assetTmpl.ready.classList.add(asset.wallet ? 'readygreen' : 'setuporange')
+      assetTmpl.ready.textContent = haveWallet ? intl.prep(intl.WALLET_READY) : intl.prep(intl.SETUP_NEEDED)
+      assetTmpl.ready.classList.add(haveWallet ? 'readygreen' : 'setuporange')
 
       let count = 0
       for (const mkt of Object.values(xc.markets)) {
         if (mkt.baseid !== feeAsset.id && mkt.quoteid !== feeAsset.id) continue
+        const node = marketNode(mkt, feeAsset.id)
+        if (!node) continue
         count++
-        const marketNode = page.marketTmpl.cloneNode(true)
-        assetTmpl.markets.appendChild(marketNode)
-
-        const marketTmpl = Doc.parseTemplate(marketNode)
-
-        const isBase = mkt.baseid === feeAsset.id
-        const otherAsset = app().assets[isBase ? mkt.quoteid : mkt.baseid]
-        if (!otherAsset) continue // not supported
-        const baseAsset = app().assets[mkt.baseid]
-        const quoteAsset = app().assets[mkt.quoteid]
-        const baseSymbol = baseAsset.symbol.toUpperCase()
-        const quoteSymbol = quoteAsset.symbol.toUpperCase()
-
-        marketTmpl.logo.src = Doc.logoPath(otherAsset.symbol)
-        marketTmpl.name.textContent = `${baseSymbol}-${quoteSymbol}`
-        const s = Doc.formatCoinValue(mkt.lotsize, baseAsset.info.unitinfo) // TODO: Use UnitInfo
-        marketTmpl.lotSize.textContent = `${s} ${baseSymbol}`
-
-        if (!isBase && mkt.spot) {
-          Doc.show(marketTmpl.quoteLotSize)
-          const cFactor = asset => asset.info.unitinfo.conventional.conversionFactor
-          const r = cFactor(quoteAsset) / cFactor(baseAsset)
-          const quoteLot = mkt.lotsize * mkt.spot.rate / RateEncodingFactor * r
-          const s = Doc.formatCoinValue(quoteLot, quoteAsset.info.unitinfo)
-          marketTmpl.quoteLotSize.textContent = `(~${s} ${otherAsset.symbol.toUpperCase()})`
-        }
+        assetTmpl.markets.appendChild(node)
       }
       if (count < 3) Doc.hide(assetTmpl.fader)
+    }
+
+    page.host.textContent = xc.host
+    for (const mkt of Object.values(xc.markets)) {
+      const node = marketNode(mkt)
+      if (!node) continue
+      page.allMarkets.appendChild(node)
     }
   }
 
@@ -558,6 +585,7 @@ export class FeeAssetSelectionForm {
     const extraTop = 50
     const fontSize = 24
     const regAssetElements = Array.from(page.assets.children)
+    regAssetElements.push(page.allmkts)
     form.style.opacity = '0'
 
     const aniLen = 350
@@ -841,4 +869,12 @@ export function bind (form, submitBttn, handler) {
 // value representing true.
 function isTruthyString (s) {
   return s === '1' || s.toLowerCase() === 'true'
+}
+
+function unitInfo (xc, assetID) {
+  const dexAsset = xc.assets[assetID]
+  if (dexAsset && dexAsset.unitInfo.conventional.conversionFactor > 0) return dexAsset.unitInfo
+  const supportedAsset = app().assets[assetID]
+  if (!supportedAsset) return null
+  return supportedAsset.info.unitinfo
 }

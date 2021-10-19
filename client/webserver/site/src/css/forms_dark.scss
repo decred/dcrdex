@@ -15,7 +15,7 @@ body.dark {
           );
       }
 
-      &:hover {
+      &:not(.nohover):hover {
         background-color: #202c35;
 
         .fader {
