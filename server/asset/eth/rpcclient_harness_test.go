@@ -7,6 +7,7 @@
 package eth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/encode"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -130,7 +132,7 @@ func TestTransaction(t *testing.T) {
 	copy(hash[:], encode.RandomBytes(32))
 	_, _, err := ethClient.transaction(ctx, hash)
 	// TODO: Test positive route.
-	if err.Error() != "not found" {
+	if !errors.Is(err, ethereum.NotFound) {
 		t.Fatal(err)
 	}
 }

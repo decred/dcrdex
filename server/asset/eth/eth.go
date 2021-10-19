@@ -251,7 +251,7 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
 	sc, err := newSwapCoin(eth, coinID, sctInit)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create coiner: %v", err)
+		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 	// Confirmations performs some extra swap status checks if the the tx
 	// is mined.
@@ -300,7 +300,7 @@ func (eth *Backend) Synced() (bool, error) {
 func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
 	cnr, err := newSwapCoin(eth, redeemCoinID, sctRedeem)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create coiner: %v", err)
+		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 	// Ensure that the redeem is for the same coin hash and contract as the
 	// contract coin.

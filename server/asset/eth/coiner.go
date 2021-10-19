@@ -15,6 +15,7 @@ import (
 
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -67,6 +68,9 @@ func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, 
 	txid := txCoinID.TxID
 	tx, _, err := backend.node.transaction(backend.rpcCtx, txid)
 	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("unable to fetch transaction: %v", err)
 	}
 
