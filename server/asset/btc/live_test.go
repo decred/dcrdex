@@ -45,12 +45,27 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 var (
 	btc *Backend
 	ctx context.Context
 )
+
+func TestGetRawTransaction(t *testing.T) {
+	hash, err := chainhash.NewHashFromStr("79275472daabf4e79ef4dea9402841e61743e0080d4dd26a74819cfd64acadf9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := btc.node.GetRawTransaction(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tx.MsgTx().TxHash(); got != *hash {
+		t.Errorf("Got tx id %v, expected %v", got, hash)
+	}
+}
 
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
