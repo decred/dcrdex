@@ -1,3 +1,4 @@
+import { app } from './registry'
 import Doc, { WalletIcons } from './doc'
 import State from './state'
 import BasePage from './basepage'
@@ -9,7 +10,6 @@ import * as Order from './orderutil'
 import ws from './ws'
 import * as intl from './locales'
 
-let app
 const bind = Doc.bind
 
 const bookRoute = 'book'
@@ -41,12 +41,11 @@ const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
 })
 
 export default class MarketsPage extends BasePage {
-  constructor (application, main, data) {
+  constructor (main, data) {
     super()
-    app = application
     const page = this.page = Doc.idDescendants(main)
     this.main = main
-    this.loaded = app.loading(this.main.parentElement)
+    this.loaded = app().loading(this.main.parentElement)
     this.maxLoaded = null
     // There may be multiple pending updates to the max order. This makes sure
     // that the screen is updated with the most recent one.
@@ -192,9 +191,9 @@ export default class MarketsPage extends BasePage {
     // Handle the candles update on the 'candles' route.
     ws.registerRoute(candlesRoute, data => { this.handleCandlesRoute(data) })
     // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(app, page.openForm, async () => { this.openFunc() })
+    this.unlockForm = new UnlockWalletForm(page.openForm, async () => { this.openFunc() })
     // Create a wallet
-    this.walletForm = new NewWalletForm(app, page.walletForm, async () => { this.createWallet() })
+    this.walletForm = new NewWalletForm(page.walletForm, async () => { this.createWallet() })
     // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
@@ -294,7 +293,7 @@ export default class MarketsPage extends BasePage {
       if (r > 0.7) r = 0.7
       else if (r < 0.25) r = 0.25
 
-      const h = r * (this.main.clientHeight - app.header.offsetHeight)
+      const h = r * (this.main.clientHeight - app().header.offsetHeight)
       page.marketChart.style.height = `${h}px`
 
       this.depthChart.resize(h)
@@ -419,7 +418,7 @@ export default class MarketsPage extends BasePage {
     const assetsAreSupported = this.assetsAreSupported()
     const base = this.market.base
     const quote = this.market.quote
-    const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
+    const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
     if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
@@ -524,7 +523,7 @@ export default class MarketsPage extends BasePage {
 
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
-    const dex = app.user.exchanges[host]
+    const dex = app().user.exchanges[host]
     const page = this.page
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
@@ -541,7 +540,7 @@ export default class MarketsPage extends BasePage {
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
-    const [baseAsset, quoteAsset] = [app.assets[base], app.assets[quote]]
+    const [baseAsset, quoteAsset] = [app().assets[base], app().assets[quote]]
     const rateConversionFactor = Order.RateEncodingFactor / baseAsset.info.unitinfo.conventional.conversionFactor * quoteAsset.info.unitinfo.conventional.conversionFactor
     Doc.hide(page.maxOrd, page.chartErrMsg)
     if (this.preorderTimer) {
@@ -553,7 +552,7 @@ export default class MarketsPage extends BasePage {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
       cfg: dex.markets[mktId],
-      // app.assets is a map of core.SupportedAsset type, which can be found at
+      // app().assets is a map of core.SupportedAsset type, which can be found at
       // client/core/types.go.
       base: baseAsset,
       quote: quoteAsset,
@@ -707,7 +706,7 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
       return
     }
-    const quoteAsset = app.assets[order.quote]
+    const quoteAsset = app().assets[order.quote]
     const total = order.rate * order.qty
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
@@ -720,7 +719,7 @@ export default class MarketsPage extends BasePage {
   preSell () {
     this.maxOrderUpdateCounter++
     const mkt = this.market
-    const baseWallet = app.assets[mkt.base.id].wallet
+    const baseWallet = app().assets[mkt.base.id].wallet
     if (baseWallet.available < mkt.cfg.lotsize) {
       this.setMaxOrder({ lots: 0 })
       return
@@ -744,7 +743,7 @@ export default class MarketsPage extends BasePage {
     this.maxOrderUpdateCounter++
     const mkt = this.market
     const rate = this.adjustedRate()
-    const quoteWallet = app.assets[mkt.quote.id].wallet
+    const quoteWallet = app().assets[mkt.quote.id].wallet
     const aLot = mkt.cfg.lotsize * (rate / Order.RateEncodingFactor)
     if (quoteWallet.balance.available < aLot) {
       this.setMaxOrder({ lots: 0 })
@@ -759,7 +758,7 @@ export default class MarketsPage extends BasePage {
     const delay = mkt.maxBuys ? 1000 : 0
     this.schedulePreOrder('/api/maxbuy', { rate: rate }, delay, res => {
       mkt.maxBuys[rate] = res.maxBuy
-      mkt.buyBalance = app.assets[mkt.quote.id].wallet.balance.available
+      mkt.buyBalance = app().assets[mkt.quote.id].wallet.balance.available
       this.setMaxOrder(res.maxBuy.swap)
     })
   }
@@ -771,9 +770,9 @@ export default class MarketsPage extends BasePage {
    */
   schedulePreOrder (path, args, delay, success) {
     const page = this.page
-    if (!this.maxLoaded) this.maxLoaded = app.loading(page.maxOrd)
+    if (!this.maxLoaded) this.maxLoaded = app().loading(page.maxOrd)
     const [bid, qid] = [this.market.base.id, this.market.quote.id]
-    const [bWallet, qWallet] = [app.assets[bid].wallet, app.assets[qid].wallet]
+    const [bWallet, qWallet] = [app().assets[bid].wallet, app().assets[qid].wallet]
     if (!bWallet || !bWallet.running || !qWallet || !qWallet.running) return
     if (this.preorderTimer) window.clearTimeout(this.preorderTimer)
 
@@ -792,7 +791,7 @@ export default class MarketsPage extends BasePage {
         ...args
       })
       if (counter !== this.maxOrderUpdateCounter) return
-      if (!app.checkResponse(res, true)) {
+      if (!app().checkResponse(res, true)) {
         console.warn('max order estimate not available:', res)
         page.maxFromLots.textContent = intl.prep(intl.ID_ESTIMATE_UNAVAILABLE)
         if (this.maxLoaded) {
@@ -909,7 +908,7 @@ export default class MarketsPage extends BasePage {
   setMarketBuyOrderEstimate () {
     const market = this.market
     const lotSize = market.cfg.lotsize
-    const xc = app.user.exchanges[market.dex.host]
+    const xc = app().user.exchanges[market.dex.host]
     const buffer = xc.markets[market.sid].buybuffer
     const gap = this.midGapConventional()
     if (gap) {
@@ -953,7 +952,7 @@ export default class MarketsPage extends BasePage {
     const metaOrders = this.metaOrders
     const market = this.market
     for (const oid in metaOrders) delete metaOrders[oid]
-    const orders = app.orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
+    const orders = app().orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
     // Sort orders by sort key.
     const compare = this.ordersSortCompare()
     orders.sort(compare)
@@ -982,9 +981,9 @@ export default class MarketsPage extends BasePage {
       side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       const link = Doc.tmplElement(row, 'link')
       link.href = `order/${ord.id}`
-      app.bindInternalNavigation(row)
+      app().bindInternalNavigation(row)
       page.liveList.appendChild(row)
-      app.bindTooltips(row)
+      app().bindTooltips(row)
     }
     this.setDepthMarkers()
   }
@@ -1052,7 +1051,7 @@ export default class MarketsPage extends BasePage {
    * the entire order book.
    */
   handleBookRoute (note) {
-    app.log('book', 'handleBookRoute:', note)
+    app().log('book', 'handleBookRoute:', note)
     const mktBook = note.payload
     const market = this.market
     const page = this.page
@@ -1089,7 +1088,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
-    app.log('book', 'handleBookOrderRoute:', data)
+    app().log('book', 'handleBookOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
@@ -1100,7 +1099,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
-    app.log('book', 'handleUnbookOrderRoute:', data)
+    app().log('book', 'handleUnbookOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     this.book.remove(order.token)
@@ -1114,7 +1113,7 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
-    app.log('book', 'handleUpdateRemainingRoute:', data)
+    app().log('book', 'handleUpdateRemainingRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty, update.qtyAtomic)
@@ -1124,7 +1123,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
-    app.log('book', 'handleEpochOrderRoute:', data)
+    app().log('book', 'handleEpochOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.msgRate > 0) this.book.add(order) // No cancels or market orders
@@ -1184,7 +1183,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     this.openAsset = asset
     this.openFunc = f
-    this.unlockForm.setAsset(app.assets[asset.id])
+    this.unlockForm.setAsset(app().assets[asset.id])
     this.showForm(page.openForm)
     page.uwAppPass.focus()
   }
@@ -1196,8 +1195,8 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const order = this.parseOrder()
     const isSell = order.sell
-    const baseAsset = app.assets[order.base]
-    const quoteAsset = app.assets[order.quote]
+    const baseAsset = app().assets[order.base]
+    const quoteAsset = app().assets[order.quote]
     const toAsset = isSell ? quoteAsset : baseAsset
     const fromAsset = isSell ? baseAsset : quoteAsset
 
@@ -1260,7 +1259,7 @@ export default class MarketsPage extends BasePage {
     }
     page.cancelPass.value = ''
     const res = await postJSON('/api/cancel', req)
-    if (!app.checkResponse(res)) return
+    if (!app().checkResponse(res)) return
     Doc.hide(cancelData.bttn, page.forms)
     order.cancelling = true
   }
@@ -1302,8 +1301,8 @@ export default class MarketsPage extends BasePage {
     const market = this.market
     Doc.hide(page.orderErr)
     if (!this.validateOrder(this.parseOrder())) return
-    const baseWallet = app.walletMap[market.base.id]
-    const quoteWallet = app.walletMap[market.quote.id]
+    const baseWallet = app().walletMap[market.base.id]
+    const quoteWallet = app().walletMap[market.quote.id]
     if (!baseWallet) {
       page.orderErr.textContent = intl.prep(intl.ID_NO_ASSET_WALLET, { asset: market.base.symbol })
       Doc.show(page.orderErr)
@@ -1341,7 +1340,7 @@ export default class MarketsPage extends BasePage {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
     // update local dex
-    this.market.dex = app.exchanges[dexAddr]
+    this.market.dex = app().exchanges[dexAddr]
     this.setRegistrationStatusVisibility()
   }
 
@@ -1376,7 +1375,7 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
-    app.log('book', 'handleEpochNote:', note)
+    app().log('book', 'handleEpochNote:', note)
     if (note.host !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
@@ -1457,7 +1456,7 @@ export default class MarketsPage extends BasePage {
     page.vSubmit.classList.remove('d-hide')
     page.vLoader.classList.add('d-hide')
     // If errors display error on confirmation modal.
-    if (!app.checkResponse(res, true)) {
+    if (!app().checkResponse(res, true)) {
       page.vErr.textContent = res.msg
       Doc.show(page.vErr)
       return
@@ -1474,7 +1473,7 @@ export default class MarketsPage extends BasePage {
    * response is received from the client.
    */
   async createWallet () {
-    const user = await app.fetchUser()
+    const user = await app().fetchUser()
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
     this.balanceWgt.updateAsset(asset.id)
@@ -1732,8 +1731,8 @@ export default class MarketsPage extends BasePage {
       // Having been disconnected from a DEX server, anything may have changed,
       // or this may be the first opportunity to get the server's config, so
       // fetch it all before reloading the markets page.
-      await app.fetchUser()
-      app.loadPage('markets')
+      await app().fetchUser()
+      app().loadPage('markets')
     }
   }
 
@@ -1808,7 +1807,7 @@ export default class MarketsPage extends BasePage {
 
   /* requestCandles sends the loadcandles request. */
   requestCandles () {
-    const loaded = app.loading(this.page.marketChart)
+    const loaded = app().loading(this.page.marketChart)
     this.candlesLoading = {
       loaded: loaded,
       timer: setTimeout(() => {
@@ -1853,7 +1852,7 @@ class MarketList {
     const xcTmpl = Doc.tmplElement(div, 'xc')
     cleanTemplates(xcTmpl)
     this.xcSections = []
-    for (const dex of Object.values(app.user.exchanges)) {
+    for (const dex of Object.values(app().user.exchanges)) {
       this.xcSections.push(new ExchangeSection(xcTmpl, dex))
     }
     // Initial sort is alphabetical.
@@ -2024,8 +2023,7 @@ class MarketRow {
     tmpl.pctChange.textContent = `${sign}${num}%`
     tmpl.pctChange.classList.remove('upgreen', 'downred', 'grey')
     tmpl.pctChange.classList.add(pct === 0 ? 'grey' : pct > 0 ? 'upgreen' : 'downred')
-
-    const baseAsset = app.assets[mkt.baseid]
+    const baseAsset = app().assets[mkt.baseid]
     if (baseAsset) {
       Doc.show(tmpl.bottomRow)
       tmpl.assetName.textContent = baseAsset.info.name
@@ -2083,7 +2081,7 @@ class BalanceWidget {
    * setWallet sets the balance widget to display data for specified market.
    */
   setWallets (host, baseID, quoteID) {
-    this.dex = app.user.exchanges[host]
+    this.dex = app().user.exchanges[host]
     this.base.id = baseID
     this.base.cfg = this.dex.assets[baseID]
     this.quote.id = quoteID
@@ -2097,7 +2095,7 @@ class BalanceWidget {
    * core.Wallet state.
    */
   updateWallet (side) {
-    const asset = app.assets[side.id]
+    const asset = app().assets[side.id]
     // Just hide everything to start.
     Doc.hide(
       side.newWalletRow, side.avail, side.immature, side.locked,
@@ -2161,7 +2159,7 @@ class BalanceWidget {
    */
   async fetchBalance (assetID) {
     const res = await postJSON('/api/balance', { assetID: assetID })
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       console.error('failed to fetch balance for asset ID', assetID)
     }
   }

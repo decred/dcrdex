@@ -1,3 +1,4 @@
+import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
@@ -6,12 +7,9 @@ import * as intl from './locales'
 
 const animationLength = 300
 
-let app
-
 export default class RegistrationPage extends BasePage {
-  constructor (application, body) {
+  constructor (body) {
     super()
-    app = application
     this.body = body
     this.notifiers = {}
     this.pwCache = {}
@@ -27,18 +25,18 @@ export default class RegistrationPage extends BasePage {
       Doc.hide(page.showSeedRestore)
     })
 
-    this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
+    this.walletForm = new NewWalletForm(page.newWalletForm, () => {
       this.confirmRegisterForm.refresh()
       this.changeForm(page.newWalletForm, page.confirmRegForm)
     }, this.pwCache, () => this.changeForm(page.newWalletForm, page.confirmRegForm))
     // ADD DEX
-    this.dexAddrForm = new DEXAddressForm(app, page.dexAddrForm, async (xc) => {
+    this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc) => {
       this.confirmRegisterForm.setExchange(xc)
       await this.changeForm(page.dexAddrForm, page.confirmRegForm)
     }, this.pwCache)
 
     // SUBMIT DEX REGISTRATION
-    this.confirmRegisterForm = new ConfirmRegistrationForm(app,
+    this.confirmRegisterForm = new ConfirmRegistrationForm(
       page.confirmRegForm,
       {
         getCertFile: () => this.getCertFile(),
@@ -52,7 +50,7 @@ export default class RegistrationPage extends BasePage {
         this.changeForm(page.confirmRegForm, page.newWalletForm)
       })
     // Attempt to load the dcrwallet configuration from the default location.
-    if (app.user.authed) this.auth()
+    if (app().user.authed) this.auth()
   }
 
   unload () {
@@ -61,7 +59,7 @@ export default class RegistrationPage extends BasePage {
 
   // auth should be called once user is known to be authed with the server.
   async auth () {
-    await app.fetchUser()
+    await app().fetchUser()
   }
 
   /* Swap this currently displayed form1 for form2 with an animation. */
@@ -104,10 +102,10 @@ export default class RegistrationPage extends BasePage {
     // the Application will only clear them on login, which would leave old
     // browser-cached notifications in place after registering even if the
     // client db is wiped.
-    app.setNotes([])
+    app().setNotes([])
     page.appPW.value = ''
     page.appPWAgain.value = ''
-    const loaded = app.loading(page.appPWForm)
+    const loaded = app().loading(page.appPWForm)
     const seed = page.seedInput.value
     const rememberPass = page.rememberPass.checked
     const res = await postJSON('/api/init', {
@@ -116,14 +114,14 @@ export default class RegistrationPage extends BasePage {
       rememberPass
     })
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       page.appPWErrMsg.textContent = res.msg
       Doc.show(page.appPWErrMsg)
       return
     }
     this.pwCache.pw = pw
     this.auth()
-    app.updateMenuItemsDisplay()
+    app().updateMenuItemsDisplay()
     this.walletForm.refresh()
     this.dexAddrForm.refresh()
     await this.changeForm(page.appPWForm, page.dexAddrForm)
@@ -153,7 +151,7 @@ export default class RegistrationPage extends BasePage {
 
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
-    await app.fetchUser()
-    app.loadPage('markets')
+    await app().fetchUser()
+    app().loadPage('markets')
   }
 }

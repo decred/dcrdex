@@ -1,3 +1,4 @@
+import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import State from './state'
@@ -7,12 +8,9 @@ import * as intl from './locales'
 
 const animationLength = 300
 
-let app
-
 export default class SettingsPage extends BasePage {
-  constructor (application, body) {
+  constructor (body) {
     super()
-    app = application
     this.body = body
     const page = this.page = Doc.idDescendants(body)
 
@@ -30,13 +28,13 @@ export default class SettingsPage extends BasePage {
     Doc.bind(page.showPokes, 'click', () => {
       const show = page.showPokes.checked
       State.setCookie('popups', show ? '1' : '0')
-      app.showPopups = show
+      app().showPopups = show
     })
 
-    page.commitHash.textContent = app.commitHash.substring(0, 7)
+    page.commitHash.textContent = app().commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
 
-    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(app,
+    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(
       page.confirmRegForm,
       {
         getCertFile: () => this.getCertFile(),
@@ -44,7 +42,7 @@ export default class SettingsPage extends BasePage {
       },
       () => this.registerDEXSuccess())
 
-    this.dexAddrForm = new forms.DEXAddressForm(app, page.dexAddrForm, async (xc) => {
+    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc) => {
       this.confirmRegistrationForm.setExchange(xc)
       await this.showForm(page.confirmRegForm)
     })
@@ -53,8 +51,8 @@ export default class SettingsPage extends BasePage {
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
     const exchangesDiv = page.exchanges
-    if (typeof app.user.exchanges !== 'undefined') {
-      for (const host of Object.keys(app.user.exchanges)) {
+    if (typeof app().user.exchanges !== 'undefined') {
+      for (const host of Object.keys(app().user.exchanges)) {
         // Bind export account button click event.
         const exportAccountButton = Doc.tmplElement(exchangesDiv, `exportAccount-${host}`)
         Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
@@ -127,10 +125,10 @@ export default class SettingsPage extends BasePage {
       pw,
       host
     }
-    const loaded = app.loading(this.body)
+    const loaded = app().loading(this.body)
     const res = await postJSON('/api/exportaccount', req)
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       page.exportAccountErr.textContent = res.msg
       Doc.show(page.exportAccountErr)
       return
@@ -153,10 +151,10 @@ export default class SettingsPage extends BasePage {
       pw,
       host
     }
-    const loaded = app.loading(this.body)
+    const loaded = app().loading(this.body)
     const res = await postJSON('/api/disableaccount', req)
     loaded()
-    if (!app.checkResponse(res, true)) {
+    if (!app().checkResponse(res, true)) {
       page.disableAccountErr.textContent = res.msg
       Doc.show(page.disableAccountErr)
       return
@@ -216,21 +214,21 @@ export default class SettingsPage extends BasePage {
       pw: pw,
       account: account
     }
-    const loaded = app.loading(this.body)
+    const loaded = app().loading(this.body)
     const importResponse = await postJSON('/api/importaccount', req)
     loaded()
-    if (!app.checkResponse(importResponse)) {
+    if (!app().checkResponse(importResponse)) {
       page.importAccountErr.textContent = importResponse.msg
       Doc.show(page.importAccountErr)
       return
     }
     const loginResponse = await postJSON('/api/login', { pass: pw })
-    if (!app.checkResponse(loginResponse)) {
+    if (!app().checkResponse(loginResponse)) {
       page.importAccountErr.textContent = loginResponse.msg
       Doc.show(page.importAccountErr)
       return
     }
-    await app.fetchUser()
+    await app().fetchUser()
     Doc.hide(page.forms)
     // Initial method of displaying imported account.
     window.location.reload()
@@ -239,10 +237,10 @@ export default class SettingsPage extends BasePage {
   async submitExportSeedReq () {
     const page = this.page
     const pw = page.exportSeedPW.value
-    const loaded = app.loading(this.body)
+    const loaded = app().loading(this.body)
     const res = await postJSON('/api/exportseed', { pass: pw })
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       page.exportAccountErr.textContent = res.msg
       Doc.show(page.exportSeedE)
       return
@@ -296,7 +294,7 @@ export default class SettingsPage extends BasePage {
     page.dexAddr.value = ''
     this.clearCertFile()
     Doc.hide(page.forms)
-    await app.fetchUser()
+    await app().fetchUser()
     // Initial method of displaying added dex.
     window.location.reload()
   }
@@ -325,7 +323,7 @@ export default class SettingsPage extends BasePage {
       clearValues()
       return
     }
-    const loaded = app.loading(page.changeAppPW)
+    const loaded = app().loading(page.changeAppPW)
     const req = {
       appPW: page.appPW.value,
       newAppPW: page.newAppPW.value
@@ -333,7 +331,7 @@ export default class SettingsPage extends BasePage {
     clearValues()
     const res = await postJSON('/api/changeapppass', req)
     loaded()
-    if (!app.checkResponse(res, true)) {
+    if (!app().checkResponse(res, true)) {
       page.changePWErrMsg.textContent = res.msg
       Doc.show(page.changePWErrMsg)
       return

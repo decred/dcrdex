@@ -1,16 +1,14 @@
+import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import * as Order from './orderutil'
 import { postJSON } from './http'
 
-let app
-
 const orderBatchSize = 50
 
 export default class OrdersPage extends BasePage {
-  constructor (application, main) {
+  constructor (main) {
     super()
-    app = application
     this.main = main
     // if offset is '', there are no more orders available to auto-load for
     // never-ending scrolling.
@@ -100,7 +98,7 @@ export default class OrdersPage extends BasePage {
       set('host', `${mktID} @ ${ord.host}`)
       let from, to, fromQty
       let toQty = ''
-      const [baseUnitInfo, quoteUnitInfo] = [app.unitInfo(ord.baseID), app.unitInfo(ord.quoteID)]
+      const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID), app().unitInfo(ord.quoteID)]
       if (ord.sell) {
         [from, to] = [ord.baseSymbol, ord.quoteSymbol]
         fromQty = Doc.formatCoinValue(ord.qty, baseUnitInfo)
@@ -124,7 +122,7 @@ export default class OrdersPage extends BasePage {
       Doc.tmplElement(tr, 'toLogo').src = Doc.logoPath(to)
       set('toSymbol', to)
       set('type', `${Order.typeString(ord)} ${Order.sellString(ord)}`)
-      set('rate', Doc.formatCoinValue(app.conventionalRate(ord.baseID, ord.quoteID, ord.rate)))
+      set('rate', Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate)))
       set('status', Order.statusString(ord))
       set('filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
@@ -132,7 +130,7 @@ export default class OrdersPage extends BasePage {
       set('time', `${Doc.timeSince(ord.stamp)} ago, ${dateTime}`)
       const link = Doc.tmplElement(tr, 'link')
       link.href = `order/${ord.id}`
-      app.bindInternalNavigation(tr)
+      app().bindInternalNavigation(tr)
       tbody.appendChild(tr)
     }
     if (orders.length === orderBatchSize) {
@@ -155,7 +153,7 @@ export default class OrdersPage extends BasePage {
 
   /* fetchOrders fetches orders using the current filter. */
   async fetchOrders () {
-    const loaded = app.loading(this.main)
+    const loaded = app().loading(this.main)
     const res = await postJSON('/api/orders', this.currentFilter())
     loaded()
     return res.orders
