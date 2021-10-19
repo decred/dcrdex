@@ -32,6 +32,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,7 +66,7 @@ var (
 		appPass: []byte("client2"),
 		wallets: map[uint32]*tWallet{
 			dcr.BipID: dcrWallet("trading2"),
-			btc.BipID: btcWallet("alpha", "gamma"), // alpha default ("") is encrypted, gamma is unencrypted
+			btc.BipID: &tWallet{spv: true}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
 		},
 		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}
@@ -101,13 +102,24 @@ func readWalletCfgsAndDexCert() error {
 
 	for _, client := range clients {
 		dcrw, btcw := client.wallets[dcr.BipID], client.wallets[btc.BipID]
-		dcrw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "dcr", dcrw.daemon, dcrw.daemon+".conf"))
-		if err == nil {
+		if dcrw.spv {
+			dcrw.config = map[string]string{}
+		} else {
+			dcrw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "dcr", dcrw.daemon, dcrw.daemon+".conf"))
+			if err != nil {
+				return err
+			}
+		}
+
+		if btcw.spv {
+			btcw.config = map[string]string{}
+		} else {
 			btcw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "btc", btcw.daemon, btcw.daemon+".conf"))
+			if err != nil {
+				return err
+			}
 		}
-		if err != nil {
-			return err
-		}
+
 		dcrw.config["account"] = dcrw.account
 		btcw.config["walletname"] = btcw.walletName
 	}
@@ -144,7 +156,13 @@ func startClients(ctx context.Context) error {
 			walletType := "dcrwalletRPC"
 			if assetID == btc.BipID {
 				walletType = "bitcoindRPC"
+				if wallet.spv {
+					walletType = "SPV"
+					wallet.pass = nil // should not be set for spv wallets in the first place, but play safe
+				}
 			}
+
+			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
 				Type:    walletType,
@@ -155,11 +173,38 @@ func startClients(ctx context.Context) error {
 				return err
 			}
 			c.log("Connected %s wallet", unbip(assetID))
+
+			if wallet.spv {
+				// Fund newly created wallet.
+				c.log("Funding newly created SPV wallet")
+				address := c.core.WalletState(assetID).Address
+				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
+				cmds := make([]string, len(amts))
+				for i, amt := range amts {
+					cmds[i] = fmt.Sprintf("./alpha sendtoaddress %s %d", address, amt)
+				}
+				err = tmuxRun(assetID, strings.Join(cmds, " && ")+" && ./mine-alpha 2")
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		err = c.registerDEX(ctx)
 		if err != nil {
 			return err
+		}
+
+		// Wait for spv wallets to sync.
+		for assetID, wallet := range c.wallets {
+			if !wallet.spv {
+				continue
+			}
+			c.log("Waiting for %s wallet to sync", unbip(assetID))
+			for !c.core.WalletState(assetID).Synced {
+				time.Sleep(time.Second)
+			}
+			c.log("%s wallet synced and ready to use", unbip(assetID))
 		}
 	}
 
@@ -1249,6 +1294,7 @@ type tWallet struct {
 	walletName string // for btc wallets, put into config map
 	pass       []byte
 	config     map[string]string
+	spv        bool
 }
 
 func dcrWallet(daemon string) *tWallet {
@@ -1550,19 +1596,20 @@ func (client *tClient) disableWallets() {
 }
 
 func mineBlocks(assetID, blocks uint32) error {
-	var harnessID string
+	return tmuxRun(assetID, fmt.Sprintf("./mine-alpha %d", blocks))
+}
+
+func tmuxRun(assetID uint32, cmd string) error {
+	var tmuxWindow string
 	switch assetID {
 	case dcr.BipID:
-		harnessID = "dcr-harness:0"
+		tmuxWindow = "dcr-harness:0"
 	case btc.BipID:
-		harnessID = "btc-harness:2"
+		tmuxWindow = "btc-harness:2"
 	default:
 		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
 	}
-	return tmuxRun(harnessID, fmt.Sprintf("./mine-alpha %d", blocks))
-}
 
-func tmuxRun(tmuxWindow, cmd string) error {
 	cmd += "; tmux wait-for -S harnessdone"
 	err := exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run() // ; wait-for harnessdone
 	if err != nil {
