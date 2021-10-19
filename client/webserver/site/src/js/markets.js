@@ -595,7 +595,7 @@ export default class MarketsPage extends BasePage {
       candleCaches: {}
     }
 
-    page.marketLoader.classList.remove('d-none')
+    Doc.show(page.marketLoader)
     if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
     if (this.currentChart === depthChart) ws.request('loadmarket', makeMarket(host, base, quote))
     else {
@@ -1060,7 +1060,7 @@ export default class MarketsPage extends BasePage {
     this.refreshActiveOrders()
     this.handleBook(mktBook)
     this.updateTitle()
-    page.marketLoader.classList.add('d-none')
+    Doc.hide(page.marketLoader)
     this.marketList.select(host, b.id, q.id)
 
     State.store(lastMarketKey, {
@@ -1799,13 +1799,12 @@ export default class MarketsPage extends BasePage {
 
   /* requestCandles sends the loadcandles request. */
   requestCandles () {
-    const loaded = app.loading(this.page.marketChart)
     this.candlesLoading = {
-      loaded: loaded,
+      loaded: () => { Doc.hide(this.page.marketLoader) },
       timer: setTimeout(() => {
         if (this.candlesLoading) {
           this.candlesLoading = null
-          loaded()
+          Doc.hide(this.page.marketLoader)
           console.error('candles not received')
         }
       }, 10000)
