@@ -205,7 +205,7 @@ export default class Application {
     this.attachCommon(this.main)
     if (this.loadedPage) this.loadedPage.unload()
     const constructor = constructors[handlerID]
-    if (constructor) this.loadedPage = new constructor(this, this.main, data)
+    if (constructor) this.loadedPage = new constructor(this.main, data)
     else this.loadedPage = null
 
     // Bind the tooltips.

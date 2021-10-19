@@ -295,10 +295,17 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 		Connected: true,
-		Fee: &core.FeeAsset{
-			ID:    42,
-			Confs: 1,
-			Amt:   1e8,
+		RegFees: map[string]*core.FeeAsset{
+			"dcr": &core.FeeAsset{
+				ID:    42,
+				Confs: 1,
+				Amt:   1e8,
+			},
+			"btc": &core.FeeAsset{
+				ID:    0,
+				Confs: 1,
+				Amt:   1e6,
+			},
 		},
 		CandleDurs: []string{"1h", "24h"},
 	},
@@ -311,10 +318,12 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(22, 141): mkMrkt("mona", "kmd"),
 		},
 		Connected: true,
-		Fee: &core.FeeAsset{
-			ID:    42,
-			Confs: 1,
-			Amt:   1e8,
+		RegFees: map[string]*core.FeeAsset{
+			"dcr": &core.FeeAsset{
+				ID:    42,
+				Confs: 1,
+				Amt:   1e8,
+			},
 		},
 		CandleDurs: []string{"5m", "1h", "24h"},
 	},
@@ -1400,7 +1409,7 @@ func TestServer(t *testing.T) {
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
 	initialize := false
-	register := true
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = true

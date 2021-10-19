@@ -1,3 +1,4 @@
+import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import * as Order from './orderutil'
@@ -11,18 +12,17 @@ const Testnet = 1
 
 const animationLength = 500
 
-let app, net
+let net
 
 export default class OrderPage extends BasePage {
-  constructor (application, main) {
+  constructor (main) {
     super()
-    app = application
     const stampers = main.querySelectorAll('[data-stamp]')
     net = parseInt(main.dataset.net)
     // Find the order
     this.orderID = main.dataset.oid
-    this.order = app.order(this.orderID)
-    // app.order can only access active orders. If the order is not active,
+    this.order = app().order(this.orderID)
+    // app().order can only access active orders. If the order is not active,
     // we'll need to get the data from the database.
     if (!this.order) this.fetchOrder()
     const page = this.page = Doc.idDescendants(main)
@@ -72,7 +72,7 @@ export default class OrderPage extends BasePage {
   /* fetchOrder fetches the order from the client. */
   async fetchOrder () {
     const res = await postJSON('/api/order', this.orderID)
-    if (!app.checkResponse(res)) return
+    if (!app().checkResponse(res)) return
     this.order = res.order
   }
 
@@ -81,7 +81,7 @@ export default class OrderPage extends BasePage {
     const order = this.order
     const page = this.page
     const remaining = order.qty - order.filled
-    const asset = Order.isMarketBuy(order) ? app.assets[order.quoteID] : app.assets[order.baseID]
+    const asset = Order.isMarketBuy(order) ? app().assets[order.quoteID] : app().assets[order.baseID]
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
     page.cancelUnit.textContent = asset.info.unitinfo.conventional.unit.toUpperCase()
     this.showForm(page.cancelForm)
@@ -111,10 +111,10 @@ export default class OrderPage extends BasePage {
       pw: page.cancelPass.value
     }
     page.cancelPass.value = ''
-    const loaded = app.loading(page.cancelForm)
+    const loaded = app().loading(page.cancelForm)
     const res = await postJSON('/api/cancel', req)
     loaded()
-    if (!app.checkResponse(res)) return
+    if (!app().checkResponse(res)) return
     page.status.textContent = intl.prep(intl.ID_CANCELING)
     Doc.hide(page.forms)
     order.cancelling = true

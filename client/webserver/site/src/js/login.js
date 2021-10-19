@@ -1,15 +1,13 @@
+import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
 
-let app
-
 export default class LoginPage extends BasePage {
-  constructor (application, body) {
+  constructor (body) {
     super()
-    app = application
     const page = this.page = Doc.idDescendants(body)
     forms.bind(page.loginForm, page.submit, () => { this.login() })
     page.pw.focus()
@@ -27,10 +25,10 @@ export default class LoginPage extends BasePage {
       Doc.show(page.errMsg)
       return
     }
-    const loaded = app.loading(page.loginForm)
+    const loaded = app().loading(page.loginForm)
     const res = await postJSON('/api/login', { pass: pw, rememberPass })
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       page.errMsg.textContent = res.msg
       Doc.show(page.errMsg)
       return
@@ -38,8 +36,8 @@ export default class LoginPage extends BasePage {
     if (res.notes) {
       res.notes.reverse()
     }
-    app.setNotes(res.notes || [])
-    await app.fetchUser()
-    app.loadPage('markets')
+    app().setNotes(res.notes || [])
+    await app().fetchUser()
+    app().loadPage('markets')
   }
 }

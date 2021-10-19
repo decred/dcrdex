@@ -1,17 +1,16 @@
+import { app } from './registry'
 import Doc from './doc'
 import { postJSON } from './http'
 import State from './state'
 import { feeSendErr } from './constants'
 import * as intl from './locales'
 
-let app
-
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
-  constructor (application, form, success, pwCache, closerFn) {
+  constructor (form, success, pwCache, closerFn) {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
@@ -26,7 +25,7 @@ export class NewWalletForm {
     }
 
     // WalletConfigForm will set the global app variable.
-    this.subform = new WalletConfigForm(application, fields.walletSettings, true)
+    this.subform = new WalletConfigForm(fields.walletSettings, true)
 
     bind(form, fields.submitAdd, async () => {
       const pw = fields.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
@@ -44,10 +43,10 @@ export class NewWalletForm {
         appPass: pw
       }
       fields.nwAppPass.value = ''
-      const loaded = app.loading(form)
+      const loaded = app().loading(form)
       const res = await postJSON('/api/newwallet', createForm)
       loaded()
-      if (!app.checkResponse(res)) {
+      if (!app().checkResponse(res)) {
         this.setError(res.msg)
         return
       }
@@ -65,7 +64,7 @@ export class NewWalletForm {
 
   async setAsset (assetID) {
     const fields = this.fields
-    const asset = app.assets[assetID]
+    const asset = app().assets[assetID]
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
     fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -88,10 +87,10 @@ export class NewWalletForm {
    * the subform if settings are found.
    */
   async loadDefaults () {
-    const loaded = app.loading(this.form)
+    const loaded = app().loading(this.form)
     const res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       this.setError(res.msg)
       return
     }
@@ -104,8 +103,7 @@ export class NewWalletForm {
  * asset-specific wallet configuration options.
 */
 export class WalletConfigForm {
-  constructor (application, form, sectionize) {
-    app = application
+  constructor (form, sectionize) {
     this.form = form
     // A configElement is a div containing an input and its label.
     this.configElements = {}
@@ -153,14 +151,14 @@ export class WalletConfigForm {
   async fileInputChanged () {
     Doc.hide(this.errMsg)
     if (!this.fileInput.value) return
-    const loaded = app.loading(this.form)
+    const loaded = app().loading(this.form)
     const config = await this.fileInput.files[0].text()
     if (!config) return
     const res = await postJSON('/api/parseconfig', {
       configtext: config
     })
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       this.errMsg.textContent = res.msg
       Doc.show(this.errMsg)
       return
@@ -214,7 +212,7 @@ export class WalletConfigForm {
     } else {
       Doc.hide(this.showOther)
     }
-    app.bindTooltips(this.allSettings)
+    app().bindTooltips(this.allSettings)
   }
 
   /*
@@ -298,9 +296,8 @@ export class WalletConfigForm {
  * ConfirmRegistrationForm should be used with the "confirmRegistrationForm" template.
  */
 export class ConfirmRegistrationForm {
-  constructor (application, form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
+  constructor (form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
     this.fields = Doc.idDescendants(form)
-    app = application
     this.getDexAddr = getDexAddr
     this.getCertFile = getCertFile
     this.success = success
@@ -325,9 +322,9 @@ export class ConfirmRegistrationForm {
 
     for (const [symbol, fee] of Object.entries(xc.regFees)) {
       // if asset fee is not supported by the client we can skip it.
-      if (app.user.assets[fee.id] === undefined) continue
-      const unitInfo = app.assets[fee.id].info.unitinfo
-      const haveWallet = app.user.assets[fee.id].wallet
+      if (app().user.assets[fee.id] === undefined) continue
+      const unitInfo = app().assets[fee.id].info.unitinfo
+      const haveWallet = app().user.assets[fee.id].wallet
       const tr = fields.feeRowTemplate.cloneNode(true)
       Doc.bind(tr, 'click', () => {
         this.feeAssetID = fee.id
@@ -381,7 +378,7 @@ export class ConfirmRegistrationForm {
       Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
       Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
       Doc.tmplElement(tr, 'quote').innerText = market.quotesymbol.toUpperCase()
-      const baseUnitInfo = app.unitInfo(market.baseid)
+      const baseUnitInfo = app().unitInfo(market.baseid)
       const fmtVal = Doc.formatCoinValue(market.lotsize, baseUnitInfo)
       Doc.tmplElement(tr, 'lotsize').innerText = `${fmtVal} ${baseUnitInfo.conventional.unit}`
       fields.marketsTableRows.appendChild(tr)
@@ -409,7 +406,7 @@ export class ConfirmRegistrationForm {
       Doc.show(fields.regErr)
       return
     }
-    const symbol = app.user.assets[this.feeAssetID].wallet.symbol
+    const symbol = app().user.assets[this.feeAssetID].wallet.symbol
     Doc.hide(fields.regErr)
     const feeAsset = this.fees[symbol]
     const cert = await this.getCertFile()
@@ -422,9 +419,9 @@ export class ConfirmRegistrationForm {
       cert: cert
     }
     fields.appPass.value = ''
-    const loaded = app.loading(this.form)
+    const loaded = app().loading(this.form)
     const res = await postJSON('/api/register', registration)
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       // This form is used both in the register workflow and the
       // settings page. The register workflow handles a failure
       // where the user does not have enough funds to pay for the
@@ -449,9 +446,8 @@ export class ConfirmRegistrationForm {
 }
 
 export class UnlockWalletForm {
-  constructor (application, form, success, pwCache) {
+  constructor (form, success, pwCache) {
     this.fields = Doc.idDescendants(form)
-    app = application
     this.form = form
     this.pwCache = pwCache
     this.currentAsset = null
@@ -502,10 +498,10 @@ export class UnlockWalletForm {
       pass: pw
     }
     fields.uwAppPass.value = ''
-    const loaded = app.loading(this.form)
+    const loaded = app().loading(this.form)
     const res = await postJSON('/api/openwallet', open)
     loaded()
-    if (!app.checkResponse(res)) {
+    if (!app().checkResponse(res)) {
       this.setError(res.msg)
       return
     }
@@ -515,8 +511,7 @@ export class UnlockWalletForm {
 }
 
 export class DEXAddressForm {
-  constructor (application, form, success, pwCache) {
-    app = application
+  constructor (form, success, pwCache) {
     this.form = form
     this.success = success
     this.pwCache = pwCache
@@ -563,7 +558,7 @@ export class DEXAddressForm {
       pw = page.dexAddrAppPW.value || this.pwCache.pw
     }
 
-    const loaded = app.loading(this.form)
+    const loaded = app().loading(this.form)
 
     const res = await postJSON('/api/discoveracct', {
       addr: addr,
@@ -571,7 +566,7 @@ export class DEXAddressForm {
       pass: pw
     })
     loaded()
-    if (!app.checkResponse(res, true)) {
+    if (!app().checkResponse(res, true)) {
       if (res.msg === 'certificate required') {
         Doc.hide(page.dexShowMore)
         Doc.show(page.dexCertBox, page.dexNeedCert)
@@ -584,8 +579,8 @@ export class DEXAddressForm {
     }
 
     if (res.paid) {
-      await app.fetchUser()
-      app.loadPage('markets')
+      await app().fetchUser()
+      app().loadPage('markets')
       return
     }
 
