@@ -2797,6 +2797,7 @@ type compositeUTXO struct {
 // spendableUTXOs filters the RPC utxos for those that are spendable with with
 // regards to the DEX's configuration, and considered safe to spend according to
 // confirmations and coin source. The UTXOs will be sorted by ascending value.
+// spendableUTXOs should only be called with the fundingMtx RLock'ed.
 func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[outPoint]*compositeUTXO, uint64, error) {
 	unspents, err := btc.node.listUnspent()
 	if err != nil {
@@ -3045,7 +3046,7 @@ func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*fi
 				secret, err := dexbtc.FindKeyPush(txIn.Witness, txIn.SignatureScript, req.contractHash[:], segwit, chainParams)
 				if err != nil {
 					req.fail("no secret extracted from redemption input %s:%d for swap output %s: %v",
-						msgTx.TxHash(), vin, outPt, err)
+						txHash, vin, outPt, err)
 					continue
 				}
 				discovered[outPt] = &findRedemptionResult{
