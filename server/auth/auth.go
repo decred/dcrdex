@@ -1474,7 +1474,8 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 				}
 				makerTxData, err = auth.getTxData(assetID, status.MakerSwap)
 				if err != nil {
-					log.Errorf("failed to get maker tx data for %s %s: %v", dex.BipIDSymbol(assetID), coinIDString(assetID, status.MakerSwap))
+					log.Errorf("failed to get maker tx data for %s %s: %v", dex.BipIDSymbol(assetID),
+						coinIDString(assetID, status.MakerSwap), err)
 					return msgjson.NewError(msgjson.RPCInternalError, "blockchain retrieval error")
 				}
 			case status.IsMaker && status.Status == order.TakerSwapCast:
@@ -1484,7 +1485,8 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 				}
 				takerTxData, err = auth.getTxData(assetID, status.TakerSwap)
 				if err != nil {
-					log.Errorf("failed to get taker tx data for %s %s: %v", dex.BipIDSymbol(assetID), coinIDString(assetID, status.TakerSwap))
+					log.Errorf("failed to get taker tx data for %s %s: %v", dex.BipIDSymbol(assetID),
+						coinIDString(assetID, status.TakerSwap), err)
 					return msgjson.NewError(msgjson.RPCInternalError, "blockchain retrieval error")
 				}
 			}
