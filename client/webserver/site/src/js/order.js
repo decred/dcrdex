@@ -25,10 +25,7 @@ export default class OrderPage extends BasePage {
     // app.order can only access active orders. If the order is not active,
     // we'll need to get the data from the database.
     if (!this.order) this.fetchOrder()
-    const page = this.page = Doc.parsePage(main, [
-      'cancelBttn', 'cancelRemain', 'cancelUnit', 'cancelForm', 'forms',
-      'cancelSubmit', 'cancelPass', 'status', 'matchBox', 'matchesLabel'
-    ])
+    const page = this.page = Doc.idDescendants(main)
 
     if (page.cancelBttn) {
       Doc.bind(page.cancelBttn, 'click', () => {

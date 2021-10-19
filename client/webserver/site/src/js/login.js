@@ -10,9 +10,7 @@ export default class LoginPage extends BasePage {
   constructor (application, body) {
     super()
     app = application
-    const page = this.page = Doc.parsePage(body, [
-      'submit', 'errMsg', 'loginForm', 'pw', 'rememberPass'
-    ])
+    const page = this.page = Doc.idDescendants(body)
     forms.bind(page.loginForm, page.submit, () => { this.login() })
     page.pw.focus()
   }

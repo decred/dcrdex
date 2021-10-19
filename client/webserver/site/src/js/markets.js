@@ -44,44 +44,7 @@ export default class MarketsPage extends BasePage {
   constructor (application, main, data) {
     super()
     app = application
-    const page = this.page = Doc.parsePage(main, [
-      // Templates, loaders, chart div...
-      'marketLoader', 'marketList', 'rowTemplate', 'buyRows', 'sellRows',
-      'marketSearch', 'rightSide',
-      // Registration status
-      'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
-      'regStatusDex', 'confReq',
-      // Order form
-      'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'limitBttn', 'marketBttn',
-      'tifBox', 'submitBttn', 'qtyField', 'rateField', 'orderErr',
-      'baseWalletIcons', 'quoteWalletIcons', 'lotSize', 'rateStep', 'lotField',
-      'tifNow', 'mktBuyBox', 'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox',
-      'loaderMsg', 'balanceTable', 'orderPreview',
-      // Wallet unlock form
-      'forms', 'openForm', 'uwAppPass',
-      // Order submission is verified with the user's password.
-      'verifyForm', 'vHeader', 'vSideHeader', 'vSide', 'vQty', 'vBase', 'vRate',
-      'vTotal', 'vQuote', 'vPass', 'vSideSubmit', 'vBaseSubmit', 'vSubmit',
-      'vLoader', 'verifyLimit', 'verifyMarket',
-      'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore', 'vErr',
-      // Create wallet form
-      'walletForm',
-      // Active orders
-      'liveTemplate', 'liveList', 'liveTable',
-      // Cancel order form
-      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
-      // Chart and legend
-      'marketChart', 'chartResizer', 'sellBookedBase', 'sellBookedQuote',
-      'buyBookedBase', 'buyBookedQuote', 'hoverData', 'hoverPrice',
-      'hoverVolume', 'chartLegend', 'chartErrMsg', 'candlestickBttn',
-      'depthBttn', 'epochLine', 'durBttnTemplate', 'durBttnBox',
-      'depthHoverData', 'candleHoverData', 'candleHigh', 'candleLow',
-      'candleStart', 'candleEnd', 'candleVol', 'depthSummary',
-      // Max order section
-      'maxOrd', 'maxLbl', 'maxFromLots', 'maxFromAmt', 'maxFromTicker',
-      'maxToAmt', 'maxToTicker', 'maxAboveZero', 'maxLotBox', 'maxFromLotsLbl',
-      'maxBox'
-    ])
+    const page = this.page = Doc.idDescendants(main)
     this.main = main
     this.loaded = app.loading(this.main.parentElement)
     this.maxLoaded = null
@@ -2080,14 +2043,7 @@ class MarketRow {
  */
 class BalanceWidget {
   constructor (table) {
-    const els = Doc.parsePage(table, [
-      'baseAvail', 'quoteAvail', 'baseNewWalletRow', 'quoteNewWalletRow',
-      'baseNewButton', 'quoteNewButton', 'baseLocked', 'quoteLocked',
-      'baseImmature', 'quoteImmature', 'baseImg', 'quoteImg',
-      'quoteUnsupported', 'baseUnsupported', 'baseExpired', 'quoteExpired',
-      'baseConnect', 'quoteConnect', 'baseSpinner', 'quoteSpinner',
-      'baseWalletState', 'quoteWalletState'
-    ])
+    const els = Doc.idDescendants(table)
     this.base = {
       id: 0,
       cfg: null,

@@ -15,27 +15,7 @@ export default class WalletsPage extends BasePage {
     super()
     app = application
     this.body = body
-    const page = this.page = Doc.parsePage(body, [
-      'rightBox',
-      // Table Rows
-      'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable',
-      // Available markets
-      'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
-      'marketsCard',
-      // New wallet, unlock wallet, wallet settings
-      'walletForm', 'openForm',
-      // Wallet configuration
-      'walletReconfig', 'recfgAssetLogo', 'recfgAssetName', 'reconfigInputs',
-      'submitReconfig', 'reconfigErr', 'appPW', 'showChangePW', 'changePW',
-      'switchPWMsg', 'hideIcon', 'showIcon', 'newPW',
-      // Deposit
-      'deposit', 'depositName', 'depositAddress', 'newDepAddrBttn',
-      'depositErr', 'depositLogo',
-      // Withdraw
-      'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
-      'withdrawAmt', 'withdrawAvail', 'submitWithdraw', // 'withdrawFee',
-      'withdrawUnit', 'withdrawPW', 'withdrawErr'
-    ])
+    const page = this.page = Doc.idDescendants(body)
 
     // Read the document, storing some info about each asset's row.
     const getAction = (row, name) => row.querySelector(`[data-action=${name}]`)

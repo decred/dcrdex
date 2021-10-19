@@ -182,16 +182,14 @@ export default class Doc {
   }
 
   /*
-   * parsePage constructs a page object from the supplied list of id strings.
-   * The properties of the returned object have names matching the supplied
-   * id strings, with the corresponding value being the Element object. It is
-   * not an error if an element does not exist for an id in the list.
+   * idDescendants creates an object mapping to elements which are descendants
+   * of the ancestor and have id attributes. Elements are keyed by their id
+   * value.
    */
-  static parsePage (main, ids) {
-    const get = s => Doc.idel(main, s)
-    const page = {}
-    ids.forEach(id => { page[id] = get(id) })
-    return page
+  static idDescendants (ancestor) {
+    const d = {}
+    for (const el of ancestor.querySelectorAll('[id]')) d[el.id] = el
+    return d
   }
 
   /*
