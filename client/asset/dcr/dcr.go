@@ -545,11 +545,17 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 	success = true // All good, don't disconnect the wallet when this method returns.
 
+	// NotifyOnTipChange will return false if the wallet does not support
+	// tip change notification. We'll use dcr.monitorBlocks below if so.
+	monitoringBlocks := dcr.wallet.NotifyOnTipChange(ctx, dcr.handleTipChange)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dcr.monitorBlocks(ctx)
+		if !monitoringBlocks {
+			dcr.monitorBlocks(ctx)
+		}
 		dcr.shutdown()
 	}()
 	return &wg, nil
@@ -2727,16 +2733,21 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer cancel()
 	newTip, err := dcr.getBestBlock(ctx)
 	if err != nil {
-		go dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
-	// This method is called frequently. Don't hold write lock
-	// unless tip has changed.
 	dcr.tipMtx.RLock()
 	sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
 	dcr.tipMtx.RUnlock()
-	if sameTip {
+	if !sameTip {
+		dcr.handleTipChange(newTip.hash, newTip.height, nil)
+	}
+}
+
+func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHeight int64, err error) {
+	if err != nil {
+		go dcr.tipChange(err)
 		return
 	}
 
@@ -2744,8 +2755,8 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer dcr.tipMtx.Unlock()
 
 	prevTip := dcr.currentTip
-	dcr.currentTip = newTip
-	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
+	dcr.currentTip = &block{newTipHeight, newTipHash}
+	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 	go dcr.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
@@ -2801,7 +2812,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 			if aBlock.Confirmations > -1 {
 				// Found the mainchain ancestor of previous tip.
 				startHeight = int64(aBlock.Height)
-				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)
+				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTipHeight)
 				break
 			}
 			if aBlock.Height == 0 {
@@ -2821,7 +2832,7 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 
 	// Run the redemption search from the startHeight determined above up
 	// till the current tip height.
-	go dcr.findRedemptionsInBlockRange(startHeight, newTip.height, contractOutpoints)
+	go dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {

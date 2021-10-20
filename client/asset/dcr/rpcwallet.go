@@ -257,6 +257,18 @@ func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 	return net, translateRPCCancelErr(err)
 }
 
+// NotifyOnTipChange registers a callback function that the should be invoked
+// when the wallet sees new mainchain blocks. The return value indicates if this
+// notification can be provided.
+// Part of the Wallet interface.
+func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
+	// TODO: Could use the ctx provided to poll getbestblock and detect tip changes
+	// in order to invoke the provided callback. This is currently already being handled
+	// by the dcr ExchangeWallet to accomodate other implementations that may also not
+	// have an out-of-the-box provision for block change notifications.
+	return false
+}
+
 // AccountOwnsAddress uses the validateaddress rpc to check if the provided
 // address belongs to the specified account.
 // Part of the Wallet interface.

@@ -44,6 +44,8 @@ func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefini
 	return nil
 }
 
+type TipChangeCallback func(*chainhash.Hash, int64, error)
+
 type Wallet interface {
 	// Connect establishes a connection to the wallet.
 	Connect(ctx context.Context) error
@@ -53,6 +55,12 @@ type Wallet interface {
 	Disconnected() bool
 	// Network returns the network of the connected wallet.
 	Network(ctx context.Context) (wire.CurrencyNet, error)
+	// NotifyOnTipChange registers a callback function that the should be
+	// invoked when the wallet sees new mainchain blocks. The return value
+	// indicates if this notification can be provided. Where this tip change
+	// notification is unimplemented, monitorBlocks should be used to track
+	// tip changes.
+	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
 	// AccountOwnsAddress checks if the provided address belongs to the
 	// specified account.
 	AccountOwnsAddress(ctx context.Context, account, address string) (bool, error)
