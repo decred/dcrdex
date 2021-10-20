@@ -329,3 +329,82 @@ func TestConfirmations(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRedeem(t *testing.T) {
+	contractAddr, nullAddr := new(common.Address), new(common.Address)
+	copy(contractAddr[:], encode.RandomBytes(20))
+	secretHash, nullHash := [32]byte{}, [32]byte{}
+	copy(secretHash[:], encode.RandomBytes(20))
+	scID := SwapCoinID{
+		ContractAddress: *contractAddr,
+		SecretHash:      secretHash,
+	}
+	scRedeem := &swapCoin{
+		contractAddr: *contractAddr,
+		secretHash:   secretHash,
+		sct:          sctRedeem,
+	}
+
+	tests := []struct {
+		name       string
+		wantErr    bool
+		sc         *swapCoin
+		contractID []byte
+	}{{
+		name:       "ok",
+		sc:         scRedeem,
+		contractID: scID.Encode(),
+	}, {
+		name: "sc not a redeem",
+		sc: &swapCoin{
+			contractAddr: *contractAddr,
+			secretHash:   secretHash,
+			sct:          sctInit,
+		},
+		contractID: scID.Encode(),
+		wantErr:    true,
+	}, {
+		name:    "cannot decode contract ID",
+		sc:      scRedeem,
+		wantErr: true,
+	}, {
+		name:       "contract ID is not a swap",
+		sc:         scRedeem,
+		contractID: new(TxCoinID).Encode(),
+		wantErr:    true,
+	}, {
+		name: "mismatched contract ID contract address",
+		sc:   scRedeem,
+		contractID: func() []byte {
+			badAddr := SwapCoinID{
+				ContractAddress: *nullAddr,
+				SecretHash:      secretHash,
+			}
+			return badAddr.Encode()
+		}(),
+		wantErr: true,
+	}, {
+		name: "mismatched contract ID secret hash",
+		sc:   scRedeem,
+		contractID: func() []byte {
+			badHash := SwapCoinID{
+				ContractAddress: *contractAddr,
+				SecretHash:      nullHash,
+			}
+			return badHash.Encode()
+		}(),
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		err := test.sc.validateRedeem(test.contractID)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+	}
+}
