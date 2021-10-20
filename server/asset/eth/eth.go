@@ -295,8 +295,9 @@ func (eth *Backend) Synced() (bool, error) {
 	return timeDiff < MaxBlockInterval, nil
 }
 
-// Redemption returns a coin that represents a contract redemption. coinID should
-// be the transaction that sent a redemption.
+// Redemption returns a coin that represents a contract redemption. redeemCoinID
+// should be the transaction that sent a redemption, while contractCoinID is the
+// swap contract this redemption redeems.
 func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
 	cnr, err := newSwapCoin(eth, redeemCoinID, sctRedeem)
 	if err != nil {
