@@ -57,6 +57,10 @@ type WalletInfo struct {
 	// be the initial form offered to the user for configuration, with others
 	// available to select.
 	AvailableWallets []*WalletDefinition `json:"availablewallets"`
+	// LegacyWalletIndex should be set for assets that existed before wallets
+	// were typed. The index should point to the WalletDefinition that should
+	// be assumed when the type is provided as an empty string.
+	LegacyWalletIndex int `json:"emptyidx"`
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`

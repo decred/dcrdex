@@ -681,10 +681,14 @@ export default class Application {
     return encRate / RateEncodingFactor * r
   }
 
-  walletDefinition (assetID) {
-    const asset = this.assets[assetID]
-    const walletType = asset.wallet.type || asset.info.availablewallets[0].type
-    return asset.info.availablewallets.filter(def => def.type === walletType)[0]
+  walletDefinition (assetID, walletType) {
+    const assetInfo = this.assets[assetID].info
+    if (walletType === '') return assetInfo.availablewallets[assetInfo.emptyidx]
+    return assetInfo.availablewallets.filter(def => def.type === walletType)[0]
+  }
+
+  currentWalletDefinition (assetID) {
+    return this.walletDefinition(assetID, this.assets[assetID].wallet.type)
   }
 
   /*

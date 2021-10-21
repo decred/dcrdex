@@ -1797,27 +1797,15 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // derived deterministically from the app seed and a random password. The
 // password is returned for encrypting and storing.
 func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
-	creds := c.creds()
-	if creds == nil {
-		return nil, errors.New("no v2 credentials stored")
-	}
-
-	appSeed, err := crypter.Decrypt(creds.EncSeed)
+	seed, pw, err := c.assetSeedAndPass(assetID, crypter)
 	if err != nil {
-		return nil, fmt.Errorf("app seed decryption error: %w", err)
+		return nil, err
 	}
 
 	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
-
-	b := make([]byte, len(appSeed)+4)
-	copy(b, appSeed)
-	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
-
-	seed := blake256.Sum256(b)
-	pw := encode.RandomBytes(32)
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Type:     form.Type,
-		Seed:     seed[:],
+		Seed:     seed,
 		Pass:     pw,
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
@@ -1828,6 +1816,26 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	}
 
 	return pw, nil
+}
+
+func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, pass []byte, err error) {
+	creds := c.creds()
+	if creds == nil {
+		return nil, nil, errors.New("no v2 credentials stored")
+	}
+
+	appSeed, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app seed decryption error: %w", err)
+	}
+
+	b := make([]byte, len(appSeed)+4)
+	copy(b, appSeed)
+	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
+
+	s := blake256.Sum256(b)
+	p := blake256.Sum256(seed)
+	return s[:], p[:], nil
 }
 
 // assetDataDirectory is a directory for a wallet to use for local storage.
@@ -2026,7 +2034,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			assetID, unbip(assetID))
 	}
 	seeded := oldWallet.Info().Seeded
-	if seeded && len(newWalletPW) > 0 {
+	if seeded && newWalletPW != nil {
 		return newError(passwordErr, "cannot set a password on a built-in wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
@@ -2039,10 +2047,23 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		Address:     oldDepositAddr,
 	}
 
-	fmt.Printf("--ReconfigureWallet.0 %+v \n", walletDef)
+	var restartOnFail bool
+
+	defer func() {
+		if restartOnFail {
+			if _, err := c.connectWallet(oldWallet); err != nil {
+				c.log.Errorf("Failed to reconnect wallet after a failed reconfiguration attempt: %v", err)
+			}
+		}
+	}()
+
+	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+	if err != nil {
+		return fmt.Errorf("failed to locate old wallet definition: %v", err)
+	}
 
 	if walletDef.Seeded {
-		if len(newWalletPW) > 0 {
+		if newWalletPW != nil {
 			return newError(passwordErr, "cannot set a password on a seeded wallet")
 		}
 
@@ -2056,8 +2077,27 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			if err != nil {
 				return newError(createWalletErr, "error creating new %q-type %s wallet: %v", form.Type, unbip(assetID), err)
 			}
-			// return newError(existenceCheckErr, "cannot reconfigure wallet that doesn't exist")
+		} else if oldDef.Seeded {
+			_, newWalletPW, err = c.assetSeedAndPass(assetID, crypter)
+			if err != nil {
+				return newError(authErr, "error retrieving wallet password: %v", err)
+			}
 		}
+
+		if oldWallet.connected() {
+			oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+			// Error can be normal if the wallet was created before wallet types
+			// were a thing. Just assume this is an old wallet and therefore not
+			// seeded.
+			if err == nil && oldDef.Seeded {
+				oldWallet.Disconnect()
+				restartOnFail = true
+			}
+		}
+	} else if newWalletPW == nil && oldDef.Seeded {
+		// If we're switching from a seeded wallet and no password was provided,
+		// use empty string = wallet not encrypted.
+		newWalletPW = []byte{}
 	}
 
 	// Reload the wallet with the new settings.
@@ -2158,6 +2198,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	c.walletMtx.Lock()
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
+
+	restartOnFail = false
 
 	if oldWallet.connected() {
 		// NOTE: Cannot lock the wallet backend because it may be the same as
@@ -6234,6 +6276,12 @@ func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinitio
 	winfo, err := asset.Info(assetID)
 	if err != nil {
 		return nil, newError(assetSupportErr, "asset.Info error: %v", err)
+	}
+	if walletType == "" {
+		if len(winfo.AvailableWallets) <= winfo.LegacyWalletIndex {
+			return nil, fmt.Errorf("legacy wallet index out of range")
+		}
+		return winfo.AvailableWallets[winfo.LegacyWalletIndex], nil
 	}
 	var walletDef *asset.WalletDefinition
 	for _, def := range winfo.AvailableWallets {

@@ -73,7 +73,6 @@ export class NewWalletForm {
     const page = this.page
     const asset = app().assets[assetID]
     const tabs = page.walletTypeTabs
-    const asset = app().assets[assetID]
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
     page.nwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -138,8 +137,7 @@ export class NewWalletForm {
    */
   async loadDefaults () {
     // No default config files for seeded assets right now.
-    const asset = app().assets[this.currentAsset.id]
-    const walletDef = asset.info.availablewallets.filter(def => def.type === this.currentWalletType)[0]
+    const walletDef = app().walletDefinition(this.currentAsset.id, this.currentWalletType)
     if (walletDef.seeded) return
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/defaultwalletcfg', {

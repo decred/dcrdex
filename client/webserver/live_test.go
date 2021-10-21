@@ -1099,6 +1099,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Balance:   c.balances[assetID],
 		Units:     winfos[assetID].UnitInfo.AtomicUnit,
 		Encrypted: true,
+		Synced:    true,
 	}
 }
 
@@ -1224,13 +1225,12 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
-		141: mkSupportedAsset("kmd", c.wallets[141], c.balances[141]),
+		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
 	}
 }
 

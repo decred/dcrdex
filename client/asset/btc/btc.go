@@ -172,6 +172,7 @@ var (
 			spvWalletDefinition,
 			rpcWalletDefinition,
 		},
+		LegacyWalletIndex: 1,
 	}
 )
 

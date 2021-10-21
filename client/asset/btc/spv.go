@@ -193,6 +193,7 @@ func logNeutrino(netDir string) error {
 	rotatorMtx.Lock()
 	defer rotatorMtx.Unlock()
 	if loggerCount > 0 {
+		loggerCount++
 		return nil
 	}
 
@@ -477,10 +478,19 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		return nil, err
 	}
 
+	target := w.syncHeight()
+	currentHeight := blk.Height
+	synced := w.wallet.ChainSynced()
+	// Sometimes the wallet doesn't report the chain as synced right away.
+	// Seems to be a bug.
+	if !synced && target > 0 && target == currentHeight {
+		synced = true
+	}
+
 	return &syncStatus{
-		Target:  w.syncHeight(),
-		Height:  blk.Height,
-		Syncing: !w.wallet.ChainSynced(),
+		Target:  target,
+		Height:  currentHeight,
+		Syncing: !synced,
 	}, nil
 }
 
@@ -677,7 +687,8 @@ func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtrac
 }
 
 func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*chainhash.Hash, error) {
-	const unfundedTxSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize
+	txOutSize := dexbtc.TxOutOverhead + uint64(len(pkScript)) // send-to address
+	var unfundedTxSize uint64 = dexbtc.MinimumTxOverhead + dexbtc.P2WPKHOutputSize /* change */ + txOutSize
 
 	unspents, err := w.listUnspent()
 	if err != nil {
@@ -689,7 +700,9 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 		return nil, fmt.Errorf("error converting unspent outputs: %w", err)
 	}
 
-	enough := func(inputsSize, inputsVal uint64) bool {
+	// With sendWithSubtract, fees are subtracted from the sent amount, so we
+	// target an input sum, not an output value. Makes the math easy.
+	enough := func(_, inputsVal uint64) bool {
 		return inputsVal >= value
 	}
 
@@ -699,8 +712,16 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 	}
 
 	fees := (unfundedTxSize + uint64(inputsSize)) * feeRate
-	if fees > sum {
+	send := value - fees
+	extra := sum - send
+
+	switch {
+	case fees > sum:
+		return nil, fmt.Errorf("fees > sum")
+	case fees > value:
 		return nil, fmt.Errorf("fees > value")
+	case send > sum:
+		return nil, fmt.Errorf("send > sum")
 	}
 
 	tx := wire.NewMsgTx(wire.TxVersion)
@@ -709,9 +730,6 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 		txIn := wire.NewTxIn(wireOP, []byte{}, nil)
 		tx.AddTxIn(txIn)
 	}
-
-	send := value - fees
-	extra := sum - send
 
 	change := extra - fees
 	changeAddr, err := w.changeAddress()
@@ -918,6 +936,11 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 	// *Rescan supplied with a QuitChan-type RescanOption.
 	// Actually, should use btcwallet.Wallet.NtfnServer ?
 
+	// notes := make(<-chan interface{})
+	// if w.chainClient != nil {
+	// 	notes = w.chainClient.Notifications()
+	// }
+
 	// Nanny for the caches checkpoints and txBlocks caches.
 	wg.Add(1)
 	go func() {
@@ -926,6 +949,7 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 		defer w.stop()
 
 		ticker := time.NewTicker(time.Minute * 20)
+		defer ticker.Stop()
 		expiration := time.Hour * 2
 		for {
 			select {
@@ -945,6 +969,8 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 					}
 				}
 				w.checkpointMtx.Unlock()
+			// case note := <-notes:
+			// 	fmt.Printf("--Notification received: %T: %+v \n", note, note)
 			case <-ctx.Done():
 				return
 			}
@@ -1290,12 +1316,8 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, err
 	}
 
-	if utxo == nil || utxo.spend != nil {
+	if utxo == nil || utxo.spend != nil || utxo.blockHash == nil {
 		return nil, 0, nil
-	}
-
-	if utxo.blockHash == nil {
-		return nil, 0, fmt.Errorf("output %s:%v not found", txHash, vout)
 	}
 
 	tip, err := w.cl.BestBlock()
@@ -1335,11 +1357,12 @@ search:
 		if err != nil {
 			return nil, fmt.Errorf("error getting block hash for height %d: %w", height, err)
 		}
-		res.checkpoint = *blockHash
 		matched, err := w.matchPkScript(blockHash, [][]byte{pkScript})
 		if err != nil {
 			return nil, fmt.Errorf("matchPkScript error: %w", err)
 		}
+
+		res.checkpoint = *blockHash
 		if !matched {
 			continue search
 		}
@@ -1401,6 +1424,11 @@ func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (
 	if err != nil {
 		return false, fmt.Errorf("GetCFilter error: %w", err)
 	}
+
+	if filter.N() == 0 {
+		return false, fmt.Errorf("unexpected empty filter for %s", blockHash)
+	}
+
 	var filterKey [gcs.KeySize]byte
 	copy(filterKey[:], blockHash[:gcs.KeySize])
 

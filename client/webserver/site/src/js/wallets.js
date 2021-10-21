@@ -62,7 +62,7 @@ export default class WalletsPage extends BasePage {
     this.walletForm = new NewWalletForm(page.walletForm, () => { this.createWalletSuccess() })
 
     // Bind the wallet reconfig form.
-    this.walletReconfig = new WalletConfigForm(page.reconfigInputs, false)
+    this.reconfigForm = new WalletConfigForm(page.reconfigInputs, false)
 
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.openForm, () => { this.openWalletSuccess() })
@@ -71,7 +71,7 @@ export default class WalletsPage extends BasePage {
     bindForm(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
 
     // Bind the wallet reconfiguration submission.
-    bindForm(page.walletReconfig, page.submitReconfig, () => this.reconfig())
+    bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
 
     // Bind the row clicks, which shows the available markets for the asset.
     for (const rowInfo of Object.values(rowInfos)) {
@@ -278,7 +278,7 @@ export default class WalletsPage extends BasePage {
     this.setPWSettingViz(this.changeWalletPW)
     const asset = app().assets[assetID]
 
-    const currentDef = app().walletDefinition(assetID)
+    const currentDef = app().currentWalletDefinition(assetID)
 
     if (asset.info.availablewallets.length > 1) {
       Doc.empty(page.changeWalletTypeSelect)
@@ -297,8 +297,8 @@ export default class WalletsPage extends BasePage {
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
     await this.hideBox()
-    this.animation = this.showBox(page.walletReconfig)
-    const loaded = app().loading(page.walletReconfig)
+    this.animation = this.showBox(page.reconfigForm)
+    const loaded = app().loading(page.reconfigForm)
     const res = await postJSON('/api/walletsettings', {
       assetID: assetID
     })
@@ -308,22 +308,20 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    this.walletReconfig.setConfig(res.map)
-
-    this.walletReconfig.update(currentDef.configopts || [])
-    this.update(currentDef)
+    this.reconfigForm.update(currentDef.configopts || [])
+    this.reconfigForm.setConfig(res.map)
+    this.updateDisplayedReconfigFields(currentDef)
   }
 
   changeWalletType () {
     const page = this.page
     const walletType = page.changeWalletTypeSelect.value
-    const asset = app().assets[this.reconfigAsset]
-    const walletDef = asset.info.availablewallets.filter(def => def.type === walletType)[0]
-    this.update(walletDef)
-    this.walletReconfig.update(walletDef.configopts || [])
+    const walletDef = app().walletDefinition(this.reconfigAsset, walletType)
+    this.reconfigForm.update(walletDef.configopts || [])
+    this.updateDisplayedReconfigFields(walletDef)
   }
 
-  update (walletDef) {
+  updateDisplayedReconfigFields (walletDef) {
     if (walletDef.seeded) {
       Doc.hide(this.page.showChangePW)
       this.changeWalletPW = false
@@ -460,15 +458,15 @@ export default class WalletsPage extends BasePage {
       return
     }
 
-    let walletType = app().walletDefinition(this.reconfigAsset).type
+    let walletType = app().currentWalletDefinition(this.reconfigAsset).type
     if (!Doc.isHidden(page.changeWalletType)) {
       walletType = page.changeWalletTypeSelect.value
     }
 
-    const loaded = app().loading(page.walletReconfig)
+    const loaded = app().loading(page.reconfigForm)
     const req = {
       assetID: this.reconfigAsset,
-      config: this.walletReconfig.map(),
+      config: this.reconfigForm.map(),
       appPW: page.appPW.value,
       walletType: walletType
     }

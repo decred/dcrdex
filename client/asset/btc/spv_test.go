@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
@@ -319,7 +320,9 @@ func (c *tNeutrinoClient) GetBlockHeader(blkHash *chainhash.Hash) (*wire.BlockHe
 func (c *tNeutrinoClient) GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, options ...neutrino.QueryOption) (*gcs.Filter, error) {
 	var key [gcs.KeySize]byte
 	copy(key[:], blockHash.CloneBytes()[:])
-	return gcs.BuildGCSFilter(builder.DefaultP, builder.DefaultM, key, c.getCFilterScripts[blockHash])
+	scripts := c.getCFilterScripts[blockHash]
+	scripts = append(scripts, encode.RandomBytes(10))
+	return gcs.BuildGCSFilter(builder.DefaultP, builder.DefaultM, key, scripts)
 }
 
 func (c *tNeutrinoClient) GetBlock(blockHash chainhash.Hash, options ...neutrino.QueryOption) (*btcutil.Block, error) {
