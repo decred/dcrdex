@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -95,7 +96,7 @@ func newRPCClient(requester RawRequesterWithContext, segwit bool, addrDecoder de
 	}
 }
 
-func (wc *rpcClient) connect(ctx context.Context) error {
+func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	wc.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := wc.getVersion()
@@ -393,9 +394,9 @@ func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 }
 
 // walletUnlock unlocks the wallet.
-func (wc *rpcClient) walletUnlock(pass string) error {
+func (wc *rpcClient) walletUnlock(pw []byte) error {
 	// 100000000 comes from bitcoin-cli help walletpassphrase
-	return wc.call(methodUnlock, anylist{pass, 100000000}, nil)
+	return wc.call(methodUnlock, anylist{string(pw), 100000000}, nil)
 }
 
 // walletLock locks the wallet.
@@ -404,7 +405,7 @@ func (wc *rpcClient) walletLock() error {
 }
 
 // sendToAddress sends the amount to the address. feeRate is in units of
-// atoms/byte.
+// sats/byte.
 func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	var success bool
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
@@ -474,7 +475,7 @@ func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 		return nil, err
 	}
 	var txid string
-	err = wc.call(methodSendRawTx, anylist{hex.EncodeToString(b)}, &txid)
+	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -592,41 +593,6 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 	return
 }
 
-// findRedemptionsInTx searches the MsgTx for the redemptions for the specified
-// swaps.
-func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*findRedemptionReq, msgTx *wire.MsgTx,
-	chainParams *chaincfg.Params) (discovered map[outPoint]*findRedemptionResult) {
-
-	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
-
-	for vin, txIn := range msgTx.TxIn {
-		if ctx.Err() != nil {
-			return discovered
-		}
-		poHash, poVout := txIn.PreviousOutPoint.Hash, txIn.PreviousOutPoint.Index
-		for outPt, req := range reqs {
-			if discovered[outPt] != nil {
-				continue
-			}
-			if outPt.txHash == poHash && outPt.vout == poVout {
-				// Match!
-				txHash := msgTx.TxHash()
-				secret, err := dexbtc.FindKeyPush(txIn.Witness, txIn.SignatureScript, req.contractHash[:], segwit, chainParams)
-				if err != nil {
-					req.fail("no secret extracted from redemption input %s:%d for swap output %s: %v",
-						msgTx.TxHash(), vin, outPt, err)
-					continue
-				}
-				discovered[outPt] = &findRedemptionResult{
-					redemptionCoinID: toCoinID(&txHash, uint32(vin)),
-					secret:           secret,
-				}
-			}
-		}
-	}
-	return
-}
-
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
 func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult) {
@@ -710,6 +676,5 @@ func txOutFromTxBytes(txB []byte, vout uint32) (*wire.TxOut, error) {
 	if len(msgTx.TxOut) <= int(vout) {
 		return nil, fmt.Errorf("no vout %d in tx %s", vout, msgTx.TxHash())
 	}
-
 	return msgTx.TxOut[vout], nil
 }

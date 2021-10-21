@@ -32,9 +32,8 @@ import (
 )
 
 const (
-	walletPassword = "abc"
-	alphaAddress   = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
-	betaAddress    = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
+	alphaAddress = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
+	betaAddress  = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
 )
 
 var (
@@ -51,6 +50,7 @@ var (
 		MaxFeeRate:   10,
 		SwapConf:     1,
 	}
+	walletPassword = []byte("abc")
 )
 
 func mineAlpha() error {
@@ -399,20 +399,20 @@ func runTest(t *testing.T, splitTx bool) {
 	swapReceipt = receipts[0]
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
+	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), tDCR.MaxFeeRate/4)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
 
 	// Test PayFee
-	coin, err := rig.beta().PayFee(alphaAddress, 1e8)
+	coin, err := rig.beta().PayFee(alphaAddress, 1e8, defaultFee)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
 	tLogger.Infof("fee paid with tx %s", coin.String())
 
 	// Test Withdraw
-	coin, err = rig.beta().Withdraw(alphaAddress, 5e7)
+	coin, err = rig.beta().Withdraw(alphaAddress, 5e7, tDCR.MaxFeeRate/4)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

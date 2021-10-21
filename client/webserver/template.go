@@ -86,7 +86,10 @@ func (t *templates) retranslate(name string, preloads ...string) error {
 			token, key := matchGroup[0], string(matchGroup[1])
 			replacement, found := t.locale[key]
 			if !found {
-				return fmt.Errorf("warning: no translation text for key %q", key)
+				replacement, found = locales.EnUS[key]
+				if !found {
+					return fmt.Errorf("warning: no translation text for key %q", key)
+				}
 			}
 			destTmpl = bytes.Replace(destTmpl, token, []byte(replacement), -1)
 		}

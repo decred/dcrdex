@@ -30,6 +30,11 @@ button {
   outline: none;
 }
 
+select {
+  font-family: inherit;
+  padding: 5px 10px;
+}
+
 // bootstrap override
 .form-check-input {
   margin-top: 0.4em;
@@ -99,8 +104,6 @@ button:focus {
 
 .card {
   width: 400px;
-  background-color: $light_bg_1;
-  border: 1px solid #aaa;
   border-radius: 3px;
   position: relative;
 
@@ -372,6 +375,10 @@ div.popup-notes {
   background-color: $light_bg_1;
 }
 
+.border1 {
+  border: 1px solid #aaa;
+}
+
 .bg2 {
   background-color: $light_bg_2;
 }
@@ -410,7 +417,8 @@ hr.dashed {
   background-color: #7775;
 }
 
-div.form-closer {
+div.form-closer,
+div.corner-bttn {
   position: absolute;
   right: 0;
   top: 0;
@@ -447,4 +455,8 @@ div.border1 {
 
 #submitDEXAddr {
   max-height: 3em;
+}
+
+#depoAddr {
+  user-select: all;
 }

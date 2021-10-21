@@ -17,14 +17,15 @@ import (
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
-	connector *dex.ConnectionMaster
-	AssetID   uint32
-	dbID      []byte
+	connector  *dex.ConnectionMaster
+	AssetID    uint32
+	dbID       []byte
+	walletType string
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
 	balance      *WalletBalance
-	pw           string
+	pw           encode.PassBytes
 	address      string
 	hookedUp     bool
 	synced       bool
@@ -54,11 +55,10 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 		}
 		return nil
 	}
-	pwB, err := crypter.Decrypt(w.encPW())
+	pw, err := crypter.Decrypt(w.encPW())
 	if err != nil {
 		return fmt.Errorf("unlockWallet decryption error: %w", err)
 	}
-	pw := string(pwB)
 	err = w.Wallet.Unlock(pw)
 	if err != nil {
 		return err
@@ -109,7 +109,8 @@ func (w *xcWallet) Lock() error {
 	if len(w.encPass) == 0 {
 		return nil
 	}
-	w.pw = ""
+	w.pw.Clear()
+	w.pw = nil
 	return w.Wallet.Lock()
 }
 
@@ -151,6 +152,7 @@ func (w *xcWallet) state() *WalletState {
 		Encrypted:    len(w.encPass) > 0,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
+		WalletType:   w.walletType,
 	}
 }
 

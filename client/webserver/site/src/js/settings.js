@@ -95,6 +95,10 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
+
+    this.notifiers = {
+      walletstate: note => this.confirmRegistrationForm.handleWalletStateNote(note)
+    }
   }
 
   async prepareAccountExport (host, authorizeAccountExportForm) {

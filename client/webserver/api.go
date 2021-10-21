@@ -130,6 +130,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(pass, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
+		Type:    form.WalletType,
 		Config:  form.Config,
 	})
 	if err != nil {
@@ -505,11 +506,12 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`
+		Type    string `json:"type"`
 	}{}
 	if !readPost(w, r, form) {
 		return
 	}
-	cfg, err := s.core.AutoWalletConfig(form.AssetID)
+	cfg, err := s.core.AutoWalletConfig(form.AssetID, form.Type)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting wallet config: %w", err))
 		return
@@ -607,8 +609,9 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
-		AssetID uint32            `json:"assetID"`
-		Config  map[string]string `json:"config"`
+		AssetID    uint32            `json:"assetID"`
+		WalletType string            `json:"walletType"`
+		Config     map[string]string `json:"config"`
 		// newWalletPW json field should be omitted in case caller isn't interested
 		// in setting new password, passing null JSON value will cause an unmarshal
 		// error.
@@ -626,8 +629,11 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Update wallet settings.
-	err = s.core.ReconfigureWallet(pass, form.NewWalletPW, form.AssetID,
-		form.Config)
+	err = s.core.ReconfigureWallet(pass, form.NewWalletPW, &core.WalletForm{
+		AssetID: form.AssetID,
+		Config:  form.Config,
+		Type:    form.WalletType,
+	})
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("reconfig error: %w", err))
 		return

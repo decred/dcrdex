@@ -109,14 +109,16 @@ func (c *TCore) CloseWallet(assetID uint32) error                 { return c.clo
 func (c *TCore) ConnectWallet(assetID uint32) error               { return nil }
 func (c *TCore) Wallets() []*core.WalletState                     { return nil }
 func (c *TCore) WalletSettings(uint32) (map[string]string, error) { return nil, nil }
-func (c *TCore) ReconfigureWallet(aPW, nPW []byte, assetID uint32, cfg map[string]string) error {
+func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
 	return nil
 }
 func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error                         { return nil }
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 func (c *TCore) NewDepositAddress(assetID uint32) (string, error)                   { return "", nil }
-func (c *TCore) AutoWalletConfig(assetID uint32) (map[string]string, error)         { return nil, nil }
-func (c *TCore) User() *core.User                                                   { return nil }
+func (c *TCore) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {
+	return nil, nil
+}
+func (c *TCore) User() *core.User { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return make(map[uint32]*core.SupportedAsset)
 }

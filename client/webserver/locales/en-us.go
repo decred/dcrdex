@@ -177,4 +177,13 @@ var EnUS = map[string]string{
 	"fee_price_header":       "Fee",
 	"fee_confs_header":       "Confs",
 	"SetupWallet":            "Setup Wallet",
+	"waiting_wallet":         "waiting for the wallet to sync",
+	"syncing":                "syncing",
+	"Insufficient funds":     "Insufficient funds",
+	"balance_wait": `It's time to pay your registration fee, but your new wallet doesn't have the balance yet. 
+                     Send at least <span id="depoWaitFee"></span> plus some more for transaction fees
+	                 to your deposit address.`,
+	"Current Balance":        "Current Balance",
+	"refreshing_in":          `refreshing in <span id="depoRefresh">15</span> seconds`,
+	"change the wallet type": "change the wallet type",
 }

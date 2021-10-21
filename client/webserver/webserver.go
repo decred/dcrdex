@@ -86,10 +86,10 @@ type clientCore interface {
 	Wallets() []*core.WalletState
 	WalletState(assetID uint32) *core.WalletState
 	WalletSettings(uint32) (map[string]string, error)
-	ReconfigureWallet([]byte, []byte, uint32, map[string]string) error
+	ReconfigureWallet([]byte, []byte, *core.WalletForm) error
 	ChangeAppPass([]byte, []byte) error
 	NewDepositAddress(assetID uint32) (string, error)
-	AutoWalletConfig(assetID uint32) (map[string]string, error)
+	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
 	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)

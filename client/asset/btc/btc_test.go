@@ -1,5 +1,5 @@
-//go:build !harness
-// +build !harness
+//go:build !spvlive
+// +build !spvlive
 
 package btc
 
@@ -71,7 +71,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete, segwit bool) (json.RawMessage, error) {
+func signFuncRaw(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete, segwit bool) (json.RawMessage, error) {
 	signTxRes := SignTxResult{
 		Complete: sigComplete,
 	}
@@ -87,22 +87,8 @@ func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete
 	if err != nil {
 		t.Fatalf("error deserializing contract: %v", err)
 	}
-	// Set the sigScripts to random bytes of the correct length for spending a
-	// p2pkh output.
-	if segwit {
-		sigSize := 73 + sizeTweak
-		for i := range msgTx.TxIn {
-			msgTx.TxIn[i].Witness = wire.TxWitness{
-				randBytes(sigSize),
-				randBytes(33),
-			}
-		}
-	} else {
-		scriptSize := dexbtc.RedeemP2PKHSigScriptSize + sizeTweak
-		for i := range msgTx.TxIn {
-			msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
-		}
-	}
+
+	signFunc(msgTx, sizeTweak, segwit)
 
 	buf := new(bytes.Buffer)
 	err = msgTx.Serialize(buf)
@@ -113,22 +99,45 @@ func signFunc(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete
 	return mustMarshal(signTxRes), nil
 }
 
+func signFunc(tx *wire.MsgTx, sizeTweak int, segwit bool) {
+	// Set the sigScripts to random bytes of the correct length for spending a
+	// p2pkh output.
+	if segwit {
+		sigSize := 73 + sizeTweak
+		for i := range tx.TxIn {
+			tx.TxIn[i].Witness = wire.TxWitness{
+				randBytes(sigSize),
+				randBytes(33),
+			}
+		}
+	} else {
+		scriptSize := dexbtc.RedeemP2PKHSigScriptSize + sizeTweak
+		for i := range tx.TxIn {
+			tx.TxIn[i].SignatureScript = randBytes(scriptSize)
+		}
+	}
+}
+
 type msgBlockWithHeight struct {
 	msgBlock *wire.MsgBlock
 	height   int64
 }
 
-type tRPCClient struct {
-	sendHash            *chainhash.Hash
-	sendErr             error
-	sentRawTx           *wire.MsgTx
-	txOutRes            *btcjson.GetTxOutResult
-	txOutErr            error
-	signFunc            func([]json.RawMessage) (json.RawMessage, error)
-	signMsgFunc         func([]json.RawMessage) (json.RawMessage, error)
-	blockchainMtx       sync.RWMutex
-	verboseBlocks       map[string]*msgBlockWithHeight
-	mainchain           map[int64]*chainhash.Hash
+type testData struct {
+	badSendHash   *chainhash.Hash
+	sendErr       error
+	sentRawTx     *wire.MsgTx
+	txOutRes      *btcjson.GetTxOutResult
+	txOutErr      error
+	sigIncomplete bool
+	signFunc      func(*wire.MsgTx)
+	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
+
+	blockchainMtx sync.RWMutex
+	verboseBlocks map[string]*msgBlockWithHeight
+	dbBlockForTx  map[chainhash.Hash]*hashEntry
+	mainchain     map[int64]*chainhash.Hash
+
 	getBestBlockHashErr error
 	mempoolTxs          map[chainhash.Hash]*wire.MsgTx
 	rawVerboseErr       error
@@ -150,9 +159,7 @@ type tRPCClient struct {
 
 	getBlockchainInfo    *getBlockchainInfoResult
 	getBlockchainInfoErr error
-	unlock               bool
 	unlockErr            error
-	lock                 bool
 	lockErr              error
 	sendToAddress        string
 	sendToAddressErr     error
@@ -160,31 +167,44 @@ type tRPCClient struct {
 	signTxErr            error
 	listUnspent          []*ListUnspentResult
 	listUnspentErr       error
+
+	// spv
+	fetchInputInfoTx  *wire.MsgTx
+	getCFilterScripts map[chainhash.Hash][][]byte
+	checkpoints       map[outPoint]*scanCheckpoint
+	confs             uint32
+	confsSpent        bool
+	confsErr          error
+	walletTxSpent     bool
 }
 
-func newTRPCClient() *tRPCClient {
+func newTestData() *testData {
 	// setup genesis block, required by bestblock polling goroutine
-	var newHash chainhash.Hash
-	copy(newHash[:], randBytes(32))
-	return &tRPCClient{
+	genesisHash := chaincfg.MainNetParams.GenesisHash
+	return &testData{
 		txOutRes: newTxOutResult([]byte{}, 1, 0),
 		verboseBlocks: map[string]*msgBlockWithHeight{
-			newHash.String(): {msgBlock: &wire.MsgBlock{}},
+			genesisHash.String(): {msgBlock: &wire.MsgBlock{}},
 		},
+		dbBlockForTx: make(map[chainhash.Hash]*hashEntry),
 		mainchain: map[int64]*chainhash.Hash{
-			0: &newHash,
+			0: genesisHash,
 		},
-		mempoolTxs: make(map[chainhash.Hash]*wire.MsgTx),
+		mempoolTxs:        make(map[chainhash.Hash]*wire.MsgTx),
+		fetchInputInfoTx:  dummyTx(),
+		getCFilterScripts: make(map[chainhash.Hash][][]byte),
+		confsErr:          WalletTransactionNotFound,
+		checkpoints:       make(map[outPoint]*scanCheckpoint),
 	}
 }
 
-func (c *tRPCClient) getBlock(blockHash string) *msgBlockWithHeight {
+func (c *testData) getBlock(blockHash string) *msgBlockWithHeight {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
 	return c.verboseBlocks[blockHash]
 }
 
-func (c *tRPCClient) GetBestBlockHeight() int64 {
+func (c *testData) GetBestBlockHeight() int64 {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	var bestBlkHeight int64
@@ -196,6 +216,20 @@ func (c *tRPCClient) GetBestBlockHeight() int64 {
 	return bestBlkHeight
 }
 
+func (c *testData) bestBlock() (*chainhash.Hash, int64) {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
+	var bestHash *chainhash.Hash
+	var bestBlkHeight int64
+	for height, hash := range c.mainchain {
+		if height >= bestBlkHeight {
+			bestBlkHeight = height
+			bestHash = hash
+		}
+	}
+	return bestHash, bestBlkHeight
+}
+
 func encodeOrError(thing interface{}, err error) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
@@ -204,15 +238,15 @@ func encodeOrError(thing interface{}, err error) (json.RawMessage, error) {
 }
 
 type tRawRequester struct {
-	*tRPCClient
+	*testData
 }
 
 func (c *tRawRequester) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	// TODO: handle methodGetBlockHash and add actual tests to cover it.
 	case methodEstimateSmartFee:
-		if c.tRPCClient.estFeeErr != nil {
-			return nil, c.tRPCClient.estFeeErr
+		if c.testData.estFeeErr != nil {
+			return nil, c.testData.estFeeErr
 		}
 		optimalRate := float64(optimalFeeRate) * 1e-5 // ~0.00024
 		return json.Marshal(&btcjson.EstimateSmartFeeResult{
@@ -230,30 +264,21 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 			return nil, err
 		}
 		c.sentRawTx = tx
-		if c.sendErr == nil && c.sendHash == nil {
+		if c.sendErr == nil && c.badSendHash == nil {
 			h := tx.TxHash().String()
 			return json.Marshal(&h)
 		}
 		if c.sendErr != nil {
 			return nil, c.sendErr
 		}
-		return json.Marshal(c.sendHash.String())
+		return json.Marshal(c.badSendHash.String())
 	case methodGetTxOut:
 		return encodeOrError(c.txOutRes, c.txOutErr)
 	case methodGetBestBlockHash:
 		if c.getBestBlockHashErr != nil {
 			return nil, c.getBestBlockHashErr
 		}
-		c.blockchainMtx.RLock()
-		defer c.blockchainMtx.RUnlock()
-		var bestHash *chainhash.Hash
-		var bestBlkHeight int64
-		for height, hash := range c.mainchain {
-			if height >= bestBlkHeight {
-				bestBlkHeight = height
-				bestHash = hash
-			}
-		}
+		bestHash, _ := c.bestBlock()
 		return json.Marshal(bestHash.String())
 	case methodGetBlockHash:
 		var blockHeight int64
@@ -276,8 +301,8 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		}
 		return json.Marshal(hashes)
 	case methodGetRawTransaction:
-		if c.tRPCClient.rawVerboseErr != nil {
-			return nil, c.tRPCClient.rawVerboseErr
+		if c.testData.rawVerboseErr != nil {
+			return nil, c.testData.rawVerboseErr
 		}
 		var hashStr string
 		err := json.Unmarshal(params[0], &hashStr)
@@ -298,7 +323,31 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		if c.signTxErr != nil {
 			return nil, c.signTxErr
 		}
-		return c.signFunc(params)
+		signTxRes := SignTxResult{
+			Complete: !c.sigIncomplete,
+		}
+		var msgHex string
+		err := json.Unmarshal(params[0], &msgHex)
+		if err != nil {
+			return nil, fmt.Errorf("json.Unmarshal error for tRawRequester -> RawRequest -> methodSignTx: %v", err)
+		}
+		msgBytes, _ := hex.DecodeString(msgHex)
+		txReader := bytes.NewReader(msgBytes)
+		msgTx := wire.NewMsgTx(wire.TxVersion)
+		err = msgTx.Deserialize(txReader)
+		if err != nil {
+			return nil, fmt.Errorf("MsgTx.Deserialize error for tRawRequester -> RawRequest -> methodSignTx: %v", err)
+		}
+
+		c.signFunc(msgTx)
+
+		buf := new(bytes.Buffer)
+		err = msgTx.Serialize(buf)
+		if err != nil {
+			return nil, fmt.Errorf("MsgTx.Serialize error for tRawRequester -> RawRequest -> methodSignTx: %v", err)
+		}
+		signTxRes.Hex = buf.Bytes()
+		return mustMarshal(signTxRes), nil
 	case methodGetBlock:
 		c.blockchainMtx.Lock()
 		defer c.blockchainMtx.Unlock()
@@ -363,9 +412,9 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetBlockchainInfo:
 		return encodeOrError(c.getBlockchainInfo, c.getBlockchainInfoErr)
 	case methodLock:
-		return encodeOrError(c.lock, c.lockErr)
+		return nil, c.lockErr
 	case methodUnlock:
-		return encodeOrError(c.unlock, c.unlockErr)
+		return nil, c.unlockErr
 	case methodSendToAddress:
 		return encodeOrError(c.sendToAddress, c.sendToAddressErr)
 	case methodSetTxFee:
@@ -376,7 +425,13 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	panic("method not registered: " + method)
 }
 
-func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash, *wire.MsgBlock) {
+const testBlocksPerBlockTimeOffset = 4
+
+func generateTestBlockTime(blockHeight int64) time.Time {
+	return time.Unix(1e6, 0).Add(time.Duration(blockHeight) * maxFutureBlockTime / testBlocksPerBlockTimeOffset)
+}
+
+func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash, *wire.MsgBlock) {
 	c.blockchainMtx.Lock()
 	defer c.blockchainMtx.Unlock()
 	blockHash, found := c.mainchain[blockHeight]
@@ -393,6 +448,7 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Has
 			}
 		}
 		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{}, 1, 2)
+		header.Timestamp = generateTestBlockTime(blockHeight)
 		msgBlock := wire.NewMsgBlock(header)
 		c.verboseBlocks[blockHash.String()] = &msgBlockWithHeight{
 			msgBlock: msgBlock,
@@ -405,7 +461,13 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Has
 	return blockHash, block.msgBlock
 }
 
-func (c *tRPCClient) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {
+func (c *testData) addDBBlockForTx(txHash, blockHash *chainhash.Hash) {
+	c.blockchainMtx.Lock()
+	defer c.blockchainMtx.Unlock()
+	c.dbBlockForTx[*txHash] = &hashEntry{hash: *blockHash}
+}
+
+func (c *testData) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	blockHash, found := c.mainchain[blockHeight]
@@ -416,7 +478,7 @@ func (c *tRPCClient) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgB
 	return blockHash, blk
 }
 
-func (c *tRPCClient) truncateChains() {
+func (c *testData) truncateChains() {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	c.mainchain = make(map[int64]*chainhash.Hash)
@@ -460,6 +522,14 @@ func makeRPCVin(txHash *chainhash.Hash, vout uint32, sigScript []byte, witness [
 	return wire.NewTxIn(wire.NewOutPoint(txHash, vout), sigScript, witness)
 }
 
+func dummyInput() *wire.TxIn {
+	return wire.NewTxIn(wire.NewOutPoint(&chainhash.Hash{0x01}, 0), nil, nil)
+}
+
+func dummyTx() *wire.MsgTx {
+	return makeRawTx([]dex.Bytes{randBytes(32)}, []*wire.TxIn{dummyInput()})
+}
+
 func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutResult {
 	return &btcjson.GetTxOutResult{
 		Confirmations: confs,
@@ -486,7 +556,7 @@ func makeSwapContract(segwit bool, lockTimeOffset time.Duration) (secret []byte,
 	return
 }
 
-func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
+func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, func(), error) {
 	if segwit {
 		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
@@ -495,7 +565,7 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBase
 	}
 
-	client := newTRPCClient()
+	data := newTestData()
 	walletCfg := &asset.WalletConfig{
 		TipChange: func(error) {},
 	}
@@ -513,7 +583,29 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 
 	// rpcClient := newRPCClient(requester, segwit, nil, false, minNetworkVersion, dex.StdOutLogger("RPCTEST", dex.LevelTrace), &chaincfg.MainNetParams)
 
-	wallet, err := newWallet(&tRawRequester{client}, cfg, &dexbtc.Config{})
+	var wallet *ExchangeWallet
+	var err error
+	switch walletType {
+	case walletTypeRPC:
+		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &WalletConfig{})
+	case walletTypeSPV:
+		wallet, err = newUnconnectedWallet(cfg, &WalletConfig{})
+		if err == nil {
+			neutrinoClient := &tNeutrinoClient{data}
+			wallet.node = &spvWallet{
+				chainParams: &chaincfg.MainNetParams,
+				wallet:      &tBtcWallet{data},
+				cl:          neutrinoClient,
+				chainClient: nil,
+				acctNum:     0,
+				txBlocks:    data.dbBlockForTx,
+				checkpoints: data.checkpoints,
+				log:         cfg.Logger.SubLogger("SPV"),
+				loader:      nil,
+			}
+		}
+	}
+
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
@@ -525,12 +617,12 @@ func tNewWallet(segwit bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 		return nil, nil, nil, err
 	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{height: client.GetBestBlockHeight(),
+	wallet.currentTip = &block{height: data.GetBestBlockHeight(),
 		hash: bestHash.String()}
 	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
-	return wallet, client, shutdown, nil
+	return wallet, data, shutdown, nil
 }
 
 func mustMarshal(thing interface{}) []byte {
@@ -557,8 +649,26 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+type testFunc func(t *testing.T, segwit bool, walletType string)
+
+func runRubric(t *testing.T, f testFunc) {
+	t.Run("rpc|segwit", func(t *testing.T) {
+		f(t, true, walletTypeRPC)
+	})
+	t.Run("rpc|non-segwit", func(t *testing.T) {
+		f(t, false, walletTypeRPC)
+	})
+	t.Run("spv|segwit", func(t *testing.T) {
+		f(t, true, walletTypeSPV)
+	})
+}
+
 func TestAvailableFund(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	runRubric(t, testAvailableFund)
+}
+
+func testAvailableFund(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -613,14 +723,16 @@ func TestAvailableFund(t *testing.T) {
 		},
 	}
 
-	msgTx := wire.NewMsgTx(wire.TxVersion)
-	msgTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&chainhash.Hash{0x01}, 0), nil, nil))
-	msgTx.AddTxOut(wire.NewTxOut(1, []byte{0x02}))
-	msgTx.AddTxOut(wire.NewTxOut(int64(lockedVal), []byte{0x02}))
+	msgTx := makeRawTx([]dex.Bytes{{0x01}, {0x02}}, []*wire.TxIn{dummyInput()})
+	msgTx.TxOut[1].Value = int64(lockedVal)
 	txBuf := bytes.NewBuffer(make([]byte, 0, dexbtc.MsgTxVBytes(msgTx)))
 	msgTx.Serialize(txBuf)
+	const blockHeight = 5
+	blockHash, _ := node.addRawTx(blockHeight, msgTx)
 
 	node.getTransaction = &GetTransactionResult{
+		BlockHash:  blockHash.String(),
+		BlockIndex: blockHeight,
 		Details: []*WalletTxDetails{
 			{
 				Amount: float64(lockedVal) / 1e8,
@@ -711,12 +823,15 @@ func TestAvailableFund(t *testing.T) {
 	node.listUnspentErr = nil
 
 	// Negative response when locking outputs.
-	node.lockUnspentErr = tErr
-	_, _, err = wallet.FundOrder(ord)
-	if err == nil {
-		t.Fatalf("no error for lockunspent result = false: %v", err)
+	// There is no way to error locking outpoints in spv
+	if walletType != walletTypeSPV {
+		node.lockUnspentErr = tErr
+		_, _, err = wallet.FundOrder(ord)
+		if err == nil {
+			t.Fatalf("no error for lockunspent result = false: %v", err)
+		}
+		node.lockUnspentErr = nil
 	}
-	node.lockUnspentErr = nil
 
 	// Fund a little bit, with unsafe littleUTXO.
 	littleUTXO.Safe = false
@@ -842,8 +957,8 @@ func TestAvailableFund(t *testing.T) {
 	_ = wallet.ReturnCoins(coins)
 
 	// With a little more locked, the split should be performed.
-	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
-		return signFunc(t, params, 0, true, wallet.segwit)
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
 	}
 	lottaUTXO.Amount += float64(baggageFees) / 1e8
 	node.listUnspent = unspents
@@ -920,7 +1035,7 @@ func (c *tCoin) String() string { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64  { return 100 }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -957,17 +1072,28 @@ func TestReturnCoins(t *testing.T) {
 }
 
 func TestFundingCoins(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	// runRubric(t, testFundingCoins)
+	testFundingCoins(t, false, walletTypeRPC)
+}
+
+func testFundingCoins(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	vout := uint32(123)
-	coinID := toCoinID(tTxHash, vout)
+	const vout = 1
+	const txBlockHeight = 3
+	tx := makeRawTx([]dex.Bytes{{0x01}, tP2PKH}, []*wire.TxIn{dummyInput()})
+	txHash := tx.TxHash()
+	_, _ = node.addRawTx(txBlockHeight, tx)
+	coinID := toCoinID(&txHash, vout)
+	// Make spendable (confs > 0)
+	node.addRawTx(txBlockHeight+1, dummyTx())
 
 	p2pkhUnspent := &ListUnspentResult{
-		TxID:         tTxID,
+		TxID:         txHash.String(),
 		Vout:         vout,
 		ScriptPubKey: tP2PKH,
 		Spendable:    true,
@@ -1068,7 +1194,7 @@ func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, max
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(false)
+	wallet, node, shutdown, err := tNewWallet(false, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1154,8 +1280,8 @@ func TestFundEdges(t *testing.T) {
 	// well.
 	wallet.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
-	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
-		return signFunc(t, params, 0, true, wallet.segwit)
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
 	}
 	backingFees = uint64(totalBytes+splitTxBaggage) * tBTC.MaxFeeRate
 	// 1 too few atoms
@@ -1288,7 +1414,7 @@ func TestFundEdges(t *testing.T) {
 }
 
 func TestFundEdgesSegwit(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1373,8 +1499,8 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// well.
 	wallet.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
-	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
-		return signFunc(t, params, 0, true, wallet.segwit)
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
 	}
 	backingFees = uint64(totalBytes+splitTxBaggageSegwit) * tBTC.MaxFeeRate
 	v := swapVal + backingFees - 1
@@ -1405,16 +1531,11 @@ func TestFundEdgesSegwit(t *testing.T) {
 }
 
 func TestSwap(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testSwap(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testSwap(t, false)
-	})
+	runRubric(t, testSwap)
 }
 
-func testSwap(t *testing.T, segwit bool) {
-	wallet, node, shutdown, err := tNewWallet(segwit)
+func testSwap(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1456,17 +1577,15 @@ func testSwap(t *testing.T, segwit bool) {
 		FeeRate:    tBTC.MaxFeeRate,
 	}
 
-	signatureComplete := true
-
 	// Aim for 3 signature cycles.
 	sigSizer := 0
-	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
+	node.signFunc = func(tx *wire.MsgTx) {
 		var sizeTweak int
 		if sigSizer%2 == 0 {
 			sizeTweak = -2
 		}
 		sigSizer++
-		return signFunc(t, params, sizeTweak, signatureComplete, wallet.segwit)
+		signFunc(tx, sizeTweak, wallet.segwit)
 	}
 
 	// This time should succeed.
@@ -1523,12 +1642,12 @@ func testSwap(t *testing.T, segwit bool) {
 	node.signTxErr = nil
 
 	// incomplete signatures
-	signatureComplete = false
+	node.sigIncomplete = true
 	_, _, _, err = wallet.Swap(swaps)
 	if err == nil {
 		t.Fatalf("no error for incomplete signature rpc error")
 	}
-	signatureComplete = true
+	node.sigIncomplete = false
 
 	// Make sure we can succeed again.
 	_, _, _, err = wallet.Swap(swaps)
@@ -1546,16 +1665,11 @@ func (ai *TAuditInfo) Contract() dex.Bytes   { return nil }
 func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
 func TestRedeem(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testRedeem(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testRedeem(t, false)
-	})
+	runRubric(t, testRedeem)
 }
 
-func testRedeem(t *testing.T, segwit bool) {
-	wallet, node, shutdown, err := tNewWallet(segwit)
+func testRedeem(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1666,16 +1780,20 @@ func testRedeem(t *testing.T, segwit bool) {
 	// Wrong hash
 	var h chainhash.Hash
 	h[0] = 0x01
-	node.sendHash = &h
+	node.badSendHash = &h
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
-	node.sendHash = nil
+	node.badSendHash = nil
 }
 
 func TestSignMessage(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	runRubric(t, testSignMessage)
+}
+
+func testSignMessage(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -1767,21 +1885,15 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testAuditContract(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testAuditContract(t, false)
-	})
+	runRubric(t, testAuditContract)
 }
 
-func testAuditContract(t *testing.T, segwit bool) {
-	wallet, node, shutdown, err := tNewWallet(segwit)
+func testAuditContract(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	vout := uint32(5)
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
@@ -1805,15 +1917,30 @@ func testAuditContract(t *testing.T, segwit bool) {
 	}
 	pkScript, _ := txscript.PayToAddrScript(contractAddr)
 
-	node.txOutRes = &btcjson.GetTxOutResult{
+	// Prime a blockchain
+	const tipHeight = 10
+	const txBlockHeight = 9
+	for i := int64(1); i < tipHeight; i++ {
+		node.addRawTx(i, dummyTx())
+	}
+
+	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
+	blockHash, _ := node.addRawTx(txBlockHeight, tx)
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript} //spv
+	node.txOutRes = &btcjson.GetTxOutResult{                // rpc
 		Confirmations: 2,
 		Value:         float64(swapVal) / 1e8,
 		ScriptPubKey: btcjson.ScriptPubKeyResult{
 			Hex: hex.EncodeToString(pkScript),
 		},
 	}
+	node.getTransactionErr = WalletTransactionNotFound
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, now)
+	txHash := tx.TxHash()
+	const vout = 0
+	outPt := newOutPoint(&txHash, vout)
+
+	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1835,17 +1962,20 @@ func testAuditContract(t *testing.T, segwit bool) {
 
 	// GetTxOut error
 	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, now)
+	delete(node.getCFilterScripts, *blockHash)
+	delete(node.checkpoints, outPt)
+	_, err = wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
 	node.txOutErr = nil
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil, now)
+	_, err = wallet.AuditContract(toCoinID(&txHash, vout), badContract, nil, now)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
@@ -1862,34 +1992,15 @@ func (r *tReceipt) Coin() asset.Coin      { return r.coin }
 func (r *tReceipt) Contract() dex.Bytes   { return r.contract }
 
 func TestFindRedemption(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testFindRedemption(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testFindRedemption(t, false)
-	})
+	runRubric(t, testFindRedemption)
 }
 
-func testFindRedemption(t *testing.T, segwit bool) {
-	node := newTRPCClient()
-	cfg := &BTCCloneCFG{
-		WalletCFG: &asset.WalletConfig{
-			TipChange: func(error) {},
-		},
-		Symbol:              "btc",
-		Logger:              tLogger,
-		ChainParams:         &chaincfg.MainNetParams,
-		WalletInfo:          WalletInfo,
-		DefaultFallbackFee:  defaultFee,
-		DefaultFeeRateLimit: defaultFeeRateLimit,
-		Segwit:              segwit,
-	}
-
-	wallet, err := newWallet(&tRawRequester{node}, cfg, &dexbtc.Config{})
+func testFindRedemption(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	wallet.currentTip = &block{} // since we're not using Connect, run checkForNewBlocks after adding blocks
 
 	contractHeight := node.GetBestBlockHeight() + 1
 	otherTxid := "7a7b3b5c3638516bc8e7f19b4a3dec00f052a599fed5036c2b89829de2367bb6"
@@ -1943,7 +2054,8 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	// Now add the redemption.
 	redeemVin := makeRPCVin(&contractTxHash, contractVout, redemptionSigScript, redemptionWitness)
 	inputs = append(inputs, redeemVin)
-	node.addRawTx(contractHeight+2, makeRawTx([]dex.Bytes{otherScript}, inputs))
+	redeemBlockHash, _ := node.addRawTx(contractHeight+2, makeRawTx([]dex.Bytes{otherScript}, inputs))
+	node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
 
 	// Update currentTip from "RPC". Normally run() would do this.
 	wallet.checkForNewBlocks(tCtx)
@@ -1967,16 +2079,18 @@ func testFindRedemption(t *testing.T, segwit bool) {
 
 	// timeout finding missing redemption
 	redeemVin.PreviousOutPoint.Hash = *otherTxHash
-	ctx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
+	delete(node.getCFilterScripts, *redeemBlockHash)
+	timedCtx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
 	defer cancel()
-	_, k, err := wallet.FindRedemption(ctx, coinID)
-	if ctx.Err() == nil || k != nil {
+	_, k, err := wallet.FindRedemption(timedCtx, coinID)
+	if timedCtx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
 	}
 
 	node.blockchainMtx.Lock()
 	redeemVin.PreviousOutPoint.Hash = contractTxHash
+	node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
 	node.blockchainMtx.Unlock()
 
 	// Canceled context
@@ -2010,26 +2124,22 @@ func testFindRedemption(t *testing.T, segwit bool) {
 }
 
 func TestRefund(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testRefund(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testRefund(t, false)
-	})
+	runRubric(t, testRefund)
 }
 
-func testRefund(t *testing.T, segwit bool) {
-	wallet, node, shutdown, err := tNewWallet(segwit)
+func testRefund(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, contract, addr, _, _ := makeSwapContract(segwit, time.Hour*12)
+	_, _, pkScript, contract, addr, _, _ := makeSwapContract(segwit, time.Hour*12)
 
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
-	node.txOutRes = bigTxOut
+	node.txOutRes = bigTxOut // rpc
 	node.changeAddr = addr.String()
+	const feeSuggestion = 100
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -2039,8 +2149,17 @@ func testRefund(t *testing.T, segwit bool) {
 	}
 	node.privKeyForAddr = wif
 
-	contractOutput := newOutput(tTxHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
+	const vout = 0
+	tx.TxOut[vout].Value = 1e8
+	txHash := tx.TxHash()
+	outPt := newOutPoint(&txHash, vout)
+	blockHash, _ := node.addRawTx(1, tx)
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
+	node.getTransactionErr = WalletTransactionNotFound
+
+	contractOutput := newOutput(&txHash, 0, 1e8)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -2049,106 +2168,109 @@ func testRefund(t *testing.T, segwit bool) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract())
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
+	ensureErr := func(tag string) {
+		delete(node.checkpoints, outPt)
+		_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+		if err == nil {
+			t.Fatalf("no error for %q", tag)
+		}
+	}
+
 	// gettxout error
 	node.txOutErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for missing utxo")
-	}
+	node.getCFilterScripts[*blockHash] = nil
+	ensureErr("no utxo")
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 	node.txOutErr = nil
 
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract)
+	_, err = wallet.Refund(badContractOutput.ID(), badContract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
 
 	// Too small.
 	node.txOutRes = newTxOutResult(nil, 100, 2)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for value < fees")
-	}
+	tx.TxOut[0].Value = 2
+	ensureErr("value < fees")
 	node.txOutRes = bigTxOut
+	tx.TxOut[0].Value = 1e8
 
 	// getrawchangeaddress error
 	node.changeAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for getrawchangeaddress rpc error")
-	}
+	ensureErr("getchangeaddress error")
 	node.changeAddrErr = nil
 
 	// signature error
 	node.privKeyForAddrErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for dumpprivkey rpc error")
-	}
+	ensureErr("dumpprivkey error")
 	node.privKeyForAddrErr = nil
 
 	// send error
 	node.sendErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for sendrawtransaction rpc error")
-	}
+	ensureErr("send error")
 	node.sendErr = nil
 
 	// bad checkhash
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
-	node.sendHash = &badHash
-	_, err = wallet.Refund(contractOutput.ID(), contract)
-	if err == nil {
-		t.Fatalf("no error for tx hash")
-	}
-	node.sendHash = nil
+	node.badSendHash = &badHash
+	ensureErr("checkhash error")
+	node.badSendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
+
+	// TODO test spv spent
 }
 
 func TestLockUnlock(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	runRubric(t, testLockUnlock)
+}
+
+func testLockUnlock(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	pw := []byte("pass")
+
 	// just checking that the errors come through.
-	node.unlock = true
-	err = wallet.Unlock("pass")
+	err = wallet.Unlock(pw)
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
 	node.unlockErr = tErr
-	err = wallet.Unlock("pass")
+	err = wallet.Unlock(pw)
 	if err == nil {
 		t.Fatalf("no error for walletpassphrase error")
 	}
 
-	// same for locking
-	node.lock = true
-	err = wallet.Lock()
-	if err != nil {
-		t.Fatalf("lock error: %v", err)
+	// Locking can't error on SPV.
+	if walletType == walletTypeRPC {
+		err = wallet.Lock()
+		if err != nil {
+			t.Fatalf("lock error: %v", err)
+		}
+		node.lockErr = tErr
+		err = wallet.Lock()
+		if err == nil {
+			t.Fatalf("no error for walletlock rpc error")
+		}
 	}
-	node.lockErr = tErr
-	err = wallet.Lock()
-	if err == nil {
-		t.Fatalf("no error for walletlock rpc error")
-	}
+
 }
 
 type tSenderType byte
@@ -2158,55 +2280,66 @@ const (
 	tWithdrawSender
 )
 
-func testSender(t *testing.T, senderType tSenderType) {
-	wallet, node, shutdown, err := tNewWallet(true)
+func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
+	const feeSuggestion = 100
 	sender := func(addr string, val uint64) (asset.Coin, error) {
-		return wallet.PayFee(addr, val)
+		return wallet.PayFee(addr, val, defaultFee)
 	}
 	if senderType == tWithdrawSender {
 		sender = func(addr string, val uint64) (asset.Coin, error) {
-			return wallet.Withdraw(addr, val)
+			return wallet.Withdraw(addr, val, feeSuggestion)
 		}
 	}
-	addr := tP2PKHAddr
+	addr := btcAddr(segwit)
 	fee := float64(1) // BTC
 	node.setTxFee = true
-	node.changeAddr = tP2PKHAddr
-	node.sendToAddress = tTxID
+	node.changeAddr = btcAddr(segwit).String()
+
+	pkScript, _ := txscript.PayToAddrScript(addr)
+	tx := makeRawTx([]dex.Bytes{randBytes(5), pkScript}, []*wire.TxIn{dummyInput()})
+	txHash := tx.TxHash()
+	const vout = 1
+	const blockHeight = 2
+	blockHash, _ := node.addRawTx(blockHeight, tx)
+
+	txB, _ := serializeMsgTx(tx)
+
+	node.sendToAddress = txHash.String()
 	node.getTransaction = &GetTransactionResult{
-		Details: []*WalletTxDetails{
-			{
-				Address:  tP2PKHAddr,
-				Category: TxCatReceive,
-				Vout:     1,
-				Amount:   -fee,
-			},
-		},
+		BlockHash:  blockHash.String(),
+		BlockIndex: blockHeight,
+		Hex:        txB,
 	}
 
 	unspents := []*ListUnspentResult{{
-		TxID:          tTxID,
-		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
+		TxID:          txHash.String(),
+		Address:       addr.String(),
 		Amount:        100,
 		Confirmations: 1,
-		Vout:          1,
-		ScriptPubKey:  tP2PKH,
+		Vout:          vout,
+		ScriptPubKey:  pkScript,
 		Safe:          true,
+		Spendable:     true,
 	}}
 	node.listUnspent = unspents
 
-	_, err = sender(addr, toSatoshi(fee))
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
+	}
+
+	_, err = sender(addr.String(), toSatoshi(fee))
 	if err != nil {
-		t.Fatalf("PayFee error: %v", err)
+		t.Fatalf("send error: %v", err)
 	}
 
 	// SendToAddress error
 	node.sendToAddressErr = tErr
-	_, err = sender(addr, 1e8)
+	_, err = sender(addr.String(), 1e8)
 	if err == nil {
 		t.Fatalf("no error for SendToAddress error: %v", err)
 	}
@@ -2214,66 +2347,108 @@ func testSender(t *testing.T, senderType tSenderType) {
 
 	// GetTransaction error
 	node.getTransactionErr = tErr
-	_, err = sender(addr, 1e8)
+	_, err = sender(addr.String(), 1e8)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error: %v", err)
 	}
 	node.getTransactionErr = nil
 
 	// good again
-	_, err = sender(addr, toSatoshi(fee))
+	_, err = sender(addr.String(), toSatoshi(fee))
 	if err != nil {
 		t.Fatalf("PayFee error afterwards: %v", err)
 	}
 }
 
 func TestPayFee(t *testing.T) {
-	testSender(t, tPayFeeSender)
+	runRubric(t, func(t *testing.T, segwit bool, walletType string) {
+		testSender(t, tPayFeeSender, segwit, walletType)
+	})
 }
 
 func TestWithdraw(t *testing.T) {
-	testSender(t, tWithdrawSender)
+	runRubric(t, func(t *testing.T, segwit bool, walletType string) {
+		testSender(t, tWithdrawSender, segwit, walletType)
+	})
 }
 
 func TestConfirmations(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true)
+	runRubric(t, testConfirmations)
+}
+
+func testConfirmations(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	coinID := make([]byte, 36)
-	copy(coinID[:32], tTxHash[:])
+	// coinID := make([]byte, 36)
+	// copy(coinID[:32], tTxHash[:])
+
+	_, _, pkScript, contract, _, _, _ := makeSwapContract(segwit, time.Hour*12)
+	const tipHeight = 10
+	const swapHeight = 2
+	const spendHeight = 4
+	const expConfs = tipHeight - swapHeight + 1
+
+	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
+	blockHash, swapBlock := node.addRawTx(swapHeight, tx)
+	txHash := tx.TxHash()
+	coinID := toCoinID(&txHash, 0)
+	// Simulate a spending transaction, and advance the tip so that the swap
+	// has two confirmations.
+	spendingTx := dummyTx()
+	spendingTx.TxIn[0].PreviousOutPoint.Hash = txHash
+	spendingBlockHash, _ := node.addRawTx(spendHeight, spendingTx)
+
+	// Prime the blockchain
+	for i := int64(1); i <= tipHeight; i++ {
+		node.addRawTx(i, dummyTx())
+	}
+
+	matchTime := swapBlock.Header.Timestamp
 
 	// Bad coin id
-	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), nil, time.Time{})
+	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime)
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// Short path.
-	node.txOutRes = &btcjson.GetTxOutResult{
-		Confirmations: 2,
+	txOutRes := &btcjson.GetTxOutResult{
+		Confirmations: expConfs,
+		BestBlock:     blockHash.String(),
 	}
-	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	node.txOutRes = txOutRes
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
+	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
-	if confs != 2 {
-		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
+	if confs != expConfs {
+		t.Fatalf("confs not retrieved from gettxout path. expected %d, got %d", expConfs, confs)
 	}
 
-	// gettransaction error
+	// no tx output found
 	node.txOutRes = nil
+	node.getCFilterScripts[*blockHash] = nil
 	node.getTransactionErr = tErr
-	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
+	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 	node.getTransactionErr = nil
-	node.getTransaction = &GetTransactionResult{}
+	txB, _ := serializeMsgTx(tx)
+	node.getTransaction = &GetTransactionResult{
+		BlockHash: blockHash.String(),
+		Hex:       txB,
+	}
 
-	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, nil, time.Time{})
+	node.getCFilterScripts[*spendingBlockHash] = [][]byte{pkScript}
+	node.walletTxSpent = true
+	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err != nil {
 		t.Fatalf("error for spent swap: %v", err)
 	}
@@ -2283,16 +2458,11 @@ func TestConfirmations(t *testing.T) {
 }
 
 func TestSendEdges(t *testing.T) {
-	t.Run("segwit", func(t *testing.T) {
-		testSendEdges(t, true)
-	})
-	t.Run("non-segwit", func(t *testing.T) {
-		testSendEdges(t, false)
-	})
+	runRubric(t, testSendEdges)
 }
 
-func testSendEdges(t *testing.T, segwit bool) {
-	wallet, node, shutdown, err := tNewWallet(segwit)
+func testSendEdges(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -2327,8 +2497,8 @@ func testSendEdges(t *testing.T, segwit bool) {
 		return baseTx
 	}
 
-	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
-		return signFunc(t, params, 0, true, wallet.segwit)
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
 	}
 
 	tests := []struct {
@@ -2375,7 +2545,11 @@ func testSendEdges(t *testing.T, segwit bool) {
 }
 
 func TestSyncStatus(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(false)
+	runRubric(t, testSyncStatus)
+}
+
+func testSyncStatus(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -2396,18 +2570,21 @@ func TestSyncStatus(t *testing.T) {
 		t.Fatalf("progress not complete when loading last block")
 	}
 
-	node.getBlockchainInfoErr = tErr
+	node.getBlockchainInfoErr = tErr // rpc
+	node.getBestBlockHashErr = tErr  // spv
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
 	node.getBlockchainInfoErr = nil
+	node.getBestBlockHashErr = nil
 
 	wallet.tipAtConnect = 100
 	node.getBlockchainInfo = &getBlockchainInfoResult{
 		Headers: 200,
 		Blocks:  150,
 	}
+	node.addRawTx(150, makeRawTx([]dex.Bytes{randBytes(1)}, []*wire.TxIn{dummyInput()})) // spv needs this for BestBlock
 	synced, progress, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
@@ -2421,7 +2598,11 @@ func TestSyncStatus(t *testing.T) {
 }
 
 func TestPreSwap(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(false)
+	runRubric(t, testPreSwap)
+}
+
+func testPreSwap(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -2432,27 +2613,34 @@ func TestPreSwap(t *testing.T) {
 	swapVal := uint64(1e7)
 	lots := swapVal / tLotSize // 10 lots
 
-	const swapSize = 225
-	const totalBytes = 2250
-	const bestCaseBytes = 513
+	// var swapSize = 225
+	var totalBytes uint64 = 2250
+	var bestCaseBytes uint64 = 513
+	pkScript := tP2PKH
+	if segwit {
+		// swapSize = 153
+		totalBytes = 1530
+		bestCaseBytes = 540
+		pkScript = tP2WPKH
+	}
 
-	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
+	backingFees := totalBytes * tBTC.MaxFeeRate // total_bytes * fee_rate
 
 	minReq := swapVal + backingFees
 
-	p2pkhUnspent := &ListUnspentResult{
+	unspent := &ListUnspentResult{
 		TxID:          tTxID,
 		Address:       tP2PKHAddr,
 		Confirmations: 5,
-		ScriptPubKey:  tP2PKH,
+		ScriptPubKey:  pkScript,
 		Spendable:     true,
 		Solvable:      true,
 		Safe:          true,
 	}
-	unspents := []*ListUnspentResult{p2pkhUnspent}
+	unspents := []*ListUnspentResult{unspent}
 
 	setFunds := func(v uint64) {
-		p2pkhUnspent.Amount = float64(v) / 1e8
+		unspent.Amount = float64(v) / 1e8
 		node.listUnspent = unspents
 	}
 
@@ -2493,10 +2681,14 @@ func TestPreSwap(t *testing.T) {
 }
 
 func TestPreRedeem(t *testing.T) {
-	wallet, _, shutdown, _ := tNewWallet(false)
+	runRubric(t, testPreRedeem)
+}
+
+func testPreRedeem(t *testing.T, segwit bool, walletType string) {
+	wallet, _, shutdown, _ := tNewWallet(segwit, walletType)
 	defer shutdown()
 
-	nonSegRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
+	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
 		LotSize: 123456, // Doesn't actually matter
 		Lots:    5,
 	})
@@ -2505,29 +2697,19 @@ func TestPreRedeem(t *testing.T) {
 		t.Fatalf("PreRedeem non-segwit error: %v", err)
 	}
 
-	wallet.segwit = true
-
-	segwitRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize: 123456,
-		Lots:    5,
-	})
-	if err != nil {
-		t.Fatalf("PreRedeem segwit error: %v", err)
-	}
-
 	// Just a couple of sanity checks.
-	if nonSegRedeem.Estimate.RealisticBestCase >= nonSegRedeem.Estimate.RealisticWorstCase {
+	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
 	}
-
-	if segwitRedeem.Estimate.RealisticWorstCase >= nonSegRedeem.Estimate.RealisticWorstCase {
-		t.Fatalf("segwit > non-segwit")
-	}
-
 }
 
 func TestTryRedemptionRequests(t *testing.T) {
-	wallet, node, shutdown, _ := tNewWallet(false)
+	// runRubric(t, testTryRedemptionRequests)
+	testTryRedemptionRequests(t, true, walletTypeSPV)
+}
+
+func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, _ := tNewWallet(segwit, walletType)
 	defer shutdown()
 
 	const swapVout = 1
@@ -2538,7 +2720,7 @@ func TestTryRedemptionRequests(t *testing.T) {
 		return &h
 	}
 
-	otherScript, _ := txscript.PayToAddrScript(btcAddr(false))
+	otherScript, _ := txscript.PayToAddrScript(btcAddr(segwit))
 	otherInput := []*wire.TxIn{makeRPCVin(randHash(), 0, randBytes(5), nil)}
 	otherTx := func() *wire.MsgTx {
 		return makeRawTx([]dex.Bytes{otherScript}, otherInput)
@@ -2553,19 +2735,19 @@ func TestTryRedemptionRequests(t *testing.T) {
 		}
 	}
 
-	getTx := func(blockHeight int64, txIdx int) *wire.MsgTx {
+	getTx := func(blockHeight int64, txIdx int) (*wire.MsgTx, *chainhash.Hash) {
 		if blockHeight == -1 {
 			// mempool
 			txHash := randHash()
 			tx := otherTx()
 			node.mempoolTxs[*txHash] = tx
-			return tx
+			return tx, nil
 		}
-		_, blk := node.getBlockAtHeight(blockHeight)
+		blockHash, blk := node.getBlockAtHeight(blockHeight)
 		for len(blk.msgBlock.Transactions) <= txIdx {
 			blk.msgBlock.Transactions = append(blk.msgBlock.Transactions, otherTx())
 		}
-		return blk.msgBlock.Transactions[txIdx]
+		return blk.msgBlock.Transactions[txIdx], blockHash
 	}
 
 	type tRedeem struct {
@@ -2583,17 +2765,28 @@ func TestTryRedemptionRequests(t *testing.T) {
 		}
 
 		swapTxHash := randHash()
-		secret, _, pkScript, contract, _, _, _ := makeSwapContract(false, time.Hour*12)
+		secret, _, pkScript, contract, _, _, _ := makeSwapContract(segwit, time.Hour*12)
 
 		if !r.notRedeemed {
-			redeemTx := getTx(r.redeemBlockHeight, r.redeemTxIdx)
+			redeemTx, redeemBlockHash := getTx(r.redeemBlockHeight, r.redeemTxIdx)
 
-			redemptionSigScript, _ := dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+			// redemptionSigScript, _ := dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
 			for len(redeemTx.TxIn) < r.redeemVin {
 				redeemTx.TxIn = append(redeemTx.TxIn, makeRPCVin(randHash(), 0, nil, nil))
 			}
 
-			redeemTx.TxIn = append(redeemTx.TxIn, makeRPCVin(swapTxHash, swapVout, redemptionSigScript, nil))
+			var redemptionSigScript []byte
+			var redemptionWitness [][]byte
+			if segwit {
+				redemptionWitness = dexbtc.RedeemP2WSHContract(contract, randBytes(73), randBytes(33), secret)
+			} else {
+				redemptionSigScript, _ = dexbtc.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+			}
+
+			redeemTx.TxIn = append(redeemTx.TxIn, makeRPCVin(swapTxHash, swapVout, redemptionSigScript, redemptionWitness))
+			if redeemBlockHash != nil {
+				node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
+			}
 		}
 
 		req := &findRedemptionReq{
@@ -2602,7 +2795,7 @@ func TestTryRedemptionRequests(t *testing.T) {
 			blockHeight:  int32(swapHeight),
 			resultChan:   make(chan *findRedemptionResult, 1),
 			pkScript:     pkScript,
-			contractHash: hashContract(false, contract),
+			contractHash: hashContract(segwit, contract),
 		}
 		wallet.findRedemptionQueue[req.outPt] = req
 		return req
@@ -2614,6 +2807,15 @@ func TestTryRedemptionRequests(t *testing.T) {
 		redeems          []*tRedeem
 		forcedErr        bool
 		canceledCtx      bool
+	}
+
+	isMempoolTest := func(tt *test) bool {
+		for _, r := range tt.redeems {
+			if r.redeemBlockHeight == -1 {
+				return true
+			}
+		}
+		return false
 	}
 
 	tests := []*test{
@@ -2710,6 +2912,11 @@ func TestTryRedemptionRequests(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		// Skip tests where we're expected to see mempool in SPV.
+		if walletType == walletTypeSPV && isMempoolTest(tt) {
+			continue
+		}
+
 		node.truncateChains()
 		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
 		node.getBestBlockHashErr = nil

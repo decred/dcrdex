@@ -22,6 +22,28 @@ const (
 	ErrUnsupported    = dex.ErrorKind("unsupported")
 )
 
+type WalletDefinition struct {
+	// If seeded is true, the Create method will be called with a deterministic
+	// seed that should be used to set the wallet key(s). This would be
+	// true for built-in wallets.
+	Seeded bool `json:"seeded"`
+	// Type is a string identifying the wallet type.
+	Type string `json:"type"`
+	// Tab is a displayable string for the wallet type. One or two words. First
+	// word capitalized. Displayed on a wallet selection tab.
+	Tab string `json:"tab"`
+	// Description is a short description of the wallet, suitable for a tooltip.
+	Description string `json:"description"`
+	// DefaultConfigPath is the default file path that the Wallet uses for its
+	// configuration file. Probably only useful for unseeded / external wallets.
+	DefaultConfigPath string `json:"configpath"`
+	// ConfigOpts is a slice of expected Wallet config options, with the display
+	// name, config key (for parsing the option from a config file/text) and
+	// description for each option. This can be used to request config info from
+	// users e.g. via dynamically generated GUI forms.
+	ConfigOpts []*ConfigOption `json:"configopts"`
+}
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
@@ -30,14 +52,15 @@ type WalletInfo struct {
 	// major changes are made to internal details such as coin ID encoding and
 	// contract structure that must be common to a server's.
 	Version uint32
-	// DefaultConfigPath is the default file path that the Wallet uses for its
-	// configuration file.
-	DefaultConfigPath string `json:"configpath"`
-	// ConfigOpts is a slice of expected Wallet config options, with the display
-	// name, config key (for parsing the option from a config file/text) and
-	// description for each option. This can be used to request config info from
-	// users e.g. via dynamically generated GUI forms.
-	ConfigOpts []*ConfigOption `json:"configopts"`
+	// AvailableWallets is an ordered list of available WalletDefinition. The
+	// first WalletDefinition is considered the default, and might, for instance
+	// be the initial form offered to the user for configuration, with others
+	// available to select.
+	AvailableWallets []*WalletDefinition `json:"availablewallets"`
+	// LegacyWalletIndex should be set for assets that existed before wallets
+	// were typed. The index should point to the WalletDefinition that should
+	// be assumed when the type is provided as an empty string.
+	LegacyWalletIndex int `json:"emptyidx"`
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
@@ -59,6 +82,9 @@ type ConfigOption struct {
 // WalletConfig is the configuration settings for the wallet. WalletConfig
 // is passed to the wallet constructor.
 type WalletConfig struct {
+	// Type is the type of wallet, corresponding to the Type field of an
+	// available WalletDefinition.
+	Type string
 	// Settings is the key-value store of wallet connection parameters. The
 	// Settings are supplied by the user according the the WalletInfo's
 	// ConfigOpts.
@@ -168,20 +194,20 @@ type Wallet interface {
 	// as the wallet does not store it, even though it was known when the init
 	// transaction was created. The client should store this information for
 	// persistence across sessions.
-	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
+	Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// OwnsAddress indicates if an address belongs to the wallet.
 	OwnsAddress(address string) (bool, error)
 	// Unlock unlocks the exchange wallet.
-	Unlock(pw string) error
+	Unlock(pw []byte) error
 	// Lock locks the exchange wallet.
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, feeAmt uint64) (Coin, error)
+	PayFee(address string, regFee, feeRateSuggestion uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -193,7 +219,7 @@ type Wallet interface {
 	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value uint64) (Coin, error)
+	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.

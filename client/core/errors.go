@@ -43,6 +43,8 @@ const (
 	accountRetrieveErr
 	accountDisableErr
 	suspendedAcctErr
+	existenceCheckErr
+	createWalletErr
 )
 
 // Error is an error message and an error code.

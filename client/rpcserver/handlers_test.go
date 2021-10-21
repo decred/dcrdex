@@ -23,6 +23,9 @@ import (
 
 func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
 	if wantErrCode != -1 {
+		if payload.Error == nil {
+			return errors.New("no error")
+		}
 		if payload.Error.Code != wantErrCode {
 			return errors.New("wrong error code")
 		}
@@ -267,6 +270,7 @@ func TestHandleNewWallet(t *testing.T) {
 		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
+			"rpc",
 			"username=tacotime",
 			`{"field":"value"}`,
 		},
@@ -275,6 +279,7 @@ func TestHandleNewWallet(t *testing.T) {
 		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
+			"rpc",
 			"username=tacotime",
 			`{"field":  value"}`,
 		},
@@ -322,6 +327,7 @@ func TestHandleNewWallet(t *testing.T) {
 		}
 		r := &RPCServer{core: tc, wsServer: wsServer}
 		payload := handleNewWallet(r, test.params)
+
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatalf("%s: %v", test.name, err)

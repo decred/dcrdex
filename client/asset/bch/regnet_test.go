@@ -23,8 +23,6 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
-const alphaAddress = "bchreg:qqnm4z2tftyyeu3kvzzepmlp9mj3g6fvxgft570vll"
-
 var (
 	tLotSize  uint64 = 1e6
 	tRateStep uint64 = 10
@@ -40,5 +38,9 @@ var (
 )
 
 func TestWallet(t *testing.T) {
-	livetest.Run(t, NewWallet, alphaAddress, tLotSize, tBCH, false)
+	livetest.Run(t, &livetest.Config{
+		NewWallet: NewWallet,
+		LotSize:   tLotSize,
+		Asset:     tBCH,
+	})
 }

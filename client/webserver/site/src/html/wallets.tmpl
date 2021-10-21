@@ -92,7 +92,7 @@
     {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
     <div id="marketsBox" class="d-hide">
       <div class="fs22 text-center py-1"><span id="marketsFor"></span> [[[Markets]]]</div>
-      <div id="marketsCard" class="card">
+      <div id="marketsCard" class="card bg1 border1">
         <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
         <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
           <div class="asset-market p-1" id="oneMarket">
@@ -104,17 +104,17 @@
     </div>
 
     {{- /* NEW WALLET */ -}}
-    <form class="card bg1 position-relative d-hide" id="walletForm" autocomplete="off">
+    <form class="card position-relative d-hide" id="walletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <div class="card bg1 text-center fs20 d-hide" id="deposit">
+    <div class="card bg1 border1 text-center fs20 d-hide" id="deposit">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
         [[[Deposit]]]
         <img id="depositLogo" class="micro-icon mx-1">
@@ -131,7 +131,7 @@
     </div>
 
     {{- /* WITHDRAW */ -}}
-    <form class="card bg1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
+    <form class="card bg1 border1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
         [[[Withdraw]]]
         <img id="withdrawLogo" class="micro-icon mx-1">
@@ -168,7 +168,7 @@
     </form>
     
     {{- /* RECONFIGURE WALLET */ -}}
-    <form class="card bg1 pb-3 d-hide mt-3" id="walletReconfig" autocomplete="off">
+    <form class="card bg1 border1 pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
       <div class="bg2 px-2 py-1 text-center position-relative fs18">
         [[[Reconfigure]]]
         <img id="recfgAssetLogo" class="micro-icon mx-1">
@@ -179,6 +179,7 @@
       <div class="px-3 py-1" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
       </div>
+
       <div id="showChangePW" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
         <span id="showIcon" class="ico-plus fs8 pl-1"></span>
         <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
@@ -193,6 +194,17 @@
           <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
         </div>
       </div>
+
+      <div id="showChangeType" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+        <span id="changeTypeShowIcon" class="ico-plus fs8 pl-1"></span>
+        <span id="changeTypeHideIcon" class="ico-minus fs8 pl-1 d-hide"></span>
+        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1">[[[change the wallet type]]]</span>
+      </div>
+      <div id="changeWalletType" class="px-4 py-1 d-hide">
+        <select id="changeWalletTypeSelect"></select>
+      </div>
+
+
       <hr class="dashed my-2 mx-4">
       <div class="px-4 my-2">
         [[[pw_change_warn]]]

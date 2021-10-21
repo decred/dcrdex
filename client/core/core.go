@@ -1058,6 +1058,7 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
+	walletWait    sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
 	log           dex.Logger
@@ -1263,6 +1264,9 @@ func (c *Core) Run(ctx context.Context) {
 		wallet.Disconnect()
 	}
 
+	// Let the wallet backends shut down cleanly.
+	c.walletWait.Wait()
+
 	c.log.Infof("DEX client core off")
 }
 
@@ -1456,7 +1460,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 
 // connectWallet connects to the wallet and returns the deposit address
 // validated by the xcWallet after connecting. If the wallet backend is still
-// synching, this also starts a goroutine to monitor sync status, emitting
+// syncing, this also starts a goroutine to monitor sync status, emitting
 // WalletStateNotes on each progress update.
 func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 	err = w.Connect() // ensures valid deposit address
@@ -1496,6 +1500,7 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 					w.mtx.Unlock()
 					c.notify(newWalletStateNote(w.state()))
 					if synced {
+						c.updateWalletBalance(w)
 						return
 					}
 
@@ -1692,10 +1697,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return err
 	}
 
-	walletInfo, err := asset.Info(assetID)
+	walletDef, err := walletDefinition(assetID, form.Type)
 	if err != nil {
-		// Only possible error is unknown asset.
-		return fmt.Errorf("asset with BIP ID %d is unknown. Did you _ import your asset packages?", assetID)
+		return err
 	}
 
 	// Remove unused key-values from parsed settings before saving to db.
@@ -1703,8 +1707,8 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	// config files usually define more key-values than we need.
 	// Expected keys should be lowercase because config.Parse returns lowercase
 	// keys.
-	expectedKeys := make(map[string]bool, len(walletInfo.ConfigOpts))
-	for _, option := range walletInfo.ConfigOpts {
+	expectedKeys := make(map[string]bool, len(walletDef.ConfigOpts))
+	for _, option := range walletDef.ConfigOpts {
 		expectedKeys[strings.ToLower(option.Key)] = true
 	}
 	for key := range form.Config {
@@ -1713,9 +1717,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		}
 	}
 
-	if walletInfo.Seeded {
+	if walletDef.Seeded {
 		if len(walletPW) > 0 {
-			return fmt.Errorf("external password incompatible with built-in wallet")
+			return errors.New("external password incompatible with seeded wallet")
 		}
 		walletPW, err = c.createSeededWallet(assetID, crypter, form)
 		if err != nil {
@@ -1732,6 +1736,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	dbWallet := &db.Wallet{
+		Type:        walletDef.Type,
 		AssetID:     assetID,
 		Settings:    form.Config,
 		EncryptedPW: encPW,
@@ -1788,38 +1793,49 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	return nil
 }
 
-// createSeededWallet creates a seeded wallet with an asset-specific seed derived
-// deterministically from the app seed.
+// createSeededWallet initializes a seeded wallet with an asset-specific seed
+// derived deterministically from the app seed and a random password. The
+// password is returned for encrypting and storing.
 func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
-	creds := c.creds()
-	if creds == nil {
-		return nil, fmt.Errorf("no v2 credentials stored")
-	}
-
-	appSeed, err := crypter.Decrypt(creds.EncSeed)
+	seed, pw, err := c.assetSeedAndPass(assetID, crypter)
 	if err != nil {
-		return nil, fmt.Errorf("app seed decryption error: %w", err)
+		return nil, err
 	}
 
 	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
-
-	b := make([]byte, len(appSeed)+4)
-	copy(b, appSeed)
-	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
-
-	seed := blake256.Sum256(b)
-	pw := encode.RandomBytes(32)
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
-		Seed:     seed[:],
+		Type:     form.Type,
+		Seed:     seed,
 		Pass:     pw,
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
+		Logger:   c.log.SubLogger("CREATE"),
 	}); err != nil {
 		return nil, fmt.Errorf("Error creating wallet: %w", err)
 	}
 
 	return pw, nil
+}
+
+func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, pass []byte, err error) {
+	creds := c.creds()
+	if creds == nil {
+		return nil, nil, errors.New("no v2 credentials stored")
+	}
+
+	appSeed, err := crypter.Decrypt(creds.EncSeed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app seed decryption error: %w", err)
+	}
+
+	b := make([]byte, len(appSeed)+4)
+	copy(b, appSeed)
+	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
+
+	s := blake256.Sum256(b)
+	p := blake256.Sum256(seed)
+	return s[:], p[:], nil
 }
 
 // assetDataDirectory is a directory for a wallet to use for local storage.
@@ -1833,6 +1849,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	// Create the client/asset.Wallet.
 	assetID := dbWallet.AssetID
 	walletCfg := &asset.WalletConfig{
+		Type:     dbWallet.Type,
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
 			// asset.Wallet implementations should not need wait for the
@@ -1841,6 +1858,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			// of deadlocking a Core method that calls Wallet.Disconnect.
 			go c.tipChange(assetID, err)
 		},
+		DataDir: c.assetDataDirectory(assetID),
 	}
 
 	logger := c.log.SubLogger(unbip(assetID))
@@ -1860,9 +1878,10 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			OrderLocked:    orderLockedAmt,
 			ContractLocked: contractLockedAmt,
 		},
-		encPass: dbWallet.EncryptedPW,
-		address: dbWallet.Address,
-		dbID:    dbWallet.ID(),
+		encPass:    dbWallet.EncryptedPW,
+		address:    dbWallet.Address,
+		dbID:       dbWallet.ID(),
+		walletType: dbWallet.Type,
 	}, nil
 }
 
@@ -1999,10 +2018,15 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 // ReconfigureWallet updates the wallet configuration settings, it also updates
 // the password if newWalletPW is non-nil. Do not make concurrent calls to
 // ReconfigureWallet for the same asset.
-func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg map[string]string) error {
+func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) error {
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return newError(authErr, "ReconfigureWallet password error: %v", err)
+	}
+	assetID := form.AssetID
+	walletDef, err := walletDefinition(assetID, form.Type)
+	if err != nil {
+		return err
 	}
 	oldWallet, found := c.wallet(assetID)
 	if !found {
@@ -2010,16 +2034,70 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 			assetID, unbip(assetID))
 	}
 	seeded := oldWallet.Info().Seeded
-	if seeded && len(newWalletPW) > 0 {
+	if seeded && newWalletPW != nil {
 		return newError(passwordErr, "cannot set a password on a built-in wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
 	dbWallet := &db.Wallet{
+		Type:        form.Type,
 		AssetID:     oldWallet.AssetID,
-		Settings:    cfg,
+		Settings:    form.Config,
 		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
 		EncryptedPW: oldWallet.encPW(),
 		Address:     oldDepositAddr,
+	}
+
+	var restartOnFail bool
+
+	defer func() {
+		if restartOnFail {
+			if _, err := c.connectWallet(oldWallet); err != nil {
+				c.log.Errorf("Failed to reconnect wallet after a failed reconfiguration attempt: %v", err)
+			}
+		}
+	}()
+
+	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+	if err != nil {
+		return fmt.Errorf("failed to locate old wallet definition: %v", err)
+	}
+
+	if walletDef.Seeded {
+		if newWalletPW != nil {
+			return newError(passwordErr, "cannot set a password on a seeded wallet")
+		}
+
+		exists, err := asset.WalletExists(assetID, form.Type, c.assetDataDirectory(assetID), form.Config, c.net)
+		if err != nil {
+			return newError(existenceCheckErr, "error checking wallet pre-existence: %v", err)
+		}
+
+		if !exists {
+			newWalletPW, err = c.createSeededWallet(assetID, crypter, form)
+			if err != nil {
+				return newError(createWalletErr, "error creating new %q-type %s wallet: %v", form.Type, unbip(assetID), err)
+			}
+		} else if oldDef.Seeded {
+			_, newWalletPW, err = c.assetSeedAndPass(assetID, crypter)
+			if err != nil {
+				return newError(authErr, "error retrieving wallet password: %v", err)
+			}
+		}
+
+		if oldWallet.connected() {
+			oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+			// Error can be normal if the wallet was created before wallet types
+			// were a thing. Just assume this is an old wallet and therefore not
+			// seeded.
+			if err == nil && oldDef.Seeded {
+				oldWallet.Disconnect()
+				restartOnFail = true
+			}
+		}
+	} else if newWalletPW == nil && oldDef.Seeded {
+		// If we're switching from a seeded wallet and no password was provided,
+		// use empty string = wallet not encrypted.
+		newWalletPW = []byte{}
 	}
 
 	// Reload the wallet with the new settings.
@@ -2121,6 +2199,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, assetID uint32, cfg 
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
 
+	restartOnFail = false
+
 	if oldWallet.connected() {
 		// NOTE: Cannot lock the wallet backend because it may be the same as
 		// the one just connected.
@@ -2208,7 +2288,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		if err != nil {
 			return newError(encryptionErr, "encryption error: %v", err)
 		}
-		err = wallet.Wallet.Unlock(string(newPW))
+		err = wallet.Wallet.Unlock(newPW)
 		if err != nil {
 			return newError(authErr,
 				"setWalletPassword unlocking wallet error, is the new password correct?: %v", err)
@@ -2265,13 +2345,18 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 // AutoWalletConfig attempts to load setting from a wallet package's
 // asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
 // is returned.
-func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
-	winfo, err := asset.Info(assetID)
+func (c *Core) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {
+	walletDef, err := walletDefinition(assetID, walletType)
 	if err != nil {
-		return nil, fmt.Errorf("asset.Info error: %w", err)
+		return nil, err
 	}
-	settings, err := config.Parse(winfo.DefaultConfigPath)
-	c.log.Infof("%d %s configuration settings loaded from file at default location %s", len(settings), unbip(assetID), winfo.DefaultConfigPath)
+
+	if walletDef.DefaultConfigPath == "" {
+		return nil, fmt.Errorf("no config path found for %s wallet, type %q", unbip(assetID), walletType)
+	}
+
+	settings, err := config.Parse(walletDef.DefaultConfigPath)
+	c.log.Infof("%d %s configuration settings loaded from file at default location %s", len(settings), unbip(assetID), walletDef.DefaultConfigPath)
 	if err != nil {
 		c.log.Debugf("config.Parse could not load settings from default path: %v", err)
 		return make(map[string]string), nil
@@ -2625,7 +2710,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
+
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, dc.fetchFeeRate(feeAsset.ID))
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -3563,7 +3649,8 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	coin, err := wallet.Withdraw(address, value)
+	const feeSuggestion = 100
+	coin, err := wallet.Withdraw(address, value, feeSuggestion)
 	if err != nil {
 		subject, details := c.formatDetails(TopicWithdrawError, unbip(assetID), err)
 		c.notify(newWithdrawNote(TopicWithdrawError, subject, details, db.ErrorLevel))
@@ -6181,4 +6268,29 @@ func parseCert(host string, certI interface{}) ([]byte, error) {
 		return c, nil
 	}
 	return nil, fmt.Errorf("not a valid certificate type %T", certI)
+}
+
+// walletDefinition gets the registered WalletDefinition for the asset and
+// wallet type.
+func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinition, error) {
+	winfo, err := asset.Info(assetID)
+	if err != nil {
+		return nil, newError(assetSupportErr, "asset.Info error: %v", err)
+	}
+	if walletType == "" {
+		if len(winfo.AvailableWallets) <= winfo.LegacyWalletIndex {
+			return nil, fmt.Errorf("legacy wallet index out of range")
+		}
+		return winfo.AvailableWallets[winfo.LegacyWalletIndex], nil
+	}
+	var walletDef *asset.WalletDefinition
+	for _, def := range winfo.AvailableWallets {
+		if def.Type == walletType {
+			walletDef = def
+		}
+	}
+	if walletDef == nil {
+		return nil, fmt.Errorf("could not find wallet definition for asset %s, type %q", unbip(assetID), walletType)
+	}
+	return walletDef, nil
 }

@@ -113,12 +113,6 @@ func getVersionTx(tx *bbolt.Tx) (uint32, error) {
 }
 
 func v1Upgrade(dbtx *bbolt.Tx) error {
-	const oldVersion = 0
-
-	if err := ensureVersion(dbtx, oldVersion); err != nil {
-		return err
-	}
-
 	bkt := dbtx.Bucket(appBucket)
 	if bkt == nil {
 		return fmt.Errorf("appBucket not found")
@@ -173,12 +167,6 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 }
 
 func v3Upgrade(dbtx *bbolt.Tx) error {
-	const oldVersion = 2
-
-	if err := ensureVersion(dbtx, oldVersion); err != nil {
-		return err
-	}
-
 	// Upgrade the match proof. We just have to retrieve and re-store the
 	// buckets. The decoder will recognize the the old version and add the new
 	// field.
@@ -262,6 +250,24 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 
 	return credsBkt.Put(outerKeyParamsKey, legacyKeyParams)
 }
+
+// Probably not worth doing. Just let decodeWallet_v0 append the nil and pass it
+// up the chain.
+// func v6Upgrade(dbtx *bbolt.Tx) error {
+// 	wallets := dbtx.Bucket(walletsBucket)
+// 	if wallets == nil {
+// 		return fmt.Errorf("failed to open orders bucket")
+// 	}
+
+// 	return wallets.ForEach(func(wid, _ []byte) error {
+// 		wBkt := wallets.Bucket(wid)
+// 		w, err := dexdb.DecodeWallet(getCopy(wBkt, walletKey))
+// 		if err != nil {
+// 			return fmt.Errorf("DecodeWallet error: %v", err)
+// 		}
+// 		return wBkt.Put(walletKey, w.Encode())
+// 	})
+// }
 
 func ensureVersion(tx *bbolt.Tx, ver uint32) error {
 	dbVersion, err := getVersionTx(tx)
@@ -357,6 +363,9 @@ func moveActiveOrders(tx *bbolt.Tx) error {
 }
 
 func doUpgrade(tx *bbolt.Tx, upgrade upgradefunc, newVersion uint32) error {
+	if err := ensureVersion(tx, newVersion-1); err != nil {
+		return err
+	}
 	err := upgrade(tx)
 	if err != nil {
 		return fmt.Errorf("error upgrading DB: %v", err)

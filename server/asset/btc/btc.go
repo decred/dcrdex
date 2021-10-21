@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
@@ -107,7 +108,7 @@ func netParams(network dex.Network) (*chaincfg.Params, error) {
 // cache of block data for quick lookups. Backend implements asset.Backend, so
 // provides exported methods for DEX-related blockchain info.
 type Backend struct {
-	cfg *dexbtc.Config
+	cfg *dexbtc.RPCConfig
 	// The asset name (e.g. btc), primarily for logging purposes.
 	name string
 	// segwit should be set to true for blockchains that support segregated
@@ -157,7 +158,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	})
 }
 
-func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.Config) *Backend {
+func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.RPCConfig) *Backend {
 	feeEstimator := feeRate
 	if cloneCfg.FeeEstimator != nil {
 		feeEstimator = cloneCfg.FeeEstimator
@@ -203,11 +204,15 @@ type BackendCloneConfig struct {
 // See ReadCloneParams and CompatibilityCheck for more info.
 func NewBTCClone(cloneCfg *BackendCloneConfig) (*Backend, error) {
 	// Read the configuration parameters
-	cfg, err := dexbtc.LoadConfigFromPath(cloneCfg.ConfigPath, cloneCfg.Name, cloneCfg.Net, cloneCfg.Ports)
+	cfg := new(dexbtc.RPCConfig)
+	err := config.ParseInto(cloneCfg.ConfigPath, cfg)
 	if err != nil {
 		return nil, err
 	}
-
+	err = dexbtc.CheckRPCConfig(cfg, cloneCfg.Name, cloneCfg.Net, cloneCfg.Ports)
+	if err != nil {
+		return nil, err
+	}
 	return newBTC(cloneCfg, cfg), nil
 }
 

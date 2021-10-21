@@ -102,7 +102,7 @@ type AccountInfo struct {
 
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
-	return dbBytes{2}.
+	return versionedBytes(2).
 		AddData([]byte(ai.Host)).
 		AddData(ai.Cert).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
@@ -196,7 +196,7 @@ type AccountProof struct {
 
 // Encode encodes the AccountProof to a versioned blob.
 func (p *AccountProof) Encode() []byte {
-	return dbBytes{0}.
+	return versionedBytes(0).
 		AddData([]byte(p.Host)).
 		AddData(uint64Bytes(p.Stamp)).
 		AddData(p.Sig)
@@ -340,7 +340,7 @@ func (p *MatchProof) Encode() []byte {
 		selfRevoked = encode.ByteTrue
 	}
 
-	return dbBytes{MatchProofVer}.
+	return versionedBytes(MatchProofVer).
 		AddData(p.Script).
 		AddData(p.CounterContract).
 		AddData(p.SecretHash).
@@ -441,7 +441,7 @@ type OrderProof struct {
 
 // Encode encodes the OrderProof to a versioned blob.
 func (p *OrderProof) Encode() []byte {
-	return dbBytes{0}.AddData(p.DEXSig).AddData(p.Preimage)
+	return versionedBytes(0).AddData(p.DEXSig).AddData(p.Preimage)
 }
 
 // DecodeOrderProof decodes the versioned blob to an *OrderProof.
@@ -469,7 +469,7 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 
 // encodeAssetBalance serializes an asset.Balance.
 func encodeAssetBalance(bal *asset.Balance) []byte {
-	return dbBytes{0}.
+	return versionedBytes(0).
 		AddData(uint64Bytes(bal.Available)).
 		AddData(uint64Bytes(bal.Immature)).
 		AddData(uint64Bytes(bal.Locked))
@@ -507,7 +507,7 @@ type Balance struct {
 
 // Encode encodes the Balance to a versioned blob.
 func (b *Balance) Encode() []byte {
-	return dbBytes{0}.
+	return versionedBytes(0).
 		AddData(encodeAssetBalance(&b.Balance)).
 		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
 }
@@ -546,6 +546,7 @@ func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
 // Wallet is information necessary to create an asset.Wallet.
 type Wallet struct {
 	AssetID     uint32
+	Type        string
 	Settings    map[string]string
 	Balance     *Balance
 	EncryptedPW []byte
@@ -554,11 +555,12 @@ type Wallet struct {
 
 // Encode encodes the Wallet to a versioned blob.
 func (w *Wallet) Encode() []byte {
-	return dbBytes{0}.
+	return versionedBytes(1).
 		AddData(uint32Bytes(w.AssetID)).
 		AddData(config.Data(w.Settings)).
 		AddData(w.EncryptedPW).
-		AddData([]byte(w.Address))
+		AddData([]byte(w.Address)).
+		AddData([]byte(w.Type))
 }
 
 // DecodeWallet decodes the versioned blob to a *Wallet. The Balance is NOT set;
@@ -571,21 +573,31 @@ func DecodeWallet(b []byte) (*Wallet, error) {
 	switch ver {
 	case 0:
 		return decodeWallet_v0(pushes)
+	case 1:
+		return decodeWallet_v1(pushes)
 	}
 	return nil, fmt.Errorf("unknown DecodeWallet version %d", ver)
 }
 
 func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
-	if len(pushes) != 4 {
-		return nil, fmt.Errorf("decodeWallet_v0: expected 4 pushes, got %d", len(pushes))
+	// Add a push for wallet type.
+	pushes = append(pushes, []byte(""))
+	return decodeWallet_v1(pushes)
+}
+
+func decodeWallet_v1(pushes [][]byte) (*Wallet, error) {
+	if len(pushes) != 5 {
+		return nil, fmt.Errorf("decodeWallet_v1: expected 5 pushes, got %d", len(pushes))
 	}
-	idB, settingsB, keyB, addressB := pushes[0], pushes[1], pushes[2], pushes[3]
+	idB, settingsB, keyB := pushes[0], pushes[1], pushes[2]
+	addressB, typeB := pushes[3], pushes[4]
 	settings, err := config.Parse(settingsB)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode wallet settings")
 	}
 	return &Wallet{
 		AssetID:     intCoder.Uint32(idB),
+		Type:        string(typeB),
 		Settings:    settings,
 		EncryptedPW: keyB,
 		Address:     string(addressB),
@@ -602,7 +614,9 @@ func (w *Wallet) SID() string {
 	return strconv.Itoa(int(w.AssetID))
 }
 
-type dbBytes = encode.BuildyBytes
+func versionedBytes(v byte) encode.BuildyBytes {
+	return encode.BuildyBytes{v}
+}
 
 var uint64Bytes = encode.Uint64Bytes
 var uint32Bytes = encode.Uint32Bytes
@@ -616,7 +630,7 @@ type AccountBackup struct {
 
 // encodeDEXAccount serializes the details needed to backup a dex account.
 func encodeDEXAccount(acct *AccountInfo) []byte {
-	return dbBytes{1}.
+	return versionedBytes(1).
 		AddData([]byte(acct.Host)).
 		AddData(acct.LegacyEncKey).
 		AddData(acct.DEXPubKey.SerializeCompressed()).
@@ -655,7 +669,7 @@ func decodeDEXAccount(acctB []byte) (*AccountInfo, error) {
 
 // Serialize encodes an account backup as bytes.
 func (ab *AccountBackup) Serialize() []byte {
-	backup := dbBytes{0}.AddData(ab.KeyParams)
+	backup := versionedBytes(0).AddData(ab.KeyParams)
 	for _, acct := range ab.Accounts {
 		backup = backup.AddData(encodeDEXAccount(acct))
 	}
@@ -852,7 +866,7 @@ func decodeNotification_v1(pushes [][]byte) (*Notification, error) {
 
 // Encode encodes the Notification to a versioned blob.
 func (n *Notification) Encode() []byte {
-	return dbBytes{1}.
+	return versionedBytes(1).
 		AddData([]byte(n.NoteType)).
 		AddData([]byte(n.SubjectText)).
 		AddData([]byte(n.DetailText)).

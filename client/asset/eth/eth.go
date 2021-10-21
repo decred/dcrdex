@@ -77,24 +77,33 @@ var (
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:              "Ethereum",
-		DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
-		ConfigOpts:        configOpts,
-		UnitInfo:          dexeth.UnitInfo,
-		Seeded:            true,
+		Name:     "Ethereum",
+		UnitInfo: dexeth.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:              "geth",
+				Tab:               "Internal",
+				Description:       "Use the built-in DEX wallet with snap sync",
+				ConfigOpts:        configOpts,
+				Seeded:            true,
+				DefaultConfigPath: defaultAppDir, // Incorrect if changed by user?
+			},
+		},
 	}
+
 	mainnetContractAddr = common.HexToAddress("")
 )
 
 // Check that Driver implements asset.Driver.
 var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
 
 // Driver implements asset.Driver.
 type Driver struct{}
 
-func (d *Driver) Create(params *asset.CreateWalletParams) error {
-	return CreateWallet(params)
-}
+// Check that Driver implements Driver and Creator.
+var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
 
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -113,6 +122,15 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+// Exists checks the existence of the wallet.
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	return false, errors.New("unimplemented")
+}
+
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	return CreateWallet(params)
 }
 
 // rawWallet is an unexported return type from the eth client. Watch for changes at
@@ -710,7 +728,7 @@ func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (re
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (*ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
+func (*ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	return nil, asset.ErrNotImplemented
 }
 
@@ -720,8 +738,8 @@ func (eth *ExchangeWallet) Address() (string, error) {
 }
 
 // Unlock unlocks the exchange wallet.
-func (eth *ExchangeWallet) Unlock(pw string) error {
-	return eth.node.unlock(eth.ctx, pw, eth.acct)
+func (eth *ExchangeWallet) Unlock(pw []byte) error {
+	return eth.node.unlock(eth.ctx, string(pw), eth.acct)
 }
 
 // Lock locks the exchange wallet.
@@ -759,7 +777,7 @@ func (eth *ExchangeWallet) Locked() bool {
 // the registration fee, and the fee rate is taken from the DEX configuration.
 //
 // NOTE: PayFee is not intended to be used with Ethereum at this time.
-func (*ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
+func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
 	return nil, asset.ErrNotImplemented
 }
 
@@ -782,7 +800,7 @@ func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt, gasPrice *big.In
 //
 // TODO: Return the asset.Coin.
 // TODO: Subtract fees from the value.
-func (eth *ExchangeWallet) Withdraw(addr string, value uint64) (asset.Coin, error) {
+func (eth *ExchangeWallet) Withdraw(addr string, value, feeSuggestion uint64) (asset.Coin, error) {
 	bigVal := big.NewInt(0).SetUint64(value)
 	gweiFactorBig := big.NewInt(srveth.GweiFactor)
 	_, err := eth.sendToAddr(common.HexToAddress(addr),

@@ -400,12 +400,16 @@ type TCore struct {
 // TDriver implements the interface required of all exchange wallets.
 type TDriver struct{}
 
-func (*TDriver) Open(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error) {
-	return nil, nil
+func (drv *TDriver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	return true, nil
 }
 
-func (*TDriver) Create(*asset.CreateWalletParams) error {
+func (drv *TDriver) Create(*asset.CreateWalletParams) error {
 	return nil
+}
+
+func (*TDriver) Open(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error) {
+	return nil, nil
 }
 
 func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
@@ -454,7 +458,10 @@ func (c *TCore) InitializeClient(pw, seed []byte) error {
 	return nil
 }
 func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, error) {
-	return tExchanges[host], nil
+	if xc := tExchanges[host]; xc != nil {
+		return xc, nil
+	}
+	return tExchanges[firstDEX], nil
 }
 
 // DiscoverAccount - use secondDEX = "thisdexwithalongname.com" to get paid = true.
@@ -1022,8 +1029,6 @@ var winfos = map[uint32]*asset.WalletInfo{
 	2:  ltc.WalletInfo,
 	42: dcr.WalletInfo,
 	22: {
-		Name:       "Monacoin",
-		ConfigOpts: configOpts,
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
 			Conventional: dex.Denomination{
@@ -1031,10 +1036,21 @@ var winfos = map[uint32]*asset.WalletInfo{
 				ConversionFactor: 1e8,
 			},
 		},
+		Name: "Monacoin",
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:   "1",
+				Tab:    "Native",
+				Seeded: true,
+			},
+			{
+				Type:       "2",
+				Tab:        "External",
+				ConfigOpts: configOpts,
+			},
+		},
 	},
 	3: {
-		Name:       "Dogecoin",
-		ConfigOpts: configOpts,
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
 			Conventional: dex.Denomination{
@@ -1042,10 +1058,12 @@ var winfos = map[uint32]*asset.WalletInfo{
 				ConversionFactor: 1e8,
 			},
 		},
+		Name: "Dogecoin",
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
 	},
 	28: {
-		Name:       "Vertcoin",
-		ConfigOpts: configOpts,
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "Sats",
 			Conventional: dex.Denomination{
@@ -1053,17 +1071,10 @@ var winfos = map[uint32]*asset.WalletInfo{
 				ConversionFactor: 1e8,
 			},
 		},
-	},
-	141: {
-		Name:       "Komodo",
-		ConfigOpts: configOpts,
-		UnitInfo: dex.UnitInfo{
-			AtomicUnit: "Sats",
-			Conventional: dex.Denomination{
-				Unit:             "KMD",
-				ConversionFactor: 1e8,
-			},
-		},
+		Name: "Vertcoin",
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
 	},
 }
 
@@ -1088,6 +1099,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Balance:   c.balances[assetID],
 		Units:     winfos[assetID].UnitInfo.AtomicUnit,
 		Encrypted: true,
+		Synced:    true,
 	}
 }
 
@@ -1174,8 +1186,8 @@ func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {
 	return c.wallets[assetID].settings, nil
 }
 
-func (c *TCore) ReconfigureWallet(aPW, nPW []byte, assetID uint32, cfg map[string]string) error {
-	c.wallets[assetID].settings = cfg
+func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
+	c.wallets[form.AssetID].settings = form.Config
 	return nil
 }
 
@@ -1202,7 +1214,7 @@ func (c *TCore) User() *core.User {
 	return user
 }
 
-func (c *TCore) AutoWalletConfig(assetID uint32) (map[string]string, error) {
+func (c *TCore) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {
 	return map[string]string{
 		"username": "tacotime",
 		"password": "abc123",
@@ -1213,13 +1225,12 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
-		141: mkSupportedAsset("kmd", c.wallets[141], c.balances[141]),
+		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
 	}
 }
 

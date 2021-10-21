@@ -53,7 +53,8 @@ type registrationForm struct {
 
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
-	AssetID uint32 `json:"assetID"`
+	AssetID    uint32 `json:"assetID"`
+	WalletType string `json:"walletType"`
 	// These are only used if the Decred wallet does not already exist. In that
 	// case, these parameters will be used to create the wallet.
 	Config map[string]string `json:"config"`

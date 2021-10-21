@@ -128,8 +128,8 @@ export default class Doc {
   }
 
   /* empty removes all child nodes from the specified element. */
-  static empty (el) {
-    while (el.firstChild) el.removeChild(el.firstChild)
+  static empty (...els) {
+    for (const el of els) while (el.firstChild) el.removeChild(el.firstChild)
   }
 
   /*

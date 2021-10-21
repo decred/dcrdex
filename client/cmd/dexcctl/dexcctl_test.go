@@ -129,15 +129,15 @@ func TestReadTextFile(t *testing.T) {
 	}, {
 		name:        "newwallet ok, with cfg file",
 		cmd:         "newwallet",
-		args:        []string{"42", "./w.conf"},
+		args:        []string{"42", "rpc", "./w.conf"},
 		txtFilePath: "./w.conf",
 		txtToSave:   cfgTxt,
-		want:        []string{"42", cfgTxt},
+		want:        []string{"42", "rpc", cfgTxt},
 	}, {
 		name: "newwallet ok, no cfg file",
 		cmd:  "newwallet",
-		args: []string{"42"},
-		want: []string{"42"},
+		args: []string{"42", "rpc"},
+		want: []string{"42", "rpc"},
 	}}
 	for _, test := range tests {
 		if test.txtFilePath != "" {

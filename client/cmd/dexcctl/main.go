@@ -69,7 +69,7 @@ var promptPasswords = map[string][]string{
 var optionalTextFiles = map[string]int{
 	"getdexconfig": 1,
 	"register":     3,
-	"newwallet":    1,
+	"newwallet":    2,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting

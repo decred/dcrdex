@@ -2,6 +2,7 @@ package btc
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec"
@@ -13,7 +14,7 @@ import (
 
 type Wallet interface {
 	RawRequester
-	connect(ctx context.Context) error
+	connect(ctx context.Context, wg *sync.WaitGroup) error
 	estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
 	sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 	getTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
@@ -30,7 +31,7 @@ type Wallet interface {
 	addressWPKH() (btcutil.Address, error)
 	signTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
 	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
-	walletUnlock(pass string) error
+	walletUnlock(pw []byte) error
 	walletLock() error
 	sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error)
 	locked() bool

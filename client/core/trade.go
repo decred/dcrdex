@@ -1217,7 +1217,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if didUnlock {
 			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a refund", t.wallets.fromAsset.Symbol)
 		}
-		refunded, err := t.refundMatches(refunds)
+		refunded, err := c.refundMatches(t, refunds)
 		corder := t.coreOrderInternal()
 		ui := t.wallets.fromWallet.Info().UnitInfo
 		if err != nil {
@@ -1926,7 +1926,7 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
+func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, error) {
 	errs := newErrorSet("refundMatches: order %s - ", t.ID())
 
 	refundWallet, refundAsset := t.wallets.fromWallet, t.wallets.fromAsset // refunding to our wallet
@@ -1961,7 +1961,8 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
+		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID, refundAsset.ID == t.Base())
+		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {
 				match.refundErr = err
@@ -2028,7 +2029,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
-			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %s: %v",
+			t.dc.log.Errorf("Failed to audit contract coin %v (%s) for match %s: %v",
 				contractID, t.wallets.toAsset.Symbol, match, err)
 			// Don't revoke in case server sends a revised audit request before
 			// the match is revoked.
@@ -2074,6 +2075,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 	var auditInfo *asset.AuditInfo
 	var tries int
 	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
+	tLastWarning := time.Now()
 	t.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
@@ -2092,7 +2094,8 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 						"Check your internet and wallet connections!", contractID, contractSymb))
 					return wait.DontTryAgain
 				}
-				if tries > 0 && tries%12 == 0 {
+				if time.Since(tLastWarning) > 30*time.Minute {
+					tLastWarning = time.Now()
 					subject, detail := t.formatDetails(TopicAuditTrouble, contractID, contractSymb, match)
 					t.notify(newOrderNote(TopicAuditTrouble, subject, detail, db.WarningLevel, t.coreOrder()))
 				}

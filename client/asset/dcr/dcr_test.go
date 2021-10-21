@@ -151,13 +151,10 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		Settings: map[string]string{
-			"account": "default",
-		},
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet, err := unconnectedWallet(walletCfg, &Config{}, tChainParams, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &Config{Account: "default"}, tChainParams, tLogger)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
@@ -1884,6 +1881,7 @@ func TestRefund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
+	const feeSuggestion = 100
 
 	bigTxOut := makeGetTxOutRes(2, 5, nil)
 	bigOutID := newOutPoint(tTxHash, 0)
@@ -1898,7 +1896,7 @@ func TestRefund(t *testing.T) {
 	}
 
 	contractOutput := newOutput(tTxHash, 0, 1e8, wire.TxTreeRegular)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -1907,14 +1905,14 @@ func TestRefund(t *testing.T) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.contract)
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	// gettxout error
 	node.txOutErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for missing utxo")
 	}
@@ -1922,14 +1920,14 @@ func TestRefund(t *testing.T) {
 
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8, wire.TxTreeRegular)
-	_, err = wallet.Refund(badContractOutput.ID(), randBytes(50))
+	_, err = wallet.Refund(badContractOutput.ID(), randBytes(50), feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
 
 	// Too small.
 	node.txOutRes[bigOutID] = newTxOutResult(nil, 100, 2)
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for value < fees")
 	}
@@ -1937,7 +1935,7 @@ func TestRefund(t *testing.T) {
 
 	// signature error
 	node.privWIFErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -1945,7 +1943,7 @@ func TestRefund(t *testing.T) {
 
 	// send error
 	node.sendRawErr = tErr
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for sendrawtransaction rpc error")
 	}
@@ -1955,14 +1953,14 @@ func TestRefund(t *testing.T) {
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.sendRawHash = &badHash
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for tx hash")
 	}
 	node.sendRawHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract)
+	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -1985,14 +1983,15 @@ func testSender(t *testing.T, senderType tSenderType) {
 	var unspentVal uint64 = 100e8
 	funName := "PayFee"
 	sender := func(addr string, val uint64) (asset.Coin, error) {
-		return wallet.PayFee(addr, val)
+		return wallet.PayFee(addr, val, defaultFee)
 	}
 	if senderType == tWithdrawSender {
+		const feeSuggestion = 100
 		funName = "Withdraw"
 		// For withdraw, test with unspent total = withdraw value
 		unspentVal = sendVal
 		sender = func(addr string, val uint64) (asset.Coin, error) {
-			return wallet.Withdraw(addr, val)
+			return wallet.Withdraw(addr, val, feeSuggestion)
 		}
 	}
 	addr := tPKHAddr.String()

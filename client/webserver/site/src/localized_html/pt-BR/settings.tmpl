@@ -61,36 +61,36 @@
   <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
     
     {{- /* DEX ADDRESS */ -}}
-    <form class="card mx-auto my-5 bg1 text-left" id="dexAddrForm" autocomplete="off">
+    <form class="card mx-auto my-5 bg1 border1 text-left" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm"}}
     </form>
     
     {{- /* CONFIRM REGISTRATION */ -}}
-    <form class="card mx-auto my-5 bg1 text-left d-hide" id="confirmRegForm">
+    <form class="card mx-auto my-5 bg1 border1 text-left d-hide" id="confirmRegForm">
       {{template "confirmRegistrationForm" .}}
     </form>
 
     {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
-    <form class="card bg1 d-hide" id="authorizeAccountExportForm">
+    <form class="card bg1 border1 d-hide" id="authorizeAccountExportForm">
       {{template "authorizeAccountExportForm"}}
     </form>
 
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
-    <form class="card bg1 d-hide" id="authorizeAccountImportForm">
+    <form class="card bg1 border1 d-hide" id="authorizeAccountImportForm">
       {{template "authorizeAccountImportForm" .}}
     </form>
 
     {{- /* DISABLE ACCOUNT */ -}}
-    <form class="card bg1 d-hide" id="disableAccountForm">
+    <form class="card bg1 border1 d-hide" id="disableAccountForm">
       {{template "disableAccountForm"}}
     </form>
 	
 	{{- /* CHANGE APP PASSWORD */ -}}
-    <form class="card bg1 d-hide" id="changeAppPWForm">
+    <form class="card bg1 border1 d-hide" id="changeAppPWForm">
       {{template "changeAppPWForm"}}
     </form>
     {{- /* EXPORT SEED AUTHORIZATION */ -}}
-    <form class="card bg1 p-4 d-hide position-relative" id="exportSeedAuth">
+    <form class="card bg1 border1 p-4 d-hide position-relative" id="exportSeedAuth">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="fs16">
         Informar sua senha do aplicativo para mostrar sua seed. Tenha certeza que mais ninguém pode ver sua tela.
@@ -107,7 +107,7 @@
     </form>
 
     {{- /* SEED DISPLAY */ -}}
-    <form class="card bg1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
+    <form class="card bg1 border1 p-4 position-relative d-hide" id="authorizeSeedDisplay">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       Não compartilhe e não perca sua seed.
       <div id="seedDiv"></div>

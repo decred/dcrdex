@@ -14,7 +14,7 @@ export class NewWalletForm {
     this.form = form
     this.currentAsset = null
     this.pwCache = pwCache
-    const fields = this.fields = Doc.idDescendants(form)
+    const page = this.page = Doc.idDescendants(form)
     this.refresh()
 
     if (closerFn) {
@@ -24,26 +24,33 @@ export class NewWalletForm {
       })
     }
 
-    // WalletConfigForm will set the global app variable.
-    this.subform = new WalletConfigForm(fields.walletSettings, true)
+    Doc.empty(page.walletTabTmpl)
+    page.walletTabTmpl.removeAttribute('id')
 
-    bind(form, fields.submitAdd, async () => {
-      const pw = fields.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
+    // WalletConfigForm will set the global app variable.
+    this.subform = new WalletConfigForm(page.walletSettings, true)
+
+    Doc.bind(this.subform.showOther, 'click', () => Doc.show(page.walletSettingsHeader))
+
+    bind(form, page.submitAdd, async () => {
+      const pw = page.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
       if (!pw && !State.passwordIsCached()) {
-        fields.newWalletErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-        Doc.show(fields.newWalletErr)
+        page.newWalletErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
+        Doc.show(page.newWalletErr)
         return
       }
-      Doc.hide(fields.newWalletErr)
+      Doc.hide(page.newWalletErr)
+      const assetID = parseInt(this.currentAsset.id)
 
       const createForm = {
-        assetID: parseInt(this.currentAsset.id),
-        pass: fields.newWalletPass.value || '',
+        assetID: assetID,
+        pass: page.newWalletPass.value || '',
         config: this.subform.map(),
-        appPass: pw
+        appPass: pw,
+        walletType: this.currentWalletType
       }
-      fields.nwAppPass.value = ''
-      const loaded = app().loading(form)
+      page.nwAppPass.value = ''
+      const loaded = app().loading(page.nwMainForm)
       const res = await postJSON('/api/newwallet', createForm)
       loaded()
       if (!app().checkResponse(res)) {
@@ -51,44 +58,92 @@ export class NewWalletForm {
         return
       }
       if (this.pwCache) this.pwCache.pw = pw
-      fields.newWalletPass.value = ''
-      success()
+      page.newWalletPass.value = ''
+      success(assetID)
     })
   }
 
   refresh () {
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    if (hidePWBox) Doc.hide(this.fields.newWalletAppPWBox)
-    else Doc.show(this.fields.newWalletAppPWBox)
+    if (hidePWBox) Doc.hide(this.page.newWalletAppPWBox)
+    else Doc.show(this.page.newWalletAppPWBox)
   }
 
   async setAsset (assetID) {
-    const fields = this.fields
+    const page = this.page
     const asset = app().assets[assetID]
+    const tabs = page.walletTypeTabs
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
-    fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
-    fields.nwAssetName.textContent = asset.info.name
-    fields.newWalletPass.value = ''
-    this.subform.update(asset.info)
-    Doc.hide(fields.newWalletErr)
+    page.nwAssetLogo.src = Doc.logoPath(asset.symbol)
+    page.nwAssetName.textContent = asset.info.name
+    page.newWalletPass.value = ''
+
+    const walletDef = asset.info.availablewallets[0]
+    Doc.empty(tabs)
+    Doc.hide(tabs, page.newWalletErr)
+
+    if (asset.info.availablewallets.length > 1) {
+      Doc.show(tabs)
+      for (const wDef of asset.info.availablewallets) {
+        const tab = page.walletTabTmpl.cloneNode(true)
+        tab.dataset.tooltip = wDef.description
+        tab.textContent = wDef.tab
+        tabs.appendChild(tab)
+        Doc.bind(tab, 'click', () => {
+          for (const t of tabs.children) t.classList.remove('selected')
+          tab.classList.add('selected')
+          this.update(wDef)
+        })
+      }
+      app().bindTooltips(tabs)
+      tabs.firstChild.classList.add('selected')
+    }
+
+    await this.update(walletDef)
+  }
+
+  async update (walletDef) {
+    const page = this.page
+    this.currentWalletType = walletDef.type
+    if (walletDef.seeded) {
+      page.newWalletPass.value = ''
+      page.submitAdd.textContent = 'Create'
+      Doc.hide(page.newWalletPassBox)
+    } else {
+      Doc.show(page.newWalletPassBox)
+      page.submitAdd.textContent = 'Add'
+    }
+
+    this.subform.update(walletDef.configopts || [])
+
+    if (this.subform.dynamicOpts.children.length) Doc.show(page.walletSettingsHeader)
+    else Doc.hide(page.walletSettingsHeader)
+
     this.refresh()
+    await this.loadDefaults()
   }
 
   /* setError sets and shows the in-form error message. */
   async setError (errMsg) {
-    this.fields.newWalletErr.textContent = errMsg
-    Doc.show(this.fields.newWalletErr)
+    this.page.newWalletErr.textContent = errMsg
+    Doc.show(this.page.newWalletErr)
   }
 
   /*
    * loadDefaults attempts to load the ExchangeWallet configuration from the
-   * default wallet config path on the server and will auto-fill the fields on
+   * default wallet config path on the server and will auto-fill the page on
    * the subform if settings are found.
    */
   async loadDefaults () {
+    // No default config files for seeded assets right now.
+    const walletDef = app().walletDefinition(this.currentAsset.id, this.currentWalletType)
+    if (walletDef.seeded) return
     const loaded = app().loading(this.form)
-    const res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
+    const res = await postJSON('/api/defaultwalletcfg', {
+      assetID: this.currentAsset.id,
+      type: this.currentWalletType
+    })
     loaded()
     if (!app().checkResponse(res)) {
       this.setError(res.msg)
@@ -175,15 +230,19 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (walletInfo) {
+  update (configOpts) {
     this.configElements = {}
-    this.configOpts = walletInfo.configopts
-    Doc.empty(this.dynamicOpts, this.otherSettings)
+    this.configOpts = configOpts
+    Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
+
+    // If there are no options, just hide the entire form.
+    if (configOpts.length === 0) return Doc.hide(this.form)
+    Doc.show(this.form)
+
     this.setOtherSettingsViz(false)
     Doc.hide(
-      this.loadedSettingsMsg, this.loadedSettings,
-      this.defaultSettingsMsg, this.defaultSettings,
-      this.errMsg
+      this.loadedSettingsMsg, this.loadedSettings, this.defaultSettingsMsg,
+      this.defaultSettings, this.errMsg
     )
     const defaultedOpts = []
     const addOpt = (box, opt) => {
@@ -207,12 +266,16 @@ export class WalletConfigForm {
       else addOpt(this.dynamicOpts, opt)
     }
     if (defaultedOpts.length) {
-      for (const opt of defaultedOpts) addOpt(this.defaultSettings, opt)
+      for (const opt of defaultedOpts) {
+        addOpt(this.defaultSettings, opt)
+      }
       Doc.show(this.showOther, this.defaultSettingsMsg, this.defaultSettings)
     } else {
       Doc.hide(this.showOther)
     }
     app().bindTooltips(this.allSettings)
+    if (this.dynamicOpts.children.length) Doc.show(this.dynamicOpts)
+    else Doc.hide(this.dynamicOpts)
   }
 
   /*
@@ -297,7 +360,7 @@ export class WalletConfigForm {
  */
 export class ConfirmRegistrationForm {
   constructor (form, { getDexAddr, getCertFile }, success, insufficientFundsFail, setupWalletFn) {
-    this.fields = Doc.idDescendants(form)
+    this.page = Doc.idDescendants(form)
     this.getDexAddr = getDexAddr
     this.getCertFile = getCertFile
     this.success = success
@@ -305,7 +368,23 @@ export class ConfirmRegistrationForm {
     this.form = form
     this.setupWalletFn = setupWalletFn
     this.feeAssetID = null
-    bind(form, this.fields.submitConfirm, () => this.submitForm())
+    this.syncWaiters = {}
+    bind(form, this.page.submitConfirm, () => this.submitForm())
+  }
+
+  registerSyncWaiter (assetID, f) {
+    let waiters = this.syncWaiters[assetID]
+    if (!waiters) waiters = this.syncWaiters[assetID] = []
+    waiters.push(f)
+  }
+
+  handleWalletStateNote (note) {
+    if (note.wallet.synced) {
+      const waiters = this.syncWaiters[note.wallet.assetID]
+      if (!waiters) return
+      for (const f of waiters) f()
+      this.syncWaiters[note.wallet.assetID] = []
+    }
   }
 
   /*
@@ -315,31 +394,19 @@ export class ConfirmRegistrationForm {
     // store xc in case we need to refresh the data, like after setting up
     // a new wallet.
     this.xc = xc
-    const fields = this.fields
+    const page = this.page
     this.fees = xc.regFees
-    Doc.empty(fields.marketsTableRows)
-    Doc.empty(fields.feeTableRows)
+    Doc.empty(page.marketsTableRows, page.feeTableRows)
+    this.walletRows = {}
 
     for (const [symbol, fee] of Object.entries(xc.regFees)) {
       // if asset fee is not supported by the client we can skip it.
       if (app().user.assets[fee.id] === undefined) continue
       const unitInfo = app().assets[fee.id].info.unitinfo
-      const haveWallet = app().user.assets[fee.id].wallet
-      const tr = fields.feeRowTemplate.cloneNode(true)
-      Doc.bind(tr, 'click', () => {
-        this.feeAssetID = fee.id
-        // remove selected class from all others row.
-        const rows = Array.from(fields.feeTableRows.querySelectorAll('tr.selected'))
-        rows.forEach(row => row.classList.remove('selected'))
-        tr.classList.add('selected')
-        // if wallet is configured, we can active the register button.
-        // Otherwise we do not allow it.
-        if (haveWallet) {
-          this.fields.submitConfirm.classList.add('selected')
-        } else {
-          this.fields.submitConfirm.classList.remove('selected')
-        }
-      })
+      const wallet = app().user.assets[fee.id].wallet
+      const tr = page.feeRowTemplate.cloneNode(true)
+      this.walletRows[fee.id] = tr
+      Doc.bind(tr, 'click', () => { this.selectRow(fee.id) })
       Doc.tmplElement(tr, 'asseticon').src = Doc.logoPath(symbol)
       Doc.tmplElement(tr, 'asset').innerText = unitInfo.conventional.unit
       Doc.tmplElement(tr, 'confs').innerText = fee.confs
@@ -347,9 +414,22 @@ export class ConfirmRegistrationForm {
 
       const setupWallet = Doc.tmplElement(tr, 'setupWallet')
       const walletReady = Doc.tmplElement(tr, 'walletReady')
-      if (haveWallet) {
-        walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
-        Doc.show(walletReady)
+      const walletSyncing = Doc.tmplElement(tr, 'walletSyncing')
+      if (wallet) {
+        if (wallet.synced) {
+          walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
+          Doc.show(walletReady)
+          Doc.hide(walletSyncing)
+        } else {
+          walletReady.innerText = intl.prep(intl.ID_WALLET_READY)
+          Doc.show(walletSyncing)
+          Doc.hide(walletReady)
+          this.registerSyncWaiter(fee.id, () => {
+            Doc.show(walletReady)
+            Doc.hide(walletSyncing)
+            if (this.feeAssetID === fee.id) page.submitConfirm.classList.add('selected')
+          })
+        }
         Doc.hide(setupWallet)
       } else {
         setupWallet.innerText = intl.prep(intl.ID_SETUP_WALLET)
@@ -357,13 +437,13 @@ export class ConfirmRegistrationForm {
         Doc.hide(walletReady)
         Doc.show(setupWallet)
       }
-      fields.feeTableRows.appendChild(tr)
+      page.feeTableRows.appendChild(tr)
       if (State.passwordIsCached()) {
-        Doc.hide(fields.appPassBox)
-        Doc.hide(fields.appPassSpan)
+        Doc.hide(page.appPassBox)
+        Doc.hide(page.appPassSpan)
       } else {
-        Doc.show(fields.appPassBox)
-        Doc.show(fields.appPassSpan)
+        Doc.show(page.appPassBox)
+        Doc.show(page.appPassSpan)
       }
     }
     const markets = Object.values(xc.markets)
@@ -373,7 +453,7 @@ export class ConfirmRegistrationForm {
       return compareBase === 0 ? compareQuote : compareBase
     })
     markets.forEach((market) => {
-      const tr = fields.marketRowTemplate.cloneNode(true)
+      const tr = page.marketRowTemplate.cloneNode(true)
       Doc.tmplElement(tr, 'baseicon').src = Doc.logoPath(market.basesymbol)
       Doc.tmplElement(tr, 'quoteicon').src = Doc.logoPath(market.quotesymbol)
       Doc.tmplElement(tr, 'base').innerText = market.basesymbol.toUpperCase()
@@ -381,44 +461,61 @@ export class ConfirmRegistrationForm {
       const baseUnitInfo = app().unitInfo(market.baseid)
       const fmtVal = Doc.formatCoinValue(market.lotsize, baseUnitInfo)
       Doc.tmplElement(tr, 'lotsize').innerText = `${fmtVal} ${baseUnitInfo.conventional.unit}`
-      fields.marketsTableRows.appendChild(tr)
+      page.marketsTableRows.appendChild(tr)
       if (State.passwordIsCached()) {
-        Doc.hide(fields.appPassBox)
-        Doc.hide(fields.appPassSpan)
+        Doc.hide(page.appPassBox)
+        Doc.hide(page.appPassSpan)
       } else {
-        Doc.show(fields.appPassBox)
-        Doc.show(fields.appPassSpan)
+        Doc.show(page.appPassBox)
+        Doc.show(page.appPassSpan)
       }
     })
+  }
+
+  selectRow (assetID) {
+    const page = this.page
+    const wallet = app().user.assets[assetID].wallet
+    this.feeAssetID = assetID
+    // remove selected class from all others row.
+    const rows = Array.from(page.feeTableRows.querySelectorAll('tr.selected'))
+    rows.forEach(row => row.classList.remove('selected'))
+    this.walletRows[assetID].classList.add('selected')
+    // if wallet is configured, we can active the register button.
+    // Otherwise we do not allow it.
+    if (wallet && wallet.synced) {
+      page.submitConfirm.classList.add('selected')
+    } else {
+      page.submitConfirm.classList.remove('selected')
+    }
   }
 
   /*
    * submitForm is called when the form is submitted.
    */
   async submitForm () {
-    const fields = this.fields
+    const page = this.page
     // if button is selected it can be clickable.
-    if (!fields.submitConfirm.classList.contains('selected')) {
+    if (!page.submitConfirm.classList.contains('selected')) {
       return
     }
     if (this.feeAssetID === null) {
-      fields.regErr.innerText = 'You must select a valid wallet for the fee payment'
-      Doc.show(fields.regErr)
+      page.regErr.innerText = 'You must select a valid wallet for the fee payment'
+      Doc.show(page.regErr)
       return
     }
     const symbol = app().user.assets[this.feeAssetID].wallet.symbol
-    Doc.hide(fields.regErr)
+    Doc.hide(page.regErr)
     const feeAsset = this.fees[symbol]
     const cert = await this.getCertFile()
     const dexAddr = this.getDexAddr()
     const registration = {
       addr: dexAddr,
-      pass: fields.appPass.value,
+      pass: page.appPass.value,
       fee: feeAsset.amount,
       asset: feeAsset.id,
       cert: cert
     }
-    fields.appPass.value = ''
+    page.appPass.value = ''
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/register', registration)
     if (!app().checkResponse(res)) {
@@ -431,8 +528,8 @@ export class ConfirmRegistrationForm {
         this.insufficientFundsFail(res.msg)
         return
       }
-      fields.regErr.textContent = res.msg
-      Doc.show(fields.regErr)
+      page.regErr.textContent = res.msg
+      Doc.show(page.regErr)
       loaded()
       return
     }
@@ -447,31 +544,31 @@ export class ConfirmRegistrationForm {
 
 export class UnlockWalletForm {
   constructor (form, success, pwCache) {
-    this.fields = Doc.idDescendants(form)
+    this.page = Doc.idDescendants(form)
     this.form = form
     this.pwCache = pwCache
     this.currentAsset = null
     this.success = success
-    bind(form, this.fields.submitUnlock, () => this.submit())
+    bind(form, this.page.submitUnlock, () => this.submit())
   }
 
   setAsset (asset) {
-    const fields = this.fields
+    const page = this.page
     this.currentAsset = asset
-    fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
-    fields.uwAssetName.textContent = asset.info.name
-    fields.uwAppPass.value = ''
+    page.uwAssetLogo.src = Doc.logoPath(asset.symbol)
+    page.uwAssetName.textContent = asset.info.name
+    page.uwAppPass.value = ''
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    if (hidePWBox) Doc.hide(fields.uwAppPassBox)
-    else Doc.show(fields.uwAppPassBox)
+    if (hidePWBox) Doc.hide(page.uwAppPassBox)
+    else Doc.show(page.uwAppPassBox)
   }
 
   /*
    * setError displays an error on the form.
    */
   setError (msg) {
-    this.fields.unlockErr.textContent = msg
-    Doc.show(this.fields.unlockErr)
+    this.page.unlockErr.textContent = msg
+    Doc.show(this.page.unlockErr)
   }
 
   /*
@@ -480,24 +577,24 @@ export class UnlockWalletForm {
    */
   showErrorOnly (msg) {
     this.setError(msg)
-    Doc.hide(this.fields.uwAppPassBox)
-    Doc.hide(this.fields.submitUnlockDiv)
+    Doc.hide(this.page.uwAppPassBox)
+    Doc.hide(this.page.submitUnlockDiv)
   }
 
   async submit () {
-    const fields = this.fields
-    const pw = fields.uwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
+    const page = this.page
+    const pw = page.uwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
     if (!pw && !State.passwordIsCached()) {
-      fields.unlockErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-      Doc.show(fields.unlockErr)
+      page.unlockErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
+      Doc.show(page.unlockErr)
       return
     }
-    Doc.hide(this.fields.unlockErr)
+    Doc.hide(this.page.unlockErr)
     const open = {
       assetID: parseInt(this.currentAsset.id),
       pass: pw
     }
-    fields.uwAppPass.value = ''
+    page.uwAppPass.value = ''
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/openwallet', open)
     loaded()
