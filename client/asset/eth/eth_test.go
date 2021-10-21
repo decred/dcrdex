@@ -555,7 +555,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	node.bal.Mul(node.bal, big.NewInt(2))
 
 	// Test funding two coins with the same id
-	coins, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID(), coins2[0].ID()})
+	_, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID(), coins2[0].ID()})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
