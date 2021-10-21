@@ -1003,7 +1003,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 
 	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("error funding swap value %s: %w", amount(val), err)
 	}
 
 	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
@@ -1123,7 +1123,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 
 	sum, size, coins, fundingCoins, redeemScripts, spents, err := fund(utxos, enough)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
 	}
 
 	if btc.useSplitTx && !ord.Immediate {

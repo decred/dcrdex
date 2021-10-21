@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -120,7 +121,7 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 	netDir := filepath.Join(dbDir, net.Name)
 
 	if err := logNeutrino(netDir); err != nil {
-		log.Warnf("error initializing btcwallet+neutrino logging: %v", err)
+		return fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 
 	logDir := filepath.Join(netDir, logDirName)
@@ -162,14 +163,8 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 }
 
 var (
-	// rotatorMtx protects the rotating file logger trackers.
-	rotatorMtx sync.Mutex
-	// loggerCount is a count of the file logger users. We'll Close the logger
-	// when the count goes to zero.
-	loggerCount uint32
-	// sharedRotator is the active rotating file logger. It must be Close'd when
-	// the last user is done logging.
-	sharedRotator *rotator.Rotator
+	// loggingInited will be set when the log rotator has been initilized.
+	loggingInited uint32
 )
 
 // logRotator initializes a rotating file logger.
@@ -185,15 +180,15 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 }
 
 // logNeutrino initializes logging in the neutrino + wallet packages. Logging
-// only has to be initialized once, and the rotating file logger must be Close'd
-// at some point, so a package level counter is used to synchronize feeders.
-// The unlogNeutrino function should be invoked by callers of logNeutrino when
-// they no longer need logging.
+// only has to be initialized once, so an atomic flag is used internally to
+// return early on subsequent invocations.
+//
+// In theory, the the rotating file logger must be Close'd at some point, but
+// there are concurrency issues with that since btcd and btcwallet have
+// unsupervised goroutines still running after shutdown. So we leave the rotator
+// running at the risk of losing some logs.
 func logNeutrino(netDir string) error {
-	rotatorMtx.Lock()
-	defer rotatorMtx.Unlock()
-	if loggerCount > 0 {
-		loggerCount++
+	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
 	}
 
@@ -201,9 +196,6 @@ func logNeutrino(netDir string) error {
 	if err != nil {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
-	loggerCount++
-
-	sharedRotator = logSpinner
 
 	backendLog := btclog.NewBackend(logWriter{logSpinner})
 
@@ -219,18 +211,6 @@ func logNeutrino(netDir string) error {
 	chain.UseLogger(logger("CHAIN", btclog.LevelInfo))
 
 	return nil
-}
-
-// unlogNeutrino decrements the count of rotating file logger users, and closes
-// the file logger if appropriate.
-func unlogNeutrino() error {
-	rotatorMtx.Lock()
-	defer rotatorMtx.Unlock()
-	loggerCount--
-	if loggerCount > 0 {
-		return nil
-	}
-	return sharedRotator.Close()
 }
 
 // spendingInput is added to a filterScanResult if a spending input is found.
@@ -708,7 +688,7 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 
 	sum, inputsSize, _, fundingCoins, _, _, err := fund(utxos, enough)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error funding sendWithSubtract value of %s: %v", amount(value), err)
 	}
 
 	fees := (unfundedTxSize + uint64(inputsSize)) * feeRate
@@ -945,7 +925,6 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer unlogNeutrino()
 		defer w.stop()
 
 		ticker := time.NewTicker(time.Minute * 20)
