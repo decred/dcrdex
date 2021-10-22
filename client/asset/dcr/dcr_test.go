@@ -162,6 +162,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	}
 	wallet.wallet = &rpcWallet{
 		rpcClient: client,
+		log:       tLogger.SubLogger("trpc"),
 	}
 	wallet.ctx = walletCtx
 
@@ -286,6 +287,13 @@ func (blockchain *tBlockchain) blockAt(height int64) (*chainhash.Hash, *chainjso
 	blockchain.mainchain[height] = &newBlockHash
 	blockchain.verboseBlocks[newBlock.Hash] = newBlock
 	blockchain.verboseBlocks[prevBlockHash].NextHash = newBlock.Hash
+
+	blockchain.verboseBlockHeaders[newBlock.Hash] = &chainjson.GetBlockHeaderVerboseResult{
+		Height:       uint32(height),
+		Hash:         newBlock.Hash,
+		PreviousHash: prevBlockHash,
+	}
+	blockchain.verboseBlockHeaders[prevBlockHash].NextHash = newBlock.Hash
 
 	return &newBlockHash, newBlock
 }
@@ -1576,16 +1584,6 @@ func TestSignMessage(t *testing.T) {
 	signature := ecdsa.Sign(privKey, msg)
 	sig := signature.Serialize()
 
-	node.walletTx = &walletjson.GetTransactionResult{
-		Details: []walletjson.GetTransactionDetailsResult{
-			{
-				Address:  tPKHAddr.String(),
-				Category: txCatReceive,
-				Vout:     vout,
-			},
-		},
-	}
-
 	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
@@ -1623,7 +1621,7 @@ func TestSignMessage(t *testing.T) {
 	node.txOutRes[newOutPoint(tTxHash, vout)] = txOut
 	check()
 
-	// gettransaction error
+	// gettxout error
 	node.txOutErr = tErr
 	_, _, err = wallet.SignMessage(op, msg)
 	if err == nil {
@@ -1924,9 +1922,16 @@ func TestRefund(t *testing.T) {
 	}
 	const feeSuggestion = 100
 
-	bigTxOut := makeGetTxOutRes(2, 5, nil)
+	tipHash, tipHeight := node.getBestBlock()
+	var confs int64 = 1
+	if tipHeight > 1 {
+		confs = 2
+	}
+
+	bigTxOut := makeGetTxOutRes(confs, 5, nil)
 	bigOutID := newOutPoint(tTxHash, 0)
 	node.txOutRes[bigOutID] = bigTxOut
+	node.txOutRes[bigOutID].BestBlock = tipHash.String() // required to calculate the block for the output
 	node.changeAddr = tPKHAddr
 	node.newAddr = tPKHAddr
 
@@ -2176,7 +2181,7 @@ func Test_sendMinusFees(t *testing.T) {
 	}
 }
 
-func TestCoinConfirmations(t *testing.T) {
+func TestLookupTxOutput(t *testing.T) {
 	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
@@ -2189,41 +2194,55 @@ func TestCoinConfirmations(t *testing.T) {
 
 	// Bad output coin
 	op.vout = 10
-	_, spent, err := wallet.walletOutputConfirmations(context.Background(), op)
+	_, spendStatus, err := wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad output coin")
 	}
-	if spent {
+	if spendStatus == outputSpendStatusSpent {
 		t.Fatalf("spent is true for bad output coin")
 	}
 	op.vout = 0
 
+	// Build the blockchain with some dummy blocks.
+	rand.Seed(time.Now().Unix())
+	for i := 0; i < rand.Intn(100); i++ {
+		node.blockchain.blockAt(int64(i))
+	}
+	tipHash, tipHeight := node.getBestBlock()
+	outputHeight := tipHeight - 1 // i.e. 2 confirmations
+	outputBlockHash, _ := node.blockchain.blockAt(outputHeight)
+
+	// Add the txOutRes with 2 confs and BestBlock correctly set.
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	confs, spent, err := wallet.walletOutputConfirmations(context.Background(), op)
+	node.txOutRes[op].BestBlock = tipHash.String()
+	txOut, spendStatus, err := wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
 	if err != nil {
-		t.Fatalf("error for gettransaction path: %v", err)
+		t.Fatalf("unexpected lookupTxOutput error: %v", err)
 	}
-	if confs != 2 {
-		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
+	if txOut.blockHeight != outputHeight {
+		t.Fatalf("output block height not retrieved from gettxout path. expected %d, got %d", outputHeight, txOut.blockHeight)
 	}
-	if spent {
+	if confirms(tipHeight, txOut.blockHeight) != 2 {
+		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confirms(tipHeight, txOut.blockHeight))
+	}
+	if spendStatus == outputSpendStatusSpent {
 		t.Fatalf("expected spent = false for gettxout path, got true")
 	}
 
 	// gettransaction error
 	delete(node.txOutRes, op)
 	node.walletTxErr = tErr
-	_, spent, err = wallet.walletOutputConfirmations(context.Background(), op)
+	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
-	if spent {
+	if spendStatus == outputSpendStatusSpent {
 		t.Fatalf("spent is true with gettransaction error")
 	}
 	node.walletTxErr = nil
 
-	// wallet.Confirmations will check if the tx hex is valid
-	// and contains an output at index 0, for the output to be
+	// wallet.lookupTxOutput will check if the tx is confirmed, its hex
+	// is valid and contains an output at index 0, for the output to be
 	// considered spent.
 	tx := wire.NewMsgTx()
 	tx.AddTxIn(&wire.TxIn{})
@@ -2233,14 +2252,49 @@ func TestCoinConfirmations(t *testing.T) {
 		t.Fatalf("error preparing tx hex with 1 output: %v", err)
 	}
 	node.walletTx = &walletjson.GetTransactionResult{
-		Hex: txHex,
+		Hex:           txHex,
+		Confirmations: 0, // unconfirmed = unspent
 	}
-	_, spent, err = wallet.walletOutputConfirmations(context.Background(), op)
+	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}
-	if !spent {
+	if spendStatus != outputSpendStatusUnspent {
+		t.Fatalf("expected spent = false for gettransaction path, got true")
+	}
+
+	// Confirmed wallet tx without gettxout response is spent.
+	node.walletTx.Confirmations = 2
+	node.walletTx.BlockHash = outputBlockHash.String()
+	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("coin error: %v", err)
+	}
+	if spendStatus != outputSpendStatusSpent {
 		t.Fatalf("expected spent = true for gettransaction path, got false")
+	}
+
+	// In spv mode, spend status is unknown unless the output pays to the
+	// wallet (then it's considered be considered spent).
+	(wallet.wallet.(*rpcWallet)).spvMode = true
+	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("coin error: %v", err)
+	}
+	if spendStatus != outputSpendStatusUnknown {
+		t.Fatalf("expected spent = unknown for spv gettransaction path, got %t", spendStatus == outputSpendStatusSpent)
+	}
+
+	// In spv mode, the output must pay to the wallet be considered spent.
+	node.walletTx.Details = []walletjson.GetTransactionDetailsResult{{
+		Vout: 0,
+	}}
+	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("coin error: %v", err)
+	}
+	if spendStatus != outputSpendStatusSpent {
+		t.Fatalf("expected spent = true for spv gettransaction path, got false")
 	}
 }
 

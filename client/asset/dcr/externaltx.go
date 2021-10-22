@@ -16,7 +16,14 @@ import (
 	"github.com/decred/dcrd/gcs/v3"
 	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/wire"
+)
+
+type outputSpendStatus uint8
+
+const (
+	outputSpendStatusUnknown outputSpendStatus = iota
+	outputSpendStatusSpent
+	outputSpendStatusUnspent
 )
 
 type externalTx struct {
@@ -36,10 +43,7 @@ type externalTx struct {
 }
 
 type externalTxOutput struct {
-	outPoint
-	value           float64
-	pkScriptHex     string
-	pkScriptVersion uint16
+	*txOutput
 
 	// The spenderMtx protects access to the fields below
 	// because they are set when the block containing the tx
@@ -50,22 +54,50 @@ type externalTxOutput struct {
 	spenderBlock     *block
 }
 
+// txOutput defines properties of a transaction output, including the
+// details of the block containing the tx, if mined.
+type txOutput struct {
+	op            outPoint
+	tree          int8
+	value         float64
+	scriptVersion uint16
+	scriptHex     string
+	blockHash     *chainhash.Hash
+	blockHeight   int64
+}
+
+func (txOut *txOutput) PkScript() ([]byte, error) {
+	pkScript, err := hex.DecodeString(txOut.scriptHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pkScript: %v", err)
+	}
+	return pkScript, nil
+}
+
+func (txOut *txOutput) Amount() (dcrutil.Amount, error) {
+	amt, err := dcrutil.NewAmount(txOut.value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid amount: %v", err)
+	}
+	return amt, nil
+}
+
 // externalTx returns details for the provided hash, if cached. If the tx cache
 // doesn't yet exist and addToCache is true, the provided script will be cached
-// against the tx hash to enable SPV wallets locate the tx in a block when it is
-// mined. Once mined, the block containing the tx and the tx outputs details are
-// also cached, to enable subsequently checking if any of the tx's output is
-// spent in a mined transaction.
+// against the tx hash so block filters can be used to locate the tx in a block
+// when it is mined. Once mined, the block containing the tx and the tx outputs
+// details are also cached, to enable subsequently checking if any of the tx's
+// output is spent in a mined transaction.
 //
 // This method should only be used with transactions that are NOT indexed by the
 // wallet such as counter-party swaps.
-func (dcr *ExchangeWallet) externalTx(hash *chainhash.Hash, pkScript []byte, addToCache bool) *externalTx {
+func (dcr *ExchangeWallet) externalTx(hash *chainhash.Hash, pkScript []byte) *externalTx {
 	dcr.externalTxMtx.Lock()
 	defer dcr.externalTxMtx.Unlock()
 
 	tx := dcr.externalTxCache[*hash]
-	if tx == nil && addToCache && len(pkScript) > 0 {
-		tx := &externalTx{
+	if tx == nil && len(pkScript) > 0 {
+		tx = &externalTx{
 			hash:      hash,
 			pkScripts: [][]byte{pkScript},
 		}
@@ -77,164 +109,48 @@ func (dcr *ExchangeWallet) externalTx(hash *chainhash.Hash, pkScript []byte, add
 	return tx
 }
 
-// externalTxOut returns details for the specified transaction output, along
-// with the confirmations, spend status and tx tree. If the tx details are not
-// currently cached, a search will be conducted to attempt finding the tx in a
-// mainchain block, unless tryFindTx is false. asset.CoinNotFoundError is
-// returned if the output cannot be found or (for full node wallets), if the
-// output is spent.
+// lookupTxOutWithBlockFilters returns details for the specified transaction
+// output if cached or if found via a block filters scan. If the pkScript is
+// not provided, details will only be returned if cached and if the block that
+// was found to contain the output is still part of the mainchain. If a block
+// filters scan is conducted and the output is found in a mainchain block, its
+// details is cached and returned.
+// Returns asset.CoinNotFoundError if the requested output details is not cached
+// and (if pkScript is provided), if the tx is not found in a block between the
+// current best block and the block just before the provided earliestTxTime.
 //
-// This method should only be used for transactions that are NOT indexed by the
-// wallet. For wallet transactions, use dcr.walletOutputConfirmations.
-//
-// NOTE: SPV wallets are unable to look up unmined transaction outputs. Also,
-// the `tryFindTx`, `pkScript` and `earliestTxTime` parameters are irrelevant
-// for full node wallets, but required for SPV wallets if the caller intends to
-// perform a search for the tx in a mainchain block.
-func (dcr *ExchangeWallet) externalTxOut(ctx context.Context, op outPoint, tryFindTx bool, pkScript []byte, earliestTxTime time.Time) (
-	*wire.TxOut, uint32, bool, int8, error) {
-
-	if !dcr.wallet.SpvMode() {
-		// Use the gettxout rpc to look up the requested tx output. Unlike
-		// SPV wallets, full node wallets are able to look up outputs for
-		// all transactions whether or not they are indexed by the wallet,
-		// including outputs in mempool.
-		output, txTree, err := dcr.unspentTxOut(ctx, &op.txHash, op.vout, true)
-		if err != nil {
-			return nil, 0, false, 0, fmt.Errorf("error finding unspent output %s: %w", op, translateRPCCancelErr(err))
-		}
-		if output == nil {
-			// Output does not exist or has been spent.
-			// We can try to look up the tx to determine if the output exists
-			// and return a 'output is spent' error, but the getrawtransaction
-			// rpc requires txindex to be enabled which may not be enabled by
-			// the client. We also can't use the gettransaction rpc because
-			// this method is particularly designed to work with txs that are
-			// NOT indexed by the wallet and gettransaction only returns data
-			// for wallet txs.
-			//
-			// TODO: Attempt finding the tx using block filters. If the tx is
-			// found, then we can assert that the output is spent instead of
-			// returning asset.CoinNotFoundError.
-			return nil, 0, false, 0, asset.CoinNotFoundError
-		}
-		amt, outputPkScript, err := parseAmountAndScript(output.Value, output.ScriptPubKey.Hex)
-		if err != nil {
-			return nil, 0, false, 0, fmt.Errorf("error parsing tx output %s: %v", op, err)
-		}
-		return newTxOut(amt, output.ScriptPubKey.Version, outputPkScript), uint32(output.Confirmations), false, txTree, nil
-	}
-
-	// This is an SPV wallet. First try to determine if the tx has been mined
-	// before checking if the specified output is spent. This will require
-	// scanning block filters to try to locate the tx, if the tx's block is
-	// not already known or the previously found tx block is no longer part of
-	// the mainchain. If tryFindTx is false however, do NOT scan scan block
-	// filters; instead, return asset.CoinNotFoundError.
-
-	tx := dcr.externalTx(&op.txHash, pkScript, tryFindTx) // the tx hash and script will be cached if not previously cached and if tryFindTx is true
+// This method should only be used with transactions that are NOT indexed by the
+// wallet such as counter-party swaps.
+func (dcr *ExchangeWallet) lookupTxOutWithBlockFilters(ctx context.Context, op outPoint, pkScript []byte, earliestTxTime time.Time) (*externalTxOutput, error) {
+	tx := dcr.externalTx(&op.txHash, pkScript) // the txHash and script will be cached if not previously cached and if pkScript is provided
 	if tx == nil {
-		return nil, 0, false, 0, asset.CoinNotFoundError
+		return nil, asset.CoinNotFoundError
 	}
 
 	// Hold the tx.blockMtx lock for 2 reasons:
-	// 1) To read the tx block, outputs map, tree and outputs fields.
+	// 1) To read/write the tx.block, tx.tree and tx.outputs fields.
 	// 2) To prevent duplicate tx block scans if this tx block is not already
-	//    known and tryFindTx is true.
-	// The closure below helps to ensure that blockMtx lock is released
-	// as soon as all those are done.
-	txBlock, output, txTree, err := func() (*block, *externalTxOutput, int8, error) {
-		tx.blockMtx.Lock()
-		defer tx.blockMtx.Unlock()
-		txBlock, err := dcr.externalTxBlock(ctx, tx, tryFindTx, earliestTxTime)
-		if err != nil {
-			return nil, nil, 0, fmt.Errorf("error checking if tx %s is mined: %v", op.txHash, err)
-		}
-		if txBlock == nil {
-			// SPV wallets cannot look up unmined txs.
-			return nil, nil, 0, asset.CoinNotFoundError
-		}
-		if len(tx.outputs) <= int(op.vout) {
-			return nil, nil, 0, fmt.Errorf("tx %s does not have an output at index %d", op.txHash, op.vout)
-		}
-		return txBlock, tx.outputs[op.vout], tx.tree, nil
-	}()
+	//    known and tryFindTx is true. Holding this lock now ensures that any
+	//    ongoing scan completes before we try to access the tx.block field
+	//    which may prevent unnecassary rescan.
+	tx.blockMtx.Lock()
+	defer tx.blockMtx.Unlock()
+
+	// Check if we already know the block for this tx and if it is still
+	// part of the mainchain. Otherwise, and if tryFindTx is true, perform
+	// a block filters scan for this tx.
+	tryFindTx := len(pkScript) > 0 // the tx scripts are already cached but don't scan if this caller did not provide scripts
+	txBlock, err := dcr.externalTxBlock(ctx, tx, tryFindTx, earliestTxTime)
 	if err != nil {
-		return nil, 0, false, 0, err
+		return nil, fmt.Errorf("error checking if tx %s is mined: %v", op.txHash, err)
 	}
-
-	amt, outputPkScript, err := parseAmountAndScript(output.value, output.pkScriptHex)
-	if err != nil {
-		return nil, 0, false, 0, fmt.Errorf("error parsing tx output %s: %v", op, err)
+	if txBlock == nil {
+		return nil, asset.CoinNotFoundError
 	}
-	txOut := newTxOut(amt, output.pkScriptVersion, outputPkScript)
-
-	// We have the requested output, let's check if it is spent.
-	// Hold the output.spenderMtx lock for 2 reasons:
-	// 1) To read (and set) the spenderBlock field.
-	// 2) To prevent duplicate spender block scans if the spenderBlock is not
-	//    already known.
-	// The closure below helps to ensure that spenderMtx lock is released
-	// as soon as all those are done.
-	isSpent, err := func() (bool, error) {
-		output.spenderMtx.Lock()
-		defer output.spenderMtx.Unlock()
-
-		// Check if this output is known to be spent in a mainchain block.
-		spenderFound, err := dcr.isMainchainBlock(ctx, output.spenderBlock)
-		if err != nil {
-			return false, err
-		} else if spenderFound {
-			return true, nil
-		} else if output.spenderBlock != nil {
-			// Output was previously found to have been spent but the block
-			// containing the spending tx seems to have been invalidated.
-			dcr.log.Warnf("Block %s found to contain spender for output %s has been invalidated.", tx.block.hash, op)
-			output.spenderBlock = nil
-		}
-
-		// This tx output is not known to be spent as of last search (if any).
-		// Scan blocks from the lastScannedBlock (if there was a previous scan)
-		// or from the block containing the output to attempt finding the spender
-		// of this output. Use mainChainAncestor to ensure that scanning starts
-		// from a mainchain block in the event that either the output block or
-		// the lastScannedBlock have been re-orged out of the mainchain.
-		startBlock := new(block)
-		if output.lastScannedBlock == nil {
-			startBlock.hash, startBlock.height, err = dcr.mainChainAncestor(ctx, txBlock.hash)
-		} else {
-			startBlock.hash, startBlock.height, err = dcr.mainChainAncestor(ctx, output.lastScannedBlock)
-		}
-		if err != nil {
-			return false, err
-		}
-
-		// Search for this output's spender in the blocks between startBlock and
-		// the current best block.
-		spenderTx, stopBlockHash, err := dcr.findTxOutSpender(ctx, op, outputPkScript, startBlock)
-		if stopBlockHash != nil { // might be nil if the search never scanned a block
-			output.lastScannedBlock = stopBlockHash
-		}
-		if err != nil {
-			return false, err
-		}
-		spent := spenderTx != nil
-		if spent {
-			spenderBlockHash, err := chainhash.NewHashFromStr(spenderTx.BlockHash)
-			if err != nil {
-				return false, err
-			}
-			output.spenderBlock = &block{hash: spenderBlockHash, height: spenderTx.BlockHeight}
-		}
-		return spent, nil
-	}()
-	if err != nil {
-		return nil, 0, false, 0, fmt.Errorf("unable to check if output %s is spent: %v", op, err)
+	if len(tx.outputs) <= int(op.vout) {
+		return nil, fmt.Errorf("tx %s does not have an output at index %d", op.txHash, op.vout)
 	}
-
-	bestBlockHeight := dcr.cachedBestBlock().height
-	confs := uint32(bestBlockHeight - txBlock.height + 1)
-	return txOut, confs, isSpent, txTree, nil
+	return tx.outputs[op.vout], nil
 }
 
 // externalTxBlock returns the mainchain block containing the provided tx, if
@@ -246,23 +162,26 @@ func (dcr *ExchangeWallet) externalTxOut(ctx context.Context, op outPoint, tryFi
 // block hash, height and the tx outputs details are cached.
 // Requires the tx.scanMtx to be locked for write.
 func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, tryFindTxBlock bool, earliestTxTime time.Time) (*block, error) {
-	txBlockFound, err := dcr.isMainchainBlock(ctx, tx.block)
-	if err != nil {
-		return nil, err
-	} else if txBlockFound {
-		return tx.block, nil
-	} else if tx.block != nil {
-		// Tx block was previously set but seems to have been invalidated.
-		// Log a warning(?) and clear the tx tree, outputs and block info
-		// fields that must have been previously set.
-		dcr.log.Warnf("Block %s found to contain tx %s has been invalidated.", tx.block.hash, tx.hash)
-		tx.block = nil
-		tx.tree = -1
-		tx.outputs = nil
+	if tx.block != nil {
+		txBlockStillValid, err := dcr.isMainchainBlock(ctx, tx.block)
+		if err != nil {
+			return nil, err
+		} else if txBlockStillValid {
+			dcr.log.Debugf("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
+			return tx.block, nil
+		} else {
+			// Tx block was previously set but seems to have been invalidated.
+			// Clear the tx tree, outputs and block info fields that must have
+			// been previously set.
+			dcr.log.Warnf("Block %s found to contain tx %s has been invalidated.", tx.block.hash, tx.hash)
+			tx.block = nil
+			tx.tree = -1
+			tx.outputs = nil
+		}
 	}
 
 	// Tx block is currently unknown. Return if the caller does not want
-	// to start a search for the block.
+	// to start a search for the tx block.
 	if !tryFindTxBlock {
 		return nil, nil
 	}
@@ -288,12 +207,18 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 	// Run cfilters scan in reverse from best block to lastScannedBlock or
 	// to block just before earliestTxTime.
 	currentTip := dcr.cachedBestBlock()
-	if lastScannedBlock != nil {
+	if lastScannedBlock == nil {
+		dcr.log.Debugf("Searching for tx %s in blocks between block %d (%s) to the block just before %s.",
+			tx.hash, currentTip.height, currentTip.hash, earliestTxTime)
+	} else if lastScannedBlock.height < currentTip.height {
 		dcr.log.Debugf("Searching for tx %s in blocks %d (%s) to %d (%s).", tx.hash,
 			currentTip.height, currentTip.hash, lastScannedBlock.height, lastScannedBlock.hash)
 	} else {
-		dcr.log.Debugf("Searching for tx %s in blocks between block %d (%s) to the block just before %s.",
-			tx.hash, currentTip.height, currentTip.hash, earliestTxTime)
+		if lastScannedBlock.height > currentTip.height {
+			dcr.log.Warnf("Previous cfilters look up for tx %s stopped at block %d but current tip is %d?",
+				tx.hash, lastScannedBlock.height, currentTip.height)
+		}
+		return nil, nil
 	}
 
 	iHash := currentTip.hash
@@ -309,22 +234,6 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 	}
 
 	for {
-		// Abort the search if we've scanned blocks from the tip back to the
-		// block we scanned last or the block just before earliestTxTime.
-		if iHeight == 0 {
-			return scanCompletedWithoutResults()
-		}
-		if lastScannedBlock != nil && iHeight <= lastScannedBlock.height {
-			return scanCompletedWithoutResults()
-		}
-		iBlock, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, iHash)
-		if err != nil {
-			return nil, fmt.Errorf("getblockheader error for block %s: %w", iHash, translateRPCCancelErr(err))
-		}
-		if iBlock.Time <= earliestTxTime.Unix() {
-			return scanCompletedWithoutResults()
-		}
-
 		// Check if this block has the tx we're looking for.
 		blockFilter, err := dcr.getBlockFilterV2(ctx, iHash)
 		if err != nil {
@@ -354,10 +263,15 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 				for i := range blkTx.Vout {
 					blkTxOut := &blkTx.Vout[i]
 					tx.outputs[i] = &externalTxOutput{
-						outPoint:        newOutPoint(tx.hash, blkTxOut.N),
-						value:           blkTxOut.Value,
-						pkScriptHex:     blkTxOut.ScriptPubKey.Hex,
-						pkScriptVersion: blkTxOut.ScriptPubKey.Version,
+						txOutput: &txOutput{
+							op:            newOutPoint(tx.hash, blkTxOut.N),
+							tree:          tx.tree,
+							value:         blkTxOut.Value,
+							scriptVersion: blkTxOut.ScriptPubKey.Version,
+							scriptHex:     blkTxOut.ScriptPubKey.Hex,
+							blockHash:     iHash,
+							blockHeight:   iHeight,
+						},
 					}
 				}
 				return tx.block, nil
@@ -366,6 +280,22 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 		}
 
 		// Block does not include the tx, check the previous block.
+		// Abort the search if we've scanned blocks from the tip back to the
+		// block we scanned last or the block just before earliestTxTime.
+		if iHeight == 0 {
+			return scanCompletedWithoutResults()
+		}
+		if lastScannedBlock != nil && iHeight <= lastScannedBlock.height {
+			return scanCompletedWithoutResults()
+		}
+		iBlock, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, iHash)
+		if err != nil {
+			return nil, fmt.Errorf("getblockheader error for block %s: %w", iHash, translateRPCCancelErr(err))
+		}
+		if iBlock.Time <= earliestTxTime.Unix() {
+			return scanCompletedWithoutResults()
+		}
+
 		iHeight--
 		iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 		if err != nil {
@@ -376,6 +306,86 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 	}
 }
 
+// checkOutputSpendStatus checks if the provided output is known to be spent
+// by a mined transaction. This may involve scanning block filters to attempt
+// finding a block that contains the spender of the provided output.
+//
+// This method should only be used with transaction outputs that do NOT pay to
+// the wallet such as swap contracts including those sent from this wallet.
+func (dcr *ExchangeWallet) checkOutputSpendStatus(ctx context.Context, output *externalTxOutput) (outputSpendStatus, error) {
+	// Hold the output.spenderMtx lock for 2 reasons:
+	// 1) To read (and set) the spenderBlock field.
+	// 2) To prevent duplicate spender block scans if the spenderBlock is not
+	//    already known. Holding this lock now ensures that any ongoing scan
+	//    completes before we try to access the output.spenderBlock field
+	//    which may prevent unnecassary rescan.
+	output.spenderMtx.Lock()
+	defer output.spenderMtx.Unlock()
+
+	errorOut := func(err error) (outputSpendStatus, error) {
+		return outputSpendStatusUnknown, err
+	}
+
+	// Check if this output is known to be spent in a mainchain block.
+	if output.spenderBlock != nil {
+		spenderBlockStillValid, err := dcr.isMainchainBlock(ctx, output.spenderBlock)
+		if err != nil {
+			return errorOut(err)
+		} else if spenderBlockStillValid {
+			dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
+			return outputSpendStatusSpent, nil
+		} else {
+			// Output was previously found to have been spent but the block
+			// containing the spending tx seems to have been invalidated.
+			dcr.log.Warnf("Block %s found to contain spender of output %s has been invalidated.", output.spenderBlock.hash, output.op)
+			output.spenderBlock = nil
+		}
+	}
+
+	// This tx output is not known to be spent as of last search (if any).
+	// Scan blocks from the lastScannedBlock (if there was a previous scan)
+	// or from the block containing the output to attempt finding the spender
+	// of this output. Use mainChainAncestor to ensure that scanning starts
+	// from a mainchain block in the event that either the output block or
+	// the lastScannedBlock have been re-orged out of the mainchain.
+	firstSearch := output.lastScannedBlock == nil
+	startBlock := new(block)
+	var err error
+	if firstSearch {
+		// TODO: Should be a fatal error if the output's block is re-orged
+		// out of the mainchain!
+		startBlock.hash, startBlock.height, err = dcr.mainChainAncestor(ctx, output.blockHash)
+	} else {
+		startBlock.hash, startBlock.height, err = dcr.mainChainAncestor(ctx, output.lastScannedBlock)
+	}
+	if err != nil {
+		return errorOut(err)
+	}
+
+	// Search for this output's spender in the blocks between startBlock and
+	// the current best block.
+	outputPkScript, err := output.PkScript()
+	if err != nil {
+		return errorOut(err)
+	}
+	spenderTx, stopBlockHash, err := dcr.findTxOutSpender(ctx, output.op, outputPkScript, startBlock, firstSearch)
+	if stopBlockHash != nil { // might be nil if the search never scanned a block
+		output.lastScannedBlock = stopBlockHash
+	}
+	if err != nil {
+		return errorOut(err)
+	}
+	if spenderTx != nil {
+		spenderBlockHash, err := chainhash.NewHashFromStr(spenderTx.BlockHash)
+		if err != nil {
+			return errorOut(err)
+		}
+		output.spenderBlock = &block{hash: spenderBlockHash, height: spenderTx.BlockHeight}
+		return outputSpendStatusSpent, nil
+	}
+	return outputSpendStatusUnspent, nil
+}
+
 // findTxOutSpender attempts to find and return the tx that spends the provided
 // output by matching the provided outputPkScript against the block filters of
 // the mainchain blocks between the provided startBlock and the current best
@@ -383,10 +393,18 @@ func (dcr *ExchangeWallet) externalTxBlock(ctx context.Context, tx *externalTx, 
 // If no tx is found to spend the provided output, the hash of the block that
 // was last checked is returned along with any error that may have occurred
 // during the search.
-func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
+func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block, firstSearch bool) (*chainjson.TxRawResult, *chainhash.Hash, error) {
 	bestBlock := dcr.cachedBestBlock()
-	dcr.log.Debugf("Searching if output %s is spent in blocks %d (%s) to %d (%s) using pkScript %x.",
-		op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash, outputPkScript)
+	if startBlock.height < bestBlock.height || (firstSearch && startBlock.height == bestBlock.height) {
+		dcr.log.Debugf("Searching if output %s is spent in blocks %d (%s) to %d (%s) using pkScript %x.",
+			op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash, outputPkScript)
+	} else {
+		if startBlock.height > bestBlock.height {
+			dcr.log.Warnf("Attempting to look for output spender in block %d but current tip is %d?",
+				startBlock.height, bestBlock.height)
+		}
+		return nil, nil, nil
+	}
 
 	iHeight := startBlock.height
 	iHash := startBlock.hash
@@ -485,16 +503,4 @@ func (dcr *ExchangeWallet) getBlockFilterV2(ctx context.Context, blockHash *chai
 		v2cfilters: filter,
 		key:        bcf2Key,
 	}, nil
-}
-
-func parseAmountAndScript(amount float64, pkScriptHex string) (int64, []byte, error) {
-	amt, err := dcrutil.NewAmount(amount)
-	if err != nil {
-		return 0, nil, fmt.Errorf("invalid amount: %v", err)
-	}
-	pkScript, err := hex.DecodeString(pkScriptHex)
-	if err != nil {
-		return 0, nil, fmt.Errorf("invalid pkScript: %v", err)
-	}
-	return int64(amt), pkScript, nil
 }

@@ -128,7 +128,7 @@ func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) 
 		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
 	}
 
-	log := logger.SubLogger("rpcw")
+	log := logger.SubLogger("RPC")
 	log.Infof("Setting up rpc client to communicate with dcrwallet at %s with TLS certificate %q.",
 		cfg.RPCListen, cfg.RPCCert)
 	nodeRPCClient, err := newClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, log)
@@ -347,11 +347,37 @@ func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.Ou
 	return translateRPCCancelErr(w.rpcClient.LockUnspent(ctx, unlock, ops))
 }
 
-// GetTxOut returns information about an unspent tx output.
+// GetTxOut returns information about an unspent tx output, if found and
+// is unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
+// correct tree will be returned if the unspent output is found.
+// An asset.CoinNotFoundError is returned if the unspent output cannot be
+// located. UnspentOutput is only guaranteed to return results for outputs
+// that pay to the wallet.
 // Part of the Wallet interface.
-func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
-	txOut, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, mempool)
-	return txOut, translateRPCCancelErr(err)
+func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, int8, error) {
+	// Check for unspent output with gettxout rpc.
+	var checkTrees []int8
+	switch {
+	case tree == wire.TxTreeUnknown:
+		checkTrees = []int8{wire.TxTreeRegular, wire.TxTreeStake}
+	case tree == wire.TxTreeRegular || tree == wire.TxTreeStake:
+		checkTrees = []int8{tree}
+	default:
+		return nil, wire.TxTreeUnknown, fmt.Errorf("invalid tx tree %d", tree)
+	}
+
+	for _, tree := range checkTrees {
+		txout, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, mempool)
+		if err != nil {
+			return nil, tree, translateRPCCancelErr(err)
+		}
+		if txout != nil {
+			return txout, tree, nil
+		}
+	}
+
+	// Return asset.CoinNotFoundError if no result was gotten from gettxout.
+	return nil, wire.TxTreeUnknown, asset.CoinNotFoundError
 }
 
 // GetNewAddressGapPolicy returns an address from the specified account using

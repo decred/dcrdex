@@ -84,8 +84,13 @@ type Wallet interface {
 	GetChangeAddress(ctx context.Context, account string) (stdaddr.Address, error)
 	// LockUnspent locks or unlocks the specified outpoint.
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
-	// GetTxOut returns information about an unspent tx output.
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
+	// GetTxOut returns information about an unspent tx output, if found and
+	// is unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
+	// correct tree will be returned if the unspent output is found.
+	// An asset.CoinNotFoundError is returned if the unspent output cannot be
+	// located. UnspentOutput is only guaranteed to return results for outputs
+	// that pay to the wallet.
+	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, int8, error)
 	// GetNewAddressGapPolicy returns an address from the specified account using
 	// the specified gap policy.
 	GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error)
