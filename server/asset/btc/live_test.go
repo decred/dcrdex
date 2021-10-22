@@ -40,7 +40,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -70,14 +69,6 @@ func TestGetRawTransaction(t *testing.T) {
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(context.Background())
-		wg := new(sync.WaitGroup)
-		defer func() {
-			cancel()
-			wg.Wait()
-		}()
-
 		logger := dex.StdOutLogger("BTCTEST", dex.LevelTrace)
 		dexAsset, err := NewBackend("", logger, dex.Mainnet)
 		if err != nil {
@@ -92,11 +83,17 @@ func TestMain(m *testing.M) {
 			return 1
 		}
 
-		wg, err = dexAsset.Connect(ctx)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		wg, err := dexAsset.Connect(ctx)
 		if err != nil {
 			fmt.Printf("Connect failed: %v", err)
 			return 1
 		}
+		defer func() {
+			cancel()
+			wg.Wait()
+		}()
 
 		return m.Run()
 	}
