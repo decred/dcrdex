@@ -394,7 +394,7 @@ func (c *amountCoin) FeeRate() uint64 {
 }
 
 // Auth ensures that a user really has the keys to spend a funding coin by
-// sending a message signed by the funding coin address and its signature.
+// verifying a message signed by the funding coin address.
 func (c *amountCoin) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if len(pubkeys) != 1 {
 		return fmt.Errorf("expected one pubkey but got %d", len(pubkeys))

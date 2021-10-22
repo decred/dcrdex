@@ -136,3 +136,19 @@ func TestTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBalance(t *testing.T) {
+	addr := new(common.Address)
+	_, err := ethClient.balance(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPendingBalance(t *testing.T) {
+	addr := new(common.Address)
+	_, err := ethClient.pendingBalance(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
