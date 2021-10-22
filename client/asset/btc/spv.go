@@ -133,7 +133,8 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 	loader := wallet.NewLoader(net, netDir, true, 60*time.Second, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
-	_, err = loader.CreateNewWallet(pubPass, privPass, seed, time.Now())
+
+	_, err = loader.CreateNewWallet(pubPass, privPass, seed, walletBirthday)
 	if err != nil {
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
