@@ -2039,7 +2039,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return fmt.Errorf("failed to locate old wallet definition: %v", err)
 	}
 
-	if oldDef.Seeded && newWalletPW != nil {
+	if walletDef.Seeded && newWalletPW != nil {
 		return newError(passwordErr, "cannot set a password on a built-in wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
