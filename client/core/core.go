@@ -2033,8 +2033,13 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
-	seeded := oldWallet.Info().Seeded
-	if seeded && newWalletPW != nil {
+
+	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+	if err != nil {
+		return fmt.Errorf("failed to locate old wallet definition: %v", err)
+	}
+
+	if walletDef.Seeded && newWalletPW != nil {
 		return newError(passwordErr, "cannot set a password on a built-in wallet")
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
@@ -2056,11 +2061,6 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			}
 		}
 	}()
-
-	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
-	if err != nil {
-		return fmt.Errorf("failed to locate old wallet definition: %v", err)
-	}
 
 	if walletDef.Seeded {
 		if newWalletPW != nil {
@@ -2084,15 +2084,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			}
 		}
 
-		if oldWallet.connected() {
-			oldDef, err := walletDefinition(assetID, oldWallet.walletType)
-			// Error can be normal if the wallet was created before wallet types
-			// were a thing. Just assume this is an old wallet and therefore not
-			// seeded.
-			if err == nil && oldDef.Seeded {
-				oldWallet.Disconnect()
-				restartOnFail = true
-			}
+		if oldWallet.connected() && oldDef.Seeded {
+			oldWallet.Disconnect()
+			restartOnFail = true
 		}
 	} else if newWalletPW == nil && oldDef.Seeded {
 		// If we're switching from a seeded wallet and no password was provided,
