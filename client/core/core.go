@@ -1794,8 +1794,8 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 }
 
 // createSeededWallet initializes a seeded wallet with an asset-specific seed
-// derived deterministically from the app seed and a random password. The
-// password is returned for encrypting and storing.
+// and password derived deterministically from the app seed. The password is
+// returned for encrypting and storing.
 func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form *WalletForm) ([]byte, error) {
 	seed, pw, err := c.assetSeedAndPass(assetID, crypter)
 	if err != nil {
@@ -2072,19 +2072,27 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			return newError(existenceCheckErr, "error checking wallet pre-existence: %v", err)
 		}
 
-		if !exists {
-			newWalletPW, err = c.createSeededWallet(assetID, crypter, form)
-			if err != nil {
-				return newError(createWalletErr, "error creating new %q-type %s wallet: %v", form.Type, unbip(assetID), err)
-			}
-		} else if oldDef.Seeded {
-			_, newWalletPW, err = c.assetSeedAndPass(assetID, crypter)
+		// The password on a seeded wallet is deterministic, based on the seed
+		// itself, so if the seeded wallet of this Type for this asset already
+		// exists, recompute the password from the app seed.
+		var pw []byte
+		if exists {
+			_, pw, err = c.assetSeedAndPass(assetID, crypter)
 			if err != nil {
 				return newError(authErr, "error retrieving wallet password: %v", err)
 			}
+		} else {
+			pw, err = c.createSeededWallet(assetID, crypter, form)
+			if err != nil {
+				return newError(createWalletErr, "error creating new %q-type %s wallet: %v", form.Type, unbip(assetID), err)
+			}
+		}
+		dbWallet.EncryptedPW, err = crypter.Encrypt(pw)
+		if err != nil {
+			return fmt.Errorf("wallet password encryption error: %w", err)
 		}
 
-		if oldWallet.connected() && oldDef.Seeded {
+		if oldDef.Seeded && oldWallet.connected() {
 			oldWallet.Disconnect()
 			restartOnFail = true
 		}
@@ -2260,6 +2268,14 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 
 // setWalletPassword updates the (encrypted) password for the wallet.
 func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt.Crypter) error {
+	walletDef, err := walletDefinition(wallet.AssetID, wallet.walletType)
+	if err != nil {
+		return err
+	}
+	if walletDef.Seeded {
+		return newError(passwordErr, "cannot set a password on a seeded wallet")
+	}
+
 	// Connect if necessary.
 	wasConnected := wallet.connected()
 	if !wasConnected {
@@ -2292,7 +2308,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		wallet.setEncPW(nil)
 	}
 
-	err := c.db.SetWalletPassword(wallet.dbID, wallet.encPW())
+	err = c.db.SetWalletPassword(wallet.dbID, wallet.encPW())
 	if err != nil {
 		return codedError(dbErr, err)
 	}
@@ -5513,7 +5529,7 @@ func (c *Core) listen(dc *dexConnection) {
 		tStart := time.Now()
 		defer func() {
 			if eTime := time.Since(tStart); eTime > 250*time.Millisecond {
-				c.log.Infof("checkTrades completed in %v", eTime)
+				c.log.Warnf("checkTrades completed in %v (slow)", eTime)
 			}
 		}()
 
