@@ -617,8 +617,10 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		return nil, nil, nil, err
 	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{height: data.GetBestBlockHeight(),
-		hash: bestHash.String()}
+	wallet.currentTip = &block{
+		height: data.GetBestBlockHeight(),
+		hash:   *bestHash,
+	}
 	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
@@ -2058,7 +2060,10 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
 
 	// Update currentTip from "RPC". Normally run() would do this.
-	wallet.checkForNewBlocks(tCtx)
+	wallet.reportNewTip(tCtx, &block{
+		hash:   *redeemBlockHash,
+		height: contractHeight + 2,
+	})
 
 	// Check find redemption result.
 	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)

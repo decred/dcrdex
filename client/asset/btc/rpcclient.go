@@ -221,7 +221,7 @@ func (wc *rpcClient) getBestBlockHeight() (int32, error) {
 	if err != nil {
 		return -1, err
 	}
-	header, err := wc.getBlockHeader(tipHash.String())
+	header, err := wc.getBlockHeader(tipHash)
 	if err != nil {
 		return -1, err
 	}
@@ -503,10 +503,10 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 }
 
 // getBlockHeader gets the block header for the specified block hash.
-func (wc *rpcClient) getBlockHeader(blockHash string) (*blockHeader, error) {
+func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
 	blkHeader := new(blockHeader)
 	err := wc.call(methodGetBlockHeader,
-		anylist{blockHash, true}, blkHeader)
+		anylist{blockHash.String(), true}, blkHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -514,8 +514,8 @@ func (wc *rpcClient) getBlockHeader(blockHash string) (*blockHeader, error) {
 }
 
 // getBlockHeight gets the mainchain height for the specified block.
-func (wc *rpcClient) getBlockHeight(h *chainhash.Hash) (int32, error) {
-	hdr, err := wc.getBlockHeader(h.String())
+func (wc *rpcClient) getBlockHeight(blockHash *chainhash.Hash) (int32, error) {
+	hdr, err := wc.getBlockHeader(blockHash)
 	if err != nil {
 		return -1, err
 	}

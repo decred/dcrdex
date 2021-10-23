@@ -284,9 +284,13 @@ type spvWallet struct {
 
 	log    dex.Logger
 	loader *wallet.Loader
+
+	tipChan    chan *block
+	syncTarget int32
 }
 
 var _ Wallet = (*spvWallet)(nil)
+var _ tipNotifier = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
 func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params) *spvWallet {
@@ -299,7 +303,14 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		checkpoints:  make(map[outPoint]*scanCheckpoint),
 		log:          logger,
 		connectPeers: connectPeers,
+		tipChan:      make(chan *block, 1),
 	}
+}
+
+// tipFeed satisfies the tipNotifier interface, signaling that *spvWallet
+// will take precedence in sending block notifications.
+func (w *spvWallet) tipFeed() <-chan *block {
+	return w.tipChan
 }
 
 // storeTxBlock stores the block hash for the tx in the cache.
@@ -467,6 +478,8 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	if !synced && target > 0 && target == currentHeight {
 		synced = true
 	}
+
+	atomic.StoreInt32(&w.syncTarget, target)
 
 	return &syncStatus{
 		Target:  target,
@@ -835,11 +848,7 @@ func (w *spvWallet) walletUnlock(pw []byte) error {
 	return w.Unlock(pw)
 }
 
-func (w *spvWallet) getBlockHeader(hashStr string) (*blockHeader, error) {
-	blockHash, err := chainhash.NewHashFromStr(hashStr)
-	if err != nil {
-		return nil, err
-	}
+func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
 		return nil, err
@@ -913,14 +922,14 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 		return err
 	}
 
-	// Possible to subscribe to block notifications here with a NewRescan ->
-	// *Rescan supplied with a QuitChan-type RescanOption.
-	// Actually, should use btcwallet.Wallet.NtfnServer ?
+	notes := make(<-chan interface{})
+	if w.chainClient != nil {
+		notes = w.chainClient.Notifications()
+		if err := w.chainClient.NotifyBlocks(); err != nil {
+			return fmt.Errorf("failed to subscribe to block notifications: %w", err)
+		}
 
-	// notes := make(<-chan interface{})
-	// if w.chainClient != nil {
-	// 	notes = w.chainClient.Notifications()
-	// }
+	}
 
 	// Nanny for the caches checkpoints and txBlocks caches.
 	wg.Add(1)
@@ -949,8 +958,31 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 					}
 				}
 				w.checkpointMtx.Unlock()
-			// case note := <-notes:
-			// 	fmt.Printf("--Notification received: %T: %+v \n", note, note)
+
+			case noteI := <-notes:
+				switch note := noteI.(type) {
+				case chain.FilteredBlockConnected:
+					blk := note.Block
+
+					// Don't broadcast tip changes until the syncStatus has been
+					// requested and we have a syncTarget OR during initial sync
+					// except every 10k blocks.
+					syncTarget := atomic.LoadInt32(&w.syncTarget)
+					if syncTarget == 0 || (blk.Height < syncTarget && blk.Height%10_000 != 0) {
+						continue
+					}
+
+					select {
+					case w.tipChan <- &block{
+						hash:   blk.Hash,
+						height: int64(blk.Height),
+					}:
+
+					default:
+						w.log.Warnf("tip report channel was blocking")
+					}
+				}
+
 			case <-ctx.Done():
 				return
 			}
