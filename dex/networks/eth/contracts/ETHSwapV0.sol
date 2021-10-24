@@ -127,6 +127,47 @@ contract ETHSwap {
         swaps[secretHash].state = State.Filled;
     }
 
+    struct Initiation {
+        uint refundTimestamp;
+        bytes32 secretHash;
+        address participant;
+        uint value;
+    }
+
+    // initiateBatch initiates an array of swaps. It checks that all of the
+    // swaps have a non zero redemptionTimestamp and value, and that none of
+    // the secret hashes have ever been used previously. The function also makes
+    // sure that msg.value is equal to the sum of the values of all the swaps.
+    // Once initiated, each swap's state is set to Filled. The msg.value is now
+    // in the custody of the contract and can only be retrieved through redeem
+    // or refund.
+    //
+    // This is a writing function and requires gas. Failure or success should
+    // be guaged by querying the swap and checking state after being mined. Gas
+    // is expended either way.
+    function initiateBatch(Initiation[] calldata initiations)
+        public
+        payable
+        senderIsOrigin()
+    {
+        uint initVal = 0;
+        for (uint i = 0; i < initiations.length; i++) {
+            require(initiations[i].value > 0);
+            require(initiations[i].refundTimestamp > 0);
+            require(swaps[initiations[i].secretHash].state == State.Empty);
+            initVal = initVal + initiations[i].value;
+            swaps[initiations[i].secretHash].initBlockNumber = block.number;
+            swaps[initiations[i].secretHash].refundBlockTimestamp = initiations[i].refundTimestamp;
+            swaps[initiations[i].secretHash].secretHash = initiations[i].secretHash;
+            swaps[initiations[i].secretHash].initiator = msg.sender;
+            swaps[initiations[i].secretHash].participant = initiations[i].participant;
+            swaps[initiations[i].secretHash].value = initiations[i].value;
+            swaps[initiations[i].secretHash].state = State.Filled;
+        }
+
+        require(initVal == msg.value);
+    }
+
     // redeem redeems a contract. It checks that the sender is not a contract,
     // and that the secret hash hashes to secretHash. msg.value is tranfered
     // from the contract to the sender.
