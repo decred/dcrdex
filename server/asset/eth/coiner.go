@@ -303,8 +303,13 @@ func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
 	if !ok {
 		return nil, errors.New("coin ID not an amount")
 	}
-	if _, err := accountHasBalance(backend, &aCoinID.Address, aCoinID.Amount); err != nil {
+	bal, pendingBal, err := accountBalance(backend, &aCoinID.Address)
+	if err != nil {
 		return nil, err
+	}
+	amt := aCoinID.Amount
+	if bal < amt && pendingBal < amt {
+		return nil, fmt.Errorf("account %s does not have %d gwei", &aCoinID.Address, amt)
 	}
 	return &amountCoin{
 		backend: backend,
@@ -312,58 +317,45 @@ func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
 	}, nil
 }
 
-func accountHasBalance(backend *Backend, addr *common.Address, gwei uint64) (isConfirmed bool, err error) {
-	// Checking in order of pending, mined in order to avoid the problem of
-	// a block being mined inbetween that causes us to miss the balance.
+func accountBalance(backend *Backend, addr *common.Address) (balance, pendingBalance uint64, err error) {
 	bigPendingBal, err := backend.node.pendingBalance(backend.rpcCtx, addr)
 	if err != nil {
-		return false, err
+		return 0, 0, err
+	}
+	pendingBal, err := ToGwei(bigPendingBal)
+	if err != nil {
+		return 0, 0, err
 	}
 	bigBal, err := backend.node.balance(backend.rpcCtx, addr)
 	if err != nil {
-		return false, err
+		return 0, 0, err
 	}
 	bal, err := ToGwei(bigBal)
 	if err != nil {
-		return false, err
+		return 0, 0, err
 	}
-	if gwei <= bal {
-		// Confirmed balance is enough.
-		return true, nil
-	}
-	// Check if unconfirmed balance is enough.
-	pendingBal, err := ToGwei(bigPendingBal)
-	if err != nil {
-		return false, err
-	}
-	if gwei <= pendingBal {
-		// Unconfirmed balance is enough.
-		return false, nil
-	}
-	// There is not enough balance confirmed or pending. Error with the
-	// balance that was higher.
-	holding := fmt.Sprintf("%d", bal)
-	if pendingBal > bal {
-		holding = fmt.Sprintf("%d pending", pendingBal)
-	}
-	return false, fmt.Errorf("account %s only holds %s gwie but need %d gwei", addr, holding, gwei)
+	return bal, pendingBal, nil
 }
 
 // Confirmations returns one if an account currently has the funds to satisfy
 // its funding amount.
 func (c *amountCoin) Confirmations(_ context.Context) (int64, error) {
-	isConfirmed, err := accountHasBalance(c.backend, &c.cID.Address, c.cID.Amount)
+	bal, pendingBal, err := accountBalance(c.backend, &c.cID.Address)
 	if err != nil {
 		return -1, err
 	}
-	if isConfirmed {
+	amt := c.cID.Amount
+	switch {
+	case bal >= amt:
 		// While not completely accurate, node.balance will only
 		// return funds that have been mined, and therefore have at
 		// least one confirmation.
 		return 1, nil
+	case pendingBal >= amt:
+		// The pending balance was found to be enough.
+		return 0, nil
 	}
-	// The pending balance was found to be enough.
-	return 0, nil
+	return -1, fmt.Errorf("account %s does not have %d gwei", &c.cID.Address, amt)
 }
 
 // ID is the amount's coin ID.

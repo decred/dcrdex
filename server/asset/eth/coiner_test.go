@@ -415,11 +415,11 @@ func TestNewAmountCoin(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		wantErr bool
-		acID    []byte
-		bal     uint64
-		balErr  error
+		name            string
+		wantErr         bool
+		acID            []byte
+		bal, pendingBal uint64
+		balErr          error
 	}{{
 		name: "ok",
 		acID: acID.Encode(),
@@ -434,15 +434,20 @@ func TestNewAmountCoin(t *testing.T) {
 		bal:     amt,
 		wantErr: true,
 	}, {
-		name:    "account has balance error from balance error",
+		name:    "balance error",
 		acID:    acID.Encode(),
 		balErr:  errors.New(""),
+		wantErr: true,
+	}, {
+		name:    "not enough funds",
+		acID:    acID.Encode(),
 		wantErr: true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
-			bal:    big.NewInt(int64(test.bal * GweiFactor)),
-			balErr: test.balErr,
+			bal:        big.NewInt(int64(test.bal * GweiFactor)),
+			balErr:     test.balErr,
+			pendingBal: big.NewInt(int64(test.pendingBal * GweiFactor)),
 		}
 		eth := &Backend{
 			node: node,
@@ -464,7 +469,7 @@ func TestNewAmountCoin(t *testing.T) {
 	}
 }
 
-func TestAccountHasBalance(t *testing.T) {
+func TestAccountBalance(t *testing.T) {
 	addr := new(common.Address)
 	copy(addr[:], encode.RandomBytes(20))
 	amt := uint64(3)
@@ -474,16 +479,10 @@ func TestAccountHasBalance(t *testing.T) {
 		wantErr               bool
 		bal, pendingBal       *big.Int
 		balErr, pendingBalErr error
-		wantConfirmed         bool
 	}{{
-		name:          "ok has confirmed balance",
-		bal:           big.NewInt(int64(amt * GweiFactor)),
-		pendingBal:    big.NewInt(0),
-		wantConfirmed: true,
-	}, {
-		name:       "ok has pending balance",
-		pendingBal: big.NewInt(int64(amt * GweiFactor)),
-		bal:        big.NewInt(0),
+		name:       "ok",
+		bal:        big.NewInt(int64(amt * GweiFactor)),
+		pendingBal: big.NewInt(int64((amt - 1) * GweiFactor)),
 	}, {
 		name:          "pending balance error",
 		pendingBalErr: errors.New(""),
@@ -503,16 +502,6 @@ func TestAccountHasBalance(t *testing.T) {
 		pendingBal: overMaxWei(),
 		bal:        big.NewInt(0),
 		wantErr:    true,
-	}, {
-		name:       "not enough balance",
-		bal:        big.NewInt(int64((amt - 1) * GweiFactor)),
-		pendingBal: big.NewInt(int64((amt - 1) * GweiFactor)),
-		wantErr:    true,
-	}, {
-		name:       "not enough balance but higher pending",
-		bal:        big.NewInt(int64((amt - 2) * GweiFactor)),
-		pendingBal: big.NewInt(int64((amt - 1) * GweiFactor)),
-		wantErr:    true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
@@ -524,7 +513,7 @@ func TestAccountHasBalance(t *testing.T) {
 		eth := &Backend{
 			node: node,
 		}
-		confirmed, err := accountHasBalance(eth, addr, amt)
+		bal, pendingBal, err := accountBalance(eth, addr)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -534,9 +523,8 @@ func TestAccountHasBalance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-		if confirmed != test.wantConfirmed {
-			t.Fatalf("want %v but got %v for isConfirmed for test %v",
-				test.wantConfirmed, confirmed, test.name)
+		if bal != test.bal.Uint64() || pendingBal != test.pendingBal.Uint64() {
+			t.Fatalf("unexpected balance for test %v", test.name)
 		}
 	}
 }
@@ -565,6 +553,11 @@ func TestAmountCoinConfirmations(t *testing.T) {
 		name:          "account has balance error",
 		pendingBalErr: errors.New(""),
 		wantErr:       true,
+	}, {
+		name:       "account doesn't have enough funds",
+		bal:        big.NewInt(0),
+		pendingBal: big.NewInt(0),
+		wantErr:    true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
