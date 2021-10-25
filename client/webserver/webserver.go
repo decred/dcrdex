@@ -147,6 +147,9 @@ func New(core clientCore, addr, customSiteDir string, logger dex.Logger, reloadH
 		absDir,
 		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
 	} {
+		if dir == "" {
+			continue
+		}
 		log.Debugf("Looking for site in %s", dir)
 		if folderExists(dir) {
 			siteDir = dir
