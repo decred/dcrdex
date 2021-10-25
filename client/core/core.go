@@ -2378,7 +2378,7 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
-	cert, err := parseCert(host, certI)
+	cert, err := parseCert(host, certI, c.net)
 	if err != nil {
 		return nil, newError(fileReadErr, "failed to parse certificate: %v", err)
 	}
@@ -2621,7 +2621,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	}
 
-	cert, err := parseCert(host, form.Cert)
+	cert, err := parseCert(host, form.Cert, c.net)
 	if err != nil {
 		return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
 	}
@@ -6244,11 +6244,11 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 // string, it will be treated as a filepath and the raw file contents returned.
 // if certI is already a []byte, it is presumed to be the raw file contents, and
 // is returned unmodified.
-func parseCert(host string, certI interface{}) ([]byte, error) {
+func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) {
 	switch c := certI.(type) {
 	case string:
 		if len(c) == 0 {
-			return CertStore[host], nil
+			return CertStore[net][host], nil
 		}
 		cert, err := os.ReadFile(c)
 		if err != nil {
@@ -6257,7 +6257,7 @@ func parseCert(host string, certI interface{}) ([]byte, error) {
 		return cert, nil
 	case []byte:
 		if len(c) == 0 {
-			return CertStore[host], nil
+			return CertStore[net][host], nil
 		}
 		return c, nil
 	}

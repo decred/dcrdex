@@ -8,7 +8,7 @@ export default class LoginPage extends BasePage {
     super()
     this.form = Doc.idel(body, 'loginForm')
     Doc.show(this.form)
-    this.loginForm = new LoginForm(app, this.form, () => { this.loggedIn() })
+    this.loginForm = new LoginForm(this.form, () => { this.loggedIn() })
     this.loginForm.focus()
   }
 

@@ -1,5 +1,5 @@
 {{define "walletConfigTemplates"}}
-<div class="py-2 px-1 d-flex justify-content-between align-items-center" id="walletSettingsHeader">
+<div class="py-2 d-flex justify-content-between align-items-center" data-tmpl="walletSettingsHeader">
   Configurações da Carteira
   <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> carregar do arquivo</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
@@ -33,64 +33,44 @@
 {{end}}
 
 {{define "newWalletForm"}}
-<<<<<<< HEAD
-<div class="wallet-tabs" id="walletTypeTabs">
-  <div class="wtab bg1" id="walletTabTmpl"></div>
+<div class="wallet-tabs" data-tmpl="walletTypeTabs">
+  <div class="wtab" data-tmpl="walletTabTmpl"></div>
 </div>
-<div class="bg2 px-2 py-1 text-center fs18 position-relative">
-  Adicionar uma carteira <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span>
+<div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
+  Adicionar uma carteira <img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span>
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
-<div class="bg1 border1 p-3" id="nwMainForm">
-=======
-<div class="py-1 text-center fs28 sans-light">
-  Adicionar uma carteira <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span>
-  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-</div>
-<div class="px-4 pt-2 fs14 grey">
-  <span class="hoverbg pointer d-hide" id="nwGoBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
-</div>
-<div class="px-4 pt-2 pb-4">
->>>>>>> improved registration sequence and form design
-  <div id="walletSettings">
+<div class="position-relative" data-tmpl="mainForm">
+  <div class="flex-center py-3" data-tmpl="oneBttnBox">
+    <button class="one-bttn w-auto" data-tmpl="oneBttn">Create!</button>
+  </div>
+  <div class="py-2 fs14 grey">
+    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
+  </div>
+  <div data-tmpl="walletSettings">
     {{template "walletConfigTemplates"}}
   </div>
   <hr class="dashed my-2">
-<<<<<<< HEAD
-  <div id="newWalletPassBox">
-    <label for="newWalletPass" class="pt-3 pl-1 mb-1">Senha da Carteira
-      <span class="ico-info" data-tooltip="Deixar senha vazia caso não haja senha necessária para sua carteira."></span>
-    </label>
-    <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
-  </div>
-  <div id="newWalletAppPWBox">
-    <label for="nwAppPass" class="pt-3 pl-1 mb-1">Senha do App</label>
-    <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
-  </div>
-  <div class="d-flex justify-content-end mt-4">
-    <button id="submitAdd" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Adicionar</button>
-=======
-  <div class="d-flex justify-content-between align-items-stretch flex-wrap">
-    <div class="col-11 p-0">
+  <div class="d-flex justify-content-between align-items-stretch flex-wrap" data-tmpl="auth">
+    <div class="col-11 p-0" data-tmpl="newWalletPassBox">
       <label for="newWalletPass" class="pt-3 pl-1 mb-1">Senha da Carteira
         <span class="ico-info" data-tooltip="Deixar senha vazia caso não haja senha necessária para sua carteira."></span>
       </label>
-      <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
+      <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="off">
     </div>
     <div class="hide-pw col-11 p-0">
       <label for="nwAppPass" class="pt-3 pl-1 mb-1">Senha do App</label>
-      <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
+      <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
     <div class="d-flex justify-content-end align-items-end mt-4 col-12 p-0">
       <div class="flex-grow-1 d-flex justify-content-end align-items-end">
-        <button id="submitAdd" type="submit" class="justify-content-center fs15 bg2 selected">Adicionar</button>
+        <button data-tmpl="submitAdd" type="submit" class="justify-content-center fs15 bg2 selected">Adicionar</button>
       </div>
     </div>
->>>>>>> improved registration sequence and form design
   </div>
 
-  <div class="fs15 pt-3 text-center d-hide errcolor" id="newWalletErr"></div>
+  <div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="newWalletErr"></div>
 </div>
 {{end}}
 
@@ -119,36 +99,48 @@
 
 {{define "dexAddrForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-<div class="flex-center fs28 sans-light"><span class="ico-plus fs12 mr-2"></span> Adicionar uma DEX</div>
-<div>
-  <label for="dexAddr" class="pl-1 mt-2">Endereço DEX</label>
-  <input type="text" class="form-control select" id="dexAddr">
+<div class="flex-center fs24 sans-light"><span class="ico-plus fs12 mr-2"></span> Adicionar uma DEX</div>
+<div class="fs20 sans-light">Pick a server</div>
+<div class="d-flex flex-column align-items-stretch mt-1" data-tmpl="knownXCs">
+  {{range .KnownExchanges}}
+    <div class="known-exchange" data-host="{{.}}"><img class="micro-icon mr-1" src={{dummyExchangeLogo .}}> {{.}}</div>
+  {{end}}
 </div>
-<div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center" id="dexShowMore"><span class="ico-plus fs11"></span> <div class="pl-2">Mostrar mais opções</div></div>
-<div class="d-hide pt-3" id="dexCertBox">
-  <div class="px-1 my-1 mb-2 fs14 d-hide" id="dexNeedCert">
-      Parece que não temos um certificado SSL para esta DEX. Adicione o certificado do servidor para podermos continuar.
+<div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center" data-tmpl="showCustom">
+  <span class="ico-plus fs11"></span>
+  <div class="pl-2">add a different server</div>
+</div>
+
+<div data-tmpl="customBox" class="d-hide">
+  <hr class="dashed my-2">
+  <div class="fs20 sans-light">Add a custom server</div>
+  <div>
+    <label for="dexAddr" class="pl-1 mt-2">Endereço DEX</label>
+    <input type="text" class="form-control select" data-tmpl="addr">
   </div>
-  <div class="pl-1 mb-1 my-1 pointer">Certificado TLS</div>
-  <input type="file" class="form-control select d-none" id="certFile">
+  <div class="px-1 mt-3 mb-2 fs14 d-hide" data-tmpl="needCert">
+    Parece que não temos um certificado SSL para esta DEX. Adicione o certificado do servidor para podermos continuar.
+  </div>
+  <div class="pl-1 mb-1 mt-3 pointer">Certificado TLS</div>
+  <input type="file" class="form-control select d-none" data-tmpl="certFile">
   <div class="pl-1 mt-2 fs15">
-    <span id="selectedCert"></span>
-    <span class="underline ml-3 pointer d-hide" id="removeCert">remover</span>
-    <span class="underline ml-3 pointer" id="addCert">adicionar um arquivo</span>
+    <span data-tmpl="selectedCert"></span>
+    <span class="underline ml-3 pointer d-hide" data-tmpl="removeCert">remover</span>
+    <span class="underline ml-3 pointer" data-tmpl="addCert">adicionar um arquivo</span>
   </div>
 </div>
-<div class="d-flex mt-5">
+<div class="d-flex mt-3 d-hide" data-tmpl="auth">
   <div class="col-12 p-0">
-    <div id="dexAddrAppPWBox" {{if $.UserInfo.PasswordIsCached}}class="d-hide"{{end}}>
+    <div data-tmpl="appPWBox" {{if $.UserInfo.PasswordIsCached}}class="d-hide"{{end}}>
       <label for="dexAddrAppPW" class="pl-1 mb-1">Senha do App</label>
-      <input type="password" class="form-control select" id="dexAddrAppPW" autocomplete="current-password">
+      <input type="password" class="form-control select" id="dexAddrAppPW" data-tmpl="appPW" autocomplete="current-password">
     </div>
   </div>
   <div class="col-12 d-flex justify-content-end align-items-end p-0">
-    <button id="submitDEXAddr" type="button" class="justify-content-center fs16 bg2 selected">Enviar</button>
+    <button data-tmpl="submit" type="button" class="justify-content-center fs16 bg2 selected">Enviar</button>
   </div>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="dexAddrErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="err"></div>
 {{end}}
 
 {{define "regAssetForm"}}
@@ -231,102 +223,48 @@
 <div class="fs22 sans-light reg-conf-msg my-2" data-tmpl="text">
   Quando vc enviar esse formulário, <span id="feeDisplay"></span> DCR será gasto de sua carteira decred para pagar a taxa de registro.
 </div>
-<<<<<<< HEAD
-<div class="p-4">
-  <div class="fs16">
-    <span id="appPassSpan">Informe sua senha do app para confirmar seu registro na DEX.</span>
-    Quando vc enviar esse formulário, <span id="feeDisplay"></span> DCR será gasto de sua carteira decred para pagar a taxa de registro.
+
+<div class="d-flex align-items-stretch justify-content-center">
+  <div class="borderright flex-center my-2 px-4">
+    <span class="ico-check fs28"></span>
   </div>
-  <div class="fs16 mt-4">
-    This DEX accepts the following fees:
-    <table class="marketstable">
-      <thead>
-        <tr>
-          <th class="text-center">Asset</th>
-          <th class="text-center">Fee</th>
-          <th class="text-center">Confs</th>
-          <th class="text-center"></th>
-        </tr>
-      </thead>
-      <tbody id="feeTableRows">
-        <tr id="feeRowTemplate" class="clickable">
-          <td>
-            <div class="d-flex justify-content-center align-items-center">
-              <img class="micro-icon mr-1" data-tmpl="asseticon">
-              <div data-tmpl="asset"></div>
-            </div>
-          </td>
-          <td class="text-center">
-            <div class="d-flex justify-content-center align-items-center">
-              <div data-tmpl="fee"></div>
-            </div>
-          </td>
-          <td class="text-center">
-            <div class="d-flex justify-content-center align-items-center">
-              <div data-tmpl="confs"></div>
-            </div>
-          </td>
-          <td class="text-center">
-            <button data-tmpl="setupWallet" type="button" class="justify-content-center w-100 selected"></button>
-            <span data-tmpl="walletReady"></span>
-            <div class="d-inline-block text-nowrap p-1 d-hide" data-tmpl="walletSyncing" data-tooltip="">
-              <div class="d-inline-block ico-spinner spinner fs11"></div>
-              
-            </span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+
+  <div class="flex-center px-3 my-2">
+    <img data-tmpl="logo" class="logo mr-3">
+    <div class="d-flex flex-column justify-content-start align-items-start">
+      <span class="fs16" data-tmpl="host"></span>
+      <span>
+        <span data-tmpl="fee" class="fs22 lh1 mr-1"></span>
+        <span data-tmpl="feeUnit" class="fs16 grey"></span>
+      </span>
+      <span class="fs14">+ tx fees </span>
+    </div>
   </div>
-  <div class="fs16 mt-4">
-    Essa DEX provê os seguintes mercados:
-    <table class="marketstable">
-      <thead>
-        <tr>
-          <th class="text-center">Base</th>
-          <th class="text-center">Quote</th>
-          <th class="text-center">Tamanho do Lote</th>
-        </tr>
-      </thead>
-      <tbody id="marketsTableRows">
-        <tr id="marketRowTemplate">
-          <td>
-            <div class="d-flex justify-content-center align-items-center">
-              <img class="micro-icon mr-1" data-tmpl="baseicon">
-              <div data-tmpl="base"></div>
-            </div>
-          </td>
-          <td class="text-center">
-            <div class="d-flex justify-content-center align-items-center">
-              <img class="micro-icon mr-1" data-tmpl="quoteicon">
-              <div data-tmpl="quote"></div>
-            </div>
-          </td>
-          <td class="text-center" data-tmpl="lotsize"></td>
-        </tr>
-      </tbody>
-    </table>
-    Todas as trocas são múltiplas do tamanho do lote.
+
+
+  <!-- <div class="col-12 p-0 d-flex align-items-center justify-content-end borderright">
+    <div class="flex-center my-2 px-4">
+      <span class="ico-check fs28"></span>
+    </div>
   </div>
-  <hr class="dashed mt-4">
-  <div id="appPassBox">
-    <label for="appPass" class="pl-1 mb-1">Senha</label>
-    <input type="password" class="form-control select" id="appPass" autocomplete="current-password">
-  </div>
-  <div class="d-flex justify-content-end mt-4">
-    <button id="submitConfirm" type="button" class="col-8 justify-content-center fs15 bg2">Registrar</button>
-  </div>
-  <div class="fs15 pt-3 text-center d-hide errcolor" id="regErr"></div>
-=======
-<div class="fs16 my-1 flex-center" data-tmpl="host"></div>
-<div class="fs24 flex-center p-0">
-  <img data-tmpl="logo" class="logo mr-2">
-  <span data-tmpl="fee" class="lh1"></span>
+
+  <div class="col-12 p-0 d-flex align-items-center justify-content-start">
+    <div class="flex-center px-3 my-2">
+      <img data-tmpl="logo" class="logo mr-3">
+      <div class="d-flex flex-column justify-content-start align-items-start">
+        <span class="fs16" data-tmpl="host"></span>
+        <span data-tmpl="fee" class="fs24 lh1"></span>
+        <span class="fs14">
+          + tx fees
+        </span>
+      </div>
+    </div>
+  </div> -->
+
+
+
 </div>
-<div class="fs14 flex-center">
-  + tx fees
->>>>>>> improved registration sequence and form design
-</div>
+
 <div data-tmpl="passBox" class="text-center p-3 mt-1">
   <span class="fs14">Informe sua senha do app para confirmar seu registro na DEX.</span>
   <input type="password" class="form-control select app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
@@ -452,5 +390,57 @@
   <div class="col-12 py-1 {{if not $passwordIsCached}}pl-5{{end}}">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Enviar</button>
   </div>
+</div>
+{{end}}
+
+{{define "waitingForWalletForm"}}
+<div class="text-center mb-4"><img class="logo" data-tmpl="logo" src="/img/coins/dcr.png"></div>
+<div class="d-flex flex-column align-items-start borderleft mb-5">
+  <div class="flex-center flex-row">
+    <div class="icons text-right pr-3">
+      <span class="ico-check fs16 d-hide" data-tmpl="syncCheck"></span>
+      <span class="ico-checkbox d-hide fs14" data-tmpl="syncUncheck"></span>
+      <div class="ico-spinner spinner d-hide fs14 d-inline-block" data-tmpl="syncSpinner"></div>
+    </div>
+    <span class="fs20 sans-light">1: Sync the Blockchain</span>
+  </div>
+  <div class="flex-center mt-1">
+    <span class="fs16 mr-1">Progress:</span>
+    <span class="fs20 mx-1" data-tmpl="progress">58</span>
+    <span class="fs16 grey">%</span>
+  </div>
+  <div class="mt-1 flex-center flex-row fs14 d-hide" data-tmpl="syncRemainBox">
+    <span data-tmpl="syncRemain" class="mr-1"></span> remaining
+  </div>
+</div>
+
+<div class="d-flex flex-column align-items-start borderleft">
+  <div class="flex-center flex-row">
+    <div class="icons text-right pr-3">
+      
+      <span class="ico-checkbox fs14 d-hide" data-tmpl="balUncheck"></span>
+      <span class="ico-check d-hide fs16" data-tmpl="balCheck"></span>
+    </div>
+    <span class="fs20 sans-light">2: Fund the Registration Fee</span>
+  </div>
+  <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
+    <div class="flex-center mt-1">
+      <span class="fs16 mr-1">Balance:</span>
+      <span class="fs20 mx-1" data-tmpl="balance"></span>
+      <span class="fs16 grey unit">XYZ</span>
+    </div>
+    <div class="mb-2 flex-center flex-row">
+      <span class="fs16 mr-1">Registration fee:</span>
+      <span class="fs20 mx-1" data-tmpl="fee"></span>
+      <span class="fs16 grey unit">XYZ</span>
+    </div>
+    <div class="fs14">Your Deposit Address</div>
+    <div class="fs14 mono bg0 p-1 select-all" data-tmpl="depoAddr"></div>
+  </div>
+</div>
+
+<div class="hoverbg pointer grey d-inline-block text-center mt-3" data-tmpl="goBack">
+  <span class="ico-arrowback fs12 mb-1"></span> 
+  pick a different asset
 </div>
 {{end}}

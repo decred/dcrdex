@@ -399,8 +399,8 @@ export class ConfirmRegistrationForm {
     this.feeAssetID = asset.id
     const page = this.page
     const regAsset = this.xc.regFees[asset.symbol]
-    const s = Doc.formatCoinValue(regAsset.amount, unitInfo)
-    page.fee.textContent = `${s} ${unitInfo.conventional.unit}`
+    page.fee.textContent = Doc.formatCoinValue(regAsset.amount, unitInfo)
+    page.feeUnit.textContent = unitInfo.conventional.unit.toUpperCase()
     page.logo.src = Doc.logoPath(asset.symbol)
   }
 
@@ -580,6 +580,10 @@ export class FeeAssetSelectionForm {
   }
 }
 
+/*
+ * WalletWaitForm is a form used to track the wallet sync status and balance
+ * in preparation for paying the registration fee.
+ */
 export class WalletWaitForm {
   constructor (form, success, goBack) {
     this.form = form
@@ -598,10 +602,12 @@ export class WalletWaitForm {
     })
   }
 
+  /* setExchange sets the exchange for which the fee is being paid. */
   setExchange (xc) {
     this.xc = xc
   }
 
+  /* setWallet must be called before showing the form. */
   setWallet (wallet) {
     this.assetID = wallet.assetID
     this.progressCache = []
@@ -618,13 +624,18 @@ export class WalletWaitForm {
 
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
     Doc.show(page.balanceBox)
-    Doc.show(wallet.synced ? page.syncCheck : page.syncUncheck)
+
+    Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
     Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
 
     page.progress.textContent = Math.round(wallet.syncProgress * 100)
     this.reportBalance(wallet.balance)
   }
 
+  /*
+   * reportWalletState sets the progress and balance, ultimately calling the
+   * success function if conditions are met.
+   */
   reportWalletState (wallet) {
     if (wallet.assetID !== this.assetID) return
     if (this.progressed && this.funded) return
@@ -632,41 +643,58 @@ export class WalletWaitForm {
     this.reportBalance(wallet.balance)
   }
 
+  /*
+   * reportBalance sets the balance display and calls success if we go over the
+   * threshold.
+   */
   reportBalance (bal) {
-    if (this.funded) return
+    if (this.funded || this.assetID === -1) return
     const page = this.page
     const asset = app().assets[this.assetID]
     const fee = this.regFee
 
-    page.balance.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
-    if (bal.available > fee.amount) {
-      Doc.show(page.balCheck)
-      Doc.hide(page.balUncheck)
-      const v = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
-      Doc.hide(page.balanceBox)
-      this.funded = true
-      if (this.progressed) this.success()
+    if (bal.available <= fee.amount) {
+      page.balance.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
+      return
     }
+
+    Doc.show(page.balCheck)
+    Doc.hide(page.balUncheck, page.balanceBox)
+    this.funded = true
+    if (this.progressed) this.success()
   }
 
+  /*
+   * reportProgress sets the progress display and calls success if we are fully
+   * synced.
+   */
   reportProgress (synced, prog) {
     const page = this.page
     if (synced) {
       page.progress.textContent = '100'
-      Doc.hide(page.syncUncheck)
+      Doc.hide(page.syncUncheck, page.syncRemainBox, page.syncSpinner)
       Doc.show(page.syncCheck)
-      Doc.hide(page.syncRemainBox)
       this.progressed = true
       if (this.funded) this.success()
       return
+    } else if (prog === 1) {
+      Doc.hide(page.syncUncheck)
+      Doc.show(page.syncSpinner)
+    } else {
+      Doc.hide(page.syncSpinner)
+      Doc.show(page.syncUncheck)
     }
     page.progress.textContent = Math.round(prog * 100)
+
+    // The remaining time estimate must be based on more than one progress
+    // report. We'll cache up to the last 20 and look at the difference between
+    // the first and last to make the estimate.
+    const cacheSize = 20
     const cache = this.progressCache
     cache.push({
       stamp: new Date().getTime(),
       progress: prog
     })
-    const cacheSize = 20
     while (cache.length > cacheSize) cache.shift()
     if (cache.length === 1) return
     Doc.show(page.syncRemainBox)
@@ -757,25 +785,45 @@ export class DEXAddressForm {
     this.pwCache = pwCache
     this.defaultTLSText = 'none selected'
 
-    const page = this.page = Doc.idDescendants(form)
+    const page = this.page = Doc.parseTemplate(form)
 
     page.selectedCert.textContent = this.defaultTLSText
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
     Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
     Doc.bind(page.addCert, 'click', () => page.certFile.click())
-    Doc.bind(page.dexShowMore, 'click', () => {
-      Doc.hide(page.dexShowMore)
-      Doc.show(page.dexCertBox)
+    Doc.bind(page.showCustom, 'click', () => {
+      Doc.hide(page.showCustom)
+      Doc.show(page.customBox, page.auth)
     })
 
-    bind(form, page.submitDEXAddr, () => this.checkDEX())
+    this.knownExchanges = Array.from(page.knownXCs.querySelectorAll('.known-exchange'))
+    for (const div of this.knownExchanges) {
+      Doc.bind(div, 'click', () => {
+        const host = div.dataset.host
+        for (const d of this.knownExchanges) d.classList.remove('selected')
+        // If we have the password cached, we're good to go.
+        if (State.passwordIsCached() || (pwCache && pwCache.pw)) return this.checkDEX(host)
+        // Highlight the entry, but the user will have to enter their password
+        // and click submit.
+        div.classList.add('selected')
+        page.appPW.focus()
+        page.addr.value = host
+      })
+    }
+
+    bind(form, page.submit, () => this.checkDEX())
     this.refresh()
   }
 
   refresh () {
+    const page = this.page
+    page.addr.value = ''
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    if (hidePWBox) Doc.hide(this.page.dexAddrAppPWBox)
-    else Doc.show(this.page.dexAddrAppPWBox)
+    if (hidePWBox) Doc.hide(page.appPWBox, page.auth)
+    else Doc.show(page.appPWBox, page.auth)
+    Doc.hide(page.customBox)
+    Doc.show(page.showCustom)
+    for (const div of this.knownExchanges) div.classList.remove('selected')
   }
 
   /* Just a small size tweak and fade-in. */
@@ -787,13 +835,13 @@ export class DEXAddressForm {
     }, 'easeOut')
   }
 
-  async checkDEX () {
+  async checkDEX (addr) {
     const page = this.page
-    Doc.hide(page.dexAddrErr)
-    const addr = page.dexAddr.value
+    Doc.hide(page.err)
+    addr = addr || page.addr.value
     if (addr === '') {
-      page.dexAddrErr.textContent = 'DEX address cannot be empty'
-      Doc.show(page.dexAddrErr)
+      page.err.textContent = 'DEX address cannot be empty'
+      Doc.show(page.err)
       return
     }
 
@@ -804,7 +852,7 @@ export class DEXAddressForm {
 
     let pw = ''
     if (!State.passwordIsCached()) {
-      pw = page.dexAddrAppPW.value || this.pwCache.pw
+      pw = page.appPW.value || this.pwCache.pw
     }
 
     const loaded = app().loading(this.form)
@@ -817,11 +865,10 @@ export class DEXAddressForm {
     loaded()
     if (!app().checkResponse(res, true)) {
       if (res.msg === 'certificate required') {
-        Doc.hide(page.dexShowMore)
-        Doc.show(page.dexCertBox, page.dexNeedCert)
+        Doc.show(page.needCert)
       } else {
-        page.dexAddrErr.textContent = res.msg
-        Doc.show(page.dexAddrErr)
+        page.err.textContent = res.msg
+        Doc.show(page.err)
       }
 
       return
@@ -868,7 +915,6 @@ export class LoginForm {
     this.pwCache = pwCache
     const page = this.page = Doc.parseTemplate(form)
     this.headerTxt = page.header.textContent
-    page.header.style.height = `${page.header.offsetHeight}px`
 
     bind(form, page.submit, () => { this.submit() })
   }

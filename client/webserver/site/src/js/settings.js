@@ -33,7 +33,10 @@ export default class SettingsPage extends BasePage {
     })
 
     page.commitHash.textContent = app().commitHash.substring(0, 7)
-    Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
+    Doc.bind(page.addADex, 'click', () => {
+      this.dexAddrForm.refresh()
+      this.showForm(page.dexAddrForm)
+    })
 
     // Asset selection
     this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, assetID => {
@@ -136,7 +139,8 @@ export default class SettingsPage extends BasePage {
     })
 
     this.notifiers = {
-      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet)
+      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: note => this.walletWaitForm.reportBalance(note.balance)
     }
   }
 

@@ -87,7 +87,8 @@ export default class RegistrationPage extends BasePage {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
-    const currentForm = page.forms.querySelector(':scope > form:not(.d-hide)')
+    const currentForm = page.forms.querySelector(':scope > form.selected')
+    currentForm.classList.remove('selected')
     switch (currentForm) {
       case page.loginForm:
         this.loginForm.animate()
@@ -95,11 +96,13 @@ export default class RegistrationPage extends BasePage {
       case page.dexAddrForm:
         this.dexAddrForm.animate()
     }
+    Doc.show(currentForm)
 
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
     this.notifiers = {
-      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet)
+      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: note => this.walletWaitForm.reportBalance(note.balance)
     }
   }
 

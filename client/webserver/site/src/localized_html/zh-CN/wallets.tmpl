@@ -91,56 +91,35 @@
 
     {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
     <div id="marketsBox" class="d-hide">
-<<<<<<< HEAD
-      <div class="fs22 text-center py-1"><span id="marketsFor"></span> 市场</div>
-      <div id="marketsCard" class="card bg1 border1">
-        <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
-        <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
-          <div class="asset-market p-1" id="oneMarket">
-            <img src="{{logoPath "dcr"}}" class="mini-icon"><br>
-            <span>DCR-BTC</span>
-=======
       <div class="fs22 text-center py-1 fs24 sans-light"><img id="marketsForLogo"> <span id="marketsFor"></span> 市场</div>
       <div id="marketsCard">
         <div id="marketCard" class="market-box p-3">
           <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
           <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
             <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
+              
+              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. Do we even need the template function? */}}
               <img src="{{logoPath "dcr"}}" class="logo">
               <span class="mt-1 fs14 demi">DCR-BTC</span>
             </div>
->>>>>>> improved registration sequence and form design
           </div>
         </div>
       </div>
     </div>
 
     {{- /* NEW WALLET */ -}}
-<<<<<<< HEAD
-    <form class="card position-relative d-hide" id="walletForm" autocomplete="off">
-=======
     <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
->>>>>>> improved registration sequence and form design
       {{template "newWalletForm"}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-<<<<<<< HEAD
-    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
-=======
     <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
->>>>>>> improved registration sequence and form design
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-<<<<<<< HEAD
-    <div class="card bg1 border1 text-center fs20 d-hide" id="deposit">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
-=======
     <div class="text-center fs20 d-hide" id="deposit">
       <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
->>>>>>> improved registration sequence and form design
         存款
         <img id="depositLogo" class="micro-icon mx-1">
         <span id="depositName"></span>
@@ -154,13 +133,8 @@
     </div>
 
     {{- /* WITHDRAW */ -}}
-<<<<<<< HEAD
-    <form class="card bg1 border1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
-=======
     <form class="pb-3 d-hide" id="withdrawForm" autocomplete="off">
       <div class="py-1 text-center position-relative fs22 sans-light">
->>>>>>> improved registration sequence and form design
         提款
         <img id="withdrawLogo" class="micro-icon mx-1">
         <span id="withdrawName"></span>
@@ -196,13 +170,8 @@
     </form>
     
     {{- /* RECONFIGURE WALLET */ -}}
-<<<<<<< HEAD
-    <form class="card bg1 border1 pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
-=======
-    <form class="pb-3 d-hide mt-3" id="walletReconfig" autocomplete="off">
+    <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
       <div class="py-1 text-center position-relative fs22 sans-light">
->>>>>>> improved registration sequence and form design
         重新配置
         <img id="recfgAssetLogo" class="micro-icon mx-1">
         <span id="recfgAssetName"></span>
@@ -212,12 +181,7 @@
       <div class="py-1 mt-2" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
       </div>
-<<<<<<< HEAD
-
-      <div id="showChangePW" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
-=======
       <div id="showChangePW" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
->>>>>>> improved registration sequence and form design
         <span id="showIcon" class="ico-plus fs8 pl-1"></span>
         <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
         <span id="switchPWMsg" class="d-inline-block pl-1 pb-1"></span>
@@ -231,24 +195,19 @@
           <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
         </div>
       </div>
-<<<<<<< HEAD
 
-      <div id="showChangeType" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+      <div id="showChangeType" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
         <span id="changeTypeShowIcon" class="ico-plus fs8 pl-1"></span>
         <span id="changeTypeHideIcon" class="ico-minus fs8 pl-1 d-hide"></span>
-        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1"></span>
+        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1">change the wallet type</span>
       </div>
-      <div id="changeWalletType" class="px-4 py-1 d-hide">
+      <div id="changeWalletType" class="py-1 d-hide">
         <select id="changeWalletTypeSelect"></select>
       </div>
 
 
-      <hr class="dashed my-2 mx-4">
-      <div class="px-4 my-2">
-=======
       <hr class="dashed my-2">
       <div class="my-2">
->>>>>>> improved registration sequence and form design
         注意：在有活跃交易或预订订单时切换到不同的钱包可能会导致资金丢失。
       </div>
       <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
