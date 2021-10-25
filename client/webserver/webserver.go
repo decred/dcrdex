@@ -176,6 +176,9 @@ func New(cfg *Config) (*WebServer, error) {
 		absDir,
 		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
 	} {
+		if dir == "" {
+			continue
+		}
 		log.Debugf("Looking for site in %s", dir)
 		if folderExists(dir) {
 			siteDir = dir
