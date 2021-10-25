@@ -73,9 +73,12 @@ func TestBestBlockHash(t *testing.T) {
 }
 
 func TestBestHeader(t *testing.T) {
-	_, err := ethClient.bestHeader(ctx)
+	bh, err := ethClient.bestHeader(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if bh == nil {
+		t.Fatal("nil return")
 	}
 }
 
@@ -84,9 +87,12 @@ func TestBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ethClient.block(ctx, h)
+	b, err := ethClient.block(ctx, h)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if b == nil {
+		t.Fatal("nil return")
 	}
 }
 
@@ -98,9 +104,12 @@ func TestBlockNumber(t *testing.T) {
 }
 
 func TestPeers(t *testing.T) {
-	_, err := ethClient.peers(ctx)
+	p, err := ethClient.peers(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if p == nil {
+		t.Fatal("nil return")
 	}
 }
 
@@ -109,21 +118,28 @@ func TestSyncProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// syncProgress may return nil and is documented as such.
 }
 
 func TestSuggestGasPrice(t *testing.T) {
-	_, err := ethClient.suggestGasPrice(ctx)
+	sgp, err := ethClient.suggestGasPrice(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if sgp == nil {
+		t.Fatal("nil return")
 	}
 }
 
 func TestSwap(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, secretHash)
+	s, err := ethClient.swap(ctx, secretHash)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if s == nil {
+		t.Fatal("nil return")
 	}
 }
 
@@ -139,16 +155,22 @@ func TestTransaction(t *testing.T) {
 
 func TestBalance(t *testing.T) {
 	addr := new(common.Address)
-	_, err := ethClient.balance(ctx, addr)
+	b, err := ethClient.balance(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if b == nil {
+		t.Fatal("nil return")
 	}
 }
 
 func TestPendingBalance(t *testing.T) {
 	addr := new(common.Address)
-	_, err := ethClient.pendingBalance(ctx, addr)
+	pb, err := ethClient.pendingBalance(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if pb == nil {
+		t.Fatal("nil return")
 	}
 }
