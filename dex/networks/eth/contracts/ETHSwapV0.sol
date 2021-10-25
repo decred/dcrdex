@@ -117,14 +117,14 @@ contract ETHSwap {
         senderIsOrigin()
         isNotInitiated(secretHash)
     {
-        Swap storage swap = swaps[secretHash];
+        Swap storage swapToUpdate = swaps[secretHash];
 
-        swap.initBlockNumber = block.number;
-        swap.refundBlockTimestamp = refundTimestamp;
-        swap.initiator = msg.sender;
-        swap.participant = participant;
-        swap.value = msg.value;
-        swap.state = State.Filled;
+        swapToUpdate.initBlockNumber = block.number;
+        swapToUpdate.refundBlockTimestamp = refundTimestamp;
+        swapToUpdate.initiator = msg.sender;
+        swapToUpdate.participant = participant;
+        swapToUpdate.value = msg.value;
+        swapToUpdate.state = State.Filled;
     }
 
     struct Initiation {
@@ -153,18 +153,18 @@ contract ETHSwap {
         uint initVal = 0;
         for (uint i = 0; i < initiations.length; i++) {
             Initiation calldata initiation = initiations[i];
-            Swap storage swap = swaps[initiation.secretHash];
+            Swap storage swapToUpdate = swaps[initiation.secretHash];
 
             require(initiation.value > 0);
             require(initiation.refundTimestamp > 0);
-            require(swap.state == State.Empty);
+            require(swapToUpdate.state == State.Empty);
 
-            swap.initBlockNumber = block.number;
-            swap.refundBlockTimestamp = initiation.refundTimestamp;
-            swap.initiator = msg.sender;
-            swap.participant = initiation.participant;
-            swap.value = initiation.value;
-            swap.state = State.Filled;
+            swapToUpdate.initBlockNumber = block.number;
+            swapToUpdate.refundBlockTimestamp = initiation.refundTimestamp;
+            swapToUpdate.initiator = msg.sender;
+            swapToUpdate.participant = initiation.participant;
+            swapToUpdate.value = initiation.value;
+            swapToUpdate.state = State.Filled;
 
             initVal += initiation.value;
         }
