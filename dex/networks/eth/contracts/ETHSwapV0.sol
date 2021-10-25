@@ -34,7 +34,6 @@ contract ETHSwap {
     struct Swap {
         uint initBlockNumber;
         uint refundBlockTimestamp;
-        bytes32 secretHash;
         bytes32 secret;
         address initiator;
         address participant;
@@ -118,13 +117,14 @@ contract ETHSwap {
         senderIsOrigin()
         isNotInitiated(secretHash)
     {
-        swaps[secretHash].initBlockNumber = block.number;
-        swaps[secretHash].refundBlockTimestamp = refundTimestamp;
-        swaps[secretHash].secretHash = secretHash;
-        swaps[secretHash].initiator = msg.sender;
-        swaps[secretHash].participant = participant;
-        swaps[secretHash].value = msg.value;
-        swaps[secretHash].state = State.Filled;
+        Swap storage swap = swaps[secretHash];
+
+        swap.initBlockNumber = block.number;
+        swap.refundBlockTimestamp = refundTimestamp;
+        swap.initiator = msg.sender;
+        swap.participant = participant;
+        swap.value = msg.value;
+        swap.state = State.Filled;
     }
 
     struct Initiation {
@@ -152,17 +152,21 @@ contract ETHSwap {
     {
         uint initVal = 0;
         for (uint i = 0; i < initiations.length; i++) {
-            require(initiations[i].value > 0);
-            require(initiations[i].refundTimestamp > 0);
-            require(swaps[initiations[i].secretHash].state == State.Empty);
-            initVal = initVal + initiations[i].value;
-            swaps[initiations[i].secretHash].initBlockNumber = block.number;
-            swaps[initiations[i].secretHash].refundBlockTimestamp = initiations[i].refundTimestamp;
-            swaps[initiations[i].secretHash].secretHash = initiations[i].secretHash;
-            swaps[initiations[i].secretHash].initiator = msg.sender;
-            swaps[initiations[i].secretHash].participant = initiations[i].participant;
-            swaps[initiations[i].secretHash].value = initiations[i].value;
-            swaps[initiations[i].secretHash].state = State.Filled;
+            Initiation calldata initiation = initiations[i];
+            Swap storage swap = swaps[initiation.secretHash];
+
+            require(initiation.value > 0);
+            require(initiation.refundTimestamp > 0);
+            require(swap.state == State.Empty);
+
+            swap.initBlockNumber = block.number;
+            swap.refundBlockTimestamp = initiation.refundTimestamp;
+            swap.initiator = msg.sender;
+            swap.participant = initiation.participant;
+            swap.value = initiation.value;
+            swap.state = State.Filled;
+
+            initVal += initiation.value;
         }
 
         require(initVal == msg.value);
