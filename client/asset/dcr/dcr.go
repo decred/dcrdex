@@ -555,6 +555,8 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		defer wg.Done()
 		if !monitoringBlocks {
 			dcr.monitorBlocks(ctx)
+		} else {
+			<-ctx.Done() // just wait for shutdown signal
 		}
 		dcr.shutdown()
 	}()

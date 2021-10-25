@@ -262,10 +262,8 @@ func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 // notification can be provided.
 // Part of the Wallet interface.
 func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
-	// TODO: Could use the ctx provided to poll getbestblock and detect tip changes
-	// in order to invoke the provided callback. This is currently already being handled
-	// by the dcr ExchangeWallet to accomodate other implementations that may also not
-	// have an out-of-the-box provision for block change notifications.
+	// TODO: Consider implementing tip change notifications using the rpcclient
+	// websocket OnBlockConnected notification.
 	return false
 }
 

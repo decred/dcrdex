@@ -26,7 +26,7 @@ type WalletConstructor func(cfg *asset.WalletConfig, chainParams *chaincfg.Param
 // customWalletConstructors are functions for setting up custom implementations
 // of the Wallet interface that may be used by the ExchangeWallet instead of the
 // default rpcWallet implementation.
-var customWalletConstructors map[string]WalletConstructor
+var customWalletConstructors = map[string]WalletConstructor{}
 
 // RegisterCustomWallet registers a function that should be used in creating a
 // Wallet implementation that the ExchangeWallet of the specified type will use
