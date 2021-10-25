@@ -250,15 +250,15 @@ func (w *rpcWallet) Disconnected() bool {
 	return w.rpcConnector.Disconnected()
 }
 
-// Disconnected returns true if the rpc client is not connected.
+// Network returns the network of the connected wallet.
 // Part of the Wallet interface.
 func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 	net, err := w.rpcClient.GetCurrentNet(ctx)
 	return net, translateRPCCancelErr(err)
 }
 
-// NotifyOnTipChange registers a callback function that the should be invoked
-// when the wallet sees new mainchain blocks. The return value indicates if this
+// NotifyOnTipChange registers a callback function that should be invoked when
+// the wallet sees new mainchain blocks. The return value indicates if this
 // notification can be provided.
 // Part of the Wallet interface.
 func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
@@ -525,7 +525,7 @@ func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address)
 type anylist []interface{}
 
 // rpcClientRawRequest is used to marshal parameters and send requests to the
-// RPC server via rpcClient.RawRequest. If `thing` is non-nil, the resul will
+// RPC server via rpcClient.RawRequest. If `thing` is non-nil, the result will
 // be marshaled into `thing`.
 func (w *rpcWallet) rpcClientRawRequest(ctx context.Context, method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))

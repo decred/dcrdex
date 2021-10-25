@@ -21,31 +21,36 @@ import (
 
 // WalletConstructor defines a function that can be invoked to create a custom
 // implementation of the Wallet interface.
-type WalletConstructor func(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (Wallet, error)
+type WalletConstructor func(cfg *asset.WalletConfig, chainParams *chaincfg.Params, logger dex.Logger) (Wallet, error)
 
-// customWalletConstructor is a function that can be invoked when setting up
-// the ExchangeWallet to set up a custom implementation of the Wallet interface
-// which will be used instead of the default rpcWallet implementation.
-var customWalletConstructor WalletConstructor
+// customWalletConstructors are functions for setting up custom implementations
+// of the Wallet interface that may be used by the ExchangeWallet instead of the
+// default rpcWallet implementation.
+var customWalletConstructors map[string]WalletConstructor
 
-// RegisterCustomWallet specifies the function that should be used in creating
-// a wallet implementation that the ExchangeWallet will use in place of the
-// default rpcWallet implementation. External consumers can use this function
-// to provide alternative Wallet implementations, and must do so before an
-// ExchangeWallet instance is created.
+// RegisterCustomWallet registers a function that should be used in creating a
+// Wallet implementation that the ExchangeWallet of the specified type will use
+// in place of the default rpcWallet implementation. External consumers can use
+// this function to provide alternative Wallet implementations, and must do so
+// before attempting to create an ExchangeWallet instance of this type.
 func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefinition) error {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
 			return fmt.Errorf("already support %q wallets", def.Type)
 		}
 	}
-	customWalletConstructor = constructor
+	customWalletConstructors[def.Type] = constructor
 	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
 	return nil
 }
 
 type TipChangeCallback func(*chainhash.Hash, int64, error)
 
+// Wallet defines methods that the ExchangeWallet uses for communicating with
+// a Decred wallet and blockchain.
+// TODO: Where possible, replace walletjson and chainjson return types with
+// other types that define fewer fields e.g. *chainjson.TxRawResult with
+// *wire.MsgTx.
 type Wallet interface {
 	// Connect establishes a connection to the wallet.
 	Connect(ctx context.Context) error

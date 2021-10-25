@@ -348,9 +348,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
-// Info returns basic information about the wallet and asset. WARNING: An
-// ExchangeWallet instance may have different DefaultFeeRate set, so use
-// (*ExchangeWallet).Info when possible.
+// Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
@@ -430,23 +428,25 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	// Set dcr.wallet using either the default rpcWallet or a custom wallet.
-	if customWalletConstructor == nil {
+	if cfg.Type == walletTypeDcrwRPC {
 		dcr.wallet, err = newRPCWallet(walletCfg, chainParams, logger)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		dcr.wallet, err = customWalletConstructor(walletCfg, chainParams, logger)
+	} else if makeCustomWallet, ok := customWalletConstructors[cfg.Type]; ok {
+		dcr.wallet, err = makeCustomWallet(cfg, chainParams, logger)
 		if err != nil {
 			return nil, fmt.Errorf("custom wallet setup error: %v", err)
 		}
+	} else {
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 	}
 
 	return dcr, nil
 }
 
-// unconnectedWallet returns an ExchangeWallet without a node. The node should
-// be set before use.
+// unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
+// should be set before use.
 func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
