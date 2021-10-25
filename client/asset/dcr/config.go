@@ -55,17 +55,6 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, *chai
 		return nil, nil, fmt.Errorf("error parsing config: %w", err)
 	}
 
-	missing := ""
-	if cfg.RPCUser == "" {
-		missing += " username"
-	}
-	if cfg.RPCPass == "" {
-		missing += " password"
-	}
-	if missing != "" {
-		return nil, nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
-	}
-
 	// Get network settings. Zero value is mainnet, but unknown non-zero cfg.Net
 	// is an error.
 	var defaultServer string

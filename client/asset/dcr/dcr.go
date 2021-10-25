@@ -9,17 +9,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -32,12 +29,10 @@ import (
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/gcs/v3"
 	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -64,18 +59,10 @@ const (
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
-	// RawRequest RPC methods
-	methodGetCFilterV2       = "getcfilterv2"
-	methodListUnspent        = "listunspent"
-	methodListLockUnspent    = "listlockunspent"
-	methodSignRawTransaction = "signrawtransaction"
-	walletTypeDcrwRPC        = "dcrwalletRPC"
+	walletTypeDcrwRPC = "dcrwalletRPC"
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
-	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
-
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
@@ -159,44 +146,6 @@ var (
 		}},
 	}
 )
-
-// rpcClient is an rpcclient.Client, or a stub for testing.
-type rpcClient interface {
-	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
-	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
-	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
-	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
-	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
-	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
-	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
-	GetBlockHeaderVerbose(ctx context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
-	GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
-	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
-	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
-	GetRawChangeAddress(ctx context.Context, account string, net stdaddr.AddressParams) (stdaddr.Address, error)
-	GetNewAddressGapPolicy(ctx context.Context, addrType string, gap dcrwallet.GapPolicy) (stdaddr.Address, error)
-	DumpPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error)
-	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
-	WalletLock(ctx context.Context) error
-	WalletPassphrase(ctx context.Context, passphrase string, timeoutSecs int64) error
-	AccountUnlocked(ctx context.Context, account string) (*walletjson.AccountUnlockedResult, error)
-	LockAccount(ctx context.Context, account string) error
-	UnlockAccount(ctx context.Context, account, passphrase string) error
-	Disconnected() bool
-	RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error)
-	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
-	ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error)
-}
-
-// The rpcclient package functions will return a rpcclient.ErrRequestCanceled
-// error if the context is canceled. Translate these to asset.ErrRequestTimeout.
-func translateRPCCancelErr(err error) error {
-	if errors.Is(err, rpcclient.ErrRequestCanceled) {
-		err = asset.ErrRequestTimeout
-	}
-	return err
-}
 
 // outPoint is the hash and output index of a transaction output.
 type outPoint struct {
@@ -399,9 +348,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
-// Info returns basic information about the wallet and asset. WARNING: An
-// ExchangeWallet instance may have different DefaultFeeRate set, so use
-// (*ExchangeWallet).Info when possible.
+// Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
@@ -414,12 +361,8 @@ func init() {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	// 64-bit atomic variables first. See
-	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect     int64
 	ctx              context.Context // the asset subsystem starts with Connect(ctx)
-	client           *rpcclient.Client
-	node             rpcClient
+	wallet           Wallet
 	chainParams      *chaincfg.Params
 	log              dex.Logger
 	acct             string
@@ -466,18 +409,6 @@ type findRedemptionResult struct {
 	Err              error
 }
 
-type walletClient = dcrwallet.Client
-
-type combinedClient struct {
-	*rpcclient.Client
-	*walletClient
-}
-
-// ValidateAddress disambiguates the node and wallet methods.
-func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error) {
-	return cc.walletClient.ValidateAddress(ctx, address)
-}
-
 // Check that ExchangeWallet satisfies the Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
@@ -485,7 +416,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
-	// package variable.
+	// variable.
 	walletCfg, chainParams, err := loadConfig(cfg.Settings, network)
 	if err != nil {
 		return nil, err
@@ -496,21 +427,26 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
-		walletCfg.RPCListen, walletCfg.RPCCert)
-	dcr.client, err = newClient(walletCfg.RPCListen, walletCfg.RPCUser,
-		walletCfg.RPCPass, walletCfg.RPCCert, logger)
-	if err != nil {
-		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %w", err)
+	// Set dcr.wallet using either the default rpcWallet or a custom wallet.
+	if cfg.Type == walletTypeDcrwRPC {
+		dcr.wallet, err = newRPCWallet(walletCfg, chainParams, logger)
+		if err != nil {
+			return nil, err
+		}
+	} else if makeCustomWallet, ok := customWalletConstructors[cfg.Type]; ok {
+		dcr.wallet, err = makeCustomWallet(cfg, chainParams, logger)
+		if err != nil {
+			return nil, fmt.Errorf("custom wallet setup error: %v", err)
+		}
+	} else {
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 	}
-	// Beyond this point, only node
-	dcr.node = &combinedClient{dcr.client, dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)}
 
 	return dcr, nil
 }
 
-// unconnectedWallet returns an ExchangeWallet without a node. The node should
-// be set before use.
+// unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
+// should be set before use.
 func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
@@ -552,37 +488,6 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}, nil
 }
 
-// newClient attempts to create a new websocket connection to a dcrwallet
-// instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
-	certs, err := os.ReadFile(cert)
-	if err != nil {
-		return nil, fmt.Errorf("TLS certificate read error: %w", err)
-	}
-
-	config := &rpcclient.ConnConfig{
-		Host:                host,
-		Endpoint:            "ws",
-		User:                user,
-		Pass:                pass,
-		Certificates:        certs,
-		DisableConnectOnNew: true,
-	}
-
-	ntfnHandlers := &rpcclient.NotificationHandlers{
-		// Setup an on-connect handler for logging (re)connects.
-		OnClientConnected: func() {
-			logger.Infof("Connected to Decred wallet at %s", host)
-		},
-	}
-	cl, err := rpcclient.New(config, ntfnHandlers)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
-	}
-
-	return cl, nil
-}
-
 // Info returns basic information about the wallet and asset.
 func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 	return WalletInfo
@@ -602,51 +507,32 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// rpclog(dcr.log)
 	dcr.ctx = ctx
-	err := dcr.client.Connect(ctx, false)
+
+	err := dcr.wallet.Connect(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Decred Wallet connect error: %w", err)
+		return nil, err
 	}
 
-	// The websocket client is connected now, so if any of the following checks
-	// fails and we return with a non-nil error, we must shutdown the rpc client
-	// or subsequent reconnect attempts will be met with "websocket client has
-	// already connected".
+	// The wallet is connected now, so if any of the following checks
+	// fails and we return with a non-nil error, we must disconnect the
+	// wallet.
+	// This is especially important as the wallet may be using an rpc
+	// connection which was established above and if we do not disconnect,
+	// subsequent reconnect attempts will be met with "websocket client
+	// has already connected".
 	var success bool
 	defer func() {
 		if !success {
-			dcr.client.Shutdown()
-			dcr.client.WaitForShutdown()
+			dcr.wallet.Disconnect()
 		}
 	}()
 
-	// Check the required API versions.
-	versions, err := dcr.client.Version(ctx)
+	curnet, err := dcr.wallet.Network(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("DCR ExchangeWallet version fetch error: %w", err)
+		return nil, fmt.Errorf("unable to fetch wallet network: %w", err)
 	}
-
-	ver, exists := versions["dcrwalletjsonrpcapi"]
-	if !exists {
-		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
-	}
-	walletSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredWalletVersion, walletSemver) {
-		return nil, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
-			walletSemver, requiredWalletVersion)
-	}
-	ver, exists = versions["dcrdjsonrpcapi"]
-	if !exists {
-		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
-	}
-	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
-	}
-
-	curnet, err := dcr.client.GetCurrentNet(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getcurrentnet failure: %w", err)
+	if curnet != dcr.chainParams.Net {
+		return nil, fmt.Errorf("unexpected wallet network %s, expected %s", curnet, dcr.chainParams.Net)
 	}
 
 	// Initialize the best block.
@@ -656,17 +542,22 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
-	atomic.StoreInt64(&dcr.tipAtConnect, dcr.currentTip.height)
 
-	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, curnet)
-	success = true
+	success = true // All good, don't disconnect the wallet when this method returns.
+
+	// NotifyOnTipChange will return false if the wallet does not support
+	// tip change notification. We'll use dcr.monitorBlocks below if so.
+	monitoringBlocks := dcr.wallet.NotifyOnTipChange(ctx, dcr.handleTipChange)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dcr.monitorBlocks(ctx)
+		if !monitoringBlocks {
+			dcr.monitorBlocks(ctx)
+		} else {
+			<-ctx.Done() // just wait for shutdown signal
+		}
 		dcr.shutdown()
 	}()
 	return &wg, nil
@@ -674,20 +565,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 
 // OwnsAddress indicates if an address belongs to the wallet.
 func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
-	a, err := stdaddr.DecodeAddress(address, dcr.chainParams)
-	if err != nil {
-		return false, err
-	}
-	va, err := dcr.node.ValidateAddress(dcr.ctx, a)
-	if err != nil {
-		// Work around a bug with dcrwallet that prevents validateaddress for
-		// locked accounts.
-		if isAccountNotEncryptedErr(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return va.IsMine && dcr.acct == va.Account, nil
+	return dcr.wallet.AccountOwnsAddress(dcr.ctx, dcr.acct, address)
 }
 
 // Balance should return the total available funds in the wallet. Note that
@@ -696,34 +574,20 @@ func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 // includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
 // utxos when funding an order.
 func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
-	balances, err := dcr.node.GetBalanceMinConf(dcr.ctx, dcr.acct, 0)
-	if err != nil {
-		return nil, translateRPCCancelErr(err)
-	}
 	locked, err := dcr.lockedAtoms()
 	if err != nil {
 		return nil, err
 	}
-
-	var balance asset.Balance
-	var acctFound bool
-	for i := range balances.Balances {
-		ab := &balances.Balances[i]
-		if ab.AccountName == dcr.acct {
-			acctFound = true
-			balance.Available = toAtoms(ab.Spendable) - locked
-			balance.Immature = toAtoms(ab.ImmatureCoinbaseRewards) +
-				toAtoms(ab.ImmatureStakeGeneration)
-			balance.Locked = locked + toAtoms(ab.LockedByTickets)
-			break
-		}
+	ab, err := dcr.wallet.AccountBalance(dcr.ctx, dcr.acct, 0)
+	if err != nil {
+		return nil, err
 	}
-
-	if !acctFound {
-		return nil, fmt.Errorf("account not found: %q", dcr.acct)
-	}
-
-	return &balance, err
+	return &asset.Balance{
+		Available: toAtoms(ab.Spendable) - locked,
+		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
+			toAtoms(ab.ImmatureStakeGeneration),
+		Locked: locked + toAtoms(ab.LockedByTickets),
+	}, nil
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
@@ -732,11 +596,11 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	if confTarget < 2 {
 		confTarget = 2
 	}
-	estimateFeeResult, err := dcr.node.EstimateSmartFee(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
+	estimatedFeeRate, err := dcr.wallet.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
 	if err != nil {
-		return 0, translateRPCCancelErr(err)
+		return 0, err
 	}
-	atomsPerKB, err := dcrutil.NewAmount(estimateFeeResult.FeeRate) // atomsPerKB is 0 when err != nil
+	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerKB is 0 when err != nil
 	if err != nil {
 		return 0, err
 	}
@@ -980,16 +844,6 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	return coins, redeemScripts, nil
 }
 
-// unspents fetches unspent outputs for the ExchangeWallet account using rpc
-// RawRequest.
-func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
-	var unspents []walletjson.ListUnspentResult
-	// minconf, maxconf (rpcdefault=9999999), [address], account
-	params := anylist{0, 9999999, nil, dcr.acct}
-	err := dcr.nodeRawRequest(methodListUnspent, params, &unspents)
-	return unspents, err
-}
-
 // fund finds coins for the specified value. A function is provided that can
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
@@ -1021,7 +875,7 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 // spendableUTXOs generates a slice of spendable *compositeUTXO.
 func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
-	unspents, err := dcr.unspents()
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acct)
 	if err != nil {
 		return nil, err
 	}
@@ -1167,9 +1021,9 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	// Use an internal address for the sized output.
-	addr, err := dcr.node.GetRawChangeAddress(dcr.ctx, dcr.acct, dcr.chainParams)
+	addr, err := dcr.wallet.GetChangeAddress(dcr.ctx, dcr.acct)
 	if err != nil {
-		return nil, false, fmt.Errorf("error creating split transaction address: %w", translateRPCCancelErr(err))
+		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, lots, nfo)
@@ -1232,9 +1086,9 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	for _, c := range fCoins {
 		wireOPs = append(wireOPs, wire.NewOutPoint(c.op.txHash(), c.op.vout(), c.op.tree))
 	}
-	err := dcr.node.LockUnspent(dcr.ctx, false, wireOPs)
+	err := dcr.wallet.LockUnspent(dcr.ctx, false, wireOPs)
 	if err != nil {
-		return translateRPCCancelErr(err)
+		return err
 	}
 	for _, c := range fCoins {
 		dcr.fundingCoins[c.op.pt] = c
@@ -1266,7 +1120,7 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) error {
 		ops = append(ops, wire.NewOutPoint(op.txHash(), op.vout(), op.tree))
 		delete(dcr.fundingCoins, op.pt)
 	}
-	return translateRPCCancelErr(dcr.node.LockUnspent(dcr.ctx, true, ops))
+	return dcr.wallet.LockUnspent(dcr.ctx, true, ops)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
@@ -1296,7 +1150,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	}
 
 	// Check locked outputs for not found coins.
-	lockedOutputs, err := dcr.lockedOutputs()
+	lockedOutputs, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acct)
 	if err != nil {
 		return nil, err
 	}
@@ -1309,9 +1163,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if !notFound[pt] {
 			continue
 		}
-		txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, output.Vout, output.Tree, true)
+		txOut, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, output.Vout, output.Tree, true)
 		if err != nil {
-			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), translateRPCCancelErr(err))
+			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), err)
 		}
 		var address string
 		if len(txOut.ScriptPubKey.Addresses) > 0 {
@@ -1331,7 +1185,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 	// Some funding coins still not found after checking locked outputs.
 	// Check wallet unspent outputs as last resort. Lock the coins if found.
-	unspents, err := dcr.unspents()
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acct)
 	if err != nil {
 		return nil, err
 	}
@@ -1365,9 +1219,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		return nil, fmt.Errorf("funding coins not found: %s", strings.Join(ids, ", "))
 	}
 	dcr.log.Debugf("Locking funding coins that were unlocked %v", coinsToLock)
-	err = dcr.node.LockUnspent(dcr.ctx, false, coinsToLock)
+	err = dcr.wallet.LockUnspent(dcr.ctx, false, coinsToLock)
 	if err != nil {
-		return nil, translateRPCCancelErr(err)
+		return nil, err
 	}
 
 	return coins, nil
@@ -1393,9 +1247,9 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		totalOut += contract.Value
 		// revokeAddrV2 is the address belonging to the key that will be
 		// used to sign and refund a swap past its encoded refund locktime.
-		revokeAddrV2, err := dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
+		revokeAddrV2, err := dcr.wallet.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
 		if err != nil {
-			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", translateRPCCancelErr(err))
+			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
 		refundAddrs = append(refundAddrs, revokeAddrV2)
 		// Create the contract, a P2SH redeem script.
@@ -1560,9 +1414,9 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 	// Send the transaction.
 	checkHash := msgTx.TxHash()
-	txHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
+	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, msgTx, false)
 	if err != nil {
-		return nil, nil, 0, translateRPCCancelErr(err)
+		return nil, nil, 0, err
 	}
 	if *txHash != checkHash {
 		return nil, nil, 0, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
@@ -1595,7 +1449,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		addr = fCoin.addr
 	} else {
 		// Check if we can get the address from gettxout.
-		txOut, err := dcr.node.GetTxOut(dcr.ctx, op.txHash(), op.vout(), op.tree, true)
+		txOut, err := dcr.wallet.GetTxOut(dcr.ctx, op.txHash(), op.vout(), op.tree, true)
 		if err == nil && txOut != nil {
 			addrs := txOut.ScriptPubKey.Addresses
 			if len(addrs) != 1 {
@@ -1645,7 +1499,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 	// Get the contracts P2SH address from the tx output's pubkey script.
 	txOutRes, txTree, err := dcr.getTxOut(txHash, vout, true)
 	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+		return nil, fmt.Errorf("error finding unspent contract: %w", err)
 	}
 	coinNotFound := txOutRes == nil
 	var pkScript []byte
@@ -1731,7 +1585,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 	dcr.tipMtx.RLock()
 	hash := dcr.currentTip.hash
 	dcr.tipMtx.RUnlock()
-	blockHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, hash)
+	blockHeader, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, hash)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("unable to retrieve block header: %w", err)
 	}
@@ -1829,12 +1683,9 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 		return nil, nil, fmt.Errorf("duplicate find redemption request for %s", contractOutpoint.String())
 	}
 	txHash, vout := contractOutpoint.txHash, contractOutpoint.vout
-	tx, err := dcr.node.GetTransaction(dcr.ctx, &txHash)
+	tx, err := dcr.wallet.GetTransaction(dcr.ctx, &txHash)
 	if err != nil {
-		if isTxNotFoundErr(err) {
-			return nil, nil, asset.CoinNotFoundError
-		}
-		return nil, nil, fmt.Errorf("error finding transaction %s in wallet: %w", txHash, translateRPCCancelErr(err))
+		return nil, nil, err
 	}
 	msgTx, err := msgTxFromHex(tx.Hex)
 	if err != nil {
@@ -1853,10 +1704,10 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid blockhash %s for contract %s: %w", tx.BlockHash, contractOutpoint.String(), err)
 		}
-		txBlock, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, false)
+		txBlock, err := dcr.wallet.GetBlockVerbose(dcr.ctx, blockHash, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error fetching verbose block %s for contract %s: %w",
-				tx.BlockHash, contractOutpoint.String(), translateRPCCancelErr(err))
+				tx.BlockHash, contractOutpoint.String(), err)
 		}
 		contractBlock = &block{height: txBlock.Height, hash: blockHash}
 	}
@@ -1894,14 +1745,14 @@ func (dcr *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint
 			contractsCount-totalFound-totalCanceled, reason)
 	}
 
-	mempoolTxs, err := dcr.node.GetRawMempool(dcr.ctx, chainjson.GRMAll)
+	mempoolTxs, err := dcr.wallet.GetRawMempool(dcr.ctx, chainjson.GRMAll)
 	if err != nil {
 		logAbandon(fmt.Sprintf("error retrieving transactions: %v", err))
 		return
 	}
 
 	for _, txHash := range mempoolTxs {
-		tx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+		tx, err := dcr.wallet.GetRawTransactionVerbose(dcr.ctx, txHash)
 		if err != nil {
 			logAbandon(fmt.Sprintf("getrawtransactionverbose error for tx hash %v: %v", txHash, err))
 			return
@@ -1951,9 +1802,9 @@ func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlockHeight, endBloc
 rangeBlocks:
 	for blockHeight := startBlockHeight; blockHeight <= endBlockHeight; blockHeight++ {
 		// Get the hash for this block.
-		blockHash, err := dcr.node.GetBlockHash(dcr.ctx, blockHeight)
+		blockHash, err := dcr.wallet.GetBlockHash(dcr.ctx, blockHeight)
 		if err != nil { // unable to get block hash is a fatal error
-			err = fmt.Errorf("unable to get hash for block %d: %w", blockHeight, translateRPCCancelErr(err))
+			err = fmt.Errorf("unable to get hash for block %d: %w", blockHeight, err)
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
@@ -1970,10 +1821,10 @@ rangeBlocks:
 		dcr.findRedemptionMtx.RUnlock()
 
 		// Check if any of the above p2sh scripts is possibly included in this block.
-		hit, err := dcr.blockMaybeContainsScripts(blockHash.String(), contractP2SHScripts)
+		hit, err := dcr.blockMaybeContainsScripts(blockHash, contractP2SHScripts)
 		if err != nil { // error checking a block's cfilters is a fatal error
 			err = fmt.Errorf("error checking cfilters for block %d (%s) for likely contract inclusion: %w",
-				blockHeight, blockHash, translateRPCCancelErr(err))
+				blockHeight, blockHash, err)
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
@@ -1985,10 +1836,10 @@ rangeBlocks:
 		// Pull the block info to confirm if any of its inputs spends a contract of interest.
 		// TODO: We don't really need getblock with either verbose=true or verboseTx=true
 		// since with a block's bytes we could deserialize and work on the MsgTxs.
-		blk, err := dcr.node.GetBlockVerbose(dcr.ctx, blockHash, true)
+		blk, err := dcr.wallet.GetBlockVerbose(dcr.ctx, blockHash, true)
 		if err != nil { // error pulling a matching block's transactions is a fatal error
 			err = fmt.Errorf("error retrieving transactions for block %d (%s): %w",
-				blockHeight, blockHash, translateRPCCancelErr(err))
+				blockHeight, blockHash, err)
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
@@ -2120,18 +1971,17 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 
 // blockMaybeContainsScripts uses the cfilters of the specified block to
 // determine if the block likely includes any of the passed scripts.
-func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash string, scripts [][]byte) (bool, error) {
-	var cfRes walletjson.GetCFilterV2Result
-	err := dcr.nodeRawRequest(methodGetCFilterV2, anylist{blockHash}, &cfRes)
+func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
+	bf, key, err := dcr.wallet.BlockCFilter(dcr.ctx, blockHash)
 	if err != nil {
 		return false, err
 	}
 
-	filterB, err := hex.DecodeString(cfRes.Filter)
+	filterB, err := hex.DecodeString(bf)
 	if err != nil {
 		return false, err
 	}
-	keyB, err := hex.DecodeString(cfRes.Key)
+	keyB, err := hex.DecodeString(key)
 	if err != nil {
 		return false, err
 	}
@@ -2158,9 +2008,9 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 	}
 
 	checkHash := msgTx.TxHash()
-	refundHash, err := dcr.node.SendRawTransaction(dcr.ctx, msgTx, false)
+	refundHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, msgTx, false)
 	if err != nil {
-		return nil, translateRPCCancelErr(err)
+		return nil, err
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
@@ -2179,9 +2029,9 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 	// Grab the unspent output to make sure it's good and to get the value if not supplied.
 	if val == 0 {
-		utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
+		utxo, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
 		if err != nil {
-			return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
+			return nil, fmt.Errorf("error finding unspent contract: %w", err)
 		}
 		if utxo == nil {
 			return nil, asset.CoinNotFoundError
@@ -2209,9 +2059,9 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	if refundAddr == nil {
-		refundAddr, err = dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
+		refundAddr, err = dcr.wallet.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
 		if err != nil {
-			return nil, fmt.Errorf("error getting new address from the wallet: %w", translateRPCCancelErr(err))
+			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
 	}
 	pkScriptVer, pkScript := refundAddr.PaymentScript()
@@ -2236,18 +2086,17 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 
 // Address returns an address for the exchange wallet.
 func (dcr *ExchangeWallet) Address() (string, error) {
-	addr, err := dcr.node.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
+	addr, err := dcr.wallet.GetNewAddressGapPolicy(dcr.ctx, dcr.acct, dcrwallet.GapPolicyIgnore)
 	if err != nil {
-		return "", translateRPCCancelErr(err)
+		return "", err
 	}
 	return addr.String(), nil
 }
 
 func (dcr *ExchangeWallet) accountUnlocked(ctx context.Context, acct string) (encrypted, unlocked bool, err error) {
 	var res *walletjson.AccountUnlockedResult
-	res, err = dcr.node.AccountUnlocked(ctx, acct)
+	res, err = dcr.wallet.AccountUnlocked(ctx, acct)
 	if err != nil {
-		err = translateRPCCancelErr(err)
 		return
 	}
 	encrypted = res.Encrypted
@@ -2264,19 +2113,19 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 		return err
 	}
 	if !encryptedAcct {
-		return translateRPCCancelErr(dcr.node.WalletPassphrase(dcr.ctx, string(pw), 0))
+		return dcr.wallet.UnlockWallet(dcr.ctx, string(pw), 0)
 
 	}
 	if unlocked {
 		return nil
 	}
 
-	return translateRPCCancelErr(dcr.node.UnlockAccount(dcr.ctx, dcr.acct, string(pw)))
+	return dcr.wallet.UnlockAccount(dcr.ctx, dcr.acct, string(pw))
 }
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
-	if dcr.client.Disconnected() {
+	if dcr.wallet.Disconnected() {
 		return asset.ErrConnectionDown
 	}
 
@@ -2292,17 +2141,13 @@ func (dcr *ExchangeWallet) Lock() error {
 		return err
 	}
 	if !encryptedAcct {
-		return translateRPCCancelErr(dcr.node.WalletLock(ctx))
+		return dcr.wallet.LockWallet(ctx)
 	}
 	if !unlocked {
 		return nil
 	}
 
-	err = dcr.node.LockAccount(dcr.ctx, dcr.acct)
-	if isAccountLockedErr(err) {
-		return nil // it's already locked
-	}
-	return translateRPCCancelErr(err)
+	return dcr.wallet.LockAccount(dcr.ctx, dcr.acct)
 }
 
 // Locked will be true if the wallet is currently locked.
@@ -2318,13 +2163,8 @@ func (dcr *ExchangeWallet) Locked() bool {
 		return !unlocked
 	}
 
-	// The account is not individually encrypted, so check walletinfo.
-	walletInfo, err := dcr.node.WalletInfo(dcr.ctx)
-	if err != nil {
-		dcr.log.Errorf("walletinfo error: %v", err)
-		return false
-	}
-	return !walletInfo.Unlocked
+	// The account is not individually encrypted, so check wallet lock status.
+	return !dcr.wallet.WalletUnlocked(dcr.ctx)
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
@@ -2378,12 +2218,9 @@ func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) 
 		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
-	tx, err := dcr.node.GetTransaction(ctx, txHash)
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
 	if err != nil {
-		if isTxNotFoundErr(err) {
-			return 0, false, asset.CoinNotFoundError
-		}
-		return 0, false, translateRPCCancelErr(err)
+		return 0, false, err
 	}
 	return uint32(tx.Confirmations), true, nil
 }
@@ -2432,30 +2269,16 @@ func (dcr *ExchangeWallet) shutdown() {
 	}
 	dcr.findRedemptionMtx.Unlock()
 
-	// Shut down the rpcclient.Client.
-	if dcr.client != nil {
-		dcr.client.Shutdown()
-		dcr.client.WaitForShutdown()
+	// Disconnect the wallet. For rpc wallets, this shuts down
+	// the rpcclient.Client.
+	if dcr.wallet != nil {
+		dcr.wallet.Disconnect()
 	}
 }
 
 // SyncStatus is information about the blockchain sync status.
 func (dcr *ExchangeWallet) SyncStatus() (bool, float32, error) {
-	chainInfo, err := dcr.node.GetBlockChainInfo(dcr.ctx)
-	if err != nil {
-		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
-	}
-	toGo := chainInfo.Headers - chainInfo.Blocks
-	if chainInfo.InitialBlockDownload || toGo > 1 {
-		ogTip := atomic.LoadInt64(&dcr.tipAtConnect)
-		totalToSync := chainInfo.Headers - ogTip
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
-		}
-		return false, progress, nil
-	}
-	return true, 1, nil
+	return dcr.wallet.SyncStatus(dcr.ctx)
 }
 
 // Combines the RPC type with the spending input information.
@@ -2501,17 +2324,9 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 	return utxos, nil
 }
 
-// lockedOutputs fetches locked outputs for the ExchangeWallet account using
-// rpc RawRequest.
-func (dcr *ExchangeWallet) lockedOutputs() ([]chainjson.TransactionInput, error) {
-	var locked []chainjson.TransactionInput
-	err := dcr.nodeRawRequest(methodListLockUnspent, anylist{dcr.acct}, &locked)
-	return locked, err
-}
-
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	lockedOutpoints, err := dcr.lockedOutputs()
+	lockedOutpoints, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acct)
 	if err != nil {
 		return 0, err
 	}
@@ -2527,10 +2342,10 @@ func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 // where the output is found.
 func (dcr *ExchangeWallet) getTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, int8, error) {
 	tree := wire.TxTreeRegular
-	txout, err := dcr.node.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check regular tree first
+	txout, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check regular tree first
 	if err == nil && txout == nil {
 		tree = wire.TxTreeStake
-		txout, err = dcr.node.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check stake tree
+		txout, err = dcr.wallet.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check stake tree
 	}
 	return txout, tree, err
 }
@@ -2547,7 +2362,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	}
 	txOut, tree, err := dcr.getTxOut(txHash, vout, true)
 	if err != nil {
-		return nil, fmt.Errorf("error finding unspent output %s:%d: %w", txHash, vout, translateRPCCancelErr(err))
+		return nil, fmt.Errorf("error finding unspent output %s:%d: %w", txHash, vout, err)
 	}
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError // maybe spent
@@ -2653,10 +2468,9 @@ func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
 	}
-	var res walletjson.SignRawTransactionResult
-	err = dcr.nodeRawRequest(methodSignRawTransaction, anylist{txHex}, &res)
+	res, err := dcr.wallet.SignRawTransaction(dcr.ctx, txHex)
 	if err != nil {
-		return nil, fmt.Errorf("rawrequest error: %w", err)
+		return nil, fmt.Errorf("signrawtransaction error: %w", err)
 	}
 
 	for i := range res.Errors {
@@ -2681,9 +2495,9 @@ func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 }
 
 func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	changeAddr, err := dcr.node.GetRawChangeAddress(dcr.ctx, dcr.acct, dcr.chainParams)
+	changeAddr, err := dcr.wallet.GetChangeAddress(dcr.ctx, dcr.acct)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating change address: %w", translateRPCCancelErr(err))
+		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
 	changeScriptVersion, changeScript := changeAddr.PaymentScript()
 	return newTxOut(int64(val), changeScriptVersion, changeScript), changeAddr, nil
@@ -2853,9 +2667,9 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {
-	txHash, err := dcr.node.SendRawTransaction(dcr.ctx, signedTx, false)
+	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
 	if err != nil {
-		return fmt.Errorf("sendrawtx error: %w, raw tx: %x", translateRPCCancelErr(err), dcr.wireBytes(signedTx))
+		return fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
 	}
 	checkHash := signedTx.TxHash()
 	if *txHash != checkHash {
@@ -2888,9 +2702,9 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 
 // getKeys fetches the private/public key pair for the specified address.
 func (dcr *ExchangeWallet) getKeys(addr stdaddr.Address) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
-	wif, err := dcr.node.DumpPrivKey(dcr.ctx, addr)
+	wif, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w (is wallet locked?)", translateRPCCancelErr(err))
+		return nil, nil, fmt.Errorf("%w (is wallet locked?)", err)
 	}
 
 	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey())
@@ -2921,16 +2735,21 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer cancel()
 	newTip, err := dcr.getBestBlock(ctx)
 	if err != nil {
-		go dcr.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
-	// This method is called frequently. Don't hold write lock
-	// unless tip has changed.
 	dcr.tipMtx.RLock()
 	sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
 	dcr.tipMtx.RUnlock()
-	if sameTip {
+	if !sameTip {
+		dcr.handleTipChange(newTip.hash, newTip.height, nil)
+	}
+}
+
+func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHeight int64, err error) {
+	if err != nil {
+		go dcr.tipChange(err)
 		return
 	}
 
@@ -2938,8 +2757,8 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	defer dcr.tipMtx.Unlock()
 
 	prevTip := dcr.currentTip
-	dcr.currentTip = newTip
-	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
+	dcr.currentTip = &block{newTipHeight, newTipHash}
+	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 	go dcr.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
@@ -2963,12 +2782,12 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
-	prevTipHeader, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, prevTip.hash)
+	prevTipHeader, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, prevTip.hash)
 	if err != nil {
 		// Redemption search cannot continue reliably without knowing if there
 		// was a reorg, cancel all find redemption requests in queue.
 		notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for prev tip hash %s: %w",
-			prevTip.hash, translateRPCCancelErr(err))
+			prevTip.hash, err)
 		return
 	}
 
@@ -2987,15 +2806,15 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 		}
 
 		for {
-			aBlock, err := dcr.node.GetBlockHeaderVerbose(dcr.ctx, ancestorBlockHash)
+			aBlock, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, ancestorBlockHash)
 			if err != nil {
-				notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for block %s: %w", ancestorBlockHash, translateRPCCancelErr(err))
+				notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for block %s: %w", ancestorBlockHash, err)
 				return
 			}
 			if aBlock.Confirmations > -1 {
 				// Found the mainchain ancestor of previous tip.
 				startHeight = int64(aBlock.Height)
-				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)
+				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTipHeight)
 				break
 			}
 			if aBlock.Height == 0 {
@@ -3015,13 +2834,13 @@ func (dcr *ExchangeWallet) checkForNewBlocks() {
 
 	// Run the redemption search from the startHeight determined above up
 	// till the current tip height.
-	go dcr.findRedemptionsInBlockRange(startHeight, newTip.height, contractOutpoints)
+	go dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
-	hash, height, err := dcr.node.GetBestBlock(ctx)
+	hash, height, err := dcr.wallet.GetBestBlock(ctx)
 	if err != nil {
-		return nil, translateRPCCancelErr(err)
+		return nil, err
 	}
 	return &block{hash: hash, height: height}, nil
 }
@@ -3035,32 +2854,6 @@ func (dcr *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 		dcr.log.Errorf("error serializing transaction: %v", err)
 	}
 	return s
-}
-
-// anylist is a list of RPC parameters to be converted to []json.RawMessage and
-// sent via nodeRawRequest.
-type anylist []interface{}
-
-// nodeRawRequest is used to marshal parameters and send requests to the RPC
-// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
-// will be marshaled into `thing`.
-func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing interface{}) error {
-	params := make([]json.RawMessage, 0, len(args))
-	for i := range args {
-		p, err := json.Marshal(args[i])
-		if err != nil {
-			return err
-		}
-		params = append(params, p)
-	}
-	b, err := dcr.node.RawRequest(dcr.ctx, method, params)
-	if err != nil {
-		return fmt.Errorf("rawrequest error: %w", translateRPCCancelErr(err))
-	}
-	if thing != nil {
-		return json.Unmarshal(b, thing)
-	}
-	return nil
 }
 
 // Convert the DCR value to atoms.
@@ -3099,25 +2892,6 @@ func reduceMsgTx(tx *wire.MsgTx) (in, out, fees, rate, size uint64) {
 	size = uint64(tx.SerializeSize())
 	rate = fees / size
 	return
-}
-
-// isTxNotFoundErr will return true if the error indicates that the requested
-// transaction is not known.
-func isTxNotFoundErr(err error) bool {
-	var rpcErr *dcrjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
-}
-
-func isAccountNotEncryptedErr(err error) bool {
-	var rpcErr *dcrjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCWallet &&
-		strings.Contains(rpcErr.Message, "account is not encrypted") // ... with a unique passphrase
-}
-
-func isAccountLockedErr(err error) bool {
-	var rpcErr *dcrjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCWalletUnlockNeeded &&
-		strings.Contains(rpcErr.Message, "account is already locked")
 }
 
 // toDCR returns a float representation in conventional units for the given
