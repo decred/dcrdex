@@ -97,8 +97,7 @@
           <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
           <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
             <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
-              
-              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. Do we even need the template function? */}}
+              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. It's overwritten anyway. Do we even need the template function? */}}
               <img src="{{logoPath "dcr"}}" class="logo">
               <span class="mt-1 fs14 demi">DCR-BTC</span>
             </div>
