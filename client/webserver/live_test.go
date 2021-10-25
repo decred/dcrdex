@@ -189,16 +189,15 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:       unbip(assetID),
-			AssetID:      assetID,
-			Open:         state.open,
-			Running:      state.running,
-			Address:      ordertest.RandomAddress(),
-			Balance:      bal,
-			Units:        winfo.UnitInfo.AtomicUnit,
-			Encrypted:    true,
-			Synced:       false,
-			SyncProgress: 0.5,
+			Symbol:    unbip(assetID),
+			AssetID:   assetID,
+			Open:      state.open,
+			Running:   state.running,
+			Address:   ordertest.RandomAddress(),
+			Balance:   bal,
+			Units:     winfo.UnitInfo.AtomicUnit,
+			Encrypted: true,
+			Synced:    false,
 		}
 	}
 	return &core.SupportedAsset{
@@ -471,12 +470,14 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:  randomBalance(0),
-			2:  randomBalance(2),
-			42: randomBalance(42),
-			22: randomBalance(22),
-			3:  randomBalance(3),
-			28: randomBalance(28),
+			0:   randomBalance(0),
+			2:   randomBalance(2),
+			42:  randomBalance(42),
+			22:  randomBalance(22),
+			3:   randomBalance(3),
+			28:  randomBalance(28),
+			60:  randomBalance(60),
+			145: randomBalance(145),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -1118,14 +1119,18 @@ var winfos = map[uint32]*asset.WalletInfo{
 		}},
 	},
 	60: {
-		Name:       "Ethereum",
-		ConfigOpts: configOpts,
-		UnitInfo:   dexeth.UnitInfo,
+		Name:     "Ethereum",
+		UnitInfo: dexeth.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
 	},
 	145: {
-		Name:       "Bitcoin Cash",
-		ConfigOpts: configOpts,
-		UnitInfo:   dexbch.UnitInfo,
+		Name:     "Bitcoin Cash",
+		UnitInfo: dexbch.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
 	},
 }
 
@@ -1166,11 +1171,55 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	}
 
 	w := c.walletState(form.AssetID)
+	w.Synced = false
+	w.SyncProgress = 0.0
+	regFee := tExchanges[firstDEX].RegFees[w.Symbol]
+	w.Balance.Available = regFee.Amt * 2
 
-	c.noteFeed <- &core.WalletStateNote{
-		Notification: db.NewNotification(core.NoteTypeWalletState, core.TopicWalletState, "", "", db.Data),
-		Wallet:       w,
+	tStart := time.Now()
+	syncDuration := float64(time.Second * 17)
+
+	syncProgress := func() float32 {
+		progress := float64(time.Since(tStart)) / syncDuration
+		if progress > 1 {
+			progress = 1
+		}
+		return float32(progress)
 	}
+
+	sendWalletState := func() {
+		wCopy := *w
+		c.noteFeed <- &core.WalletStateNote{
+			Notification: db.NewNotification(core.NoteTypeWalletState, core.TopicWalletState, "", "", db.Data),
+			Wallet:       &wCopy,
+		}
+	}
+
+	setProgress := func() bool {
+		progress := syncProgress()
+		c.mtx.Lock()
+		defer c.mtx.Unlock()
+		w.SyncProgress = progress
+		synced := progress == 1
+		w.Synced = synced
+		sendWalletState()
+		return synced
+	}
+
+	go func() {
+		for {
+			select {
+			case <-time.After(time.Millisecond * 1013):
+				if setProgress() {
+					return
+				}
+			case <-tCtx.Done():
+				return
+			}
+		}
+	}()
+
+	sendWalletState()
 
 	return nil
 }

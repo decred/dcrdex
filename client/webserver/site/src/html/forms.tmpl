@@ -1,5 +1,5 @@
 {{define "walletConfigTemplates"}}
-<div class="py-2 px-1 d-flex justify-content-between align-items-center" id="walletSettingsHeader">
+<div class="py-2 d-flex justify-content-between align-items-center" data-tmpl="walletSettingsHeader">
   [[[Wallet Settings]]]
   <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> [[[load from file]]]</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
@@ -33,41 +33,44 @@
 {{end}}
 
 {{define "newWalletForm"}}
-<div class="wallet-tabs" id="walletTypeTabs">
-  <div class="wtab bg1" id="walletTabTmpl"></div>
+<div class="wallet-tabs" data-tmpl="walletTypeTabs">
+  <div class="wtab" data-tmpl="walletTabTmpl"></div>
 </div>
-<div class="bg2 px-2 py-1 text-center fs18 position-relative">
+<div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
   [[[add_a_x_wallet]]]
   <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
-<div class="px-4 pt-2 fs14 grey">
-  <span class="hoverbg pointer d-hide" id="nwGoBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
-</div>
-<div class="bg1 border1 p-3" id="nwMainForm">
-  <div id="walletSettings">
+<div class="position-relative" data-tmpl="mainForm">
+  <div class="flex-center py-3" data-tmpl="oneBttnBox">
+    <button class="one-bttn w-auto" data-tmpl="oneBttn">Create!</button>
+  </div>
+  <div class="py-2 fs14 grey">
+    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
+  </div>
+  <div data-tmpl="walletSettings">
     {{template "walletConfigTemplates"}}
   </div>
   <hr class="dashed my-2">
-  <div class="d-flex justify-content-between align-items-stretch flex-wrap">
-    <div class="col-11 p-0">
+  <div class="d-flex justify-content-between align-items-stretch flex-wrap" data-tmpl="auth">
+    <div class="col-11 p-0" data-tmpl="newWalletPassBox">
       <label for="newWalletPass" class="pt-3 pl-1 mb-1">[[[Wallet Password]]]
         <span class="ico-info" data-tooltip="[[[w_password_tooltip]]]"></span>
       </label>
-      <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
+      <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="off">
     </div>
     <div class="hide-pw col-11 p-0">
       <label for="nwAppPass" class="pt-3 pl-1 mb-1">[[[App Password]]]</label>
-      <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
+      <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
     <div class="d-flex justify-content-end align-items-end mt-4 col-12 p-0">
       <div class="flex-grow-1 d-flex justify-content-end align-items-end">
-        <button id="submitAdd" type="submit" class="justify-content-center fs15 bg2 selected">[[[Add]]]</button>
+        <button data-tmpl="submitAdd" type="submit" class="justify-content-center fs15 bg2 selected">[[[Add]]]</button>
       </div>
     </div>
   </div>
 
-  <div class="fs15 pt-3 text-center d-hide errcolor" id="newWalletErr"></div>
+  <div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="newWalletErr"></div>
 </div>
 {{end}}
 
@@ -208,14 +211,28 @@
 <div class="fs22 sans-light reg-conf-msg my-2" data-tmpl="text">
   [[[reg_confirm_submit]]]
 </div>
-<div class="fs16 my-1 flex-center" data-tmpl="host"></div>
-<div class="fs24 flex-center p-0">
-  <img data-tmpl="logo" class="logo mr-2">
-  <span data-tmpl="fee" class="lh1"></span>
+
+<div class="d-flex align-items-stretch justify-content-center">
+  <div class="col-12 p-0 d-flex align-items-center justify-content-end borderright">
+    <div class="flex-center my-2 px-4">
+      <span class="ico-check fs28"></span>
+    </div>
+  </div>
+
+  <div class="col-12 p-0 d-flex align-items-center justify-content-start">
+    <div class="flex-center px-3 my-2">
+      <img data-tmpl="logo" class="logo mr-3">
+      <div class="d-flex flex-column justify-content-start align-items-start">
+        <span class="fs16" data-tmpl="host"></span>
+        <span data-tmpl="fee" class="fs24 lh1"></span>
+        <span class="fs14">
+          + tx fees
+        </span>
+      </div>
+    </div>
+  </div>
 </div>
-<div class="fs14 flex-center">
-  + tx fees
-</div>
+
 <div data-tmpl="passBox" class="text-center p-3 mt-1">
   <span class="fs14">[[[app_pw_reg]]]</span>
   <input type="password" class="form-control select app-pass mt-3" data-tmpl="appPass" autocomplete="current-password">
@@ -341,5 +358,55 @@
   <div class="col-12 py-1 {{if not $passwordIsCached}}pl-5{{end}}">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
   </div>
+</div>
+{{end}}
+
+{{define "waitingForWalletForm"}}
+<div class="text-center mb-4"><img class="logo" data-tmpl="logo" src="/img/coins/dcr.png"></div>
+<div class="d-flex flex-column align-items-start borderleft mb-5">
+  <div class="flex-center flex-row">
+    <div class="icons text-right pr-3">
+      <span class="ico-check fs16 d-hide" data-tmpl="syncCheck"></span>
+      <span class="ico-checkbox fs14 d-inline-block" data-tmpl="syncUncheck"></span>
+    </div>
+    <span class="fs20 sans-light">1: Sync the Blockchain</span>
+  </div>
+  <div class="flex-center mt-1">
+    <span class="fs16 mr-1">Progress:</span>
+    <span class="fs20 mx-1" data-tmpl="progress">58</span>
+    <span class="fs16 grey">%</span>
+  </div>
+  <div class="mt-1 flex-center flex-row fs14 d-hide" data-tmpl="syncRemainBox">
+    <span data-tmpl="syncRemain" class="mr-1"></span> remaining
+  </div>
+</div>
+
+<div class="d-flex flex-column align-items-start borderleft">
+  <div class="flex-center flex-row">
+    <div class="icons text-right pr-3">
+      <span class="ico-check fs16 d-inline-block" data-tmpl="balCheck"></span>
+      <span class="ico-checkbox fs14 d-hide" data-tmpl="balUncheck"></span>
+    </div>
+    <span class="fs20 sans-light">2: Fund the Registration Fee</span>
+  </div>
+  <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
+    <div class="flex-center mt-1">
+      <span class="fs16 mr-1">Balance:</span>
+      <span class="fs20 mx-1" data-tmpl="balance"></span>
+      <span class="fs16 grey unit">XYZ</span>
+    </div>
+    <div class="mb-2 flex-center flex-row">
+      <span class="fs16 mr-1">Registration fee:</span>
+      <span class="fs20 mx-1" data-tmpl="fee"></span>
+      <span class="fs16 grey unit">XYZ</span>
+    </div>
+    <div class="fs14">Your Deposit Address</div>
+    <div class="fs14 mono bg0 p-1 select-all" data-tmpl="depoAddr"></div>
+  </div>
+</div>
+
+<div class="hoverbg pointer grey d-inline-block text-center mt-3" data-tmpl="goBack">
+  <span class="ico-arrowback fs12 mb-1"></span> 
+  pick a different asset
 </div>
 {{end}}

@@ -169,7 +169,7 @@ var ZhCN = map[string]string{
 	"dont_share":             "请好好保存切勿分享它。",
 	"Show Me":                "展示",
 	"Wallet Settings":        "钱包设置",
-	"add_a_x_wallet":         `添加<img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span>钱包`,
+	"add_a_x_wallet":         `添加<img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span>钱包`,
 	"ready":                  "准备就绪",
 	"off":                    "关闭",
 	"Export Trades":          "导出交易",

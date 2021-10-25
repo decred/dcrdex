@@ -12,15 +12,16 @@ import { RateEncodingFactor } from './orderutil'
 export class NewWalletForm {
   constructor (form, success, pwCache, backFunc) {
     this.form = form
-    this.currentAsset = null
+    this.success = success
     this.pwCache = pwCache
-    const page = this.page = Doc.idDescendants(form)
+    this.currentAsset = null
+    const page = this.page = Doc.parseTemplate(form)
     this.pwHiders = Array.from(form.querySelectorAll('.hide-pw'))
     this.refresh()
 
     if (backFunc) {
-      Doc.show(page.nwGoBack)
-      Doc.bind(page.nwGoBack, 'click', () => { backFunc() })
+      Doc.show(page.goBack)
+      Doc.bind(page.goBack, 'click', () => { backFunc() })
     }
 
     Doc.empty(page.walletTabTmpl)
@@ -31,35 +32,8 @@ export class NewWalletForm {
 
     Doc.bind(this.subform.showOther, 'click', () => Doc.show(page.walletSettingsHeader))
 
-    bind(form, page.submitAdd, async () => {
-      const pw = page.nwAppPass.value || (this.pwCache ? this.pwCache.pw : '')
-      if (!pw && !State.passwordIsCached()) {
-        page.newWalletErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-        Doc.show(page.newWalletErr)
-        return
-      }
-      Doc.hide(page.newWalletErr)
-      const assetID = parseInt(this.currentAsset.id)
-
-      const createForm = {
-        assetID: assetID,
-        pass: page.newWalletPass.value || '',
-        config: this.subform.map(),
-        appPass: pw,
-        walletType: this.currentWalletType
-      }
-      page.nwAppPass.value = ''
-      const loaded = app().loading(page.nwMainForm)
-      const res = await postJSON('/api/newwallet', createForm)
-      loaded()
-      if (!app().checkResponse(res)) {
-        this.setError(res.msg)
-        return
-      }
-      if (this.pwCache) this.pwCache.pw = pw
-      page.newWalletPass.value = ''
-      success(assetID)
-    })
+    bind(form, page.submitAdd, () => this.submit())
+    bind(form, page.oneBttn, () => this.submit())
   }
 
   refresh () {
@@ -68,15 +42,49 @@ export class NewWalletForm {
     else Doc.show(...this.pwHiders)
   }
 
+  async submit () {
+    const page = this.page
+    const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
+    if (!pw && !State.passwordIsCached()) {
+      page.newWalletErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
+      Doc.show(page.newWalletErr)
+      return
+    }
+    Doc.hide(page.newWalletErr)
+    const assetID = parseInt(this.currentAsset.id)
+
+    const createForm = {
+      assetID: assetID,
+      pass: page.newWalletPass.value || '',
+      config: this.subform.map(),
+      appPass: pw,
+      walletType: this.currentWalletType
+    }
+    page.appPass.value = ''
+    const loaded = app().loading(page.mainForm)
+    const res = await postJSON('/api/newwallet', createForm)
+    loaded()
+    if (!app().checkResponse(res)) {
+      this.setError(res.msg)
+      return
+    }
+    if (this.pwCache) this.pwCache.pw = pw
+    page.newWalletPass.value = ''
+    this.success(assetID)
+  }
+
   async setAsset (assetID) {
     const page = this.page
     const asset = app().assets[assetID]
     const tabs = page.walletTypeTabs
     if (this.currentAsset && this.currentAsset.id === asset.id) return
     this.currentAsset = asset
-    page.nwAssetLogo.src = Doc.logoPath(asset.symbol)
-    page.nwAssetName.textContent = asset.info.name
+    page.assetLogo.src = Doc.logoPath(asset.symbol)
+    page.assetName.textContent = asset.info.name
     page.newWalletPass.value = ''
+
+    if (asset.info.availablewallets.length > 1) page.header.classList.add('bordertop')
+    else page.header.classList.remove('bordertop')
 
     const walletDef = asset.info.availablewallets[0]
     Doc.empty(tabs)
@@ -105,12 +113,16 @@ export class NewWalletForm {
   async update (walletDef) {
     const page = this.page
     this.currentWalletType = walletDef.type
-    if (walletDef.seeded) {
+    const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
+    if (appPwCached && walletDef.seeded) {
+      Doc.show(page.oneBttnBox)
+    } else if (walletDef.seeded) {
+      Doc.show(page.auth)
       page.newWalletPass.value = ''
       page.submitAdd.textContent = 'Create'
-      Doc.hide(page.newWalletPassBox)
     } else {
-      Doc.show(page.newWalletPassBox)
+      Doc.show(page.auth, page.newWalletPassBox)
       page.submitAdd.textContent = 'Add'
     }
 
@@ -367,25 +379,9 @@ export class ConfirmRegistrationForm {
     this.certFile = ''
     this.feeAssetID = null
     this.pwCache = pwCache
-    this.syncWaiters = {}
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
-    bind(form, this.page.submitConfirm, () => this.submitForm())
-  }
-
-  registerSyncWaiter (assetID, f) {
-    let waiters = this.syncWaiters[assetID]
-    if (!waiters) waiters = this.syncWaiters[assetID] = []
-    waiters.push(f)
-  }
-
-  handleWalletStateNote (note) {
-    if (note.wallet.synced) {
-      const waiters = this.syncWaiters[note.wallet.assetID]
-      if (!waiters) return
-      for (const f of waiters) f()
-      this.syncWaiters[note.wallet.assetID] = []
-    }
+    bind(form, this.page.submit, () => this.submitForm())
   }
 
   setExchange (xc, certFile) {
@@ -418,23 +414,6 @@ export class ConfirmRegistrationForm {
       form.style.top = offset
       form.style.left = offset
     })
-  }
-
-  selectRow (assetID) {
-    const page = this.page
-    const wallet = app().user.assets[assetID].wallet
-    this.feeAssetID = assetID
-    // remove selected class from all others row.
-    const rows = Array.from(page.feeTableRows.querySelectorAll('tr.selected'))
-    rows.forEach(row => row.classList.remove('selected'))
-    this.walletRows[assetID].classList.add('selected')
-    // if wallet is configured, we can active the register button.
-    // Otherwise we do not allow it.
-    if (wallet && wallet.synced) {
-      page.submitConfirm.classList.add('selected')
-    } else {
-      page.submitConfirm.classList.remove('selected')
-    }
   }
 
   /*
@@ -598,6 +577,110 @@ export class FeeAssetSelectionForm {
       form.style.paddingTop = `${(1 - prog) * extraTop}px`
       how.style.fontSize = `${fontSize * prog}px`
     }, 'easeOut')
+  }
+}
+
+export class WalletWaitForm {
+  constructor (form, success, goBack) {
+    this.form = form
+    this.success = success
+    this.page = Doc.parseTemplate(form)
+    this.assetID = -1
+    this.xc = null
+    this.regFee = null
+    this.progressCache = []
+    this.progressed = false
+    this.funded = false
+
+    Doc.bind(this.page.goBack, 'click', () => {
+      this.assetID = -1
+      goBack()
+    })
+  }
+
+  setExchange (xc) {
+    this.xc = xc
+  }
+
+  setWallet (wallet) {
+    this.assetID = wallet.assetID
+    this.progressCache = []
+    this.progressed = false
+    this.funded = false
+    const page = this.page
+    const asset = app().assets[wallet.assetID]
+    const fee = this.regFee = this.xc.regFees[asset.symbol]
+
+    for (const span of this.form.querySelectorAll('.unit')) span.textContent = asset.symbol.toUpperCase()
+    page.logo.src = Doc.logoPath(asset.symbol)
+    page.depoAddr.textContent = wallet.address
+    page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.info.unitinfo)
+
+    Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
+    Doc.show(page.balanceBox)
+    Doc.show(wallet.synced ? page.syncCheck : page.syncUncheck)
+    Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
+
+    page.progress.textContent = Math.round(wallet.syncProgress * 100)
+    this.reportBalance(wallet.balance)
+  }
+
+  reportWalletState (wallet) {
+    if (wallet.assetID !== this.assetID) return
+    if (this.progressed && this.funded) return
+    this.reportProgress(wallet.synced, wallet.syncProgress)
+    this.reportBalance(wallet.balance)
+  }
+
+  reportBalance (bal) {
+    if (this.funded) return
+    const page = this.page
+    const asset = app().assets[this.assetID]
+    const fee = this.regFee
+
+    page.balance.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
+    if (bal.available > fee.amount) {
+      Doc.show(page.balCheck)
+      Doc.hide(page.balUncheck)
+      const v = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
+      Doc.hide(page.balanceBox)
+      this.funded = true
+      if (this.progressed) this.success()
+    }
+  }
+
+  reportProgress (synced, prog) {
+    const page = this.page
+    if (synced) {
+      page.progress.textContent = '100'
+      Doc.hide(page.syncUncheck)
+      Doc.show(page.syncCheck)
+      Doc.hide(page.syncRemainBox)
+      this.progressed = true
+      if (this.funded) this.success()
+      return
+    }
+    page.progress.textContent = Math.round(prog * 100)
+    const cache = this.progressCache
+    cache.push({
+      stamp: new Date().getTime(),
+      progress: prog
+    })
+    const cacheSize = 20
+    while (cache.length > cacheSize) cache.shift()
+    if (cache.length === 1) return
+    Doc.show(page.syncRemainBox)
+    const [first, last] = [cache[0], cache[cache.length - 1]]
+    const progDelta = last.progress - first.progress
+    if (progDelta === 0) {
+      page.syncRemain.textContent = '> 1 day'
+      return
+    }
+    const timeDelta = last.stamp - first.stamp
+    const progRate = progDelta / timeDelta
+    const toGoProg = 1 - last.progress
+    const toGoTime = toGoProg / progRate
+    page.syncRemain.textContent = Doc.formatDuration(toGoTime)
   }
 }
 

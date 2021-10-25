@@ -12,6 +12,7 @@ export default class SettingsPage extends BasePage {
   constructor (body) {
     super()
     this.body = body
+    this.currentDEX = null
     const page = this.page = Doc.idDescendants(body)
 
     this.forms = page.forms.querySelectorAll(':scope > form')
@@ -36,14 +37,21 @@ export default class SettingsPage extends BasePage {
 
     // Asset selection
     this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, assetID => {
+      this.confirmRegisterForm.setAsset(assetID)
+
       const asset = app().assets[assetID]
-      this.confirmRegistrationForm.setAsset(assetID)
-      if (asset.wallet) {
-        // TODO: After #1230 is in, we'll want to check the balance here and
-        // show the low balance modal if appropriate.
-        this.animateConfirmForm(page.regAssetForm)
+      const wallet = asset.wallet
+      if (wallet) {
+        const fee = this.currentDEX.regFees[asset.symbol]
+        if (wallet.synced && wallet.balance.available > fee.amount) {
+          this.animateConfirmForm(page.regAssetForm)
+          return
+        }
+        this.walletWaitForm.setWallet(wallet)
+        forms.slideSwap(page.regAssetForm, page.walletWait)
         return
       }
+
       this.newWalletForm.setAsset(assetID)
       this.newWalletForm.loadDefaults()
       this.currentForm = page.newWalletForm
@@ -51,22 +59,29 @@ export default class SettingsPage extends BasePage {
     })
 
     // Approve fee payment
-    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
       this.registerDEXSuccess()
     }, () => {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
     // Create a new wallet
-    this.newWalletForm = new forms.NewWalletForm(page.newWalletForm, () => {
-      this.regAssetForm.refresh()
-      this.currentForm = page.confirmRegForm
-      forms.slideSwap(page.newWalletForm, page.confirmRegForm)
-    }, this.pwCache, () => this.animateRegAsset(page.newWalletForm))
+    this.newWalletForm = new forms.NewWalletForm(
+      page.newWalletForm,
+      assetID => this.newWalletCreated(assetID),
+      this.pwCache,
+      () => this.animateRegAsset(page.newWalletForm)
+    )
+
+    this.walletWaitForm = new forms.WalletWaitForm(page.walletWait, () => {
+      this.animateConfirmForm(page.walletWait)
+    }, () => { this.animateRegAsset(page.walletWait) })
 
     // Enter an address for a new DEX
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
-      this.confirmRegistrationForm.setExchange(xc, certFile)
+      this.currentDEX = xc
+      this.confirmRegisterForm.setExchange(xc, certFile)
+      this.walletWaitForm.setExchange(xc)
       this.regAssetForm.setExchange(xc)
       this.animateRegAsset(page.dexAddrForm)
     })
@@ -121,8 +136,25 @@ export default class SettingsPage extends BasePage {
     })
 
     this.notifiers = {
-      walletstate: note => this.confirmRegistrationForm.handleWalletStateNote(note)
+      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet)
     }
+  }
+
+  async newWalletCreated (assetID) {
+    const user = await app().fetchUser()
+    const page = this.page
+    const asset = user.assets[assetID]
+    const wallet = asset.wallet
+    const feeAmt = this.currentDEX.regFees[asset.symbol].amount
+
+    if (wallet.synced && wallet.balance.available > feeAmt) {
+      await this.animateConfirmForm(page.newWalletForm)
+      return
+    }
+
+    this.walletWaitForm.setWallet(wallet)
+    this.currentForm = page.walletWait
+    await forms.slideSwap(page.newWalletForm, page.walletWait)
   }
 
   async prepareAccountExport (host, authorizeAccountExportForm) {
@@ -386,7 +418,7 @@ export default class SettingsPage extends BasePage {
 
   /* Swap in the confirmation form and run the animation. */
   async animateConfirmForm (oldForm) {
-    this.confirmRegistrationForm.animate()
+    this.confirmRegisterForm.animate()
     const form = this.page.confirmRegForm
     this.currentForm = form
     Doc.hide(oldForm)

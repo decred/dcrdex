@@ -10,7 +10,7 @@ body.dark {
           linear-gradient(
             to bottom,
             #13202b00,
-            #13202b
+            $dark_body_bg
             90%
           );
       }
@@ -32,13 +32,21 @@ body.dark {
   }
 }
 
-.wallet-tabs {
-  .wtab {
-    background-color: $dark_bg_1;
-    border-color: #333;
+#newWalletForm {
+  .wallet-tabs {
+    .wtab {
+      background-color: $dark_body_bg;
+      border-color: #999;
+      opacity: 0.8;
+    }
+  
+    .wtab.selected {
+      opacity: 1;
+      background-color: #263846;
+    }
   }
 
-  .wtab.selected {
-    background-color: $dark_bg_2;
+  .bordertop {
+    border-top: solid 1px #999;
   }
 }

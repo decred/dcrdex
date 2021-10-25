@@ -21,7 +21,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  background-color: #e0e0e0;
+  background-color: $light_body_bg;
   font-family: $sans;
 }
 
@@ -415,6 +415,14 @@ hr.dashed {
   text-decoration: underline;
 }
 
+.lh1 {
+  line-height: 1;
+}
+
+.select-all {
+  user-select: all;
+}
+
 .hoverbg:hover {
   background-color: #7775;
 }
@@ -457,8 +465,4 @@ div.border1 {
 
 #loader {
   background-color: #e0e0e077;
-}
-
-#depoAddr {
-  user-select: all;
 }
