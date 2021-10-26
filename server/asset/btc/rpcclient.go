@@ -5,8 +5,10 @@ package btc
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -91,8 +93,12 @@ func (rc *RPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool
 
 // GetRawTransaction retrieves tx's information.
 func (rc *RPCClient) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) {
-	res := new(btcutil.Tx)
-	return res, rc.call(methodGetRawTransaction, anylist{txHash.String()}, res)
+	var txHex string
+	err := rc.call(methodGetRawTransaction, anylist{txHash.String()}, &txHex)
+	if err != nil {
+		return nil, err
+	}
+	return btcutil.NewTxFromReader(hex.NewDecoder(strings.NewReader(txHex)))
 }
 
 // GetRawTransactionVerbose retrieves the verbose tx information.
