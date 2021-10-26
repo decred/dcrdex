@@ -66,7 +66,7 @@ var (
 		appPass: []byte("client2"),
 		wallets: map[uint32]*tWallet{
 			dcr.BipID: dcrWallet("trading2"),
-			btc.BipID: {spv: true}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
+			btc.BipID: {created: true, _type: "SPV"}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
 		},
 		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}
@@ -102,7 +102,7 @@ func readWalletCfgsAndDexCert() error {
 
 	for _, client := range clients {
 		dcrw, btcw := client.wallets[dcr.BipID], client.wallets[btc.BipID]
-		if dcrw.spv {
+		if dcrw.created {
 			dcrw.config = map[string]string{}
 		} else {
 			dcrw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "dcr", dcrw.daemon, dcrw.daemon+".conf"))
@@ -111,7 +111,7 @@ func readWalletCfgsAndDexCert() error {
 			}
 		}
 
-		if btcw.spv {
+		if btcw.created {
 			btcw.config = map[string]string{}
 		} else {
 			btcw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "btc", btcw.daemon, btcw.daemon+".conf"))
@@ -153,19 +153,10 @@ func startClients(ctx context.Context) error {
 
 		// connect wallets
 		for assetID, wallet := range c.wallets {
-			walletType := "dcrwalletRPC"
-			if assetID == btc.BipID {
-				walletType = "bitcoindRPC"
-				if wallet.spv {
-					walletType = "SPV"
-					wallet.pass = nil // should not be set for spv wallets in the first place, but play safe
-				}
-			}
-
 			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
-				Type:    walletType,
+				Type:    wallet._type,
 				AssetID: assetID,
 				Config:  wallet.config,
 			})
@@ -174,7 +165,7 @@ func startClients(ctx context.Context) error {
 			}
 			c.log("Connected %s wallet (spv = %v)", unbip(assetID), wallet.spv)
 
-			if wallet.spv {
+			if wallet.created {
 				c.log("Waiting for %s wallet to sync", unbip(assetID))
 				for !c.core.WalletState(assetID).Synced {
 					time.Sleep(time.Second)
@@ -695,6 +686,11 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	if !disconnected {
 		t.Fatalf("client 2 dex not disconnected after %v", disconnectTimeout)
 	}
+
+	// Disconnect the wallets, they'll be reconnected when Login is called below.
+	// Login->connectWallets will error for btc spv wallets if the wallet is not
+	// first disconnected.
+	client2.disconnectWallets()
 
 	// Allow some time for orders to be revoked due to inaction, and
 	// for requests pending on the server to expire (usually bTimeout).
@@ -1307,7 +1303,8 @@ type tWallet struct {
 	walletName string // for btc wallets, put into config map
 	pass       []byte
 	config     map[string]string
-	spv        bool
+	_type      string // type is a keyword
+	created    bool
 }
 
 func dcrWallet(daemon string) *tWallet {
@@ -1604,6 +1601,15 @@ func (client *tClient) disableWallets() {
 		wallet.encPass = []byte{0}
 		wallet.pw = nil
 		wallet.mtx.Unlock()
+	}
+	client.core.walletMtx.Unlock()
+}
+
+func (client *tClient) disconnectWallets() {
+	client.log("Disconnecting wallets")
+	client.core.walletMtx.Lock()
+	for _, wallet := range client.core.wallets {
+		wallet.Disconnect()
 	}
 	client.core.walletMtx.Unlock()
 }

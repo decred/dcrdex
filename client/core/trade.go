@@ -872,7 +872,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually swappables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is swappable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
@@ -948,7 +948,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually redeemables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is redeemable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
@@ -1024,7 +1024,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually refundables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is refundable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
