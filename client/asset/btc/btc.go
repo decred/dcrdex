@@ -1853,6 +1853,9 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 	// retrieval at the asset.Wallet interface level.
 	coinNotFound := txOut == nil
 	if coinNotFound {
+		if len(txData) == 0 {
+			return nil, fmt.Errorf("contract %s:%d not found in blockchain and tx data not provided to audit", txHash, vout)
+		}
 		tx, err := msgTxFromBytes(txData)
 		if err != nil {
 			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)

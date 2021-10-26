@@ -2107,7 +2107,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
+			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp))) // why not match.matchTime()?
 			if err == nil {
 				// Success.
 				errChan <- nil
@@ -2208,8 +2208,8 @@ func (t *trackedTrade) reAuditContract(match *matchTracker) error {
 	}
 
 	proof := &match.MetaData.Proof
-	coinID, contract, txData := match.counterSwap.Coin.ID(), proof.CounterContract, proof.CounterTxData
-	auditInfo, err := t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp))) // why not match.matchTime()?
+	coinID, contract := match.counterSwap.Coin.ID(), proof.CounterContract
+	auditInfo, err := t.wallets.toWallet.AuditContract(coinID, contract, nil, time.Time{})
 	if err != nil {
 		return err
 	}
@@ -2217,8 +2217,8 @@ func (t *trackedTrade) reAuditContract(match *matchTracker) error {
 		return err
 	}
 	// Audit successful.
-	t.dc.log.Infof("Re audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
-		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
+	t.dc.log.Infof("Re audited contract (%s: %v) paying to %s for order %s, match %s",
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match)
 	return nil
 }
 

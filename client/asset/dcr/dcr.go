@@ -1548,6 +1548,9 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		// broadcasted. Pull the contract output details from the provided
 		// txData to validate. The txData will be broadcasted below if the
 		// contract details are valid.
+		if len(txData) == 0 {
+			return nil, fmt.Errorf("contract %s not found in blockchain and tx data not provided to audit", op)
+		}
 		contractTx = wire.NewMsgTx()
 		if err := contractTx.Deserialize(bytes.NewReader(txData)); err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
