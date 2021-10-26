@@ -475,7 +475,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 
 func init() {
 	var err error
-	walletBirthday, err = time.Parse(time.RFC822, "03 Aug 21 09:02 CDT")
+	walletBirthday, err = time.Parse(time.RFC822, "02 Jun 21 21:12 CDT")
 	if err != nil {
 		panic("error parsing wallet birthday: " + err.Error())
 	}
