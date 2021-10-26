@@ -252,7 +252,7 @@ const (
 	//
 	// TODO: When the contract is solidified, break down evm functions
 	// called and the gas used for each. (◍•﹏•)
-	InitGas = 180000 // gas
+	InitGas = 158000 // gas
 
 	RedeemGas = 63000 // gas
 )

@@ -34,7 +34,6 @@ contract ETHSwap {
     struct Swap {
         uint initBlockNumber;
         uint refundBlockTimestamp;
-        bytes32 secretHash;
         bytes32 secret;
         address initiator;
         address participant;
@@ -118,13 +117,59 @@ contract ETHSwap {
         senderIsOrigin()
         isNotInitiated(secretHash)
     {
-        swaps[secretHash].initBlockNumber = block.number;
-        swaps[secretHash].refundBlockTimestamp = refundTimestamp;
-        swaps[secretHash].secretHash = secretHash;
-        swaps[secretHash].initiator = msg.sender;
-        swaps[secretHash].participant = participant;
-        swaps[secretHash].value = msg.value;
-        swaps[secretHash].state = State.Filled;
+        Swap storage swapToUpdate = swaps[secretHash];
+
+        swapToUpdate.initBlockNumber = block.number;
+        swapToUpdate.refundBlockTimestamp = refundTimestamp;
+        swapToUpdate.initiator = msg.sender;
+        swapToUpdate.participant = participant;
+        swapToUpdate.value = msg.value;
+        swapToUpdate.state = State.Filled;
+    }
+
+    struct Initiation {
+        uint refundTimestamp;
+        bytes32 secretHash;
+        address participant;
+        uint value;
+    }
+
+    // initiateBatch initiates an array of swaps. It checks that all of the
+    // swaps have a non zero redemptionTimestamp and value, and that none of
+    // the secret hashes have ever been used previously. The function also makes
+    // sure that msg.value is equal to the sum of the values of all the swaps.
+    // Once initiated, each swap's state is set to Filled. The msg.value is now
+    // in the custody of the contract and can only be retrieved through redeem
+    // or refund.
+    //
+    // This is a writing function and requires gas. Failure or success should
+    // be guaged by querying the swap and checking state after being mined. Gas
+    // is expended either way.
+    function initiateBatch(Initiation[] calldata initiations)
+        public
+        payable
+        senderIsOrigin()
+    {
+        uint initVal = 0;
+        for (uint i = 0; i < initiations.length; i++) {
+            Initiation calldata initiation = initiations[i];
+            Swap storage swapToUpdate = swaps[initiation.secretHash];
+
+            require(initiation.value > 0);
+            require(initiation.refundTimestamp > 0);
+            require(swapToUpdate.state == State.Empty);
+
+            swapToUpdate.initBlockNumber = block.number;
+            swapToUpdate.refundBlockTimestamp = initiation.refundTimestamp;
+            swapToUpdate.initiator = msg.sender;
+            swapToUpdate.participant = initiation.participant;
+            swapToUpdate.value = initiation.value;
+            swapToUpdate.state = State.Filled;
+
+            initVal += initiation.value;
+        }
+
+        require(initVal == msg.value);
     }
 
     // redeem redeems a contract. It checks that the sender is not a contract,

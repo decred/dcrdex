@@ -257,6 +257,15 @@ func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimes
 	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
 }
 
+// initiateBatch initiates multiple swaps in the same transaction.
+func (c *rpcclient) initiateBatch(txOpts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
+	err := c.addSignerToOpts(txOpts, netID)
+	if err != nil {
+		return nil, err
+	}
+	return c.es.InitiateBatch(txOpts, initiations)
+}
+
 // estimateGas checks the amount of gas that is used for a function call.
 func (c *rpcclient) estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
 	return c.ec.EstimateGas(ctx, msg)

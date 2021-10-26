@@ -421,6 +421,284 @@ func TestInitiateGas(t *testing.T) {
 	fmt.Printf("Gas used for initiate: %v \n", gas)
 }
 
+func TestInitiateBatchGas(t *testing.T) {
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+
+	var previousGas uint64
+	for i := 1; i < 10; i++ {
+		initiations := make([]dexeth.ETHSwapInitiation, 0, i)
+		for j := 0; j < i; j++ {
+			var secretHash [32]byte
+			copy(secretHash[:], encode.RandomBytes(32))
+			initiations = append(initiations, dexeth.ETHSwapInitiation{
+				RefundTimestamp: big.NewInt(1),
+				SecretHash:      secretHash,
+				Participant:     participantAddr,
+				Value:           big.NewInt(1),
+			})
+		}
+		data, err := parsedAbi.Pack("initiateBatch", initiations)
+		if err != nil {
+			t.Fatalf("unexpected error packing abi: %v", err)
+		}
+		msg := ethereum.CallMsg{
+			From:  participantAddr,
+			To:    &contractAddr,
+			Value: big.NewInt(int64(i)),
+			Gas:   0,
+			Data:  data,
+		}
+		gas, err := participantEthClient.estimateGas(ctx, msg)
+		if err != nil {
+			t.Fatalf("unexpected error from estimateGas: %v", err)
+		}
+		fmt.Printf("Gas used for batch initiating %v swaps: %v. %v more than previous \n", i, gas, gas-previousGas)
+		previousGas = gas
+	}
+}
+
+func TestInitiateBatch(t *testing.T) {
+	err := ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a slice of random secret hashes that can be used in the tests and
+	// make sure none of them have been used yet.
+	numSecretHashes := 10
+	secretHashes := make([][32]byte, numSecretHashes)
+	for i := 0; i < numSecretHashes; i++ {
+		copy(secretHashes[i][:], encode.RandomBytes(32))
+		swap, err := ethClient.swap(ctx, simnetAcct, secretHashes[i])
+		if err != nil {
+			t.Fatal("unable to get swap state")
+		}
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSNone {
+			t.Fatalf("unexpected swap state: want %s got %s", srveth.SSNone, state)
+		}
+	}
+
+	now := time.Now().Unix()
+
+	intOverFlow := big.NewInt(0).Exp(big.NewInt(2), big.NewInt(256), big.NewInt(1))
+	maxInt := big.NewInt(0).Sub(intOverFlow, big.NewInt(1))
+
+	tests := []struct {
+		name    string
+		swaps   []dexeth.ETHSwapInitiation
+		success bool
+		txValue *big.Int
+	}{
+		{
+			name:    "1 swap ok",
+			success: true,
+			txValue: big.NewInt(1),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+			},
+		},
+		{
+			name:    "1 swap with existing hash",
+			success: false,
+			txValue: big.NewInt(1),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+			},
+		},
+		{
+			name:    "2 swaps ok",
+			success: true,
+			txValue: big.NewInt(2),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[1],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[2],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+			},
+		},
+		{
+			name:    "2 swaps repeated hash",
+			success: false,
+			txValue: big.NewInt(2),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[3],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[3],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+			},
+		},
+		{
+			name:    "1 swap nil refundtimestamp",
+			success: false,
+			txValue: big.NewInt(2),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(0),
+					SecretHash:      secretHashes[4],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1),
+				},
+			},
+		},
+		{
+			// Preventing this used to need explicit checks before solidity 0.8, but now the
+			// compiler checks for integer overflows by default.
+			name:    "integer overflow attack",
+			success: false,
+			txValue: big.NewInt(999),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[5],
+					Participant:     participantAddr,
+					Value:           maxInt,
+				},
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[6],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1000),
+				},
+			},
+		},
+		{
+			name:    "swap with 0 value",
+			success: false,
+			txValue: big.NewInt(1000),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[5],
+					Participant:     participantAddr,
+					Value:           big.NewInt(0),
+				},
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[6],
+					Participant:     participantAddr,
+					Value:           big.NewInt(1000),
+				},
+			},
+		},
+		{
+			name:    "sum of swaps != msg.value",
+			success: false,
+			txValue: big.NewInt(99),
+			swaps: []dexeth.ETHSwapInitiation{
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[5],
+					Participant:     participantAddr,
+					Value:           big.NewInt(50),
+				},
+				{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[6],
+					Participant:     participantAddr,
+					Value:           big.NewInt(50),
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		originalBal, err := ethClient.balance(ctx, &simnetAddr)
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+
+		originalStates := make(map[string]srveth.SwapState)
+		for _, testSwap := range test.swaps {
+			swap, err := ethClient.swap(ctx, simnetAcct, testSwap.SecretHash)
+			if err != nil {
+				t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			}
+			originalStates[hex.EncodeToString(testSwap.SecretHash[:])] = srveth.SwapState(swap.State)
+		}
+
+		txOpts := newTxOpts(ctx, &simnetAddr, test.txValue)
+		tx, err := ethClient.initiateBatch(txOpts, simnetID, test.swaps)
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		spew.Dump(tx)
+
+		if err := waitForMined(t, time.Second*10, false); err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+
+		// It appears the receipt is only accessible after the tx is mined.
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		spew.Dump(receipt)
+
+		// Balance should be reduced by a certain amount depending on
+		// whether initiate completed successfully on-chain. If
+		// unsuccessful the fee is subtracted. If successful, amt is
+		// also subtracted.
+		bal, err := ethClient.balance(ctx, &simnetAddr)
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
+		wantBal := big.NewInt(0).Sub(originalBal, txFee)
+		if test.success {
+			wantBal.Sub(wantBal, test.txValue)
+		}
+		if bal.Cmp(wantBal) != 0 {
+			t.Fatalf("unexpected balance change for test %v: want %v got %v", test.name, wantBal, bal)
+		}
+
+		for _, testSwap := range test.swaps {
+			swap, err := ethClient.swap(ctx, simnetAcct, testSwap.SecretHash)
+			if err != nil {
+				t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			}
+			state := srveth.SwapState(swap.State)
+			if test.success && state != srveth.SSInitiated {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSInitiated, state)
+			}
+
+			originalState := originalStates[hex.EncodeToString(testSwap.SecretHash[:])]
+			if !test.success && state != originalState {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, originalState, state)
+			}
+		}
+	}
+}
+
 func TestInitiate(t *testing.T) {
 	now := time.Now().Unix()
 	var secretHash [32]byte
@@ -472,7 +750,7 @@ func TestInitiate(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -641,7 +919,7 @@ func TestRedeem(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := test.redeemerClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -775,7 +1053,7 @@ func TestRefund(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
