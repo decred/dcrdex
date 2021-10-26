@@ -52,7 +52,7 @@ type swapCoin struct {
 // an error is returned then if something is different than expected. As such,
 // the swapCoin expects Confirmations to be called with confirmations
 // available at least once before the swap be trusted for swap initializations.
-func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, error) {
+func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin, error) {
 	switch sct {
 	case sctInit, sctRedeem:
 	default:
@@ -294,7 +294,7 @@ type amountCoin struct {
 	cID     *AmountCoinID
 }
 
-func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
+func (backend *Backend) newAmountCoin(coinID []byte) (*amountCoin, error) {
 	cID, err := DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -303,7 +303,7 @@ func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
 	if !ok {
 		return nil, errors.New("coin ID not an amount")
 	}
-	bal, pendingBal, err := accountBalance(backend, &aCoinID.Address)
+	bal, pendingBal, err := backend.accountBalance(&aCoinID.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func newAmountCoin(backend *Backend, coinID []byte) (*amountCoin, error) {
 	}, nil
 }
 
-func accountBalance(backend *Backend, addr *common.Address) (balance, pendingBalance uint64, err error) {
+func (backend *Backend) accountBalance(addr *common.Address) (balance, pendingBalance uint64, err error) {
 	bigPendingBal, err := backend.node.pendingBalance(backend.rpcCtx, addr)
 	if err != nil {
 		return 0, 0, err
@@ -340,7 +340,7 @@ func accountBalance(backend *Backend, addr *common.Address) (balance, pendingBal
 // Confirmations returns one if an account currently has the funds to satisfy
 // its funding amount.
 func (c *amountCoin) Confirmations(_ context.Context) (int64, error) {
-	bal, pendingBal, err := accountBalance(c.backend, &c.cID.Address)
+	bal, pendingBal, err := c.backend.accountBalance(&c.cID.Address)
 	if err != nil {
 		return -1, err
 	}

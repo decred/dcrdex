@@ -144,7 +144,7 @@ func TestNewSwapCoin(t *testing.T) {
 			node:         node,
 			contractAddr: *contractAddr,
 		}
-		sc, err := newSwapCoin(eth, test.coinID, test.ct)
+		sc, err := eth.newSwapCoin(test.coinID, test.ct)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -301,7 +301,7 @@ func TestConfirmations(t *testing.T) {
 			contractAddr: *contractAddr,
 		}
 
-		sc, err := newSwapCoin(eth, txCoinIDBytes, test.ct)
+		sc, err := eth.newSwapCoin(txCoinIDBytes, test.ct)
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
@@ -452,7 +452,7 @@ func TestNewAmountCoin(t *testing.T) {
 		eth := &Backend{
 			node: node,
 		}
-		cnr, err := newAmountCoin(eth, test.acID)
+		cnr, err := eth.newAmountCoin(test.acID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -513,7 +513,7 @@ func TestAccountBalance(t *testing.T) {
 		eth := &Backend{
 			node: node,
 		}
-		bal, pendingBal, err := accountBalance(eth, addr)
+		bal, pendingBal, err := eth.accountBalance(addr)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

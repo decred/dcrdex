@@ -251,7 +251,7 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 
 // Contract is part of the asset.Backend interface.
 func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
-	sc, err := newSwapCoin(eth, coinID, sctInit)
+	sc, err := eth.newSwapCoin(coinID, sctInit)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -301,7 +301,7 @@ func (eth *Backend) Synced() (bool, error) {
 // should be the transaction that sent a redemption, while contractCoinID is the
 // swap contract this redemption redeems.
 func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
-	cnr, err := newSwapCoin(eth, redeemCoinID, sctRedeem)
+	cnr, err := eth.newSwapCoin(redeemCoinID, sctRedeem)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -322,7 +322,7 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 // FundingCoin is an unspent amount on the blockchain. It points to an account
 // that should maintain at least a certain value.
 func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, _ []byte) (asset.FundingCoin, error) {
-	return newAmountCoin(eth, coinID)
+	return eth.newAmountCoin(coinID)
 }
 
 // ValidateCoinID attempts to decode the coinID.
