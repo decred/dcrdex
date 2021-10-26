@@ -630,7 +630,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		hash:   *bestHash,
 	}
 	wallet.tipMtx.Unlock()
-	go wallet.watchBlocks(walletCtx)
+	go wallet.watchBlocks(walletCtx, blockTicker, walletBlockAllowance)
 
 	return wallet, data, shutdown, nil
 }

@@ -775,7 +775,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		btc.watchBlocks(ctx)
+		btc.watchBlocks(ctx, blockTicker, walletBlockAllowance)
 		btc.shutdown()
 	}()
 	return &wg, nil
@@ -2393,8 +2393,8 @@ func (btc *ExchangeWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) 
 
 // watchBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes.
-func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
-	ticker := time.NewTicker(blockTicker)
+func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletAllowance time.Duration) {
+	ticker := time.NewTicker(blockPeriod)
 	defer ticker.Stop()
 
 	var walletBlock <-chan *block
@@ -2462,7 +2462,7 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 				}
 				queuedBlock = &polledBlock{
 					block: newTip,
-					queue: time.AfterFunc(walletBlockAllowance, func() {
+					queue: time.AfterFunc(walletAllowance, func() {
 						dequeuedBlock <- newTip
 					}),
 				}
