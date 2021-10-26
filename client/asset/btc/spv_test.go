@@ -699,3 +699,74 @@ func TestSendWithSubtract(t *testing.T) {
 		t.Fatalf("test passed with fees > available error")
 	}
 }
+
+func TestTryBlocksWithNotifier(t *testing.T) {
+	defaultWalletBlockAllowance := walletBlockAllowance
+	defaultBlockTicker := blockTicker
+
+	walletBlockAllowance = 30 * time.Millisecond
+	blockTicker = 5 * time.Millisecond
+
+	defer func() {
+		walletBlockAllowance = defaultWalletBlockAllowance
+		blockTicker = defaultBlockTicker
+	}()
+
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
+	defer shutdown()
+
+	spv := wallet.node.(*spvWallet)
+
+	getNote := func(timeout time.Duration) bool {
+		select {
+		case <-node.tipChanged:
+			return true
+		case <-time.After(timeout):
+			return false
+		}
+	}
+
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatalf("got a first block")
+	}
+
+	var tipHeight int64
+	addBlock := func() *block {
+		tipHeight++
+		h, _ := node.addRawTx(tipHeight, dummyTx())
+		return &block{tipHeight, *h}
+	}
+
+	addBlock()
+
+	// It should not come through on the block tick, since it will be cached.
+	if getNote(blockTicker * 2) {
+		t.Fatalf("got block that should've been cached")
+	}
+
+	// But it will come through after the blockAllowance, printing a warning.
+	if !getNote(walletBlockAllowance * 2) {
+		t.Fatal("block didn't time out")
+	}
+
+	// On the other hand, a wallet block should come through immediately. Not
+	// even waiting on the block tick.
+	spv.tipChan <- addBlock()
+	if !getNote(blockTicker / 2) {
+		t.Fatal("wallet block wasn't sent through")
+	}
+
+	// If we do the same thing but make sure that a polled block is queued
+	// first, we should still see the block right away, and the queued block
+	// should be canceled.
+	blk := addBlock()
+	time.Sleep(blockTicker * 2)
+	spv.tipChan <- blk
+	if !getNote(blockTicker / 2) {
+		t.Fatal("wallet block wasn't sent through with polled block queued")
+	}
+
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatal("queued polled block that should have been canceled came through")
+	}
+}

@@ -167,6 +167,7 @@ type testData struct {
 	signTxErr            error
 	listUnspent          []*ListUnspentResult
 	listUnspentErr       error
+	tipChanged           chan struct{}
 
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
@@ -195,6 +196,7 @@ func newTestData() *testData {
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
 		checkpoints:       make(map[outPoint]*scanCheckpoint),
+		tipChanged:        make(chan struct{}, 1),
 	}
 }
 
@@ -567,7 +569,12 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 
 	data := newTestData()
 	walletCfg := &asset.WalletConfig{
-		TipChange: func(error) {},
+		TipChange: func(error) {
+			select {
+			case data.tipChanged <- struct{}{}:
+			default:
+			}
+		},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
@@ -596,6 +603,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
+				tipChan:     make(chan *block),
 				chainClient: nil,
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
@@ -622,7 +630,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		hash:   *bestHash,
 	}
 	wallet.tipMtx.Unlock()
-	go wallet.run(walletCtx)
+	go wallet.watchBlocks(walletCtx)
 
 	return wallet, data, shutdown, nil
 }
@@ -2966,5 +2974,4 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 			}
 		}
 	}
-
 }

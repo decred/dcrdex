@@ -775,7 +775,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		btc.run(ctx)
+		btc.watchBlocks(ctx)
 		btc.shutdown()
 	}()
 	return &wg, nil
@@ -2391,9 +2391,9 @@ func (btc *ExchangeWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) 
 	return uint32(tx.Confirmations), nil
 }
 
-// run pings for new blocks and runs the tipChange callback function when the
-// block changes.
-func (btc *ExchangeWallet) run(ctx context.Context) {
+// watchBlocks pings for new blocks and runs the tipChange callback function
+// when the block changes.
+func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 
@@ -2416,7 +2416,7 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 
 	// dequeuedBlock is where the queuedBlocks that time out will be sent for
 	// broadcast.
-	var dequeuedBlock chan *block
+	dequeuedBlock := make(chan *block, 1)
 
 	for {
 		select {
@@ -2428,6 +2428,10 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 			if err != nil {
 				go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
 				return
+			}
+
+			if queuedBlock != nil && *newTipHash == queuedBlock.block.hash {
+				continue
 			}
 
 			// This method is called frequently. Don't hold write lock
@@ -2475,7 +2479,8 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 
 		case dqBlock := <-dequeuedBlock:
 			btc.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-				"never reported: %d %s. This may indicate a problem with the wallet.", dqBlock.height, dqBlock.hash)
+				"never reported: %d %s. If you see this message repeatedly, it may indicate "+
+				"an issue with the wallet.", dqBlock.height, dqBlock.hash)
 			btc.reportNewTip(ctx, dqBlock)
 
 		case <-ctx.Done():
