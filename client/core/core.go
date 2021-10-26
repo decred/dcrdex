@@ -1829,13 +1829,18 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 		return nil, nil, fmt.Errorf("app seed decryption error: %w", err)
 	}
 
+	seed, pass = assetSeedAndPass(assetID, appSeed)
+	return seed, pass, nil
+}
+
+func assetSeedAndPass(assetID uint32, appSeed []byte) ([]byte, []byte) {
 	b := make([]byte, len(appSeed)+4)
 	copy(b, appSeed)
 	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
 
 	s := blake256.Sum256(b)
 	p := blake256.Sum256(s[:])
-	return s[:], p[:], nil
+	return s[:], p[:]
 }
 
 // assetDataDirectory is a directory for a wallet to use for local storage.

@@ -7308,15 +7308,7 @@ func TestCredentialHandling(t *testing.T) {
 
 func TestCore_assetSeedAndPass(t *testing.T) {
 	// This test ensures the derived wallet seed and password are deterministic
-	// and depend on both asset ID and app seed. Core does not need to be
-	// running, and only a dummy crypter is required to return deterministic
-	// data (a copy) from the "encrypted" app seed.
-	c := &Core{
-		credentials: &db.PrimaryCredentials{
-			EncInnerKey: []byte{1}, // pass the db upgrade check
-		},
-	}
-	crypter := &tCrypter{} // to "decrypt" the app seed
+	// and depend on both asset ID and app seed.
 
 	// NOTE: the blake256 hash of an empty slice is:
 	// []byte{0x71, 0x6f, 0x6e, 0x86, 0x3f, 0x74, 0x4b, 0x9a, 0xc2, 0x2c, 0x97, 0xec, 0x7b, 0x76, 0xea, 0x5f,
@@ -7325,14 +7317,14 @@ func TestCore_assetSeedAndPass(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		encSeed  []byte
+		appSeed  []byte
 		assetID  uint32
 		wantSeed []byte
 		wantPass []byte
 	}{
 		{
 			name:    "base",
-			encSeed: []byte{1, 2, 3},
+			appSeed: []byte{1, 2, 3},
 			assetID: 2,
 			wantSeed: []byte{
 				0xac, 0x61, 0xb1, 0xbc, 0x77, 0xd0, 0xa6, 0xd5, 0xd2, 0xb5, 0xc9, 0x77, 0x91, 0xd6, 0x4a, 0xaf,
@@ -7343,7 +7335,7 @@ func TestCore_assetSeedAndPass(t *testing.T) {
 		},
 		{
 			name:    "change app seed",
-			encSeed: []byte{2, 2, 3},
+			appSeed: []byte{2, 2, 3},
 			assetID: 2,
 			wantSeed: []byte{
 				0xf, 0xc9, 0xf, 0xa8, 0xb3, 0xe9, 0x31, 0x2a, 0xba, 0xf1, 0xda, 0x70, 0x41, 0x81, 0x49, 0xed,
@@ -7354,7 +7346,7 @@ func TestCore_assetSeedAndPass(t *testing.T) {
 		},
 		{
 			name:    "change asset ID",
-			encSeed: []byte{1, 2, 3},
+			appSeed: []byte{1, 2, 3},
 			assetID: 0,
 			wantSeed: []byte{
 				0xe1, 0xad, 0x62, 0xe4, 0x60, 0xfd, 0x75, 0x91, 0x3d, 0x41, 0x2e, 0x8e, 0xc5, 0x72, 0xd4, 0xa2,
@@ -7366,11 +7358,7 @@ func TestCore_assetSeedAndPass(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c.credentials.EncSeed = tt.encSeed
-			seed, pass, err := c.assetSeedAndPass(tt.assetID, crypter)
-			if err != nil {
-				t.Fatal(err)
-			}
+			seed, pass := assetSeedAndPass(tt.assetID, tt.appSeed)
 			if !bytes.Equal(pass, tt.wantPass) {
 				t.Errorf("pass not as expected, got %#v", pass)
 			}
