@@ -174,6 +174,7 @@ var (
 		},
 		LegacyWalletIndex: 1,
 	}
+	walletBirthday time.Time
 )
 
 // TxInSigner is a transaction input signer.
@@ -473,6 +474,12 @@ func (d *Driver) Info() *asset.WalletInfo {
 }
 
 func init() {
+	var err error
+	walletBirthday, err = time.Parse(time.RFC822, "02 Jun 21 21:12 CDT")
+	if err != nil {
+		panic("error parsing wallet birthday: " + err.Error())
+	}
+
 	asset.Register(BipID, &Driver{})
 }
 
