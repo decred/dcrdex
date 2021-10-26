@@ -265,7 +265,10 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		return nil, err
 	}
 
-	accounts := exportAccountsFromNode(node)
+	accounts, err := exportAccountsFromNode(node)
+	if err != nil {
+		return nil, err
+	}
 	if len(accounts) != 1 {
 		return nil,
 			fmt.Errorf("NewWallet: eth node keystore should only contain 1 account, but contains %d",
