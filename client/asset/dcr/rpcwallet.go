@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -26,7 +27,7 @@ import (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 7, Patch: 0} // TODO: Update to 8.8.0 for spv getcurrentnetwork support
 	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
 )
 
@@ -52,6 +53,8 @@ type rpcWallet struct {
 	// rpcClient is a combined rpcclient.Client+dcrwallet.Client,
 	// or a stub for testing.
 	rpcClient
+
+	connectCount uint32
 }
 
 // Ensure rpcWallet satisfies the Wallet interface.
@@ -129,27 +132,27 @@ func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) 
 	}
 
 	log := logger.SubLogger("RPC")
+	rpcw := &rpcWallet{
+		chainParams: chainParams,
+		log:         log,
+	}
+
 	log.Infof("Setting up rpc client to communicate with dcrwallet at %s with TLS certificate %q.",
 		cfg.RPCListen, cfg.RPCCert)
-	nodeRPCClient, err := newClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, log)
+	err := rpcw.setupRPCClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert)
 	if err != nil {
 		return nil, fmt.Errorf("error setting up rpc client: %w", err)
 	}
 
-	return &rpcWallet{
-		chainParams:  chainParams,
-		log:          log,
-		rpcConnector: nodeRPCClient,
-		rpcClient:    &combinedClient{nodeRPCClient, dcrwallet.NewClient(dcrwallet.RawRequestCaller(nodeRPCClient), chainParams)},
-	}, nil
+	return rpcw, nil
 }
 
-// newClient attempts to create a new websocket connection to a dcrwallet
+// setupRPCClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
+func (w *rpcWallet) setupRPCClient(host, user, pass, cert string) error {
 	certs, err := os.ReadFile(cert)
 	if err != nil {
-		return nil, fmt.Errorf("TLS certificate read error: %w", err)
+		return fmt.Errorf("TLS certificate read error: %w", err)
 	}
 
 	config := &rpcclient.ConnConfig{
@@ -163,37 +166,39 @@ func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Cli
 
 	ntfnHandlers := &rpcclient.NotificationHandlers{
 		// Setup an on-connect handler for logging (re)connects.
-		OnClientConnected: func() {
-			logger.Infof("Connected to Decred wallet at %s", host)
-		},
+		OnClientConnected: w.handleRPCClientReconnection,
 	}
-	cl, err := rpcclient.New(config, ntfnHandlers)
+	nodeRPCClient, err := rpcclient.New(config, ntfnHandlers)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
+		return fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
 	}
 
-	return cl, nil
+	w.rpcConnector = nodeRPCClient
+	w.rpcClient = &combinedClient{nodeRPCClient, dcrwallet.NewClient(dcrwallet.RawRequestCaller(nodeRPCClient), w.chainParams)}
+	return nil
 }
 
-// Connect establishes a connection to the previously created rpc client.
-// Part of the Wallet interface.
-func (w *rpcWallet) Connect(ctx context.Context) error {
-	err := w.rpcConnector.Connect(ctx, false)
-	if err != nil {
-		return fmt.Errorf("dcrwallet connect error: %w", err)
+func (w *rpcWallet) handleRPCClientReconnection() {
+	connectCount := atomic.AddUint32(&w.connectCount, 1)
+	if connectCount == 1 {
+		// first connection, below check will be performed
+		// by *rpcWallet.Connect.
+		return
 	}
 
-	// The websocket client is connected now, so if any of the following checks
-	// fails and we return with a non-nil error, we must shutdown the rpc client
-	// or subsequent reconnect attempts will be met with "websocket client has
-	// already connected".
-	var success bool
-	defer func() {
-		if !success {
-			w.rpcConnector.Shutdown()
-			w.rpcConnector.WaitForShutdown()
-		}
-	}()
+	w.log.Debugf("dcrwallet reconnected (%d)", connectCount-1)
+	err := w.checkRPCConnection(context.TODO())
+	if err != nil {
+		w.log.Errorf("dcrwallet reconnect handler error: %v", err)
+	}
+}
+
+// isSpvMode uses the walletinfo rpc to determine if this wallet is
+// connected to the Decred network via SPV peers.
+func (w *rpcWallet) checkRPCConnection(ctx context.Context) error {
+	// Reset spvMode to false, until we're sure we're connected to
+	// an SPV wallet below.
+	w.spvMode = false
 
 	// Check the required API versions.
 	versions, err := w.rpcConnector.Version(ctx)
@@ -212,13 +217,7 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	}
 
 	ver, exists = versions["dcrdjsonrpcapi"]
-	if !exists {
-		w.spvMode = true
-		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
-		// TODO: Thr wallet may actually not be connected to an spv syncer, use the walletinfo
-		// rpc to confirm and return the following error if this is not spv wallet.
-		// return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
-	} else {
+	if exists {
 		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
 			return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
@@ -226,9 +225,41 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 		}
 		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 			walletSemver, nodeSemver, w.chainParams.Name)
+	} else {
+		// SPV maybe?
+		walletInfo, err := w.rpcClient.WalletInfo(ctx)
+		if err != nil {
+			return fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
+		}
+		if !walletInfo.SPV {
+			return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
+		}
+		w.spvMode = true
+		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
 	}
 
-	success = true
+	return nil
+}
+
+// Connect establishes a connection to the previously created rpc client.
+// Part of the Wallet interface.
+func (w *rpcWallet) Connect(ctx context.Context) error {
+	err := w.rpcConnector.Connect(ctx, false)
+	if err != nil {
+		return fmt.Errorf("dcrwallet connect error: %w", err)
+	}
+
+	// The websocket client is connected now, so if the following check
+	// fails and we return with a non-nil error, we must shutdown the
+	// rpc client otherwise subsequent reconnect attempts will be met
+	// with "websocket client has already connected".
+	err = w.checkRPCConnection(ctx)
+	if err != nil {
+		w.rpcConnector.Shutdown()
+		w.rpcConnector.WaitForShutdown()
+		return err
+	}
+
 	return nil
 }
 
@@ -252,11 +283,10 @@ func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 	return net, translateRPCCancelErr(err)
 }
 
-// SpvMode returns through if the wallet is connected to
+// SpvMode returns true if the wallet is connected to the Decred
+// network via SPV peers.
 // Part of the Wallet interface.
 func (w *rpcWallet) SpvMode() bool {
-	// TODO: Should probably re-check walletinfo to be sure
-	// the network backend has not been changed to dcrd.
 	return w.spvMode
 }
 

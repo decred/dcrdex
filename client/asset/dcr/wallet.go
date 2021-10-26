@@ -60,7 +60,7 @@ type Wallet interface {
 	Disconnected() bool
 	// Network returns the network of the connected wallet.
 	Network(ctx context.Context) (wire.CurrencyNet, error)
-	// SpvMode returns through if the wallet is connected to the Decred
+	// SpvMode returns true if the wallet is connected to the Decred
 	// network via SPV peers.
 	SpvMode() bool
 	// NotifyOnTipChange registers a callback function that the should be
