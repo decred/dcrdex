@@ -1834,7 +1834,7 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 	binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
 
 	s := blake256.Sum256(b)
-	p := blake256.Sum256(seed)
+	p := blake256.Sum256(s[:])
 	return s[:], p[:], nil
 }
 
