@@ -657,7 +657,7 @@ func TestInitiateBatch(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -750,7 +750,7 @@ func TestInitiate(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -919,7 +919,7 @@ func TestRedeem(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := test.redeemerClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
@@ -1053,7 +1053,7 @@ func TestRefund(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 
-		// It appears the receipt is only accessable after the tx is mined.
+		// It appears the receipt is only accessible after the tx is mined.
 		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
