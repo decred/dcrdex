@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 7, Patch: 0} // TODO: Update to 8.8.0 for spv getcurrentnetwork support
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 8, Patch: 0}
 	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
 )
 

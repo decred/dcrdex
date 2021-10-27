@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.16
 
 require (
-	decred.org/dcrwallet/v2 v2.0.0-20211006150810-61ab76379a26 // json-rpc 8.7.0 server, TODO: update to 8.8.0
+	decred.org/dcrwallet/v2 v2.0.0-20211027145433-305bed7bace0
 	github.com/btcsuite/btcd v0.22.0-beta.0.20211026140004-31791ba4dc6e
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
 	github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
