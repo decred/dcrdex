@@ -1738,7 +1738,11 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, op outPoint, memp
 	// cache and if also not found, scan block filters to find the output.
 	var eTxOut *externalTxOutput
 	if txOut == nil {
-		dcr.log.Debugf("Output %s NOT found in wallet, checking cache/block filters", op)
+		if len(pkScript) == 0 {
+			dcr.log.Debugf("Output %s NOT found in wallet, checking external tx cache", op)
+		} else {
+			dcr.log.Debugf("Output %s NOT found in wallet, checking cache/block filters", op)
+		}
 		eTxOut, err = dcr.lookupTxOutWithBlockFilters(ctx, op, pkScript, earliestTxTime)
 		if err != nil {
 			return errorOut(err)
@@ -1856,6 +1860,10 @@ func (dcr *ExchangeWallet) checkWalletForTxOutput(ctx context.Context, op outPoi
 	// external outputs, even if the wallet tracks the tx.
 	for _, details := range tx.Details {
 		if details.Vout == op.vout {
+			externalOutput := details.Category == "send" || details.Amount < 0
+			if externalOutput {
+				break
+			}
 			dcr.log.Debugf("Output %s found by gettransaction but not by gettxout is considered SPENT. SPV mode = %t", op, spvMode)
 			return output, outputSpendStatusSpent, nil
 		}
