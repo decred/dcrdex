@@ -195,6 +195,9 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 		return nil, err
 	}
 
+	ks := keystore.NewKeyStore(stack.KeyStoreDir(), keystore.LightScryptN, keystore.LightScryptP)
+	stack.AccountManager().AddBackend(ks)
+
 	return stack, nil
 }
 
@@ -254,7 +257,11 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 	if err != nil {
 		return err
 	}
-	ks := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+	backends := node.AccountManager().Backends(keystore.KeyStoreType)
+	if len(backends) == 0 {
+		return fmt.Errorf("importKeyToNode: expected at least 1 keystore backend")
+	}
+	ks := backends[0].(*keystore.KeyStore)
 	accounts := ks.Accounts()
 	if len(accounts) == 0 {
 		_, err = ks.ImportECDSA(ecdsaPrivateKey, hex.EncodeToString(password))
@@ -275,9 +282,13 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 
 // exportAccountsFromNode returns all the accounts for which a the ethereum wallet
 // has stored a private key.
-func exportAccountsFromNode(node *node.Node) []accounts.Account {
-	ks := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-	return ks.Accounts()
+func exportAccountsFromNode(node *node.Node) ([]accounts.Account, error) {
+	backends := node.AccountManager().Backends(keystore.KeyStoreType)
+	if len(backends) == 0 {
+		return nil, fmt.Errorf("exportAccountsForNode: expected at least 1 keystore backend")
+	}
+	ks := backends[0].(*keystore.KeyStore)
+	return ks.Accounts(), nil
 }
 
 //

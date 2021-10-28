@@ -174,6 +174,20 @@ func TestMain(m *testing.M) {
 		if err := participantEthClient.connect(ctx, participantWallet.internalNode, &addr); err != nil {
 			return 1, fmt.Errorf("connect error: %v\n", err)
 		}
+		accts, err := exportAccountsFromNode(simnetWallet.internalNode)
+		if err != nil {
+			return 1, err
+		}
+		if len(accts) != 1 {
+			return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
+		}
+		accts, err = exportAccountsFromNode(participantWallet.internalNode)
+		if err != nil {
+			return 1, err
+		}
+		if len(accts) != 1 {
+			return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
+		}
 		return m.Run(), nil
 	}
 	exitCode, err := run()
@@ -402,13 +416,17 @@ func TestInitiateGas(t *testing.T) {
 		t.Fatalf("unexpected error packing abi: %v", err)
 	}
 	msg := ethereum.CallMsg{
-		From:  participantAddr,
+		From:  simnetAddr,
 		To:    &contractAddr,
 		Value: big.NewInt(1),
 		Gas:   0,
 		Data:  data,
 	}
-	gas, err := participantEthClient.estimateGas(ctx, msg)
+	err = ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gas, err := ethClient.estimateGas(ctx, msg)
 	if err != nil {
 		t.Fatalf("unexpected error from estimateGas: %v", err)
 	}
@@ -425,6 +443,10 @@ func TestInitiateBatchGas(t *testing.T) {
 	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+	err = ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var previousGas uint64
@@ -445,13 +467,13 @@ func TestInitiateBatchGas(t *testing.T) {
 			t.Fatalf("unexpected error packing abi: %v", err)
 		}
 		msg := ethereum.CallMsg{
-			From:  participantAddr,
+			From:  simnetAddr,
 			To:    &contractAddr,
 			Value: big.NewInt(int64(i)),
 			Gas:   0,
 			Data:  data,
 		}
-		gas, err := participantEthClient.estimateGas(ctx, msg)
+		gas, err := ethClient.estimateGas(ctx, msg)
 		if err != nil {
 			t.Fatalf("unexpected error from estimateGas: %v", err)
 		}
