@@ -38,6 +38,6 @@ abigen --sol ${SOLIDITY_FILE} --pkg eth --out ../contract.go
 
 solc --bin --optimize ${SOLIDITY_FILE} -o .
 BYTECODE=$(<ETHSwap.bin)
-sed -i .tmp "s/ETH_SWAP_V${ETH_SWAP_VERSION}=.*/ETH_SWAP_V${ETH_SWAP_VERSION}=\"${BYTECODE}\"/" ../../../testing/eth/harness.sh
+sed -i.tmp "s/ETH_SWAP_V${ETH_SWAP_VERSION}=.*/ETH_SWAP_V${ETH_SWAP_VERSION}=\"${BYTECODE}\"/" ../../../testing/eth/harness.sh
 rm ../../../testing/eth/harness.sh.tmp
 rm ETHSwap.bin
