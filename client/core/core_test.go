@@ -7287,7 +7287,7 @@ func TestCredentialHandling(t *testing.T) {
 	// Decred wallet"
 }
 
-func TestCore_assetSeedAndPass(t *testing.T) {
+func TestCoreAssetSeedAndPass(t *testing.T) {
 	// This test ensures the derived wallet seed and password are deterministic
 	// and depend on both asset ID and app seed.
 
@@ -7339,7 +7339,7 @@ func TestCore_assetSeedAndPass(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seed, pass := assetSeedAndPass(tt.assetID, tt.appSeed)
+			seed, pass := AssetSeedAndPass(tt.assetID, tt.appSeed)
 			if !bytes.Equal(pass, tt.wantPass) {
 				t.Errorf("pass not as expected, got %#v", pass)
 			}
