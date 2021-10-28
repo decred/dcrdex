@@ -264,25 +264,31 @@ func New(cfg *Config) (*WebServer, error) {
 		// The rest of the web handlers require initialization.
 		web.Group(func(webInit chi.Router) {
 			webInit.Use(s.requireInit)
-			// The login handler is the only one that requires init but not auth
-			// since it performs the auth.
-			webInit.Get(loginRoute, s.handleLogin)
 
-			// The rest of these handlers require auth.
-			webInit.Group(func(webAuth chi.Router) {
-				webAuth.Use(s.requireLogin)
-				webAuth.Get(walletsRoute, s.handleWallets)
-				webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
-				webAuth.Get(ordersRoute, s.handleOrders)
-				webAuth.Get(exportOrderRoute, s.handleExportOrders)
+			// Can go to wallets with init and auth, but not dex.
+			webInit.Group(func(webAuthNoDEX chi.Router) {
+				webAuthNoDEX.Use(s.requireLogin)
+				webAuthNoDEX.Get(walletsRoute, s.handleWallets)
+			})
 
-				// These handlers require a DEX connection.
-				webAuth.Group(func(webDC chi.Router) {
-					webDC.Use(s.requireDEXConnection)
-					webDC.Get(homeRoute, s.handleHome)
-					webDC.Get(marketsRoute, s.handleMarkets)
+			webInit.Group(func(webDC chi.Router) {
+				webDC.Use(s.requireDEXConnection)
+
+				// The login handler is the only one that requires init and
+				// dexes but not auth since it performs the auth.
+				webDC.Get(loginRoute, s.handleLogin)
+
+				// The rest of these handlers require auth.
+				webDC.Group(func(webAuth chi.Router) {
+					webAuth.Use(s.requireLogin)
+					webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
+					webAuth.Get(ordersRoute, s.handleOrders)
+					webAuth.Get(exportOrderRoute, s.handleExportOrders)
+					webAuth.Get(homeRoute, s.handleHome)
+					webAuth.Get(marketsRoute, s.handleMarkets)
 				})
 			})
+
 		})
 	})
 
@@ -394,7 +400,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 
 	bb := "bodybuilder"
 	s.html = newTemplates(tmplDir, match, s.reloadHTML).
-		addTemplate("login", bb).
+		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
 		addTemplate("wallets", bb, "forms").

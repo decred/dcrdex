@@ -8,6 +8,15 @@
   font-style: normal;
 }
 
+@font-face {
+  font-family: 'source-sans-light';
+  src:
+    url('/font/SourceSansPro-Light.woff') format('woff'),
+    url('/font/SourceSansPro-Light.svg') format('svg');
+  font-weight: 200;
+  font-style: normal;
+}
+
 /* fonts */
 @font-face {
   font-family: 'demi-sans';
@@ -106,4 +115,12 @@
 
 .mono {
   font-family: $mono;
+}
+
+.sans {
+  font-family: $sans;
+}
+
+.sans-light {
+  font-family: $sans-light;
 }

@@ -12,6 +12,7 @@ export default class SettingsPage extends BasePage {
   constructor (body) {
     super()
     this.body = body
+    this.currentDEX = null
     const page = this.page = Doc.idDescendants(body)
 
     this.forms = page.forms.querySelectorAll(':scope > form')
@@ -32,19 +33,60 @@ export default class SettingsPage extends BasePage {
     })
 
     page.commitHash.textContent = app().commitHash.substring(0, 7)
-    Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
+    Doc.bind(page.addADex, 'click', () => {
+      this.dexAddrForm.refresh()
+      this.showForm(page.dexAddrForm)
+    })
 
-    this.confirmRegistrationForm = new forms.ConfirmRegistrationForm(
-      page.confirmRegForm,
-      {
-        getCertFile: () => this.getCertFile(),
-        getDexAddr: () => this.getDexAddr()
-      },
-      () => this.registerDEXSuccess())
+    // Asset selection
+    this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, assetID => {
+      this.confirmRegisterForm.setAsset(assetID)
 
-    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc) => {
-      this.confirmRegistrationForm.setExchange(xc)
-      await this.showForm(page.confirmRegForm)
+      const asset = app().assets[assetID]
+      const wallet = asset.wallet
+      if (wallet) {
+        const fee = this.currentDEX.regFees[asset.symbol]
+        if (wallet.synced && wallet.balance.available > fee.amount) {
+          this.animateConfirmForm(page.regAssetForm)
+          return
+        }
+        this.walletWaitForm.setWallet(wallet)
+        forms.slideSwap(page.regAssetForm, page.walletWait)
+        return
+      }
+
+      this.newWalletForm.setAsset(assetID)
+      this.newWalletForm.loadDefaults()
+      this.currentForm = page.newWalletForm
+      forms.slideSwap(page.regAssetForm, page.newWalletForm)
+    })
+
+    // Approve fee payment
+    this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, () => {
+      this.registerDEXSuccess()
+    }, () => {
+      this.animateRegAsset(page.confirmRegForm)
+    }, this.pwCache)
+
+    // Create a new wallet
+    this.newWalletForm = new forms.NewWalletForm(
+      page.newWalletForm,
+      assetID => this.newWalletCreated(assetID),
+      this.pwCache,
+      () => this.animateRegAsset(page.newWalletForm)
+    )
+
+    this.walletWaitForm = new forms.WalletWaitForm(page.walletWait, () => {
+      this.animateConfirmForm(page.walletWait)
+    }, () => { this.animateRegAsset(page.walletWait) })
+
+    // Enter an address for a new DEX
+    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
+      this.currentDEX = xc
+      this.confirmRegisterForm.setExchange(xc, certFile)
+      this.walletWaitForm.setExchange(xc)
+      this.regAssetForm.setExchange(xc)
+      this.animateRegAsset(page.dexAddrForm)
     })
 
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
@@ -97,8 +139,26 @@ export default class SettingsPage extends BasePage {
     })
 
     this.notifiers = {
-      walletstate: note => this.confirmRegistrationForm.handleWalletStateNote(note)
+      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: note => this.walletWaitForm.reportBalance(note.balance)
     }
+  }
+
+  async newWalletCreated (assetID) {
+    const user = await app().fetchUser()
+    const page = this.page
+    const asset = user.assets[assetID]
+    const wallet = asset.wallet
+    const feeAmt = this.currentDEX.regFees[asset.symbol].amount
+
+    if (wallet.synced && wallet.balance.available > feeAmt) {
+      await this.animateConfirmForm(page.newWalletForm)
+      return
+    }
+
+    this.walletWaitForm.setWallet(wallet)
+    this.currentForm = page.walletWait
+    await forms.slideSwap(page.newWalletForm, page.walletWait)
   }
 
   async prepareAccountExport (host, authorizeAccountExportForm) {
@@ -349,5 +409,23 @@ export default class SettingsPage extends BasePage {
    */
   unload () {
     Doc.unbind(document, 'keyup', this.keyup)
+  }
+
+  /* Swap in the asset selection form and run the animation. */
+  async animateRegAsset (oldForm) {
+    Doc.hide(oldForm)
+    const form = this.page.regAssetForm
+    this.currentForm = form
+    this.regAssetForm.animate()
+    Doc.show(form)
+  }
+
+  /* Swap in the confirmation form and run the animation. */
+  async animateConfirmForm (oldForm) {
+    this.confirmRegisterForm.animate()
+    const form = this.page.confirmRegForm
+    this.currentForm = form
+    Doc.hide(oldForm)
+    Doc.show(form)
   }
 }

@@ -1,5 +1,5 @@
 body.dark {
-  background-color: #13202b;
+  background-color: $dark_body_bg;
   color: $font-color-dark;
 
   header.maintop {
@@ -83,14 +83,13 @@ body.dark {
     color: #dde9ff;
   }
 
-  #noteBox,
-  #profileBox {
-    background-color: $dark_bg_1;
-  }
-
   div.popup-notes > span {
     background-color: white;
     color: $font-color-light;
+  }
+
+  #forms {
+    background-color: #13202bf3;
   }
 
   .buycolor {
@@ -101,13 +100,22 @@ body.dark {
     color: $sellcolor_dark;
   }
 
+  div.border1 {
+    border: 1px solid #333;
+  }
+
+  #noteBox,
+  #profileBox {
+    background-color: $dark_bg_1;
+  }
+
   #tooltip {
     background-color: #ece9f7;
     border-color: #d8d8d8;
     color: black;
   }
 
-  div.border1 {
-    border: 1px solid #333;
+  #loader {
+    background-color: #13202b77;
   }
 }

@@ -198,4 +198,14 @@ var templateFuncs = template.FuncMap{
 	"x100": func(v float32) float32 {
 		return v * 100
 	},
+	"dummyExchangeLogo": func(host string) string {
+		if len(host) == 0 {
+			return "/img/coins/z.png"
+		}
+		char := host[0]
+		if char < 97 || char > 122 {
+			return "/img/coins/z.png"
+		}
+		return "/img/coins/" + string(char) + ".png"
+	},
 }

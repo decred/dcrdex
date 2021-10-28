@@ -109,7 +109,7 @@ export default class MarketsPage extends BasePage {
     }
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate)
+    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate)
 
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
@@ -191,9 +191,9 @@ export default class MarketsPage extends BasePage {
     // Handle the candles update on the 'candles' route.
     ws.registerRoute(candlesRoute, data => { this.handleCandlesRoute(data) })
     // Bind the wallet unlock form.
-    this.unlockForm = new UnlockWalletForm(page.openForm, async () => { this.openFunc() })
+    this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, async () => { this.openFunc() })
     // Create a wallet
-    this.walletForm = new NewWalletForm(page.walletForm, async () => { this.createWallet() })
+    this.newWalletForm = new NewWalletForm(page.newWalletForm, async () => { this.createWallet() })
     // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
@@ -1170,7 +1170,7 @@ export default class MarketsPage extends BasePage {
   async showForm (form) {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.openForm, page.verifyForm, page.walletForm, page.cancelForm)
+    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm, page.cancelForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -1186,7 +1186,7 @@ export default class MarketsPage extends BasePage {
     this.openAsset = asset
     this.openFunc = f
     this.unlockForm.setAsset(app().assets[asset.id])
-    this.showForm(page.openForm)
+    this.showForm(page.unlockWalletForm)
     page.uwAppPass.focus()
   }
 
@@ -1286,9 +1286,9 @@ export default class MarketsPage extends BasePage {
   showCreate (asset) {
     const page = this.page
     this.currentCreate = asset
-    this.walletForm.setAsset(asset.id)
-    this.showForm(page.walletForm)
-    this.walletForm.loadDefaults()
+    this.newWalletForm.setAsset(asset.id)
+    this.showForm(page.newWalletForm)
+    this.newWalletForm.loadDefaults()
   }
 
   /*
@@ -1851,7 +1851,7 @@ class MarketList {
   constructor (div) {
     this.selected = null
     const xcTmpl = Doc.tmplElement(div, 'xc')
-    cleanTemplates(xcTmpl)
+    Doc.cleanTemplates(xcTmpl)
     this.xcSections = []
     for (const dex of Object.values(app().user.exchanges)) {
       this.xcSections.push(new ExchangeSection(xcTmpl, dex))
@@ -2188,17 +2188,6 @@ function swapBttns (before, now) {
  */
 function updateDataCol (tr, col, s) {
   Doc.tmplElement(tr, col).textContent = s
-}
-
-/*
- * cleanTemplates removes the elements from the DOM and deletes the id
- * attribute.
- */
-function cleanTemplates (...tmpls) {
-  tmpls.forEach(tmpl => {
-    tmpl.remove()
-    tmpl.removeAttribute('id')
-  })
 }
 
 // OrderTableRowManager manages the data within a row in an order table. Each row

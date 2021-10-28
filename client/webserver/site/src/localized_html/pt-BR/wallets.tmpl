@@ -91,58 +91,59 @@
 
     {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
     <div id="marketsBox" class="d-hide">
-      <div class="fs22 text-center py-1"><span id="marketsFor"></span> Mercados</div>
-      <div id="marketsCard" class="card bg1 border1">
-        <div class="bg2 px-2 py-1 text-center fs18" id="dexTitle"></div>
-        <div class="d-flex justify-content-center align-items-start flex-wrap mt-2 mb-1" id="markets">
-          <div class="asset-market p-1" id="oneMarket">
-            <img src="{{logoPath "dcr"}}" class="mini-icon"><br>
-            <span>DCR-BTC</span>
+      <div class="fs22 text-center py-1 fs24 sans-light"><img id="marketsForLogo"> <span id="marketsFor"></span> Mercados</div>
+      <div id="marketsCard">
+        <div id="marketCard" class="market-box p-3">
+          <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
+          <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
+            <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
+              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. It's overwritten anyway. Do we even need the template function? */}}
+              <img src="{{logoPath "dcr"}}" class="logo">
+              <span class="mt-1 fs14 demi">DCR-BTC</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     {{- /* NEW WALLET */ -}}
-    <form class="card position-relative d-hide" id="walletForm" autocomplete="off">
+    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}
-    <div class="card bg1 border1 text-center fs20 d-hide" id="deposit">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+    <div class="text-center fs20 d-hide" id="deposit">
+      <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
         Depositar
         <img id="depositLogo" class="micro-icon mx-1">
         <span id="depositName"></span>
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="p-2">
-        <div class="mono d-inline bg0 p-1 mb-1 fs15" id="depositAddress"></div>
-        <div class="my-3">
-          <button id="newDepAddrBttn" type="button" class=" px-2 mt-1 justify-content-center fs15 bg2 selected">Novo endereço de depósito</button>
-        </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
+      <div class="mono d-inline bg0 p-2 fs15" id="depositAddress"></div>
+      <div class="my-3">
+        <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">Novo endereço de depósito</button>
       </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
     </div>
 
     {{- /* WITHDRAW */ -}}
-    <form class="card bg1 border1 pb-3 d-hide" id="withdrawForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+    <form class="pb-3 d-hide" id="withdrawForm" autocomplete="off">
+      <div class="py-1 text-center position-relative fs22 sans-light">
         Retirar
         <img id="withdrawLogo" class="micro-icon mx-1">
         <span id="withdrawName"></span>
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="px-4 mt-3">
+      <div class="mt-3">
         <label for="withdrawAddr" class="pl-1 mb-1">Endereço</label>
         <input type="text" class="form-control select" id="withdrawAddr">
       </div>
-      <div class="d-flex align-items-stretch px-4">
+      <div class="d-flex align-items-stretch">
         <div class="mt-2 col-10 p-0">
           <label for="withdrawAmt" class="pl-1 mb-1">Quantia</label>
           <input type="text" class="form-control select" id="withdrawAmt">
@@ -152,9 +153,9 @@
           <!-- <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div> -->
         </div>
       </div>
-      <hr class="dashed my-4 mx-4">
+      <hr class="dashed my-4">
       <div class="fs16 px-4 text-center">Autorizar retirada com sua senha do aplicativo.</div>
-      <div class="d-flex px-4 mt-3">
+      <div class="d-flex mt-3">
         <div class="col-12 p-0">
           <label for="withdrawPW" class="pl-1 mb-1">Senha</label>
           <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
@@ -168,24 +169,23 @@
     </form>
     
     {{- /* RECONFIGURE WALLET */ -}}
-    <form class="card bg1 border1 pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center position-relative fs18">
+    <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
+      <div class="py-1 text-center position-relative fs22 sans-light">
         Reconfigurar
         <img id="recfgAssetLogo" class="micro-icon mx-1">
         <span id="recfgAssetName"></span>
         Carteira
         <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="px-3 py-1" id="reconfigInputs">
+      <div class="py-1 mt-2" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
       </div>
-
-      <div id="showChangePW" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+      <div id="showChangePW" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
         <span id="showIcon" class="ico-plus fs8 pl-1"></span>
         <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
         <span id="switchPWMsg" class="d-inline-block pl-1 pb-1"></span>
       </div>
-      <div id="changePW" class="px-4 py-1">
+      <div id="changePW" class="py-1">
         <div class="fs15">
           Trocando a senha abaixo não troca sua senha da sua carteira. Use este formulário para atualizar o cliente DEX depois de ter alterado a senha da carteira pela aplicação da carteira diretamente.
         </div>
@@ -195,21 +195,21 @@
         </div>
       </div>
 
-      <div id="showChangeType" class="px-3 py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+      <div id="showChangeType" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
         <span id="changeTypeShowIcon" class="ico-plus fs8 pl-1"></span>
         <span id="changeTypeHideIcon" class="ico-minus fs8 pl-1 d-hide"></span>
-        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1"></span>
+        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1">change the wallet type</span>
       </div>
-      <div id="changeWalletType" class="px-4 py-1 d-hide">
+      <div id="changeWalletType" class="py-1 d-hide">
         <select id="changeWalletTypeSelect"></select>
       </div>
 
 
-      <hr class="dashed my-2 mx-4">
-      <div class="px-4 my-2">
+      <hr class="dashed my-2">
+      <div class="my-2">
         Nota: Trocando para uma carteira diferente enquanto possui trocas ativas ou pedidos nos livros pode causar fundos a serem perdidos.
       </div>
-      <div class="d-flex px-4 mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+      <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
         <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
           <label for="appPW" class="pl-1 mb-1">Senha do App</label>
           <input type="password" class="form-control select" id="appPW" autocomplete="off">

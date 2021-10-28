@@ -6975,7 +6975,7 @@ out:
 
 func TestParseCert(t *testing.T) {
 	byteCert := []byte{0x0a, 0x0b}
-	cert, err := parseCert("anyhost", []byte{0x0a, 0x0b})
+	cert, err := parseCert("anyhost", []byte{0x0a, 0x0b}, dex.Mainnet)
 	if err != nil {
 		t.Fatalf("byte cert error: %v", err)
 	}
@@ -6987,14 +6987,14 @@ func TestParseCert(t *testing.T) {
 	defer os.Remove(certFile.Name())
 	certFile.Write(byteCert)
 	certFile.Close()
-	cert, err = parseCert("anyhost", certFile.Name())
+	cert, err = parseCert("anyhost", certFile.Name(), dex.Mainnet)
 	if err != nil {
 		t.Fatalf("file cert error: %v", err)
 	}
 	if !bytes.Equal(cert, byteCert) {
 		t.Fatalf("byte cert note returned unmodified. expected %x, got %x", byteCert, cert)
 	}
-	cert, err = parseCert("dex-test.ssgen.io:7232", []byte(nil))
+	cert, err = parseCert("dex-test.ssgen.io:7232", []byte(nil), dex.Testnet)
 	if err != nil {
 		t.Fatalf("CertStore cert error: %v", err)
 	}

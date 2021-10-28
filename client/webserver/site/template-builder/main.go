@@ -54,7 +54,7 @@ func main() {
 		}
 
 		localizedTemplates := make(map[string][]byte, len(locales.Locales))
-		enDict := locales.Locales["en"]
+		enDict := locales.Locales["en-US"]
 
 		for lang := range locales.Locales {
 			fmt.Println("Prepping", lang)
@@ -72,7 +72,10 @@ func main() {
 				dict := locales.Locales[lang]
 				replacement, found := dict[key]
 				if !found {
-					replacement = enDict[key]
+					replacement, found = enDict[key]
+					if !found {
+						return fmt.Errorf("no translation and no default replacement for %s", key)
+					}
 					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
 				}
 				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement), -1) // Could just do 1

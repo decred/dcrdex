@@ -2,10 +2,17 @@ import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, DEXAddressForm, ConfirmRegistrationForm, bind as bindForm } from './forms'
+import {
+  NewWalletForm,
+  DEXAddressForm,
+  LoginForm,
+  ConfirmRegistrationForm,
+  FeeAssetSelectionForm,
+  WalletWaitForm,
+  slideSwap,
+  bind as bindForm
+} from './forms'
 import * as intl from './locales'
-
-const animationLength = 300
 
 export default class RegistrationPage extends BasePage {
   constructor (body) {
@@ -13,7 +20,6 @@ export default class RegistrationPage extends BasePage {
     this.body = body
     this.pwCache = {}
     this.currentDEX = null
-    this.currentForm = body.querySelector('form:not(.d-hide)')
     const page = this.page = Doc.idDescendants(body)
 
     // Hide the form closers for the registration process.
@@ -26,41 +32,77 @@ export default class RegistrationPage extends BasePage {
       Doc.hide(page.showSeedRestore)
     })
 
-    this.walletForm = new NewWalletForm(page.newWalletForm, assetID => { this.newWalletCreated(assetID) },
-      this.pwCache, () => this.changeForm(page.confirmRegForm))
-    // ADD DEX
-    this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc) => {
-      this.confirmRegisterForm.setExchange(xc)
-      this.currentDEX = xc
-      await this.changeForm(page.confirmRegForm)
+    this.loginForm = new LoginForm(page.loginForm, async () => {
+      await app().fetchUser()
+      this.dexAddrForm.refresh()
+      slideSwap(page.loginForm, page.dexAddrForm)
     }, this.pwCache)
 
-    // SUBMIT DEX REGISTRATION
-    this.confirmRegisterForm = new ConfirmRegistrationForm(
-      page.confirmRegForm,
-      {
-        getCertFile: () => this.getCertFile(),
-        getDexAddr: () => this.getDexAddr()
-      },
-      () => this.registerDEXSuccess(),
-      (msg) => this.registerDEXFundsFail(msg),
-      (assetId) => {
-        this.walletForm.setAsset(assetId)
-        this.walletForm.loadDefaults()
-        this.changeForm(page.newWalletForm)
-      })
+    this.newWalletForm = new NewWalletForm(
+      page.newWalletForm,
+      assetID => this.newWalletCreated(assetID),
+      this.pwCache,
+      () => this.animateRegAsset(page.newWalletForm)
+    )
 
-    Doc.bind(page.depoWaitClose, 'click', () => {
-      if (this.balanceTimer) {
-        clearInterval(this.balanceTimer)
-        this.balanceTimer = null
-        this.changeForm(page.confirmRegForm)
+    // ADD DEX
+    this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
+      this.currentDEX = xc
+      this.confirmRegisterForm.setExchange(xc, certFile)
+      this.walletWaitForm.setExchange(xc)
+      this.regAssetForm.setExchange(xc)
+      this.animateRegAsset(page.dexAddrForm)
+    }, this.pwCache)
+
+    // SELECT REG ASSET
+    this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, assetID => {
+      this.confirmRegisterForm.setAsset(assetID)
+
+      const asset = app().assets[assetID]
+      const wallet = asset.wallet
+      if (wallet) {
+        const fee = this.currentDEX.regFees[asset.symbol]
+        if (wallet.synced && wallet.balance.available > fee.amount) {
+          this.animateConfirmForm(page.regAssetForm)
+          return
+        }
+        this.walletWaitForm.setWallet(wallet)
+        slideSwap(page.regAssetForm, page.walletWait)
+        return
       }
+
+      this.newWalletForm.setAsset(assetID)
+      this.newWalletForm.loadDefaults()
+      slideSwap(page.regAssetForm, page.newWalletForm)
     })
+
+    this.walletWaitForm = new WalletWaitForm(page.walletWait, () => {
+      this.animateConfirmForm(page.walletWait)
+    }, () => { this.animateRegAsset(page.walletWait) })
+
+    // SUBMIT DEX REGISTRATION
+    this.confirmRegisterForm = new ConfirmRegistrationForm(page.confirmRegForm, () => {
+      this.registerDEXSuccess()
+    }, () => {
+      this.animateRegAsset(page.confirmRegForm)
+    }, this.pwCache)
+
+    const currentForm = page.forms.querySelector(':scope > form.selected')
+    currentForm.classList.remove('selected')
+    switch (currentForm) {
+      case page.loginForm:
+        this.loginForm.animate()
+        break
+      case page.dexAddrForm:
+        this.dexAddrForm.animate()
+    }
+    Doc.show(currentForm)
+
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
     this.notifiers = {
-      walletstate: note => this.confirmRegisterForm.handleWalletStateNote(note)
+      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: note => this.walletWaitForm.reportBalance(note.balance)
     }
   }
 
@@ -73,25 +115,18 @@ export default class RegistrationPage extends BasePage {
     await app().fetchUser()
   }
 
-  /* Swap this currently displayed form1 for form2 with an animation. */
-  async changeForm (newForm) {
-    const oldForm = this.currentForm
-    this.currentForm = newForm
-    const shift = this.body.offsetWidth / 2
-    await Doc.animate(animationLength, progress => {
-      oldForm.style.right = `${progress * shift}px`
-    }, 'easeInHard')
+  /* Swap in the asset selection form and run the animation. */
+  async animateRegAsset (oldForm) {
     Doc.hide(oldForm)
-    oldForm.style.right = '0'
-    newForm.style.right = -shift
-    Doc.show(newForm)
-    if (newForm.querySelector('input')) {
-      newForm.querySelector('input').focus()
-    }
-    await Doc.animate(animationLength, progress => {
-      newForm.style.right = `${-shift + progress * shift}px`
-    }, 'easeOutHard')
-    newForm.style.right = '0'
+    this.regAssetForm.animate()
+    Doc.show(this.page.regAssetForm)
+  }
+
+  /* Swap in the confirmation form and run the animation. */
+  async animateConfirmForm (oldForm) {
+    this.confirmRegisterForm.animate()
+    Doc.hide(oldForm)
+    Doc.show(this.page.confirmRegForm)
   }
 
   /* Set the application password. Attached to form submission. */
@@ -135,9 +170,9 @@ export default class RegistrationPage extends BasePage {
     this.pwCache.pw = pw
     this.auth()
     app().updateMenuItemsDisplay()
-    this.walletForm.refresh()
+    this.newWalletForm.refresh()
     this.dexAddrForm.refresh()
-    await this.changeForm(page.dexAddrForm)
+    await slideSwap(page.appPWForm, page.dexAddrForm)
   }
 
   /* gets the contents of the cert file */
@@ -154,14 +189,6 @@ export default class RegistrationPage extends BasePage {
     return this.page.dexAddr.value
   }
 
-  /* Called when dex registration failed due to insufficient funds. */
-  async registerDEXFundsFail (msg) {
-    const page = this.page
-    page.regFundsErr.textContent = msg
-    Doc.show(page.regFundsErr)
-    await this.changeForm(page.failedRegForm)
-  }
-
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     await app().fetchUser()
@@ -169,45 +196,19 @@ export default class RegistrationPage extends BasePage {
   }
 
   async newWalletCreated (assetID) {
-    this.confirmRegisterForm.refresh()
-    this.confirmRegisterForm.selectRow(assetID)
+    this.regAssetForm.refresh()
     const user = await app().fetchUser()
     const page = this.page
     const asset = user.assets[assetID]
     const wallet = asset.wallet
-    const bal = wallet.balance
-    const regAmt = this.currentDEX.regFees[asset.symbol].amount
-    if (bal.available >= regAmt) {
-      this.changeForm(page.confirmRegForm)
+    const feeAmt = this.currentDEX.regFees[asset.symbol].amount
+
+    if (wallet.synced && wallet.balance.available > feeAmt) {
+      await this.animateConfirmForm(page.newWalletForm)
       return
     }
 
-    page.depoWaitFee = `${Doc.formatCoinValue(regAmt / 1e8)} ${asset.symbol}`
-    page.depoAddr.textContent = wallet.address
-    page.depoWaitBal.textContent = `${Doc.formatCoinValue(bal.available / 1e8)} ${asset.symbol}`
-    page.depoRefresh.textContent = '15'
-
-    const enough = async (fetchNew) => {
-      const bal = fetchNew ? await app().fetchBalance(assetID) : user.assets[assetID].wallet.balance
-      page.depoWaitBal.textContent = `${Doc.formatCoinValue(bal.available / 1e8)} ${asset.symbol}`
-      if (bal.available < regAmt) return false
-      clearInterval(this.balanceTimer)
-      this.changeForm(page.confirmRegForm)
-      return true
-    }
-
-    this.balanceTimer = setInterval(() => {
-      let remaining = parseInt(page.depoRefresh.textContent)
-      remaining--
-      if (remaining > 0) {
-        enough(false)
-        page.depoRefresh.textContent = remaining
-        return
-      }
-      enough(true)
-      page.depoRefresh.textContent = '15'
-    }, 1000)
-
-    this.changeForm(page.depoWait)
+    this.walletWaitForm.setWallet(wallet)
+    await slideSwap(page.newWalletForm, page.walletWait)
   }
 }

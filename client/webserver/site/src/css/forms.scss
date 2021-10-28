@@ -1,79 +1,372 @@
-table.marketstable {
-  border-collapse: collapse;
-  width: 100%;
-  margin-top: 10px;
-  margin-bottom: 10px;
+#regAssetForm {
+  position: relative;
 
-  th {
-    font-size: 15px;
-    font-family: sans-serif;
+  .grey {
+    color: #999;
   }
 
-  td {
-    font-size: 15px;
+  div.reg-asset-allmkts {
+    min-width: 210px;
   }
 
-  td,
-  th {
-    font-size: 15px;
-    width: 33.3%;
-    padding: 3px 0;
+  div.reg-asset {
+    min-width: 425px;
+    padding: 20px 10px;
+    border-bottom: dashed 2px #7777;
+
+    .fader {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 25px;
+      pointer-events: none;
+      background-image:
+        linear-gradient(
+          to bottom,
+          #e0e0e000,
+          $light_body_bg
+          90%
+        );
+    }
+
+    &:not(.nohover):hover {
+      background-color: #c7c7c7;
+
+      .fader {
+        background-image:
+          linear-gradient(
+            to bottom,
+            #c7c7c700,
+            #c7c7c7
+            90%
+          );
+      }
+    }
   }
 
-  button {
-    padding: 4px 12px;
+  img.reg-asset-logo {
+    width: 50px;
+    height: 50px;
   }
 
-  tr.clickable {
-    cursor: pointer;
-    opacity: 0.75;
+  img.reg-market-logo {
+    width: 14px;
+    height: 14px;
+    margin-right: 5px;
   }
 
-  tr.clickable:hover {
-    opacity: 1;
+  table.reg-asset-markets {
+    @extend .stylish-overflow;
+
+    display: block;
+    max-height: 65px;
+    line-height: 1.15;
+    overflow-y: hidden;
+    margin-right: 8px;
+
+    &:hover {
+      overflow-y: auto;
+      margin-right: 0;
+    }
+
+    th {
+      font-weight: normal;
+      font-size: 13px;
+    }
+
+    td {
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 1px 5px;
+    }
   }
 
-  tr.clickable.selected {
-    opacity: 1;
-    border: 1px solid #686767;
+  div.reg-asset-details {
+    box-sizing: content-box;
+    line-height: 1.25;
+    width: 100px;
+    padding: 0 50px 0 25px;
+  }
+
+  div.reg-assets-markets-wrap {
+    position: relative;
+
+    &:hover > .fader {
+      display: none;
+    }
+  }
+
+  #regAssets {
+    color: #c7c3cc;
+  }
+
+  .readygreen {
+    color: #009931;
+  }
+
+  .setuporange {
+    color: #b89400;
   }
 }
 
-.wallet-tabs {
-  width: 100%;
-  display: flex;
-  justify-content: flex-start;
-  align-items: stretch;
+#confirmRegForm {
+  width: 425px;
 
-  .wtab {
-    padding: 8px 20px;
-    font-size: 15px;
-    border-style: solid solid none solid;
-    border-radius: 5px 5px 0 0;
-    border-width: 1px;
-    border-color: #aaa;
+  .grey {
+    color: grey;
+  }
+
+  button.submit {
+    width: auto;
+    padding: 12px 30px;
+    border-radius: 3px;
     opacity: 0.8;
-    background-color: $light_bg_1;
-    position: relative;
-    z-index: 150;
-  }
-
-  .wtab:not(:first-child) {
-    border-left-style: none;
-  }
-
-  .wtab.selected {
-    opacity: 1;
-    top: 1px;
-    background-color: $light_bg_2;
-    cursor: default;
-  }
-
-  .wtab:not(.selected) {
-    cursor: pointer;
 
     &:hover {
       opacity: 1;
     }
   }
+
+  img.logo {
+    width: 30px;
+    height: 30px;
+  }
+
+  input.app-pass {
+    // margin: 0 auto;
+    display: inline-block;
+    max-width: 250px;
+  }
+
+  div.reg-conf-msg {
+    width: 100%;
+  }
+
+  div.borderright {
+    border-right: 1px solid #777;
+  }
+}
+
+#newWalletForm {
+  width: 425px;
+
+  .grey {
+    color: #999;
+  }
+
+  .wallet-tabs {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    align-items: stretch;
+
+    .wtab {
+      padding: 8px 20px;
+      font-size: 15px;
+      border-style: solid solid none solid;
+      border-radius: 5px 5px 0 0;
+      border-width: 1px;
+      border-color: #555;
+      opacity: 0.8;
+      background-color: $light_body_bg;
+      position: relative;
+      z-index: 150;
+    }
+
+    .wtab:not(:first-child) {
+      border-left-style: none;
+    }
+
+    .wtab.selected {
+      opacity: 1;
+      top: 1px;
+      cursor: default;
+    }
+
+    .wtab:not(.selected) {
+      cursor: pointer;
+
+      &:hover {
+        opacity: 1;
+      }
+    }
+  }
+
+  .bordertop {
+    border-top: solid 1px #555;
+    border-radius: 0 10px 0 0;
+  }
+
+  .one-bttn {
+    display: inline-block;
+    font-size: 22px;
+    padding: 10px 25px;
+    background-color: #0b5831;
+    border-radius: 5px;
+    animation: glow 1.5s infinite alternate;
+  }
+
+  .one-bttn:hover {
+    background-color: #0c5f36;
+  }
+
+  @keyframes glow {
+    from {
+      box-shadow: 0 0 4px -3px #fff7;
+      opacity: 0.95;
+    }
+
+    to {
+      box-shadow: 0 0 4px 0 #fff7;
+      opacity: 1;
+    }
+  }
+
+  .asset-logo {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+button.form-button {
+  padding: 10px;
+  border-radius: 3px;
+  opacity: 0.8;
+  width: 80%;
+  white-space: nowrap;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+#rightBox > form button {
+  @extend .form-button;
+}
+
+#forms {
+  @extend .stylish-overflow;
+  @extend .flex-center;
+
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  padding: 25px 0;
+  background-color: #e0e0e0f3;
+  z-index: 100;
+
+  & > form {
+    box-sizing: content-box;
+    padding: 50px;
+    margin: auto;
+    text-align: left;
+    position: relative;
+
+    div.form-closer {
+      right: 20px;
+      top: 35px;
+    }
+
+    button {
+      @extend .form-button;
+    }
+  }
+}
+
+#marketsBox {
+  min-width: 225px;
+  max-width: 425px;
+
+  .market-box {
+    border: 1px solid #777;
+    margin-bottom: 20px;
+
+    .logo {
+      width: 25px;
+      height: 25px;
+    }
+  }
+
+  #marketsForLogo {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+#walletWait {
+  .grey {
+    color: #999;
+  }
+
+  .icons {
+    width: 25px;
+  }
+
+  .borderleft {
+    padding-left: 25px;
+    border-left: solid 1px #777;
+  }
+
+  .logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .ico-check {
+    color: #05a35a99;
+  }
+}
+
+#dexAddrForm {
+  .known-exchange {
+    @extend .flex-center;
+
+    font-size: 17px;
+    padding: 5px 0;
+    width: 100%;
+    border: 1px solid #555;
+    margin-bottom: 10px;
+    border-radius: 3px;
+    cursor: pointer;
+
+    &:hover,
+    &.selected {
+      background-color: #7772;
+    }
+  }
+}
+
+#loginForm {
+  width: 250px;
+}
+
+#unlockWalletForm,
+#authorizeAccountExportForm,
+#authorizeAccountImportForm,
+#disableAccountForm {
+  width: 275px;
+}
+
+#changeAppPWForm,
+#dexAddrForm,
+#verifyForm,
+#appPWForm {
+  width: 325px;
+}
+
+#withdrawForm,
+#exportSeedAuth,
+#cancelForm {
+  width: 375px;
+}
+
+#reconfigForm,
+#authorizeSeedDisplay {
+  width: 425px;
 }

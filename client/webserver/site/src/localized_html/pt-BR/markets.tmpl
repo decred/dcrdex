@@ -409,84 +409,82 @@
   </div>
 
   {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+  <div id="forms" class="d-hide">
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="card m-auto d-hide" id="walletForm" autocomplete="off">
+    <form class="m-auto d-hide" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* VERIFY ORDER */ -}}
-    <form class="card bg1 border1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-      <div class="px-2 py-1 text-center fs18 position-relative header" id="vHeader">
+    <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="py-1 text-center fs18 position-relative header" id="vHeader">
         Verificar<span id="vSideHeader"></span> Pedido
-        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="py-3 px-4">
-        <div class="echo-data">
-          Você está enviando um pedido para
-          <div class="fs20 demi py-1">
-            <span id="vSide"></span>
-            <span id="vQty"></span>
-            <span id="vBase"></span>
+      <div class="echo-data mt-2 sans-light fs18">
+        Você está enviando um pedido para
+        <div class="fs20 sans py-1">
+          <span id="vSide"></span>
+          <span id="vQty"></span>
+          <span id="vBase"></span>
+        </div>
+        <div id="verifyLimit">
+          Na taxa de
+          <div class="fs20 sans py-1">
+            <span id="vRate"></span>
+            <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
           </div>
-          <div id="verifyLimit">
-            Na taxa de
-            <div class="fs20 demi py-1">
-              <span id="vRate"></span>
-              <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
-            </div>
-            Por um total de
-            <div class="fs20 demi py-1">
-              <span id="vTotal"></span>
-              <span id="vQuote"></span>
-            </div>
-          </div>
-          <div id="verifyMarket">
-            Está é uma ordem de mercado e combinará com o(s) melhor(es) pedidos no livro de ofertas. Baseado no atual valor médio de mercado, você receberá
-            <div class="fs20 demi py-1">
-              <span id="vmTotal"></span>
-              <span id="vmAsset"></span>
-              <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lotes)</span>
-            </div>
+          Por um total de
+          <div class="fs20 sans py-1">
+            <span id="vTotal"></span>
+            <span id="vQuote"></span>
           </div>
         </div>
-        <hr class="dashed my-3">
-        {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">Autorizar este pedido com a senha do app.</div>
-        <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
-          <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="pl-1 mb-1">Senha</label>
-            <input type="password" class="form-control select" id="vPass">
-          </div>
-          <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
-            <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
-            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
-              <span id="vSideSubmit"></span>
-              <span id="vBaseSubmit"></span>
-            </button>
-            <div id="vLoader" class="loader flex-center d-hide">
-              <div class="ico-spinner spinner"></div>
-            </div>
+        <div id="verifyMarket">
+          Está é uma ordem de mercado e combinará com o(s) melhor(es) pedidos no livro de ofertas. Baseado no atual valor médio de mercado, você receberá
+          <div class="fs20 sans py-1">
+            <span id="vmTotal"></span>
+            <span id="vmAsset"></span>
+            <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lotes)</span>
           </div>
         </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
-        <hr class="dashed my-3">
-        <div class="disclaimer mt-2 fs14">
-          <span class="red">IMPORTANTE</span>: Trocas levam tempo para serem concluídas, e vc não pode desligar o cliente e software DEX,
+      </div>
+      <hr class="dashed my-3">
+      {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+      <div class="fs18 sans-light text-center {{if $passwordIsCached}}d-hide{{end}}">Autorizar este pedido com a senha do app.</div>
+      <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
+        <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
+          <label for="vPass" class="pl-1 mb-1">Senha</label>
+          <input type="password" class="form-control select" id="vPass">
+        </div>
+        <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
+          <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
+          <button id="vSubmit" type="button" class="w-75 justify-content-center fs15 selected">
+            <span id="vSideSubmit"></span>
+            <span id="vBaseSubmit"></span>
+          </button>
+          <div id="vLoader" class="loader flex-center d-hide">
+            <div class="ico-spinner spinner"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
+      <hr class="dashed my-3">
+      <div class="disclaimer mt-2 fs14">
+        <span class="red">IMPORTANTE</span>: Trocas levam tempo para serem concluídas, e vc não pode desligar o cliente e software DEX,
 		ou o <span data-unit="quote"></span> ou <span data-unit="base"></span> blockchain e/ou software da carteira, até os pedidos serem completamente concluídos.
 		A troca pode completar em alguns minutos ou levar até mesmo horas.
-        </div>
       </div>
       
     </form>
 
-    <form class="card bg1 border1 d-hide" id="cancelForm" autocomplete="off">
+    <form class="d-hide" id="cancelForm" autocomplete="off">
       {{template "cancelOrderForm" .}}
     </form>
 

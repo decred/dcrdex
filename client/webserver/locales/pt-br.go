@@ -169,12 +169,8 @@ var PtBr = map[string]string{
 	"dont_share":             "Não compartilhe e não perca sua seed.",
 	"Show Me":                "Mostre me",
 	"Wallet Settings":        "Configurações da Carteira",
-	"add_a_x_wallet":         `Adicionar uma carteira <img id="nwAssetLogo" class="micro-icon mx-1"> <span id="nwAssetName"></span>`,
+	"add_a_x_wallet":         `Adicionar uma carteira <img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span>`,
 	"ready":                  "destrancado",
 	"off":                    "desligado",
 	"Export Trades":          "Exportar Trocas",
-	"asset_header":           "Asset",
-	"fee_price_header":       "Fee",
-	"fee_confs_header":       "Confs",
-	"SetupWallet":            "Setup Wallet",
 }

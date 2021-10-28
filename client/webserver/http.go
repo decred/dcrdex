@@ -77,24 +77,26 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 // registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
-	Initialized bool
+	Initialized    bool
+	Authed         bool
+	KnownExchanges []string
 }
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	cArgs := commonArgs(r, "Register | Decred DEX")
-	if cArgs.UserInfo.Initialized && !cArgs.UserInfo.Authed {
-		// Initialized app should login before using the Register page.
-		http.Redirect(w, r, loginRoute, http.StatusSeeOther)
-		return
-	}
+	s.sendTemplate(w, "register", &registerTmplData{
+		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
+		KnownExchanges:  s.knownExchanges(),
+	})
+}
 
-	data := &registerTmplData{
-		CommonArguments: *cArgs,
-		Initialized:     cArgs.UserInfo.Initialized,
+func (s *WebServer) knownExchanges() []string {
+	certs := core.CertStore[s.core.Network()]
+	knownExchanges := make([]string, 0, len(certs))
+	for host := range certs {
+		knownExchanges = append(knownExchanges, host)
 	}
-
-	s.sendTemplate(w, "register", data)
+	return knownExchanges
 }
 
 // marketResult is the template data for the `/markets` page request.
@@ -145,7 +147,14 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, "settings", commonArgs(r, "Settings | Decred DEX"))
+	data := &struct {
+		CommonArguments
+		KnownExchanges []string
+	}{
+		CommonArguments: *commonArgs(r, "Settings | Decred DEX"),
+		KnownExchanges:  s.knownExchanges(),
+	}
+	s.sendTemplate(w, "settings", data)
 }
 
 type ordersTmplData struct {

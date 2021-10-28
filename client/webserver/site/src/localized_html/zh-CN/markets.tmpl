@@ -409,84 +409,82 @@
   </div>
 
   {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+  <div id="forms" class="d-hide">
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 border1 position-relative d-hide" id="openForm" autocomplete="off">
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
       {{template "unlockWalletForm"}}
     </form>
 
     {{- /* NEW WALLET */ -}}
-    <form class="card m-auto d-hide" id="walletForm" autocomplete="off">
+    <form class="m-auto d-hide" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
     {{- /* VERIFY ORDER */ -}}
-    <form class="card bg1 border1 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-      <div class="px-2 py-1 text-center fs18 position-relative header" id="vHeader">
+    <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="py-1 text-center fs18 position-relative header" id="vHeader">
         检查<span id="vSideHeader"></span> 请求
-        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
-      <div class="py-3 px-4">
-        <div class="echo-data">
-          您正在提交一下订单
-          <div class="fs20 demi py-1">
-            <span id="vSide"></span>
-            <span id="vQty"></span>
-            <span id="vBase"></span>
+      <div class="echo-data mt-2 sans-light fs18">
+        您正在提交一下订单
+        <div class="fs20 sans py-1">
+          <span id="vSide"></span>
+          <span id="vQty"></span>
+          <span id="vBase"></span>
+        </div>
+        <div id="verifyLimit">
+          汇率
+          <div class="fs20 sans py-1">
+            <span id="vRate"></span>
+            <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
           </div>
-          <div id="verifyLimit">
-            汇率
-            <div class="fs20 demi py-1">
-              <span id="vRate"></span>
-              <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
-            </div>
-            共计
-            <div class="fs20 demi py-1">
-              <span id="vTotal"></span>
-              <span id="vQuote"></span>
-            </div>
-          </div>
-          <div id="verifyMarket">
-            这是一个市价单，将匹配订单簿中的最佳订单。根据当前的平均市场价，您将收到
-            <div class="fs20 demi py-1">
-              <span id="vmTotal"></span>
-              <span id="vmAsset"></span>
-              <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> 批)</span>
-            </div>
+          共计
+          <div class="fs20 sans py-1">
+            <span id="vTotal"></span>
+            <span id="vQuote"></span>
           </div>
         </div>
-        <hr class="dashed my-3">
-        {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">使用应用密码授权此订单。</div>
-        <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
-          <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="pl-1 mb-1">密码</label>
-            <input type="password" class="form-control select" id="vPass">
-          </div>
-          <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
-            <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
-            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
-              <span id="vSideSubmit"></span>
-              <span id="vBaseSubmit"></span>
-            </button>
-            <div id="vLoader" class="loader flex-center d-hide">
-              <div class="ico-spinner spinner"></div>
-            </div>
+        <div id="verifyMarket">
+          这是一个市价单，将匹配订单簿中的最佳订单。根据当前的平均市场价，您将收到
+          <div class="fs20 sans py-1">
+            <span id="vmTotal"></span>
+            <span id="vmAsset"></span>
+            <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> 批)</span>
           </div>
         </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
-        <hr class="dashed my-3">
-        <div class="disclaimer mt-2 fs14">
-          <span class="red">交易需要</span>一定时间才能完成，禁止关闭 DEX 客户端软件以及
+      </div>
+      <hr class="dashed my-3">
+      {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+      <div class="fs18 sans-light text-center {{if $passwordIsCached}}d-hide{{end}}">使用应用密码授权此订单。</div>
+      <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
+        <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
+          <label for="vPass" class="pl-1 mb-1">密码</label>
+          <input type="password" class="form-control select" id="vPass">
+        </div>
+        <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
+          <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
+          <button id="vSubmit" type="button" class="w-75 justify-content-center fs15 selected">
+            <span id="vSideSubmit"></span>
+            <span id="vBaseSubmit"></span>
+          </button>
+          <div id="vLoader" class="loader flex-center d-hide">
+            <div class="ico-spinner spinner"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
+      <hr class="dashed my-3">
+      <div class="disclaimer mt-2 fs14">
+        <span class="red">交易需要</span>一定时间才能完成，禁止关闭 DEX 客户端软件以及
 		<span data-unit="quote"></span>或<span data-unit="base"></span>钱包软件。
 		交易可能在几分钟内完成，也可能长至几个小时。
-        </div>
       </div>
       
     </form>
 
-    <form class="card bg1 border1 d-hide" id="cancelForm" autocomplete="off">
+    <form class="d-hide" id="cancelForm" autocomplete="off">
       {{template "cancelOrderForm" .}}
     </form>
 

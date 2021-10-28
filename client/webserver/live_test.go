@@ -33,7 +33,9 @@ import (
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	dexbch "decred.org/dcrdex/dex/networks/bch"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 )
@@ -187,16 +189,15 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:       unbip(assetID),
-			AssetID:      assetID,
-			Open:         state.open,
-			Running:      state.running,
-			Address:      ordertest.RandomAddress(),
-			Balance:      bal,
-			Units:        winfo.UnitInfo.AtomicUnit,
-			Encrypted:    true,
-			Synced:       false,
-			SyncProgress: 0.5,
+			Symbol:    unbip(assetID),
+			AssetID:   assetID,
+			Open:      state.open,
+			Running:   state.running,
+			Address:   ordertest.RandomAddress(),
+			Balance:   bal,
+			Units:     winfo.UnitInfo.AtomicUnit,
+			Encrypted: true,
+			Synced:    false,
 		}
 	}
 	return &core.SupportedAsset{
@@ -283,16 +284,24 @@ var dexAssets = map[uint32]*dex.Asset{
 	28:  mkDexAsset("vtc"),
 	141: mkDexAsset("kmd"),
 	3:   mkDexAsset("doge"),
+	145: mkDexAsset("bch"),
+	60:  mkDexAsset("eth"),
 }
 
 var tExchanges = map[string]*core.Exchange{
 	firstDEX: {
 		Host:   "somedex.com",
 		Assets: dexAssets,
+		AcctID: "abcdef0123456789",
 		Markets: map[string]*core.Market{
-			mkid(42, 0): mkMrkt("dcr", "btc"),
-			mkid(42, 2): mkMrkt("dcr", "ltc"),
-			mkid(3, 22): mkMrkt("doge", "mona"),
+			mkid(42, 0):   mkMrkt("dcr", "btc"),
+			mkid(145, 42): mkMrkt("bch", "dcr"),
+			mkid(60, 42):  mkMrkt("eth", "dcr"),
+			mkid(2, 42):   mkMrkt("ltc", "dcr"),
+			mkid(3, 0):    mkMrkt("doge", "btc"),
+			mkid(3, 42):   mkMrkt("doge", "dcr"),
+			mkid(22, 42):  mkMrkt("mona", "dcr"),
+			mkid(28, 0):   mkMrkt("vtc", "btc"),
 		},
 		Connected: true,
 		RegFees: map[string]*core.FeeAsset{
@@ -303,8 +312,33 @@ var tExchanges = map[string]*core.Exchange{
 			},
 			"btc": &core.FeeAsset{
 				ID:    0,
-				Confs: 1,
-				Amt:   1e6,
+				Confs: 2,
+				Amt:   1e5,
+			},
+			"eth": &core.FeeAsset{
+				ID:    60,
+				Confs: 5,
+				Amt:   1e7,
+			},
+			"bch": &core.FeeAsset{
+				ID:    145,
+				Confs: 2,
+				Amt:   1e10,
+			},
+			"ltc": &core.FeeAsset{
+				ID:    2,
+				Confs: 5,
+				Amt:   1e10,
+			},
+			"doge": &core.FeeAsset{
+				ID:    3,
+				Confs: 10,
+				Amt:   1e12,
+			},
+			"kmd": &core.FeeAsset{ // Not-supported
+				ID:    141,
+				Confs: 10,
+				Amt:   1e12,
 			},
 		},
 		CandleDurs: []string{"1h", "24h"},
@@ -312,6 +346,7 @@ var tExchanges = map[string]*core.Exchange{
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
 		Assets: dexAssets,
+		AcctID: "0123456789abcdef",
 		Markets: map[string]*core.Market{
 			mkid(42, 28):  mkMrkt("dcr", "vtc"),
 			mkid(0, 2):    mkMrkt("btc", "ltc"),
@@ -323,6 +358,11 @@ var tExchanges = map[string]*core.Exchange{
 				ID:    42,
 				Confs: 1,
 				Amt:   1e8,
+			},
+			"btc": &core.FeeAsset{
+				ID:    0,
+				Confs: 2,
+				Amt:   1e6,
 			},
 		},
 		CandleDurs: []string{"5m", "1h", "24h"},
@@ -430,12 +470,14 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:  randomBalance(0),
-			2:  randomBalance(2),
-			42: randomBalance(42),
-			22: randomBalance(22),
-			3:  randomBalance(3),
-			28: randomBalance(28),
+			0:   randomBalance(0),
+			2:   randomBalance(2),
+			42:  randomBalance(42),
+			22:  randomBalance(22),
+			3:   randomBalance(3),
+			28:  randomBalance(28),
+			60:  randomBalance(60),
+			145: randomBalance(145),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -1076,6 +1118,20 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
+	60: {
+		Name:     "Ethereum",
+		UnitInfo: dexeth.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
+	},
+	145: {
+		Name:     "Bitcoin Cash",
+		UnitInfo: dexbch.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{{
+			ConfigOpts: configOpts,
+		}},
+	},
 }
 
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
@@ -1115,11 +1171,55 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	}
 
 	w := c.walletState(form.AssetID)
+	w.Synced = false
+	w.SyncProgress = 0.0
+	regFee := tExchanges[firstDEX].RegFees[w.Symbol]
+	w.Balance.Available = regFee.Amt * 2
 
-	c.noteFeed <- &core.WalletStateNote{
-		Notification: db.NewNotification(core.NoteTypeWalletState, core.TopicWalletState, "", "", db.Data),
-		Wallet:       w,
+	tStart := time.Now()
+	syncDuration := float64(time.Second * 17)
+
+	syncProgress := func() float32 {
+		progress := float64(time.Since(tStart)) / syncDuration
+		if progress > 1 {
+			progress = 1
+		}
+		return float32(progress)
 	}
+
+	sendWalletState := func() {
+		wCopy := *w
+		c.noteFeed <- &core.WalletStateNote{
+			Notification: db.NewNotification(core.NoteTypeWalletState, core.TopicWalletState, "", "", db.Data),
+			Wallet:       &wCopy,
+		}
+	}
+
+	setProgress := func() bool {
+		progress := syncProgress()
+		c.mtx.Lock()
+		defer c.mtx.Unlock()
+		w.SyncProgress = progress
+		synced := progress == 1
+		w.Synced = synced
+		sendWalletState()
+		return synced
+	}
+
+	go func() {
+		for {
+			select {
+			case <-time.After(time.Millisecond * 1013):
+				if setProgress() {
+					return
+				}
+			case <-tCtx.Done():
+				return
+			}
+		}
+	}()
+
+	sendWalletState()
 
 	return nil
 }
@@ -1225,12 +1325,14 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		60:  mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
+		145: mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
 	}
 }
 

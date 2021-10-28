@@ -224,6 +224,17 @@ export default class Doc {
   }
 
   /*
+  * cleanTemplates removes the elements from the DOM and deletes the id
+  * attribute.
+  */
+  static cleanTemplates (...tmpls) {
+    tmpls.forEach(tmpl => {
+      tmpl.remove()
+      tmpl.removeAttribute('id')
+    })
+  }
+
+  /*
   * tmplElement is a helper function for grabbing sub-elements of the market list
   * template.
   */
@@ -242,11 +253,16 @@ export default class Doc {
   }
 
   /*
-   * timeSince returns a string representation of the duration since the specified
-   * unix timestamp.
+   * timeSince returns a string representation of the duration since the
+   * specified unix timestamp.
    */
   static timeSince (t) {
-    let seconds = Math.floor(((new Date().getTime()) - t))
+    return Doc.formatDuration((new Date().getTime()) - t)
+  }
+
+  /* formatDuration returns a string representation of the duration */
+  static formatDuration (dur) {
+    let seconds = Math.floor(dur)
     let result = ''
     let count = 0
     const add = (n, s) => {

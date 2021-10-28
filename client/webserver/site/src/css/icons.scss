@@ -92,6 +92,22 @@
   content: "\e90b";
 }
 
+.ico-arrowright::before {
+  content: "\e90c";
+}
+
 .ico-arrowdown::before {
   content: "\e90c";
+  display: inline-block;
+  transform: rotate(90deg);
+}
+
+.ico-arrowback::before {
+  content: "\e90c";
+  display: inline-block;
+  transform: rotate(180deg);
+}
+
+.ico-checkbox::before {
+  content: "\e90d";
 }
