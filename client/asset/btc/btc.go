@@ -2477,7 +2477,9 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 		// queued polled block that would appear to be superceded by this one.
 		case walletTip := <-walletBlock:
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
-				queuedBlock.queue.Stop()
+				if !queuedBlock.queue.Stop() && walletTip.hash == queuedBlock.hash {
+					continue
+				}
 				queuedBlock = nil
 			}
 			btc.reportNewTip(ctx, walletTip)
@@ -2515,9 +2517,6 @@ func (btc *ExchangeWallet) reportNewTip(ctx context.Context, newTip *block) {
 	defer btc.tipMtx.Unlock()
 
 	prevTip := btc.currentTip
-	if prevTip.hash == newTip.hash {
-		return // already reported
-	}
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
 	go btc.tipChange(nil)
