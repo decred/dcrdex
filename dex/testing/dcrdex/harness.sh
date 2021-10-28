@@ -135,7 +135,7 @@ cat << EOF >> "./markets.json"
             "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf",
             "regConfs": 2,
             "regFee": 20000000,
-            "regXPub": "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp"
+            "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy"
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
