@@ -98,6 +98,7 @@ type btcWallet interface {
 	walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
 	syncedTo() waddrmgr.BlockStamp
 	signTransaction(*wire.MsgTx) error
+	txNotifications() wallet.TransactionNotificationsClient
 }
 
 var _ btcWallet = (*walletExtender)(nil)
@@ -922,19 +923,14 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 		return err
 	}
 
-	notes := make(<-chan interface{})
-	if w.chainClient != nil {
-		notes = w.chainClient.Notifications()
-		if err = w.chainClient.NotifyBlocks(); err != nil {
-			return fmt.Errorf("failed to subscribe to block notifications: %w", err)
-		}
-	}
+	txNotes := w.wallet.txNotifications()
 
 	// Nanny for the caches checkpoints and txBlocks caches.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer w.stop()
+		defer txNotes.Done()
 
 		ticker := time.NewTicker(time.Minute * 20)
 		defer ticker.Stop()
@@ -958,25 +954,19 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 				}
 				w.checkpointMtx.Unlock()
 
-			case noteI := <-notes:
-				switch note := noteI.(type) {
-				case chain.FilteredBlockConnected:
-					blk := note.Block
-
-					// Don't broadcast tip changes until the syncStatus has been
-					// requested and we have a syncTarget OR during initial sync
-					// except every 10k blocks.
+			case note := <-txNotes.C:
+				if len(note.AttachedBlocks) > 0 {
+					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
 					syncTarget := atomic.LoadInt32(&w.syncTarget)
-					if syncTarget == 0 || (blk.Height < syncTarget && blk.Height%10_000 != 0) {
+					if syncTarget == 0 || (lastBlock.Height < syncTarget && lastBlock.Height%10_000 != 0) {
 						continue
 					}
 
 					select {
 					case w.tipChan <- &block{
-						hash:   blk.Hash,
-						height: int64(blk.Height),
+						hash:   *lastBlock.Hash,
+						height: int64(lastBlock.Height),
 					}:
-
 					default:
 						w.log.Warnf("tip report channel was blocking")
 					}
@@ -1679,6 +1669,11 @@ func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
 	return walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
 		return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 	})
+}
+
+// txNotifications gives access to the NotificationServer's tx notifications.
+func (w *walletExtender) txNotifications() wallet.TransactionNotificationsClient {
+	return w.NtfnServer.TransactionNotifications()
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a

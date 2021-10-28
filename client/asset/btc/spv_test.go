@@ -267,6 +267,10 @@ func (c *tBtcWallet) signTransaction(tx *wire.MsgTx) error {
 	return nil
 }
 
+func (c *tBtcWallet) txNotifications() wallet.TransactionNotificationsClient {
+	return wallet.TransactionNotificationsClient{}
+}
+
 type tNeutrinoClient struct {
 	*testData
 }
