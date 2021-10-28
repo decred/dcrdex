@@ -480,7 +480,12 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		synced = true
 	}
 
-	atomic.StoreInt32(&w.syncTarget, target)
+	if atomic.SwapInt32(&w.syncTarget, target) == 0 && target > 0 {
+		w.tipChan <- &block{
+			hash:   blk.Hash,
+			height: int64(blk.Height),
+		}
+	}
 
 	return &syncStatus{
 		Target:  target,

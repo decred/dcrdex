@@ -9,6 +9,7 @@ package btc
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -752,6 +753,9 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 	}
 
 	addBlock()
+
+	// Prime the sync target to avoid the syncStatus tip send here.
+	atomic.StoreInt32(&spv.syncTarget, 1)
 
 	// It should not come through on the block tick, since it will be cached.
 	if getNote(blockTicker * 2) {

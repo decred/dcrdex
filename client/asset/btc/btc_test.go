@@ -605,7 +605,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
-				tipChan:     make(chan *block),
+				tipChan:     make(chan *block, 1),
 				chainClient: nil,
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,

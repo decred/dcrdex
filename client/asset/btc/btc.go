@@ -2456,7 +2456,6 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 				}
 				blockAllowance := walletBlockAllowance
 				syncStatus, err := btc.node.syncStatus()
-
 				if err != nil {
 					btc.log.Errorf("Error retreiving sync status before queuing polled block: %v", err)
 				} else if syncStatus.Syncing {
