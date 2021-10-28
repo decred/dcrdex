@@ -190,6 +190,8 @@ func (c *tBtcWallet) Stop() {}
 func (c *tBtcWallet) WaitForShutdown() {}
 
 func (c *tBtcWallet) ChainSynced() bool {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
 	if c.getBlockchainInfo == nil {
 		return false
 	}
@@ -294,6 +296,8 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 }
 
 func (c *tNeutrinoClient) Peers() []*neutrino.ServerPeer {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
 	peer := &neutrino.ServerPeer{Peer: &peer.Peer{}}
 	if c.getBlockchainInfo != nil {
 		peer.UpdateLastBlockHeight(int32(c.getBlockchainInfo.Headers))
@@ -737,6 +741,12 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 		return &block{tipHeight, *h}
 	}
 
+	// Start with no blocks so that we're not synced.
+	node.getBlockchainInfo = &getBlockchainInfoResult{
+		Headers: 2,
+		Blocks:  0,
+	}
+
 	addBlock()
 
 	// It should not come through on the block tick, since it will be cached.
@@ -744,9 +754,28 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 		t.Fatalf("got block that should've been cached")
 	}
 
-	// But it will come through after the blockAllowance, printing a warning.
+	// And it won't come through after a sigle block allowance, because we're
+	// not synced.
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatal("block didn't wait for the syncing mode allowance")
+	}
+
+	// But it will come through after the sync timeout = 10 * normal timeout.
+	if !getNote(walletBlockAllowance * 9) {
+		t.Fatal("block didn't time out in syncing mode")
+	}
+
+	// But if we're synced, it should come through after the normal block
+	// allowance.
+	addBlock()
+	node.blockchainMtx.Lock()
+	node.getBlockchainInfo = &getBlockchainInfoResult{
+		Headers: tipHeight,
+		Blocks:  tipHeight,
+	}
+	node.blockchainMtx.Unlock()
 	if !getNote(walletBlockAllowance * 2) {
-		t.Fatal("block didn't time out")
+		t.Fatal("block didn't time out in normal mode")
 	}
 
 	// On the other hand, a wallet block should come through immediately. Not

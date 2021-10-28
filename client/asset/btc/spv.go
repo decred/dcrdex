@@ -303,7 +303,7 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		checkpoints:  make(map[outPoint]*scanCheckpoint),
 		log:          logger,
 		connectPeers: connectPeers,
-		tipChan:      make(chan *block, 1),
+		tipChan:      make(chan *block, 8),
 	}
 }
 
@@ -925,10 +925,9 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 	notes := make(<-chan interface{})
 	if w.chainClient != nil {
 		notes = w.chainClient.Notifications()
-		if err := w.chainClient.NotifyBlocks(); err != nil {
+		if err = w.chainClient.NotifyBlocks(); err != nil {
 			return fmt.Errorf("failed to subscribe to block notifications: %w", err)
 		}
-
 	}
 
 	// Nanny for the caches checkpoints and txBlocks caches.

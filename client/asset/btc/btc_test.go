@@ -133,10 +133,11 @@ type testData struct {
 	signFunc      func(*wire.MsgTx)
 	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
 
-	blockchainMtx sync.RWMutex
-	verboseBlocks map[string]*msgBlockWithHeight
-	dbBlockForTx  map[chainhash.Hash]*hashEntry
-	mainchain     map[int64]*chainhash.Hash
+	blockchainMtx     sync.RWMutex
+	verboseBlocks     map[string]*msgBlockWithHeight
+	dbBlockForTx      map[chainhash.Hash]*hashEntry
+	mainchain         map[int64]*chainhash.Hash
+	getBlockchainInfo *getBlockchainInfoResult
 
 	getBestBlockHashErr error
 	mempoolTxs          map[chainhash.Hash]*wire.MsgTx
@@ -157,7 +158,6 @@ type testData struct {
 	getTransaction    *GetTransactionResult
 	getTransactionErr error
 
-	getBlockchainInfo    *getBlockchainInfoResult
 	getBlockchainInfoErr error
 	unlockErr            error
 	lockErr              error
@@ -412,6 +412,8 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetTransaction:
 		return encodeOrError(c.getTransaction, c.getTransactionErr)
 	case methodGetBlockchainInfo:
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
 		return encodeOrError(c.getBlockchainInfo, c.getBlockchainInfoErr)
 	case methodLock:
 		return nil, c.lockErr
@@ -630,9 +632,17 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		hash:   *bestHash,
 	}
 	wallet.tipMtx.Unlock()
-	go wallet.watchBlocks(walletCtx, blockTicker, walletBlockAllowance)
-
-	return wallet, data, shutdown, nil
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		wallet.watchBlocks(walletCtx)
+	}()
+	shutdownAndWait := func() {
+		shutdown()
+		wg.Wait()
+	}
+	return wallet, data, shutdownAndWait, nil
 }
 
 func mustMarshal(thing interface{}) []byte {

@@ -775,7 +775,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		btc.watchBlocks(ctx, blockTicker, walletBlockAllowance)
+		btc.watchBlocks(ctx)
 		btc.shutdown()
 	}()
 	return &wg, nil
@@ -2393,8 +2393,8 @@ func (btc *ExchangeWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) 
 
 // watchBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes.
-func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletAllowance time.Duration) {
-	ticker := time.NewTicker(blockPeriod)
+func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
+	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 
 	var walletBlock <-chan *block
@@ -2414,10 +2414,6 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletA
 	// notification.
 	var queuedBlock *polledBlock
 
-	// dequeuedBlock is where the queuedBlocks that time out will be sent for
-	// broadcast.
-	dequeuedBlock := make(chan *block, 1)
-
 	for {
 		select {
 
@@ -2434,8 +2430,6 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletA
 				continue
 			}
 
-			// This method is called frequently. Don't hold write lock
-			// unless tip has changed.
 			btc.tipMtx.RLock()
 			sameTip := btc.currentTip.hash == *newTipHash
 			btc.tipMtx.RUnlock()
@@ -2460,10 +2454,21 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletA
 				if queuedBlock != nil {
 					queuedBlock.queue.Stop()
 				}
+				blockAllowance := walletBlockAllowance
+				syncStatus, err := btc.node.syncStatus()
+
+				if err != nil {
+					btc.log.Errorf("Error retreiving sync status before queuing polled block: %v", err)
+				} else if syncStatus.Syncing {
+					blockAllowance *= 10
+				}
 				queuedBlock = &polledBlock{
 					block: newTip,
-					queue: time.AfterFunc(walletAllowance, func() {
-						dequeuedBlock <- newTip
+					queue: time.AfterFunc(blockAllowance, func() {
+						btc.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+							"never reported: %d %s. If you see this message repeatedly, it may indicate "+
+							"an issue with the wallet.", newTip.height, newTip.hash)
+						btc.reportNewTip(ctx, newTip)
 					}),
 				}
 			}
@@ -2476,12 +2481,6 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context, blockPeriod, walletA
 				queuedBlock = nil
 			}
 			btc.reportNewTip(ctx, walletTip)
-
-		case dqBlock := <-dequeuedBlock:
-			btc.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-				"never reported: %d %s. If you see this message repeatedly, it may indicate "+
-				"an issue with the wallet.", dqBlock.height, dqBlock.hash)
-			btc.reportNewTip(ctx, dqBlock)
 
 		case <-ctx.Done():
 			return
@@ -2516,6 +2515,9 @@ func (btc *ExchangeWallet) reportNewTip(ctx context.Context, newTip *block) {
 	defer btc.tipMtx.Unlock()
 
 	prevTip := btc.currentTip
+	if prevTip.hash == newTip.hash {
+		return // already reported
+	}
 	btc.currentTip = newTip
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
 	go btc.tipChange(nil)
