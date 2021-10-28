@@ -173,8 +173,4 @@ var PtBr = map[string]string{
 	"ready":                  "destrancado",
 	"off":                    "desligado",
 	"Export Trades":          "Exportar Trocas",
-	"asset_header":           "Asset",
-	"fee_price_header":       "Fee",
-	"fee_confs_header":       "Confs",
-	"SetupWallet":            "Setup Wallet",
 }

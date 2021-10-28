@@ -84,15 +84,10 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	cArgs := commonArgs(r, "Register | Decred DEX")
-	data := &registerTmplData{
+	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
-		Initialized:     cArgs.UserInfo.Initialized,
-		Authed:          cArgs.UserInfo.Authed,
 		KnownExchanges:  s.knownExchanges(),
-	}
-
-	s.sendTemplate(w, "register", data)
+	})
 }
 
 func (s *WebServer) knownExchanges() []string {

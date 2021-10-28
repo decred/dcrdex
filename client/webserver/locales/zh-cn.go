@@ -173,9 +173,4 @@ var ZhCN = map[string]string{
 	"ready":                  "准备就绪",
 	"off":                    "关闭",
 	"Export Trades":          "导出交易",
-
-	"asset_header":     "Asset",        // xxx translation
-	"fee_price_header": "Fee",          // xxx translation
-	"fee_confs_header": "Confs",        // xxx translation
-	"SetupWallet":      "Setup Wallet", // xxx translation
 }

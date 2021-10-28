@@ -4,7 +4,7 @@
   <div class="position-absolute" id="forms">
 
     {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}
-    <form class="d-hide{{if not .Initialized}} selected{{end}}" id="appPWForm">
+    <form class="d-hide{{if not .UserInfo.Initialized}} selected{{end}}" id="appPWForm">
       <div class="px-2 py-1 text-center fs28 sans-light">设置应用密码</div>
       <div class="fs18 mt-2 sans-light">设置应用密码。这个密码将保护你的 DEX 账户和连接的密钥和钱包。</div>
       <hr class="dashed my-4">
@@ -33,7 +33,7 @@
     </form>
 
     {{- /* LOGIN FORM */ -}}
-    <form class="d-hide{{if and (not .Authed) .Initialized }} selected{{end}}" id="loginForm">
+    <form class="d-hide{{if and (not .UserInfo.Authed) .UserInfo.Initialized }} selected{{end}}" id="loginForm">
       {{template "loginForm"}}
     </form>
 
@@ -43,7 +43,7 @@
     </form>
 
     {{- /* DEX ADDRESS FORM */ -}}
-    <form class="d-hide{{if and .Initialized .Authed}} selected{{end}}" id="dexAddrForm">
+    <form class="d-hide{{if and .UserInfo.Initialized .UserInfo.Authed}} selected{{end}}" id="dexAddrForm">
       {{template "dexAddrForm" .}}
     </form>
 
