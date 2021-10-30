@@ -55,14 +55,14 @@ var (
 	disabledAccountsBucket = []byte("disabledAccounts")
 	activeOrdersBucket     = []byte("activeOrders")
 	archivedOrdersBucket   = []byte("orders")
-	matchesBucket          = []byte("matches")
+	activeMatchesBucket    = []byte("activeMatches")
+	archivedMatchesBucket  = []byte("matches")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
 	versionKey             = []byte("version")
 	linkedKey              = []byte("linked")
 	feeProofKey            = []byte("feecoin")
 	statusKey              = []byte("status")
-	retiredKey             = []byte("retired")
 	baseKey                = []byte("base")
 	quoteKey               = []byte("quote")
 	orderKey               = []byte("order")
@@ -92,9 +92,6 @@ var (
 	outerKeyParamsKey      = []byte("outerKeyParams")
 	legacyKeyParamsKey     = []byte("keyParams")
 	byteTrue               = encode.ByteTrue
-	byteFalse              = encode.ByteFalse
-	byteEpoch              = uint16Bytes(uint16(order.OrderStatusEpoch))
-	byteBooked             = uint16Bytes(uint16(order.OrderStatusBooked))
 	backupDir              = "backup"
 )
 
@@ -125,8 +122,10 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	}
 
 	if err = bdb.makeTopLevelBuckets([][]byte{
-		appBucket, accountsBucket, disabledAccountsBucket, activeOrdersBucket,
-		archivedOrdersBucket, matchesBucket, walletsBucket, notesBucket, credentialsBucket,
+		appBucket, accountsBucket, disabledAccountsBucket,
+		activeOrdersBucket, archivedOrdersBucket,
+		activeMatchesBucket, archivedMatchesBucket,
+		walletsBucket, notesBucket, credentialsBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -167,11 +166,6 @@ func (db *BoltDB) Run(ctx context.Context) {
 		db.log.Errorf("unable to backup database: %v", err)
 	}
 	db.Close()
-}
-
-// appView is a convenience function for reading from the app bucket.
-func (db *BoltDB) appView(f bucketFunc) error {
-	return db.withBucket(appBucket, db.View, f)
 }
 
 // Recrypt re-encrypts the wallet passwords and account private keys. As a
@@ -1033,6 +1027,41 @@ func (db *BoltDB) ordersUpdate(f func(ob, archivedOB *bbolt.Bucket) error) error
 	})
 }
 
+// matchBucket gets a match's bucket in either the active or archived matches
+// bucket. It will be created if it is not in either matches bucket. If an
+// inactive match is found in the active bucket, it is moved to the archived
+// matches bucket.
+func matchBucket(mb, archivedMB *bbolt.Bucket, metaID []byte, active bool) (*bbolt.Bucket, error) {
+	if active {
+		// Active match would be in active bucket if it was previously inserted.
+		return mb.CreateBucketIfNotExists(metaID) // might exist already
+	}
+
+	// Archived match may currently be in either active or archived bucket.
+	mBkt := mb.Bucket(metaID) // try the active bucket first
+	if mBkt == nil {
+		// It's not in the active bucket, check/create in archived.
+		return archivedMB.CreateBucketIfNotExists(metaID) // might exist already
+	}
+
+	// It's in the active bucket, but no longer active. Move it to the archived
+	// bucket.
+	newBkt, err := archivedMB.CreateBucketIfNotExists(metaID) // should not exist in both buckets though!
+	if err != nil {
+		return nil, fmt.Errorf("unable to create archived match bucket: %w", err)
+	}
+	// Assume the order bucket contains only values, no sub-buckets.
+	if err := mBkt.ForEach(func(k, v []byte) error {
+		return newBkt.Put(k, v)
+	}); err != nil {
+		return nil, fmt.Errorf("unable to copy active matches bucket: %w", err)
+	}
+	if err := mb.DeleteBucket(metaID); err != nil {
+		return nil, fmt.Errorf("unable to delete active match bucket: %w", err)
+	}
+	return newBkt, nil
+}
+
 // UpdateMatch updates the match information in the database. Any existing
 // entry for the same match ID will be overwritten without indication.
 func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
@@ -1043,23 +1072,18 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 	if md.DEX == "" {
 		return fmt.Errorf("empty DEX not allowed")
 	}
-	return db.matchesUpdate(func(master *bbolt.Bucket) error {
+	return db.matchesUpdate(func(mb, archivedMB *bbolt.Bucket) error {
 		metaID := m.MatchOrderUniqueID()
-		mBkt, err := master.CreateBucketIfNotExists(metaID)
+		active := dexdb.MatchIsActive(m.UserMatch, &m.MetaData.Proof)
+		mBkt, err := matchBucket(mb, archivedMB, metaID, active)
 		if err != nil {
-			return fmt.Errorf("order bucket error: %w", err)
+			return err
 		}
-		var retired []byte
-		if dexdb.MatchIsActive(m.UserMatch, &m.MetaData.Proof) {
-			retired = encode.ByteFalse
-		} else {
-			retired = encode.ByteTrue
-		}
+
 		return newBucketPutter(mBkt).
 			put(baseKey, uint32Bytes(md.Base)).
 			put(quoteKey, uint32Bytes(md.Quote)).
 			put(statusKey, []byte{byte(match.Status)}).
-			put(retiredKey, retired).
 			put(dexKey, []byte(md.DEX)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
@@ -1072,12 +1096,15 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 }
 
 // ActiveMatches retrieves the matches that are in an active state, which is
-// any match that is not retired.
+// any match that is still active.
 func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
-	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
-		retiredB := mBkt.Get(retiredKey)
-		return bytes.Equal(retiredB, encode.ByteFalse) // active => retired == false
-	}, true) // cancel matches are immediately complete, never active
+	return db.filteredMatches(
+		func(mBkt *bbolt.Bucket) bool {
+			return true // all matches in the bucket
+		},
+		true,  // don't bother with cancel matches that are never active
+		false, // exclude archived matches
+	)
 }
 
 // DEXOrdersWithActiveMatches retrieves order IDs for any order that has active
@@ -1086,9 +1113,9 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 	dexB := []byte(dex)
 	// For each match for this DEX, pick the active ones.
 	idMap := make(map[order.OrderID]bool)
-	err := db.matchesView(func(master *bbolt.Bucket) error {
-		return master.ForEach(func(k, _ []byte) error {
-			mBkt := master.Bucket(k)
+	err := db.matchesView(func(ob, _ *bbolt.Bucket) error { // only the active matches bucket is used
+		return ob.ForEach(func(k, _ []byte) error {
+			mBkt := ob.Bucket(k)
 			if mBkt == nil {
 				return fmt.Errorf("match %x bucket is not a bucket", k)
 			}
@@ -1096,12 +1123,6 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 				return nil
 			}
 
-			retiredB := mBkt.Get(retiredKey)
-			if bytes.Equal(retiredB, encode.ByteTrue) {
-				return nil
-			}
-
-			// The match is active.
 			oidB := mBkt.Get(orderIDKey)
 			var oid order.OrderID
 			copy(oid[:], oidB)
@@ -1126,7 +1147,7 @@ func (db *BoltDB) MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*de
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		oid := mBkt.Get(orderIDKey)
 		return bytes.Equal(oid, oidB)
-	}, excludeCancels)
+	}, excludeCancels, true) // include archived matches
 }
 
 // filteredMatches gets all matches that pass the provided filter function. Each
@@ -1134,59 +1155,106 @@ func (db *BoltDB) MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*de
 // indicates the match should be decoded and returned. Matches with cancel
 // orders may be excluded, a separate option so the filter function does not
 // need to load and decode the matchKey value.
-func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool, excludeCancels bool) ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool, excludeCancels, includeArchived bool) ([]*dexdb.MetaMatch, error) {
 	var matches []*dexdb.MetaMatch
-	return matches, db.matchesView(func(master *bbolt.Bucket) error {
-		return master.ForEach(func(k, _ []byte) error {
-			mBkt := master.Bucket(k)
-			if mBkt == nil {
-				return fmt.Errorf("match %x bucket is not a bucket", k)
-			}
-			if filter(mBkt) {
-				var proof *dexdb.MatchProof
-				matchB := getCopy(mBkt, matchKey)
-				if matchB == nil {
-					return fmt.Errorf("nil match bytes for %x", k)
+	return matches, db.matchesView(func(mb, archivedMB *bbolt.Bucket) error {
+		buckets := []*bbolt.Bucket{mb}
+		if includeArchived {
+			buckets = append(buckets, archivedMB)
+		}
+		for _, master := range buckets {
+			err := master.ForEach(func(k, _ []byte) error {
+				mBkt := master.Bucket(k)
+				if mBkt == nil {
+					return fmt.Errorf("match %x bucket is not a bucket", k)
 				}
-				match, err := order.DecodeMatch(matchB)
-				if err != nil {
-					return fmt.Errorf("error decoding match %x: %w", k, err)
-				}
-				if excludeCancels && match.Address == "" {
+				if !filter(mBkt) {
 					return nil
 				}
-				proofB := getCopy(mBkt, proofKey)
-				if len(proofB) == 0 {
-					return fmt.Errorf("empty proof")
-				}
-				proof, _, err = dexdb.DecodeMatchProof(proofB)
+				match, err := loadMatchBucket(mBkt, excludeCancels)
 				if err != nil {
-					return fmt.Errorf("error decoding proof: %w", err)
+					return fmt.Errorf("loading match %x bucket: %w", k, err)
 				}
-				matches = append(matches, &dexdb.MetaMatch{
-					MetaData: &dexdb.MatchMetaData{
-						Proof: *proof,
-						DEX:   string(getCopy(mBkt, dexKey)),
-						Base:  intCoder.Uint32(mBkt.Get(baseKey)),
-						Quote: intCoder.Uint32(mBkt.Get(quoteKey)),
-						Stamp: intCoder.Uint64(mBkt.Get(stampKey)),
-					},
-					UserMatch: match,
-				})
+				if match != nil {
+					matches = append(matches, match)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
-			return nil
-		})
+		}
+		return nil
 	})
 }
 
+func loadMatchBucket(mBkt *bbolt.Bucket, excludeCancels bool) (*dexdb.MetaMatch, error) {
+	var proof *dexdb.MatchProof
+	matchB := getCopy(mBkt, matchKey)
+	if matchB == nil {
+		return nil, fmt.Errorf("nil match bytes")
+	}
+	match, err := order.DecodeMatch(matchB)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding match: %w", err)
+	}
+	// A cancel match for a maker (trade) order has an empty address.
+	if excludeCancels && match.Address == "" {
+		return nil, nil
+	}
+	proofB := getCopy(mBkt, proofKey)
+	if len(proofB) == 0 {
+		return nil, fmt.Errorf("empty proof")
+	}
+	proof, _, err = dexdb.DecodeMatchProof(proofB)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding proof: %w", err)
+	}
+	// A cancel match for a taker (the cancel) order is complete with no
+	// InitSig. Unfortunately, the trade Address was historically set.
+	if excludeCancels && (len(proof.Auth.InitSig) == 0 && match.Status == order.MatchComplete) {
+		return nil, nil
+	}
+	return &dexdb.MetaMatch{
+		MetaData: &dexdb.MatchMetaData{
+			Proof: *proof,
+			DEX:   string(getCopy(mBkt, dexKey)),
+			Base:  intCoder.Uint32(mBkt.Get(baseKey)),
+			Quote: intCoder.Uint32(mBkt.Get(quoteKey)),
+			Stamp: intCoder.Uint64(mBkt.Get(stampKey)),
+		},
+		UserMatch: match,
+	}, nil
+}
+
 // matchesView is a convenience function for reading from the match bucket.
-func (db *BoltDB) matchesView(f bucketFunc) error {
-	return db.withBucket(matchesBucket, db.View, f)
+func (db *BoltDB) matchesView(f func(mb, archivedMB *bbolt.Bucket) error) error {
+	return db.View(func(tx *bbolt.Tx) error {
+		mb := tx.Bucket(activeMatchesBucket)
+		if mb == nil {
+			return fmt.Errorf("failed to open %s bucket", string(activeMatchesBucket))
+		}
+		archivedMB := tx.Bucket(archivedMatchesBucket)
+		if archivedMB == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedMatchesBucket))
+		}
+		return f(mb, archivedMB)
+	})
 }
 
 // matchesUpdate is a convenience function for updating the match bucket.
-func (db *BoltDB) matchesUpdate(f bucketFunc) error {
-	return db.withBucket(matchesBucket, db.Update, f)
+func (db *BoltDB) matchesUpdate(f func(mb, archivedMB *bbolt.Bucket) error) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		mb := tx.Bucket(activeMatchesBucket)
+		if mb == nil {
+			return fmt.Errorf("failed to open %s bucket", string(activeMatchesBucket))
+		}
+		archivedMB := tx.Bucket(archivedMatchesBucket)
+		if archivedMB == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedMatchesBucket))
+		}
+		return f(mb, archivedMB)
+	})
 }
 
 // UpdateWallet adds a wallet to the database.
@@ -1305,7 +1373,7 @@ func (db *BoltDB) walletsUpdate(f bucketFunc) error {
 // SaveNotification saves the notification.
 func (db *BoltDB) SaveNotification(note *dexdb.Notification) error {
 	if note.Severeness < dexdb.Success {
-		return fmt.Errorf("Storage of notification with severity %s is forbidden.", note.Severeness)
+		return fmt.Errorf("storage of notification with severity %s is forbidden", note.Severeness)
 	}
 	return db.notesUpdate(func(master *bbolt.Bucket) error {
 		noteB := note.Encode()

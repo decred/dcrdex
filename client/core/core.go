@@ -4676,7 +4676,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		for _, dbMatch := range dbMatches {
 			// Only trade matches are added to the matches map. Detect and skip
 			// cancel order matches, which have an empty Address field.
-			if dbMatch.Address == "" {
+			if dbMatch.Address == "" { // only correct for maker's cancel match
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
 				continue
 			}

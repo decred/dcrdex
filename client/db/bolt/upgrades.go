@@ -8,12 +8,20 @@ import (
 	"path/filepath"
 
 	dexdb "decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
 
 type upgradefunc func(tx *bbolt.Tx) error
+
+// TODO: consider changing upgradefunc to accept a bbolt.DB so it may create its
+// own transactions. The individual upgrades have to happen in separate
+// transactions because they get too big for a single transaction. Plus we
+// should consider switching certain upgrades from ForEach to a more cumbersome
+// Cursor()-based iteration that will facilitate partitioning updates into
+// smaller batches of buckets.
 
 // Each database upgrade function should be keyed by the database
 // version it upgrades.
@@ -32,9 +40,7 @@ var upgrades = [...]upgradefunc{
 	// only thing we need to do during the DB upgrade is to update the
 	// db.AccountInfo to differentiate legacy vs. new-style key.
 	v5Upgrade,
-	// v5 => v6 saves the retirement status for all existing matches, providing
-	// a more straightforward way of determining if a match is retired without
-	// performing extensive checks on the match.
+	// v5 => v6 splits matches into separate active and archived buckets.
 	v6Upgrade,
 }
 
@@ -51,6 +57,8 @@ func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 
 	return bucket.Put(versionKey, encode.Uint32Bytes(newVersion))
 }
+
+var upgradeLog = dex.Disabled
 
 // upgradeDB checks whether any upgrades are necessary before the database is
 // ready for application usage.  If any are, they are performed.
@@ -72,6 +80,7 @@ func (db *BoltDB) upgradeDB() error {
 	}
 
 	db.log.Infof("Upgrading database from version %d to %d", version, DBVersion)
+	upgradeLog = db.log
 
 	// Backup the current version's DB file before processing the upgrades to
 	// DBVersion. Note that any intermediate versions are not stored.
@@ -122,7 +131,8 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 		return fmt.Errorf("appBucket not found")
 	}
 	skipCancels := true // cancel matches don't get revoked, only cancel orders
-	return reloadMatchProofs(dbtx, skipCancels)
+	matchesBucket := []byte("matches")
+	return reloadMatchProofs(dbtx, skipCancels, matchesBucket)
 }
 
 // v2Upgrade adds a MaxFeeRate field to the OrderMetaData. The upgrade sets the
@@ -175,7 +185,8 @@ func v3Upgrade(dbtx *bbolt.Tx) error {
 	// buckets. The decoder will recognize the the old version and add the new
 	// field.
 	skipCancels := true // cancel matches have no tx data
-	return reloadMatchProofs(dbtx, skipCancels)
+	matchesBucket := []byte("matches")
+	return reloadMatchProofs(dbtx, skipCancels, matchesBucket)
 }
 
 // v4Upgrade moves active orders from what will become the archivedOrdersBucket
@@ -195,7 +206,7 @@ func v4Upgrade(dbtx *bbolt.Tx) error {
 	return moveActiveOrders(dbtx)
 }
 
-// v5Upgrade changes the database structure to accomodate PrimaryCredentials.
+// v5Upgrade changes the database structure to accommodate PrimaryCredentials.
 // The OuterKeyParams bucket is populated with the existing application
 // serialized Crypter, but other fields are not populated since the password
 // would be required. The caller should generate new PrimaryCredentials and
@@ -273,23 +284,48 @@ func v5Upgrade(dbtx *bbolt.Tx) error {
 // 	})
 // }
 
-// v6Upgrade saves the retirement status for all existing matches, providing
-// a more straightforward way of determining if a match is retired without
-// performing extensive checks on the match every time the match is loaded
-// from db.
-func v6Upgrade(tx *bbolt.Tx) error {
+// v6Upgrade moves active matches from what will become the
+// archivedMatchesBucket to a new matchesBucket. This is done in order to make
+// searching active matches faster, as they do not need to be pulled out of all
+// matches any longer. This upgrade moves active matches as opposed to inactive
+// matches under the assumption that there are less active matches to move, and
+// so a smaller database transaction occurs.
+//
+// NOTE: Earlier taker cancel order matches may be MatchComplete AND have an
+// Address set because the msgjson.Match included the maker's/trade's address.
+// However, this upgrade does not patch the address field because MatchIsActive
+// instead keys off of InitSig to detect cancel matches, and this is a
+// potentially huge set of matches and bolt eats too much memory with ForEach.
+func v6Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 5
-	if err := ensureVersion(tx, oldVersion); err != nil {
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
 		return err
 	}
 
-	matches := tx.Bucket(matchesBucket)
-	return matches.ForEach(func(k, _ []byte) error {
-		mBkt := matches.Bucket(k)
-		if mBkt == nil {
+	oldMatchesBucket := []byte("matches")
+	newActiveMatchesBucket := []byte("activeMatches")
+	// NOTE: newActiveMatchesBucket created in NewDB, but TestUpgrades skips that.
+	_, err := dbtx.CreateBucketIfNotExists(newActiveMatchesBucket)
+	if err != nil {
+		return err
+	}
+
+	var nActive, nArchived int
+
+	defer func() {
+		upgradeLog.Infof("%d active matches moved, %d archived matches unmoved", nActive, nArchived)
+	}()
+
+	archivedMatchesBkt := dbtx.Bucket(oldMatchesBucket)
+	activeMatchesBkt := dbtx.Bucket(newActiveMatchesBucket)
+
+	return archivedMatchesBkt.ForEach(func(k, _ []byte) error {
+		archivedMBkt := archivedMatchesBkt.Bucket(k)
+		if archivedMBkt == nil {
 			return fmt.Errorf("match %x bucket is not a bucket", k)
 		}
-		matchB := getCopy(mBkt, matchKey)
+		matchB := getCopy(archivedMBkt, matchKey)
 		if matchB == nil {
 			return fmt.Errorf("nil match bytes for %x", k)
 		}
@@ -297,7 +333,7 @@ func v6Upgrade(tx *bbolt.Tx) error {
 		if err != nil {
 			return fmt.Errorf("error decoding match %x: %w", k, err)
 		}
-		proofB := getCopy(mBkt, proofKey)
+		proofB := getCopy(archivedMBkt, proofKey)
 		if len(proofB) == 0 {
 			return fmt.Errorf("empty proof")
 		}
@@ -305,13 +341,28 @@ func v6Upgrade(tx *bbolt.Tx) error {
 		if err != nil {
 			return fmt.Errorf("error decoding proof: %w", err)
 		}
-		var retired []byte
-		if dexdb.MatchIsActive(match, proof) {
-			retired = encode.ByteFalse
-		} else {
-			retired = encode.ByteTrue
+		// If match is active, move to activeMatchesBucket.
+		if !dexdb.MatchIsActive(match, proof) {
+			nArchived++
+			return nil
 		}
-		return mBkt.Put(retiredKey, retired)
+
+		upgradeLog.Infof("Moving match %v (%v, revoked = %v, refunded = %v, sigs (init/redeem): %v, %v) to active bucket.",
+			match, match.Status, proof.IsRevoked(), len(proof.RefundCoin) > 0,
+			len(proof.Auth.InitSig) > 0, len(proof.Auth.RedeemSig) > 0)
+		nActive++
+
+		activeMBkt, err := activeMatchesBkt.CreateBucket(k)
+		if err != nil {
+			return err
+		}
+		// Assume the match bucket contains only values, no sub-buckets
+		if err := archivedMBkt.ForEach(func(k, v []byte) error {
+			return activeMBkt.Put(k, v)
+		}); err != nil {
+			return err
+		}
+		return archivedMatchesBkt.DeleteBucket(k)
 	})
 }
 
@@ -329,7 +380,7 @@ func ensureVersion(tx *bbolt.Tx, ver uint32) error {
 // Note that reloadMatchProofs will rewrite the MatchProof with the current
 // match proof encoding version. Thus, multiple upgrades in a row calling
 // reloadMatchProofs may be no-ops. Matches with cancel orders may be skipped.
-func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool) error {
+func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool, matchesBucket []byte) error {
 	matches := tx.Bucket(matchesBucket)
 	return matches.ForEach(func(k, _ []byte) error {
 		mBkt := matches.Bucket(k)

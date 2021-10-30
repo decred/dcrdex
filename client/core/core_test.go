@@ -4492,6 +4492,7 @@ func TestResolveActiveTrades(t *testing.T) {
 				MakerSwap:       encode.RandomBytes(32),
 				Auth: db.MatchAuth{
 					MatchSig: encode.RandomBytes(32),
+					InitSig:  encode.RandomBytes(32), // otherwise MatchComplete will be seen as a cancel order match (inactive)
 				},
 			},
 			DEX:   tDexHost,

@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,24 +23,34 @@ import (
 
 var (
 	tDir     string
-	tCtx     context.Context
 	tCounter int
 	tLogger  = dex.StdOutLogger("db_TEST", dex.LevelTrace)
 )
 
-func newTestDB(t *testing.T) *BoltDB {
+func newTestDB(t *testing.T) (*BoltDB, func()) {
+	t.Helper()
 	tCounter++
 	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
 	dbi, err := NewDB(dbPath, tLogger)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
 	}
-	go dbi.Run(tCtx)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dbi.Run(ctx)
+	}()
 	db, ok := dbi.(*BoltDB)
 	if !ok {
 		t.Fatalf("DB is not a *BoltDB")
 	}
-	return db
+	shutdown := func() {
+		cancel()
+		wg.Wait()
+	}
+	return db, shutdown
 }
 
 func TestMain(m *testing.M) {
@@ -52,16 +63,14 @@ func TestMain(m *testing.M) {
 			return -1
 		}
 		defer os.RemoveAll(tDir)
-		var shutdown func()
-		tCtx, shutdown = context.WithCancel(context.Background())
-		defer shutdown()
 		return m.Run()
 	}
 	os.Exit(doIt())
 }
 
 func TestBackup(t *testing.T) {
-	db := newTestDB(t)
+	db, shutdown := newTestDB(t)
+	defer shutdown()
 
 	// Backup the database.
 	err := db.Backup()
@@ -83,7 +92,8 @@ func TestBackup(t *testing.T) {
 }
 
 func TestStorePrimaryCredentials(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
 
 	// Trying to fetch credentials before storing should be an error.
 	_, err := boltdb.PrimaryCredentials()
@@ -147,7 +157,9 @@ func TestStorePrimaryCredentials(t *testing.T) {
 }
 
 func TestAccounts(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	dexURLs, err := boltdb.ListAccounts()
 	if err != nil {
 		t.Fatalf("error listing accounts: %v", err)
@@ -253,7 +265,9 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestDisableAccount(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	acct := dbtest.RandomAccountInfo()
 	host := acct.Host
 	err := boltdb.CreateAccount(acct)
@@ -287,7 +301,9 @@ func TestDisableAccount(t *testing.T) {
 }
 
 func TestAccountProof(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	acct := dbtest.RandomAccountInfo()
 	host := acct.Host
 
@@ -312,7 +328,9 @@ func TestAccountProof(t *testing.T) {
 }
 
 func TestWallets(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	wallets, err := boltdb.Wallets()
 	if err != nil {
 		t.Fatalf("error listing wallets from empty DB: %v", err)
@@ -404,6 +422,7 @@ func randOrderForMarket(base, quote uint32) order.Order {
 }
 
 func mustContainOrder(t *testing.T, os []*db.MetaOrder, o *db.MetaOrder) {
+	t.Helper()
 	oid := o.Order.ID()
 	for _, mord := range os {
 		if mord.Order.ID() == oid {
@@ -415,7 +434,9 @@ func mustContainOrder(t *testing.T, os []*db.MetaOrder, o *db.MetaOrder) {
 }
 
 func TestOrders(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	// Create an account to use.
 	acct1 := dbtest.RandomAccountInfo()
 	acct2 := dbtest.RandomAccountInfo()
@@ -636,7 +657,8 @@ func TestOrders(t *testing.T) {
 }
 
 func TestOrderFilters(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
 
 	makeOrder := func(host string, base, quote uint32, stamp int64, status order.OrderStatus) *db.MetaOrder {
 		mord := &db.MetaOrder{
@@ -778,7 +800,9 @@ func TestOrderFilters(t *testing.T) {
 }
 
 func TestOrderChange(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	// Create an account to use.
 	acct := dbtest.RandomAccountInfo()
 	err := boltdb.CreateAccount(acct)
@@ -856,7 +880,9 @@ func TestOrderChange(t *testing.T) {
 }
 
 func TestMatches(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	base, quote := randU32(), randU32()
 	acct := dbtest.RandomAccountInfo()
 
@@ -974,7 +1000,9 @@ func randBytes(l int) []byte {
 }
 
 func TestNotifications(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	numToDo := 1000
 	numToFetch := 200
 	if testing.Short() {
@@ -1050,7 +1078,9 @@ func (c *tCrypter) Serialize() []byte {
 func (c *tCrypter) Close() {}
 
 func TestRecrypt(t *testing.T) {
-	boltdb := newTestDB(t)
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
 	tester := func(walletID []byte, host string, creds *db.PrimaryCredentials) error {
 		encPW := randBytes(5)
 		oldCrypter, newCrypter := &tCrypter{}, &tCrypter{encPW}
@@ -1104,6 +1134,7 @@ func TestRecrypt(t *testing.T) {
 }
 
 func testCredentialsUpdate(t *testing.T, boltdb *BoltDB, tester func([]byte, string, *db.PrimaryCredentials) error) {
+	t.Helper()
 	w := dbtest.RandomWallet()
 	w.EncryptedPW = randBytes(6)
 	walletID := w.ID()
