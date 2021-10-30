@@ -9,6 +9,7 @@ package btc
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,6 +191,8 @@ func (c *tBtcWallet) Stop() {}
 func (c *tBtcWallet) WaitForShutdown() {}
 
 func (c *tBtcWallet) ChainSynced() bool {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
 	if c.getBlockchainInfo == nil {
 		return false
 	}
@@ -265,6 +268,10 @@ func (c *tBtcWallet) signTransaction(tx *wire.MsgTx) error {
 	return nil
 }
 
+func (c *tBtcWallet) txNotifications() wallet.TransactionNotificationsClient {
+	return wallet.TransactionNotificationsClient{}
+}
+
 type tNeutrinoClient struct {
 	*testData
 }
@@ -294,6 +301,8 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 }
 
 func (c *tNeutrinoClient) Peers() []*neutrino.ServerPeer {
+	c.blockchainMtx.RLock()
+	defer c.blockchainMtx.RUnlock()
 	peer := &neutrino.ServerPeer{Peer: &peer.Peer{}}
 	if c.getBlockchainInfo != nil {
 		peer.UpdateLastBlockHeight(int32(c.getBlockchainInfo.Headers))
@@ -697,5 +706,104 @@ func TestSendWithSubtract(t *testing.T) {
 	_, err = spv.sendWithSubtract(pkScript, availableFunds/2, 1e8)
 	if err == nil {
 		t.Fatalf("test passed with fees > available error")
+	}
+}
+
+func TestTryBlocksWithNotifier(t *testing.T) {
+	defaultWalletBlockAllowance := walletBlockAllowance
+	defaultBlockTicker := blockTicker
+
+	walletBlockAllowance = 30 * time.Millisecond
+	blockTicker = 5 * time.Millisecond
+
+	defer func() {
+		walletBlockAllowance = defaultWalletBlockAllowance
+		blockTicker = defaultBlockTicker
+	}()
+
+	wallet, node, shutdown, _ := tNewWallet(true, walletTypeSPV)
+	defer shutdown()
+
+	spv := wallet.node.(*spvWallet)
+
+	getNote := func(timeout time.Duration) bool {
+		select {
+		case <-node.tipChanged:
+			return true
+		case <-time.After(timeout):
+			return false
+		}
+	}
+
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatalf("got a first block")
+	}
+
+	var tipHeight int64
+	addBlock := func() *block {
+		tipHeight++
+		h, _ := node.addRawTx(tipHeight, dummyTx())
+		return &block{tipHeight, *h}
+	}
+
+	// Start with no blocks so that we're not synced.
+	node.getBlockchainInfo = &getBlockchainInfoResult{
+		Headers: 2,
+		Blocks:  0,
+	}
+
+	addBlock()
+
+	// Prime the sync target to avoid the syncStatus tip send here.
+	atomic.StoreInt32(&spv.syncTarget, 1)
+
+	// It should not come through on the block tick, since it will be cached.
+	if getNote(blockTicker * 2) {
+		t.Fatalf("got block that should've been cached")
+	}
+
+	// And it won't come through after a sigle block allowance, because we're
+	// not synced.
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatal("block didn't wait for the syncing mode allowance")
+	}
+
+	// But it will come through after the sync timeout = 10 * normal timeout.
+	if !getNote(walletBlockAllowance * 9) {
+		t.Fatal("block didn't time out in syncing mode")
+	}
+
+	// But if we're synced, it should come through after the normal block
+	// allowance.
+	addBlock()
+	node.blockchainMtx.Lock()
+	node.getBlockchainInfo = &getBlockchainInfoResult{
+		Headers: tipHeight,
+		Blocks:  tipHeight,
+	}
+	node.blockchainMtx.Unlock()
+	if !getNote(walletBlockAllowance * 2) {
+		t.Fatal("block didn't time out in normal mode")
+	}
+
+	// On the other hand, a wallet block should come through immediately. Not
+	// even waiting on the block tick.
+	spv.tipChan <- addBlock()
+	if !getNote(blockTicker / 2) {
+		t.Fatal("wallet block wasn't sent through")
+	}
+
+	// If we do the same thing but make sure that a polled block is queued
+	// first, we should still see the block right away, and the queued block
+	// should be canceled.
+	blk := addBlock()
+	time.Sleep(blockTicker * 2)
+	spv.tipChan <- blk
+	if !getNote(blockTicker / 2) {
+		t.Fatal("wallet block wasn't sent through with polled block queued")
+	}
+
+	if getNote(walletBlockAllowance * 2) {
+		t.Fatal("queued polled block that should have been canceled came through")
 	}
 }

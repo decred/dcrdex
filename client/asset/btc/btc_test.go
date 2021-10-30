@@ -133,10 +133,11 @@ type testData struct {
 	signFunc      func(*wire.MsgTx)
 	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
 
-	blockchainMtx sync.RWMutex
-	verboseBlocks map[string]*msgBlockWithHeight
-	dbBlockForTx  map[chainhash.Hash]*hashEntry
-	mainchain     map[int64]*chainhash.Hash
+	blockchainMtx     sync.RWMutex
+	verboseBlocks     map[string]*msgBlockWithHeight
+	dbBlockForTx      map[chainhash.Hash]*hashEntry
+	mainchain         map[int64]*chainhash.Hash
+	getBlockchainInfo *getBlockchainInfoResult
 
 	getBestBlockHashErr error
 	mempoolTxs          map[chainhash.Hash]*wire.MsgTx
@@ -157,7 +158,6 @@ type testData struct {
 	getTransaction    *GetTransactionResult
 	getTransactionErr error
 
-	getBlockchainInfo    *getBlockchainInfoResult
 	getBlockchainInfoErr error
 	unlockErr            error
 	lockErr              error
@@ -167,6 +167,7 @@ type testData struct {
 	signTxErr            error
 	listUnspent          []*ListUnspentResult
 	listUnspentErr       error
+	tipChanged           chan struct{}
 
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
@@ -195,6 +196,7 @@ func newTestData() *testData {
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
 		checkpoints:       make(map[outPoint]*scanCheckpoint),
+		tipChanged:        make(chan struct{}, 1),
 	}
 }
 
@@ -410,6 +412,8 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetTransaction:
 		return encodeOrError(c.getTransaction, c.getTransactionErr)
 	case methodGetBlockchainInfo:
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
 		return encodeOrError(c.getBlockchainInfo, c.getBlockchainInfoErr)
 	case methodLock:
 		return nil, c.lockErr
@@ -567,7 +571,12 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 
 	data := newTestData()
 	walletCfg := &asset.WalletConfig{
-		TipChange: func(error) {},
+		TipChange: func(error) {
+			select {
+			case data.tipChanged <- struct{}{}:
+			default:
+			}
+		},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
@@ -596,6 +605,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
+				tipChan:     make(chan *block, 1),
 				chainClient: nil,
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
@@ -617,12 +627,22 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		return nil, nil, nil, err
 	}
 	wallet.tipMtx.Lock()
-	wallet.currentTip = &block{height: data.GetBestBlockHeight(),
-		hash: bestHash.String()}
+	wallet.currentTip = &block{
+		height: data.GetBestBlockHeight(),
+		hash:   *bestHash,
+	}
 	wallet.tipMtx.Unlock()
-	go wallet.run(walletCtx)
-
-	return wallet, data, shutdown, nil
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		wallet.watchBlocks(walletCtx)
+	}()
+	shutdownAndWait := func() {
+		shutdown()
+		wg.Wait()
+	}
+	return wallet, data, shutdownAndWait, nil
 }
 
 func mustMarshal(thing interface{}) []byte {
@@ -2058,7 +2078,10 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	node.getCFilterScripts[*redeemBlockHash] = [][]byte{pkScript}
 
 	// Update currentTip from "RPC". Normally run() would do this.
-	wallet.checkForNewBlocks(tCtx)
+	wallet.reportNewTip(tCtx, &block{
+		hash:   *redeemBlockHash,
+		height: contractHeight + 2,
+	})
 
 	// Check find redemption result.
 	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
@@ -2961,5 +2984,4 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 			}
 		}
 	}
-
 }

@@ -37,10 +37,14 @@ type Wallet interface {
 	locked() bool
 	syncStatus() (*syncStatus, error)
 	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
-	getBlockHeader(blockHash string) (*blockHeader, error)
+	getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error)
 	ownsAddress(addr btcutil.Address) (bool, error)
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
+}
+
+type tipNotifier interface {
+	tipFeed() <-chan *block
 }

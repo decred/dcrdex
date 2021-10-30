@@ -935,7 +935,7 @@ func (dc *dexConnection) subPriceFeed() {
 		var msgErr *msgjson.Error
 		// Ignore old servers' errors.
 		if !errors.As(err, &msgErr) || msgErr.Code != msgjson.UnknownMessageType {
-			dc.log.Errorf("unable to fetch market overview: %w", err)
+			dc.log.Errorf("unable to fetch market overview: %v", err)
 		}
 		return
 	}
