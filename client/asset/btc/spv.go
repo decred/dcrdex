@@ -963,6 +963,13 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 				if len(note.AttachedBlocks) > 0 {
 					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
 					syncTarget := atomic.LoadInt32(&w.syncTarget)
+
+					for ib := range note.AttachedBlocks {
+						for _, nt := range note.AttachedBlocks[ib].Transactions {
+							w.log.Debugf("Block %d contains wallet transaction %v", note.AttachedBlocks[ib].Height, nt.Hash)
+						}
+					}
+
 					if syncTarget == 0 || (lastBlock.Height < syncTarget && lastBlock.Height%10_000 != 0) {
 						continue
 					}
