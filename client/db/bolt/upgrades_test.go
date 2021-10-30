@@ -17,7 +17,6 @@ import (
 	"time"
 
 	dexdb "decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
@@ -29,7 +28,7 @@ var dbUpgradeTests = [...]struct {
 	filename   string // in testdata directory
 	newVersion uint32
 }{
-	// {"testnetbot", v4Upgrade, verifyV4Upgrade, "dexbot-testnet.db.gz", 4}, // only for TestUpgradeDB
+	// {"testnetbot", v4Upgrade, verifyV4Upgrade, "dexbot-testnet.db.gz", 6}, // only for TestUpgradeDB, using just filename
 	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz", 1},
 	{"upgradeFromV1", v2Upgrade, verifyV2Upgrade, "v1.db.gz", 2},
 	{"upgradeFromV2", v3Upgrade, verifyV3Upgrade, "v2.db.gz", 3},
@@ -39,13 +38,14 @@ var dbUpgradeTests = [...]struct {
 }
 
 func TestUpgrades(t *testing.T) {
+	upgradeLog = tLogger
 	t.Run("group", func(t *testing.T) {
 		for _, tc := range dbUpgradeTests {
 			tc := tc // capture range variable
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				dbPath, close := unpack(t, tc.filename)
-				defer close()
+				dbPath, cleanup := unpack(t, tc.filename)
+				defer cleanup()
 				db, err := bbolt.Open(dbPath, 0600,
 					&bbolt.Options{Timeout: 1 * time.Second})
 				if err != nil {
@@ -249,29 +249,57 @@ func verifyV5Upgrade(t *testing.T, db *bbolt.DB) {
 }
 
 func verifyV6Upgrade(t *testing.T, db *bbolt.DB) {
-	verifyMatches := map[string]bool{
-		"090f54bc6b13652d4e4c23ec94b4f70751c61db043ae732c014d0f5cf4ccccb7": false, // status < MatchComplete, not revoked, not refunded
-		"5ee45ebb29edf84ab2a7f35aef619b20c3e2cd26017a5e281e7cc1bfde0ed435": true,  // status < MatchComplete, revoked at NewlyMatched
-		"84455dae423b09f149396f09b6063380eeb312e1b67051a695e78cd5c985cb49": false, // status == MakerSwapCast, side Maker, revoked, requires refund
-		"59c054d537fbd98f51621671a84d25b55350d0e33a6b3c2c4abd874054f8a438": true,  // status == TakerSwapCast, side Maker, revoked, refunded
-		"f153a3b8d5824c3e237911cd1b108dfb2e04555f6c5899681d182216caa328fc": false, // status == MatchComplete, no RedeemSig
-		"3996ffea2a3db99262b954cf6dcf883f562baf273d767b7cf91b6aacddd4206f": true,  // status == MatchComplete, RedeemSig set
+	verifyMatches := map[string]bool{ // matchid: active
+		"52fdfc072182654f163f5f0f9a621d729566c74d10037c4d7bbb0407d1e2c649": true,  // status < MatchComplete, not revoked, not refunded
+		"81855a1e00167939cb6694d2c422acd208a0072939487f6999eb9d18a4478404": false, // status < MatchComplete, revoked at NewlyMatched
+		"5d87f3c67cf2367951baa2ff6cd471c483f15fb90badb37c5821b6d95526a41a": true,  // status == MakerSwapCast, side Maker, revoked, requires refund
+		"9504680b4e7c8b763a1b1d49d4955c8486216325253fec738dd7a9e28bf92111": false, // status == TakerSwapCast, side Maker, revoked, refunded
+		"9c160f0702448615bbda08313f6a8eb668d20bf5059875921e668a5bdf2c7fc4": true,  // status == MatchComplete, no RedeemSig !!! TODO: missing InitSig
+		"844592d2572bcd0668d2d6c52f5054e2d0836bf84c7174cb7476364cc3dbd968": false, // status == MatchComplete, RedeemSig set
+		"b0f7172ed85794bb358b0c3b525da1786f9fff094279db1944ebd7a19d0f7bba": false, // cancel order match
 	}
 
-	err := db.View(func(dbtx *bbolt.Tx) error {
-		matches := dbtx.Bucket(matchesBucket)
-		return matches.ForEach(func(k, v []byte) error {
+	bdb := &BoltDB{DB: db}
+	err := bdb.matchesView(func(mb, amb *bbolt.Bucket) error {
+		// active matches
+		err := mb.ForEach(func(k, _ []byte) error {
 			matchID := hex.EncodeToString(k)
-			mBkt := matches.Bucket(k)
+			mBkt := mb.Bucket(k)
 			if mBkt == nil {
 				return fmt.Errorf("match %s bucket is not a bucket", matchID)
 			}
-			retiredB := mBkt.Get(retiredKey)
-			retired := bytes.Equal(retiredB, encode.ByteTrue)
-			if expectRetired, ok := verifyMatches[matchID]; !ok {
-				return fmt.Errorf("found unexpected match %s", matchID)
-			} else if retired != expectRetired {
-				return fmt.Errorf("expected match %s retired = %t, got %t", matchID, expectRetired, retired)
+			midB := getCopy(mBkt, matchIDKey)
+			if midB == nil {
+				return fmt.Errorf("nil match ID bytes")
+			}
+			mid := hex.EncodeToString(midB)
+			if active, found := verifyMatches[mid]; !found {
+				return fmt.Errorf("match %v not found in test DB", mid)
+			} else if !active {
+				return fmt.Errorf("inactive match found in active matches bucket: %v", mid)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// archived
+		return amb.ForEach(func(k, _ []byte) error {
+			matchID := hex.EncodeToString(k)
+			mBkt := amb.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("match %s bucket is not a bucket", matchID)
+			}
+			midB := getCopy(mBkt, matchIDKey)
+			if midB == nil {
+				return fmt.Errorf("nil match ID bytes")
+			}
+			mid := hex.EncodeToString(midB)
+			if active, found := verifyMatches[mid]; !found {
+				return fmt.Errorf("match %v not found in test DB", mid)
+			} else if active {
+				return fmt.Errorf("active match found in archived matches bucket: %v", mid)
 			}
 			return nil
 		})

@@ -452,6 +452,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Store a completed maker cancel match in the DB.
 		makerCancelMeta := t.makeMetaMatch(cancelMatch)
 		makerCancelMeta.Status = order.MatchComplete
+		makerCancelMeta.Address = "" // not a trade match
 		err = t.db.UpdateMatch(makerCancelMeta)
 		if err != nil {
 			return fmt.Errorf("failed to update match in db: %w", err)
@@ -637,6 +638,7 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 	// Store the completed taker cancel match.
 	takerCancelMeta := t.makeMetaMatch(t.cancel.matches.taker)
 	takerCancelMeta.Status = order.MatchComplete
+	takerCancelMeta.Address = "" // not a trade match
 	err := t.db.UpdateMatch(takerCancelMeta)
 	if err != nil {
 		return fmt.Errorf("failed to update match in db: %w", err)
