@@ -38,10 +38,14 @@ func TestNewSwapCoin(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], secretSlice)
 	copy(secretHash[:], secretHashSlice)
-	tc := TxCoinID{
-		TxID: txHash,
-	}
-	txCoinIDBytes := tc.Encode()
+	txCoinIDBytes := (&TxCoinID{
+		TxID:  txHash,
+		Index: 1,
+	}).Encode()
+	txCoinIDIndex2Bytes := (&TxCoinID{
+		TxID:  txHash,
+		Index: 2,
+	}).Encode()
 	sc := SwapCoinID{}
 	swapCoinIDBytes := sc.Encode()
 	gasPrice := big.NewInt(3e10)
@@ -135,6 +139,12 @@ func TestNewSwapCoin(t *testing.T) {
 		name:    "gas too big",
 		tx:      tTx(overMaxWei(), value, contractAddr, initCalldata),
 		coinID:  txCoinIDBytes,
+		ct:      sctInit,
+		wantErr: true,
+	}, {
+		name:    "tx coin id too high index",
+		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:  txCoinIDIndex2Bytes,
 		ct:      sctInit,
 		wantErr: true,
 	}}

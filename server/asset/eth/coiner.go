@@ -89,12 +89,23 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 
 	switch sct {
 	case sctInit:
-		counterParty, secretHash, locktime, err = dexeth.ParseInitiateData(txdata)
+		initiations, err := dexeth.ParseInitiateData(txdata)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse initiate data: %v", err)
+		}
+		if txCoinID.Index >= uint32(len(initiations)) {
+			return nil, fmt.Errorf("tx %v does not have initiation with index %d",
+				txCoinID.TxID, txCoinID.Index)
+		}
+		initiation := initiations[txCoinID.Index]
+		counterParty = &initiation.Participant
+		secretHash = initiation.SecretHash
+		locktime = initiation.RefundTimestamp.Int64()
 	case sctRedeem:
 		secret, secretHash, err = dexeth.ParseRedeemData(txdata)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse call data: %v", err)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse redeem data: %v", err)
+		}
 	}
 
 	contractAddr := tx.To()

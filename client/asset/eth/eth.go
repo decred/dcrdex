@@ -154,7 +154,7 @@ type ethFetcher interface {
 	blockNumber(ctx context.Context) (uint64, error)
 	connect(ctx context.Context, node *node.Node, contractAddr *common.Address) error
 	listWallets(ctx context.Context) ([]rawWallet, error)
-	initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error)
+	initiate(txOpts *bind.TransactOpts, netID int64, initiations []dexeth.ETHSwapInitiation) (*types.Transaction, error)
 	estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
@@ -194,8 +194,8 @@ type ExchangeWallet struct {
 
 	acct *accounts.Account
 
-	cachedInitGas    uint64
-	cachedInitGasMtx sync.Mutex
+	initGasCache    map[int]uint64
+	initGasCacheMtx sync.Mutex
 
 	lockedFunds    map[string]uint64 // gwei
 	lockedFundsMtx sync.RWMutex
@@ -281,6 +281,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		internalNode: node,
 		lockedFunds:  make(map[string]uint64),
 		acct:         &accounts[0],
+		initGasCache: make(map[int]uint64),
 	}, nil
 }
 
@@ -384,12 +385,12 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 // result is cached and reused in subsequent requests.
 //
 // This function will return an error if the wallet has a non zero balance.
-func (eth *ExchangeWallet) getInitGas() (uint64, error) {
-	eth.cachedInitGasMtx.Lock()
-	defer eth.cachedInitGasMtx.Unlock()
+func (eth *ExchangeWallet) getInitGas(numSwaps int) (uint64, error) {
+	eth.initGasCacheMtx.Lock()
+	defer eth.initGasCacheMtx.Unlock()
 
-	if eth.cachedInitGas > 0 {
-		return eth.cachedInitGas, nil
+	if cachedGas, ok := eth.initGasCache[numSwaps]; ok {
+		return cachedGas, nil
 	}
 
 	var secretHash [32]byte
@@ -398,14 +399,23 @@ func (eth *ExchangeWallet) getInitGas() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	data, err := parsedAbi.Pack("initiate", big.NewInt(1), secretHash, &eth.acct.Address)
+	initiations := make([]dexeth.ETHSwapInitiation, 0, numSwaps)
+	for i := 0; i < numSwaps; i++ {
+		initiations = append(initiations, dexeth.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(1),
+			SecretHash:      secretHash,
+			Participant:     eth.acct.Address,
+			Value:           big.NewInt(1),
+		})
+	}
+	data, err := parsedAbi.Pack("initiate", initiations)
 	if err != nil {
 		return 0, err
 	}
 	msg := ethereum.CallMsg{
 		From:  eth.acct.Address,
 		To:    &mainnetContractAddr,
-		Value: big.NewInt(1),
+		Value: big.NewInt(int64(numSwaps)),
 		Gas:   0,
 		Data:  data,
 	}
@@ -413,7 +423,7 @@ func (eth *ExchangeWallet) getInitGas() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	eth.cachedInitGas = gas
+	eth.initGasCache[numSwaps] = gas
 	return gas, nil
 }
 
@@ -430,7 +440,7 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	if balance.Available == 0 {
 		return &asset.SwapEstimate{}, nil
 	}
-	initGas, err := eth.getInitGas()
+	initGas, err := eth.getInitGas(1)
 
 	if err != nil {
 		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
@@ -468,25 +478,20 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 	if lots == 0 {
 		return &asset.SwapEstimate{}
 	}
-	initGas, err := eth.getInitGas()
+	oneSwapGas, err := eth.getInitGas(1)
 	if err != nil {
 		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
-		initGas = nfo.SwapSize
+		oneSwapGas = nfo.SwapSize
 	}
-	realisticTxFee := initGas * feeSuggestion
-	maxTxFee := initGas * nfo.MaxFeeRate
 	value := lots * lotSize
-	maxFees := lots * maxTxFee
-	realisticWorstCase := realisticTxFee * lots
-	realisticBestCase := realisticTxFee
-	locked := value + maxFees
+	maxFees := oneSwapGas * nfo.MaxFeeRate * lots
 	return &asset.SwapEstimate{
 		Lots:               lots,
 		Value:              value,
 		MaxFees:            maxFees,
-		RealisticWorstCase: realisticWorstCase,
-		RealisticBestCase:  realisticBestCase,
-		Locked:             locked,
+		RealisticWorstCase: lots * oneSwapGas * feeSuggestion,
+		RealisticBestCase:  oneSwapGas * feeSuggestion,
+		Locked:             value + maxFees,
 	}
 }
 
