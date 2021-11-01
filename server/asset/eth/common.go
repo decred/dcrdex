@@ -261,6 +261,9 @@ const (
 // Errors if the amount of gwei is too big to fit fully into a uint64. The
 // passed wei parameter value is changed and is no longer useable.
 func ToGwei(wei *big.Int) (uint64, error) {
+	if wei.Cmp(big.NewInt(0)) == -1 {
+		return 0, fmt.Errorf("cannot convert negative wei value of %v to gwei", wei)
+	}
 	gweiFactorBig := big.NewInt(GweiFactor)
 	wei.Div(wei, gweiFactorBig)
 	if !wei.IsUint64() {

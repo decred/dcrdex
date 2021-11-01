@@ -415,11 +415,11 @@ func TestNewAmountCoin(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		wantErr         bool
-		acID            []byte
-		bal, pendingBal uint64
-		balErr          error
+		name                  string
+		wantErr               bool
+		acID                  []byte
+		bal, pendingBal       uint64
+		balErr, txpoolContErr error
 	}{{
 		name: "ok",
 		acID: acID.Encode(),
@@ -442,12 +442,19 @@ func TestNewAmountCoin(t *testing.T) {
 		name:    "not enough funds",
 		acID:    acID.Encode(),
 		wantErr: true,
+	}, {
+		name:          "error getting pending tx fee",
+		acID:          acID.Encode(),
+		pendingBal:    amt,
+		txpoolContErr: errors.New(""),
+		wantErr:       true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
-			bal:        big.NewInt(int64(test.bal * GweiFactor)),
-			balErr:     test.balErr,
-			pendingBal: big.NewInt(int64(test.pendingBal * GweiFactor)),
+			bal:           big.NewInt(int64(test.bal * GweiFactor)),
+			balErr:        test.balErr,
+			pendingBal:    big.NewInt(int64(test.pendingBal * GweiFactor)),
+			txpoolContErr: test.txpoolContErr,
 		}
 		eth := &Backend{
 			node: node,
@@ -525,6 +532,72 @@ func TestAccountBalance(t *testing.T) {
 		}
 		if bal != test.bal.Uint64() || pendingBal != test.pendingBal.Uint64() {
 			t.Fatalf("unexpected balance for test %v", test.name)
+		}
+	}
+}
+
+func TestLowestGasPrice(t *testing.T) {
+	addr := new(common.Address)
+	copy(addr[:], encode.RandomBytes(20))
+	cont := func(gasses []int64) map[string]map[string]map[int]*types.Transaction {
+		m := make(map[string]map[string]map[int]*types.Transaction)
+		m["pending"] = make(map[string]map[int]*types.Transaction)
+		m["pending"]["deadbeefaccount"] = make(map[int]*types.Transaction)
+		m["pending"][addr.String()] = make(map[int]*types.Transaction)
+		i := 0
+		// These are credits from a dummy account.
+		for _, gas := range gasses {
+			bigGweiGas := big.NewInt(GweiFactor)
+			tx := tTx(bigGweiGas.Mul(bigGweiGas, big.NewInt(gas)), nil, addr, nil)
+			m["pending"]["deadbeefaccount"][i] = tx
+			i++
+		}
+		// This is an ignored debit.
+		m["pending"][addr.String()][i] = tTx(big.NewInt(0), nil, new(common.Address), nil)
+		return m
+	}
+
+	tests := []struct {
+		name          string
+		wantLowestGas uint64
+		wantErr       bool
+		txpoolCont    map[string]map[string]map[int]*types.Transaction
+		txpoolContErr error
+	}{{
+		name:          "ok lowest of three",
+		txpoolCont:    cont([]int64{76, 44, 300}),
+		wantLowestGas: 44,
+	}, {
+		name: "ok no txs",
+	}, {
+		name:          "content error",
+		txpoolContErr: errors.New(""),
+		wantErr:       true,
+	}, {
+		name:       "bad fee",
+		txpoolCont: cont([]int64{-1}),
+		wantErr:    true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			txpoolCont:    test.txpoolCont,
+			txpoolContErr: test.txpoolContErr,
+		}
+		eth := &Backend{
+			node: node,
+		}
+		lgp, err := eth.lowestGasPrice(addr)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if lgp != test.wantLowestGas {
+			t.Fatalf("expected %d but got %d for test %v", test.wantLowestGas, lgp, test.name)
 		}
 	}
 }

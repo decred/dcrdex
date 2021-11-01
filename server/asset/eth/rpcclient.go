@@ -132,3 +132,9 @@ func (c *rpcclient) balance(ctx context.Context, addr *common.Address) (*big.Int
 func (c *rpcclient) pendingBalance(ctx context.Context, addr *common.Address) (*big.Int, error) {
 	return c.ec.PendingBalanceAt(ctx, *addr)
 }
+
+// txpoolContent retrieves all transactions from the mempool.
+func (c *rpcclient) txpoolContent(ctx context.Context) (map[string]map[string]map[int]*types.Transaction, error) {
+	var m map[string]map[string]map[int]*types.Transaction
+	return m, c.c.CallContext(ctx, &m, "txpool_content")
+}

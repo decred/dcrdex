@@ -98,6 +98,7 @@ type ethFetcher interface {
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 	balance(ctx context.Context, addr *common.Address) (bigBal *big.Int, err error)
 	pendingBalance(ctx context.Context, addr *common.Address) (bigPendingBal *big.Int, err error)
+	txpoolContent(ctx context.Context) (txsMap map[string]map[string]map[int]*types.Transaction, err error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output

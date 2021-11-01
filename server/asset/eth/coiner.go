@@ -290,10 +290,19 @@ func (c *swapCoin) FeeRate() uint64 {
 var _ asset.FundingCoin = (*amountCoin)(nil)
 
 type amountCoin struct {
-	backend *Backend
-	cID     *AmountCoinID
+	backend  *Backend
+	cID      *AmountCoinID
+	gasPrice uint64
 }
 
+// newAmountCoin creates a asset.Funding coin for ethereum. It is comprised of
+// an account and the value we expect that account to have ready. This differes
+// from utxo coins because the value held may change at any time. The value is
+// checked to have at least as much as we expect upon creation and once every
+// time Confirmations is called. Another difference is that the tx fee, or gas
+// price, is not one number. Here we check once upon initiation if their are
+// pending transactions and just use the lowest from that time if the confirmed
+// balance doesn't reach our needed threshold.
 func (backend *Backend) newAmountCoin(coinID []byte) (*amountCoin, error) {
 	cID, err := DecodeCoinID(coinID)
 	if err != nil {
@@ -309,15 +318,28 @@ func (backend *Backend) newAmountCoin(coinID []byte) (*amountCoin, error) {
 	}
 	amt := aCoinID.Amount
 	if bal < amt && pendingBal < amt {
-		return nil, fmt.Errorf("account %s does not have %d gwei", &aCoinID.Address, amt)
+		return nil, fmt.Errorf("account %s does not have %d gwei",
+			&aCoinID.Address, amt)
+	}
+	gasPrice := uint64(0)
+	// If there is pending balance, store its lowest gas price in case it
+	// turns out to be too low.
+	if pendingBal != 0 {
+		gasPrice, err = backend.lowestGasPrice(&aCoinID.Address)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get gas price: %v", err)
+		}
 	}
 	return &amountCoin{
-		backend: backend,
-		cID:     aCoinID,
+		backend:  backend,
+		cID:      aCoinID,
+		gasPrice: gasPrice,
 	}, nil
 }
 
-func (backend *Backend) accountBalance(addr *common.Address) (balance, pendingBalance uint64, err error) {
+// accountBalance returns the mined and pending balances for an address.
+func (backend *Backend) accountBalance(addr *common.Address) (balance,
+	pendingBalance uint64, err error) {
 	bigPendingBal, err := backend.node.pendingBalance(backend.rpcCtx, addr)
 	if err != nil {
 		return 0, 0, err
@@ -335,6 +357,42 @@ func (backend *Backend) accountBalance(addr *common.Address) (balance, pendingBa
 		return 0, 0, err
 	}
 	return bal, pendingBal, nil
+}
+
+// lowestGasPrice returns the lowest gas fee among pending transactions or zero.
+func (backend *Backend) lowestGasPrice(addr *common.Address) (uint64, error) {
+	txsMap, err := backend.node.txpoolContent(backend.rpcCtx)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get txpool content: %v", err)
+	}
+	var lowestPrice *big.Int
+	for from, txs := range txsMap["pending"] {
+		if from == addr.String() {
+			// Skip debits.
+			continue
+		}
+		for _, tx := range txs {
+			if *tx.To() == *addr {
+				if lowestPrice == nil {
+					lowestPrice = tx.GasPrice()
+					continue
+				}
+				if lowestPrice.Cmp(tx.GasPrice()) > 0 {
+					lowestPrice = tx.GasPrice()
+				}
+			}
+		}
+	}
+	// If we didn't find a pending tx, the outstanding balance was likely
+	// mined before we checked so no error.
+	if lowestPrice == nil {
+		return 0, nil
+	}
+	lp, err := ToGwei(lowestPrice)
+	if err != nil {
+		return 0, fmt.Errorf("unable to convert pending fee rate to gwei: %v", err)
+	}
+	return lp, nil
 }
 
 // Confirmations returns one if an account currently has the funds to satisfy
@@ -363,9 +421,9 @@ func (c *amountCoin) ID() []byte {
 	return c.cID.Encode()
 }
 
-// There is no one TxID leading to an amountCoin, and no way to know which
-// transactions led to this state beyond a certain window without an archival
-// node.
+// There may be more than TxID leading to an amountCoin, and no way to know
+// which transactions led to this state beyond a certain window without an
+// archival node.
 func (c *amountCoin) TxID() string {
 	return ""
 }
@@ -380,9 +438,11 @@ func (c *amountCoin) Value() uint64 {
 	return c.cID.Amount
 }
 
-// FeeRate is not applicable to value held in an account.
+// FeeRate returns the lowest gas fee among pending transactions to the
+// account. It is not set if there was not pending balance upon initiation of
+// the funding coin.
 func (c *amountCoin) FeeRate() uint64 {
-	return 0
+	return c.gasPrice
 }
 
 // Auth ensures that a user really has the keys to spend a funding coin by

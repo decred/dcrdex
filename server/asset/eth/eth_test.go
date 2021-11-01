@@ -76,6 +76,8 @@ type testNode struct {
 	balErr         error
 	pendingBal     *big.Int
 	pendingBalErr  error
+	txpoolCont     map[string]map[string]map[int]*types.Transaction
+	txpoolContErr  error
 }
 
 func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
@@ -126,6 +128,10 @@ func (n *testNode) balance(ctx context.Context, addr *common.Address) (bigBal *b
 
 func (n *testNode) pendingBalance(ctx context.Context, addr *common.Address) (bigPendingBal *big.Int, err error) {
 	return n.pendingBal, n.pendingBalErr
+}
+
+func (n *testNode) txpoolContent(ctx context.Context) (map[string]map[string]map[int]*types.Transaction, error) {
+	return n.txpoolCont, n.txpoolContErr
 }
 
 func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *swap.ETHSwapSwap {

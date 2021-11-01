@@ -174,3 +174,13 @@ func TestPendingBalance(t *testing.T) {
 		t.Fatal("nil return")
 	}
 }
+
+func TestTxPoolContent(t *testing.T) {
+	content, err := ethClient.txpoolContent(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content == nil {
+		t.Fatal("nil return")
+	}
+}
