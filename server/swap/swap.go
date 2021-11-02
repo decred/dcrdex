@@ -1989,6 +1989,13 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 	// }
 	// FeeRateMakerSwap := feeRate(match.makerStatus.swapAsset)
 
+	// If the taker order is a cancel, omit the maker (trade) order's address
+	// since it is dead weight. Consider omitting the numeric fields too.
+	var makerAddr string
+	if match.Taker.Type() != order.CancelOrderType {
+		makerAddr = order.ExtractAddress(match.Maker)
+	}
+
 	stamp := encode.UnixMilliU(match.matchTime)
 	return &msgjson.Match{
 			OrderID:      idToBytes(match.Maker.ID()),
@@ -2005,7 +2012,7 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:      idToBytes(match.ID()),
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			Address:      order.ExtractAddress(match.Maker),
+			Address:      makerAddr,
 			ServerTime:   stamp,
 			FeeRateBase:  match.FeeRateBase,
 			FeeRateQuote: match.FeeRateQuote,
