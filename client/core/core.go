@@ -1420,12 +1420,12 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 	addr := w.currentDepositAddress()
 	newAddr, err := c.connectWallet(w)
 	if err != nil {
-		return err // core.Error with code connectWalletErr
+		return fmt.Errorf("connectWallet: %w", err) // core.Error with code connectWalletErr
 	}
 	if newAddr != addr {
 		c.log.Infof("New deposit address for %v wallet: %v", unbip(assetID), newAddr)
 		if err = c.storeDepositAddress(w.dbID, newAddr); err != nil {
-			return err
+			return fmt.Errorf("storeDepositAddress: %w", err)
 		}
 	}
 	// First update balances since it is included in WalletState. Ignore errors
@@ -2561,6 +2561,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 			atomic.StoreUint32(&dc.reportingConnects, 1)
 			c.wg.Add(1)
 			go c.listen(dc)
+			go dc.subPriceFeed()
 
 			c.connMtx.Lock()
 			c.conns[dc.acct.host] = dc
@@ -2875,6 +2876,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 			if atomic.CompareAndSwapUint32(&dc.reportingConnects, 0, 1) {
 				c.wg.Add(1)
 				go c.listen(dc)
+				go dc.subPriceFeed()
 			}
 
 			c.connMtx.Lock()
@@ -5186,10 +5188,9 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
 
-	go dc.subPriceFeed()
-
 	if listen {
 		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+		go dc.subPriceFeed()
 	} else {
 		c.log.Infof("Connected to DEX server at %s but NOT listening for messages.", host)
 	}
