@@ -60,6 +60,7 @@ const (
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
 	walletTypeDcrwRPC = "dcrwalletRPC"
+	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
 )
 
 var (
@@ -428,7 +429,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	// Set dcr.wallet using either the default rpcWallet or a custom wallet.
-	if cfg.Type == walletTypeDcrwRPC {
+	if cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy {
 		dcr.wallet, err = newRPCWallet(walletCfg, chainParams, logger)
 		if err != nil {
 			return nil, err
