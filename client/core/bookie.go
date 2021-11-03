@@ -941,11 +941,11 @@ func (dc *dexConnection) subPriceFeed() {
 	}
 
 	// We expect there to be a map in handlePriceUpdateNote.
-	if spots == nil {
-		spots = make(map[string]*msgjson.Spot)
+	spotsCopy := make(map[string]*msgjson.Spot, len(spots))
+	for mkt, spot := range spots {
+		spotsCopy[mkt] = spot
 	}
-
-	dc.notify(newSpotPriceNote(dc.acct.host, spots)) // before putting the map in dc.spots
+	dc.notify(newSpotPriceNote(dc.acct.host, spotsCopy)) // consumers read spotsCopy async with this call
 
 	dc.spotsMtx.Lock()
 	dc.spots = spots
