@@ -242,11 +242,6 @@ func (blockchain *tBlockchain) addRawTx(tx *chainjson.TxRawResult) (*chainhash.H
 
 	// Save prevout and output scripts in block cfilters.
 	blockFilterBuilder := blockchain.v2CFilterBuilders[block.Hash]
-	if blockFilterBuilder == nil {
-		blockFilterBuilder = &tV2CFilterBuilder{}
-		copy(blockFilterBuilder.key[:], randBytes(16))
-		blockchain.v2CFilterBuilders[block.Hash] = blockFilterBuilder
-	}
 	for i := range tx.Vin {
 		input := &tx.Vin[i]
 		prevTx, found := blockchain.rawTxs[input.Txid]
@@ -294,6 +289,10 @@ func (blockchain *tBlockchain) blockAt(height int64) (*chainhash.Hash, *chainjso
 		PreviousHash: prevBlockHash,
 	}
 	blockchain.verboseBlockHeaders[prevBlockHash].NextHash = newBlock.Hash
+
+	blockFilterBuilder := &tV2CFilterBuilder{}
+	copy(blockFilterBuilder.key[:], randBytes(16))
+	blockchain.v2CFilterBuilders[newBlockHash.String()] = blockFilterBuilder
 
 	return &newBlockHash, newBlock
 }
@@ -546,7 +545,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		defer c.blockchain.mtx.RUnlock()
 		blockFilterBuilder := c.blockchain.v2CFilterBuilders[blkHash]
 		if blockFilterBuilder == nil {
-			return nil, fmt.Errorf("v2cfilter builder not found for block")
+			return nil, fmt.Errorf("cfilters builder not found for block %s", blkHash)
 		}
 		v2CFilter, err := blockFilterBuilder.build()
 		if err != nil {
@@ -1035,7 +1034,7 @@ func TestReturnCoins(t *testing.T) {
 		t.Fatalf("no error for missing txout")
 	}
 
-	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
+	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(0, 1, tP2PKHScript)
 	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with custom coin type: %v", err)
@@ -1616,7 +1615,7 @@ func TestSignMessage(t *testing.T) {
 
 	check()
 	delete(wallet.fundingCoins, op.pt)
-	txOut := makeGetTxOutRes(1, 5, nil)
+	txOut := makeGetTxOutRes(0, 5, nil)
 	txOut.ScriptPubKey.Addresses = []string{tPKHAddr.String()}
 	node.txOutRes[newOutPoint(tTxHash, vout)] = txOut
 	check()
@@ -2194,49 +2193,48 @@ func TestLookupTxOutput(t *testing.T) {
 
 	// Bad output coin
 	op.vout = 10
-	_, spendStatus, err := wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for bad output coin")
 	}
-	if spendStatus == outputSpendStatusSpent {
+	if spent {
 		t.Fatalf("spent is true for bad output coin")
 	}
 	op.vout = 0
 
 	// Build the blockchain with some dummy blocks.
-	rand.Seed(time.Now().Unix())
-	for i := 0; i < rand.Intn(100); i++ {
-		node.blockchain.blockAt(int64(i))
-	}
-	tipHash, tipHeight := node.getBestBlock()
-	outputHeight := tipHeight - 1 // i.e. 2 confirmations
-	outputBlockHash, _ := node.blockchain.blockAt(outputHeight)
+	// rand.Seed(time.Now().Unix())
+	// node.blockchain.mtx.Lock()
+	// for i := 1; i < rand.Intn(100); i++ {
+	// 	node.blockchain.blockAt(int64(i))
+	// }
+	// node.blockchain.mtx.Unlock()
+	// wallet.checkForNewBlocks() // update the tip cache
+	// tipHash, tipHeight := node.getBestBlock()
+	// outputHeight := tipHeight - 1 // i.e. 2 confirmations
+	// outputBlockHash, _ := node.blockchain.blockAt(outputHeight)
 
 	// Add the txOutRes with 2 confs and BestBlock correctly set.
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	node.txOutRes[op].BestBlock = tipHash.String()
-	txOut, spendStatus, err := wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, confs, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("unexpected lookupTxOutput error: %v", err)
+		t.Fatalf("unexpected error for gettxout path: %v", err)
 	}
-	if txOut.blockHeight != outputHeight {
-		t.Fatalf("output block height not retrieved from gettxout path. expected %d, got %d", outputHeight, txOut.blockHeight)
+	if confs != 2 {
+		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
 	}
-	if confirms(tipHeight, txOut.blockHeight) != 2 {
-		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confirms(tipHeight, txOut.blockHeight))
-	}
-	if spendStatus == outputSpendStatusSpent {
+	if spent {
 		t.Fatalf("expected spent = false for gettxout path, got true")
 	}
 
 	// gettransaction error
 	delete(node.txOutRes, op)
 	node.walletTxErr = tErr
-	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
-	if spendStatus == outputSpendStatusSpent {
+	if spent {
 		t.Fatalf("spent is true with gettransaction error")
 	}
 	node.walletTxErr = nil
@@ -2246,7 +2244,9 @@ func TestLookupTxOutput(t *testing.T) {
 	// considered spent.
 	tx := wire.NewMsgTx()
 	tx.AddTxIn(&wire.TxIn{})
-	tx.AddTxOut(&wire.TxOut{})
+	tx.AddTxOut(&wire.TxOut{
+		PkScript: tP2PKHScript,
+	})
 	txHex, err := msgTxToHex(tx)
 	if err != nil {
 		t.Fatalf("error preparing tx hex with 1 output: %v", err)
@@ -2255,46 +2255,45 @@ func TestLookupTxOutput(t *testing.T) {
 		Hex:           txHex,
 		Confirmations: 0, // unconfirmed = unspent
 	}
-	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("coin error: %v", err)
+		t.Fatalf("unexpected error for gettransaction path (unconfirmed): %v", err)
 	}
-	if spendStatus != outputSpendStatusUnspent {
-		t.Fatalf("expected spent = false for gettransaction path, got true")
+	if spent {
+		t.Fatalf("expected spent = false for gettransaction path (unconfirmed), got true")
 	}
 
 	// Confirmed wallet tx without gettxout response is spent.
 	node.walletTx.Confirmations = 2
-	node.walletTx.BlockHash = outputBlockHash.String()
-	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("coin error: %v", err)
+		t.Fatalf("unexpected error for gettransaction path (confirmed): %v", err)
 	}
-	if spendStatus != outputSpendStatusSpent {
-		t.Fatalf("expected spent = true for gettransaction path, got false")
+	if !spent {
+		t.Fatalf("expected spent = true for gettransaction path (confirmed), got false")
 	}
 
-	// In spv mode, spend status is unknown unless the output pays to the
-	// wallet (then it's considered be considered spent).
+	// In spv mode, output is assumed unspent if it doesn't pay to the wallet.
 	(wallet.wallet.(*rpcWallet)).spvMode = true
-	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("coin error: %v", err)
+		t.Fatalf("unexpected error for spv gettransaction path (non-wallet output): %v", err)
 	}
-	if spendStatus != outputSpendStatusUnknown {
-		t.Fatalf("expected spent = unknown for spv gettransaction path, got %t", spendStatus == outputSpendStatusSpent)
+	if spent {
+		t.Fatalf("expected spent = false for spv gettransaction path (non-wallet output), got true")
 	}
 
-	// In spv mode, the output must pay to the wallet be considered spent.
+	// In spv mode, output is spent if it pays to the wallet.
 	node.walletTx.Details = []walletjson.GetTransactionDetailsResult{{
-		Vout: 0,
+		Vout:     0,
+		Category: "receive", // output at index 0 pays to the wallet
 	}}
-	_, spendStatus, err = wallet.lookupTxOutput(context.Background(), op, true, nil, time.Time{})
+	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("coin error: %v", err)
+		t.Fatalf("unexpected error for spv gettransaction path (wallet output): %v", err)
 	}
-	if spendStatus != outputSpendStatusSpent {
-		t.Fatalf("expected spent = true for spv gettransaction path, got false")
+	if !spent {
+		t.Fatalf("expected spent = true for spv gettransaction path (wallet output), got false")
 	}
 }
 

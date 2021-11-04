@@ -16,7 +16,6 @@ import (
 // exist and be unspent.
 const (
 	CoinNotFoundError = dex.ErrorKind("coin not found")
-	CoinIsSpentError  = dex.ErrorKind("coin is spent")
 	ErrRequestTimeout = dex.ErrorKind("request timeout")
 	ErrConnectionDown = dex.ErrorKind("wallet not connected")
 	ErrNotImplemented = dex.ErrorKind("not implemented")

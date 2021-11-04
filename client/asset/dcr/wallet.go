@@ -84,13 +84,14 @@ type Wallet interface {
 	GetChangeAddress(ctx context.Context, account string) (stdaddr.Address, error)
 	// LockUnspent locks or unlocks the specified outpoint.
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
-	// GetTxOut returns information about an unspent tx output, if found and
-	// is unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
+	// UnspentOutput returns information about an unspent tx output, if found
+	// and unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
 	// correct tree will be returned if the unspent output is found.
-	// An asset.CoinNotFoundError is returned if the unspent output cannot be
-	// located. UnspentOutput is only guaranteed to return results for outputs
-	// that pay to the wallet.
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, int8, error)
+	// This method is only guaranteed to return results for outputs that pay to
+	// the wallet, although wallets connected to a full node may return results
+	// for non-wallet outputs. Returns asset.CoinNotFoundError if the unspent
+	// output cannot be located.
+	UnspentOutput(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8) (*TxOutput, error)
 	// GetNewAddressGapPolicy returns an address from the specified account using
 	// the specified gap policy.
 	GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error)
@@ -136,4 +137,13 @@ type Wallet interface {
 	SyncStatus(ctx context.Context) (bool, float32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error)
+}
+
+// TxOutput defines properties of a transaction output, including the
+// details of the block containing the tx, if mined.
+type TxOutput struct {
+	*wire.TxOut
+	Tree          int8
+	Addresses     []string
+	Confirmations uint32
 }

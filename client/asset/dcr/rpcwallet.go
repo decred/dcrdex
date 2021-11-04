@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -377,15 +378,14 @@ func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.Ou
 	return translateRPCCancelErr(w.rpcClient.LockUnspent(ctx, unlock, ops))
 }
 
-// GetTxOut returns information about an unspent tx output, if found and
-// is unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
+// UnspentOutput returns information about an unspent tx output, if found
+// and unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
 // correct tree will be returned if the unspent output is found.
-// An asset.CoinNotFoundError is returned if the unspent output cannot be
-// located. UnspentOutput is only guaranteed to return results for outputs
-// that pay to the wallet.
+// This method is only guaranteed to return results for outputs that pay to
+// the wallet. Returns asset.CoinNotFoundError if the unspent output cannot
+// be located.
 // Part of the Wallet interface.
-func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, int8, error) {
-	// Check for unspent output with gettxout rpc.
+func (w *rpcWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8) (*TxOutput, error) {
 	var checkTrees []int8
 	switch {
 	case tree == wire.TxTreeUnknown:
@@ -393,21 +393,36 @@ func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index 
 	case tree == wire.TxTreeRegular || tree == wire.TxTreeStake:
 		checkTrees = []int8{tree}
 	default:
-		return nil, wire.TxTreeUnknown, fmt.Errorf("invalid tx tree %d", tree)
+		return nil, fmt.Errorf("invalid tx tree %d", tree)
 	}
 
 	for _, tree := range checkTrees {
-		txout, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, mempool)
+		txOut, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, true)
 		if err != nil {
-			return nil, tree, translateRPCCancelErr(err)
+			return nil, translateRPCCancelErr(err)
 		}
-		if txout != nil {
-			return txout, tree, nil
+		if txOut == nil {
+			continue
 		}
+
+		amount, err := dcrutil.NewAmount(txOut.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid amount %f: %v", txOut.Value, err)
+		}
+		pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ScriptPubKey %s: %v", txOut.ScriptPubKey.Hex, err)
+		}
+		output := &TxOutput{
+			TxOut:         newTxOut(int64(amount), txOut.ScriptPubKey.Version, pkScript),
+			Tree:          tree,
+			Addresses:     txOut.ScriptPubKey.Addresses,
+			Confirmations: uint32(txOut.Confirmations),
+		}
+		return output, nil
 	}
 
-	// Return asset.CoinNotFoundError if no result was gotten from gettxout.
-	return nil, wire.TxTreeUnknown, asset.CoinNotFoundError
+	return nil, asset.CoinNotFoundError
 }
 
 // GetNewAddressGapPolicy returns an address from the specified account using
