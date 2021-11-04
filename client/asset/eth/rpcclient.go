@@ -247,7 +247,7 @@ func (c *rpcclient) addSignerToOpts(txOpts *bind.TransactOpts, netID int64) erro
 }
 
 // initiate creates swap contracts. The initiator will be the account at
-// txOpts.From. Any on-chain failure, such using an already existing secret
+// txOpts.From. Any on-chain failure, such as using an already existing secret
 // hash, will not cause this to error.
 func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
 	err := c.addSignerToOpts(txOpts, netID)

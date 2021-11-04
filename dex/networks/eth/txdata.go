@@ -25,15 +25,12 @@ const (
 // initiate with expected argument types. It returns the array of initiations
 // with which initiate was called.
 func ParseInitiateData(calldata []byte) ([]ETHSwapInitiation, error) {
-	fail := func(err error) ([]ETHSwapInitiation, error) {
-		return nil, err
-	}
 	decoded, err := parseCallData(calldata, ETHSwapABI)
 	if err != nil {
-		return fail(fmt.Errorf("unable to parse call data: %v", err))
+		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
 	if decoded.name != initiateFuncName {
-		return fail(fmt.Errorf("expected %v function but got %v", initiateFuncName, decoded.name))
+		return nil, fmt.Errorf("expected %v function but got %v", initiateFuncName, decoded.name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
@@ -41,7 +38,7 @@ func ParseInitiateData(calldata []byte) ([]ETHSwapInitiation, error) {
 	//
 	// TODO: If any of the checks prove redundant, remove them.
 	if len(args) != numInputArgs {
-		return fail(fmt.Errorf("expected %v input args but got %v", numInputArgs, len(args)))
+		return nil, fmt.Errorf("expected %v input args but got %v", numInputArgs, len(args))
 	}
 	initiations, ok := args[0].value.([]struct {
 		RefundTimestamp *big.Int       `json:"refundTimestamp"`
@@ -50,7 +47,7 @@ func ParseInitiateData(calldata []byte) ([]ETHSwapInitiation, error) {
 		Value           *big.Int       `json:"value"`
 	})
 	if !ok {
-		return fail(fmt.Errorf("expected first arg of type []ETHSwapInitiation but got %T", args[0].value))
+		return nil, fmt.Errorf("expected first arg of type []ETHSwapInitiation but got %T", args[0].value)
 	}
 
 	toReturn := make([]ETHSwapInitiation, 0, len(initiations))
