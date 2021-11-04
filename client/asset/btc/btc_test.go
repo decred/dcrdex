@@ -1909,12 +1909,11 @@ func TestAuditContract(t *testing.T) {
 }
 
 func testAuditContract(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, _, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	now := time.Now()
@@ -1936,31 +1935,16 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 		contractAddr, _ = btcutil.NewAddressScriptHash(contract, &chaincfg.MainNetParams)
 	}
 	pkScript, _ := txscript.PayToAddrScript(contractAddr)
-
-	// Prime a blockchain
-	const tipHeight = 10
-	const txBlockHeight = 9
-	for i := int64(1); i < tipHeight; i++ {
-		node.addRawTx(i, dummyTx())
-	}
-
 	tx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
-	blockHash, _ := node.addRawTx(txBlockHeight, tx)
-	node.getCFilterScripts[*blockHash] = [][]byte{pkScript} //spv
-	node.txOutRes = &btcjson.GetTxOutResult{                // rpc
-		Confirmations: 2,
-		Value:         float64(swapVal) / 1e8,
-		ScriptPubKey: btcjson.ScriptPubKeyResult{
-			Hex: hex.EncodeToString(pkScript),
-		},
+	txData, err := serializeMsgTx(tx)
+	if err != nil {
+		t.Fatalf("error making contract tx data: %v", err)
 	}
-	node.getTransactionErr = WalletTransactionNotFound
 
 	txHash := tx.TxHash()
 	const vout = 0
-	outPt := newOutPoint(&txHash, vout)
 
-	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
+	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, txData, now)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1975,21 +1959,10 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil, now)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, txData, now)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
-
-	// GetTxOut error
-	node.txOutErr = tErr
-	delete(node.getCFilterScripts, *blockHash)
-	delete(node.checkpoints, outPt)
-	_, err = wallet.AuditContract(toCoinID(&txHash, vout), contract, nil, now)
-	if err == nil {
-		t.Fatalf("no error for unknown txout")
-	}
-	node.txOutErr = nil
-	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
 
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")

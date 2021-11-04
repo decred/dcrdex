@@ -153,23 +153,13 @@ type Wallet interface {
 	// signature for each pubkey are returned.
 	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
 	// AuditContract retrieves information about a swap contract from the
-	// blockchain (where possible) or from the provided txData (if valid).
-	// The information returned would be used to verify the counter-party's
-	// contract during a swap. If the coin cannot be found on the blockchain
-	// and the provided txData cannot be broadcasted, a CoinNotFoundError
-	// may be returned. This enables the client to properly handle network
-	// latency where appropriate.
-	//
-	// NOTE: For SPV wallets, a successful audit response is no gaurantee that
-	// the txData provided was actually broadcasted to the blockchain. An error
-	// may have occurred while trying to broadcast the txData or even if there
-	// was no broadcast error, the tx might still not enter mempool or get mined
-	// e.g. if the tx references invalid or already spent inputs.
-	//
-	// Granted, clients wait for the contract tx to be included in a block before
-	// taking further actions on a match; but it is generally safer to repeat this
-	// audit after the contract tx is mined to ensure that the tx observed on the
-	// blockchain is as expected.
+	// provided txData and broadcasts the txData to ensure the contract is
+	// propagated to the blockchain. The information returned would be used
+	// to verify the counter-party's contract during a swap. It is not an
+	// error if the provided txData cannot be broadcasted because it may
+	// already be broadcasted. A successful audit response does not mean
+	// the tx exists on the blockchain, use SwapConfirmations to ensure
+	// the tx is mined.
 	AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time

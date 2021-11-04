@@ -149,7 +149,7 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 	// mainchain, scan back to the mainchain ancestor of the lastScannedBlock.
 	var lastScannedBlock *block
 	if tx.lastScannedBlock != nil {
-		stopBlockHash, stopBlockHeight, err := dcr.mainChainAncestor(ctx, tx.lastScannedBlock)
+		stopBlockHash, stopBlockHeight, err := dcr.mainchainAncestor(ctx, tx.lastScannedBlock)
 		if err != nil {
 			return nil, fmt.Errorf("error looking up mainchain ancestor for block %s", err)
 		}
@@ -186,6 +186,7 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 		return nil, nil
 	}
 
+	earliestTxStamp := earliestTxTime.Unix()
 	for {
 		msgTx, outputSpenders, err := dcr.findTxInBlock(ctx, tx.hash, txScripts, iHash)
 		if err != nil {
@@ -212,7 +213,7 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 		if err != nil {
 			return nil, fmt.Errorf("getblockheader error for block %s: %w", iHash, translateRPCCancelErr(err))
 		}
-		if iBlock.Time <= earliestTxTime.Unix() {
+		if iBlock.Time <= earliestTxStamp {
 			return scanCompletedWithoutResults()
 		}
 
@@ -317,11 +318,11 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	// This tx output is not known to be spent as of last search (if any).
 	// Scan block filters starting from the block after the tx block or the
-	// lastScannedBlock (if there was a previous scan). Use mainChainAncestor
+	// lastScannedBlock (if there was a previous scan). Use mainchainAncestor
 	// to ensure that scanning starts from a mainchain block in the event that
 	// the lastScannedBlock have been re-orged out of the mainchain. We already
 	// checked that the txBlock is not invalidated above.
-	_, lastScannedHeight, err := dcr.mainChainAncestor(ctx, output.lastScannedBlock)
+	_, lastScannedHeight, err := dcr.mainchainAncestor(ctx, output.lastScannedBlock)
 	if err != nil {
 		return false, err
 	}

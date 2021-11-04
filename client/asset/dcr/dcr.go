@@ -618,16 +618,10 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 // feeRateWithFallback attempts to get the optimal fee rate in atoms / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
 func (dcr *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	var err error
-	if !dcr.wallet.SpvMode() {
-		var feeRate uint64
-		feeRate, err = dcr.feeRate(confTarget)
-		if err == nil {
-			dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
-			return feeRate
-		}
-	} else {
-		err = errors.New("SPV does not support estimatesmartfee")
+	feeRate, err := dcr.feeRate(confTarget)
+	if err == nil {
+		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		return feeRate
 	}
 	if feeSuggestion > 0 && feeSuggestion < dcr.fallbackFeeRate && feeSuggestion < dcr.feeRateLimit {
 		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
@@ -1496,24 +1490,11 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
-// AuditContract retrieves information about a swap contract from the blockchain
-// (if possible) or from the provided txData if the provided txData represents a
-// valid transaction that pays to the provided contract at the specified coinID
-// and (for full node wallets) can be broadcasted to the blockchain network.
-//
-// The information returned would be used to verify the counter-party's contract
-// during a swap.
-//
-// NOTE: For SPV wallets, a successful audit response is no guarantee that the
-// txData provided to this method was actually broadcasted to the blockchain.
-// An error may have occurred while trying to broadcast the txData or even if
-// there was no broadcast error, the tx might still not enter mempool or get
-// mined e.g. if the tx references invalid or already spent inputs.
-//
-// Granted, clients wait for the contract tx to be included in a block before
-// taking further actions on a match; but it is generally safer to repeat this
-// audit after the contract tx is mined to ensure that the tx observed on the
-// blockchain is as expected.
+// AuditContract retrieves information about a swap contract from the provided
+// txData if it represents a valid transaction that pays to the contract at the
+// specified coinID. An attempt is also made to broadcasted the txData to the
+// blockchain network but it is not necessary that the broadcast succeeds since
+// the contract may have already been broadcasted.
 func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -2977,9 +2958,9 @@ func (dcr *ExchangeWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, err
 	return blockHash, nil
 }
 
-// mainChainAncestor crawls blocks backwards starting at the provided hash
+// mainchainAncestor crawls blocks backwards starting at the provided hash
 // until finding a mainchain block. Returns the first mainchain block found.
-func (dcr *ExchangeWallet) mainChainAncestor(ctx context.Context, blockHash *chainhash.Hash) (*chainhash.Hash, int64, error) {
+func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *chainhash.Hash) (*chainhash.Hash, int64, error) {
 	checkHash := blockHash
 	for {
 		checkBlock, err := dcr.wallet.GetBlockHeaderVerbose(ctx, checkHash)
@@ -3002,9 +2983,6 @@ func (dcr *ExchangeWallet) mainChainAncestor(ctx context.Context, blockHash *cha
 }
 
 func (dcr *ExchangeWallet) isMainchainBlock(ctx context.Context, block *block) (bool, error) {
-	if block == nil {
-		return false, nil
-	}
 	blockHeader, err := dcr.wallet.GetBlockHeaderVerbose(ctx, block.hash)
 	if err != nil {
 		return false, fmt.Errorf("getblockheader error for block %s: %w", block.hash, translateRPCCancelErr(err))
