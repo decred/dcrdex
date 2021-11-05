@@ -1138,17 +1138,27 @@ func (w *spvWallet) startWallet() error {
 		bailOnWallet()
 	}
 
-	// If we're on regtest and the peers haven't been explicitly set, add the
-	// simnet harness alpha node as an additional peer so we don't have to type
-	// it in.
-	if w.chainParams.Name == "regtest" && len(w.connectPeers) == 0 {
-		w.connectPeers = []string{"localhost:20575"}
+	// Depending on the network, we add some addpeers or a connect peer. On
+	// regtest, if the peers haven't been explicitly set, add the simnet harness
+	// alpha node as an additional peer so we don't have to type it in. On
+	// mainet and testnet3, add a known reliable persistent peer to be used in
+	// addition to normal DNS seed-based peer discovery.
+	var addPeers []string
+	switch w.chainParams.Net {
+	case wire.MainNet:
+		addPeers = []string{"45.76.69.19"}
+	case wire.TestNet3:
+		addPeers = []string{"dex-test.ssgen.io"}
+	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
+		if len(w.connectPeers) == 0 {
+			w.connectPeers = []string{"localhost:20575"}
+		}
 	}
 	chainService, err := neutrino.NewChainService(neutrino.Config{
-		DataDir:     w.netDir,
-		Database:    w.neutrinoDB,
-		ChainParams: *w.chainParams,
-		// AddPeers:         []string{"localhost"}, // worth a shot
+		DataDir:          w.netDir,
+		Database:         w.neutrinoDB,
+		ChainParams:      *w.chainParams,
+		AddPeers:         addPeers,
 		ConnectPeers:     w.connectPeers,
 		BroadcastTimeout: 10 * time.Second,
 	})
