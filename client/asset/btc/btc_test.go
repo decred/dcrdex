@@ -2550,24 +2550,31 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// full node
 	node.getBlockchainInfo = &getBlockchainInfoResult{
 		Headers: 100,
-		Blocks:  99,
+		Blocks:  99, // full node allowed to be synced when 1 block behind
 	}
+
+	// spv
+	blkHash, _ := node.addRawTx(100, dummyTx())
+	node.mainchain[100] = blkHash // SPV, actually has to reach target
 
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
 	if !synced {
-		t.Fatalf("synced = false for 1 block to go")
+		t.Fatalf("synced = false")
 	}
 	if progress < 1 {
 		t.Fatalf("progress not complete when loading last block")
 	}
 
 	node.getBlockchainInfoErr = tErr // rpc
-	node.getBestBlockHashErr = tErr  // spv
+	node.getBestBlockHashErr = tErr  // spv BestBlock()
+	delete(node.mainchain, 100)      // force spv to BestBlock() with no wallet block
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")

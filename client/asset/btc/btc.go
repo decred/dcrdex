@@ -765,12 +765,14 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
 
-	btc.tipMtx.Lock()
-	btc.currentTip, err = btc.blockFromHash(bestBlockHash)
-	btc.tipMtx.Unlock()
+	bestBlock, err := btc.blockFromHash(bestBlockHash)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing best block for %s: %w", btc.symbol, err)
 	}
+	btc.log.Infof("Connected wallet with current best block %v (%d)", bestBlock.hash, bestBlock.height)
+	btc.tipMtx.Lock()
+	btc.currentTip = bestBlock
+	btc.tipMtx.Unlock()
 	atomic.StoreInt64(&btc.tipAtConnect, btc.currentTip.height)
 	wg.Add(1)
 	go func() {
@@ -807,6 +809,9 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	ss, err := btc.node.syncStatus()
 	if err != nil {
 		return false, 0, err
+	}
+	if ss.Target == 0 { // do not say progress = 1
+		return false, 0, nil
 	}
 	if ss.Syncing {
 		ogTip := atomic.LoadInt64(&btc.tipAtConnect)
