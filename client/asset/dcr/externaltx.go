@@ -62,7 +62,17 @@ func (dcr *ExchangeWallet) lookupTxOutWithBlockFilters(ctx context.Context, op o
 		return 0, false, fmt.Errorf("error checking if output %s is spent: %v", op, err)
 	}
 
-	return dcr.confirms(outputBlock.height), spent, nil
+	// Get the current tip height to calculate confirmations.
+	tip, err := dcr.getBestBlock(ctx)
+	if err != nil {
+		dcr.log.Errorf("getbestblock error %v", err)
+		*tip = dcr.cachedBestBlock()
+	}
+	var confs uint32
+	if tip.height >= outputBlock.height { // slight possibility that the cached tip height is behind the output's block height
+		confs = uint32(tip.height + 1 - outputBlock.height)
+	}
+	return confs, spent, nil
 }
 
 // externalTxOutput attempts to locate the requested tx output in a mainchain
@@ -97,14 +107,14 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 		if err != nil {
 			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %v", tx.hash, err)
 		}
+		if txBlock == nil {
+			return nil, nil, asset.CoinNotFoundError
+		}
 	}
-	if txBlock == nil {
-		return nil, nil, asset.CoinNotFoundError
-	}
+
 	if len(tx.outputSpenders) <= int(op.vout) {
 		return nil, nil, fmt.Errorf("tx %s does not have an output at index %d", tx.hash, op.vout)
 	}
-
 	return tx.outputSpenders[op.vout], txBlock, nil
 }
 
@@ -236,9 +246,9 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.
 		return nil, nil, nil
 	}
 
-	blk, err := dcr.getBlock(ctx, blockHash, true)
+	blk, err := dcr.wallet.GetBlockVerbose(ctx, blockHash, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
 	}
 
 	var txHex string
@@ -340,7 +350,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	// Search for this output's spender in the blocks between startBlock and
 	// the current best block.
-	nextScanHash, err := dcr.getBlockHash(nextScanHeight)
+	nextScanHash, err := dcr.wallet.GetBlockHash(ctx, nextScanHeight)
 	if err != nil {
 		return false, err
 	}
@@ -374,21 +384,23 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 // was last checked is returned along with any error that may have occurred
 // during the search.
 func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
+	var lastScannedHash *chainhash.Hash
+
 	iHeight := startBlock.height
 	iHash := startBlock.hash
 	bestBlock := dcr.cachedBestBlock()
 	for {
 		blockFilter, err := dcr.getBlockFilterV2(ctx, iHash)
 		if err != nil {
-			return nil, nil, err
+			return nil, lastScannedHash, err
 		}
 
 		if blockFilter.Match(outputPkScript) {
 			dcr.log.Debugf("Output %s is likely spent in block %d (%s). Confirming.",
 				op, iHeight, iHash)
-			blk, err := dcr.getBlock(ctx, iHash, true)
+			blk, err := dcr.wallet.GetBlockVerbose(ctx, iHash, true)
 			if err != nil {
-				return nil, iHash, err
+				return nil, lastScannedHash, fmt.Errorf("error retrieving block %s: %w", iHash, err)
 			}
 			blockTxs := append(blk.RawTx, blk.RawSTx...)
 			for i := range blockTxs {
@@ -412,6 +424,7 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 		if err != nil {
 			return nil, iHash, translateRPCCancelErr(err)
 		}
+		lastScannedHash = iHash
 		iHash = nextHash
 	}
 
@@ -423,12 +436,13 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 // txSpendsOutput returns true if the passed tx has an input that spends the
 // specified output.
 func txSpendsOutput(tx *chainjson.TxRawResult, op outPoint) bool {
-	if tx.Txid == op.txHash.String() {
+	prevOutHash := op.txHash.String()
+	if tx.Txid == prevOutHash {
 		return false // no need to check inputs if this tx is the same tx that pays to the specified op
 	}
 	for i := range tx.Vin {
 		input := &tx.Vin[i]
-		if input.Vout == op.vout && input.Txid == op.txHash.String() {
+		if input.Vout == op.vout && input.Txid == prevOutHash {
 			return true // found spender
 		}
 	}

@@ -1030,12 +1030,6 @@ func TestReturnCoins(t *testing.T) {
 	coinID := toCoinID(tTxHash, 0)
 	coins = asset.Coins{&tCoin{id: coinID}, &tCoin{id: coinID}}
 	err = wallet.ReturnCoins(coins)
-	if err == nil {
-		t.Fatalf("no error for missing txout")
-	}
-
-	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(0, 1, tP2PKHScript)
-	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with custom coin type: %v", err)
 	}
@@ -2193,7 +2187,7 @@ func TestLookupTxOutput(t *testing.T) {
 
 	// Bad output coin
 	op.vout = 10
-	_, _, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for bad output coin")
 	}
@@ -2202,21 +2196,9 @@ func TestLookupTxOutput(t *testing.T) {
 	}
 	op.vout = 0
 
-	// Build the blockchain with some dummy blocks.
-	// rand.Seed(time.Now().Unix())
-	// node.blockchain.mtx.Lock()
-	// for i := 1; i < rand.Intn(100); i++ {
-	// 	node.blockchain.blockAt(int64(i))
-	// }
-	// node.blockchain.mtx.Unlock()
-	// wallet.checkForNewBlocks() // update the tip cache
-	// tipHash, tipHeight := node.getBestBlock()
-	// outputHeight := tipHeight - 1 // i.e. 2 confirmations
-	// outputBlockHash, _ := node.blockchain.blockAt(outputHeight)
-
 	// Add the txOutRes with 2 confs and BestBlock correctly set.
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	_, confs, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, confs, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for gettxout path: %v", err)
 	}
@@ -2230,7 +2212,7 @@ func TestLookupTxOutput(t *testing.T) {
 	// gettransaction error
 	delete(node.txOutRes, op)
 	node.walletTxErr = tErr
-	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
@@ -2255,7 +2237,7 @@ func TestLookupTxOutput(t *testing.T) {
 		Hex:           txHex,
 		Confirmations: 0, // unconfirmed = unspent
 	}
-	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (unconfirmed): %v", err)
 	}
@@ -2265,7 +2247,7 @@ func TestLookupTxOutput(t *testing.T) {
 
 	// Confirmed wallet tx without gettxout response is spent.
 	node.walletTx.Confirmations = 2
-	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (confirmed): %v", err)
 	}
@@ -2275,7 +2257,7 @@ func TestLookupTxOutput(t *testing.T) {
 
 	// In spv mode, output is assumed unspent if it doesn't pay to the wallet.
 	(wallet.wallet.(*rpcWallet)).spvMode = true
-	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for spv gettransaction path (non-wallet output): %v", err)
 	}
@@ -2288,7 +2270,7 @@ func TestLookupTxOutput(t *testing.T) {
 		Vout:     0,
 		Category: "receive", // output at index 0 pays to the wallet
 	}}
-	_, _, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for spv gettransaction path (wallet output): %v", err)
 	}
