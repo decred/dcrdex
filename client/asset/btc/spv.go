@@ -1370,7 +1370,7 @@ search:
 		if res.spend != nil && res.blockHash == nil {
 			w.log.Warnf("A spending input (%s) was found during the scan but the output (%s) "+
 				"itself wasn't found. Was the startBlockHeight early enough?",
-				newOutPoint(&res.spend.blockHash, res.spend.vin),
+				newOutPoint(&res.spend.txHash, res.spend.vin),
 				newOutPoint(&txHash, vout),
 			)
 			return res, nil
