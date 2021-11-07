@@ -66,7 +66,7 @@ var (
 		appPass: []byte("client2"),
 		wallets: map[uint32]*tWallet{
 			dcr.BipID: dcrWallet("trading2"),
-			btc.BipID: &tWallet{spv: true}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
+			btc.BipID: {spv: true}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
 		},
 		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}
@@ -172,9 +172,15 @@ func startClients(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			c.log("Connected %s wallet", unbip(assetID))
+			c.log("Connected %s wallet (spv = %v)", unbip(assetID), wallet.spv)
 
 			if wallet.spv {
+				c.log("Waiting for %s wallet to sync", unbip(assetID))
+				for !c.core.WalletState(assetID).Synced {
+					time.Sleep(time.Second)
+				}
+				c.log("%s wallet synced and ready to use", unbip(assetID))
+
 				// Fund newly created wallet.
 				c.log("Funding newly created SPV wallet")
 				address := c.core.WalletState(assetID).Address
@@ -187,24 +193,14 @@ func startClients(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
+				// Tip change after block filtering scan takes the wallet time.
+				time.Sleep(2 * time.Second * sleepFactor)
 			}
 		}
 
 		err = c.registerDEX(ctx)
 		if err != nil {
 			return err
-		}
-
-		// Wait for spv wallets to sync.
-		for assetID, wallet := range c.wallets {
-			if !wallet.spv {
-				continue
-			}
-			c.log("Waiting for %s wallet to sync", unbip(assetID))
-			for !c.core.WalletState(assetID).Synced {
-				time.Sleep(time.Second)
-			}
-			c.log("%s wallet synced and ready to use", unbip(assetID))
 		}
 	}
 
@@ -238,7 +234,12 @@ func teardown(cancelCtx context.CancelFunc) {
 	}
 }
 
+var sleepFactor time.Duration = 1
+
 func TestMain(m *testing.M) {
+	if race {
+		sleepFactor = 3
+	}
 	tmpDir, _ = os.MkdirTemp("", "")
 	defer os.RemoveAll(tmpDir)
 	os.Exit(m.Run())
@@ -383,6 +384,11 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 			client.log("tick failure: %v", err)
 		}
 
+		// Propagation to miners can take some time after the send RPC
+		// completes, especially with SPV wallets, so wait a bit before mining
+		// blocks in monitorTrackedTrade.
+		time.Sleep(sleepFactor * time.Second)
+
 		return monitorTrackedTrade(ctx, client, tracker, finalStatus)
 	}
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
@@ -401,7 +407,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * time.Second)
+	time.Sleep(4 * sleepFactor * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -681,7 +687,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	client2.log("Disconnecting from the DEX server")
 	c2dc.connMaster.Disconnect()
 	// Disconnection is asynchronous, wait for confirmation of DEX disconnection.
-	disconnectTimeout := 10 * time.Second
+	disconnectTimeout := 10 * sleepFactor * time.Second
 	disconnected := client2.notes.find(context.Background(), disconnectTimeout, func(n Notification) bool {
 		connNote, ok := n.(*ConnEventNote)
 		return ok && connNote.Host == dexHost && !connNote.Connected
@@ -700,6 +706,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	client2.log("Reconnecting DEX to trigger order status reconciliation")
 	// Use core.initialize to restore client 2 orders from db, and login
 	// to trigger dex authentication.
+	// TODO: cannot do this anymore with built-in wallets
 	client2.core.initialize()
 	_, err = client2.core.Login(client2.appPass)
 	if err != nil {
@@ -807,14 +814,17 @@ func TestResendPendingRequests(t *testing.T) {
 		// create new notification feed to catch swap-related errors from send{Init,Redeem}Async
 		notes := client.core.NotificationFeed()
 
+		wait := 5 * sleepFactor * time.Second
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
 		var foundSwapErrorNote bool
 		for !foundSwapErrorNote {
 			select {
 			case note := <-notes:
 				foundSwapErrorNote = note.Severity() == db.ErrorLevel && (note.Topic() == TopicSwapSendError ||
 					note.Topic() == TopicInitError || note.Topic() == TopicReportRedeemError)
-			case <-time.After(4 * time.Second):
-				return fmt.Errorf("client %d: no init/redeem error note after 4 seconds", client.id)
+			case <-timer.C:
+				return fmt.Errorf("client %d: no init/redeem error note after %v", client.id, wait)
 			}
 		}
 
@@ -877,9 +887,9 @@ func TestResendPendingRequests(t *testing.T) {
 	// Allow some time for balance changes to be properly reported.
 	// There is usually a split-second window where a locked output
 	// has been spent but the spending tx is still in mempool. This
-	// will cause the txout to be included in the wallets locked
+	// will cause the txout to be included in the wallet's locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * time.Second)
+	time.Sleep(4 * sleepFactor * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -931,7 +941,7 @@ func simpleTradeTest(t *testing.T, qty, rate uint64, finalStatus order.MatchStat
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * time.Second)
+	time.Sleep(4 * sleepFactor * time.Second)
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
@@ -1089,6 +1099,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 
 			if assetToMine != nil {
 				assetID, nBlocks := assetToMine.ID, assetToMine.SwapConf
+				time.Sleep(2 * sleepFactor * time.Second)
 				err := mineBlocks(assetID, nBlocks)
 				if err == nil {
 					var actor order.MatchSide
@@ -1099,7 +1110,8 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 					} else {
 						actor = order.Maker
 					}
-					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.MatchID.Bytes()))
+					client.log("Mined %d %s blocks for %s's %s, match %s", nBlocks, unbip(assetID),
+						actor, swapOrRedeem, token(match.MatchID.Bytes()))
 				} else {
 					client.log("%s mine error %v", unbip(assetID), err) // return err???
 				}
@@ -1202,7 +1214,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	// will be greater than the furthest swap locktime, thereby lifting the
 	// time lock on all these swaps.
 	mineMedian := func(assetID uint32) error {
-		time.Sleep(1 * time.Second)
+		time.Sleep(sleepFactor * time.Second)
 		if err := mineBlocks(assetID, 6); err != nil {
 			return fmt.Errorf("client %d: error mining 6 btc blocks for swap refunds: %v",
 				client.id, err)
@@ -1252,7 +1264,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			}
 		}
 	}
-	time.Sleep(4 * time.Second)
+	time.Sleep(4 * sleepFactor * time.Second)
 
 	client.expectBalanceDiffs = refundAmts
 	err = client.assertBalanceChanges()

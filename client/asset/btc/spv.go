@@ -780,7 +780,10 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	var assumedMempool bool
 	switch err {
 	case WalletTransactionNotFound:
+		w.log.Tracef("swapConfirmations - WalletTransactionNotFound: %v:%d", txHash, vout)
 	case SpentStatusUnknown:
+		w.log.Tracef("swapConfirmations - SpentStatusUnknown: %v:%d (block %v, confs %d)",
+			txHash, vout, blockHash, confs)
 		if blockHash == nil {
 			// We generated this swap, but it probably hasn't been mined yet.
 			// It's SpentStatusUnknown because the wallet doesn't track the
@@ -804,6 +807,8 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	}
 
 	// Our last option is neutrino.
+	w.log.Tracef("swapConfirmations - scanFilters: %v:%d (block %v, start time %v)",
+		txHash, vout, blockHash, startTime)
 	utxo, err := w.scanFilters(txHash, vout, pkScript, startTime, blockHash)
 	if err != nil {
 		return 0, false, err
@@ -811,6 +816,8 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 
 	if utxo.spend == nil && utxo.blockHash == nil {
 		if assumedMempool {
+			w.log.Tracef("swapConfirmations - scanFilters did not find %v:%d, assuming in mempool.",
+				txHash, vout)
 			return 0, false, nil
 		}
 		return 0, false, fmt.Errorf("output %s:%v not found with search parameters startTime = %s, pkScript = %x",
@@ -1273,6 +1280,8 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 	// If we found a block, let's store a reference in our local database so we
 	// can maybe bypass a long search next time.
 	if utxo.blockHash != nil {
+		w.log.Debugf("cfilters scan SUCCEEDED for %v:%d. block hash: %v, spent: %v",
+			txHash, vout, utxo.blockHash, utxo.spend != nil)
 		w.storeTxBlock(*txHash, *utxo.blockHash)
 	}
 
@@ -1361,7 +1370,7 @@ search:
 		if res.spend != nil && res.blockHash == nil {
 			w.log.Warnf("A spending input (%s) was found during the scan but the output (%s) "+
 				"itself wasn't found. Was the startBlockHeight early enough?",
-				newOutPoint(&res.spend.blockHash, res.spend.vin),
+				newOutPoint(&res.spend.txHash, res.spend.vin),
 				newOutPoint(&txHash, vout),
 			)
 			return res, nil
@@ -1380,6 +1389,7 @@ search:
 			continue search
 		}
 		// Pull the block.
+		w.log.Tracef("Block %v matched pkScript %v. Pulling the block...", blockHash, pkScript)
 		block, err := w.cl.GetBlock(*blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("GetBlock error: %v", err)
@@ -1400,6 +1410,8 @@ search:
 							blockHash:   *block.Hash(),
 							blockHeight: uint32(height),
 						}
+						w.log.Tracef("Found txn %v spending %v in block %v (%d)", res.spend.txHash,
+							txHash, res.spend.blockHash, res.spend.blockHeight)
 						if res.blockHash != nil {
 							break search
 						}
@@ -1418,6 +1430,7 @@ search:
 					res.blockHash = block.Hash()
 					res.blockHeight = uint32(height)
 					res.txOut = txOut
+					w.log.Tracef("Found txn %v in block %v (%d)", txHash, res.blockHash, height)
 					if res.spend != nil {
 						break search
 					}

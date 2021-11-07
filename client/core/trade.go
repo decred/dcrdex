@@ -880,6 +880,9 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	if match.Status == order.MakerSwapCast {
 		// Get the confirmation count on the maker's coin.
 		if match.Side == order.Taker {
+			toAssetID := t.wallets.toAsset.ID
+			t.dc.log.Tracef("Checking confirmations on COUNTERPARTY swap txn %v (%s)...",
+				coinIDString(toAssetID, match.MetaData.Proof.MakerSwap), unbip(toAssetID))
 			// If the maker is the counterparty, we can determine swappability
 			// based on the confirmations.
 			confs, req, changed, spent := t.counterPartyConfirms(ctx, match)
@@ -896,6 +899,8 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			return ready
 		}
 		// If we're the maker, check the confirmations anyway so we can notify.
+		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
+			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
 		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.Script, match.MetaData.Stamp)
 		if err != nil {
