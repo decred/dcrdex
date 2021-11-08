@@ -106,19 +106,6 @@ func (at *APITime) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// BanResult holds the result of a ban.
-type BanResult struct {
-	AccountID  string  `json:"accountid"`
-	BrokenRule byte    `json:"brokenrule"`
-	BanTime    APITime `json:"bantime"`
-}
-
-// UnbanResult holds the result of an unban.
-type UnbanResult struct {
-	AccountID string  `json:"accountid"`
-	UnbanTime APITime `json:"unbantime"`
-}
-
 // ForgiveResult holds the result of a forgive_match.
 type ForgiveResult struct {
 	AccountID   string  `json:"accountid"`

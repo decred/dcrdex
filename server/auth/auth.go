@@ -884,8 +884,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 }
 
 // Unban forgives a user, allowing them to resume trading if their score permits
-// it. This is primarily useful for reversing a manual ban. Use ForgiveMatchFail
-// to forgive specific match negotiation failures.
+// it. Use ForgiveMatchFail to forgive specific match negotiation failures.
 func (auth *AuthManager) Unban(user account.AccountID) error {
 	client := auth.user(user)
 	if client != nil {

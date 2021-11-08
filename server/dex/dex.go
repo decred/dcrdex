@@ -917,17 +917,6 @@ func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	return dm.storage.AccountInfo(aid)
 }
 
-// Penalize bans an account by canceling the client's orders and setting their rule
-// status to rule.
-func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string) error {
-	return dm.authMgr.Penalize(aid, rule, details)
-}
-
-// Unban reverses a ban and allows a client to resume trading.
-func (dm *DEX) Unban(aid account.AccountID) error {
-	return dm.authMgr.Unban(aid)
-}
-
 // ForgiveMatchFail forgives a user for a specific match failure, potentially
 // allowing them to resume trading if their score becomes passing.
 func (dm *DEX) ForgiveMatchFail(aid account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error) {
