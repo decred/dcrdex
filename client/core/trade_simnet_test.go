@@ -163,7 +163,7 @@ func startClients(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			c.log("Connected %s wallet (spv = %v)", unbip(assetID), wallet.spv)
+			c.log("Connected %s wallet (created/builtin = %v)", unbip(assetID), wallet.created)
 
 			if wallet.created {
 				c.log("Waiting for %s wallet to sync", unbip(assetID))

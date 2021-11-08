@@ -1827,7 +1827,6 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract from the provided
 // txData. The extracted information would be used to audit the counter-party's
 // contract during a swap.
-// TODO: Broadcast the txData.
 func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, since time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -1839,8 +1838,8 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
-	// Perform basic validation using the txData. Also want to broadcast the transaction if using
-	// an spvWallet. It may be worth separating data validation from coin
+	// Perform basic validation using the txData.
+	// It may be worth separating data validation from coin
 	// retrieval at the asset.Wallet interface level.
 	tx, err := msgTxFromBytes(txData)
 	if err != nil {
@@ -1884,6 +1883,13 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 	if !bytes.Equal(contractHash, addr.ScriptAddress()) {
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
+	}
+
+	// Broadcast the transaction.
+	if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
+		btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+	} else if !hashSent.IsEqual(txHash) {
+		btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
 	}
 
 	return &asset.AuditInfo{

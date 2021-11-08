@@ -363,17 +363,17 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 	}
 
 	// Cache relevant spender info if the spender is found.
-	spent := spenderTx != nil
-	if spent {
-		spenderBlockHash, err := chainhash.NewHashFromStr(spenderTx.BlockHash)
-		if err != nil {
-			// dcr.log.Errorf("Invalid hash (%s) for tx that spends output %s: %v", spenderTx.BlockHash, output.op, err)
-			return false, fmt.Errorf("invalid hash (%s) for tx that spends output %s: %v", spenderTx.BlockHash, output.op, err)
-		} else {
-			output.spenderBlock = &block{hash: spenderBlockHash, height: spenderTx.BlockHeight}
-		}
+	if spenderTx == nil {
+		return false, nil
 	}
-	return spent, err
+
+	spenderBlockHash, err := chainhash.NewHashFromStr(spenderTx.BlockHash)
+	if err != nil {
+		return true, fmt.Errorf("invalid hash (%s) for tx that spends output %s: %w",
+			spenderTx.BlockHash, output.op, err)
+	}
+	output.spenderBlock = &block{hash: spenderBlockHash, height: spenderTx.BlockHeight}
+	return true, nil
 }
 
 // findTxOutSpender attempts to find and return the tx that spends the provided

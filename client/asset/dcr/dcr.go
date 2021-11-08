@@ -1551,30 +1551,23 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 			contractHash, addrScript)
 	}
 
+	// The counter-party should have broadcasted the contract tx but
+	// rebroadcast just in case to ensure that the tx is sent to the
+	// network.
+	if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
+		dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+	} else if !hashSent.IsEqual(txHash) {
+		dcr.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
+	}
+
 	txTree := determineTxTree(contractTx)
-	auditInfo := &asset.AuditInfo{
+	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), txTree),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
-	}
-
-	// The counter-party should have broadcasted the contract tx but
-	// rebroadcast just in case to ensure that the tx is sent to the
-	// network.
-	dcr.log.Debugf("Rebroadcasting contract tx %v.", txData)
-	allowHighFees := true // high fees shouldn't prevent this tx from being bcast
-	finalTxHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, allowHighFees)
-	if err != nil {
-		dcr.log.Errorf("Error rebroadcasting contract tx %v: %v.", txData, err)
-	} else if !finalTxHash.IsEqual(txHash) {
-		return nil, fmt.Errorf("broadcasted contract tx, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", txHash, finalTxHash)
-	}
-
-	dcr.log.Infof("Audited contract coin %s:%d using raw tx data. SPV mode = %t", txHash, vout, dcr.wallet.SpvMode())
-	return auditInfo, nil
+	}, nil
 }
 
 func determineTxTree(msgTx *wire.MsgTx) int8 {
