@@ -7,11 +7,10 @@ export RPC_PASS="pass"
 export WALLET_PASS=abc
 
 # --listen and --rpclisten ports for alpha and beta nodes.
-# The --rpclisten ports are exported for use by create-wallet.sh
-# to decide which node to connect a wallet to.
-ALPHA_NODE_PORT="19560"
+# The ports are exported for use by create-wallet.sh.
+export ALPHA_NODE_PORT="19560"
 export ALPHA_NODE_RPC_PORT="19561"
-BETA_NODE_PORT="19570"
+export BETA_NODE_PORT="19570"
 export BETA_NODE_RPC_PORT="19571"
 
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
@@ -272,34 +271,42 @@ sleep 3
 ################################################################################
 
 echo "Creating simnet alpha wallet"
+USE_SPV="0"
 ENABLE_VOTING="2" # 2 = enable voting and ticket buyer
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:3" "alpha" ${ALPHA_WALLET_SEED} \
-${ALPHA_WALLET_RPC_PORT} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT}
+${ALPHA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${ALPHA_WALLET_HTTPPROF_PORT}
 # alpha uses walletpassphrase/walletlock.
 
+# SPV wallets will declare peers stalled and disconnect with only ancient blocks
+# from the archive, so we must mine a couple blocks first, but only now after the
+# voting wallet (alpha) is running.
+tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
+
 echo "Creating simnet beta wallet"
+USE_SPV="1"
 ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:4" "beta" ${BETA_WALLET_SEED} \
-${BETA_WALLET_RPC_PORT} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT}
+${BETA_WALLET_RPC_PORT} ${USE_SPV} ${ENABLE_VOTING} ${BETA_WALLET_HTTPPROF_PORT}
 
 # The trading wallets need to be created from scratch every time.
 echo "Creating simnet trading wallet 1"
+USE_SPV="1"
 ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:5" "trading1" ${TRADING_WALLET1_SEED} \
-${TRADING_WALLET1_PORT} ${ENABLE_VOTING}
+${TRADING_WALLET1_PORT} ${USE_SPV} ${ENABLE_VOTING}
 
 echo "Creating simnet trading wallet 2"
+USE_SPV="1"
 ENABLE_VOTING="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
-${TRADING_WALLET2_PORT} ${ENABLE_VOTING}
+${TRADING_WALLET2_PORT} ${USE_SPV} ${ENABLE_VOTING}
 
 sleep 15
 
 # Give beta's "default" account a password, so it uses unlockaccount/lockaccount.
 tmux send-keys -t $SESSION:0 "./beta setaccountpassphrase default ${WALLET_PASS}${WAIT}" C-m\; wait-for donedcr
-# Lock the wallet so we know we can function with just account unlocking. There
-# is also a bug in dcrwallet that breaks validateaddress if the wallet is
-# unlocked but not the account, so keep the wallet locked.
+
+# Lock the wallet so we know we can function with just account unlocking.
 tmux send-keys -t $SESSION:0 "./beta walletlock${WAIT}" C-m\; wait-for donedcr
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.

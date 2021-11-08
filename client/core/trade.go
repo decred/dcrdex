@@ -872,7 +872,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually swappables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is swappable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
@@ -937,7 +937,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually redeemables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is redeemable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
@@ -1002,7 +1002,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually refundables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is refundable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
@@ -2085,7 +2085,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
+			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp))) // why not match.matchTime()?
 			if err == nil {
 				// Success.
 				errChan <- nil
@@ -2141,6 +2141,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 	if err != nil {
 		return err
 	}
+
 	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
 
 	// Audit the contract.

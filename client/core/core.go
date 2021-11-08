@@ -2725,8 +2725,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, dc.fetchFeeRate(feeAsset.ID))
+	feeRateSuggestion := dc.fetchFeeRate(feeAsset.ID)
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRateSuggestion)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -4911,6 +4911,11 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						defer tracker.mtx.Unlock()
 						if err != nil {
 							match.swapErr = fmt.Errorf("audit error: %w", err)
+							// NOTE: This behaviour differs from the audit request handler behaviour for failed audits.
+							// handleAuditRoute does NOT set a swapErr in case a revised audit request is received from
+							// the server. Audit requests are currently NOT resent, so this difference is trivial. IF
+							// a revised audit request did come through though, no further actions will be taken for this
+							// match even if the revised audit passes validation.
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)

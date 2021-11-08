@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ import (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 5, Patch: 0}
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 8, Patch: 0}
 	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
 )
 
@@ -37,17 +38,15 @@ const (
 	methodListUnspent        = "listunspent"
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
+	methodSyncStatus         = "syncstatus"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
 // with the json-rpc server of an external dcrwallet daemon.
 type rpcWallet struct {
-	// 64-bit atomic variables first. See
-	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect int64
-
 	chainParams *chaincfg.Params
 	log         dex.Logger
+	spvMode     bool
 
 	// rpcConnector is a rpcclient.Client, does not need to be
 	// set for testing.
@@ -55,6 +54,8 @@ type rpcWallet struct {
 	// rpcClient is a combined rpcclient.Client+dcrwallet.Client,
 	// or a stub for testing.
 	rpcClient
+
+	connectCount uint32
 }
 
 // Ensure rpcWallet satisfies the Wallet interface.
@@ -90,7 +91,6 @@ type rpcConnector interface {
 type rpcClient interface {
 	GetCurrentNet(ctx context.Context) (wire.CurrencyNet, error)
 	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
-	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
@@ -132,28 +132,28 @@ func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) 
 		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
 	}
 
-	log := logger.SubLogger("rpcw")
+	log := logger.SubLogger("RPC")
+	rpcw := &rpcWallet{
+		chainParams: chainParams,
+		log:         log,
+	}
+
 	log.Infof("Setting up rpc client to communicate with dcrwallet at %s with TLS certificate %q.",
 		cfg.RPCListen, cfg.RPCCert)
-	nodeRPCClient, err := newClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, log)
+	err := rpcw.setupRPCClient(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert)
 	if err != nil {
 		return nil, fmt.Errorf("error setting up rpc client: %w", err)
 	}
 
-	return &rpcWallet{
-		chainParams:  chainParams,
-		log:          log,
-		rpcConnector: nodeRPCClient,
-		rpcClient:    &combinedClient{nodeRPCClient, dcrwallet.NewClient(dcrwallet.RawRequestCaller(nodeRPCClient), chainParams)},
-	}, nil
+	return rpcw, nil
 }
 
-// newClient attempts to create a new websocket connection to a dcrwallet
+// setupRPCClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Client, error) {
+func (w *rpcWallet) setupRPCClient(host, user, pass, cert string) error {
 	certs, err := os.ReadFile(cert)
 	if err != nil {
-		return nil, fmt.Errorf("TLS certificate read error: %w", err)
+		return fmt.Errorf("TLS certificate read error: %w", err)
 	}
 
 	config := &rpcclient.ConnConfig{
@@ -167,37 +167,39 @@ func newClient(host, user, pass, cert string, logger dex.Logger) (*rpcclient.Cli
 
 	ntfnHandlers := &rpcclient.NotificationHandlers{
 		// Setup an on-connect handler for logging (re)connects.
-		OnClientConnected: func() {
-			logger.Infof("Connected to Decred wallet at %s", host)
-		},
+		OnClientConnected: w.handleRPCClientReconnection,
 	}
-	cl, err := rpcclient.New(config, ntfnHandlers)
+	nodeRPCClient, err := rpcclient.New(config, ntfnHandlers)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
+		return fmt.Errorf("Failed to start dcrwallet RPC client: %w", err)
 	}
 
-	return cl, nil
+	w.rpcConnector = nodeRPCClient
+	w.rpcClient = &combinedClient{nodeRPCClient, dcrwallet.NewClient(dcrwallet.RawRequestCaller(nodeRPCClient), w.chainParams)}
+	return nil
 }
 
-// Connect establishes a connection to the previously created rpc client.
-// Part of the Wallet interface.
-func (w *rpcWallet) Connect(ctx context.Context) error {
-	err := w.rpcConnector.Connect(ctx, false)
-	if err != nil {
-		return fmt.Errorf("dcrwallet connect error: %w", err)
+func (w *rpcWallet) handleRPCClientReconnection() {
+	connectCount := atomic.AddUint32(&w.connectCount, 1)
+	if connectCount == 1 {
+		// first connection, below check will be performed
+		// by *rpcWallet.Connect.
+		return
 	}
 
-	// The websocket client is connected now, so if any of the following checks
-	// fails and we return with a non-nil error, we must shutdown the rpc client
-	// or subsequent reconnect attempts will be met with "websocket client has
-	// already connected".
-	var success bool
-	defer func() {
-		if !success {
-			w.rpcConnector.Shutdown()
-			w.rpcConnector.WaitForShutdown()
-		}
-	}()
+	w.log.Debugf("dcrwallet reconnected (%d)", connectCount-1)
+	err := w.checkRPCConnection(context.TODO())
+	if err != nil {
+		w.log.Errorf("dcrwallet reconnect handler error: %v", err)
+	}
+}
+
+// isSpvMode uses the walletinfo rpc to determine if this wallet is
+// connected to the Decred network via SPV peers.
+func (w *rpcWallet) checkRPCConnection(ctx context.Context) error {
+	// Reset spvMode to false, until we're sure we're connected to
+	// an SPV wallet below.
+	w.spvMode = false
 
 	// Check the required API versions.
 	versions, err := w.rpcConnector.Version(ctx)
@@ -214,26 +216,51 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 		return fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
 			walletSemver, requiredWalletVersion)
 	}
+
 	ver, exists = versions["dcrdjsonrpcapi"]
-	if !exists {
-		return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
-	}
-	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-		return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
+	if exists {
+		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+			return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+				nodeSemver, requiredNodeVersion)
+		}
+		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
+			walletSemver, nodeSemver, w.chainParams.Name)
+	} else {
+		// SPV maybe?
+		walletInfo, err := w.rpcClient.WalletInfo(ctx)
+		if err != nil {
+			return fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
+		}
+		if !walletInfo.SPV {
+			return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
+		}
+		w.spvMode = true
+		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
 	}
 
-	// Set the tipAtConnect, we'll use it later in determining SyncStatus.
-	_, currentTip, err := w.GetBestBlock(ctx)
+	return nil
+}
+
+// Connect establishes a connection to the previously created rpc client.
+// Part of the Wallet interface.
+func (w *rpcWallet) Connect(ctx context.Context) error {
+	err := w.rpcConnector.Connect(ctx, false)
 	if err != nil {
-		return fmt.Errorf("error getting best block height: %w", translateRPCCancelErr(err))
+		return fmt.Errorf("dcrwallet connect error: %w", err)
 	}
-	atomic.StoreInt64(&w.tipAtConnect, currentTip)
 
-	success = true
-	w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-		walletSemver, nodeSemver, w.chainParams.Name)
+	// The websocket client is connected now, so if the following check
+	// fails and we return with a non-nil error, we must shutdown the
+	// rpc client otherwise subsequent reconnect attempts will be met
+	// with "websocket client has already connected".
+	err = w.checkRPCConnection(ctx)
+	if err != nil {
+		w.rpcConnector.Shutdown()
+		w.rpcConnector.WaitForShutdown()
+		return err
+	}
+
 	return nil
 }
 
@@ -255,6 +282,13 @@ func (w *rpcWallet) Disconnected() bool {
 func (w *rpcWallet) Network(ctx context.Context) (wire.CurrencyNet, error) {
 	net, err := w.rpcClient.GetCurrentNet(ctx)
 	return net, translateRPCCancelErr(err)
+}
+
+// SpvMode returns true if the wallet is connected to the Decred
+// network via SPV peers.
+// Part of the Wallet interface.
+func (w *rpcWallet) SpvMode() bool {
+	return w.spvMode
 }
 
 // NotifyOnTipChange registers a callback function that should be invoked when
@@ -344,11 +378,51 @@ func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.Ou
 	return translateRPCCancelErr(w.rpcClient.LockUnspent(ctx, unlock, ops))
 }
 
-// GetTxOut returns information about an unspent tx output.
+// UnspentOutput returns information about an unspent tx output, if found
+// and unspent. Use wire.TxTreeUnknown if the output tree is unknown, the
+// correct tree will be returned if the unspent output is found.
+// This method is only guaranteed to return results for outputs that pay to
+// the wallet. Returns asset.CoinNotFoundError if the unspent output cannot
+// be located.
 // Part of the Wallet interface.
-func (w *rpcWallet) GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
-	txOut, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, mempool)
-	return txOut, translateRPCCancelErr(err)
+func (w *rpcWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8) (*TxOutput, error) {
+	var checkTrees []int8
+	switch {
+	case tree == wire.TxTreeUnknown:
+		checkTrees = []int8{wire.TxTreeRegular, wire.TxTreeStake}
+	case tree == wire.TxTreeRegular || tree == wire.TxTreeStake:
+		checkTrees = []int8{tree}
+	default:
+		return nil, fmt.Errorf("invalid tx tree %d", tree)
+	}
+
+	for _, tree := range checkTrees {
+		txOut, err := w.rpcClient.GetTxOut(ctx, txHash, index, tree, true)
+		if err != nil {
+			return nil, translateRPCCancelErr(err)
+		}
+		if txOut == nil {
+			continue
+		}
+
+		amount, err := dcrutil.NewAmount(txOut.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid amount %f: %v", txOut.Value, err)
+		}
+		pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ScriptPubKey %s: %v", txOut.ScriptPubKey.Hex, err)
+		}
+		output := &TxOutput{
+			TxOut:         newTxOut(int64(amount), txOut.ScriptPubKey.Version, pkScript),
+			Tree:          tree,
+			Addresses:     txOut.ScriptPubKey.Addresses,
+			Confirmations: uint32(txOut.Confirmations),
+		}
+		return output, nil
+	}
+
+	return nil, asset.CoinNotFoundError
 }
 
 // GetNewAddressGapPolicy returns an address from the specified account using
@@ -494,21 +568,13 @@ func (w *rpcWallet) UnlockAccount(ctx context.Context, account, passphrase strin
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
 func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
-	chainInfo, err := w.rpcClient.GetBlockChainInfo(ctx)
+	syncStatus := new(walletjson.SyncStatusResult)
+	err := w.rpcClientRawRequest(ctx, methodSyncStatus, nil, syncStatus)
 	if err != nil {
-		return false, 0, fmt.Errorf("getblockchaininfo error: %w", translateRPCCancelErr(err))
+		return false, 0, fmt.Errorf("rawrequest error: %w", err)
 	}
-	toGo := chainInfo.Headers - chainInfo.Blocks
-	if chainInfo.InitialBlockDownload || toGo > 1 {
-		ogTip := atomic.LoadInt64(&w.tipAtConnect)
-		totalToSync := chainInfo.Headers - ogTip
-		var progress float32 = 1
-		if totalToSync > 0 {
-			progress = 1 - (float32(toGo) / float32(totalToSync))
-		}
-		return false, progress, nil
-	}
-	return true, 1, nil
+	ready := syncStatus.Synced && !syncStatus.InitialBlockDownload
+	return ready, syncStatus.HeadersFetchProgress, nil
 }
 
 // AddressPrivKey fetches the privkey for the specified address.

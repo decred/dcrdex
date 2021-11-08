@@ -25,13 +25,14 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
+	"github.com/btcsuite/btcwallet/wallet"
+	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/gcs/v3/blockcf2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
@@ -382,6 +383,9 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+
+	externalTxMtx   sync.RWMutex
+	externalTxCache map[chainhash.Hash]*externalTx
 }
 
 type block struct {
@@ -482,6 +486,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		tipChange:           cfg.TipChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
+		externalTxCache:     make(map[chainhash.Hash]*externalTx),
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
@@ -1118,7 +1123,7 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) error {
 		if err != nil {
 			return fmt.Errorf("error converting coin: %w", err)
 		}
-		ops = append(ops, wire.NewOutPoint(op.txHash(), op.vout(), op.tree))
+		ops = append(ops, op.wireOutPoint()) // op.tree may be wire.TxTreeUnknown, but that's fine since wallet.LockUnspent doesn't rely on it
 		delete(dcr.fundingCoins, op.pt)
 	}
 	return dcr.wallet.LockUnspent(dcr.ctx, true, ops)
@@ -1164,13 +1169,13 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if !notFound[pt] {
 			continue
 		}
-		txOut, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, output.Vout, output.Tree, true)
+		txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, txHash, output.Vout, output.Tree)
 		if err != nil {
 			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), err)
 		}
 		var address string
-		if len(txOut.ScriptPubKey.Addresses) > 0 {
-			address = txOut.ScriptPubKey.Addresses[0]
+		if len(txOut.Addresses) > 0 {
+			address = txOut.Addresses[0]
 		}
 		coin := newOutput(txHash, output.Vout, toAtoms(output.Amount), output.Tree)
 		coins = append(coins, coin)
@@ -1449,18 +1454,21 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if found {
 		addr = fCoin.addr
 	} else {
-		// Check if we can get the address from gettxout.
-		txOut, err := dcr.wallet.GetTxOut(dcr.ctx, op.txHash(), op.vout(), op.tree, true)
-		if err == nil && txOut != nil {
-			addrs := txOut.ScriptPubKey.Addresses
-			if len(addrs) != 1 {
+		// Check if we can get the address from wallet.UnspentOutput.
+		// op.tree may be wire.TxTreeUnknown but wallet.UnspentOutput is
+		// able to deal with that and find the actual tree.
+		txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, op.txHash(), op.vout(), op.tree)
+		if err != nil {
+			dcr.log.Errorf("gettxout error for SignMessage coin %s: %v", op, err)
+		} else if txOut != nil {
+			if len(txOut.Addresses) != 1 {
 				// TODO: SignMessage is usually called for coins selected by
 				// FundOrder. Should consider rejecting/ignoring multisig ops
 				// in FundOrder to prevent this SignMessage error from killing
 				// order placements.
 				return nil, nil, fmt.Errorf("multi-sig not supported")
 			}
-			addr = addrs[0]
+			addr = txOut.Addresses[0]
 			found = true
 		}
 	}
@@ -1484,64 +1492,52 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return pubkeys, sigs, nil
 }
 
-// AuditContract retrieves information about a swap contract on the
-// blockchain. This would be used to verify the counter-party's contract
-// during a swap.
+// AuditContract retrieves information about a swap contract from the provided
+// txData if it represents a valid transaction that pays to the contract at the
+// specified coinID. An attempt is also made to broadcasted the txData to the
+// blockchain network but it is not necessary that the broadcast succeeds since
+// the contract may have already been broadcasted.
 func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
+
 	// Get the receiving address.
 	_, receiver, stamp, secretHash, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
-	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOutRes, txTree, err := dcr.getTxOut(txHash, vout, true)
+
+	contractTx, err := msgTxFromBytes(txData)
 	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", err)
+		return nil, fmt.Errorf("invalid contract tx data: %w", err)
 	}
-	coinNotFound := txOutRes == nil
-	var pkScript []byte
-	var value uint64
-	var version uint16
-	if txOutRes != nil {
-		pkScript, err = hex.DecodeString(txOutRes.ScriptPubKey.Hex)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %w",
-				txOutRes.ScriptPubKey.Hex, err)
-		}
-		value = toAtoms(txOutRes.Value)
-		version = txOutRes.ScriptPubKey.Version
-	} else {
-		tx, err := msgTxFromBytes(txData)
-		if err != nil {
-			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
-		}
-		if len(tx.TxOut) <= int(vout) {
-			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
-		}
-		txOut := tx.TxOut[vout]
-		pkScript = txOut.PkScript
-		value = uint64(txOut.Value)
-		version = txOut.Version
+	if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
+		return nil, fmt.Errorf("invalid contract tx data: %w", err)
+	}
+	if checkHash := contractTx.TxHash(); checkHash != *txHash {
+		return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
+	}
+	if int(vout) >= len(contractTx.TxOut) {
+		return nil, fmt.Errorf("invalid contract tx data: no output at %d", vout)
 	}
 
-	// Check for standard P2SH.
-	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(version,
-		pkScript, dcr.chainParams, false)
+	// Validate contract output.
+	// Script must be P2SH, with 1 address and 1 required signature.
+	contractTxOut := contractTx.TxOut[vout]
+	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams, false)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", pkScript, err)
+		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", contractTxOut.PkScript, err)
 	}
 	if scriptClass != txscript.ScriptHashTy {
 		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
 	}
-	if numReq != 1 {
-		return nil, fmt.Errorf("unexpected number of signatures expected for P2SH script: %d", numReq)
-	}
 	if len(addrs) != 1 {
 		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
+	}
+	if sigsReq != 1 {
+		return nil, fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
 	}
 	// Compare the contract hash to the P2SH address.
 	contractHash := dcrutil.Hash160(contract)
@@ -1554,16 +1550,115 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addrScript)
 	}
-	if coinNotFound {
-		return nil, asset.CoinNotFoundError
+
+	// The counter-party should have broadcasted the contract tx but
+	// rebroadcast just in case to ensure that the tx is sent to the
+	// network.
+	if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
+		dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+	} else if !hashSent.IsEqual(txHash) {
+		dcr.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
 	}
+
+	txTree := determineTxTree(contractTx)
 	return &asset.AuditInfo{
-		Coin:       newOutput(txHash, vout, value, txTree),
+		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), txTree),
 		Contract:   contract,
 		SecretHash: secretHash,
 		Recipient:  receiver.String(),
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
+}
+
+func determineTxTree(msgTx *wire.MsgTx) int8 {
+	// stake.DetermineTxType will produce correct results if we pass true for
+	// isTreasuryEnabled regardless of whether the treasury vote has activated
+	// or not.
+	// The only possibility for wrong results is passing isTreasuryEnabled=false
+	// _after_ the treasury vote activates - some stake tree votes may identify
+	// as regular tree transactions.
+	// Could try with isTreasuryEnabled false, then true and if neither comes up
+	// as a stake transaction, then we infer regular, but that isn't necessary
+	// as explained above.
+	isTreasuryEnabled := true
+	// Consider the automatic ticket revocations agenda NOT active. Specifying
+	// true just adds the constraints that revocations must have an empty
+	// signature script for its input and must have zero fee. Thus, false will
+	// correctly identify consensus-validated transactions before OR after
+	// activation of this agenda.
+	isAutoRevocationsEnabled := false
+	if stake.DetermineTxType(msgTx, isTreasuryEnabled, isAutoRevocationsEnabled) != stake.TxTypeRegular {
+		return wire.TxTreeStake
+	}
+	return wire.TxTreeRegular
+}
+
+// lookupTxOutput attempts to find and return details for the specified output,
+// first checking for an unspent output and if not found, checking wallet txs.
+// Returns asset.CoinNotFoundError if the output is not found.
+// NOTE: This method is only guaranteed to return results for outputs belonging
+// to transactions that are tracked by the wallet, although full node wallets
+// are able to look up non-wallet outputs that are unspent.
+func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*wire.TxOut, uint32, bool, error) {
+	// Check for an unspent output.
+	output, err := dcr.wallet.UnspentOutput(ctx, txHash, vout, wire.TxTreeUnknown)
+	if err == nil {
+		return output.TxOut, output.Confirmations, false, nil
+	} else if err != asset.CoinNotFoundError {
+		return nil, 0, false, err
+	}
+
+	// Check wallet transactions.
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	msgTx, err := msgTxFromHex(tx.Hex)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
+	}
+	if int(vout) >= len(msgTx.TxOut) {
+		return nil, 0, false, fmt.Errorf("tx %s has no output at %d", txHash, vout)
+	}
+
+	txOut := msgTx.TxOut[vout]
+	confs := uint32(tx.Confirmations)
+
+	// We have the requested output. Check if it is spent.
+	if confs == 0 {
+		// Only counts as spent if spent in a mined transaction,
+		// unconfirmed tx outputs can't be spent in a mined tx.
+		return txOut, confs, false, nil
+	}
+
+	if !dcr.wallet.SpvMode() {
+		// A mined output that is not found by wallet.UnspentOutput
+		// is spent if the wallet is connected to a full node.
+		dcr.log.Debugf("Output %s:%d that was not reported as unspent is considered SPENT, spv mode = false.",
+			txHash, vout)
+		return txOut, confs, true, nil
+	}
+
+	// For SPV wallets, only consider the output spent if it pays to the
+	// wallet because outputs that don't pay to the wallet may be unspent
+	// but still not found by wallet.UnspentOutput.
+	var outputPaysToWallet bool
+	for _, details := range tx.Details {
+		if details.Vout == vout {
+			outputPaysToWallet = details.Category == wallet.CreditReceive.String()
+			break
+		}
+	}
+	if outputPaysToWallet {
+		dcr.log.Debugf("Output %s:%d was not reported as unspent, pays to the wallet and is considered SPENT.",
+			txHash, vout)
+		return txOut, confs, true, nil
+	}
+
+	// Assume unspent even though the spend status is not really known.
+	dcr.log.Debugf("Output %s:%d was not reported as unspent, does not pay to the wallet and is assumed UNSPENT.",
+		txHash, vout)
+	return txOut, confs, false, nil
 }
 
 // RefundAddress extracts and returns the refund address from a contract.
@@ -1821,15 +1916,15 @@ rangeBlocks:
 		}
 		dcr.findRedemptionMtx.RUnlock()
 
-		// Check if any of the above p2sh scripts is possibly included in this block.
-		hit, err := dcr.blockMaybeContainsScripts(blockHash, contractP2SHScripts)
-		if err != nil { // error checking a block's cfilters is a fatal error
-			err = fmt.Errorf("error checking cfilters for block %d (%s) for likely contract inclusion: %w",
-				blockHeight, blockHash, err)
+		// Get the cfilters for this block to check if any of the above p2sh scripts is
+		// possibly included in this block.
+		blkCFilter, err := dcr.getBlockFilterV2(dcr.ctx, blockHash)
+		if err != nil { // error retrieving a block's cfilters is a fatal error
+			err = fmt.Errorf("get cfilters error for block %d (%s): %w", blockHeight, blockHash, err)
 			dcr.fatalFindRedemptionsError(err, contractOutpoints)
 			return
 		}
-		if !hit {
+		if !blkCFilter.MatchAny(contractP2SHScripts) {
 			lastScannedBlockHeight = blockHeight
 			continue // block does not reference any of these contracts, continue to next block
 		}
@@ -1970,32 +2065,6 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 	dcr.findRedemptionMtx.Unlock()
 }
 
-// blockMaybeContainsScripts uses the cfilters of the specified block to
-// determine if the block likely includes any of the passed scripts.
-func (dcr *ExchangeWallet) blockMaybeContainsScripts(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
-	bf, key, err := dcr.wallet.BlockCFilter(dcr.ctx, blockHash)
-	if err != nil {
-		return false, err
-	}
-
-	filterB, err := hex.DecodeString(bf)
-	if err != nil {
-		return false, err
-	}
-	keyB, err := hex.DecodeString(key)
-	if err != nil {
-		return false, err
-	}
-
-	filter, err := gcs.FromBytesV2(blockcf2.B, blockcf2.M, filterB)
-	if err != nil {
-		return false, err
-	}
-	var bcf2Key [gcs.KeySize]byte
-	copy(bcf2Key[:], keyB)
-	return filter.MatchAny(bcf2Key, scripts), nil
-}
-
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
 // NOTE: The contract cannot be retrieved from the unspent coin info as the
@@ -2015,7 +2084,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 	}
 	if *refundHash != checkHash {
 		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
+			"expected %s, got %s", checkHash, *refundHash)
 	}
 	return toCoinID(refundHash, 0), nil
 }
@@ -2028,16 +2097,19 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	if err != nil {
 		return nil, err
 	}
-	// Grab the unspent output to make sure it's good and to get the value if not supplied.
+	// Grab the output, make sure it's unspent and get the value if not supplied.
 	if val == 0 {
-		utxo, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
+		utxo, _, spent, err := dcr.lookupTxOutput(dcr.ctx, txHash, vout)
 		if err != nil {
 			return nil, fmt.Errorf("error finding unspent contract: %w", err)
 		}
 		if utxo == nil {
 			return nil, asset.CoinNotFoundError
 		}
-		val = toAtoms(utxo.Value)
+		if spent {
+			return nil, fmt.Errorf("contract %s:%d is spent", txHash, vout)
+		}
+		val = uint64(utxo.Value)
 	}
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
@@ -2208,36 +2280,52 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return bytes.Equal(h[:], secretHash)
 }
 
-func (dcr *ExchangeWallet) coinConfirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	txHash, vout, err := decodeCoinID(id)
+// SwapConfirmations gets the number of confirmations and the spend status for
+// the specified swap. The contract and matchTime are provided so that wallets
+// may search for the coin using light filters.
+//
+// If the swap was not funded by this wallet, and it is already spent, this
+// method may return asset.CoinNotFoundError. Compare dcr.externalTxOut.
+//
+// If the coin is located, but recognized as spent, no error is returned.
+func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return 0, false, err
 	}
-	// Check for an unspent output.
-	txOut, _, err := dcr.getTxOut(txHash, vout, true)
-	if err == nil && txOut != nil {
-		return uint32(txOut.Confirmations), false, nil
-	}
-	// Check wallet transactions.
-	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
-	if err != nil {
-		return 0, false, err
-	}
-	return uint32(tx.Confirmations), true, nil
-}
 
-// SwapConfirmations gets the number of confirmations for the specified coin ID
-// by first checking for a unspent output, and if not found, searching indexed
-// wallet transactions.
-func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, _ dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
-	return dcr.coinConfirmations(ctx, coinID)
+	// Check if we can find the contract onchain without using cfilters.
+	_, confs, spent, err = dcr.lookupTxOutput(ctx, txHash, vout)
+	if err == nil {
+		return confs, spent, nil
+	} else if err != asset.CoinNotFoundError {
+		return 0, false, err
+	}
+
+	// Prepare the pkScript to find the contract output using block filters.
+	scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
+	if err != nil {
+		return 0, false, fmt.Errorf("error encoding script address: %w", err)
+	}
+	_, p2shScript := scriptAddr.PaymentScript()
+
+	// Find the contract and it's spend status using block filters.
+	dcr.log.Debugf("Contract output %s:%d NOT yet found, will attempt finding it with block filters.", txHash, vout)
+	return dcr.lookupTxOutWithBlockFilters(ctx, newOutPoint(txHash, vout), p2shScript, matchTime)
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
 // output.
 func (dcr *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
-	confs, _, err = dcr.coinConfirmations(ctx, coinID)
-	return confs, err
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(tx.Confirmations), nil
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
@@ -2250,6 +2338,13 @@ func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (
 		}
 		if op.value == 0 {
 			return 0, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash(), op.vout())
+		}
+		if op.tree == wire.TxTreeUnknown { // Set the correct prevout tree if unknown.
+			unspentPrevOut, err := dcr.wallet.UnspentOutput(dcr.ctx, op.txHash(), op.vout(), op.tree)
+			if err != nil {
+				return 0, fmt.Errorf("unable to determine tree for prevout %s: %v", op.pt, err)
+			}
+			op.tree = unspentPrevOut.Tree
 		}
 		totalIn += op.value
 		prevOut := op.wireOutPoint()
@@ -2338,20 +2433,8 @@ func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 	return sum, nil
 }
 
-// getTxOut attempts to find the specified txout from the regular tree and if
-// not found in the regular tree, checks the stake tree. Also returns the tree
-// where the output is found.
-func (dcr *ExchangeWallet) getTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, int8, error) {
-	tree := wire.TxTreeRegular
-	txout, err := dcr.wallet.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check regular tree first
-	if err == nil && txout == nil {
-		tree = wire.TxTreeStake
-		txout, err = dcr.wallet.GetTxOut(dcr.ctx, txHash, index, tree, mempool) // check stake tree
-	}
-	return txout, tree, err
-}
-
-// convertCoin converts the asset.Coin to an unspent output.
+// convertCoin converts the asset.Coin to an output whose tree may be unknown.
+// Use wallet.UnspentOutput to determine the output tree where necessary.
 func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	op, _ := coin.(*output)
 	if op != nil {
@@ -2361,14 +2444,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	txOut, tree, err := dcr.getTxOut(txHash, vout, true)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent output %s:%d: %w", txHash, vout, err)
-	}
-	if txOut == nil {
-		return nil, asset.CoinNotFoundError // maybe spent
-	}
-	return newOutput(txHash, vout, coin.Value(), tree), nil
+	return newOutput(txHash, vout, coin.Value(), wire.TxTreeUnknown), nil
 }
 
 // sendMinusFees sends the amount to the address. Fees are subtracted from the
@@ -2844,6 +2920,63 @@ func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
 		return nil, err
 	}
 	return &block{hash: hash, height: height}, nil
+}
+
+// mainchainAncestor crawls blocks backwards starting at the provided hash
+// until finding a mainchain block. Returns the first mainchain block found.
+func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *chainhash.Hash) (*chainhash.Hash, int64, error) {
+	checkHash := blockHash
+	for {
+		checkBlock, err := dcr.wallet.GetBlockHeaderVerbose(ctx, checkHash)
+		if err != nil {
+			return nil, 0, fmt.Errorf("getblockheader error for block %s: %w", checkHash, err)
+		}
+		if checkBlock.Confirmations > -1 {
+			// This is a mainchain block, return the hash and height.
+			return checkHash, int64(checkBlock.Height), nil
+		}
+		if checkBlock.Height == 0 {
+			return nil, 0, fmt.Errorf("no mainchain ancestor for block %s", blockHash.String())
+		}
+		checkHash, err = chainhash.NewHashFromStr(checkBlock.PreviousHash)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error decoding previous hash %s for block %s: %w",
+				checkBlock.PreviousHash, checkHash.String(), err)
+		}
+	}
+}
+
+func (dcr *ExchangeWallet) isMainchainBlock(ctx context.Context, block *block) (bool, error) {
+	blockHeader, err := dcr.wallet.GetBlockHeaderVerbose(ctx, block.hash)
+	if err != nil {
+		return false, fmt.Errorf("getblockheader error for block %s: %w", block.hash, err)
+	}
+	// First validation check.
+	if blockHeader.Confirmations < 0 || int64(blockHeader.Height) != block.height {
+		return false, nil
+	}
+	// Check if the next block invalidated this block's regular tree txs.
+	// This block checks out if there is no following block yet.
+	if blockHeader.NextHash == "" {
+		return true, nil
+	}
+	nextBlockHash, err := chainhash.NewHashFromStr(blockHeader.NextHash)
+	if err != nil {
+		return false, fmt.Errorf("block %s has invalid nexthash value %s: %v",
+			block.hash, blockHeader.NextHash, err)
+	}
+	nextBlockHeader, err := dcr.wallet.GetBlockHeaderVerbose(ctx, nextBlockHash)
+	if err != nil {
+		return false, fmt.Errorf("getblockheader error for block %s: %w", nextBlockHash, err)
+	}
+	validated := nextBlockHeader.VoteBits&1 != 0
+	return validated, nil
+}
+
+func (dcr *ExchangeWallet) cachedBestBlock() block {
+	dcr.tipMtx.RLock()
+	defer dcr.tipMtx.RUnlock()
+	return *dcr.currentTip
 }
 
 // wireBytes dumps the serialized transaction bytes.

@@ -27,6 +27,7 @@ import (
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/gcs/v3"
 	"github.com/decred/dcrd/gcs/v3/blockcf2"
@@ -161,6 +162,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	}
 	wallet.wallet = &rpcWallet{
 		rpcClient: client,
+		log:       tLogger.SubLogger("trpc"),
 	}
 	wallet.ctx = walletCtx
 
@@ -182,40 +184,38 @@ func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
 }
 
 type tRPCClient struct {
-	sendRawHash       *chainhash.Hash
-	sendRawErr        error
-	sentRawTx         *wire.MsgTx
-	txOutRes          map[outPoint]*chainjson.GetTxOutResult
-	txOutErr          error
-	bestBlockErr      error
-	mempoolErr        error
-	rawTxErr          error
-	unspent           []walletjson.ListUnspentResult
-	unspentErr        error
-	balanceResult     *walletjson.GetBalanceResult
-	balanceErr        error
-	lockUnspentErr    error
-	changeAddr        stdaddr.Address
-	changeAddrErr     error
-	newAddr           stdaddr.Address
-	newAddrErr        error
-	signFunc          func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
-	privWIF           *dcrutil.WIF
-	privWIFErr        error
-	walletTx          *walletjson.GetTransactionResult
-	walletTxErr       error
-	lockErr           error
-	passErr           error
-	disconnected      bool
-	rawRes            map[string]json.RawMessage
-	rawErr            map[string]error
-	blockchain        *tBlockchain
-	lluCoins          []walletjson.ListUnspentResult // Returned from ListLockUnspent
-	lockedCoins       []*wire.OutPoint               // Last submitted to LockUnspent
-	listLockedErr     error
-	blockchainInfo    *chainjson.GetBlockChainInfoResult
-	blockchainInfoErr error
-	estFeeErr         error
+	sendRawHash    *chainhash.Hash
+	sendRawErr     error
+	sentRawTx      *wire.MsgTx
+	txOutRes       map[outPoint]*chainjson.GetTxOutResult
+	txOutErr       error
+	bestBlockErr   error
+	mempoolErr     error
+	rawTxErr       error
+	unspent        []walletjson.ListUnspentResult
+	unspentErr     error
+	balanceResult  *walletjson.GetBalanceResult
+	balanceErr     error
+	lockUnspentErr error
+	changeAddr     stdaddr.Address
+	changeAddrErr  error
+	newAddr        stdaddr.Address
+	newAddrErr     error
+	signFunc       func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
+	privWIF        *dcrutil.WIF
+	privWIFErr     error
+	walletTx       *walletjson.GetTransactionResult
+	walletTxErr    error
+	lockErr        error
+	passErr        error
+	disconnected   bool
+	rawRes         map[string]json.RawMessage
+	rawErr         map[string]error
+	blockchain     *tBlockchain
+	lluCoins       []walletjson.ListUnspentResult // Returned from ListLockUnspent
+	lockedCoins    []*wire.OutPoint               // Last submitted to LockUnspent
+	listLockedErr  error
+	estFeeErr      error
 }
 
 type tBlockchain struct {
@@ -242,11 +242,6 @@ func (blockchain *tBlockchain) addRawTx(tx *chainjson.TxRawResult) (*chainhash.H
 
 	// Save prevout and output scripts in block cfilters.
 	blockFilterBuilder := blockchain.v2CFilterBuilders[block.Hash]
-	if blockFilterBuilder == nil {
-		blockFilterBuilder = &tV2CFilterBuilder{}
-		copy(blockFilterBuilder.key[:], randBytes(16))
-		blockchain.v2CFilterBuilders[block.Hash] = blockFilterBuilder
-	}
 	for i := range tx.Vin {
 		input := &tx.Vin[i]
 		prevTx, found := blockchain.rawTxs[input.Txid]
@@ -287,6 +282,17 @@ func (blockchain *tBlockchain) blockAt(height int64) (*chainhash.Hash, *chainjso
 	blockchain.mainchain[height] = &newBlockHash
 	blockchain.verboseBlocks[newBlock.Hash] = newBlock
 	blockchain.verboseBlocks[prevBlockHash].NextHash = newBlock.Hash
+
+	blockchain.verboseBlockHeaders[newBlock.Hash] = &chainjson.GetBlockHeaderVerboseResult{
+		Height:       uint32(height),
+		Hash:         newBlock.Hash,
+		PreviousHash: prevBlockHash,
+	}
+	blockchain.verboseBlockHeaders[prevBlockHash].NextHash = newBlock.Hash
+
+	blockFilterBuilder := &tV2CFilterBuilder{}
+	copy(blockFilterBuilder.key[:], randBytes(16))
+	blockchain.v2CFilterBuilders[newBlockHash.String()] = blockFilterBuilder
 
 	return &newBlockHash, newBlock
 }
@@ -338,10 +344,6 @@ func (c *tRPCClient) EstimateSmartFee(_ context.Context, confirmations int64, mo
 	optimalRate := float64(optimalFeeRate) * 1e-5 // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
 	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
 	return &chainjson.EstimateSmartFeeResult{FeeRate: optimalRate}, nil
-}
-
-func (c *tRPCClient) GetBlockChainInfo(_ context.Context) (*chainjson.GetBlockChainInfoResult, error) {
-	return c.blockchainInfo, c.blockchainInfoErr
 }
 
 func (c *tRPCClient) SendRawTransaction(_ context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
@@ -447,7 +449,7 @@ func (c *tRPCClient) GetRawTransactionVerbose(_ context.Context, txHash *chainha
 	}
 	tx, found := c.blockchain.rawTxs[txHash.String()]
 	if !found {
-		return nil, fmt.Errorf("no text transaction %s", txHash)
+		return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test raw tx "+txHash.String())
 	}
 	if tx.BlockHeight < 0 {
 		tx.Confirmations = -1
@@ -482,7 +484,10 @@ func (c *tRPCClient) DumpPrivKey(_ context.Context, address stdaddr.Address) (*d
 }
 
 func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
-	return c.walletTx, c.walletTxErr
+	if c.walletTx != nil || c.walletTxErr != nil {
+		return c.walletTx, c.walletTxErr
+	}
+	return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test transaction")
 }
 
 func (c *tRPCClient) AccountUnlocked(_ context.Context, acct string) (*walletjson.AccountUnlockedResult, error) {
@@ -540,7 +545,7 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 		defer c.blockchain.mtx.RUnlock()
 		blockFilterBuilder := c.blockchain.v2CFilterBuilders[blkHash]
 		if blockFilterBuilder == nil {
-			return nil, fmt.Errorf("v2cfilter builder not found for block")
+			return nil, fmt.Errorf("cfilters builder not found for block %s", blkHash)
 		}
 		v2CFilter, err := blockFilterBuilder.build()
 		if err != nil {
@@ -1024,12 +1029,6 @@ func TestReturnCoins(t *testing.T) {
 
 	coinID := toCoinID(tTxHash, 0)
 	coins = asset.Coins{&tCoin{id: coinID}, &tCoin{id: coinID}}
-	err = wallet.ReturnCoins(coins)
-	if err == nil {
-		t.Fatalf("no error for missing txout")
-	}
-
-	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
 	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with custom coin type: %v", err)
@@ -1578,16 +1577,6 @@ func TestSignMessage(t *testing.T) {
 	signature := ecdsa.Sign(privKey, msg)
 	sig := signature.Serialize()
 
-	node.walletTx = &walletjson.GetTransactionResult{
-		Details: []walletjson.GetTransactionDetailsResult{
-			{
-				Address:  tPKHAddr.String(),
-				Category: txCatReceive,
-				Vout:     vout,
-			},
-		},
-	}
-
 	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 	if err != nil {
 		t.Fatalf("NewWIF error: %v", err)
@@ -1620,12 +1609,12 @@ func TestSignMessage(t *testing.T) {
 
 	check()
 	delete(wallet.fundingCoins, op.pt)
-	txOut := makeGetTxOutRes(1, 5, nil)
+	txOut := makeGetTxOutRes(0, 5, nil)
 	txOut.ScriptPubKey.Addresses = []string{tPKHAddr.String()}
 	node.txOutRes[newOutPoint(tTxHash, vout)] = txOut
 	check()
 
-	// gettransaction error
+	// gettxout error
 	node.txOutErr = tErr
 	_, _, err = wallet.SignMessage(op, msg)
 	if err == nil {
@@ -1650,12 +1639,11 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestAuditContract(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet()
+	wallet, _, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
-	vout := uint32(2)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
@@ -1666,21 +1654,23 @@ func TestAuditContract(t *testing.T) {
 	addr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
 	_, pkScript := addr.PaymentScript()
 
-	txoutRes := makeGetTxOutRes(1, 5, pkScript) // 1 conf
-	node.txOutRes[newOutPoint(tTxHash, vout)] = txoutRes
-
-	// need getblock, getblockhash, and getrawtransaction results too
-	_, bestBlockHeight, err := node.GetBestBlock(context.Background())
+	// Prepare the contract tx data.
+	contractTx := wire.NewMsgTx()
+	contractTx.AddTxIn(&wire.TxIn{})
+	contractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: pkScript,
+	})
+	contractTxData, err := contractTx.Bytes()
 	if err != nil {
-		t.Fatalf("unexpected GetBestBlock error: %v", err)
+		t.Fatalf("error preparing contract txdata: %v", err)
 	}
-	contractHeight := bestBlockHeight + 1
-	inputs := []chainjson.Vin{makeRPCVin("feeddabeef", 0, nil)}
-	newBlockHash, _ := node.blockchain.addRawTx(makeRawTx(contractHeight, tTxHash.String(), inputs, []dex.Bytes{nil, nil, pkScript /* vout 2 */}))
 
-	txoutRes.BestBlock = newBlockHash.String() // with 1 conf and this best block hash, the tx is in this block
+	contractHash := contractTx.TxHash()
+	contractVout := uint32(0)
+	contractCoinID := toCoinID(&contractHash, contractVout)
 
-	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
+	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData, time.Time{})
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1695,26 +1685,62 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, nil, time.Time{})
+	_, err = wallet.AuditContract(make([]byte, 15), contract, contractTxData, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
-	// GetTxOut error
-	node.txOutErr = tErr
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract, nil, time.Time{})
-	if err == nil {
-		t.Fatalf("no error for unknown txout")
-	}
-	node.txOutErr = nil
-
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
-	_, badContract := wrongAddr.PaymentScript()
-	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract, nil, time.Time{})
+	wrongAddrStr := wrongAddr.String()
+	wrongContract, err := dexdcr.MakeContract(wrongAddrStr, wrongAddrStr, secretHash, lockTime.Unix(), tChainParams)
+	if err != nil {
+		t.Fatalf("error making wrong swap contract: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, wrongContract, contractTxData, time.Time{})
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
+	}
+
+	// Invalid contract
+	_, wrongPkScript := wrongAddr.PaymentScript()
+	_, err = wallet.AuditContract(contractCoinID, wrongPkScript, contractTxData, time.Time{}) // addrPkScript not a valid contract
+	if err == nil {
+		t.Fatalf("no error for invalid contract")
+	}
+
+	// No txdata
+	_, err = wallet.AuditContract(contractCoinID, contract, nil, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for no txdata")
+	}
+
+	// Invalid txdata, zero inputs
+	contractTx.TxIn = nil
+	invalidContractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing invalid contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, invalidContractTxData, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
+	}
+
+	// Wrong txdata, wrong output script
+	wrongContractTx := wire.NewMsgTx()
+	wrongContractTx.AddTxIn(&wire.TxIn{})
+	wrongContractTx.AddTxOut(&wire.TxOut{
+		Value:    5 * int64(tLotSize),
+		PkScript: wrongPkScript,
+	})
+	wrongContractTxData, err := wrongContractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing wrong contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData, time.Time{})
+	if err == nil {
+		t.Fatalf("no error for unknown txout")
 	}
 }
 
@@ -1889,9 +1915,16 @@ func TestRefund(t *testing.T) {
 	}
 	const feeSuggestion = 100
 
-	bigTxOut := makeGetTxOutRes(2, 5, nil)
+	tipHash, tipHeight := node.getBestBlock()
+	var confs int64 = 1
+	if tipHeight > 1 {
+		confs = 2
+	}
+
+	bigTxOut := makeGetTxOutRes(confs, 5, nil)
 	bigOutID := newOutPoint(tTxHash, 0)
 	node.txOutRes[bigOutID] = bigTxOut
+	node.txOutRes[bigOutID].BestBlock = tipHash.String() // required to calculate the block for the output
 	node.changeAddr = tPKHAddr
 	node.newAddr = tPKHAddr
 
@@ -2141,7 +2174,7 @@ func Test_sendMinusFees(t *testing.T) {
 	}
 }
 
-func TestCoinConfirmations(t *testing.T) {
+func TestLookupTxOutput(t *testing.T) {
 	wallet, node, shutdown, err := tNewWallet()
 	defer shutdown()
 	if err != nil {
@@ -2150,21 +2183,24 @@ func TestCoinConfirmations(t *testing.T) {
 
 	coinID := make([]byte, 36)
 	copy(coinID[:32], tTxHash[:])
+	op := newOutPoint(tTxHash, 0)
 
-	// Bad coin idea
-	_, spent, err := wallet.coinConfirmations(context.Background(), randBytes(35))
+	// Bad output coin
+	op.vout = 10
+	_, _, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
-		t.Fatalf("no error for bad coin ID")
+		t.Fatalf("no error for bad output coin")
 	}
 	if spent {
-		t.Fatalf("spent is non-zero for non-nil error")
+		t.Fatalf("spent is true for bad output coin")
 	}
+	op.vout = 0
 
-	op := newOutPoint(tTxHash, 0)
+	// Add the txOutRes with 2 confs and BestBlock correctly set.
 	node.txOutRes[op] = makeGetTxOutRes(2, 1, tP2PKHScript)
-	confs, spent, err := wallet.coinConfirmations(context.Background(), coinID)
+	_, confs, spent, err := wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
-		t.Fatalf("error for gettransaction path: %v", err)
+		t.Fatalf("unexpected error for gettxout path: %v", err)
 	}
 	if confs != 2 {
 		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
@@ -2174,24 +2210,72 @@ func TestCoinConfirmations(t *testing.T) {
 	}
 
 	// gettransaction error
-	node.walletTxErr = tErr
 	delete(node.txOutRes, op)
-	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
+	node.walletTxErr = tErr
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
 	if spent {
-		t.Fatalf("spent is non-zero with gettransaction error")
+		t.Fatalf("spent is true with gettransaction error")
 	}
 	node.walletTxErr = nil
 
-	node.walletTx = &walletjson.GetTransactionResult{}
-	_, spent, err = wallet.coinConfirmations(context.Background(), coinID)
+	// wallet.lookupTxOutput will check if the tx is confirmed, its hex
+	// is valid and contains an output at index 0, for the output to be
+	// considered spent.
+	tx := wire.NewMsgTx()
+	tx.AddTxIn(&wire.TxIn{})
+	tx.AddTxOut(&wire.TxOut{
+		PkScript: tP2PKHScript,
+	})
+	txHex, err := msgTxToHex(tx)
 	if err != nil {
-		t.Fatalf("coin error: %v", err)
+		t.Fatalf("error preparing tx hex with 1 output: %v", err)
+	}
+	node.walletTx = &walletjson.GetTransactionResult{
+		Hex:           txHex,
+		Confirmations: 0, // unconfirmed = unspent
+	}
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	if err != nil {
+		t.Fatalf("unexpected error for gettransaction path (unconfirmed): %v", err)
+	}
+	if spent {
+		t.Fatalf("expected spent = false for gettransaction path (unconfirmed), got true")
+	}
+
+	// Confirmed wallet tx without gettxout response is spent.
+	node.walletTx.Confirmations = 2
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	if err != nil {
+		t.Fatalf("unexpected error for gettransaction path (confirmed): %v", err)
 	}
 	if !spent {
-		t.Fatalf("expected spent = true for gettransaction path, got false")
+		t.Fatalf("expected spent = true for gettransaction path (confirmed), got false")
+	}
+
+	// In spv mode, output is assumed unspent if it doesn't pay to the wallet.
+	(wallet.wallet.(*rpcWallet)).spvMode = true
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	if err != nil {
+		t.Fatalf("unexpected error for spv gettransaction path (non-wallet output): %v", err)
+	}
+	if spent {
+		t.Fatalf("expected spent = false for spv gettransaction path (non-wallet output), got true")
+	}
+
+	// In spv mode, output is spent if it pays to the wallet.
+	node.walletTx.Details = []walletjson.GetTransactionDetailsResult{{
+		Vout:     0,
+		Category: "receive", // output at index 0 pays to the wallet
+	}}
+	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
+	if err != nil {
+		t.Fatalf("unexpected error for spv gettransaction path (wallet output): %v", err)
+	}
+	if !spent {
+		t.Fatalf("expected spent = true for spv gettransaction path (wallet output), got false")
 	}
 }
 
@@ -2276,46 +2360,45 @@ func TestSyncStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 100,
-		Blocks:  99,
-	}
 
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(&walletjson.SyncStatusResult{
+		Synced:               true,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 1,
+	})
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (synced expected): %v", err)
 	}
 	if !synced {
-		t.Fatalf("synced = false for 1 block to go")
+		t.Fatalf("synced = false for progress=1")
 	}
 	if progress < 1 {
-		t.Fatalf("progress not complete when loading last block")
+		t.Fatalf("progress not complete with sync true")
 	}
 
-	node.blockchainInfoErr = tErr
+	node.rawErr[methodSyncStatus] = tErr
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
-	node.blockchainInfoErr = nil
+	node.rawErr[methodSyncStatus] = nil
 
-	wallet.wallet = &rpcWallet{
-		rpcClient:    node,
-		tipAtConnect: 100,
+	nodeSyncStatusResult := &walletjson.SyncStatusResult{
+		Synced:               false,
+		InitialBlockDownload: false,
+		HeadersFetchProgress: 0.5, // Headers: 200, WalletTip: 100
 	}
-	node.blockchainInfo = &chainjson.GetBlockChainInfoResult{
-		Headers: 200,
-		Blocks:  150,
-	}
+	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(nodeSyncStatusResult)
 	synced, progress, err = wallet.SyncStatus()
 	if err != nil {
 		t.Fatalf("SyncStatus error (half-synced): %v", err)
 	}
 	if synced {
-		t.Fatalf("synced = true for 50 blocks to go")
+		t.Fatalf("synced = true for progress=0.5")
 	}
-	if progress > 0.500001 || progress < 0.4999999 {
-		t.Fatalf("progress out of range. Expected 0.5, got %.2f", progress)
+	if progress != nodeSyncStatusResult.HeadersFetchProgress {
+		t.Fatalf("progress out of range. Expected %.2f, got %.2f", nodeSyncStatusResult.HeadersFetchProgress, progress)
 	}
 }
 

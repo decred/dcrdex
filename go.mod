@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.16
 
 require (
-	decred.org/dcrwallet/v2 v2.0.0-20210913145543-714c2f555f04
+	decred.org/dcrwallet/v2 v2.0.0-20211027145433-305bed7bace0
 	github.com/btcsuite/btcd v0.22.0-beta.0.20211026140004-31791ba4dc6e
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
 	github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
@@ -14,23 +14,23 @@ require (
 	github.com/btcsuite/btcwallet/walletdb v1.4.0
 	github.com/btcsuite/btcwallet/wtxmgr v1.3.0
 	github.com/davecgh/go-spew v1.1.1
-	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210914193033-2efb9bda71fe
-	github.com/decred/dcrd/certgen v1.1.2-0.20210901152745-8830d9c9cdba
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
-	github.com/decred/dcrd/chaincfg/v3 v3.0.1-0.20210901152745-8830d9c9cdba
-	github.com/decred/dcrd/crypto/blake256 v1.0.1-0.20210901152745-8830d9c9cdba
-	github.com/decred/dcrd/database/v3 v3.0.0-20210914193033-2efb9bda71fe // indirect
-	github.com/decred/dcrd/dcrec v1.0.1-0.20210901152745-8830d9c9cdba
-	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2-0.20210715032435-c9521b468f95
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.0
+	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20210914212651-723d86274b0d
+	github.com/decred/dcrd/blockchain/v4 v4.0.0-20210914212651-723d86274b0d
+	github.com/decred/dcrd/certgen v1.1.2-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.4-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/chaincfg/v3 v3.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/crypto/blake256 v1.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/dcrec v1.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2-0.20210914193033-2efb9bda71fe
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1-0.20210914212651-723d86274b0d
 	github.com/decred/dcrd/dcrjson/v4 v4.0.0
-	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210914193033-2efb9bda71fe
-	github.com/decred/dcrd/gcs/v3 v3.0.0-20210914193033-2efb9bda71fe
-	github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210901152745-8830d9c9cdba
-	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210914193033-2efb9bda71fe
+	github.com/decred/dcrd/dcrutil/v4 v4.0.0-20210914212651-723d86274b0d
+	github.com/decred/dcrd/gcs/v3 v3.0.0-20210914212651-723d86274b0d
+	github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210914212651-723d86274b0d
 	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210914193033-2efb9bda71fe
-	github.com/decred/dcrd/txscript/v4 v4.0.0-20210914193033-2efb9bda71fe
-	github.com/decred/dcrd/wire v1.4.1-0.20210901152745-8830d9c9cdba
+	github.com/decred/dcrd/txscript/v4 v4.0.0-20210914212651-723d86274b0d
+	github.com/decred/dcrd/wire v1.4.1-0.20210914212651-723d86274b0d
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/ethereum/go-ethereum v1.10.11

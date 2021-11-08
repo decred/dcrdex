@@ -152,14 +152,14 @@ type Wallet interface {
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
 	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
-	// AuditContract retrieves information about a swap contract on the
-	// blockchain. This would be used to verify the counter-party's contract
-	// during a swap. If the coin cannot be found for the coin ID, the
-	// ExchangeWallet should return CoinNotFoundError. This enables the client
-	// to properly handle network latency. The matchTime is provided so that
-	// wallets can limit their scan when matching against transaction filters.
-	// necessary for wallets without full chain backing, but the caller should
-	// have it on hand anyway.
+	// AuditContract retrieves information about a swap contract from the
+	// provided txData and broadcasts the txData to ensure the contract is
+	// propagated to the blockchain. The information returned would be used
+	// to verify the counter-party's contract during a swap. It is not an
+	// error if the provided txData cannot be broadcasted because it may
+	// already be broadcasted. A successful audit response does not mean
+	// the tx exists on the blockchain, use SwapConfirmations to ensure
+	// the tx is mined.
 	AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
@@ -203,8 +203,8 @@ type Wallet interface {
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
-	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, regFee, feeRateSuggestion uint64) (Coin, error)
+	// the registration fee, and the feeRateSuggestion is gotten from the server.
+	PayFee(address string, feeAmt, feeRateSuggestion uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.

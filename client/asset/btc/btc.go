@@ -1824,9 +1824,9 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	return
 }
 
-// AuditContract retrieves information about a swap contract on the blockchain.
-// AuditContract would be used to audit the counter-party's contract during a
-// swap.
+// AuditContract retrieves information about a swap contract from the provided
+// txData. The extracted information would be used to audit the counter-party's
+// contract during a swap.
 func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, since time.Time) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -1837,31 +1837,18 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
-	pkScript, err := btc.scriptHashScript(contract)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing pubkey script: %w", err)
-	}
-	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, _, err := btc.node.getTxOut(txHash, vout, pkScript, since)
-	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
-		return nil, fmt.Errorf("error finding unspent contract: %s:%d : %w", txHash, vout, err)
-	}
 
-	// Even if we haven't found the output, we can perform basic validation
-	// using the txData. We may also want to broadcast the transaction if using
-	// an spvWallet. It may be worth separating data validation from coin
+	// Perform basic validation using the txData.
+	// It may be worth separating data validation from coin
 	// retrieval at the asset.Wallet interface level.
-	coinNotFound := txOut == nil
-	if coinNotFound {
-		tx, err := msgTxFromBytes(txData)
-		if err != nil {
-			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
-		}
-		if len(tx.TxOut) <= int(vout) {
-			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
-		}
-		txOut = tx.TxOut[vout]
+	tx, err := msgTxFromBytes(txData)
+	if err != nil {
+		return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
 	}
+	if len(tx.TxOut) <= int(vout) {
+		return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
+	}
+	txOut := tx.TxOut[vout]
 
 	// Check for standard P2SH.
 	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, btc.chainParams)
@@ -1898,9 +1885,13 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 			contractHash, addr.ScriptAddress())
 	}
 
-	if coinNotFound {
-		return nil, asset.CoinNotFoundError
+	// Broadcast the transaction.
+	if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
+		btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+	} else if !hashSent.IsEqual(txHash) {
+		btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
 	}
+
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(txOut.Value)),
 		Recipient:  receiver.String(),
@@ -2191,6 +2182,14 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 		return nil, fmt.Errorf("error parsing pubkey script: %w", err)
 	}
 
+	// TODO: I'd recommend not passing a pkScript without a limited startTime
+	// to prevent potentially long searches. In this case though, the output
+	// will be found in the wallet and won't need to be searched for, only
+	// the spender search will be conducted using the pkScript starting from
+	// the block containing the original tx. The script can be gotten from
+	// the wallet tx though and used for the spender search, while not passing
+	// a script here to ensure no attempt is made to find the output without
+	// a limited startTime.
 	utxo, _, err := btc.node.getTxOut(txHash, vout, pkScript, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", err)
