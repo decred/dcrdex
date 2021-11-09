@@ -1693,9 +1693,6 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, contract)
 		txIn := wire.NewTxIn(cinfo.output.wireOutPoint(), nil, nil)
-		// Enable locktime
-		// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
-		txIn.Sequence = wire.MaxTxInSequenceNum - 1
 		msgTx.AddTxIn(txIn)
 		values = append(values, cinfo.output.value)
 		totalIn += cinfo.output.value
@@ -2233,6 +2230,9 @@ func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contrac
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
 	txIn := wire.NewTxIn(prevOut, []byte{}, nil)
+	// Enable the OP_CHECKLOCKTIMEVERIFY opcode to be used.
+	//
+	// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
 	// Calculate fees and add the change output.

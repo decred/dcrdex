@@ -1379,11 +1379,6 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		contracts = append(contracts, contract)
 		prevOut := cinfo.output.wireOutPoint()
 		txIn := wire.NewTxIn(prevOut, int64(cinfo.output.value), []byte{})
-		// Sequence = 0xffffffff - 1 is special value that marks the transaction as
-		// irreplaceable and enables the use of lock time.
-		//
-		// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
-		txIn.Sequence = wire.MaxTxInSequenceNum - 1
 		msgTx.AddTxIn(txIn)
 		totalIn += cinfo.output.value
 	}
@@ -2122,6 +2117,9 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
 	txIn := wire.NewTxIn(prevOut, int64(val), []byte{})
+	// Enable the OP_CHECKLOCKTIMEVERIFY opcode to be used.
+	//
+	// https://github.com/decred/dcrd/blob/8f5270b707daaa1ecf24a1ba02b3ff8a762674d3/txscript/opcode.go#L981-L998
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
 	// Calculate fees and add the change output.
