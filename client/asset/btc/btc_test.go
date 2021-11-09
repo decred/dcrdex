@@ -582,7 +582,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	cfg := &BTCCloneCFG{
+	cfg := &RPCCloneConfig{
 		WalletCFG:           walletCfg,
 		Symbol:              "btc",
 		Logger:              tLogger,
@@ -605,16 +605,15 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		if err == nil {
 			neutrinoClient := &tNeutrinoClient{data}
 			wallet.node = &spvWallet{
+				WalletCore: &WalletCore{
+					CS: neutrinoClient,
+				},
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
-				cl:          neutrinoClient,
 				tipChan:     make(chan *block, 1),
-				chainClient: nil,
-				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
 				checkpoints: data.checkpoints,
 				log:         cfg.Logger.SubLogger("SPV"),
-				loader:      nil,
 			}
 		}
 	}
@@ -2928,12 +2927,12 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 
 		node.truncateChains()
 		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
-		node.blockchainMtx.RLock()
+		node.blockchainMtx.Lock()
 		node.getBestBlockHashErr = nil
 		if tt.forcedErr {
 			node.getBestBlockHashErr = tErr
 		}
-		node.blockchainMtx.RUnlock()
+		node.blockchainMtx.Unlock()
 		addBlocks(tt.numBlocks)
 		var startBlock *chainhash.Hash
 		if tt.startBlockHeight >= 0 {

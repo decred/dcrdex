@@ -42,6 +42,9 @@ type WalletDefinition struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
+	// Managed can be set to true to disable wallet re-configuration through the
+	// standard UI.
+	Managed bool `json:"managed"`
 }
 
 // WalletInfo is auxiliary information about an ExchangeWallet.

@@ -26,7 +26,7 @@ func ReadCloneParams(cloneParams *CloneParams) *chaincfg.Params {
 // CloneParams are the parameters needed by BTC-clone-based Backend and
 // ExchangeWallet implementations. Pass a *CloneParams to ReadCloneParams to
 // create a *chaincfg.Params for server/asset/btc.NewBTCClone and
-// client/asset/btc.BTCCloneWallet.
+// client/asset/btc.RPCCloneWallet.
 type CloneParams struct {
 	// PubKeyHashAddrID: Net ID byte for a pubkey-hash address
 	PubKeyHashAddrID byte

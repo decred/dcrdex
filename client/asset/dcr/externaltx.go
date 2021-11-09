@@ -5,16 +5,12 @@ package dcr
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/gcs/v3/blockcf2"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -127,12 +123,12 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 		return nil, nil
 	}
 
-	txBlockStillValid, err := dcr.isMainchainBlock(ctx, tx.block)
+	isMainchain, err := dcr.wallet.IsValidMainchain(ctx, tx.block.hash)
 	if err != nil {
 		return nil, err
 	}
 
-	if txBlockStillValid {
+	if isMainchain {
 		dcr.log.Debugf("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
 		return tx.block, nil
 	}
@@ -198,7 +194,7 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 
 	earliestTxStamp := earliestTxTime.Unix()
 	for {
-		msgTx, outputSpenders, err := dcr.findTxInBlock(ctx, tx.hash, txScripts, iHash)
+		msgTx, outputSpenders, err := dcr.findTxInBlock(ctx, *tx.hash, txScripts, iHash)
 		if err != nil {
 			return nil, err
 		}
@@ -219,57 +215,46 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 		if lastScannedBlock != nil && iHeight <= lastScannedBlock.height {
 			return scanCompletedWithoutResults()
 		}
-		iBlock, err := dcr.wallet.GetBlockHeaderVerbose(dcr.ctx, iHash)
+		iBlock, err := dcr.wallet.GetBlockHeader(dcr.ctx, iHash)
 		if err != nil {
 			return nil, fmt.Errorf("getblockheader error for block %s: %w", iHash, translateRPCCancelErr(err))
 		}
-		if iBlock.Time <= earliestTxStamp {
+		if iBlock.Timestamp.Unix() <= earliestTxStamp {
 			return scanCompletedWithoutResults()
 		}
 
 		iHeight--
-		iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding previous hash %s for block %s: %w",
-				iBlock.PreviousHash, iHash.String(), err)
-		}
+		iHash = &iBlock.PrevBlock
 		continue
 	}
 }
 
-func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.Hash, txScripts [][]byte, blockHash *chainhash.Hash) (*wire.MsgTx, []*outputSpenderFinder, error) {
-	blockFilter, err := dcr.getBlockFilterV2(ctx, blockHash)
+func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.Hash, txScripts [][]byte, blockHash *chainhash.Hash) (*wire.MsgTx, []*outputSpenderFinder, error) {
+	key, filter, err := dcr.wallet.BlockFilter(ctx, blockHash)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !blockFilter.MatchAny(txScripts) {
+	if !filter.MatchAny(key, txScripts) {
 		return nil, nil, nil
 	}
 
-	blk, err := dcr.wallet.GetBlockVerbose(ctx, blockHash, true)
+	blk, err := dcr.wallet.GetBlock(ctx, blockHash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving block %s: %w", blockHash, err)
 	}
 
-	var txHex string
-	blockTxs := append(blk.RawTx, blk.RawSTx...)
-	for t := range blockTxs {
-		blkTx := &blockTxs[t]
-		if blkTx.Txid == txHash.String() {
-			dcr.log.Debugf("Found mined tx %s in block %d (%s).", txHash, blk.Height, blk.Hash)
-			txHex = blkTx.Hex
+	var msgTx *wire.MsgTx
+	for _, tx := range blk.Transactions {
+		if tx.TxHash() == txHash {
+			dcr.log.Debugf("Found mined tx %s in block %s.", txHash, blk.BlockHash())
+			msgTx = tx
 			break
 		}
 	}
 
-	if txHex == "" {
-		dcr.log.Debugf("Block %d (%s) filters matched scripts for tx %s but does NOT contain the tx.", blk.Height, blk.Hash, txHash)
+	if msgTx == nil {
+		dcr.log.Debugf("Block %s filters matched scripts for tx %s but does NOT contain the tx.", blk.BlockHash(), txHash)
 		return nil, nil, nil
-	}
-
-	msgTx, err := msgTxFromHex(txHex)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
 	}
 
 	// We have the txs in this block, check if any them spends an output
@@ -278,20 +263,18 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.
 	for i, txOut := range msgTx.TxOut {
 		outputSpenders[i] = &outputSpenderFinder{
 			TxOut:            txOut,
-			op:               newOutPoint(txHash, uint32(i)),
+			op:               newOutPoint(&txHash, uint32(i)),
 			tree:             determineTxTree(msgTx),
 			lastScannedBlock: blockHash,
 		}
 	}
-	for t := range blockTxs {
-		blkTx := &blockTxs[t]
-		if blkTx.Txid == txHash.String() {
+	for _, tx := range blk.Transactions {
+		if tx.TxHash() == txHash {
 			continue // oriignal tx, ignore
 		}
-		for i := range blkTx.Vin {
-			input := &blkTx.Vin[i]
-			if input.Txid == txHash.String() { // found a spender
-				outputSpenders[input.Vout].spenderBlock = &block{blk.Height, blockHash}
+		for _, txIn := range tx.TxIn {
+			if txIn.PreviousOutPoint.Hash == txHash { // found a spender
+				outputSpenders[txIn.PreviousOutPoint.Index].spenderBlock = &block{int64(blk.Header.Height), blockHash}
 			}
 		}
 	}
@@ -311,11 +294,11 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	// Check if this output is known to be spent in a mainchain block.
 	if output.spenderBlock != nil {
-		spenderBlockStillValid, err := dcr.isMainchainBlock(ctx, output.spenderBlock)
+		isMainchain, err := dcr.wallet.IsValidMainchain(ctx, output.spenderBlock.hash)
 		if err != nil {
 			return false, err
 		}
-		if spenderBlockStillValid {
+		if isMainchain {
 			dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
 			return true, nil
 		}
@@ -354,7 +337,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 	if err != nil {
 		return false, err
 	}
-	spenderTx, stopBlockHash, err := dcr.findTxOutSpender(ctx, output.op, output.PkScript, &block{nextScanHeight, nextScanHash})
+	spenderTx, stopBlockHash, stopBlockHeight, err := dcr.findTxOutSpender(ctx, output.op, output.PkScript, &block{nextScanHeight, nextScanHash})
 	if stopBlockHash != nil { // might be nil if the search never scanned a block
 		output.lastScannedBlock = stopBlockHash
 	}
@@ -367,12 +350,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 		return false, nil
 	}
 
-	spenderBlockHash, err := chainhash.NewHashFromStr(spenderTx.BlockHash)
-	if err != nil {
-		return true, fmt.Errorf("invalid hash (%s) for tx that spends output %s: %w",
-			spenderTx.BlockHash, output.op, err)
-	}
-	output.spenderBlock = &block{hash: spenderBlockHash, height: spenderTx.BlockHeight}
+	output.spenderBlock = &block{hash: stopBlockHash, height: stopBlockHeight}
 	return true, nil
 }
 
@@ -383,32 +361,30 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 // If no tx is found to spend the provided output, the hash of the block that
 // was last checked is returned along with any error that may have occurred
 // during the search.
-func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
+func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*wire.MsgTx, *chainhash.Hash, int64, error) {
 	var lastScannedHash *chainhash.Hash
 
 	iHeight := startBlock.height
 	iHash := startBlock.hash
 	bestBlock := dcr.cachedBestBlock()
 	for {
-		blockFilter, err := dcr.getBlockFilterV2(ctx, iHash)
+		key, filter, err := dcr.wallet.BlockFilter(ctx, iHash)
 		if err != nil {
-			return nil, lastScannedHash, err
+			return nil, lastScannedHash, 0, err
 		}
 
-		if blockFilter.Match(outputPkScript) {
+		if filter.Match(key, outputPkScript) {
 			dcr.log.Debugf("Output %s is likely spent in block %d (%s). Confirming.",
 				op, iHeight, iHash)
-			blk, err := dcr.wallet.GetBlockVerbose(ctx, iHash, true)
+			blk, err := dcr.wallet.GetBlock(ctx, iHash)
 			if err != nil {
-				return nil, lastScannedHash, fmt.Errorf("error retrieving block %s: %w", iHash, err)
+				return nil, lastScannedHash, 0, fmt.Errorf("error retrieving block %s: %w", iHash, err)
 			}
-			blockTxs := append(blk.RawTx, blk.RawSTx...)
-			for i := range blockTxs {
-				blkTx := &blockTxs[i]
-				if txSpendsOutput(blkTx, op) {
+			for _, tx := range blk.Transactions {
+				if txSpendsOutput(tx, op) {
 					dcr.log.Debugf("Found spender for output %s in block %d (%s), spender tx hash %s.",
-						op, iHeight, iHash, blkTx.Txid)
-					return blkTx, iHash, nil
+						op, iHeight, iHash, tx.TxHash())
+					return tx, iHash, iHeight, nil
 				}
 			}
 			dcr.log.Debugf("Output %s is NOT spent in block %d (%s).", op, iHeight, iHash)
@@ -422,7 +398,7 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 		iHeight++
 		nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
 		if err != nil {
-			return nil, iHash, translateRPCCancelErr(err)
+			return nil, iHash, 0, translateRPCCancelErr(err)
 		}
 		lastScannedHash = iHash
 		iHash = nextHash
@@ -430,60 +406,20 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 
 	dcr.log.Debugf("Output %s is NOT spent in blocks %d (%s) to %d (%s).",
 		op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash)
-	return nil, bestBlock.hash, nil // scanned up to best block, no spender found
+	return nil, bestBlock.hash, 0, nil // scanned up to best block, no spender found
 }
 
 // txSpendsOutput returns true if the passed tx has an input that spends the
 // specified output.
-func txSpendsOutput(tx *chainjson.TxRawResult, op outPoint) bool {
-	prevOutHash := op.txHash.String()
-	if tx.Txid == prevOutHash {
+func txSpendsOutput(tx *wire.MsgTx, op outPoint) bool {
+	if tx.TxHash() == op.txHash {
 		return false // no need to check inputs if this tx is the same tx that pays to the specified op
 	}
-	for i := range tx.Vin {
-		input := &tx.Vin[i]
-		if input.Vout == op.vout && input.Txid == prevOutHash {
+	for _, txIn := range tx.TxIn {
+		prevOut := &txIn.PreviousOutPoint
+		if prevOut.Index == op.vout && prevOut.Hash == op.txHash {
 			return true // found spender
 		}
 	}
 	return false
-}
-
-type blockFilter struct {
-	v2cfilters *gcs.FilterV2
-	key        [gcs.KeySize]byte
-}
-
-func (bf *blockFilter) Match(data []byte) bool {
-	return bf.v2cfilters.Match(bf.key, data)
-}
-
-func (bf *blockFilter) MatchAny(data [][]byte) bool {
-	return bf.v2cfilters.MatchAny(bf.key, data)
-}
-
-func (dcr *ExchangeWallet) getBlockFilterV2(ctx context.Context, blockHash *chainhash.Hash) (*blockFilter, error) {
-	bf, key, err := dcr.wallet.BlockCFilter(ctx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	filterB, err := hex.DecodeString(bf)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding block filter: %w", err)
-	}
-	keyB, err := hex.DecodeString(key)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding block filter key: %w", err)
-	}
-	filter, err := gcs.FromBytesV2(blockcf2.B, blockcf2.M, filterB)
-	if err != nil {
-		return nil, fmt.Errorf("error deserializing block filter: %w", err)
-	}
-	var bcf2Key [gcs.KeySize]byte
-	copy(bcf2Key[:], keyB)
-
-	return &blockFilter{
-		v2cfilters: filter,
-		key:        bcf2Key,
-	}, nil
 }

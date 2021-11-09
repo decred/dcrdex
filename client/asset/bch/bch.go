@@ -5,9 +5,11 @@ package bch
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -18,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/gcash/bchd/bchec"
 	bchscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
@@ -144,10 +147,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
+	bch := &BCHWallet{}
+
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
-	cloneCFG := &btc.BTCCloneCFG{
+	cloneCFG := &btc.RPCCloneConfig{
 		WalletCFG:          cfg,
 		MinNetworkVersion:  minNetworkVersion,
 		WalletInfo:         WalletInfo,
@@ -173,23 +178,25 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// Bitcoin Cash uses estimatefee instead of estimatesmartfee, and even
 		// then, they modified it from the old Bitcoin Core estimatefee by
 		// removing the confirmation target argument.
-		FeeEstimator: estimateFee,
+		FeeEstimator: bch.estimateFee,
 	}
 
-	xcWallet, err := btc.BTCCloneWallet(cloneCFG)
+	xcWallet, cl, err := btc.RPCCloneWallet(cloneCFG)
 	if err != nil {
 		return nil, err
 	}
 
-	return &BCHWallet{
-		ExchangeWallet: xcWallet,
-	}, nil
+	bch.ExchangeWallet = xcWallet
+	bch.cl = cl
+	return bch, nil
 }
 
 // BCHWallet embeds btc.ExchangeWallet, but re-implements a couple of methods to
 // perform on-the-fly address translation.
 type BCHWallet struct {
 	*btc.ExchangeWallet
+	cl  *rpcclient.Client
+	ctx context.Context
 }
 
 // Address converts the Bitcoin base58-encoded address returned by the embedded
@@ -217,6 +224,29 @@ func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadc
 	return ai, nil
 }
 
+func (bch *BCHWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	bch.ctx = ctx
+	return bch.ExchangeWallet.Connect(ctx)
+}
+
+// estimateFee uses Bitcoin Cash's estimatefee RPC, since estimatesmartfee
+// is not implemented.
+func (bch *BCHWallet) estimateFee(confTarget uint64) (uint64, error) {
+	resp, err := bch.cl.RawRequest(bch.ctx, "estimatefee", nil)
+	if err != nil {
+		return 0, err
+	}
+	var feeRate float64
+	err = json.Unmarshal(resp, &feeRate)
+	if err != nil {
+		return 0, err
+	}
+	if feeRate <= 0 {
+		return 0, fmt.Errorf("fee could not be estimated")
+	}
+	return uint64(math.Round(feeRate * 1e5)), nil
+}
+
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature
 // hash and signing algorithm.
 func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, btcKey *btcec.PrivateKey, val uint64) ([]byte, error) {
@@ -238,24 +268,6 @@ func serializeBtcTx(msgTx *wire.MsgTx) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// estimateFee uses Bitcoin Cash's estimatefee RPC, since estimatesmartfee
-// is not implemented.
-func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
-	resp, err := node.RawRequest("estimatefee", nil)
-	if err != nil {
-		return 0, err
-	}
-	var feeRate float64
-	err = json.Unmarshal(resp, &feeRate)
-	if err != nil {
-		return 0, err
-	}
-	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estimated")
-	}
-	return uint64(math.Round(feeRate * 1e5)), nil
 }
 
 // translateTx converts the btcd/*wire.MsgTx into a bchd/*wire.MsgTx.

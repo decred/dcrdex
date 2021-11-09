@@ -50,12 +50,6 @@ const (
 	methodGetRawTransaction  = "getrawtransaction"
 )
 
-// RawRequester defines decred's rpcclient RawRequest func where all RPC
-// requests sent through. For testing, it can be satisfied by a stub.
-type RawRequester interface {
-	RawRequest(string, []json.RawMessage) (json.RawMessage, error)
-}
-
 // RawRequesterWithContext defines decred's rpcclient RawRequest func where all
 // RPC requests sent through. For testing, it can be satisfied by a stub.
 type RawRequesterWithContext interface {
@@ -299,9 +293,9 @@ func (wc *rpcClient) listLockUnspent() ([]*RPCOutpoint, error) {
 	return unspents, err
 }
 
-// changeAddress gets a new internal address from the wallet. The address will
+// internalAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
+func (wc *rpcClient) internalAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
@@ -328,6 +322,13 @@ func (wc *rpcClient) addressPKH() (btcutil.Address, error) {
 // wallet.
 func (wc *rpcClient) addressWPKH() (btcutil.Address, error) {
 	return wc.address("bech32")
+}
+
+func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
+	if wc.segwit {
+		return wc.addressWPKH()
+	}
+	return wc.addressPKH()
 }
 
 // address is used internally for fetching addresses of various types from the

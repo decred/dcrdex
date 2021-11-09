@@ -152,7 +152,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
-	cloneCFG := &btc.BTCCloneCFG{
+	cloneCFG := &btc.RPCCloneConfig{
 		WalletCFG:           cfg,
 		MinNetworkVersion:   minNetworkVersion,
 		WalletInfo:          WalletInfo,
@@ -168,5 +168,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Segwit:              false,
 	}
 
-	return btc.BTCCloneWallet(cloneCFG)
+	w, _, err := btc.RPCCloneWallet(cloneCFG)
+	return w, err
 }

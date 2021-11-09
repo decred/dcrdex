@@ -181,8 +181,8 @@ var (
 // TxInSigner is a transaction input signer.
 type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, val uint64) ([]byte, error)
 
-// BTCCloneCFG holds clone specific parameters.
-type BTCCloneCFG struct {
+// RPCCloneConfig holds clone specific parameters.
+type RPCCloneConfig struct {
 	WalletCFG           *asset.WalletConfig
 	MinNetworkVersion   uint64
 	WalletInfo          *asset.WalletInfo
@@ -214,7 +214,7 @@ type BTCCloneCFG struct {
 	NonSegwitSigner TxInSigner
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
-	FeeEstimator func(RawRequester, uint64) (uint64, error)
+	FeeEstimator func(uint64) (uint64, error)
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -506,7 +506,7 @@ type ExchangeWallet struct {
 	segwit            bool
 	legacyRawFeeLimit bool
 	signNonSegwit     TxInSigner
-	estimateFee       func(RawRequester, uint64) (uint64, error)
+	estimateFee       func(uint64) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
 
 	tipMtx     sync.RWMutex
@@ -580,7 +580,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		return nil, err
 	}
 
-	cloneCFG := &BTCCloneCFG{
+	cloneCfg := &RPCCloneConfig{
 		WalletCFG:           cfg,
 		MinNetworkVersion:   minNetworkVersion,
 		WalletInfo:          WalletInfo,
@@ -596,46 +596,46 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		return openSPVWallet(cloneCFG)
+		return openConstructedWallet(cloneCfg, func(walletCfg *WalletConfig, _ *chaincfg.Params, _ dex.Logger) (Wallet, error) {
+			var peers []string
+			if walletCfg.Peer != "" {
+				peers = append(peers, walletCfg.Peer)
+			}
+			return loadSPVWallet(cfg.DataDir, logger.SubLogger("SPV"), peers, params), nil
+		})
 	case walletTypeRPC, walletTypeLegacy:
-		return BTCCloneWallet(cloneCFG)
-	default:
+		w, _, err := RPCCloneWallet(cloneCfg)
+		return w, err
+	}
+
+	customConstructor, found := customWalletConstructors[cfg.Type]
+	if !found {
 		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 	}
+	return openConstructedWallet(cloneCfg, customConstructor)
 }
 
-// BTCCloneWallet creates a wallet backend for a set of network parameters and
+// RPCCloneWallet creates a wallet backend for a set of network parameters and
 // default network ports. A BTC clone can use this method, possibly in
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
-func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
+func RPCCloneWallet(cfg *RPCCloneConfig) (*ExchangeWallet, *rpcclient.Client, error) {
 	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	btc, err := newRPCWallet(client, cfg, &clientCfg.WalletConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
+		return nil, nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
 			err)
 	}
 
-	return btc, nil
-}
-
-func newRPCWalletConnection(cfg *RPCWalletConfig) (*rpcclient.Client, error) {
-	endpoint := cfg.RPCBind + "/wallet/" + cfg.WalletName
-	return rpcclient.New(&rpcclient.ConnConfig{
-		HTTPPostMode: true,
-		DisableTLS:   true,
-		Host:         endpoint,
-		User:         cfg.RPCUser,
-		Pass:         cfg.RPCPass,
-	}, nil)
+	return btc, client, nil
 }
 
 // newRPCWallet creates the ExchangeWallet and starts the block monitor.
-func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletConfig *WalletConfig) (*ExchangeWallet, error) {
+func newRPCWallet(requester RawRequesterWithContext, cfg *RPCCloneConfig, walletConfig *WalletConfig) (*ExchangeWallet, error) {
 	btc, err := newUnconnectedWallet(cfg, walletConfig)
 	if err != nil {
 		return nil, err
@@ -645,7 +645,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 	return btc, nil
 }
 
-func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeWallet, error) {
+func newUnconnectedWallet(cfg *RPCCloneConfig, walletCfg *WalletConfig) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(walletCfg.FallbackFeeRate / 1000)
@@ -712,7 +712,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeW
 }
 
 // openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
+func openConstructedWallet(cfg *RPCCloneConfig, newWallet WalletConstructor) (*ExchangeWallet, error) {
 	walletCfg := new(WalletConfig)
 	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)
 	if err != nil {
@@ -724,12 +724,12 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, err
 	}
 
-	var peers []string
-	if walletCfg.Peer != "" {
-		peers = append(peers, walletCfg.Peer)
+	w, err := newWallet(walletCfg, cfg.ChainParams, cfg.Logger)
+	if err != nil {
+		return nil, err
 	}
 
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
+	btc.node = w
 
 	return btc, nil
 }
@@ -760,7 +760,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error initializing best block for %s: %w", btc.symbol, err)
 	}
 	// Check for method unknown error for feeRate method.
-	_, err = btc.estimateFee(btc.node, 1)
+	_, err = btc.estimateFee(1)
 	if isMethodNotFoundErr(err) {
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
@@ -883,8 +883,12 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC.
-func (btc *ExchangeWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
+func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
+	estimator, is := btc.node.(feeEstimator)
+	if !is {
+		return 0, fmt.Errorf("fee estimation unavailable")
+	}
+	feeResult, err := estimator.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -912,7 +916,7 @@ func (a amount) String() string {
 // feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
 func (btc *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	feeRate, err := btc.estimateFee(btc.node, confTarget)
+	feeRate, err := btc.estimateFee(confTarget)
 	if err == nil {
 		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
@@ -1288,7 +1292,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 	}
 
 	// Use an internal address for the sized output.
-	addr, err := btc.node.changeAddress()
+	addr, err := btc.node.internalAddress()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -1303,7 +1307,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
 	// Grab a change address.
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.internalAddress()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -1541,7 +1545,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		totalOut += contract.Value
 		// revokeAddr is the address belonging to the key that will be
 		// used to sign and refund a swap past its encoded refund locktime.
-		revokeAddr, err := btc.externalAddress()
+		revokeAddr, err := btc.node.externalAddress()
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
@@ -1586,7 +1590,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.changeAddress()
+	changeAddr, err := btc.node.internalAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -1715,7 +1719,7 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	// Send the funds back to the exchange wallet.
-	redeemAddr, err := btc.node.changeAddress()
+	redeemAddr, err := btc.node.internalAddress()
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -2142,11 +2146,15 @@ func (btc *ExchangeWallet) tryRedemptionRequests(ctx context.Context, startBlock
 		return
 	}
 
+	finder, is := btc.node.(mempoolFinder)
+	if !is {
+		return
+	}
 	// Do we really want to do this? Mempool could be huge.
 	searchDur := time.Minute * 5
 	searchCtx, cancel := context.WithTimeout(ctx, searchDur)
 	defer cancel()
-	for outPt, res := range btc.node.findRedemptionsInMempool(searchCtx, mempoolReqs) {
+	for outPt, res := range finder.findRedemptionsInMempool(searchCtx, mempoolReqs) {
 		req, ok := mempoolReqs[outPt]
 		if !ok {
 			btc.log.Errorf("findRedemptionsInMempool discovered outpoint not found")
@@ -2248,7 +2256,7 @@ func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contrac
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 	if refundAddr == nil {
-		refundAddr, err = btc.node.changeAddress()
+		refundAddr, err = btc.node.internalAddress()
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -2287,7 +2295,7 @@ func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contrac
 
 // Address returns a new external address from the wallet.
 func (btc *ExchangeWallet) Address() (string, error) {
-	addr, err := btc.externalAddress()
+	addr, err := btc.node.externalAddress()
 	if err != nil {
 		return "", err
 	}
@@ -3004,14 +3012,6 @@ type verboseBlockTxs struct {
 	Height   uint64                `json:"height"`
 	NextHash string                `json:"nextblockhash"`
 	Tx       []btcjson.TxRawResult `json:"tx"`
-}
-
-// externalAddress will return a new address for public use.
-func (btc *ExchangeWallet) externalAddress() (btcutil.Address, error) {
-	if btc.segwit {
-		return btc.node.addressWPKH()
-	}
-	return btc.node.addressPKH()
 }
 
 // hashContract hashes the contract for use in a p2sh or p2wsh pubkey script.

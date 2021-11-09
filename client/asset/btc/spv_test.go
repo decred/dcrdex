@@ -330,9 +330,11 @@ func (c *tNeutrinoClient) GetBlockHeader(blkHash *chainhash.Hash) (*wire.BlockHe
 }
 
 func (c *tNeutrinoClient) GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, options ...neutrino.QueryOption) (*gcs.Filter, error) {
+	c.blockchainMtx.RLock()
+	scripts := c.getCFilterScripts[blockHash]
+	c.blockchainMtx.RUnlock()
 	var key [gcs.KeySize]byte
 	copy(key[:], blockHash.CloneBytes()[:])
-	scripts := c.getCFilterScripts[blockHash]
 	scripts = append(scripts, encode.RandomBytes(10))
 	return gcs.BuildGCSFilter(builder.DefaultP, builder.DefaultM, key, scripts)
 }
