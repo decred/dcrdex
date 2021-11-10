@@ -1551,14 +1551,16 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ t
 			contractHash, addrScript)
 	}
 
-	// The counter-party should have broadcasted the contract tx but
-	// rebroadcast just in case to ensure that the tx is sent to the
-	// network.
-	if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
-		dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
-	} else if !hashSent.IsEqual(txHash) {
-		dcr.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
-	}
+	// The counter-party should have broadcasted the contract tx but rebroadcast
+	// just in case to ensure that the tx is sent to the network. Do not block
+	// because this is not required and does not affect the audit result.
+	go func() {
+		if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
+			dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+		} else if !hashSent.IsEqual(txHash) {
+			dcr.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
+		}
+	}()
 
 	txTree := determineTxTree(contractTx)
 	return &asset.AuditInfo{
