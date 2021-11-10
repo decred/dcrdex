@@ -1407,7 +1407,7 @@ search:
 						res.spend = &spendingInput{
 							txHash:      tx.TxHash(),
 							vin:         uint32(vin),
-							blockHash:   *block.Hash(),
+							blockHash:   *blockHash,
 							blockHeight: uint32(height),
 						}
 						w.log.Tracef("Found txn %v spending %v in block %v (%d)", res.spend.txHash,
@@ -1427,7 +1427,7 @@ search:
 			}
 			for _, txOut := range tx.TxOut {
 				if bytes.Equal(txOut.PkScript, pkScript) {
-					res.blockHash = block.Hash()
+					res.blockHash = blockHash
 					res.blockHeight = uint32(height)
 					res.txOut = txOut
 					w.log.Tracef("Found txn %v in block %v (%d)", txHash, res.blockHash, height)
