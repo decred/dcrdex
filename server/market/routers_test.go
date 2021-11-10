@@ -348,11 +348,13 @@ type TBackend struct {
 	feeRateMinus10 int64
 }
 
-func tNewBackend() *TBackend {
-	return &TBackend{
-		utxos:      make(map[string]uint64),
-		addrChecks: true,
-		synced:     1,
+func tNewUTXOBackend() *tUTXOBackend {
+	return &tUTXOBackend{
+		TBackend: TBackend{
+			utxos:      make(map[string]uint64),
+			addrChecks: true,
+			synced:     1,
+		},
 	}
 }
 
@@ -376,9 +378,6 @@ func (b *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error
 	}
 	return &asset.Contract{Coin: c}, nil
 }
-func (b *TBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
-	return b.utxo(coinID)
-}
 func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	return b.utxo(redemptionID)
 }
@@ -398,10 +397,6 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 }
 
 func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
-func (b *TBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
-	_, err := b.utxo(coinID)
-	return err
-}
 func (b *TBackend) FeeRate(context.Context) (uint64, error) {
 	return 9, nil
 }
@@ -414,6 +409,19 @@ func (b *TBackend) Synced() (bool, error) {
 }
 
 func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
+
+type tUTXOBackend struct {
+	TBackend
+}
+
+func (b *tUTXOBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
+	return b.utxo(coinID)
+}
+
+func (b *tUTXOBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
+	_, err := b.utxo(coinID)
+	return err
+}
 
 type tUTXO struct {
 	val     uint64
@@ -442,8 +450,8 @@ type tUser struct {
 }
 
 type tOrderRig struct {
-	btc    *TBackend
-	dcr    *TBackend
+	btc    *tUTXOBackend
+	dcr    *tUTXOBackend
 	user   *tUser
 	auth   *TAuth
 	market *TMarketTunnel
@@ -547,8 +555,8 @@ func TestMain(m *testing.M) {
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
 	oRig = &tOrderRig{
-		btc: tNewBackend(),
-		dcr: tNewBackend(),
+		btc: tNewUTXOBackend(),
+		dcr: tNewUTXOBackend(),
 		user: &tUser{
 			acct:    ordertest.NextAccount(),
 			privKey: privKey,
@@ -714,12 +722,19 @@ func TestLimit(t *testing.T) {
 	rpcErr := oRig.router.handleLimit(user.acct, msg)
 	ensureErr("bad payload", rpcErr, msgjson.RPCParseError)
 
+	// Invalid backend.
+	assetDCR.Backend = &oRig.dcr.TBackend
+	assetBTC.Backend = &oRig.btc.TBackend
+	ensureErr("no OutputTracker", sendLimit(), msgjson.FundingError)
+	assetDCR.Backend = oRig.dcr
+	assetBTC.Backend = oRig.btc
+
 	// Wrong order type marked for limit order
 	limit.OrderType = msgjson.MarketOrderNum
 	ensureErr("wrong order type", sendLimit(), msgjson.OrderParameterError)
 	limit.OrderType = msgjson.LimitOrderNum
 
-	testPrefixTrade(&limit.Prefix, &limit.Trade, oRig.dcr, oRig.btc,
+	testPrefixTrade(&limit.Prefix, &limit.Trade, &oRig.dcr.TBackend, &oRig.btc.TBackend,
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendLimit(), code) },
 	)
 
@@ -903,7 +918,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	ensureErr("wrong order type", sendMarket(), msgjson.OrderParameterError)
 	mkt.OrderType = msgjson.MarketOrderNum
 
-	testPrefixTrade(&mkt.Prefix, &mkt.Trade, oRig.dcr, oRig.btc,
+	testPrefixTrade(&mkt.Prefix, &mkt.Trade, &oRig.dcr.TBackend, &oRig.btc.TBackend,
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendMarket(), code) },
 	)
 

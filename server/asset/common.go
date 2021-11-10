@@ -49,10 +49,6 @@ type Backend interface {
 	// Redemption returns a Coin for redemptionID, a transaction input, that
 	// spends contract ID, an output containing the swap contract.
 	Redemption(redemptionID, contractID []byte) (Coin, error)
-	// FundingCoin returns the unspent coin at the specified location. Coins
-	// with non-standard pkScripts or scripts that require zero signatures to
-	// redeem must return an error.
-	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -70,16 +66,32 @@ type Backend interface {
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
 	ValidateContract(contract []byte) error
-	// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID
-	// and retrieving the corresponding Coin. If the coin is not found or no
-	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
-	// for more UTXO data.
-	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
 	// FeeRate returns the current optimal fee rate in atoms / byte.
 	FeeRate(context.Context) (uint64, error)
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)
+}
+
+// OutputTracker is implemented by backends for UTXO-based blockchains.
+// OutputTracker tracks the value and spend-status of transaction outputs.
+type OutputTracker interface {
+	// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID
+	// and retrieving the corresponding Coin. If the coin is not found or no
+	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
+	// for more UTXO data.
+	VerifyUnspentCoin(ctx context.Context, coinID []byte) error
+	// FundingCoin returns the unspent coin at the specified location. Coins
+	// with non-standard pkScripts or scripts that require zero signatures to
+	// redeem must return an error.
+	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
+}
+
+// AccountBalancer is implemented by backends for account-based blockchains.
+// An AccountBalancer reports the current balance for an account.
+type AccountBalancer interface {
+	// AccountBalance retrieves the current account balance.
+	AccountBalance(addr string) (uint64, error)
 }
 
 // Coin represents a transaction input or output.

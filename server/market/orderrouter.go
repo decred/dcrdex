@@ -186,9 +186,13 @@ func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr 
 }
 
 func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+	outputTracker, is := backend.(asset.OutputTracker)
+	if !is {
+		return nil, fmt.Errorf("fundingCoin requested for incapable asset")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	return backend.FundingCoin(ctx, coinID, redeemScript)
+	return outputTracker.FundingCoin(ctx, coinID, redeemScript)
 }
 
 func coinConfirmations(coin asset.Coin) (int64, error) {

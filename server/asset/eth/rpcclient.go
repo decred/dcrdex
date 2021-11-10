@@ -120,3 +120,13 @@ func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwa
 func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
 	return c.ec.TransactionByHash(ctx, hash)
 }
+
+// accountBalance gets the account balance, including the effects of known
+// unmined transactions.
+func (c *rpcclient) accountBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	bigBal, err := c.ec.PendingBalanceAt(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	return bigBal, nil
+}

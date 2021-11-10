@@ -81,6 +81,8 @@ type testNode struct {
 	tx             *types.Transaction
 	txIsMempool    bool
 	txErr          error
+	acctBal        *big.Int
+	acctBalErr     error
 }
 
 func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
@@ -123,6 +125,10 @@ func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwap
 
 func (n *testNode) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
 	return n.tx, n.txIsMempool, n.txErr
+}
+
+func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	return n.acctBal, n.acctBalErr
 }
 
 func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *swap.ETHSwapSwap {
@@ -719,5 +725,38 @@ func TestValidateContract(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
+	}
+}
+
+func TestAccountBalance(t *testing.T) {
+	node := &testNode{}
+	eth := &Backend{node: node}
+
+	const gweiBal = 1e9
+	bigBal := big.NewInt(gweiBal)
+	node.acctBal = bigBal.Mul(bigBal, big.NewInt(GweiFactor))
+
+	// Initial success
+	bal, err := eth.AccountBalance("")
+	if err != nil {
+		t.Fatalf("AccountBalance error: %v", err)
+	}
+
+	if bal != gweiBal {
+		t.Fatalf("wrong balance. expected %f, got %d", gweiBal, bal)
+	}
+
+	// Only error path.
+	node.acctBalErr = errors.New("test error")
+	_, err = eth.AccountBalance("")
+	if err == nil {
+		t.Fatalf("no AccountBalance error when expected")
+	}
+	node.acctBalErr = nil
+
+	// Success again
+	_, err = eth.AccountBalance("")
+	if err != nil {
+		t.Fatalf("AccountBalance error: %v", err)
 	}
 }

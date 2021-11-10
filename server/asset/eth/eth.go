@@ -96,6 +96,7 @@ type ethFetcher interface {
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	swap(ctx context.Context, secretHash [32]byte) (*dexeth.ETHSwapSwap, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
+	accountBalance(ctx context.Context, addr common.Address) (*big.Int, error)
 }
 
 // Backend is an asset backend for Ethereum. It has methods for fetching output
@@ -331,11 +332,6 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 	return cnr, nil
 }
 
-// FundingCoin is an unspent output.
-func (eth *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
-	return nil, notImplementedErr
-}
-
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 	coinId, err := DecodeCoinID(coinID)
@@ -358,9 +354,14 @@ func (eth *Backend) CheckAddress(addr string) bool {
 	return common.IsHexAddress(addr)
 }
 
-// VerifyUnspentCoin attempts to verify a coin ID is unspent.
-func (eth *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error {
-	return notImplementedErr
+// AccountBalance retrieves the current account balance, including the effects
+// of known unmined transactions.
+func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
+	bigBal, err := eth.node.accountBalance(eth.rpcCtx, common.HexToAddress(addrStr))
+	if err != nil {
+		return 0, fmt.Errorf("accountBalance error: %w", err)
+	}
+	return ToGwei(bigBal)
 }
 
 // run processes the queue and monitors the application context. The supplied
