@@ -26,11 +26,14 @@ func overMaxWei() *big.Int {
 	return overMaxWei.Add(overMaxWei, gweiFactorBig)
 }
 
+func randomAddress() *common.Address {
+	var addr common.Address
+	copy(addr[:], encode.RandomBytes(20))
+	return &addr
+}
+
 func TestNewSwapCoin(t *testing.T) {
-	receiverAddr, contractAddr, randomAddr := new(common.Address), new(common.Address), new(common.Address)
-	copy(receiverAddr[:], encode.RandomBytes(20))
-	copy(contractAddr[:], encode.RandomBytes(20))
-	copy(randomAddr[:], encode.RandomBytes(20))
+	contractAddr, randomAddr := randomAddress(), randomAddress()
 	secret, secretHash, txHash := [32]byte{}, [32]byte{}, [32]byte{}
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], secretSlice)
@@ -145,7 +148,7 @@ func TestNewSwapCoin(t *testing.T) {
 			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
-		sc, err := newSwapCoin(eth, test.coinID, test.ct)
+		sc, err := eth.newSwapCoin(test.coinID, test.ct)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -303,7 +306,7 @@ func TestConfirmations(t *testing.T) {
 			contractAddr: *contractAddr,
 		}
 
-		sc, err := newSwapCoin(eth, txCoinIDBytes, test.ct)
+		sc, err := eth.newSwapCoin(txCoinIDBytes, test.ct)
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}

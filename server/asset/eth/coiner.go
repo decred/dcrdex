@@ -50,7 +50,7 @@ type swapCoin struct {
 // an error is returned then if something is different than expected. As such,
 // the swapCoin expects Confirmations to be called with confirmations
 // available at least once before the swap be trusted for swap initializations.
-func newSwapCoin(backend *Backend, coinID []byte, sct swapCoinType) (*swapCoin, error) {
+func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin, error) {
 	switch sct {
 	case sctInit, sctRedeem:
 	default:

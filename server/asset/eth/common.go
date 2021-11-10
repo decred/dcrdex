@@ -81,7 +81,7 @@ const (
 // to the smart contract. This type of ID is useful to identify coins that
 // were sent in transactions that have not yet been mined.
 type TxCoinID struct {
-	TxID [32]byte
+	TxID common.Hash
 }
 
 // String creates a human readable string.
