@@ -1887,12 +1887,15 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 			contractHash, addr.ScriptAddress())
 	}
 
-	// Broadcast the transaction.
-	if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
-		btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
-	} else if !hashSent.IsEqual(txHash) {
-		btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
-	}
+	// Broadcast the transaction, but do not block because this is not required
+	// and does not affect the audit result.
+	go func() {
+		if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
+			btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+		} else if !hashSent.IsEqual(txHash) {
+			btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
+		}
+	}()
 
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(txOut.Value)),
