@@ -1366,8 +1366,9 @@ func (c *Core) dexConnections() []*dexConnection {
 // exchangeMap creates a map of *Exchange keyed by host, including markets and
 // orders.
 func (c *Core) exchangeMap() map[string]*Exchange {
-	infos := make(map[string]*Exchange, len(c.conns))
-	for _, dc := range c.dexConnections() {
+	dcs := c.dexConnections()
+	infos := make(map[string]*Exchange, len(dcs))
+	for _, dc := range dcs {
 		infos[dc.acct.host] = dc.exchangeInfo()
 	}
 	return infos
