@@ -207,7 +207,21 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 // TxData fetches the raw transaction data.
 func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
-	return nil, notImplementedErr
+	cnr, err := DecodeCoinID(coinID)
+	if err != nil {
+		return nil, fmt.Errorf("coin ID decoding error: %v", err)
+	}
+	c, is := cnr.(*TxCoinID)
+	if !is {
+		return nil, fmt.Errorf("wrong type of coin ID, %v", cnr)
+	}
+
+	tx, _, err := eth.node.transaction(eth.rpcCtx, c.TxID)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving transaction: %w", err)
+	}
+
+	return tx.MarshalBinary()
 }
 
 // InitTxSize is not size for eth. In ethereum the size of a non-standard
@@ -249,7 +263,7 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 
 // Contract is part of the asset.Backend interface.
 func (eth *Backend) Contract(coinID, _ []byte) (*asset.Contract, error) {
-	sc, err := newSwapCoin(eth, coinID, sctInit)
+	sc, err := eth.newSwapCoin(coinID, sctInit)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -299,7 +313,7 @@ func (eth *Backend) Synced() (bool, error) {
 // should be the transaction that sent a redemption, while contractCoinID is the
 // swap contract this redemption redeems.
 func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
-	cnr, err := newSwapCoin(eth, redeemCoinID, sctRedeem)
+	cnr, err := eth.newSwapCoin(redeemCoinID, sctRedeem)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}

@@ -629,3 +629,54 @@ func TestRedemption(t *testing.T) {
 		}
 	}
 }
+
+func TestTxData(t *testing.T) {
+	node := &testNode{}
+	eth := &Backend{
+		node: node,
+	}
+	gasPrice := big.NewInt(3e10)
+	value := big.NewInt(5e18)
+	addr := randomAddress()
+	data := encode.RandomBytes(5)
+	tx := tTx(gasPrice, value, addr, data)
+	goodCoinID := (&TxCoinID{TxID: tx.Hash()}).Encode()
+	node.tx = tx
+
+	// initial success
+	txData, err := eth.TxData(goodCoinID)
+	if err != nil {
+		t.Fatalf("TxData error: %v", err)
+	}
+	checkB, _ := tx.MarshalBinary()
+	if !bytes.Equal(txData, checkB) {
+		t.Fatalf("tx data not transmitted")
+	}
+
+	// bad coin ID
+	coinID := encode.RandomBytes(2)
+	_, err = eth.TxData(coinID)
+	if err == nil {
+		t.Fatalf("no error for bad coin ID")
+	}
+
+	// Wrong type of coin ID
+	coinID = (&SwapCoinID{}).Encode()
+	_, err = eth.TxData(coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong coin type")
+	}
+
+	// No transaction
+	_, err = eth.TxData(coinID)
+	if err == nil {
+		t.Fatalf("no error for missing tx")
+	}
+
+	// Success again
+	node.tx = tx
+	_, err = eth.TxData(goodCoinID)
+	if err != nil {
+		t.Fatalf("TxData error: %v", err)
+	}
+}
