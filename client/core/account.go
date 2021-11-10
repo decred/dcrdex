@@ -55,7 +55,9 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 	dc.cfgMtx.RUnlock()
 	// Disconnect and delete connection from map.
 	dc.connMaster.Disconnect()
+	c.connMtx.Lock()
 	delete(c.conns, dc.acct.host)
+	c.connMtx.Unlock()
 
 	return nil
 }
