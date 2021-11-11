@@ -80,7 +80,8 @@ const (
 // TxCoinID identifies a coin in the swap contract by the
 // hash of the transaction which initiatied the swap and the
 // index of the initiation in the argument to the initiate
-// function.
+// function. This type of ID is useful to identify coins that
+// were sent in transactions that have not yet been mined.
 type TxCoinID struct {
 	TxID  common.Hash
 	Index uint32
