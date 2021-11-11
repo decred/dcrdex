@@ -140,6 +140,7 @@ type RegisterForm struct {
 type Match struct {
 	MatchID       dex.Bytes         `json:"matchID"`
 	Status        order.MatchStatus `json:"status"`
+	Active        bool              `json:"active"`
 	Revoked       bool              `json:"revoked"`
 	Rate          uint64            `json:"rate"`
 	Qty           uint64            `json:"qty"`
@@ -257,6 +258,7 @@ func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapC
 	match := &Match{
 		MatchID:       userMatch.MatchID[:],
 		Status:        userMatch.Status,
+		Active:        db.MatchIsActive(userMatch, proof),
 		Revoked:       proof.IsRevoked(),
 		Rate:          userMatch.Rate,
 		Qty:           userMatch.Quantity,
