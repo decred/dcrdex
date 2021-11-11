@@ -1146,7 +1146,7 @@ func (w *spvWallet) startWallet() error {
 	var addPeers []string
 	switch w.chainParams.Net {
 	case wire.MainNet:
-		addPeers = []string{"45.76.69.19"}
+		addPeers = []string{"cfilters.ssgen.io"}
 	case wire.TestNet3:
 		addPeers = []string{"dex-test.ssgen.io"}
 	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!

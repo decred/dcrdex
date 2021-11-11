@@ -464,7 +464,7 @@ func (wc *rpcClient) syncStatus() (*syncStatus, error) {
 	return &syncStatus{
 		Target:  int32(chainInfo.Headers),
 		Height:  int32(chainInfo.Blocks),
-		Syncing: chainInfo.InitialBlockDownload || chainInfo.Headers-chainInfo.Blocks > 1, // sure not > 0?
+		Syncing: chainInfo.InitialBlockDownload || chainInfo.Headers-chainInfo.Blocks > 1,
 	}, nil
 }
 
