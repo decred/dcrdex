@@ -322,7 +322,7 @@ func (ord *orderReader) sumTo(filter func(match *core.Match) bool) uint64 {
 // hasLiveMatches will be true if there are any matches < MakerRedeemed.
 func (ord *orderReader) hasLiveMatches() bool {
 	for _, match := range ord.Matches {
-		if match.Status < order.MakerRedeemed {
+		if match.Active {
 			return true
 		}
 	}
@@ -466,6 +466,21 @@ func newMatchReader(match *core.Match, ord *orderReader) *matchReader {
 
 // StatusString is a formatted string of the match status.
 func (m *matchReader) StatusString() string {
+	if m.Revoked {
+		// When revoked, match status is less important than pending action if
+		// still active, or the outcome if inactive.
+		switch {
+		case m.Active:
+			return "Revoked - Refund PENDING" // could auto-redeem too, but we are waiting
+		case m.Refund != nil:
+			return "Revoked - Refunded"
+			// TODO: show refund txid on /order page
+		case m.Redeem != nil:
+			return "Revoked - Redeemed"
+		} // otherwise no txns needed to retire
+		return "Revoked - Complete"
+	}
+
 	switch m.Status {
 	case order.NewlyMatched:
 		return "(0 / 4) Newly Matched"
@@ -481,7 +496,7 @@ func (m *matchReader) StatusString() string {
 	case order.MatchComplete:
 		return "Match Complete"
 	}
-	return "Unknown Order Status"
+	return "Unknown Match Status"
 }
 
 // RateString is the formatted match rate, with units.
