@@ -26,7 +26,7 @@ const (
 )
 
 // version is the dex server's release version.
-var version = semver{major: 0, minor: 3, patch: 0}
+var version = semver{major: 0, minor: 4, patch: 0}
 
 // semver holds dexcctl's semver values.
 type semver struct {

@@ -24,7 +24,7 @@ const (
 const (
 	AppName  string = "dcrdex"
 	AppMajor uint   = 0
-	AppMinor uint   = 3
+	AppMinor uint   = 4
 	AppPatch uint   = 0
 )
 
