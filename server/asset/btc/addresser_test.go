@@ -51,6 +51,9 @@ func TestAddressDeriver(t *testing.T) {
 	// params := &chaincfg.TestNet3Params
 	// zpub := "vpub5UpDTWU6Nuj9uuU5TZnxjS97SAjKwY4UiLvvnYNRC6vmvbDa5toZRG1BkqCnLSRmNYuLuqLDPtdDq6YvELoMUSPjVSFTsX1H42kabkJDwWD"
 	// xpubWant := "tpubD8rNb5dcPYmZtJ3AaUMJMXfV7E7spAYY6CZfhtDLJ2SRn5WjfRymopzJ3HCjrkgqyjfs2N3CrKANHrGf4bUcxMDEHiPcisJVBSUH8wNhdoA"
+	// params := &chaincfg.RegressionNetParams
+	// zpub := "vpub5YqS5eyUTyzmeuQiyW96jgBcRiCNSEMapKkUcF6L8kWSrma29AXi9Zr4e5rxCjk4eZnP8sTpeXNJDdFr6kMGjh8ZqraXpYyyq1XfaaPwt32"
+	// xpubWant := "tpubDCsbDE8zUd3BdHyp6QhSMmhz6mavJrqeCBPDXawFEg26iFsBihhvY8qAvXruj419FkYuFQAp6wuSgNyaw12YDbx4e8igfuHBxRFN7kRdZbM"
 
 	net := params.Net
 

@@ -1065,6 +1065,13 @@ func (w *spvWallet) startWallet() error {
 		bailOnWalletAndDB()
 	}
 
+	props, err := btcw.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	if err != nil || props.AccountPubKey == nil {
+		w.log.Warnf("Unable to retrieve account properties: %v", err)
+	} else {
+		w.log.Tracef("Account extended public key (do not share): %v", props.AccountPubKey.String())
+	}
+
 	w.cl = chainService
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
 	w.wallet = &walletExtender{btcw, w.chainParams}
