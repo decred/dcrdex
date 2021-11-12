@@ -92,7 +92,7 @@ type btcWallet interface {
 	HaveAddress(a btcutil.Address) (bool, error)
 	Stop()
 	WaitForShutdown()
-	ChainSynced() bool
+	ChainSynced() bool // currently unused
 	SynchronizeRPC(chainClient chain.Interface)
 	// walletExtender methods
 	walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
@@ -433,14 +433,22 @@ func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
 }
 
 func (w *spvWallet) getBestBlockHash() (*chainhash.Hash, error) {
-	blk, err := w.cl.BestBlock()
-	if err != nil {
-		return nil, err
-	}
-	return &blk.Hash, err
+	blk := w.wallet.syncedTo()
+	return &blk.Hash, nil
 }
 
+// getBestBlockHeight returns the height of the best block processed by the
+// wallet, which indicates the height at which the compact filters have been
+// retrieved and scanned for wallet addresses. This is may be less than
+// getChainHeight, which indicates the height that the chain service has reached
+// in its retrieval of block headers and compact filter headers.
 func (w *spvWallet) getBestBlockHeight() (int32, error) {
+	return w.wallet.syncedTo().Height, nil
+}
+
+// getChainHeight is only for confirmations since it does not reflect the wallet
+// manager's sync height, just the chain service.
+func (w *spvWallet) getChainHeight() (int32, error) {
 	blk, err := w.cl.BestBlock()
 	if err != nil {
 		return -1, err
@@ -465,34 +473,130 @@ func (w *spvWallet) syncHeight() int32 {
 }
 
 // syncStatus is information about the wallet's sync status.
+//
+// The neutrino wallet has a two stage sync:
+//  1. chain service fetching block headers and filter headers
+//  2. wallet address manager retrieving and scanning filters
+//
+// We only report a single sync height, so we are going to show some progress in
+// the chain service sync stage that comes before the wallet has performed any
+// address recovery/rescan, and switch to the wallet's sync height when it
+// reports non-zero height.
 func (w *spvWallet) syncStatus() (*syncStatus, error) {
-	blk, err := w.cl.BestBlock()
-	if err != nil {
-		return nil, err
-	}
-
+	var synced bool
+	var blk *block
 	target := w.syncHeight()
-	currentHeight := blk.Height
-	synced := w.wallet.ChainSynced()
-	// Sometimes the wallet doesn't report the chain as synced right away.
-	// Seems to be a bug.
-	if !synced && target > 0 && target == currentHeight {
-		synced = true
+
+	// First try the wallet address manager sync block.
+	walletBlock := w.wallet.syncedTo()
+	if walletBlock.Height == 0 { // becomes non-zero shortly after birthday
+		// Chain service headers (block and filter) height.
+		chainBlock, err := w.cl.BestBlock()
+		if err != nil {
+			return nil, err
+		}
+		blk = &block{
+			height: int64(chainBlock.Height),
+			hash:   chainBlock.Hash,
+		}
+	} else {
+		blk = &block{
+			height: int64(walletBlock.Height),
+			hash:   walletBlock.Hash,
+		}
+		synced = walletBlock.Height >= target
 	}
 
-	if atomic.SwapInt32(&w.syncTarget, target) == 0 && target > 0 {
-		w.tipChan <- &block{
-			hash:   blk.Hash,
-			height: int64(blk.Height),
-		}
+	if target > 0 && atomic.SwapInt32(&w.syncTarget, target) == 0 {
+		w.tipChan <- blk
 	}
 
 	return &syncStatus{
 		Target:  target,
-		Height:  currentHeight,
+		Height:  int32(blk.height),
 		Syncing: !synced,
 	}, nil
 }
+
+// getWalletBirthdayBlock retrieves the wallet's birthday block.
+//
+// NOTE: The wallet birthday block hash is NOT SET until the chain service
+// passes the birthday block and the wallet looks it up based on the birthday
+// Time and the downloaded block headers.
+// func (w *walletExtender) getWalletBirthdayBlock() (*waddrmgr.BlockStamp, error) {
+// 	var birthdayBlock waddrmgr.BlockStamp
+// 	err := walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
+// 		ns := dbtx.ReadBucket([]byte("waddrmgr")) // it'll be fine
+// 		var err error
+// 		birthdayBlock, _, err = w.Manager.BirthdayBlock(ns)
+// 		return err
+// 	})
+// 	if err != nil {
+// 		return nil, err // sadly, waddrmgr.ErrBirthdayBlockNotSet is expected during most of chain sync
+// 	}
+// 	return &birthdayBlock, nil
+// }
+
+/* If neutrino.(*ChainService).BestBlock starts returning a non-zero Timestamp:
+
+var lastPrenatalHeight int32
+
+func (w *spvWallet) syncStatus() (*syncStatus, error) {
+	// Chain service headers (block and filter) height.
+	chainBlk, err := w.cl.BestBlock()
+	if err != nil {
+		return nil, err
+	}
+	target := w.syncHeight()
+	currentHeight := chainBlk.Height
+
+	var synced bool
+	var blk *block
+	// Wallet address manager sync height.
+	if chainBlk.Timestamp.After(w.wallet.Manager.Birthday()) {
+		// After birthday, wallet address manager should be syncing.
+		walletBlock := w.wallet.syncedTo()
+		if walletBlock.Height == 0 {
+			// About to start, so just return last chain service height prior to
+			// wallet birthday.
+			return &syncStatus{
+				Target:  target,
+				Height:  atomic.LoadInt32(&lastPrenatalHeight),
+				Syncing: true,
+			}, nil
+		}
+		blk = &block{
+			height: int64(walletBlock.Height),
+			hash:   walletBlock.Hash,
+		}
+		currentHeight = walletBlock.Height
+		synced = currentHeight >= target // maybe && w.wallet.ChainSynced()
+		w.log.Debugf("chain = %d, wallet = %d, target = %d (synced = %v)",
+			chainBlk.Height, walletBlock.Height, target, synced)
+		// NOTE: when sync flips to wallet height, progress may go down.
+		// Alternatively, always just consider walletBlock, never chainBlk, but
+		// it could appear to be stuck at 0% for a minute prior to the chain
+		// service reaching the wallet's birthday.
+	} else {
+		// Chain service still syncing.
+		blk = &block{
+			height: int64(currentHeight),
+			hash:   chainBlk.Hash,
+		}
+		atomic.StoreInt32(&lastPrenatalHeight, currentHeight)
+	}
+
+	if target > 0 && atomic.SwapInt32(&w.syncTarget, target) == 0 {
+		w.tipChan <- blk
+	}
+
+	return &syncStatus{
+		Target:  target,
+		Height:  int32(blk.height),
+		Syncing: !synced,
+	}, nil
+}
+*/
 
 // Balances retrieves a wallet's balance details.
 func (w *spvWallet) balances() (*GetBalancesResult, error) {
@@ -825,7 +929,7 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	}
 
 	if utxo.blockHash != nil {
-		bestHeight, err := w.getBestBlockHeight()
+		bestHeight, err := w.getChainHeight()
 		if err != nil {
 			return 0, false, fmt.Errorf("getBestBlockHeight error: %v", err)
 		}
@@ -1039,17 +1143,27 @@ func (w *spvWallet) startWallet() error {
 		bailOnWallet()
 	}
 
-	// If we're on regtest and the peers haven't been explicitly set, add the
-	// simnet harness alpha node as an additional peer so we don't have to type
-	// it in.
-	if w.chainParams.Name == "regtest" && len(w.connectPeers) == 0 {
-		w.connectPeers = append(w.connectPeers, "localhost:20575")
+	// Depending on the network, we add some addpeers or a connect peer. On
+	// regtest, if the peers haven't been explicitly set, add the simnet harness
+	// alpha node as an additional peer so we don't have to type it in. On
+	// mainet and testnet3, add a known reliable persistent peer to be used in
+	// addition to normal DNS seed-based peer discovery.
+	var addPeers []string
+	switch w.chainParams.Net {
+	case wire.MainNet:
+		addPeers = []string{"cfilters.ssgen.io"}
+	case wire.TestNet3:
+		addPeers = []string{"dex-test.ssgen.io"}
+	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
+		if len(w.connectPeers) == 0 {
+			w.connectPeers = []string{"localhost:20575"}
+		}
 	}
-
 	chainService, err := neutrino.NewChainService(neutrino.Config{
 		DataDir:          w.netDir,
 		Database:         w.neutrinoDB,
 		ChainParams:      *w.chainParams,
+		AddPeers:         addPeers,
 		ConnectPeers:     w.connectPeers,
 		BroadcastTimeout: 10 * time.Second,
 	})
@@ -1168,9 +1282,9 @@ func (w *spvWallet) mainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhas
 func (w *spvWallet) findBlockForTime(matchTime time.Time) (*chainhash.Hash, int32, error) {
 	offsetTime := matchTime.Add(-maxFutureBlockTime)
 
-	bestHeight, err := w.getBestBlockHeight()
+	bestHeight, err := w.getChainHeight()
 	if err != nil {
-		return nil, 0, fmt.Errorf("getBestBlockHeight error: %v", err)
+		return nil, 0, fmt.Errorf("getChainHeight error: %v", err)
 	}
 
 	getBlockTimeForHeight := func(height int32) (*chainhash.Hash, time.Time, error) {
@@ -1355,10 +1469,8 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 // filterScanFromHeight scans BIP158 filters beginning at the specified block
 // height until the tip, or until a spending transaction is found.
 func (w *spvWallet) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, startBlockHeight int32, checkPt *filterScanResult) (*filterScanResult, error) {
-	tip, err := w.getBestBlockHeight()
-	if err != nil {
-		return nil, err
-	}
+	walletBlock := w.wallet.syncedTo() // where cfilters are received and processed
+	tip := walletBlock.Height
 
 	res := checkPt
 	if res == nil {
@@ -1389,7 +1501,8 @@ search:
 			continue search
 		}
 		// Pull the block.
-		w.log.Tracef("Block %v matched pkScript %v. Pulling the block...", blockHash, pkScript)
+		w.log.Tracef("Block %v matched pkScript for output %v:%d. Pulling the block...",
+			blockHash, txHash, vout)
 		block, err := w.cl.GetBlock(*blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("GetBlock error: %v", err)
@@ -1526,8 +1639,11 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 
 	if details.Block.Hash != (chainhash.Hash{}) {
 		blockHash = &details.Block.Hash
-		syncBlock := w.wallet.syncedTo() // Better than chainClient.GetBestBlockHeight() ?
-		confs = uint32(confirms(details.Block.Height, syncBlock.Height))
+		height, err := w.getChainHeight()
+		if err != nil {
+			return nil, 0, false, err
+		}
+		confs = uint32(confirms(details.Block.Height, height))
 	}
 
 	spent, found := outputSpendStatus(details, vout)

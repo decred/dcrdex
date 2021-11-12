@@ -1502,6 +1502,7 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 					c.notify(newWalletStateNote(w.state()))
 					if synced {
 						c.updateWalletBalance(w)
+						c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
 						return
 					}
 
@@ -1770,7 +1771,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return initErr("error getting wallet balance for %s: %w", symbol, err)
 	}
-	wallet.balance = balances           // update xcWallet's WalletBalance
+	wallet.setBalance(balances)         // update xcWallet's WalletBalance
 	dbWallet.Balance = balances.Balance // store the db.Balance
 
 	// Store the wallet in the database.

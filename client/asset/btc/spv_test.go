@@ -196,7 +196,7 @@ func (c *tBtcWallet) ChainSynced() bool {
 	if c.getBlockchainInfo == nil {
 		return false
 	}
-	return c.getBlockchainInfo.Blocks >= c.getBlockchainInfo.Headers-1
+	return c.getBlockchainInfo.Blocks >= c.getBlockchainInfo.Headers // -1 ok for chain sync ?
 }
 
 func (c *tBtcWallet) SynchronizeRPC(chainClient chain.Interface) {}
@@ -248,12 +248,12 @@ func (c *tBtcWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResu
 }
 
 func (c *tBtcWallet) syncedTo() waddrmgr.BlockStamp {
-	bestHash, bestHeight := c.bestBlock()
+	bestHash, bestHeight := c.bestBlock() // NOTE: in reality this may be lower than the chain service's best block
 	blk := c.getBlock(bestHash.String())
 	return waddrmgr.BlockStamp{
 		Height:    int32(bestHeight),
 		Hash:      *bestHash,
-		Timestamp: blk.msgBlock.Header.Timestamp,
+		Timestamp: blk.msgBlock.Header.Timestamp, // neutrino doesn't actually set this, yet
 	}
 }
 
