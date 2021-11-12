@@ -181,8 +181,8 @@ const (
 	// PenaltyRoute is the DEX-originating notification-type message
 	// informing of a broken rule and the resulting penalty.
 	PenaltyRoute = "penalty"
-	// SpotsRoute is the HTTP or WebSocket request to get the spot price and
-	// volume for the DEX's markets.
+	// SpotsRoute is the client-originating HTTP or WebSocket request to get the
+	// spot price and volume for the DEX's markets.
 	SpotsRoute = "spots"
 	// FeeRateRoute is the client-originating request asking for the most
 	// recently recorded transaction fee estimate for an asset.

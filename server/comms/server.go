@@ -53,9 +53,10 @@ const (
 	// operations. Consider which routes are authenticated when setting these.
 	wsRateStatus, wsBurstStatus     = 10, 500     // order_status and match_status (combined)
 	wsRateOrder, wsBurstOrder       = 5, 100      // market, limit, and cancel (combined)
-	wsRateInfo, wsBurstInfo         = 10, 200     // low-cost route limiter for: config, fee_rate  (combined)
-	wsRateBook, wsBurstBook         = 1, 100      // orderbook, assuming 100 markets subscribed max
+	wsRateInfo, wsBurstInfo         = 10, 200     // low-cost route limiter for: config, fee_rate, spots, candles (combined)
+	wsRateSubs, wsBurstSubs         = 2, 100      // subscriptions: orderbook and price feed (combined)
 	wsRateRegister, wsBurstRegister = 1 / 60.0, 1 // register, rate.Every(time.Minute) but const
+	wsRateConnect, wsBurstConnect   = 4, 100      // connect, account discovery requires bursts - (*Core).discoverAccount
 	// The cumulative rates below would need to be less than sum of above to
 	// actually trip unless it is also applied to unspecified routes.
 	wsRateTotal, wsBurstTotal = 40, 1000
@@ -212,9 +213,12 @@ func newRouteLimiter() *routeLimiter {
 	statusLimiter := rate.NewLimiter(wsRateStatus, wsBurstStatus)
 	orderLimiter := rate.NewLimiter(wsRateOrder, wsBurstOrder)
 	infoLimiter := rate.NewLimiter(wsRateInfo, wsBurstInfo)
+	marketSubsLimiter := rate.NewLimiter(wsRateSubs, wsBurstSubs)
 	return &routeLimiter{
 		cumulative: rate.NewLimiter(wsRateTotal, wsBurstTotal),
 		routes: map[string]allower{
+			// Connect (authorize) route
+			msgjson.ConnectRoute: rate.NewLimiter(wsRateConnect, wsBurstConnect),
 			// Meter the 'register' route the most.
 			msgjson.RegisterRoute: rate.NewLimiter(wsRateRegister, wsBurstRegister),
 			// Status checking of matches and orders
@@ -224,11 +228,14 @@ func newRouteLimiter() *routeLimiter {
 			msgjson.LimitRoute:  orderLimiter,
 			msgjson.MarketRoute: orderLimiter,
 			msgjson.CancelRoute: orderLimiter,
-			// Order book subscription with full snapshot
-			msgjson.OrderBookRoute: rate.NewLimiter(wsRateBook, wsBurstBook),
-			// Config and fee rate
+			// Order book and price feed subscriptions
+			msgjson.OrderBookRoute: marketSubsLimiter,
+			msgjson.PriceFeedRoute: marketSubsLimiter,
+			// Config, fee rate, spot prices, and candles
 			msgjson.FeeRateRoute: infoLimiter,
 			msgjson.ConfigRoute:  infoLimiter,
+			msgjson.SpotsRoute:   infoLimiter,
+			msgjson.CandlesRoute: infoLimiter,
 		},
 	}
 }
