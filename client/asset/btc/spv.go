@@ -437,6 +437,11 @@ func (w *spvWallet) getBestBlockHash() (*chainhash.Hash, error) {
 	return &blk.Hash, nil
 }
 
+// getBestBlockHeight returns the height of the best block processed by the
+// wallet, which indicates the height at which the compact filters have been
+// retrieved and scanned for wallet addresses. This is may be less than
+// getChainHeight, which indicates the height that the chain service has reached
+// in its retrieval of block headers and compact filter headers.
 func (w *spvWallet) getBestBlockHeight() (int32, error) {
 	return w.wallet.syncedTo().Height, nil
 }
