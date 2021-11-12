@@ -216,7 +216,7 @@ func (c *rpcclient) swap(ctx context.Context, from *accounts.Account, secretHash
 func (c *rpcclient) wallet(acct accounts.Account) (accounts.Wallet, error) {
 	wallet, err := c.n.AccountManager().Find(acct)
 	if err != nil {
-		return nil, fmt.Errorf("error finding wallet for account %s: %v \n", acct.Address, err)
+		return nil, fmt.Errorf("error finding wallet for account %s: %w", acct.Address, err)
 	}
 	return wallet, nil
 }

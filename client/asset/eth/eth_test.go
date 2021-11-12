@@ -81,9 +81,6 @@ func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int,
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
 }
-func (n *testNode) syncStatus(ctx context.Context) (bool, float32, error) {
-	return false, 0, nil
-}
 func (n *testNode) unlock(ctx context.Context, pw string, acct *accounts.Account) error {
 	return nil
 }
