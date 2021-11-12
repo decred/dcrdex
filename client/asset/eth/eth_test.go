@@ -351,7 +351,7 @@ func TestBalance(t *testing.T) {
 			node: node,
 			ctx:  ctx,
 			log:  tLogger,
-			acct: new(accounts.Account),
+			acct: newLockedAcct(new(accounts.Account)),
 		}
 		bal, err := eth.Balance()
 		cancel()
@@ -396,14 +396,14 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		Address: common.HexToAddress(address),
 	}
 	eth := &ExchangeWallet{
-		node:        node,
-		ctx:         ctx,
-		log:         tLogger,
-		acct:        &account,
-		lockedFunds: make(map[string]uint64),
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: newLockedAcct(&account),
 	}
 
 	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+		t.Helper()
 		balance, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("%v: unexpected error %v", testName, err)
@@ -442,8 +442,8 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: unexpected error: %v", test.testName, err)
 		}
-		if coin.id.Address.String() != test.coinAddress {
-			t.Fatalf("%v: coin address expected to be %v, but got %v", test.testName, test.coinAddress, coin.id.Address.String())
+		if coin.Address.String() != test.coinAddress {
+			t.Fatalf("%v: coin address expected to be %v, but got %v", test.testName, test.coinAddress, coin.Address.String())
 		}
 		if coins[0].Value() != test.coinValue {
 			t.Fatalf("%v: expected %v but got %v", test.testName, test.coinValue, coins[0].Value())
@@ -521,11 +521,10 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	node.balErr = nil
 
 	eth2 := &ExchangeWallet{
-		node:        node,
-		ctx:         ctx,
-		log:         tLogger,
-		acct:        &account,
-		lockedFunds: make(map[string]uint64),
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: newLockedAcct(&account),
 	}
 
 	// Test reloading coins from first order
@@ -548,19 +547,6 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 1")
 
-	// Double the available balance
-	node.bal.Mul(node.bal, big.NewInt(2))
-
-	// Test funding two coins with the same id
-	_, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID(), coins2[0].ID()})
-	if err == nil {
-		t.Fatalf("expected error but did not get")
-	}
-	checkBalance(eth2, walletBalanceGwei*2-coins1[0].Value(), coins1[0].Value(), "after funding error 2")
-
-	// Return to original available balance
-	node.bal.Div(node.bal, big.NewInt(2))
-
 	// Test funding coins with bad coin ID
 	_, err = eth2.FundingCoins([]dex.Bytes{badCoin.ID()})
 	if err == nil {
@@ -575,10 +561,9 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
 	differentAddressCoin := coin{
-		id: dexeth.AmountCoinID{
+		dexeth.AmountCoinID{
 			Address: differentAddress,
 			Amount:  100000,
-			Nonce:   nonce,
 		},
 	}
 	_, err = eth2.FundingCoins([]dex.Bytes{differentAddressCoin.ID()})
@@ -638,7 +623,7 @@ func TestGetInitGas(t *testing.T) {
 		node: node,
 		ctx:  ctx,
 		log:  tLogger,
-		acct: new(accounts.Account),
+		acct: newLockedAcct(new(accounts.Account)),
 	}
 
 	_, err := eth.getInitGas()
@@ -820,7 +805,7 @@ func TestPreSwap(t *testing.T) {
 			node: node,
 			ctx:  ctx,
 			log:  tLogger,
-			acct: new(accounts.Account),
+			acct: newLockedAcct(new(accounts.Account)),
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		preSwap, err := eth.PreSwap(&preSwapForm)
@@ -865,7 +850,7 @@ func TestPreRedeem(t *testing.T) {
 		node: node,
 		ctx:  ctx,
 		log:  tLogger,
-		acct: new(accounts.Account),
+		acct: newLockedAcct(new(accounts.Account)),
 	}
 	preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
 		LotSize:       123456,
@@ -993,7 +978,7 @@ func TestMaxOrder(t *testing.T) {
 			node: node,
 			ctx:  ctx,
 			log:  tLogger,
-			acct: new(accounts.Account),
+			acct: newLockedAcct(new(accounts.Account)),
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		maxOrder, err := eth.MaxOrder(test.lotSize, test.feeSuggestion, &dexAsset)
@@ -1044,7 +1029,7 @@ func TestSignMessage(t *testing.T) {
 		node: node,
 		ctx:  ctx,
 		log:  tLogger,
-		acct: &account,
+		acct: newLockedAcct(&account),
 	}
 
 	msg := []byte("msg")
@@ -1058,12 +1043,10 @@ func TestSignMessage(t *testing.T) {
 
 	// Error due to coin from with account than wallet
 	differentAddress := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
-	nonce := [8]byte{}
 	coinDifferentAddress := coin{
-		id: dexeth.AmountCoinID{
+		dexeth.AmountCoinID{
 			Address: differentAddress,
 			Amount:  100,
-			Nonce:   nonce,
 		},
 	}
 	_, _, err = eth.SignMessage(&coinDifferentAddress, msg)
@@ -1072,10 +1055,9 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	coin := coin{
-		id: dexeth.AmountCoinID{
+		dexeth.AmountCoinID{
 			Address: account.Address,
 			Amount:  100,
-			Nonce:   nonce,
 		},
 	}
 

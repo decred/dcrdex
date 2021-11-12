@@ -73,8 +73,8 @@ const (
 	txCoinIDSize = 34
 	// coin type id (2) + address (20) + secret has (32) = 54
 	swapCoinIDSize = 54
-	// coin type id (2) + address (20) + amount (8) + nonce (8) = 38
-	amountCoinIDSize = 38
+	// coin type id (2) + address (20) + amount (8) = 38
+	amountCoinIDSize = 30
 )
 
 // TxCoinID identifies a coin by the transaction ID that was used to send it
@@ -170,13 +170,11 @@ func decodeSwapCoinID(coinID []byte) (*SwapCoinID, error) {
 type AmountCoinID struct {
 	Address common.Address
 	Amount  uint64
-	Nonce   [8]byte
 }
 
 // String creates a human readable string.
 func (c *AmountCoinID) String() string {
-	return fmt.Sprintf("address: %v, amount:%x, nonce:%x",
-		c.Address, c.Amount, c.Nonce)
+	return fmt.Sprintf("address: %v, amount: %x", c.Address, c.Amount)
 }
 
 // Encode creates a byte slice that can be decoded with DecodeCoinID.
@@ -184,8 +182,7 @@ func (c *AmountCoinID) Encode() []byte {
 	b := make([]byte, amountCoinIDSize)
 	binary.BigEndian.PutUint16(b[:2], uint16(CIDAmount))
 	copy(b[2:22], c.Address[:])
-	binary.BigEndian.PutUint64(b[22:30], c.Amount)
-	copy(b[30:], c.Nonce[:])
+	binary.BigEndian.PutUint64(b[22:], c.Amount)
 	return b
 }
 
@@ -205,13 +202,10 @@ func decodeAmountCoinID(coinID []byte) (*AmountCoinID, error) {
 	}
 
 	var address [20]byte
-	var nonce [8]byte
 	copy(address[:], coinID[2:22])
-	copy(nonce[:], coinID[30:])
 	return &AmountCoinID{
 		Address: address,
 		Amount:  binary.BigEndian.Uint64(coinID[22:30]),
-		Nonce:   nonce,
 	}, nil
 }
 
