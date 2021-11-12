@@ -10,7 +10,7 @@
 // NOTE: These test reuse a light node that lives in the dextest folders.
 // However, when recreating the test database for every test, the nonce used
 // for imported accounts is sometimes, randomly, off, which causes transactions
-// to not be mined and effectively makes the node unuseable (at least before
+// to not be mined and effectively makes the node unusable (at least before
 // restarting). It also seems to have caused getting balance of an account to
 // fail, and sometimes the redeem and refund functions to also fail. This could
 // be a problem in the future if a user restores from seed. Punting on this
@@ -137,19 +137,19 @@ func TestMain(m *testing.M) {
 		// testing harness.
 		err := os.MkdirAll(simnetWalletDir, 0755)
 		if err != nil {
-			return 1, fmt.Errorf("error creating simnet wallet dir dir: %v\n", err)
+			return 1, fmt.Errorf("error creating simnet wallet dir dir: %v", err)
 		}
 		err = os.MkdirAll(participantWalletDir, 0755)
 		if err != nil {
-			return 1, fmt.Errorf("error creating participant wallet dir: %v\n", err)
+			return 1, fmt.Errorf("error creating participant wallet dir: %v", err)
 		}
 		addrBytes, err := os.ReadFile(contractAddrFile)
 		if err != nil {
-			return 1, fmt.Errorf("error reading contract address: %v\n", err)
+			return 1, fmt.Errorf("error reading contract address: %v", err)
 		}
 		addrLen := len(addrBytes)
 		if addrLen == 0 {
-			return 1, fmt.Errorf("no contract address found at %v\n", contractAddrFile)
+			return 1, fmt.Errorf("no contract address found at %v", contractAddrFile)
 		}
 		addrStr := string(addrBytes[:addrLen-1])
 		contractAddr = common.HexToAddress(addrStr)
@@ -163,16 +163,19 @@ func TestMain(m *testing.M) {
 			simnetWallet.internalNode.Wait()
 		}()
 		participantWallet, err := setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356")
+		if err != nil {
+			return 1, err
+		}
 		defer func() {
 			participantWallet.internalNode.Close()
 			participantWallet.internalNode.Wait()
 		}()
 		addr := common.HexToAddress(addrStr)
 		if err := ethClient.connect(ctx, simnetWallet.internalNode, &addr); err != nil {
-			return 1, fmt.Errorf("connect error: %v\n", err)
+			return 1, fmt.Errorf("connect error: %v", err)
 		}
 		if err := participantEthClient.connect(ctx, participantWallet.internalNode, &addr); err != nil {
-			return 1, fmt.Errorf("connect error: %v\n", err)
+			return 1, fmt.Errorf("connect error: %v", err)
 		}
 		accts, err := exportAccountsFromNode(simnetWallet.internalNode)
 		if err != nil {
@@ -217,11 +220,11 @@ func setupWallet(walletDir, seed, listenAddress string) (*ExchangeWallet, error)
 	}
 	err := CreateWallet(&createWalletParams)
 	if err != nil {
-		return nil, fmt.Errorf("error creating node: %v\n", err)
+		return nil, fmt.Errorf("error creating node: %v", err)
 	}
 	wallet, err := NewWallet(&walletConfig, tLogger, dex.Simnet)
 	if err != nil {
-		return nil, fmt.Errorf("error starting node: %v\n", err)
+		return nil, fmt.Errorf("error starting node: %v", err)
 	}
 	return wallet, nil
 }
@@ -289,6 +292,9 @@ func TestBlock(t *testing.T) {
 
 func TestAccounts(t *testing.T) {
 	accts := ethClient.accounts()
+	if len(accts) == 0 {
+		t.Errorf("Found no accounts")
+	}
 	spew.Dump(accts)
 }
 
@@ -296,6 +302,9 @@ func TestBalance(t *testing.T) {
 	bal, err := ethClient.balance(ctx, &simnetAddr)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if bal == nil {
+		t.Fatalf("empty balance")
 	}
 	spew.Dump(bal)
 }
@@ -318,6 +327,9 @@ func TestListWallets(t *testing.T) {
 	wallets, err := ethClient.listWallets(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(wallets) == 0 {
+		t.Fatalf("no wallets")
 	}
 	spew.Dump(wallets)
 }
@@ -1195,6 +1207,9 @@ func TestSignMessage(t *testing.T) {
 		t.Fatalf("error signing text: %v", err)
 	}
 	pubKey, err := secp256k1.RecoverPubkey(crypto.Keccak256(msg), signature)
+	if err != nil {
+		t.Fatalf("RecoverPubkey: %v", err)
+	}
 	x, y := elliptic.Unmarshal(secp256k1.S256(), pubKey)
 	recoveredAddress := crypto.PubkeyToAddress(ecdsa.PublicKey{
 		Curve: secp256k1.S256(),

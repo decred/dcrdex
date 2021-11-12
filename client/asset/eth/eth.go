@@ -237,7 +237,7 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 		return err
 	}
 
-	importKeyToNode(node, privateKey, createWalletParams.Pass)
+	err = importKeyToNode(node, privateKey, createWalletParams.Pass)
 	if err != nil {
 		return err
 	}
@@ -331,11 +331,17 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-// OwnsAddress indicates if an address belongs to the wallet.
+// OwnsAddress indicates if an address belongs to the wallet. The address need
+// not be a EIP55-compliant formatted address. It may or may not have a 0x
+// prefix, and case is not important.
 //
 // In Ethereum, an address is an account.
 func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
-	return strings.ToLower(eth.acct.Address.String()) == strings.ToLower(address), nil
+	if !common.IsHexAddress(address) {
+		return false, errors.New("invalid address")
+	}
+	addr := common.HexToAddress(address)
+	return addr == eth.acct.Address, nil
 }
 
 // Balance returns the total available funds in the account. The eth node
@@ -595,7 +601,7 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(coin.id.Address.Bytes(), eth.acct.Address.Bytes()) {
+		if coin.id.Address != eth.acct.Address {
 			return nil, fmt.Errorf("FundingCoins: coin address %v != wallet address %v",
 				coin.id.Address, eth.acct.Address)
 		}
@@ -687,18 +693,18 @@ func (*ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
-func (e *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	ethCoin, err := decodeCoinID(coin.ID())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if !bytes.Equal(ethCoin.id.Address.Bytes(), e.acct.Address.Bytes()) {
+	if ethCoin.id.Address != eth.acct.Address {
 		return nil, nil, fmt.Errorf("SignMessage: coin address: %v != wallet address: %v",
-			ethCoin.id.Address, e.acct.Address)
+			ethCoin.id.Address, eth.acct.Address)
 	}
 
-	sig, err := e.node.signData(e.acct.Address, msg)
+	sig, err := eth.node.signData(eth.acct.Address, msg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error signing data: %v", err)
 	}
@@ -766,7 +772,7 @@ func (eth *ExchangeWallet) Locked() bool {
 	findWallet := func() bool {
 		for _, w := range wallets {
 			for _, a := range w.Accounts {
-				if bytes.Equal(a.Address[:], eth.acct.Address[:]) {
+				if a.Address == eth.acct.Address {
 					wallet = w
 					return true
 				}
@@ -901,8 +907,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	eth.tipMtx.RLock()
 	currentTipHash := eth.currentTip.Hash()
 	eth.tipMtx.RUnlock()
-	sameTip := bytes.Equal(currentTipHash[:], bestHash[:])
-	if sameTip {
+	if currentTipHash == bestHash {
 		return
 	}
 
