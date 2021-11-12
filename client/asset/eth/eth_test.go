@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
+	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,9 +82,6 @@ func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int,
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
-}
-func (n *testNode) syncStatus(ctx context.Context) (bool, float32, error) {
-	return false, 0, nil
 }
 func (n *testNode) unlock(ctx context.Context, pw string, acct *accounts.Account) error {
 	return nil
@@ -1054,6 +1053,93 @@ func TestMaxOrder(t *testing.T) {
 		if maxOrder.Locked != test.wantLocked {
 			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, maxOrder.Locked, test.name)
 		}
+	}
+}
+
+func TestOwnsAddress(t *testing.T) {
+	address := "0b84C791b79Ee37De042AD2ffF1A253c3ce9bc27" // no "0x" prefix
+	if !common.IsHexAddress(address) {
+		t.Fatalf("bad test address")
+	}
+
+	var otherAddress common.Address
+	rand.Read(otherAddress[:])
+
+	eth := &ExchangeWallet{
+		acct: &accounts.Account{
+			Address: common.HexToAddress(address),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		address  string
+		wantOwns bool
+		wantErr  bool
+	}{
+		{
+			name:     "same (exact)",
+			address:  address,
+			wantOwns: true,
+			wantErr:  false,
+		},
+		{
+			name:     "same (lower)",
+			address:  strings.ToLower(address),
+			wantOwns: true,
+			wantErr:  false,
+		},
+		{
+			name:     "same (upper)",
+			address:  strings.ToUpper(address),
+			wantOwns: true,
+			wantErr:  false,
+		},
+		{
+			name:     "same (0x prefix)",
+			address:  "0x" + address,
+			wantOwns: true,
+			wantErr:  false,
+		},
+		{
+			name:     "different (valid canonical)",
+			address:  otherAddress.String(),
+			wantOwns: false,
+			wantErr:  false,
+		},
+		{
+			name:     "different (valid hex)",
+			address:  otherAddress.Hex(),
+			wantOwns: false,
+			wantErr:  false,
+		},
+		{
+			name:     "error (bad hex char)",
+			address:  strings.Replace(address, "b", "r", 1),
+			wantOwns: false,
+			wantErr:  true,
+		},
+		{
+			name:     "error (bad length)",
+			address:  "ababababababab",
+			wantOwns: false,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owns, err := eth.OwnsAddress(tt.address)
+			if (err == nil) && tt.wantErr {
+				t.Error("expected error")
+			}
+			if (err != nil) && !tt.wantErr {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if owns != tt.wantOwns {
+				t.Errorf("got %v, want %v", owns, tt.wantOwns)
+			}
+		})
 	}
 }
 
