@@ -415,7 +415,7 @@ func TestInitiateGas(t *testing.T) {
 	}
 
 	var previousGas uint64
-	for i := 1; i < 10; i++ {
+	for i := 1; i < 80; i++ {
 		initiations := make([]dexeth.ETHSwapInitiation, 0, i)
 		for j := 0; j < i; j++ {
 			var secretHash [32]byte
@@ -442,6 +442,21 @@ func TestInitiateGas(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error from estimateGas: %v", err)
 		}
+
+		var expectedGas uint64
+		var actualGas uint64
+		if i == 1 {
+			expectedGas = srveth.InitGas
+			actualGas = gas
+		} else {
+			expectedGas = srveth.AdditionalInitGas
+			actualGas = gas - previousGas
+		}
+		if actualGas > expectedGas || actualGas < expectedGas/100*95 {
+			t.Fatalf("Expected incremental gas for %d initiations to be close to %d but got %d",
+				len(initiations), expectedGas, actualGas)
+		}
+
 		fmt.Printf("Gas used for batch initiating %v swaps: %v. %v more than previous \n", i, gas, gas-previousGas)
 		previousGas = gas
 	}
