@@ -118,7 +118,7 @@ func (ss *subsystem) stop() {
 type DEX struct {
 	network     dex.Network
 	markets     map[string]*market.Market
-	assets      map[uint32]*swap.LockableAsset
+	assets      map[uint32]*swap.SwapperAsset
 	storage     db.DEXArchivist
 	authMgr     *auth.AuthManager
 	swapper     *swap.Swapper
@@ -390,7 +390,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	xpubs := make(map[string]string) // to enforce uniqueness
 
 	// Start asset backends.
-	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
+	lockableAssets := make(map[uint32]*swap.SwapperAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
 	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
 	assetLogger := cfg.LogBackend.Logger("ASSET")
@@ -467,9 +467,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 
 		backedAssets[assetID] = ba
-		lockableAssets[assetID] = &swap.LockableAsset{
+		lockableAssets[assetID] = &swap.SwapperAsset{
 			BackedAsset: ba,
-			CoinLocker:  dexCoinLocker.AssetLocker(assetID).Swap(),
+			Locker:      dexCoinLocker.AssetLocker(assetID).Swap(),
 		}
 		feeMgr.AddFetcher(ba)
 
@@ -587,11 +587,37 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
+	// Because the dexBalancer relies on the marketTunnels map, and NewMarket
+	// checks necessary balances for account-based assets using the dexBalancer,
+	// that means that each market can only query orders for the markets that
+	// were intitialized before it was, which is fine, but notable. The
+	// resulting behavior is that a user could have orders involving an
+	// account-based asset approved for re-booking on one market, but have
+	// orders rejected on a market involving the same asset created afterwards,
+	// since the later balance query is accounting for the earlier market.
+	//
+	// The current behavior is to reject all orders for the market if the
+	// account balance is too low to support them all, though an algorithm could
+	// be developed to do reject only some orders, based on available funding.
+	//
+	// This pattern is only safe because the markets are not Run until after
+	// they are all instantiated, so we are synchronous in our use of the
+	// marketTunnels map.
+	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
+	dexBalancer := market.NewDEXBalancer(marketTunnels, backedAssets, swapper)
+
 	// Markets
 	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
-		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
-		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
+		// nilness of the coin locker signals account-based asset.
+		var baseCoinLocker, quoteCoinLocker coinlock.CoinLocker
+		if _, ok := backedAssets[mktInf.Base].Backend.(asset.OutputTracker); ok {
+			baseCoinLocker = dexCoinLocker.AssetLocker(mktInf.Base).Book()
+		}
+		if _, ok := backedAssets[mktInf.Quote].Backend.(asset.OutputTracker); ok {
+			quoteCoinLocker = dexCoinLocker.AssetLocker(mktInf.Quote).Book()
+		}
+
 		mkt, err := market.NewMarket(&market.Config{
 			MarketInfo:      mktInf,
 			Storage:         storage,
@@ -602,11 +628,13 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			FeeFetcherQuote: feeMgr.FeeFetcher(mktInf.Quote),
 			CoinLockerQuote: quoteCoinLocker,
 			DataCollector:   dataAPI,
+			Balancer:        dexBalancer,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("NewMarket failed: %w", err)
 		}
 		markets[mktInf.Name] = mkt
+		marketTunnels[mktInf.Name] = mkt
 		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
 		err = dataAPI.AddMarketSource(mkt)
 		if err != nil {
@@ -637,13 +665,11 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// BookRouter, and MarketTunnels for the OrderRouter.
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
-	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
 	cfgMarkets := make([]*msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		bookSources[name] = mkt
-		marketTunnels[name] = mkt
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
 			Base:            mkt.Base(),
@@ -676,6 +702,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		AuthManager: authMgr,
 		Markets:     marketTunnels,
 		FeeSource:   feeMgr,
+		DEXBalancer: dexBalancer,
 	})
 	startSubSys("OrderRouter", orderRouter)
 

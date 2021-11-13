@@ -56,15 +56,16 @@ func genBigList(listSize int) {
 
 	bigList = make([]*Order, 0, listSize)
 	for i := 0; i < listSize; i++ {
-		order := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
-		order.Address = newFakeAddr()
+		lo := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
+		lo.Address = newFakeAddr()
+		lo.Coins = []order.CoinID{[]byte(newFakeAddr())}
 		// duplicate some prices
 		if (i+1)%(listSize/dupRate) == 0 {
-			order.Rate = bigList[i/2].Rate
-			order.Quantity = bigList[i/2].Quantity + 1
+			lo.Rate = bigList[i/2].Rate
+			lo.Quantity = bigList[i/2].Quantity + 1
 		}
-		_ = order.ID() // compute and cache the OrderID
-		bigList = append(bigList, order)
+		_ = lo.ID() // compute and cache the OrderID
+		bigList = append(bigList, lo)
 	}
 }
 
@@ -85,7 +86,7 @@ func TestMain(m *testing.M) {
 
 func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	// Max oriented queue
-	pq := NewMaxOrderPQ(uint32(len(bigList) - len(bigList)/16)) // a little smaller to force a realloc
+	pq := NewMaxOrderPQ(uint32(len(bigList)-len(bigList)/16), 0) // a little smaller to force a realloc
 	for i, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -161,7 +162,7 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 
 func TestLargeOrderMinPriorityQueue(t *testing.T) {
 	// Min oriented queue
-	pq := NewMinOrderPQ(uint32(len(bigList) - len(bigList)/16)) // a little smaller to force a realloc
+	pq := NewMinOrderPQ(uint32(len(bigList)-len(bigList)/16), 0) // a little smaller to force a realloc
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -237,7 +238,7 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 
 func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
 	// Max oriented queue (sell book)
-	pq := NewMaxOrderPQ(uint32(len(bigList)))
+	pq := NewMaxOrderPQ(uint32(len(bigList)), 0)
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -305,7 +306,7 @@ func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
 
 func TestLargeOrderMaxPriorityQueue_realloc(t *testing.T) {
 	// Max oriented queue (sell book)
-	pq := NewMaxOrderPQ(uint32(len(bigList))) // no realloc for initial inserts
+	pq := NewMaxOrderPQ(uint32(len(bigList)), 0) // no realloc for initial inserts
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -362,7 +363,7 @@ func TestLargeOrderMaxPriorityQueue_realloc(t *testing.T) {
 }
 
 func TestMinOrderPQ(t *testing.T) {
-	pq := NewMinOrderPQ(0) // zero cap to force a realloc right away
+	pq := NewMinOrderPQ(0, 0) // zero cap to force a realloc right away
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -379,7 +380,7 @@ func TestMinOrderPQ(t *testing.T) {
 }
 
 func TestMaxOrderPQ(t *testing.T) {
-	pq := NewMaxOrderPQ(0)
+	pq := NewMaxOrderPQ(0, 0)
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -396,7 +397,7 @@ func TestMaxOrderPQ(t *testing.T) {
 }
 
 func TestMaxOrderPQ_TieRate(t *testing.T) {
-	pq := NewMaxOrderPQ(4)
+	pq := NewMaxOrderPQ(4, 0)
 
 	for _, o := range orders[:3] {
 		ok := pq.Insert(o)
@@ -413,7 +414,7 @@ func TestMaxOrderPQ_TieRate(t *testing.T) {
 }
 
 func TestMaxOrderPQ_TieRateAndTime(t *testing.T) {
-	pq := NewMaxOrderPQ(4)
+	pq := NewMaxOrderPQ(4, 0)
 
 	// 7f9200eedcf2fa868173cdfc2101ee4d71ec024c1c052589b3371442aaa26c2d
 	ok := pq.Insert(orders[0])
@@ -435,7 +436,7 @@ func TestMaxOrderPQ_TieRateAndTime(t *testing.T) {
 }
 
 func TestOrderPQCapacity(t *testing.T) {
-	pq := NewMaxOrderPQ(2)
+	pq := NewMaxOrderPQ(2, 0)
 
 	ok := pq.Insert(orders[0])
 	if !ok {
@@ -468,7 +469,7 @@ func TestOrderPQCapacity(t *testing.T) {
 }
 
 func TestOrderPQ_Insert_negative(t *testing.T) {
-	pq := NewMinOrderPQ(2)
+	pq := NewMinOrderPQ(2, 0)
 
 	ok := pq.Insert(orders[0])
 	if !ok {
@@ -487,7 +488,7 @@ func TestOrderPQ_Insert_negative(t *testing.T) {
 }
 
 func TestOrderPQ_Remove(t *testing.T) {
-	pq := NewMaxOrderPQ(2)
+	pq := NewMaxOrderPQ(2, 0)
 
 	ok := pq.Insert(orders[0])
 	if !ok {
@@ -515,7 +516,7 @@ func TestOrderPQ_Remove(t *testing.T) {
 }
 
 func TestOrderPQ_RemoveUserOrders(t *testing.T) {
-	pq := NewMaxOrderPQ(6)
+	pq := NewMaxOrderPQ(6, 0)
 
 	ok := pq.Insert(orders[0])
 	if !ok {
@@ -593,13 +594,13 @@ func TestOrderPQ_RemoveUserOrders(t *testing.T) {
 }
 
 func TestOrderPQMin_Worst(t *testing.T) {
-	pq0 := NewMinOrderPQ(4)
+	pq0 := NewMinOrderPQ(4, 0)
 	worst := pq0.Worst()
 	if worst != nil {
 		t.Errorf("Worst for an empty queue should be nil, got %v", worst)
 	}
 
-	pq1 := NewMinOrderPQ(4)
+	pq1 := NewMinOrderPQ(4, 0)
 	if !pq1.Insert(bigList[0]) {
 		t.Fatalf("Failed to insert order %v", bigList[0])
 	}
@@ -609,7 +610,7 @@ func TestOrderPQMin_Worst(t *testing.T) {
 	}
 
 	// Min oriented queue
-	pq := NewMinOrderPQ(uint32(len(bigList) - len(bigList)/16))
+	pq := NewMinOrderPQ(uint32(len(bigList)-len(bigList)/16), 0)
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -637,7 +638,7 @@ func TestOrderPQMin_Worst(t *testing.T) {
 
 func TestOrderPQMax_Worst(t *testing.T) {
 	// Max oriented queue
-	pq := NewMaxOrderPQ(uint32(len(bigList)))
+	pq := NewMaxOrderPQ(uint32(len(bigList)), 0)
 	for _, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
@@ -666,7 +667,7 @@ func TestOrderPQMax_Worst(t *testing.T) {
 func TestOrderPQMax_leafNodes(t *testing.T) {
 	// Max oriented queue
 	newQ := func(list []*Order) *OrderPQ {
-		pq := NewMaxOrderPQ(uint32(len(bigList)))
+		pq := NewMaxOrderPQ(uint32(len(bigList)), 0)
 		for _, o := range list {
 			ok := pq.Insert(o)
 			if !ok {
@@ -689,5 +690,79 @@ func TestOrderPQMax_leafNodes(t *testing.T) {
 			t.Errorf("Incorrect number of leaf nodes. Got %d, expected %d",
 				len(leaves), expectedNum)
 		}
+	}
+}
+
+func TestAccountTracking(t *testing.T) {
+	// make the last order's user the same as the first.
+	lastOrd := bigList[len(bigList)-1]
+	firstOrd := bigList[0]
+	lastOrd.Address = firstOrd.Address
+	lastOrd.Coins = firstOrd.Coins
+
+	// Max oriented queue
+	pq := NewMaxOrderPQ(uint32(len(bigList)), AccountTrackingBase|AccountTrackingQuote) // a little smaller to force a realloc
+	for i, o := range bigList {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Fatalf("Failed to insert order %d: %v", i, o)
+		}
+	}
+
+	if len(pq.acctTracker.base) == 0 {
+		t.Fatalf("base asset not tracked")
+	}
+
+	if len(pq.acctTracker.quote) == 0 {
+		t.Fatalf("quote asset not tracked")
+	}
+
+	// Check each order and make sure it's where we expect.
+	for _, ord := range bigList {
+		// they are all buy orders
+		baseAccount := ord.Address
+		ords, found := pq.acctTracker.base[baseAccount]
+		if !found {
+			t.Fatalf("base order account not found")
+		}
+		_, found = ords[ord.ID()]
+		if !found {
+			t.Fatalf("base order not found")
+		}
+
+		quoteAccount := string(ord.Coins[0])
+		ords, found = pq.acctTracker.quote[quoteAccount]
+		if !found {
+			t.Fatalf("quote order account not found")
+		}
+		_, found = ords[ord.ID()]
+		if !found {
+			t.Fatalf("quote order not found")
+		}
+	}
+
+	// Check that our first user has two orders.
+	if len(pq.acctTracker.base[firstOrd.BaseAccount()]) != 2 {
+		t.Fatalf("didn't track two base orders for first user")
+	}
+
+	if len(pq.acctTracker.quote[firstOrd.QuoteAccount()]) != 2 {
+		t.Fatalf("didn't track two quote orders for first user")
+	}
+
+	// Remove them all.
+	for i, o := range bigList {
+		_, ok := pq.RemoveOrder(o)
+		if !ok {
+			t.Fatalf("Failed to remove order %d: %v", i, o)
+		}
+	}
+
+	if len(pq.acctTracker.base) != 0 {
+		t.Fatalf("base asset not cleared")
+	}
+
+	if len(pq.acctTracker.quote) != 0 {
+		t.Fatalf("quote asset not cleared")
 	}
 }

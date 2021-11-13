@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -170,10 +171,10 @@ type stepInformation struct {
 	checkVal uint64
 }
 
-// LockableAsset pairs an Asset with a CoinLocker.
-type LockableAsset struct {
+// SwapperAsset is a BackedAsset with an optional CoinLocker.
+type SwapperAsset struct {
 	*asset.BackedAsset
-	coinlock.CoinLocker // should be *coinlock.AssetCoinLocker
+	Locker coinlock.CoinLocker // should be *coinlock.AssetCoinLocker
 }
 
 // Swapper handles order matches by handling authentication and inter-party
@@ -182,7 +183,8 @@ type LockableAsset struct {
 type Swapper struct {
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins map[uint32]*LockableAsset
+	coins     map[uint32]*SwapperAsset
+	acctBased map[uint32]bool
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
@@ -194,6 +196,7 @@ type Swapper struct {
 	matchMtx    sync.RWMutex
 	matches     map[order.MatchID]*matchTracker
 	userMatches map[account.AccountID]map[order.MatchID]*matchTracker
+	acctMatches map[uint32]map[string]map[order.MatchID]*matchTracker
 
 	// The broadcast timeout.
 	bTimeout time.Duration
@@ -218,7 +221,7 @@ type Swapper struct {
 type Config struct {
 	// Assets is a map to all the asset information, including the asset backends,
 	// used by this Swapper.
-	Assets map[uint32]*LockableAsset
+	Assets map[uint32]*SwapperAsset
 	// AuthManager is the auth manager for client messaging and authentication.
 	AuthManager AuthManager
 	// A database backend.
@@ -249,15 +252,26 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		}
 	}
 
+	acctBased := make(map[uint32]bool, len(cfg.Assets))
+	acctMatches := make(map[uint32]map[string]map[order.MatchID]*matchTracker)
+	for _, a := range cfg.Assets {
+		if _, ok := a.Backend.(asset.AccountBalancer); ok {
+			acctBased[a.ID] = true
+			acctMatches[a.ID] = make(map[string]map[order.MatchID]*matchTracker)
+		}
+	}
+
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
 		coins:         cfg.Assets,
+		acctBased:     acctBased,
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
 		swapDone:      cfg.SwapDone,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
 		userMatches:   make(map[account.AccountID]map[order.MatchID]*matchTracker),
+		acctMatches:   acctMatches,
 		bTimeout:      cfg.BroadcastTimeout,
 		lockTimeTaker: cfg.LockTimeTaker,
 		lockTimeMaker: cfg.LockTimeMaker,
@@ -303,6 +317,26 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 			break
 		}
 	}
+
+	addAcctMatch := func(matches map[string]map[order.MatchID]*matchTracker, acctAddr string, mt *matchTracker) {
+		acctMatches := matches[acctAddr]
+		if acctMatches == nil {
+			acctMatches = make(map[order.MatchID]*matchTracker, 1)
+			matches[acctAddr] = acctMatches
+		}
+		acctMatches[mt.ID()] = mt
+	}
+
+	if s.acctBased[mt.Maker.Base()] {
+		acctMatches := s.acctMatches[mt.Maker.Base()]
+		addAcctMatch(acctMatches, mt.Maker.BaseAccount(), mt)
+		addAcctMatch(acctMatches, mt.Taker.Trade().BaseAccount(), mt)
+	}
+	if s.acctBased[mt.Maker.Quote()] {
+		acctMatches := s.acctMatches[mt.Maker.Quote()]
+		addAcctMatch(acctMatches, mt.Maker.QuoteAccount(), mt)
+		addAcctMatch(acctMatches, mt.Taker.Trade().QuoteAccount(), mt)
+	}
 }
 
 // deleteMatch unregisters a match. The matchMtx must be locked.
@@ -327,6 +361,28 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 			break
 		}
 	}
+
+	deleteAcctMatch := func(matches map[string]map[order.MatchID]*matchTracker, acctAddr string, mt *matchTracker) {
+		acctMatches := matches[acctAddr]
+		if acctMatches == nil {
+			return
+		}
+		delete(acctMatches, mt.ID())
+		if len(acctMatches) == 0 {
+			delete(matches, acctAddr)
+		}
+	}
+
+	if s.acctBased[mt.Maker.Base()] {
+		acctMatches := s.acctMatches[mt.Maker.Base()]
+		deleteAcctMatch(acctMatches, mt.Maker.BaseAccount(), mt)
+		deleteAcctMatch(acctMatches, mt.Taker.Trade().BaseAccount(), mt)
+	}
+	if s.acctBased[mt.Maker.Quote()] {
+		acctMatches := s.acctMatches[mt.Maker.Quote()]
+		deleteAcctMatch(acctMatches, mt.Maker.QuoteAccount(), mt)
+		deleteAcctMatch(acctMatches, mt.Taker.Trade().QuoteAccount(), mt)
+	}
 }
 
 // UserSwappingAmt gets the total amount in active swaps for a user in a
@@ -347,26 +403,88 @@ func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (a
 	return
 }
 
+// pendingAccountStats is used to sum in-process match stats for the
+// AccountStats method.
+type pendingAccountStats struct {
+	acctAddr string
+	assetID  uint32
+	swaps    uint64
+	qty      uint64
+	redeems  int
+}
+
+func newPendingAccountStats(acctAddr string, assetID uint32) *pendingAccountStats {
+	return &pendingAccountStats{
+		acctAddr: acctAddr,
+		assetID:  assetID,
+	}
+}
+
+func (p *pendingAccountStats) addMatch(mt *matchTracker) {
+	p.addOrder(mt, mt.Maker, order.MakerSwapCast, order.MakerRedeemed)
+	p.addOrder(mt, mt.Taker, order.TakerSwapCast, order.MatchComplete)
+}
+
+func (p *pendingAccountStats) addOrder(mt *matchTracker, ord order.Order, swappedStatus, redeemedStatus order.MatchStatus) {
+	trade := ord.Trade()
+	if ord.Base() == p.assetID && trade.BaseAccount() == p.acctAddr {
+		if trade.Sell {
+			if mt.Status < swappedStatus {
+				p.qty += mt.Quantity
+				p.swaps++
+			}
+		} else if mt.Status < redeemedStatus {
+			p.redeems++
+		}
+	}
+	if ord.Quote() == p.assetID && trade.QuoteAccount() == p.acctAddr {
+		if !trade.Sell {
+			if mt.Status < swappedStatus {
+				p.qty += calc.BaseToQuote(mt.Rate, mt.Quantity)
+				p.swaps++ // The swap is expected to occur in 1 transaction.
+			}
+		} else if mt.Status < redeemedStatus {
+			p.redeems++
+		}
+	}
+}
+
+// AccountStats is part of the MatchNegotiator interface to report in-process
+// match information for a asset account address.
+func (s *Swapper) AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int) {
+	stats := newPendingAccountStats(acctAddr, assetID)
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+	acctMatches := s.acctMatches[assetID]
+	if acctMatches == nil {
+		return // How?
+	}
+	for _, mt := range acctMatches[acctAddr] {
+		stats.addMatch(mt)
+	}
+	return stats.qty, stats.swaps, stats.redeems
+}
+
 // ChainsSynced will return true if both specified asset's backends are synced.
 func (s *Swapper) ChainsSynced(base, quote uint32) (bool, error) {
 	b, found := s.coins[base]
 	if !found {
-		return false, fmt.Errorf("No backend found for %d", base)
+		return false, fmt.Errorf("no backend found for %d", base)
 	}
 	baseSynced, err := b.Backend.Synced()
 	if err != nil {
-		return false, fmt.Errorf("Error checking sync status for %d: %w", base, err)
+		return false, fmt.Errorf("error checking sync status for %d: %w", base, err)
 	}
 	if !baseSynced {
 		return false, nil
 	}
 	q, found := s.coins[quote]
 	if !found {
-		return false, fmt.Errorf("No backend found for %d", base)
+		return false, fmt.Errorf("no backend found for %d", base)
 	}
 	quoteSynced, err := q.Backend.Synced()
 	if err != nil {
-		return false, fmt.Errorf("Error checking sync status for %d: %w", quote, err)
+		return false, fmt.Errorf("error checking sync status for %d: %w", quote, err)
 	}
 	return quoteSynced, nil
 }
@@ -1346,6 +1464,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	stepInfo.match.Status = stepInfo.nextStep
 	stepInfo.match.mtx.Unlock()
 
+	fmt.Println("-setting new status", stepInfo.nextStep)
+
 	// Only unlock match map after the statuses and txn times are stored,
 	// ensuring that checkInaction will not revoke the match as we respond and
 	// request counterparty audit.
@@ -1907,7 +2027,8 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 
 // CheckUnspent attempts to verify a coin ID for a given asset by retrieving the
 // corresponding asset.Coin. If the coin is not found or spent, an
-// asset.CoinNotFoundError is returned.
+// asset.CoinNotFoundError is returned. CheckUnspent returns immediately with
+// no error if the requested asset is not a utxo-based asset.
 func (s *Swapper) CheckUnspent(ctx context.Context, assetID uint32, coinID []byte) error {
 	backend := s.coins[assetID]
 	if backend == nil {
@@ -1938,43 +2059,54 @@ func (s *Swapper) LockOrdersCoins(orders []order.Order) {
 	}
 }
 
-func (s *Swapper) lockOrdersCoins(asset uint32, orders []order.Order) {
-	assetLock := s.coins[asset]
-	if assetLock == nil {
-		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
+func (s *Swapper) lockOrdersCoins(assetID uint32, orders []order.Order) {
+	swapperAsset := s.coins[assetID]
+	if swapperAsset == nil {
+		log.Errorf(fmt.Sprintf("lockOrderCoins called for unknown asset %d", assetID))
+		return
+	}
+	if swapperAsset.Locker == nil {
+		return
 	}
 
-	assetLock.LockOrdersCoins(orders)
+	swapperAsset.Locker.LockOrdersCoins(orders)
 }
 
 // LockCoins locks coins of a given asset. The OrderID is used for tracking.
 func (s *Swapper) LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID) {
-	assetLock := s.coins[asset]
-	if assetLock == nil {
+	swapperAsset := s.coins[asset]
+	if swapperAsset == nil {
 		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
 	}
+	if swapperAsset.Locker == nil {
+		return
+	}
 
-	assetLock.LockCoins(coins)
+	swapperAsset.Locker.LockCoins(coins)
 }
 
 // unlockOrderCoins is not exported since only the Swapper knows when to unlock
 // coins (when funding coins are spent in a fully-confirmed contract).
 func (s *Swapper) unlockOrderCoins(ord order.Order) {
-	asset := ord.Quote()
+	assetID := ord.Quote()
 	if ord.Trade().Sell {
-		asset = ord.Base()
+		assetID = ord.Base()
 	}
 
-	s.unlockOrderIDCoins(asset, ord.ID())
+	s.unlockOrderIDCoins(assetID, ord.ID())
 }
 
-func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
-	assetLock := s.coins[asset]
-	if assetLock == nil {
-		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
+func (s *Swapper) unlockOrderIDCoins(assetID uint32, oid order.OrderID) {
+	swapperAsset := s.coins[assetID]
+	if swapperAsset == nil {
+		log.Errorf(fmt.Sprintf("unlockOrderIDCoins called for unknown asset %d", assetID))
+		return
+	}
+	if swapperAsset.Locker == nil {
+		return
 	}
 
-	assetLock.UnlockOrderCoins(oid)
+	swapperAsset.Locker.UnlockOrderCoins(oid)
 }
 
 // matchNotifications creates a pair of msgjson.Match from a matchTracker.

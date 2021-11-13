@@ -2928,12 +2928,12 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 
 		node.truncateChains()
 		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
-		node.blockchainMtx.RLock()
+		node.blockchainMtx.Lock()
 		node.getBestBlockHashErr = nil
 		if tt.forcedErr {
 			node.getBestBlockHashErr = tErr
 		}
-		node.blockchainMtx.RUnlock()
+		node.blockchainMtx.Unlock()
 		addBlocks(tt.numBlocks)
 		var startBlock *chainhash.Hash
 		if tt.startBlockHeight >= 0 {

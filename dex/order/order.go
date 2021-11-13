@@ -473,6 +473,42 @@ func (t *Trade) SwapAddress() string {
 	return t.Address
 }
 
+// FromAccount is the account that the order originates from. Only useful for
+// account-based assets. Use of this method assumes that account coin has
+// already been added.
+func (t *Trade) FromAccount() string {
+	if len(t.Coins) == 0 {
+		return "no coins?"
+	}
+	return string(t.Coins[0])
+}
+
+// ToAccount is the account that the order pays to. Only useful for
+// account-based assets.
+func (t *Trade) ToAccount() string {
+	return t.Address
+}
+
+// BaseAccount is the account address associated with the base asset for the
+// order. Only useful for account-based assets. Use of this method assumes that
+// account coin has already been added (when sell = true).
+func (t *Trade) BaseAccount() string {
+	if t.Sell {
+		return t.FromAccount()
+	}
+	return t.ToAccount()
+}
+
+// QuoteAccount is the account address associated with the quote asset for the
+// order. Only useful for account-based assets. Use of this method assumes that
+// account coin has already been added (when sell = false).
+func (t *Trade) QuoteAccount() string {
+	if t.Sell {
+		return t.ToAccount()
+	}
+	return t.FromAccount()
+}
+
 // serializeSize returns the length of the serialized Trade.
 func (t *Trade) serializeSize() int {
 	// Compute the size of the serialized Coin IDs.

@@ -20,12 +20,14 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
@@ -239,6 +241,19 @@ func (f *tFeeFetcher) LastRate() uint64 {
 	return 10
 }
 
+type tBalancer struct {
+	reqs map[string]int
+}
+
+func newTBalancer() *tBalancer {
+	return &tBalancer{make(map[string]int)}
+}
+
+func (b *tBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool {
+	b.reqs[acctAddr]++
+	return true
+}
+
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
 	var id order.OrderID
@@ -246,7 +261,7 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
-func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), error) {
+func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
 	bookLockerBase := masterLockerBase.Book()
@@ -258,9 +273,28 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 
 	epochDurationMSec := uint64(500) // 0.5 sec epoch duration
 	storage := &TArchivist{}
-	if len(stor) > 0 {
-		storage = stor[0]
+	var balancer Balancer
+
+	baseAsset, quoteAsset := assetDCR, assetBTC
+
+	for _, opt := range opts {
+		switch optT := opt.(type) {
+		case *TArchivist:
+			storage = optT
+		case [2]*asset.BackedAsset:
+			baseAsset, quoteAsset = optT[0], optT[1]
+			if baseAsset.ID == assetETH.ID || baseAsset.ID == assetMATIC.ID {
+				bookLockerBase = nil
+			}
+			if quoteAsset.ID == assetETH.ID || quoteAsset.ID == assetMATIC.ID {
+				bookLockerQuote = nil
+			}
+		case *tBalancer:
+			balancer = optT
+		}
+
 	}
+
 	authMgr := &TAuth{
 		sends:            make([]*msgjson.Message, 0),
 		preimagesByMsgID: make(map[uint64]order.Preimage),
@@ -273,9 +307,11 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	}
 	var swapDone func(ord order.Order, match *order.Match, fail bool)
 	swapperCfg := &swap.Config{
-		Assets: map[uint32]*swap.LockableAsset{
-			assetDCR.ID: {BackedAsset: assetDCR, CoinLocker: swapLockerBase},
-			assetBTC.ID: {BackedAsset: assetBTC, CoinLocker: swapLockerQuote},
+		Assets: map[uint32]*swap.SwapperAsset{
+			assetDCR.ID:   {BackedAsset: assetDCR, Locker: swapLockerBase},
+			assetBTC.ID:   {BackedAsset: assetBTC, Locker: swapLockerQuote},
+			assetETH.ID:   {BackedAsset: assetETH},
+			assetMATIC.ID: {BackedAsset: assetMATIC},
 		},
 		Storage:          storage,
 		AuthManager:      authMgr,
@@ -292,7 +328,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	}
 
 	mbBuffer := 1.1
-	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
+	mktInfo, err := dex.NewMarketInfo(baseAsset.ID, quoteAsset.ID,
 		dcrLotSize, btcRateStep, epochDurationMSec, mbBuffer)
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %w", err)
@@ -303,15 +339,17 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		Storage:         storage,
 		Swapper:         swapper,
 		AuthManager:     authMgr,
-		FeeFetcherBase:  &tFeeFetcher{assetDCR.MaxFeeRate},
+		FeeFetcherBase:  &tFeeFetcher{baseAsset.MaxFeeRate},
 		CoinLockerBase:  bookLockerBase,
-		FeeFetcherQuote: &tFeeFetcher{assetBTC.MaxFeeRate},
+		FeeFetcherQuote: &tFeeFetcher{quoteAsset.MaxFeeRate},
 		CoinLockerQuote: bookLockerQuote,
 		DataCollector:   new(TCollector),
+		Balancer:        balancer,
 	})
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %w", err)
 	}
+
 	swapDone = mkt.SwapDone
 
 	ssw := dex.NewStartStopWaiter(swapper)
@@ -1906,4 +1944,134 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 	if !taker || !maker {
 		t.Fatalf("There should be 2 payloads, one for maker and taker match each")
 	}
+}
+
+func TestMarket_NewMarket_AccountBased(t *testing.T) {
+	testAccountAssets(t, true, false)
+	testAccountAssets(t, false, true)
+	testAccountAssets(t, true, true)
+}
+
+func testAccountAssets(t *testing.T, base, quote bool) {
+	storage := &TArchivist{}
+	balancer := newTBalancer()
+	const numPerSide = 10
+	ords := make([]*order.LimitOrder, 0, numPerSide*2)
+
+	baseAsset, quoteAsset := assetDCR, assetBTC
+	if base {
+		baseAsset = assetETH
+	}
+	if quote {
+		quoteAsset = assetMATIC
+	}
+
+	for i := 0; i < numPerSide*2; i++ {
+		writer := test.RandomWriter()
+		writer.Market = &test.Market{
+			Base:    baseAsset.ID,
+			Quote:   quoteAsset.ID,
+			LotSize: dcrLotSize,
+		}
+		writer.Sell = i%2 == 0
+		ord := makeLO(writer, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF)
+		if (ord.Sell && base) || (!ord.Sell && quote) { // eth-funded order needs a account address coin.
+			ord.Coins = []order.CoinID{[]byte(test.RandomAddress())}
+		}
+		ords = append(ords, ord)
+		storage.BookOrder(ord)
+	}
+
+	_, _, _, cleanup, err := newTestMarket(storage, balancer, [2]*asset.BackedAsset{baseAsset, quoteAsset})
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	for _, lo := range ords {
+		if base && balancer.reqs[lo.BaseAccount()] == 0 {
+			t.Fatalf("base balance not requested for order")
+		}
+		if quote && balancer.reqs[lo.QuoteAccount()] == 0 {
+			t.Fatalf("quote balance not requested for order")
+		}
+	}
+}
+
+func TestMarket_AccountPending(t *testing.T) {
+	storage := &TArchivist{}
+	writer := test.RandomWriter()
+	writer.Market = &test.Market{
+		Base:    assetETH.ID,
+		Quote:   assetMATIC.ID,
+		LotSize: dcrLotSize,
+	}
+
+	const rate = btcRateStep * 100
+	const sellLots = 10
+	const buyLots = 20
+	ethAddr := test.RandomAddress()
+	maticAddr := test.RandomAddress()
+
+	writer.Sell = true
+	lo := makeLO(writer, rate, sellLots, order.StandingTiF)
+	lo.Coins = []order.CoinID{[]byte(ethAddr)}
+	lo.Address = maticAddr
+	storage.BookOrder(lo)
+
+	writer.Sell = false
+	lo = makeLO(writer, rate, buyLots, order.StandingTiF)
+	lo.Coins = []order.CoinID{[]byte(maticAddr)}
+	lo.Address = ethAddr
+	storage.BookOrder(lo)
+
+	mkt, _, _, cleanup, err := newTestMarket(storage, newTBalancer(), [2]*asset.BackedAsset{assetETH, assetMATIC})
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	checkPending := func(tag string, addr string, assetID uint32, expQty, expLots uint64, expRedeems int) {
+		t.Helper()
+		qty, lots, redeems := mkt.AccountPending(addr, assetID)
+		if qty != expQty {
+			t.Fatalf("%s: wrong quantity: wanted %d, got %d", tag, expQty, qty)
+		}
+		if lots != expLots {
+			t.Fatalf("%s: wrong lots: wanted %d, got %d", tag, expLots, lots)
+		}
+		if redeems != expRedeems {
+			t.Fatalf("%s: wrong redeems: wanted %d, got %d", tag, expRedeems, redeems)
+		}
+	}
+
+	checkPending("booked-only-eth", ethAddr, assetETH.ID, sellLots*dcrLotSize, sellLots, buyLots)
+
+	quoteQty := calc.BaseToQuote(rate, buyLots*dcrLotSize)
+	checkPending("booked-only-matic", maticAddr, assetMATIC.ID, quoteQty, buyLots, sellLots)
+
+	const epochSellLots = 5
+	writer.Sell = true
+	lo = makeLO(writer, rate, epochSellLots, order.StandingTiF)
+	lo.Coins = []order.CoinID{[]byte(ethAddr)}
+	lo.Address = maticAddr
+	mkt.epochOrders[lo.ID()] = lo
+	const totalSellLots = sellLots + epochSellLots
+	checkPending("with-epoch-sell-eth", ethAddr, assetETH.ID, totalSellLots*dcrLotSize, totalSellLots, buyLots)
+	checkPending("with-epoch-sell-matic", maticAddr, assetMATIC.ID, quoteQty, buyLots, totalSellLots)
+
+	// Market buy order.
+	midGap := mkt.MidGap()
+	mktBuyQty := quoteQty + calc.BaseToQuote(midGap, dcrLotSize/2)
+	writer.Sell = false
+	mo := makeMO(writer, 0)
+	mo.Quantity = mktBuyQty
+	mo.Coins = []order.CoinID{[]byte(maticAddr)}
+	mo.Address = ethAddr
+	mkt.epochOrders[mo.ID()] = mo
+	redeems := int(totalSellLots)
+	totalBuyLots := buyLots + calc.QuoteToBase(midGap, mktBuyQty)/dcrLotSize
+	totalQty := quoteQty + mktBuyQty
+	checkPending("with-epoch-market-buy-matic", maticAddr, assetMATIC.ID, totalQty, totalBuyLots, redeems)
+	checkPending("with-epoch-market-buy-eth", ethAddr, assetETH.ID, totalSellLots*dcrLotSize, totalSellLots, int(totalBuyLots))
 }

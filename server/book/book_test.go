@@ -91,7 +91,7 @@ var (
 func newBook(t *testing.T) *Book {
 	resetMakers()
 
-	b := New(LotSize)
+	b := New(LotSize, 0)
 
 	for _, o := range bookBuyOrders {
 		if ok := b.Insert(o); !ok {

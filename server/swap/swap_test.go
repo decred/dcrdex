@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -35,8 +36,9 @@ import (
 )
 
 const (
-	ABCID = 123
-	XYZID = 789
+	ABCID  = 123
+	XYZID  = 789
+	ACCTID = 456
 )
 
 var (
@@ -341,11 +343,10 @@ type redeemKey struct {
 }
 
 // This stub satisfies asset.Backend.
-type TAsset struct {
+type TBackend struct {
 	mtx           sync.RWMutex
 	contracts     map[string]*asset.Contract
 	contractErr   error
-	funds         asset.FundingCoin
 	fundsErr      error
 	redemptions   map[redeemKey]asset.Coin
 	redemptionErr error
@@ -353,8 +354,8 @@ type TAsset struct {
 	lbl           string
 }
 
-func newTAsset(lbl string) *TAsset {
-	return &TAsset{
+func newTBackend(lbl string) TBackend {
+	return TBackend{
 		bChan:       make(chan *asset.BlockUpdate, 5),
 		lbl:         lbl,
 		contracts:   make(map[string]*asset.Contract),
@@ -363,12 +364,15 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
-func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
-	a.mtx.RLock()
-	defer a.mtx.RUnlock()
-	return a.funds, a.fundsErr
+func newUTXOBackend(lbl string) *TUTXOBackend {
+	return &TUTXOBackend{TBackend: newTBackend(lbl)}
 }
-func (a *TAsset) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
+
+func newAccountBackend(lbl string) *TAccountBackend {
+	return &TAccountBackend{newTBackend(lbl)}
+}
+
+func (a *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	if a.contractErr != nil {
@@ -381,7 +385,7 @@ func (a *TAsset) Contract(coinID, redeemScript []byte) (*asset.Contract, error) 
 
 	return contract, nil
 }
-func (a *TAsset) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, error) {
+func (a *TBackend) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	if a.redemptionErr != nil {
@@ -393,31 +397,30 @@ func (a *TAsset) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, erro
 	}
 	return redeem, nil
 }
-func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
+func (a *TBackend) ValidateCoinID(coinID []byte) (string, error) {
 	return "", nil
 }
-func (a *TAsset) ValidateContract(contract []byte) error {
+func (a *TBackend) ValidateContract(contract []byte) error {
 	return nil
 }
-func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate          { return a.bChan }
-func (a *TAsset) InitTxSize() uint32                                       { return 100 }
-func (a *TAsset) InitTxSizeBase() uint32                                   { return 66 }
-func (a *TAsset) FeeRate(context.Context) (uint64, error)                  { return 10, nil }
-func (a *TAsset) CheckAddress(string) bool                                 { return true }
-func (a *TAsset) Connect(context.Context) (*sync.WaitGroup, error)         { return nil, nil }
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool              { return true }
-func (a *TAsset) VerifyUnspentCoin(_ context.Context, coinID []byte) error { return nil }
-func (a *TAsset) Synced() (bool, error)                                    { return true, nil }
-func (a *TAsset) TxData([]byte) ([]byte, error) {
+func (a *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate  { return a.bChan }
+func (a *TBackend) InitTxSize() uint32                               { return 100 }
+func (a *TBackend) InitTxSizeBase() uint32                           { return 66 }
+func (a *TBackend) FeeRate(context.Context) (uint64, error)          { return 10, nil }
+func (a *TBackend) CheckAddress(string) bool                         { return true }
+func (a *TBackend) Connect(context.Context) (*sync.WaitGroup, error) { return nil, nil }
+func (a *TBackend) ValidateSecret(secret, contract []byte) bool      { return true }
+func (a *TBackend) Synced() (bool, error)                            { return true, nil }
+func (a *TBackend) TxData([]byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (a *TAsset) setContractErr(err error) {
+func (a *TBackend) setContractErr(err error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
 	a.contractErr = err
 }
-func (a *TAsset) setContract(contract *asset.Contract, resetErr bool) {
+func (a *TBackend) setContract(contract *asset.Contract, resetErr bool) {
 	a.mtx.Lock()
 	a.contracts[string(contract.ID())] = contract
 	if resetErr {
@@ -426,18 +429,43 @@ func (a *TAsset) setContract(contract *asset.Contract, resetErr bool) {
 	a.mtx.Unlock()
 }
 
-func (a *TAsset) setRedemptionErr(err error) {
+func (a *TBackend) setRedemptionErr(err error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
 	a.redemptionErr = err
 }
-func (a *TAsset) setRedemption(redeem asset.Coin, cpSwap asset.Coin, resetErr bool) {
+func (a *TBackend) setRedemption(redeem asset.Coin, cpSwap asset.Coin, resetErr bool) {
 	a.mtx.Lock()
 	a.redemptions[redeemKey{string(redeem.ID()), string(cpSwap.ID())}] = redeem
 	if resetErr {
 		a.redemptionErr = nil
 	}
 	a.mtx.Unlock()
+}
+
+type TUTXOBackend struct {
+	TBackend
+	funds asset.FundingCoin
+}
+
+func (a *TUTXOBackend) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+	return a.funds, a.fundsErr
+}
+
+func (a *TUTXOBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error { return nil }
+
+type TAccountBackend struct {
+	TBackend
+}
+
+func (b *TAccountBackend) AccountBalance(addr string) (uint64, error) {
+	return 0, nil
+}
+
+func (b *TAccountBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) error {
+	return nil
 }
 
 // This stub satisfies asset.Transaction, used by asset.Backend.
@@ -477,10 +505,11 @@ func (coin *TCoin) FeeRate() uint64 {
 	return 72 // make sure it's at least the required fee if you want it to pass (test fail TODO)
 }
 
-func TNewAsset(backend asset.Backend) *asset.BackedAsset {
+func TNewAsset(backend asset.Backend, assetID uint32) *asset.BackedAsset {
 	return &asset.BackedAsset{
 		Backend: backend,
 		Asset: dex.Asset{
+			ID:         assetID,
 			Symbol:     "qwe",
 			MaxFeeRate: 12,
 			SwapConf:   2,
@@ -502,9 +531,11 @@ func tNewResponse(id uint64, resp []byte) *msgjson.Message {
 // testRig is the primary test data structure.
 type testRig struct {
 	abc           *asset.BackedAsset
-	abcNode       *TAsset
+	abcNode       *TUTXOBackend
 	xyz           *asset.BackedAsset
-	xyzNode       *TAsset
+	xyzNode       *TUTXOBackend
+	acctAsset     *asset.BackedAsset
+	acctNode      *TAccountBackend
 	auth          *TAuthManager
 	swapper       *Swapper
 	swapperWaiter *dex.StartStopWaiter
@@ -515,7 +546,8 @@ type testRig struct {
 }
 
 func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
-	var abcBackend, xyzBackend *TAsset
+	var abcBackend, xyzBackend *TUTXOBackend
+	var acctBackend *TAccountBackend
 	storage := &TStorage{}
 	authMgr := newTAuthManager()
 	var noResume bool
@@ -529,20 +561,24 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		authMgr.newNtfn = seedRig.auth.newNtfn
 		authMgr.newSuspend = seedRig.auth.newSuspend
 	} else {
-		abcBackend = newTAsset("abc")
-		xyzBackend = newTAsset("xyz")
+		abcBackend = newUTXOBackend("abc")
+		xyzBackend = newUTXOBackend("xyz")
+		acctBackend = newAccountBackend("acct")
 	}
 
-	abcAsset := TNewAsset(abcBackend)
+	abcAsset := TNewAsset(abcBackend, ABCID)
 	abcCoinLocker := coinlock.NewAssetCoinLocker()
 
-	xyzAsset := TNewAsset(xyzBackend)
+	xyzAsset := TNewAsset(xyzBackend, XYZID)
 	xyzCoinLocker := coinlock.NewAssetCoinLocker()
 
+	acctAsset := TNewAsset(acctBackend, ACCTID)
+
 	swapper, err := NewSwapper(&Config{
-		Assets: map[uint32]*LockableAsset{
-			ABCID: {abcAsset, abcCoinLocker},
-			XYZID: {xyzAsset, xyzCoinLocker},
+		Assets: map[uint32]*SwapperAsset{
+			ABCID:  {abcAsset, abcCoinLocker},
+			XYZID:  {xyzAsset, xyzCoinLocker},
+			ACCTID: {BackedAsset: acctAsset}, // no coin locker for account based asset.
 		},
 		Storage:          storage,
 		AuthManager:      authMgr,
@@ -567,6 +603,8 @@ func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 		abcNode:       abcBackend,
 		xyz:           xyzAsset,
 		xyzNode:       xyzBackend,
+		acctAsset:     acctAsset,
+		acctNode:      acctBackend,
 		auth:          authMgr,
 		swapper:       swapper,
 		swapperWaiter: ssw,
@@ -1351,7 +1389,7 @@ func testSwap(t *testing.T, rig *testRig) {
 	t.Helper()
 	ensureNilErr := makeEnsureNilErr(t)
 
-	sendBlock := func(node *TAsset) {
+	sendBlock := func(node *TBackend) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
@@ -1375,12 +1413,12 @@ func testSwap(t *testing.T, rig *testRig) {
 		ensureNilErr(rig.auditSwap_taker())
 		ensureNilErr(rig.ackAudit_taker(true))
 		matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(makerSwapAsset.SwapConf))
-		sendBlock(makerSwapAsset.Backend.(*TAsset))
+		sendBlock(&makerSwapAsset.Backend.(*TUTXOBackend).TBackend)
 		ensureNilErr(rig.sendSwap_taker(true))
 		ensureNilErr(rig.auditSwap_maker())
 		ensureNilErr(rig.ackAudit_maker(true))
 		matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(takerSwapAsset.SwapConf))
-		sendBlock(takerSwapAsset.Backend.(*TAsset))
+		sendBlock(&takerSwapAsset.Backend.(*TUTXOBackend).TBackend)
 		ensureNilErr(rig.redeem_maker(true))
 		ensureNilErr(rig.ackRedemption_taker(true))
 		ensureNilErr(rig.redeem_taker(true))
@@ -1450,7 +1488,7 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
 
-	sendBlock := func(node *TAsset) {
+	sendBlock := func(node *TBackend) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
@@ -1496,7 +1534,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatal(err)
 	}
 	matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.abc.SwapConf))
-	sendBlock(rig.abc.Backend.(*TAsset))
+	sendBlock(&rig.abc.Backend.(*TUTXOBackend).TBackend)
 	if err := rig.auditSwap_taker(); err != nil {
 		t.Fatal(err)
 	}
@@ -1532,7 +1570,7 @@ func TestTxWaiters(t *testing.T) {
 			resp.Error.Code, resp.Error.Message)
 	}
 	matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.xyz.SwapConf))
-	sendBlock(rig.xyz.Backend.(*TAsset))
+	sendBlock(&rig.xyz.Backend.(*TUTXOBackend).TBackend)
 
 	ensureNilErr(rig.auditSwap_maker())
 	ensureNilErr(rig.ackAudit_maker(true))
@@ -1595,7 +1633,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	rig.auth.newNtfn = make(chan struct{}, 2) // 2 revoke_match requests
 
 	ensureNilErr := makeEnsureNilErr(t)
-	sendBlock := func(node *TAsset) {
+	sendBlock := func(node *TBackend) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
 	}
 
@@ -1629,7 +1667,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	// tryExpire will sleep for the duration of a BroadcastTimeout, and then
 	// check that a penalty was assigned to the appropriate user, and that a
 	// revoke_match message is sent to both users.
-	tryExpire := func(i, j int, step order.MatchStatus, jerk, victim *tUser, node *TAsset) bool {
+	tryExpire := func(i, j int, step order.MatchStatus, jerk, victim *tUser, node *TBackend) bool {
 		t.Helper()
 		if i != j {
 			return false
@@ -1669,7 +1707,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		ensureNilErr(rig.ackMatch_taker(true))
 
 		// Timeout waiting for maker swap.
-		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
+		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, &rig.abcNode.TBackend) {
 			continue
 		}
 
@@ -1685,10 +1723,10 @@ func TestBroadcastTimeouts(t *testing.T) {
 
 		// Maker's swap reaches swapConf.
 		matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.abc.SwapConf))
-		sendBlock(rig.abcNode) // tryConfirmSwap
+		sendBlock(&rig.abcNode.TBackend) // tryConfirmSwap
 		// With maker swap confirmed, inaction happens bTimeout after
 		// swapConfirmed time.
-		if tryExpire(i, 1, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
+		if tryExpire(i, 1, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, &rig.xyzNode.TBackend) {
 			continue
 		}
 
@@ -1704,10 +1742,10 @@ func TestBroadcastTimeouts(t *testing.T) {
 
 		// Taker's swap reaches swapConf.
 		matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.xyz.SwapConf))
-		sendBlock(rig.xyzNode)
+		sendBlock(&rig.xyzNode.TBackend)
 		// With taker swap confirmed, inaction happens bTimeout after
 		// swapConfirmed time.
-		if tryExpire(i, 2, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
+		if tryExpire(i, 2, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, &rig.xyzNode.TBackend) {
 			continue
 		}
 
@@ -1719,7 +1757,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		// Maker's redeem reaches swapConf. Not necessary for taker redeem.
 		// matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 		// sendBlock(rig.xyzNode)
-		if tryExpire(i, 3, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
+		if tryExpire(i, 3, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, &rig.abcNode.TBackend) {
 			continue
 		}
 
@@ -1896,6 +1934,90 @@ func TestCancel(t *testing.T) {
 	if makerNote.MatchID.String() != takerNote.MatchID.String() {
 		t.Fatalf("match ID mismatch. %s != %s", makerNote.MatchID, takerNote.MatchID)
 	}
+}
+
+func TestAccountTracking(t *testing.T) {
+	const lotSize uint64 = 1e8
+	const rate = 2e10
+	const lots = 5
+	const qty = lotSize * lots
+	makerAddr := "maker"
+	takerAddr := "taker"
+
+	trackedSet := tPerfectLimitLimit(qty, rate, true)
+	matchInfo := trackedSet.matchInfos[0]
+
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	var baseAsset, quoteAsset uint32 = ACCTID, XYZID
+
+	addOrder := func(matchSet *order.MatchSet, makerSell bool) {
+		maker, taker := matchSet.Makers[0], matchSet.Taker
+		taker.Prefix().BaseAsset = baseAsset
+		maker.BaseAsset = baseAsset
+		taker.Prefix().QuoteAsset = quoteAsset
+		maker.QuoteAsset = quoteAsset
+		maker.Coins = []order.CoinID{[]byte(makerAddr)}
+		taker.Trade().Coins = []order.CoinID{[]byte(takerAddr)}
+		taker.Trade().Address = takerAddr
+		maker.Address = makerAddr
+		if makerSell {
+			taker.Trade().Sell = false
+			maker.Sell = true
+		} else {
+			taker.Trade().Sell = true
+			maker.Sell = false
+		}
+		rig.swapper.Negotiate([]*order.MatchSet{matchSet})
+	}
+
+	checkStats := func(addr string, expQty, expSwaps uint64, expRedeems int) {
+		t.Helper()
+		q, s, r := rig.swapper.AccountStats(addr, ACCTID)
+		if q != expQty {
+			t.Fatalf("wrong quantity. wanted %d, got %d", expQty, q)
+		}
+		if s != expSwaps {
+			t.Fatalf("wrong swaps. wanted %d, got %d", expSwaps, s)
+		}
+		if r != expRedeems {
+			t.Fatalf("wrong redeems. wanted %d, got %d", expRedeems, r)
+		}
+	}
+
+	addOrder(trackedSet.matchSet, true)
+	checkStats(makerAddr, qty, 1, 0)
+	checkStats(takerAddr, 0, 0, 1)
+
+	tracker := rig.getTracker()
+	tracker.Status = order.MakerSwapCast
+	checkStats(makerAddr, 0, 0, 0)
+	checkStats(takerAddr, 0, 0, 1)
+
+	tracker.Status = order.MatchComplete
+	checkStats(takerAddr, 0, 0, 0)
+
+	rig.swapper.deleteMatch(tracker)
+	if len(rig.swapper.acctMatches[ACCTID]) > 0 {
+		t.Fatalf("account tracking not deleted for removed match")
+	}
+
+	// Do 3 maker buys, 2 maker sells, and check the numbers.
+	for i := 0; i < 5; i++ {
+		set := tPerfectLimitLimit(qty, rate, i > 2)
+		addOrder(set.matchSet, i > 2)
+	}
+
+	checkStats(makerAddr, qty*2, 2, 3)
+	checkStats(takerAddr, qty*3, 3, 2)
+
+	quoteAsset, baseAsset = baseAsset, quoteAsset
+	set := tPerfectLimitLimit(qty, rate, false)
+
+	addOrder(set.matchSet, false)
+	checkStats(makerAddr, qty*2+calc.BaseToQuote(rate, qty), 3, 3)
+	checkStats(takerAddr, qty*3, 3, 3)
 }
 
 // TODO: TestSwapper_restoreActiveSwaps? It would be almost entirely driven by

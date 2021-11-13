@@ -666,8 +666,6 @@ func (p *Prefix) Stamp(t uint64) {
 	p.ServerTime = t
 }
 
-// TODO: Update prefix serialization with commitment.
-
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
@@ -679,16 +677,20 @@ func (p *Prefix) Serialize() []byte {
 	b = append(b, uint32Bytes(p.Quote)...)
 	b = append(b, p.OrderType)
 	b = append(b, uint64Bytes(p.ClientTime)...)
+	// Note: ServerTime is zero for the client's signature message, but non-zero
+	// for the server's. This is in contrast to an order.Order which cannot
+	// even be serialized without the server's timestamp.
 	b = append(b, uint64Bytes(p.ServerTime)...)
 	return append(b, p.Commit...)
 }
 
 // Trade is common to Limit and Market Payloads.
 type Trade struct {
-	Side     uint8   `json:"side"`
-	Quantity uint64  `json:"ordersize"`
-	Coins    []*Coin `json:"coins"`
-	Address  string  `json:"address"`
+	Side      uint8      `json:"side"`
+	Quantity  uint64     `json:"ordersize"`
+	Coins     []*Coin    `json:"coins"`
+	Address   string     `json:"address"`
+	RedeemSig *RedeemSig `json:"redeemsig,omitempty"` // account-based assets only. not serialized.
 }
 
 // Serialize serializes the Trade data.
@@ -751,6 +753,13 @@ type CancelOrder struct {
 func (c *CancelOrder) Serialize() []byte {
 	// serialization: prefix (89) + target id (32) = 121
 	return append(c.Prefix.Serialize(), c.TargetID...)
+}
+
+// RedeemSig is a signature proving ownership of the redeeming address. This is
+// only necessary as part of a Trade if the asset received is account-based.
+type RedeemSig struct {
+	PubKey dex.Bytes `json:"pubkey"`
+	Sig    dex.Bytes `json:"sig"`
 }
 
 // OrderResult is returned from the order-placing routes.

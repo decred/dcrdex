@@ -395,8 +395,9 @@ func TestRequiredOrderFunds(t *testing.T) {
 		SwapSize:     initSize,
 		MaxFeeRate:   feeRate,
 	}
+
 	// Second argument called inputsSize same as another initSize.
-	got := calc.RequiredOrderFunds(swapVal, initSize, numSwaps, nfo)
+	got := calc.RequiredOrderFunds(swapVal, 0, numSwaps, nfo)
 	if got != want {
 		t.Fatalf("want %v got %v for fees", want, got)
 	}

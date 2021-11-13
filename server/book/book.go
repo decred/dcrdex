@@ -23,18 +23,20 @@ const (
 // allow constant time access to the best orders, and log time insertion and
 // removal of orders.
 type Book struct {
-	mtx     sync.RWMutex
-	lotSize uint64
-	buys    *OrderPQ
-	sells   *OrderPQ
+	mtx          sync.RWMutex
+	acctTracking AccountTracking
+	lotSize      uint64
+	buys         *OrderPQ
+	sells        *OrderPQ
 }
 
 // New creates a new order book with the given lot size.
-func New(lotSize uint64) *Book {
+func New(lotSize uint64, acctTracking AccountTracking) *Book {
 	return &Book{
-		lotSize: lotSize,
-		buys:    NewMaxOrderPQ(initBookHalfCapacity),
-		sells:   NewMinOrderPQ(initBookHalfCapacity),
+		lotSize:      lotSize,
+		acctTracking: acctTracking,
+		buys:         NewMaxOrderPQ(initBookHalfCapacity, acctTracking),
+		sells:        NewMinOrderPQ(initBookHalfCapacity, acctTracking),
 	}
 }
 
@@ -42,8 +44,8 @@ func New(lotSize uint64) *Book {
 func (b *Book) Clear() {
 	b.mtx.Lock()
 	b.buys, b.sells = nil, nil
-	b.buys = NewMaxOrderPQ(initBookHalfCapacity)
-	b.sells = NewMinOrderPQ(initBookHalfCapacity)
+	b.buys = NewMaxOrderPQ(initBookHalfCapacity, b.acctTracking)
+	b.sells = NewMinOrderPQ(initBookHalfCapacity, b.acctTracking)
 	b.mtx.Unlock()
 }
 
@@ -182,4 +184,22 @@ func (b *Book) UnfilledUserSells(user account.AccountID) []*order.LimitOrder {
 	b.mtx.RLock()
 	defer b.mtx.RUnlock()
 	return b.sells.UnfilledForUser(user)
+}
+
+// IterateBaseAccount calls the provided function for every tracked order with
+// a base asset corresponding to the specified account address.
+func (b *Book) IterateBaseAccount(acctAddr string, f func(lo *order.LimitOrder)) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	b.sells.IterateBaseAccount(acctAddr, f)
+	b.buys.IterateBaseAccount(acctAddr, f)
+}
+
+// IterateQuoteAccount calls the provided function for every tracked order with
+// a quote asset corresponding to the specified account address.
+func (b *Book) IterateQuoteAccount(acctAddr string, f func(lo *order.LimitOrder)) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	b.sells.IterateQuoteAccount(acctAddr, f)
+	b.buys.IterateQuoteAccount(acctAddr, f)
 }

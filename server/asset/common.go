@@ -92,6 +92,9 @@ type OutputTracker interface {
 type AccountBalancer interface {
 	// AccountBalance retrieves the current account balance.
 	AccountBalance(addr string) (uint64, error)
+	// ValidateSignature checks that the pubkey is correct for the address and
+	// that the signature shows ownership of the associated private key.
+	ValidateSignature(addr string, pubkey, msg, sig []byte) error
 }
 
 // Coin represents a transaction input or output.
