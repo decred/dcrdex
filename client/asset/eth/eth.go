@@ -30,7 +30,6 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -155,7 +154,6 @@ type ethFetcher interface {
 	connect(ctx context.Context, node *node.Node, contractAddr *common.Address) error
 	listWallets(ctx context.Context) ([]rawWallet, error)
 	initiate(txOpts *bind.TransactOpts, netID int64, initiations []dexeth.ETHSwapInitiation) (*types.Transaction, error)
-	estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
 	lock(ctx context.Context, acct *accounts.Account) error
 	nodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
 	pendingTransactions(ctx context.Context) ([]*types.Transaction, error)
@@ -193,9 +191,6 @@ type ExchangeWallet struct {
 	currentTip *types.Block
 
 	acct *accounts.Account
-
-	initGasCache    map[int]uint64
-	initGasCacheMtx sync.Mutex
 
 	lockedFunds    map[string]uint64 // gwei
 	lockedFundsMtx sync.RWMutex
@@ -281,7 +276,6 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, network dex.Netw
 		internalNode: node,
 		lockedFunds:  make(map[string]uint64),
 		acct:         &accounts[0],
-		initGasCache: make(map[int]uint64),
 	}, nil
 }
 
@@ -381,52 +375,6 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 	return bal, nil
 }
 
-// getInitGas gets an estimate for the gas required for initiating a swap. The
-// result is cached and reused in subsequent requests.
-//
-// This function will return an error if the wallet has a non zero balance.
-func (eth *ExchangeWallet) getInitGas(numSwaps int) (uint64, error) {
-	eth.initGasCacheMtx.Lock()
-	defer eth.initGasCacheMtx.Unlock()
-
-	if cachedGas, ok := eth.initGasCache[numSwaps]; ok {
-		return cachedGas, nil
-	}
-
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
-	if err != nil {
-		return 0, err
-	}
-	initiations := make([]dexeth.ETHSwapInitiation, 0, numSwaps)
-	for i := 0; i < numSwaps; i++ {
-		initiations = append(initiations, dexeth.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(1),
-			SecretHash:      secretHash,
-			Participant:     eth.acct.Address,
-			Value:           big.NewInt(1),
-		})
-	}
-	data, err := parsedAbi.Pack("initiate", initiations)
-	if err != nil {
-		return 0, err
-	}
-	msg := ethereum.CallMsg{
-		From:  eth.acct.Address,
-		To:    &mainnetContractAddr,
-		Value: big.NewInt(int64(numSwaps)),
-		Gas:   0,
-		Data:  data,
-	}
-	gas, err := eth.node.estimateGas(eth.ctx, msg)
-	if err != nil {
-		return 0, err
-	}
-	eth.initGasCache[numSwaps] = gas
-	return gas, nil
-}
-
 // MaxOrder generates information about the maximum order size and associated
 // fees that the wallet can support for the given DEX configuration. The fees are an
 // estimate based on current network conditions, and will be <= the fees
@@ -440,13 +388,7 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	if balance.Available == 0 {
 		return &asset.SwapEstimate{}, nil
 	}
-	initGas, err := eth.getInitGas(1)
-
-	if err != nil {
-		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
-		initGas = nfo.SwapSize
-	}
-	maxTxFee := initGas * nfo.MaxFeeRate
+	maxTxFee := srveth.InitGas * nfo.MaxFeeRate
 	lots := balance.Available / (lotSize + maxTxFee)
 	if lots < 1 {
 		return &asset.SwapEstimate{}, nil
@@ -478,19 +420,14 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 	if lots == 0 {
 		return &asset.SwapEstimate{}
 	}
-	oneSwapGas, err := eth.getInitGas(1)
-	if err != nil {
-		eth.log.Warnf("error getting init gas, falling back to server's value: %v", err)
-		oneSwapGas = nfo.SwapSize
-	}
 	value := lots * lotSize
-	maxFees := oneSwapGas * nfo.MaxFeeRate * lots
+	maxFees := srveth.InitGas * nfo.MaxFeeRate * lots
 	return &asset.SwapEstimate{
 		Lots:               lots,
 		Value:              value,
 		MaxFees:            maxFees,
-		RealisticWorstCase: lots * oneSwapGas * feeSuggestion,
-		RealisticBestCase:  oneSwapGas * feeSuggestion,
+		RealisticWorstCase: lots * srveth.InitGas * feeSuggestion,
+		RealisticBestCase:  srveth.InitGas * feeSuggestion,
 		Locked:             value + maxFees,
 	}
 }
