@@ -583,7 +583,7 @@ export default class MarketsPage extends BasePage {
    * on the chart area. The rate field is set to the x-value of the click.
    */
   reportDepthClick (r) {
-    this.page.rateField.value = Doc.formatCoinValue(r / this.market.rateConversionFactor)
+    this.page.rateField.value = Doc.formatCoinValue(r)
     this.rateFieldChanged()
   }
 
@@ -1710,7 +1710,7 @@ export default class MarketsPage extends BasePage {
     const manager = new OrderTableRowManager(tr, orderBin, base.info.unitinfo, rateConversionFactor)
     tr.manager = manager
     bind(tr, 'click', () => {
-      this.reportDepthClick(tr.manager.getRate())
+      this.reportDepthClick(tr.manager.getRate() / rateConversionFactor)
     })
     if (tr.manager.getRate() !== 0) {
       Doc.bind(tr, 'mouseenter', e => {
