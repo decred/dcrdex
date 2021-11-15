@@ -133,27 +133,27 @@ type testData struct {
 	signFunc      func(*wire.MsgTx)
 	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
 
-	blockchainMtx     sync.RWMutex
-	verboseBlocks     map[string]*msgBlockWithHeight
-	dbBlockForTx      map[chainhash.Hash]*hashEntry
-	mainchain         map[int64]*chainhash.Hash
-	getBlockchainInfo *getBlockchainInfoResult
-
+	blockchainMtx       sync.RWMutex
+	verboseBlocks       map[string]*msgBlockWithHeight
+	dbBlockForTx        map[chainhash.Hash]*hashEntry
+	mainchain           map[int64]*chainhash.Hash
+	getBlockchainInfo   *getBlockchainInfoResult
 	getBestBlockHashErr error
-	mempoolTxs          map[chainhash.Hash]*wire.MsgTx
-	rawVerboseErr       error
-	lockedCoins         []*RPCOutpoint
-	estFeeErr           error
-	listLockUnspent     []*RPCOutpoint
-	getBalances         *GetBalancesResult
-	getBalancesErr      error
-	lockUnspentErr      error
-	changeAddr          string
-	changeAddrErr       error
-	newAddress          string
-	newAddressErr       error
-	privKeyForAddr      *btcutil.WIF
-	privKeyForAddrErr   error
+
+	mempoolTxs        map[chainhash.Hash]*wire.MsgTx
+	rawVerboseErr     error
+	lockedCoins       []*RPCOutpoint
+	estFeeErr         error
+	listLockUnspent   []*RPCOutpoint
+	getBalances       *GetBalancesResult
+	getBalancesErr    error
+	lockUnspentErr    error
+	changeAddr        string
+	changeAddrErr     error
+	newAddress        string
+	newAddressErr     error
+	privKeyForAddr    *btcutil.WIF
+	privKeyForAddrErr error
 
 	getTransaction    *GetTransactionResult
 	getTransactionErr error
@@ -277,9 +277,12 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 	case methodGetTxOut:
 		return encodeOrError(c.txOutRes, c.txOutErr)
 	case methodGetBestBlockHash:
+		c.blockchainMtx.RLock()
 		if c.getBestBlockHashErr != nil {
+			c.blockchainMtx.RUnlock()
 			return nil, c.getBestBlockHashErr
 		}
+		c.blockchainMtx.RUnlock()
 		bestHash, _ := c.bestBlock()
 		return json.Marshal(bestHash.String())
 	case methodGetBlockHash:
@@ -2573,14 +2576,18 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	}
 
 	node.getBlockchainInfoErr = tErr // rpc
-	node.getBestBlockHashErr = tErr  // spv BestBlock()
-	delete(node.mainchain, 100)      // force spv to BestBlock() with no wallet block
+	node.blockchainMtx.Lock()
+	node.getBestBlockHashErr = tErr // spv BestBlock()
+	node.blockchainMtx.Unlock()
+	delete(node.mainchain, 100) // force spv to BestBlock() with no wallet block
 	_, _, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
 	}
 	node.getBlockchainInfoErr = nil
+	node.blockchainMtx.Lock()
 	node.getBestBlockHashErr = nil
+	node.blockchainMtx.Unlock()
 
 	wallet.tipAtConnect = 100
 	node.getBlockchainInfo = &getBlockchainInfoResult{
@@ -2922,10 +2929,12 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 
 		node.truncateChains()
 		wallet.findRedemptionQueue = make(map[outPoint]*findRedemptionReq)
+		node.blockchainMtx.RLock()
 		node.getBestBlockHashErr = nil
 		if tt.forcedErr {
 			node.getBestBlockHashErr = tErr
 		}
+		node.blockchainMtx.RUnlock()
 		addBlocks(tt.numBlocks)
 		var startBlock *chainhash.Hash
 		if tt.startBlockHeight >= 0 {
