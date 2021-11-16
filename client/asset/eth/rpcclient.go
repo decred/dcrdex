@@ -262,15 +262,15 @@ func (c *rpcclient) estimateGas(ctx context.Context, msg ethereum.CallMsg) (uint
 	return c.ec.EstimateGas(ctx, msg)
 }
 
-// redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
-// Any on-chain failure, such as this secret not matching the hash, will not cause
-// this to error.
-func (c *rpcclient) redeem(txOpts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
+// redeem redeems a list of swap contracts. The redeemer will be the account at
+// txOpts.From. Any on-chain failure, such as this secret not matching the hash,
+// will not cause this to error.
+func (c *rpcclient) redeem(txOpts *bind.TransactOpts, netID int64, redemptions []swap.ETHSwapRedemption) (*types.Transaction, error) {
 	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
 	}
-	return c.es.Redeem(txOpts, secret, secretHash)
+	return c.es.Redeem(txOpts, redemptions)
 }
 
 // refund refunds a swap contract. The refunder will be the account at txOpts.From.

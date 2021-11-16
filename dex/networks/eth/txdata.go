@@ -17,7 +17,7 @@ const (
 	initiateFuncName = "initiate"
 	numInputArgs     = 1
 	redeemFuncName   = "redeem"
-	numRedeemArgs    = 2
+	numRedeemArgs    = 1
 )
 
 // ParseInitiateData accepts call data from a transaction that pays to a
@@ -62,16 +62,13 @@ func ParseInitiateData(calldata []byte) ([]ETHSwapInitiation, error) {
 // contract with extra data. It will error if the call data does not call
 // redeem with expected argument types. It returns the secret and secret hash
 // in that order.
-func ParseRedeemData(calldata []byte) (secret [32]byte, secretHash [32]byte, err error) {
-	fail := func(err error) ([32]byte, [32]byte, error) {
-		return [32]byte{}, [32]byte{}, err
-	}
+func ParseRedeemData(calldata []byte) ([]ETHSwapRedemption, error) {
 	decoded, err := parseCallData(calldata, ETHSwapABI)
 	if err != nil {
-		return fail(fmt.Errorf("unable to parse call data: %v", err))
+		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
 	if decoded.name != redeemFuncName {
-		return fail(fmt.Errorf("expected %v function but got %v", redeemFuncName, decoded.name))
+		return nil, fmt.Errorf("expected %v function but got %v", redeemFuncName, decoded.name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
@@ -79,15 +76,19 @@ func ParseRedeemData(calldata []byte) (secret [32]byte, secretHash [32]byte, err
 	//
 	// TODO: If any of the checks prove redundant, remove them.
 	if len(args) != numRedeemArgs {
-		return fail(fmt.Errorf("expected %v redeem args but got %v", numRedeemArgs, len(args)))
+		return nil, fmt.Errorf("expected %v redeem args but got %v", numRedeemArgs, len(args))
 	}
-	secret, ok := args[0].value.([32]byte)
+	redemptions, ok := args[0].value.([]struct {
+		Secret     [32]byte `json:"secret"`
+		SecretHash [32]byte `json:"secretHash"`
+	})
 	if !ok {
-		return fail(fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value))
+		return nil, fmt.Errorf("expected first arg of type []ETHSwapRedemption but got %T", args[0].value)
 	}
-	secretHash, ok = args[1].value.([32]byte)
-	if !ok {
-		return fail(fmt.Errorf("expected second arg of type [32]byte but got %T", args[1].value))
+	toReturn := make([]ETHSwapRedemption, 0, len(redemptions))
+	for _, redemption := range redemptions {
+		toReturn = append(toReturn, ETHSwapRedemption(redemption))
 	}
-	return secret, secretHash, nil
+
+	return toReturn, nil
 }

@@ -49,8 +49,6 @@ const (
 	BipID              = 60
 	defaultGasFee      = 82  // gwei
 	defaultGasFeeLimit = 200 // gwei
-
-	RedeemGas = 60000 // gas
 )
 
 var (
@@ -164,7 +162,7 @@ type ethFetcher interface {
 	sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error)
 	shutdown()
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
-	redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error)
+	redeem(txOpts *bind.TransactOpts, netID int64, redemptions []dexeth.ETHSwapRedemption) (*types.Transaction, error)
 	refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error)
 	swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*dexeth.ETHSwapSwap, error)
 	unlock(ctx context.Context, pw string, acct *accounts.Account) error
@@ -500,8 +498,8 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
-			RealisticBestCase:  RedeemGas * req.FeeSuggestion,
-			RealisticWorstCase: RedeemGas * req.FeeSuggestion * req.Lots,
+			RealisticBestCase:  srveth.RedeemGas * req.FeeSuggestion,
+			RealisticWorstCase: srveth.RedeemGas * req.FeeSuggestion * req.Lots,
 		},
 	}, nil
 }

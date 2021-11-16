@@ -702,22 +702,37 @@ func TestInitiate(t *testing.T) {
 }
 
 func TestRedeemGas(t *testing.T) {
-	now := time.Now().Unix()
-	amt := big.NewInt(1e18)
-	txOpts := newTxOpts(ctx, &simnetAddr, amt)
-	var secret [32]byte
-	copy(secret[:], encode.RandomBytes(32))
-	secretHash := sha256.Sum256(secret[:])
 	err := ethClient.unlock(ctx, pw, simnetAcct)
 	if err != nil {
 		t.Fatal(err)
 	}
-	initiations := []dexeth.ETHSwapInitiation{{
-		RefundTimestamp: big.NewInt(now),
-		SecretHash:      secretHash,
-		Participant:     participantAddr,
-		Value:           amt,
-	}}
+
+	// Create secrets and secret hashes
+	numSecrets := 7
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
+
+	// Initiate swaps
+	now := time.Now().Unix()
+	amt := big.NewInt(1)
+	initiations := make([]dexeth.ETHSwapInitiation, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		initiations = append(initiations, dexeth.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(now),
+			SecretHash:      secretHashes[i],
+			Participant:     participantAddr,
+			Value:           amt,
+		})
+	}
+	initValue := big.NewInt(int64(numSecrets))
+	txOpts := newTxOpts(ctx, &simnetAddr, initValue)
 	_, err = ethClient.initiate(txOpts, simnetID, initiations)
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
@@ -725,108 +740,250 @@ func TestRedeemGas(t *testing.T) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
+
+	// Make sure swaps were properly initiated
+	for i := range initiations {
+		swap, err := ethClient.swap(ctx, simnetAcct, initiations[i].SecretHash)
+		if err != nil {
+			t.Fatal("unable to get swap state")
+		}
+		state := srveth.SwapState(swap.State)
+		if state != srveth.SSInitiated {
+			t.Fatalf("unexpected swap state: want %s got %s", srveth.SSInitiated, state)
+		}
+	}
+
+	// Test gas usage of redeem function
 	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
 	if err != nil {
 		t.Fatalf("unexpected error parsing abi: %v", err)
 	}
-
-	data, err := parsedAbi.Pack("redeem", secret, secretHash)
-	if err != nil {
-		t.Fatalf("unexpected error packing abi: %v", err)
+	redemptions := make([]dexeth.ETHSwapRedemption, 0, numSecrets)
+	var previous uint64
+	for i := 0; i < numSecrets; i++ {
+		redemptions = append(redemptions, dexeth.ETHSwapRedemption{
+			Secret:     secrets[i],
+			SecretHash: secretHashes[i],
+		})
+		data, err := parsedAbi.Pack("redeem", redemptions)
+		if err != nil {
+			t.Fatalf("unexpected error packing abi: %v", err)
+		}
+		msg := ethereum.CallMsg{
+			From: participantAddr,
+			To:   &contractAddr,
+			Gas:  0,
+			Data: data,
+		}
+		gas, err := participantEthClient.estimateGas(ctx, msg)
+		if err != nil {
+			t.Fatalf("Error estimating gas for redeem function: %v", err)
+		}
+		var expectedGas uint64
+		var actualGas uint64
+		if i == 0 {
+			expectedGas = srveth.RedeemGas
+			actualGas = gas
+		} else {
+			expectedGas = srveth.AdditionalRedeemGas
+			actualGas = gas - previous
+		}
+		if actualGas > expectedGas || actualGas < (expectedGas/100*95) {
+			t.Fatalf("Expected incremental gas for %d redemptions to be close to %d but got %d",
+				len(redemptions), expectedGas, actualGas)
+		}
+		fmt.Printf("Gas used to redeem %d swaps: %d -- %d more than previous \n", i+1, gas, gas-previous)
+		previous = gas
 	}
-	msg := ethereum.CallMsg{
-		From: participantAddr,
-		To:   &contractAddr,
-		Gas:  0,
-		Data: data,
-	}
-	gas, err := participantEthClient.estimateGas(ctx, msg)
-	if err != nil {
-		t.Fatalf("Error estimating gas for redeem function: %v", err)
-	}
-	if gas > RedeemGas {
-		t.Fatalf("actual gas %v is greater than RedeemGas %v", gas, RedeemGas)
-	}
-	if gas+3000 < RedeemGas {
-		t.Fatalf("actual gas %v is much less than RedeemGas %v", gas, RedeemGas)
-	}
-	fmt.Printf("Gas used for redeem: %v \n", gas)
 }
 
 func TestRedeem(t *testing.T) {
 	amt := big.NewInt(1e18)
 	locktime := time.Second * 12
-	tests := []struct {
-		name              string
-		sleep             time.Duration
-		redeemerClient    *rpcclient
-		redeemer          *accounts.Account
-		finalState        srveth.SwapState
-		addAmt, badSecret bool
-	}{{
-		name:           "ok before locktime",
-		sleep:          time.Second * 8,
-		redeemerClient: participantEthClient,
-		redeemer:       participantAcct,
-		finalState:     srveth.SSRedeemed,
-		addAmt:         true,
-	}, {
-		name:           "ok after locktime",
-		sleep:          time.Second * 16,
-		redeemerClient: participantEthClient,
-		redeemer:       participantAcct,
-		finalState:     srveth.SSRedeemed,
-		addAmt:         true,
-	}, {
-		name:           "bad secret",
-		sleep:          time.Second * 8,
-		redeemerClient: participantEthClient,
-		redeemer:       participantAcct,
-		finalState:     srveth.SSInitiated,
-		badSecret:      true,
-	}, {
-		name:           "wrong redeemer",
-		sleep:          time.Second * 8,
-		finalState:     srveth.SSInitiated,
-		redeemerClient: ethClient,
-		redeemer:       simnetAcct,
-	}}
-
-	for _, test := range tests {
-		err := ethClient.unlock(ctx, pw, simnetAcct)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = participantEthClient.unlock(ctx, pw, participantAcct)
-		if err != nil {
-			t.Fatal(err)
-		}
-		txOpts := newTxOpts(ctx, &simnetAddr, amt)
+	numSecrets := 10
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
 		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
 
-		swap, err := ethClient.swap(ctx, simnetAcct, secretHash)
-		if err != nil {
-			t.Fatal("unable to get swap state")
-		}
-		state := srveth.SwapState(swap.State)
-		if state != srveth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
+	err := ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = participantEthClient.unlock(ctx, pw, participantAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name           string
+		sleep          time.Duration
+		redeemerClient *rpcclient
+		redeemer       *accounts.Account
+		initiations    []dexeth.ETHSwapInitiation
+		redemptions    []dexeth.ETHSwapRedemption
+		finalStates    []srveth.SwapState
+		addAmt         bool
+	}{
+		{
+			name:           "ok before locktime",
+			sleep:          time.Second * 8,
+			redeemerClient: participantEthClient,
+			redeemer:       participantAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[0],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[0],
+					SecretHash: secretHashes[0]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSRedeemed,
+			},
+			addAmt: true,
+		},
+		{
+			name:           "ok two before locktime",
+			sleep:          time.Second * 8,
+			redeemerClient: participantEthClient,
+			redeemer:       participantAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[1],
+					Participant: participantAddr},
+				{
+					SecretHash:  secretHashes[2],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[1],
+					SecretHash: secretHashes[1]},
+				{
+					Secret:     secrets[2],
+					SecretHash: secretHashes[2]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSRedeemed, srveth.SSRedeemed,
+			},
+			addAmt: true,
+		},
+		{
+			name:           "ok after locktime",
+			sleep:          time.Second * 16,
+			redeemerClient: participantEthClient,
+			redeemer:       participantAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[3],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[3],
+					SecretHash: secretHashes[3]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSRedeemed,
+			},
+			addAmt: true,
+		},
+		{
+			name:           "bad redeemer",
+			sleep:          time.Second * 8,
+			redeemerClient: ethClient,
+			redeemer:       simnetAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[4],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[4],
+					SecretHash: secretHashes[4]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSInitiated,
+			},
+			addAmt: false,
+		},
+		{
+			name:           "bad secret",
+			sleep:          time.Second * 8,
+			redeemerClient: ethClient,
+			redeemer:       simnetAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[5],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[6],
+					SecretHash: secretHashes[5]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSInitiated,
+			},
+			addAmt: false,
+		},
+		{
+			name:           "duplicate secret hashes",
+			sleep:          time.Second * 8,
+			redeemerClient: participantEthClient,
+			redeemer:       participantAcct,
+			initiations: []dexeth.ETHSwapInitiation{
+				{
+					SecretHash:  secretHashes[7],
+					Participant: participantAddr},
+				{
+					SecretHash:  secretHashes[8],
+					Participant: participantAddr},
+			},
+			redemptions: []dexeth.ETHSwapRedemption{
+				{
+					Secret:     secrets[7],
+					SecretHash: secretHashes[7]},
+				{
+					Secret:     secrets[7],
+					SecretHash: secretHashes[7]},
+			},
+			finalStates: []srveth.SwapState{
+				srveth.SSInitiated, srveth.SSInitiated,
+			},
+			addAmt: false,
+		},
+	}
+
+	for _, test := range tests {
+		numInitiations := big.NewInt(int64(len(test.redemptions)))
+		initValue := big.NewInt(0).Mul(amt, numInitiations)
+		txOpts := newTxOpts(ctx, &simnetAddr, initValue)
+
+		for i := range test.initiations {
+			swap, err := ethClient.swap(ctx, simnetAcct, test.initiations[i].SecretHash)
+			if err != nil {
+				t.Fatal("unable to get swap state")
+			}
+			state := srveth.SwapState(swap.State)
+			if state != srveth.SSNone {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, srveth.SSNone, state)
+			}
+
+			test.initiations[i].RefundTimestamp = big.NewInt(time.Now().Add(locktime).Unix())
+			test.initiations[i].Value = amt
 		}
 
-		// Create a secret that doesn't has to secretHash.
-		if test.badSecret {
-			copy(secret[:], encode.RandomBytes(32))
-		}
-		inLocktime := time.Now().Add(locktime).Unix()
-		initiations := []dexeth.ETHSwapInitiation{{
-			RefundTimestamp: big.NewInt(inLocktime),
-			SecretHash:      secretHash,
-			Participant:     participantAddr,
-			Value:           amt,
-		}}
-		_, err = ethClient.initiate(txOpts, simnetID, initiations)
+		_, err = ethClient.initiate(txOpts, simnetID, test.initiations)
 		if err != nil {
 			t.Fatalf("unable to initiate swap for test %v: %v ", test.name, err)
 		}
@@ -840,7 +997,7 @@ func TestRedeem(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 		txOpts = newTxOpts(ctx, &test.redeemer.Address, nil)
-		tx, err := test.redeemerClient.redeem(txOpts, simnetID, secret, secretHash)
+		tx, err := test.redeemerClient.redeem(txOpts, simnetID, test.redemptions)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
@@ -868,23 +1025,27 @@ func TestRedeem(t *testing.T) {
 		txFee := big.NewInt(0).Mul(big.NewInt(int64(receipt.GasUsed)), gasPrice)
 		wantBal := big.NewInt(0).Sub(originalBal, txFee)
 		if test.addAmt {
-			wantBal.Add(wantBal, amt)
+			numRedemptions := int64(len(test.redemptions))
+			redeemedAmount := big.NewInt(0).Mul(amt, big.NewInt(numRedemptions))
+			wantBal.Add(wantBal, redeemedAmount)
 		}
 		if bal.Cmp(wantBal) != 0 {
 			t.Fatalf("unexpected balance change for test %v: want %v got %v", test.name, wantBal, bal)
 		}
 
-		swap, err = ethClient.swap(ctx, simnetAcct, secretHash)
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
-		state = srveth.SwapState(swap.State)
-		if state != test.finalState {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, test.finalState, state)
+		for i, redemption := range test.redemptions {
+			swap, err := ethClient.swap(ctx, simnetAcct, redemption.SecretHash)
+			if err != nil {
+				t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			}
+			state := srveth.SwapState(swap.State)
+			if state != test.finalStates[i] {
+				t.Fatalf("unexpected swap state for test %v [%d]: want %s got %s",
+					test.name, i, test.finalStates[i], state)
+			}
 		}
 	}
 }
-
 func TestRefund(t *testing.T) {
 	amt := big.NewInt(1e18)
 	locktime := time.Second * 12
@@ -963,7 +1124,13 @@ func TestRefund(t *testing.T) {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}
 			txOpts = newTxOpts(ctx, &participantAddr, nil)
-			_, err := participantEthClient.redeem(txOpts, simnetID, secret, secretHash)
+			redemptions := []dexeth.ETHSwapRedemption{
+				{
+					SecretHash: secretHash,
+					Secret:     secret,
+				},
+			}
+			_, err := participantEthClient.redeem(txOpts, simnetID, redemptions)
 			if err != nil {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}

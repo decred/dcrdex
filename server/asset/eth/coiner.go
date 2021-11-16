@@ -91,7 +91,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 	case sctInit:
 		initiations, err := dexeth.ParseInitiateData(txdata)
 		if err != nil {
-			return nil, fmt.Errorf("unable to parse initiate data: %v", err)
+			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
 		}
 		if txCoinID.Index >= uint32(len(initiations)) {
 			return nil, fmt.Errorf("tx %v does not have initiation with index %d",
@@ -102,10 +102,16 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 		secretHash = initiation.SecretHash
 		locktime = initiation.RefundTimestamp.Int64()
 	case sctRedeem:
-		secret, secretHash, err = dexeth.ParseRedeemData(txdata)
+		redemptions, err := dexeth.ParseRedeemData(txdata)
 		if err != nil {
-			return nil, fmt.Errorf("unable to parse redeem data: %v", err)
+			return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
 		}
+		if txCoinID.Index >= uint32(len(redemptions)) {
+			return nil, fmt.Errorf("tx %v does not have redemption with index %d",
+				txCoinID.TxID, txCoinID.Index)
+		}
+		secret = redemptions[txCoinID.Index].Secret
+		secretHash = redemptions[txCoinID.Index].SecretHash
 	}
 
 	contractAddr := tx.To()

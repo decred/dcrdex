@@ -260,7 +260,10 @@ const (
 	// additional swaps in the same transaction.
 	AdditionalInitGas = 113000
 	// RedeemGas is the amount of gas it costs to redeem a swap.
-	RedeemGas = 60000
+	RedeemGas = 65000
+	// AdditionalRedeemGas is the amount of gas needed to redeem
+	// additional swaps in the same transaction.
+	AdditionalRedeemGas = 32000
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.

@@ -40,9 +40,12 @@ var (
 		"31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c5610000000000000" +
 		"00000000000345853e21b1d475582e71cc269124ed5e2dd342200000000000000000000" +
 		"00000000000000000000000000000000000000000001")
-	redeemCalldata = mustParseHex("b31597ad87eac09638c0c38b4e735b79f053" +
-		"cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d64459" +
-		"1a8e00e92b607f920ad8050deb7c7469767d9c561")
+	redeemCalldata = mustParseHex("f4fd17f90000000000000000000000000000000000000" +
+		"000000000000000000000000020000000000000000000000000000000000000000000000000" +
+		"00000000000000022c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965f" +
+		"d3e7399d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d654687eac0" +
+		"9638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4" +
+		"d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
 	initParticipantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
 	initLocktime        = int64(1632112916)
 	secretHashSlice     = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
@@ -566,7 +569,7 @@ func TestRedemption(t *testing.T) {
 	receiverAddr, contractAddr := new(common.Address), new(common.Address)
 	copy(receiverAddr[:], encode.RandomBytes(20))
 	copy(contractAddr[:], encode.RandomBytes(20))
-	secretHash, txHash := [32]byte{}, make([]byte, 32)
+	secretHash, txHash := [32]byte{}, [32]byte{}
 	copy(secretHash[:], secretHashSlice)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
@@ -574,6 +577,10 @@ func TestRedemption(t *testing.T) {
 	ccID := &SwapCoinID{
 		SecretHash:      secretHash,
 		ContractAddress: *contractAddr,
+	}
+	txCoinID := TxCoinID{
+		TxID:  txHash,
+		Index: 1,
 	}
 	tests := []struct {
 		name               string
@@ -587,7 +594,7 @@ func TestRedemption(t *testing.T) {
 		name:       "ok",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: ccID.Encode(),
-		coinID:     new(TxCoinID).Encode(),
+		coinID:     txCoinID.Encode(),
 		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
@@ -600,13 +607,13 @@ func TestRedemption(t *testing.T) {
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: ccID.Encode(),
 		swp:        tSwap(0, bigO, bigO, SSRefunded, receiverAddr),
-		coinID:     new(TxCoinID).Encode(),
+		coinID:     txCoinID.Encode(),
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: new(SwapCoinID).Encode(),
-		coinID:     new(TxCoinID).Encode(),
+		coinID:     txCoinID.Encode(),
 		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}

@@ -111,7 +111,7 @@ func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transactio
 func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
 	return nil, nil
 }
-func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
+func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, redemptions []swap.ETHSwapRedemption) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error) {

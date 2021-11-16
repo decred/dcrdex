@@ -142,7 +142,13 @@ func TestNewSwapCoin(t *testing.T) {
 		ct:      sctInit,
 		wantErr: true,
 	}, {
-		name:    "tx coin id too high index",
+		name:    "tx coin id for swap - index of bounds",
+		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:  txCoinIDIndex2Bytes,
+		ct:      sctInit,
+		wantErr: true,
+	}, {
+		name:    "tx coin id for redeem - index of bounds",
 		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
 		coinID:  txCoinIDIndex2Bytes,
 		ct:      sctInit,
