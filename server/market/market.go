@@ -194,6 +194,26 @@ func NewMarket(cfg *Config) (*Market, error) {
 		bookOrdersByID[ord.ID()] = ord
 	}
 
+	// "execute" any epoch orders in DB that may be left over from unclean
+	// shutdown. Whatever epoch they were in will not be seen again.
+	epochOrders, err := storage.EpochOrders(base, quote)
+	if err != nil {
+		return nil, err
+	}
+	for _, ord := range epochOrders {
+		oid := ord.ID()
+		log.Infof("Dropping old epoch order %v", oid)
+		if co, ok := ord.(*order.CancelOrder); ok {
+			if err := storage.FailCancelOrder(co); err != nil {
+				log.Errorf("Failed to set orphaned epoch cancel order %v as executed: %v", oid, err)
+			}
+			continue
+		}
+		if err := storage.ExecuteOrder(ord); err != nil {
+			log.Errorf("Failed to set orphaned epoch trade order %v as executed: %v", oid, err)
+		}
+	}
+
 	baseCoins := make(map[order.OrderID][]order.CoinID)
 	quoteCoins := make(map[order.OrderID][]order.CoinID)
 
