@@ -160,7 +160,7 @@ type Wallet interface {
 	// already be broadcasted. A successful audit response does not mean
 	// the tx exists on the blockchain, use SwapConfirmations to ensure
 	// the tx is mined.
-	AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*AuditInfo, error)
+	AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
 	// expired, making it possible to issue a Refund. The contract expiry time
 	// is also returned, but reaching this time does not necessarily mean the

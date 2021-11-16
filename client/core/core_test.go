@@ -706,7 +706,7 @@ func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Byte
 	return nil, nil, w.signCoinErr
 }
 
-func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
+func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	defer func() {
 		if w.auditChan != nil {
 			w.auditChan <- struct{}{}

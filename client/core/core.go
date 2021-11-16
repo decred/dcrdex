@@ -4857,18 +4857,18 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				counterTxData := match.MetaData.Proof.CounterTxData
 
-				// Obtaining AuditInfo will fail if it's unmined AND gone from
-				// mempool, or the wallet is otherwise not ready. Note that this
-				// does not actually audit the contract's value, recipient,
-				// expiration, or secret hash (if maker), as that was already
-				// done when it was initially stored as CounterScript.
-				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData, encode.UnixTimeMilli(int64(match.MetaData.Stamp)))
+				// Note that this does not actually audit the contract's value,
+				// recipient, expiration, or secret hash (if maker), as that was
+				// already done when it was initially stored as CounterScript.
+				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData, true)
 				if err != nil {
 					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
 					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(wallets.toAsset.ID))
 					// Start the audit retry waiter. Set swapErr to block tick
 					// actions like counterSwap.Confirmations checks while it is
 					// searching since matchTracker.counterSwap is not yet set.
+					// We may consider removing this if AuditContract is an
+					// offline action for all wallet implementations.
 					match.swapErr = fmt.Errorf("audit in progress, please wait") // don't frighten the users
 					go func(tracker *trackedTrade, match *matchTracker) {
 						auditInfo, err := tracker.searchAuditInfo(match, counterSwap, counterContract, counterTxData)

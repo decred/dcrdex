@@ -326,7 +326,7 @@ func Run(t *testing.T, cfg *Config) {
 		t.Helper()
 
 		// Alpha should be able to redeem.
-		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil, tStart)
+		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil, false)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}

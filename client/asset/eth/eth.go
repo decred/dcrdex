@@ -709,7 +709,7 @@ func (e *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, s
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap.
-func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, _ time.Time) (*asset.AuditInfo, error) {
+func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	return nil, asset.ErrNotImplemented
 }
 

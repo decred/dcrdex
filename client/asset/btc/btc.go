@@ -1829,7 +1829,7 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract from the provided
 // txData. The extracted information would be used to audit the counter-party's
 // contract during a swap.
-func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, since time.Time) (*asset.AuditInfo, error) {
+func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -1889,13 +1889,15 @@ func (btc *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, sin
 
 	// Broadcast the transaction, but do not block because this is not required
 	// and does not affect the audit result.
-	go func() {
-		if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
-			btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
-		} else if !hashSent.IsEqual(txHash) {
-			btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
-		}
-	}()
+	if rebroadcast {
+		go func() {
+			if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
+				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+			} else if !hashSent.IsEqual(txHash) {
+				btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
+			}
+		}()
+	}
 
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(txOut.Value)),
