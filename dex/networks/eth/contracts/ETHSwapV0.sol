@@ -63,17 +63,6 @@ contract ETHSwap {
         require(block.timestamp >= refundBlockTimestamp);
         _;
     }
-
-    // isRedeemable checks that a swap can be redeemed. The requirements are
-    // the participant is msg.sender, the state is Filled, and the passed secret
-    // hashes to secretHash.
-    modifier isRedeemable(bytes32 secretHash, bytes32 secret) {
-        require(swaps[secretHash].state == State.Filled);
-        require(swaps[secretHash].participant == msg.sender);
-        require(sha256(abi.encodePacked(secret)) == secretHash);
-        _;
-    }
-
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors. There is some
     // conversation in the eth community about removing tx.origin, which would
@@ -135,6 +124,11 @@ contract ETHSwap {
         require(initVal == msg.value);
     }
 
+    struct Redemption {
+        bytes32 secret;
+        bytes32 secretHash;
+    }
+
     // redeem redeems a contract. It checks that the sender is not a contract,
     // and that the secret hash hashes to secretHash. msg.value is tranfered
     // from the contract to the sender.
@@ -154,15 +148,26 @@ contract ETHSwap {
     // This is a writing function and requires gas. Failure or success should
     // be guaged by querying the swap and checking state after being mined. Gas
     // is expended either way.
-    function redeem(bytes32 secret, bytes32 secretHash)
+    function redeem(Redemption[] calldata redemptions)
         public
         senderIsOrigin()
-        isRedeemable(secretHash, secret)
     {
-        swaps[secretHash].state = State.Redeemed;
-        (bool ok, ) = payable(msg.sender).call{value: swaps[secretHash].value}("");
+        uint amountToRedeem = 0;
+        for (uint i = 0; i < redemptions.length; i++) {
+            Redemption calldata redemption = redemptions[i];
+            Swap storage swapToRedeem = swaps[redemption.secretHash];
+
+            require(swapToRedeem.state == State.Filled);
+            require(swapToRedeem.participant == msg.sender);
+            require(sha256(abi.encodePacked(redemption.secret)) == redemption.secretHash);
+
+            swapToRedeem.state = State.Redeemed;
+            swapToRedeem.secret = redemption.secret;
+            amountToRedeem += swapToRedeem.value;
+        }
+
+        (bool ok, ) = payable(msg.sender).call{value: amountToRedeem}("");
         require(ok == true);
-        swaps[secretHash].secret = secret;
     }
 
 

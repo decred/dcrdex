@@ -77,9 +77,13 @@ func TestParseInitiateData(t *testing.T) {
 		t.Fatalf("packed calldata is different than expected")
 	}
 
-	redeemCalldata := mustParseHex("b31597ad87eac09638c0c38b4e735b79f053" +
-		"cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d64459" +
-		"1a8e00e92b607f920ad8050deb7c7469767d9c561")
+	redeemCalldata := mustParseHex("f4fd17f9000000000000000000000000000000000" +
+		"000000000000000000000000000002000000000000000000000000000000000000" +
+		"0000000000000000000000000000287eac09638c0c38b4e735b79f053cb869167e" +
+		"e770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d644591a8e00e92b607f92" +
+		"0ad8050deb7c7469767d9c5612c0a304c9321402dc11cbb5898b9f2af3029ce1c7" +
+		"6ec6702c4cd5bb965fd3e7399d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d" +
+		"3fe1de489f920007d6546")
 
 	tests := []struct {
 		name     string
@@ -123,20 +127,60 @@ func TestParseInitiateData(t *testing.T) {
 	}
 }
 
-func TestParseRedeemData(t *testing.T) {
-	secretHashSlice := mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
-	secretSlice := mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
-	secretHash, secret := [32]byte{}, [32]byte{}
-	copy(secretHash[:], secretHashSlice)
-	copy(secret[:], secretSlice)
-	calldata := mustParseHex("b31597ad87eac09638c0c38b4e735b79f053cb8691" +
-		"67ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d644591a8e00" +
-		"e92b607f920ad8050deb7c7469767d9c561")
+func redemptionsAreEqual(a, b ETHSwapRedemption) bool {
+	return a.SecretHash == b.SecretHash &&
+		a.Secret == b.Secret
+}
 
-	initiateCalldata := mustParseHex("ae05214700000000000000000000000000" +
-		"000000000000000000000000000000614811144aec4dc47fc6bd1fd5091" +
-		"c1aa4067c7fbd6bbcdb476209756354ec784d6082dc0000000000000000" +
-		"000000008d83B207674bfd53B418a6E47DA148F5bFeCc652")
+func TestParseRedeemData(t *testing.T) {
+	secretHashA, secretA, secretHashB, secretB := [32]byte{}, [32]byte{}, [32]byte{}, [32]byte{}
+	copy(secretHashA[:], mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561"))
+	copy(secretA[:], mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a"))
+	copy(secretHashB[:], mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546"))
+	copy(secretB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
+
+	redemptions := []ETHSwapRedemption{
+		ETHSwapRedemption{
+			Secret:     secretA,
+			SecretHash: secretHashA,
+		},
+		ETHSwapRedemption{
+			Secret:     secretB,
+			SecretHash: secretHashB,
+		},
+	}
+	parsedABI, err := abi.JSON(strings.NewReader(ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unable to parse abi: %v", err)
+	}
+	calldata, err := parsedABI.Pack("redeem", redemptions)
+	if err != nil {
+		t.Fatalf("unale to pack abi: %v", err)
+	}
+	redeemCallData := mustParseHex("f4fd17f9000000000000000000000000000000000" +
+		"000000000000000000000000000002000000000000000000000000000000000000" +
+		"0000000000000000000000000000287eac09638c0c38b4e735b79f053cb869167e" +
+		"e770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d644591a8e00e92b607f92" +
+		"0ad8050deb7c7469767d9c5612c0a304c9321402dc11cbb5898b9f2af3029ce1c7" +
+		"6ec6702c4cd5bb965fd3e7399d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d" +
+		"3fe1de489f920007d6546")
+
+	if !bytes.Equal(calldata, redeemCallData) {
+		t.Fatalf("packed calldata is different than expected")
+	}
+
+	initiateCalldata := mustParseHex("a8793f94000000000000000000000" +
+		"0000000000000000000000000000000000000000020000000000000000" +
+		"0000000000000000000000000000000000000000000000002000000000" +
+		"000000000000000000000000000000000000000000000006148111499d" +
+		"971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6" +
+		"546000000000000000000000000345853e21b1d475582e71cc269124ed" +
+		"5e2dd34220000000000000000000000000000000000000000000000000" +
+		"0000000000000010000000000000000000000000000000000000000000" +
+		"0000000000000614811142c0a304c9321402dc11cbb5898b9f2af3029c" +
+		"e1c76ec6702c4cd5bb965fd3e73000000000000000000000000345853e" +
+		"21b1d475582e71cc269124ed5e2dd34220000000000000000000000000" +
+		"000000000000000000000000000000000000001")
 
 	tests := []struct {
 		name     string
@@ -156,7 +200,7 @@ func TestParseRedeemData(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		s, sh, err := ParseRedeemData(test.calldata)
+		parsedRedemptions, err := ParseRedeemData(test.calldata)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -166,11 +210,16 @@ func TestParseRedeemData(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-		if sh != secretHash {
-			t.Fatalf("want secret hash %x but got %x for test %q", secretHash, sh, test.name)
+
+		if len(redemptions) != len(parsedRedemptions) {
+			t.Fatalf("expected %d redemptions but got %d", len(redemptions), len(parsedRedemptions))
 		}
-		if s != secret {
-			t.Fatalf("want secret %x but got %x for test %q", secret, s, test.name)
+
+		for i := range redemptions {
+			if !redemptionsAreEqual(redemptions[i], parsedRedemptions[i]) {
+				t.Fatalf("expected redemptions to be equal. original: %v, parsed: %v",
+					redemptions[i], parsedRedemptions[i])
+			}
 		}
 	}
 }
