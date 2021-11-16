@@ -119,6 +119,7 @@ func conflictResolver(ours, servers order.MatchStatus) matchConflictResolver {
 // resolution. If the conflict cannot be resolved, the match will be
 // self-revoked.
 func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
+	match.checkServerRevoke = false
 	srvStatus := order.MatchStatus(srvData.Status)
 	if srvStatus != order.MatchComplete && !srvData.Active {
 		// Server has revoked the match. We'll still go through

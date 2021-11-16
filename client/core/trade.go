@@ -96,6 +96,10 @@ type matchTracker struct {
 	// isRefundable. Initialize this to a very large value to guarantee that it
 	// will be logged on the first check or when 0.
 	lastExpireDur time.Duration
+	// checkServerRevoke is set to make sure that a taker will not prematurely
+	// send an initialization until it is confimed with the server that the
+	// match is not revoked.
+	checkServerRevoke bool
 }
 
 // matchTime returns the match's match time as a time.Time.
@@ -841,9 +845,9 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) bool {
-	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil {
-		t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t",
-			match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil)
+	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil || match.checkServerRevoke {
+		t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t, checkServerRevoke = %v",
+			match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil, match.checkServerRevoke)
 		return false
 	}
 

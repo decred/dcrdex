@@ -4642,14 +4642,22 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
 				continue
 			}
+			// Make sure that a taker will not prematurely send an
+			// initialization until it is confimed with the server
+			// that the match is not revoked.
+			var checkServerRevoke bool
+			if dbMatch.Side == order.Taker && dbMatch.Status == order.MakerSwapCast {
+				checkServerRevoke = true
+			}
 			tracker.matches[dbMatch.MatchID] = &matchTracker{
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
 				// Ensure logging on the first check of counterparty contract
 				// confirms and own contract expiry.
-				counterConfirms: -1,
-				lastExpireDur:   365 * 24 * time.Hour,
+				counterConfirms:   -1,
+				lastExpireDur:     365 * 24 * time.Hour,
+				checkServerRevoke: checkServerRevoke,
 			}
 		}
 
