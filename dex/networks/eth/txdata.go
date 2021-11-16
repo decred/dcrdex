@@ -15,25 +15,22 @@ import (
 
 const (
 	initiateFuncName = "initiate"
-	numInputArgs     = 3
+	numInputArgs     = 1
 	redeemFuncName   = "redeem"
 	numRedeemArgs    = 2
 )
 
 // ParseInitiateData accepts call data from a transaction that pays to a
 // contract with extra data. It will error if the call data does not call
-// initiate with expected argument types. It returns the participant address,
-// the secret hash, and locktime.
-func ParseInitiateData(calldata []byte) (*common.Address, [32]byte, int64, error) {
-	fail := func(err error) (*common.Address, [32]byte, int64, error) {
-		return nil, [32]byte{}, 0, err
-	}
+// initiate with expected argument types. It returns the array of initiations
+// with which initiate was called.
+func ParseInitiateData(calldata []byte) ([]ETHSwapInitiation, error) {
 	decoded, err := parseCallData(calldata, ETHSwapABI)
 	if err != nil {
-		return fail(fmt.Errorf("unable to parse call data: %v", err))
+		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
 	if decoded.name != initiateFuncName {
-		return fail(fmt.Errorf("expected %v function but got %v", initiateFuncName, decoded.name))
+		return nil, fmt.Errorf("expected %v function but got %v", initiateFuncName, decoded.name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
@@ -41,24 +38,24 @@ func ParseInitiateData(calldata []byte) (*common.Address, [32]byte, int64, error
 	//
 	// TODO: If any of the checks prove redundant, remove them.
 	if len(args) != numInputArgs {
-		return fail(fmt.Errorf("expected %v input args but got %v", numInputArgs, len(args)))
+		return nil, fmt.Errorf("expected %v input args but got %v", numInputArgs, len(args))
 	}
-	locktime, ok := args[0].value.(*big.Int)
+	initiations, ok := args[0].value.([]struct {
+		RefundTimestamp *big.Int       `json:"refundTimestamp"`
+		SecretHash      [32]byte       `json:"secretHash"`
+		Participant     common.Address `json:"participant"`
+		Value           *big.Int       `json:"value"`
+	})
 	if !ok {
-		return fail(fmt.Errorf("expected first arg of type *big.Int but got %T", args[0].value))
+		return nil, fmt.Errorf("expected first arg of type []ETHSwapInitiation but got %T", args[0].value)
 	}
-	if !locktime.IsInt64() {
-		return fail(fmt.Errorf("locktime %v cannot be expressed as an int64", locktime))
+
+	toReturn := make([]ETHSwapInitiation, 0, len(initiations))
+	for _, init := range initiations {
+		toReturn = append(toReturn, ETHSwapInitiation(init))
 	}
-	secretHash, ok := args[1].value.([32]byte)
-	if !ok {
-		return fail(fmt.Errorf("expected second arg of type [32]byte but got %T", args[1].value))
-	}
-	participantAddr, ok := args[2].value.(common.Address)
-	if !ok {
-		return fail(fmt.Errorf("expected third arg of type common.Address but got %T", args[2].value))
-	}
-	return &participantAddr, secretHash, locktime.Int64(), nil
+
+	return toReturn, nil
 }
 
 // ParseRedeemData accepts call data from a transaction that pays to a

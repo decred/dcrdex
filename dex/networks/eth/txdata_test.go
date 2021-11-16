@@ -4,9 +4,13 @@
 package eth
 
 import (
+	"bytes"
 	"encoding/hex"
+	"math/big"
+	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -18,16 +22,60 @@ func mustParseHex(s string) []byte {
 	return b
 }
 
+func initiationsAreEqual(a, b ETHSwapInitiation) bool {
+	return a.RefundTimestamp.Cmp(b.RefundTimestamp) == 0 &&
+		a.SecretHash == b.SecretHash &&
+		a.Participant == b.Participant &&
+		a.Value.Cmp(b.Value) == 0
+}
+
 func TestParseInitiateData(t *testing.T) {
-	participantAddr := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
-	secretHashSlice := mustParseHex("4aec4dc47fc6bd1fd5091c1aa4067c7fbd6bbcdb476209756354ec784d6082dc")
-	var secretHash [32]byte
-	copy(secretHash[:], secretHashSlice)
+	participantAddr := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	var secretHashA [32]byte
+	var secretHashB [32]byte
+	copy(secretHashA[:], mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546"))
+	copy(secretHashB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
+
 	locktime := int64(1632112916)
-	calldata := mustParseHex("ae0521470000000000000000000000000000000000" +
-		"0000000000000000000000614811144aec4dc47fc6bd1fd5091c1aa4067" +
-		"c7fbd6bbcdb476209756354ec784d6082dc000000000000000000000000" +
-		"8d83B207674bfd53B418a6E47DA148F5bFeCc652")
+
+	initiations := []ETHSwapInitiation{
+		ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(locktime),
+			SecretHash:      secretHashA,
+			Participant:     participantAddr,
+			Value:           big.NewInt(1),
+		},
+		ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(locktime),
+			SecretHash:      secretHashB,
+			Participant:     participantAddr,
+			Value:           big.NewInt(1),
+		},
+	}
+	parsedABI, err := abi.JSON(strings.NewReader(ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unable to parse abi: %v", err)
+	}
+	calldata, err := parsedABI.Pack("initiate", initiations)
+	if err != nil {
+		t.Fatalf("unale to pack abi: %v", err)
+	}
+	initiateCalldata := mustParseHex("a8793f94000000000000000000000" +
+		"0000000000000000000000000000000000000000020000000000000000" +
+		"0000000000000000000000000000000000000000000000002000000000" +
+		"000000000000000000000000000000000000000000000006148111499d" +
+		"971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6" +
+		"546000000000000000000000000345853e21b1d475582e71cc269124ed" +
+		"5e2dd34220000000000000000000000000000000000000000000000000" +
+		"0000000000000010000000000000000000000000000000000000000000" +
+		"0000000000000614811142c0a304c9321402dc11cbb5898b9f2af3029c" +
+		"e1c76ec6702c4cd5bb965fd3e73000000000000000000000000345853e" +
+		"21b1d475582e71cc269124ed5e2dd34220000000000000000000000000" +
+		"000000000000000000000000000000000000001")
+
+	if !bytes.Equal(calldata, initiateCalldata) {
+		t.Fatalf("packed calldata is different than expected")
+	}
 
 	redeemCalldata := mustParseHex("b31597ad87eac09638c0c38b4e735b79f053" +
 		"cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4d64459" +
@@ -51,7 +99,7 @@ func TestParseInitiateData(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		addr, sh, lt, err := ParseInitiateData(test.calldata)
+		parsedInitiations, err := ParseInitiateData(test.calldata)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -61,14 +109,16 @@ func TestParseInitiateData(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-		if *addr != participantAddr {
-			t.Fatalf("want participant address %x but got %x for test %q", participantAddr, addr, test.name)
+
+		if len(parsedInitiations) != len(initiations) {
+			t.Fatalf("expected %d initiations but got %d", len(initiations), len(parsedInitiations))
 		}
-		if sh != secretHash {
-			t.Fatalf("want secret hash %x but got %x for test %q", secretHash, sh, test.name)
-		}
-		if lt != locktime {
-			t.Fatalf("want locktime %d but got %d for test %q", locktime, lt, test.name)
+
+		for i := range initiations {
+			if !initiationsAreEqual(parsedInitiations[i], initiations[i]) {
+				t.Fatalf("expected initiations to be equal. original: %v, parsed: %v",
+					initiations[i], parsedInitiations[i])
+			}
 		}
 	}
 }

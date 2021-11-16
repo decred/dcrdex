@@ -246,24 +246,15 @@ func (c *rpcclient) addSignerToOpts(txOpts *bind.TransactOpts, netID int64) erro
 	return nil
 }
 
-// initiate creates a swap contract. The initiator will be the account at
-// txOpts.From. Any on-chain failure, such as this secret hash already existing
-// in the swaps map, will not cause this to error.
-func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error) {
+// initiate creates swap contracts. The initiator will be the account at
+// txOpts.From. Any on-chain failure, such as using an already existing secret
+// hash, will not cause this to error.
+func (c *rpcclient) initiate(txOpts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
 	err := c.addSignerToOpts(txOpts, netID)
 	if err != nil {
 		return nil, err
 	}
-	return c.es.Initiate(txOpts, big.NewInt(refundTimestamp), secretHash, *participant)
-}
-
-// initiateBatch initiates multiple swaps in the same transaction.
-func (c *rpcclient) initiateBatch(txOpts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
-	err := c.addSignerToOpts(txOpts, netID)
-	if err != nil {
-		return nil, err
-	}
-	return c.es.InitiateBatch(txOpts, initiations)
+	return c.es.Initiate(txOpts, initiations)
 }
 
 // estimateGas checks the amount of gas that is used for a function call.
