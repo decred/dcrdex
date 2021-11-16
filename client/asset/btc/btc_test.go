@@ -1919,7 +1919,6 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	}
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
-	now := time.Now()
 	addr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
 	if segwit {
 		addr, _ = btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
@@ -1947,7 +1946,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	txHash := tx.TxHash()
 	const vout = 0
 
-	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, txData, now)
+	audit, err := wallet.AuditContract(toCoinID(&txHash, vout), contract, txData, false)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1962,7 +1961,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, txData, now)
+	_, err = wallet.AuditContract(make([]byte, 15), contract, txData, false)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
@@ -1971,7 +1970,7 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(toCoinID(&txHash, vout), badContract, nil, now)
+	_, err = wallet.AuditContract(toCoinID(&txHash, vout), badContract, nil, false)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}

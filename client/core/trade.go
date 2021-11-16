@@ -1514,8 +1514,8 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	for i, receipt := range receipts {
 		match := matches[i]
 		coin := receipt.Coin()
-		c.log.Infof("Contract coin %v (%s), value = %d, refundable at %v (script = %v)",
-			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.Contract())
+		c.log.Infof("Contract coin %v (%s), value = %d, refundable at %v (script = %v), match = %v",
+			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.Contract(), match)
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			c.log.Tracef("Contract coin %v secret = %x", coin, secret)
 		}
@@ -2054,6 +2054,12 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 // counterparty contract data again except on reconnect. This may block for a
 // long time and should be run in a goroutine. The trackedTrade mtx must NOT be
 // locked.
+//
+// NOTE: This assumes the Wallet's AuditContract method may need to actually
+// locate the contract transaction on the network. However, for some (or all)
+// assets, the audit may be performed with just txData, which makes this
+// "search" obsolete. We may wish to remove the latencyQ and have this be a
+// single call to AuditContract. Leaving as-is for now.
 func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract, txData []byte) (*asset.AuditInfo, error) {
 	errChan := make(chan error, 1)
 	var auditInfo *asset.AuditInfo
@@ -2064,7 +2070,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, encode.UnixTimeMilli(int64(match.MetaData.Stamp))) // why not match.matchTime()?
+			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, true)
 			if err == nil {
 				// Success.
 				errChan <- nil
@@ -2185,8 +2191,9 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 		t.dc.log.Errorf("Error updating database for match %v: %s", match, err)
 	}
 
-	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, with tx data = %t",
-		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match, len(txData) > 0)
+	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s, "+
+		"with tx data = %t. Script: %x", t.wallets.toAsset.Symbol, auditInfo.Coin,
+		auditInfo.Recipient, t.ID(), match, len(txData) > 0, contract)
 
 	return nil
 }

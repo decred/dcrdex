@@ -1670,7 +1670,7 @@ func TestAuditContract(t *testing.T) {
 	contractVout := uint32(0)
 	contractCoinID := toCoinID(&contractHash, contractVout)
 
-	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData, time.Time{})
+	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData, true)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -1685,7 +1685,7 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract(make([]byte, 15), contract, contractTxData, time.Time{})
+	_, err = wallet.AuditContract(make([]byte, 15), contract, contractTxData, false)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
@@ -1698,20 +1698,20 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error making wrong swap contract: %v", err)
 	}
-	_, err = wallet.AuditContract(contractCoinID, wrongContract, contractTxData, time.Time{})
+	_, err = wallet.AuditContract(contractCoinID, wrongContract, contractTxData, false)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
 
 	// Invalid contract
 	_, wrongPkScript := wrongAddr.PaymentScript()
-	_, err = wallet.AuditContract(contractCoinID, wrongPkScript, contractTxData, time.Time{}) // addrPkScript not a valid contract
+	_, err = wallet.AuditContract(contractCoinID, wrongPkScript, contractTxData, false) // addrPkScript not a valid contract
 	if err == nil {
 		t.Fatalf("no error for invalid contract")
 	}
 
 	// No txdata
-	_, err = wallet.AuditContract(contractCoinID, contract, nil, time.Time{})
+	_, err = wallet.AuditContract(contractCoinID, contract, nil, false)
 	if err == nil {
 		t.Fatalf("no error for no txdata")
 	}
@@ -1722,7 +1722,7 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error preparing invalid contract txdata: %v", err)
 	}
-	_, err = wallet.AuditContract(contractCoinID, contract, invalidContractTxData, time.Time{})
+	_, err = wallet.AuditContract(contractCoinID, contract, invalidContractTxData, false)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
@@ -1738,7 +1738,7 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error preparing wrong contract txdata: %v", err)
 	}
-	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData, time.Time{})
+	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData, false)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}

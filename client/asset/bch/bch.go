@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -206,8 +205,8 @@ func (bch *BCHWallet) Address() (string, error) {
 // AuditContract modifies the *asset.Contract returned by the ExchangeWallet
 // AuditContract method by converting the Recipient to the Cash Address
 // encoding.
-func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, matchTime time.Time) (*asset.AuditInfo, error) { // AuditInfo has address
-	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData, matchTime)
+func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) { // AuditInfo has address
+	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData, rebroadcast)
 	if err != nil {
 		return nil, err
 	}
