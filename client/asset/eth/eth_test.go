@@ -108,7 +108,7 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
 	return nil, nil
 }
-func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, refundTimestamp int64, secretHash [32]byte, participant *common.Address) (*types.Transaction, error) {
+func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, secret, secretHash [32]byte) (*types.Transaction, error) {
@@ -127,7 +127,10 @@ func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return n.peerInfo, n.peersErr
 }
 func (n *testNode) estimateGas(ctx context.Context, callMsg ethereum.CallMsg) (uint64, error) {
-	return n.initGas, n.initGasErr
+	// Estimates are always done with 1 wei per swap. First swap takes full
+	// amount of gas, subsequents take 80%.
+	estimate := n.initGas + (n.initGas / 5 * 4 * (callMsg.Value.Uint64() - 1))
+	return estimate, n.initGasErr
 }
 func (n *testNode) signData(addr common.Address, data []byte) ([]byte, error) {
 	if n.signDataErr != nil {
@@ -638,19 +641,20 @@ func TestGetInitGas(t *testing.T) {
 	node.initGas = 1800
 	node.initGasErr = errors.New("")
 	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		acct: new(accounts.Account),
+		node:         node,
+		ctx:          ctx,
+		log:          tLogger,
+		acct:         new(accounts.Account),
+		initGasCache: make(map[int]uint64),
 	}
 
-	_, err := eth.getInitGas()
+	_, err := eth.getInitGas(1)
 	if err == nil {
 		t.Fatalf("expected error but did not get one")
 	}
 
 	node.initGasErr = nil
-	gas, err := eth.getInitGas()
+	gas, err := eth.getInitGas(1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -659,7 +663,7 @@ func TestGetInitGas(t *testing.T) {
 	}
 
 	node.initGas = 500
-	gas, err = eth.getInitGas()
+	gas, err = eth.getInitGas(1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -668,12 +672,30 @@ func TestGetInitGas(t *testing.T) {
 	}
 
 	node.initGasErr = errors.New("")
-	gas, err = eth.getInitGas()
+	gas, err = eth.getInitGas(1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gas != 1800 {
 		t.Fatalf("expected gas to be 1800 but got %d", gas)
+	}
+	node.initGasErr = nil
+
+	gas, err = eth.getInitGas(2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gas != 900 {
+		t.Fatalf("expected gas to be 900 but got %d", gas)
+	}
+
+	node.initGas = 1800
+	gas, err = eth.getInitGas(2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gas != 900 {
+		t.Fatalf("expected gas to be 900 but got %d", gas)
 	}
 
 	cancel()
@@ -820,10 +842,11 @@ func TestPreSwap(t *testing.T) {
 		node.initGasErr = test.initGasErr
 		node.initGas = estimatedInitGas
 		eth := &ExchangeWallet{
-			node: node,
-			ctx:  ctx,
-			log:  tLogger,
-			acct: new(accounts.Account),
+			node:         node,
+			ctx:          ctx,
+			log:          tLogger,
+			acct:         new(accounts.Account),
+			initGasCache: make(map[int]uint64),
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		preSwap, err := eth.PreSwap(&preSwapForm)
@@ -993,10 +1016,11 @@ func TestMaxOrder(t *testing.T) {
 		node.initGasErr = test.initGasErr
 		node.initGas = estimatedInitGas
 		eth := &ExchangeWallet{
-			node: node,
-			ctx:  ctx,
-			log:  tLogger,
-			acct: new(accounts.Account),
+			node:         node,
+			ctx:          ctx,
+			log:          tLogger,
+			acct:         new(accounts.Account),
+			initGasCache: make(map[int]uint64),
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		maxOrder, err := eth.MaxOrder(test.lotSize, test.feeSuggestion, &dexAsset)

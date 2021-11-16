@@ -69,24 +69,27 @@ type CoinID interface {
 }
 
 const (
-	// coin type id (2) + tx id (32) = 34
-	txCoinIDSize = 34
+	// coin type id (2) + tx id (32) + index (4) = 38
+	txCoinIDSize = 38
 	// coin type id (2) + address (20) + secret has (32) = 54
 	swapCoinIDSize = 54
 	// coin type id (2) + address (20) + amount (8) + nonce (8) = 38
 	amountCoinIDSize = 38
 )
 
-// TxCoinID identifies a coin by the transaction ID that was used to send it
-// to the smart contract. This type of ID is useful to identify coins that
+// TxCoinID identifies a coin in the swap contract by the
+// hash of the transaction which initiatied the swap and the
+// index of the initiation in the argument to the initiate
+// function. This type of ID is useful to identify coins that
 // were sent in transactions that have not yet been mined.
 type TxCoinID struct {
-	TxID common.Hash
+	TxID  common.Hash
+	Index uint32
 }
 
 // String creates a human readable string.
 func (c *TxCoinID) String() string {
-	return fmt.Sprintf("tx: %x", c.TxID)
+	return fmt.Sprintf("tx: %x, index: %d", c.TxID, c.Index)
 }
 
 // Encode creates a byte slice that can be decoded with DecodeCoinID.
@@ -94,6 +97,7 @@ func (c *TxCoinID) Encode() []byte {
 	b := make([]byte, txCoinIDSize)
 	binary.BigEndian.PutUint16(b[:2], uint16(CIDTxID))
 	copy(b[2:], c.TxID[:])
+	binary.BigEndian.PutUint32(b[34:], c.Index)
 	return b
 }
 
@@ -114,8 +118,12 @@ func decodeTxCoinID(coinID []byte) (*TxCoinID, error) {
 
 	var txID [32]byte
 	copy(txID[:], coinID[2:])
+
+	index := binary.BigEndian.Uint32(coinID[34:])
+
 	return &TxCoinID{
-		TxID: txID,
+		TxID:  txID,
+		Index: index,
 	}, nil
 }
 
@@ -242,19 +250,14 @@ const (
 	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
 	// as gwei, or 1e9 wei. This is used in factoring.
 	GweiFactor = 1e9
-	// InitGas is the amount of gas needed to initialize an ethereum swap.
-	//
-	// The price of a normal transaction is 21000 gas. However, when
-	// contract methods are called it is difficult to descern where gas is
-	// used. The formal declaration of what costs how much can be found at
-	// https://ethereum.github.io/yellowpaper/paper.pdf in Appendix G.
-	// The current value here is an appoximation based on tests.
-	//
-	// TODO: When the contract is solidified, break down evm functions
-	// called and the gas used for each. (◍•﹏•)
-	InitGas = 158000 // gas
-
-	RedeemGas = 63000 // gas
+	// InitGas is the amount of gas needed to initialize a single
+	// ethereum swap.
+	InitGas = 157000
+	// AdditionalInitGas is the amount of gas needed to initialize
+	// additional swaps in the same transaction.
+	AdditionalInitGas = 135000
+	// RedeemGas is the amount of gas it costs to redeem a swap.
+	RedeemGas = 63000
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.

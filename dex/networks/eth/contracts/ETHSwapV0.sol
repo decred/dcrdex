@@ -71,20 +71,6 @@ contract ETHSwap {
         _;
     }
 
-    // isNotInitiated asserts that the current state of the swap is Empty.
-    modifier isNotInitiated(bytes32 secretHash) {
-        require(swaps[secretHash].state == State.Empty);
-        _;
-    }
-
-    // hasNoNilValues ensures that value and locktime of the swap are not zero.
-    // Zero values would likely indicate a mistake on the part of the sender.
-    modifier hasNoNilValues(uint refundTime) {
-        require(msg.value > 0);
-        require(refundTime > 0);
-        _;
-    }
-
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors. There is some
     // conversation in the eth community about removing tx.origin, which would
@@ -101,32 +87,6 @@ contract ETHSwap {
         return swaps[secretHash];
     }
 
-    // initiate initiates a swap. It checks that the swap has no nil values,
-    // the sender is not a contract, and that the contract is not initiated.
-    // Once initiated, the swap's state is set to Filled. The msg.value is now
-    // in the custody of the contract and can only be retrieved through redeem
-    // or refund.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
-    function initiate(uint refundTimestamp, bytes32 secretHash, address participant)
-        public
-        payable
-        hasNoNilValues(refundTimestamp)
-        senderIsOrigin()
-        isNotInitiated(secretHash)
-    {
-        Swap storage swapToUpdate = swaps[secretHash];
-
-        swapToUpdate.initBlockNumber = block.number;
-        swapToUpdate.refundBlockTimestamp = refundTimestamp;
-        swapToUpdate.initiator = msg.sender;
-        swapToUpdate.participant = participant;
-        swapToUpdate.value = msg.value;
-        swapToUpdate.state = State.Filled;
-    }
-
     struct Initiation {
         uint refundTimestamp;
         bytes32 secretHash;
@@ -134,7 +94,7 @@ contract ETHSwap {
         uint value;
     }
 
-    // initiateBatch initiates an array of swaps. It checks that all of the
+    // initiate initiates an array of swaps. It checks that all of the
     // swaps have a non zero redemptionTimestamp and value, and that none of
     // the secret hashes have ever been used previously. The function also makes
     // sure that msg.value is equal to the sum of the values of all the swaps.
@@ -145,7 +105,7 @@ contract ETHSwap {
     // This is a writing function and requires gas. Failure or success should
     // be guaged by querying the swap and checking state after being mined. Gas
     // is expended either way.
-    function initiateBatch(Initiation[] calldata initiations)
+    function initiate(Initiation[] calldata initiations)
         public
         payable
         senderIsOrigin()
