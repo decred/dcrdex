@@ -57,11 +57,11 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 		return nil, fmt.Errorf("unknown swapCoin type: %d", sct)
 	}
 
-	cID, err := DecodeCoinID(coinID)
+	cID, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	txCoinID, ok := cID.(*TxCoinID)
+	txCoinID, ok := cID.(*dexeth.TxCoinID)
 	if !ok {
 		return nil, errors.New("coin ID not a txid")
 	}
@@ -123,13 +123,13 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 	// initialization transaction could take a long time to be mined. A
 	// transaction with a very low gas price may need to be resent with a
 	// higher price.
-	gasPrice, err := ToGwei(tx.GasPrice())
+	gasPrice, err := dexeth.ToGwei(tx.GasPrice())
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert gas price: %v", err)
 	}
 
 	// Value is stored in the swap with the initialization transaction.
-	value, err := ToGwei(tx.Value())
+	value, err := dexeth.ToGwei(tx.Value())
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert value: %v", err)
 	}
@@ -159,11 +159,11 @@ func (c *swapCoin) validateRedeem(contractID []byte) error {
 	if c.sct != sctRedeem {
 		return errors.New("can only validate redeem")
 	}
-	cID, err := DecodeCoinID(contractID)
+	cID, err := dexeth.DecodeCoinID(contractID)
 	if err != nil {
 		return err
 	}
-	scID, ok := cID.(*SwapCoinID)
+	scID, ok := cID.(*dexeth.SwapCoinID)
 	if !ok {
 		return errors.New("contract ID not a swap")
 	}
@@ -201,8 +201,8 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// is the expected address and value was also as expected. Also
 		// not validating the locktime, as the swap is redeemed and
 		// locktime no longer relevant.
-		ss := SwapState(swap.State)
-		if ss == SSRedeemed {
+		ss := dexeth.SwapStep(swap.State)
+		if ss == dexeth.SSRedeemed {
 			// While not completely accurate, we know that if the
 			// swap is redeemed the redemption has at least one
 			// confirmation.
@@ -210,7 +210,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		}
 		// If swap is in the Initiated state, the transaction may be
 		// unmined.
-		if ss == SSInitiated {
+		if ss == dexeth.SSInitiated {
 			// Assume the tx still has a chance of being mined.
 			return 0, nil
 		}
@@ -225,7 +225,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// It is important to only trust confirmations according to the
 		// swap contract. Until there are confirmations we cannot be sure
 		// that initiation happened successfuly.
-		if SwapState(swap.State) == SSNone {
+		if dexeth.SwapStep(swap.State) == dexeth.SSNone {
 			// Assume the tx still has a chance of being mined.
 			return 0, nil
 		}
@@ -236,7 +236,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// confirmations, and we are sure the secret hash belongs to
 		// this swap. Assert that the value, reciever, and locktime are
 		// as expected.
-		value, err := ToGwei(big.NewInt(0).Set(swap.Value))
+		value, err := dexeth.ToGwei(new(big.Int).Set(swap.Value))
 		if err != nil {
 			return -1, fmt.Errorf("unable to convert value: %v", err)
 		}
@@ -269,7 +269,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 
 // ID is the swap's coin ID.
 func (c *swapCoin) ID() []byte {
-	sc := &SwapCoinID{
+	sc := &dexeth.SwapCoinID{
 		ContractAddress: c.contractAddr,
 		SecretHash:      c.secretHash,
 	}
@@ -283,7 +283,7 @@ func (c *swapCoin) TxID() string {
 
 // String is a human readable representation of the swap coin.
 func (c *swapCoin) String() string {
-	sc := &SwapCoinID{
+	sc := &dexeth.SwapCoinID{
 		ContractAddress: c.contractAddr,
 		SecretHash:      c.secretHash,
 	}

@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -190,19 +191,19 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 		}
 	}
 
-	stack, err := node.New(stackConf)
+	node, err := node.New(stackConf)
 	if err != nil {
 		return nil, err
 	}
 
-	ks := keystore.NewKeyStore(stack.KeyStoreDir(), keystore.LightScryptN, keystore.LightScryptP)
-	stack.AccountManager().AddBackend(ks)
+	ks := keystore.NewKeyStore(node.KeyStoreDir(), keystore.LightScryptN, keystore.LightScryptP)
+	node.AccountManager().AddBackend(ks)
 
-	return stack, nil
+	return node, nil
 }
 
 // startNode starts a geth node.
-func startNode(node *node.Node, network dex.Network) error {
+func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error) {
 	ethCfg := ethconfig.Defaults
 	switch network {
 	case dex.Simnet:
@@ -212,17 +213,17 @@ func startNode(node *node.Node, network dex.Network) error {
 			genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
 			genBytes, err := os.ReadFile(genesisFile)
 			if err != nil {
-				return fmt.Errorf("error reading genesis file: %v", err)
+				return nil, fmt.Errorf("error reading genesis file: %v", err)
 			}
 			genLen := len(genBytes)
 			if genLen == 0 {
-				return fmt.Errorf("no genesis found at %v", genesisFile)
+				return nil, fmt.Errorf("no genesis found at %v", genesisFile)
 			}
 			genBytes = genBytes[:genLen-1]
 			SetSimnetGenesis(string(genBytes))
 		}
 		if err := json.Unmarshal([]byte(simnetGenesis), &sp); err != nil {
-			return fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
+			return nil, fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
 		}
 		ethCfg.Genesis = &sp
 		ethCfg.NetworkId = 42
@@ -232,22 +233,23 @@ func startNode(node *node.Node, network dex.Network) error {
 	case dex.Mainnet:
 		// urls = params.MainnetBootnodes
 		// TODO: Allow.
-		return fmt.Errorf("eth cannot be used on mainnet")
+		return nil, fmt.Errorf("eth cannot be used on mainnet")
 	default:
-		return fmt.Errorf("unknown network ID: %d", uint8(network))
+		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
 
 	ethCfg.SyncMode = downloader.LightSync
 
-	if _, err := les.New(node, &ethCfg); err != nil {
-		return err
+	leth, err := les.New(node, &ethCfg)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := node.Start(); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return leth, nil
 }
 
 // importKeyToNode imports an private key into an ethereum node that can be
@@ -280,15 +282,43 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 	return nil
 }
 
-// exportAccountsFromNode returns all the accounts for which a the ethereum wallet
-// has stored a private key.
-func exportAccountsFromNode(node *node.Node) ([]accounts.Account, error) {
+func exportKeyStoreFromNode(node *node.Node) (*keystore.KeyStore, error) {
 	backends := node.AccountManager().Backends(keystore.KeyStoreType)
 	if len(backends) == 0 {
-		return nil, fmt.Errorf("exportAccountsForNode: expected at least 1 keystore backend")
+		return nil, fmt.Errorf("exportKeyStoreFromNode: expected at least 1 keystore backend")
 	}
-	ks := backends[0].(*keystore.KeyStore)
-	return ks.Accounts(), nil
+	return backends[0].(*keystore.KeyStore), nil
+}
+
+// accountCredentials captures the account-specific geth interfaces.
+type accountCredentials struct {
+	ks     *keystore.KeyStore
+	acct   *accounts.Account
+	addr   common.Address
+	wallet accounts.Wallet
+}
+
+// nodeCredentials parses the accountCredentials from the node.
+func nodeCredentials(node *node.Node) (*accountCredentials, error) {
+	ks, err := exportKeyStoreFromNode(node)
+	if err != nil {
+		return nil, fmt.Errorf("exportKeyStoreFromNode error: %v", err)
+	}
+	accts := ks.Accounts()
+	if len(accts) != 1 {
+		return nil, fmt.Errorf("unexpected number of accounts, %d", len(accts))
+	}
+	acct := accts[0]
+	wallets := ks.Wallets()
+	if len(wallets) != 1 {
+		return nil, fmt.Errorf("unexpected number of wallets, %d", len(wallets))
+	}
+	return &accountCredentials{
+		ks:     ks,
+		acct:   &acct,
+		addr:   acct.Address,
+		wallet: wallets[0],
+	}, nil
 }
 
 //

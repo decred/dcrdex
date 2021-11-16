@@ -15,34 +15,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// SwapState is the state of a swap and corresponds to values in the Solidity
-// swap contract.
-type SwapState uint8
-
 // CoinIDFlag signifies the type of coin ID. Currenty an eth coin ID can be
 // either a contract address and secret hash or a txid.
 type CoinIDFlag uint16
-
-// Swap states represent the status of a swap. The default state of a swap is
-// SSNone. A swap in status SSNone does not exist. SSInitiated indicates that a
-// party has initiated the swap and funds have been sent to the contract.
-// SSRedeemed indicates a successful swap where the participant was able to
-// redeem with the secret hash. SSRefunded indicates a failed swap, where the
-// initiating party refunded their coins after the locktime passed. A swap no
-// longer changes states after reaching SSRedeemed or SSRefunded.
-const (
-	// SSNone indicates that the swap is not initiated. This is the default
-	// state of a swap.
-	SSNone SwapState = iota
-	// SSInitiated indicates that the swap has been initiated.
-	SSInitiated
-	// SSRedeemed indicates that the swap was initiated and then redeemed.
-	// This is one of two possible end states of a swap.
-	SSRedeemed
-	// SSRefunded indicates that the swap was initiated and then refunded.
-	// This is one of two possible end states of a swap.
-	SSRefunded
-)
 
 // CIDTxID and CIDSwap are used in CoinIDs to signify a coinID
 // as either a transaction ID or a combination of a swap contract
@@ -257,28 +232,6 @@ func DecodeCoinID(coinID []byte) (CoinID, error) {
 	}
 }
 
-const (
-	// MaxBlockInterval is the number of seconds since the last header came
-	// in over which we consider the chain to be out of sync.
-	MaxBlockInterval = 180
-	// GweiFactor is the amount of wei in one gwei. Eth balances are floored
-	// as gwei, or 1e9 wei. This is used in factoring.
-	GweiFactor = 1e9
-	// InitGas is the amount of gas needed to initialize a single
-	// ethereum swap.
-	InitGas = 135000
-	// AdditionalInitGas is the amount of gas needed to initialize
-	// additional swaps in the same transaction.
-	AdditionalInitGas = 113000
-	// RedeemGas is the amount of gas it costs to redeem a swap.
-	RedeemGas = 65000
-	// AdditionalRedeemGas is the amount of gas needed to redeem
-	// additional swaps in the same transaction.
-	AdditionalRedeemGas = 32000
-	// RefundGas is the amount of gas it costs to refund a swap.
-	RefundGas = 43000
-)
-
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
 // Errors if the amount of gwei is too big to fit fully into a uint64.
 func ToGwei(wei *big.Int) (uint64, error) {
@@ -295,19 +248,4 @@ func ToWei(gwei uint64) *big.Int {
 	bigGwei := big.NewInt(0).SetUint64(gwei)
 	gweiFactorBig := big.NewInt(GweiFactor)
 	return new(big.Int).Mul(bigGwei, gweiFactorBig)
-}
-
-// String satisfies the Stringer interface.
-func (ss SwapState) String() string {
-	switch ss {
-	case SSNone:
-		return "none"
-	case SSInitiated:
-		return "initiated"
-	case SSRedeemed:
-		return "redeemed"
-	case SSRefunded:
-		return "refunded"
-	}
-	return "unknown"
 }

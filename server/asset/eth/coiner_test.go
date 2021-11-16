@@ -20,7 +20,7 @@ import (
 func overMaxWei() *big.Int {
 	maxInt := ^uint64(0)
 	maxWei := new(big.Int).SetUint64(maxInt)
-	gweiFactorBig := big.NewInt(GweiFactor)
+	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
 	maxWei.Mul(maxWei, gweiFactorBig)
 	overMaxWei := new(big.Int).Set(maxWei)
 	return overMaxWei.Add(overMaxWei, gweiFactorBig)
@@ -38,23 +38,23 @@ func TestNewSwapCoin(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], secretSlice)
 	copy(secretHash[:], secretHashSlice)
-	txCoinIDBytes := (&TxCoinID{
+	txCoinIDBytes := (&dexeth.TxCoinID{
 		TxID:  txHash,
 		Index: 1,
 	}).Encode()
-	txCoinIDIndex2Bytes := (&TxCoinID{
+	txCoinIDIndex2Bytes := (&dexeth.TxCoinID{
 		TxID:  txHash,
 		Index: 2,
 	}).Encode()
-	sc := SwapCoinID{}
+	sc := dexeth.SwapCoinID{}
 	swapCoinIDBytes := sc.Encode()
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
-	wantGas, err := ToGwei(big.NewInt(3e10))
+	wantGas, err := dexeth.ToGwei(big.NewInt(3e10))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVal, err := ToGwei(big.NewInt(5e18))
+	wantVal, err := dexeth.ToGwei(big.NewInt(5e18))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestNewSwapCoin(t *testing.T) {
 		ct:     sctInit,
 	}, {
 		name:   "ok redeem",
-		tx:     tTx(gasPrice, big.NewInt(0), contractAddr, redeemCalldata),
+		tx:     tTx(gasPrice, new(big.Int), contractAddr, redeemCalldata),
 		coinID: txCoinIDBytes,
 		ct:     sctRedeem,
 	}, {
@@ -101,7 +101,7 @@ func TestNewSwapCoin(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "unable to decode redeem data, must be redeem for redeem coin type",
-		tx:      tTx(gasPrice, big.NewInt(0), contractAddr, initCalldata),
+		tx:      tTx(gasPrice, new(big.Int), contractAddr, initCalldata),
 		coinID:  txCoinIDBytes,
 		ct:      sctRedeem,
 		wantErr: true,
@@ -207,14 +207,14 @@ func TestConfirmations(t *testing.T) {
 	secretHash, txHash := [32]byte{}, [32]byte{}
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secretHash[:], secretHashSlice)
-	tc := TxCoinID{
+	tc := dexeth.TxCoinID{
 		TxID: txHash,
 	}
 	txCoinIDBytes := tc.Encode()
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
 	locktime := big.NewInt(initLocktime)
-	bigO := big.NewInt(0)
+	bigO := new(big.Int)
 	oneGweiMore := big.NewInt(1e9)
 	oneGweiMore.Add(oneGweiMore, value)
 	tests := []struct {
@@ -229,24 +229,24 @@ func TestConfirmations(t *testing.T) {
 	}{{
 		name:      "ok has confs value not verified",
 		bn:        100,
-		swap:      tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:      tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
 		value:     value,
 		ct:        sctInit,
 		wantConfs: 3,
 	}, {
 		name:  "ok no confs",
-		swap:  tSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:  tSwap(0, bigO, bigO, dexeth.SSNone, nullAddr),
 		value: value,
 		ct:    sctInit,
 	}, {
 		name:      "ok redeem swap status redeemed",
-		swap:      tSwap(97, locktime, value, SSRedeemed, &initParticipantAddr),
+		swap:      tSwap(97, locktime, value, dexeth.SSRedeemed, &initParticipantAddr),
 		value:     bigO,
 		ct:        sctRedeem,
 		wantConfs: 1,
 	}, {
 		name:  "ok redeem swap status initiated",
-		swap:  tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:  tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
 		value: bigO,
 		ct:    sctRedeem,
 	}, {
@@ -256,7 +256,7 @@ func TestConfirmations(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "redeem bad swap state None",
-		swap:    tSwap(0, bigO, bigO, SSNone, nullAddr),
+		swap:    tSwap(0, bigO, bigO, dexeth.SSNone, nullAddr),
 		value:   bigO,
 		ct:      sctRedeem,
 		wantErr: true,
@@ -268,37 +268,37 @@ func TestConfirmations(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "swap value causes ToGwei error",
-		swap:    tSwap(99, locktime, overMaxWei(), SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, locktime, overMaxWei(), dexeth.SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "value differs from initial transaction",
-		swap:    tSwap(99, locktime, oneGweiMore, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, locktime, oneGweiMore, dexeth.SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "participant differs from initial transaction",
-		swap:    tSwap(99, locktime, value, SSInitiated, nullAddr),
+		swap:    tSwap(99, locktime, value, dexeth.SSInitiated, nullAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "locktime not an int64",
-		swap:    tSwap(99, new(big.Int).SetUint64(^uint64(0)), value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, new(big.Int).SetUint64(^uint64(0)), value, dexeth.SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "locktime differs from initial transaction",
-		swap:    tSwap(99, bigO, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(99, bigO, value, dexeth.SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		wantErr: true,
 	}, {
 		name:    "block number error",
-		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
 		value:   value,
 		ct:      sctInit,
 		bnErr:   errors.New(""),
@@ -354,7 +354,7 @@ func TestValidateRedeem(t *testing.T) {
 	copy(contractAddr[:], encode.RandomBytes(20))
 	secretHash, nullHash := [32]byte{}, [32]byte{}
 	copy(secretHash[:], encode.RandomBytes(20))
-	scID := SwapCoinID{
+	scID := dexeth.SwapCoinID{
 		ContractAddress: *contractAddr,
 		SecretHash:      secretHash,
 	}
@@ -389,13 +389,13 @@ func TestValidateRedeem(t *testing.T) {
 	}, {
 		name:       "contract ID is not a swap",
 		sc:         scRedeem,
-		contractID: new(TxCoinID).Encode(),
+		contractID: new(dexeth.TxCoinID).Encode(),
 		wantErr:    true,
 	}, {
 		name: "mismatched contract ID contract address",
 		sc:   scRedeem,
 		contractID: func() []byte {
-			badAddr := SwapCoinID{
+			badAddr := dexeth.SwapCoinID{
 				ContractAddress: *nullAddr,
 				SecretHash:      secretHash,
 			}
@@ -406,7 +406,7 @@ func TestValidateRedeem(t *testing.T) {
 		name: "mismatched contract ID secret hash",
 		sc:   scRedeem,
 		contractID: func() []byte {
-			badHash := SwapCoinID{
+			badHash := dexeth.SwapCoinID{
 				ContractAddress: *contractAddr,
 				SecretHash:      nullHash,
 			}

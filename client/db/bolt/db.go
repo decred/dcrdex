@@ -91,6 +91,8 @@ var (
 	innerKeyParamsKey      = []byte("innerKeyParams")
 	outerKeyParamsKey      = []byte("outerKeyParams")
 	legacyKeyParamsKey     = []byte("keyParams")
+	fromVersionKey         = []byte("fromVersion")
+	toVersionKey           = []byte("toVersion")
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
 )
@@ -875,6 +877,15 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
 	}
 
+	var fromVersion, toVersion uint32
+	fromVersionB, toVersionB := oBkt.Get(fromVersionKey), oBkt.Get(toVersionKey)
+	if len(fromVersionB) == 4 {
+		fromVersion = intCoder.Uint32(fromVersionB)
+	}
+	if len(toVersionB) == 4 {
+		toVersion = intCoder.Uint32(toVersionB)
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -885,6 +896,8 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
 			MaxFeeRate:         maxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
+			FromVersion:        fromVersion,
+			ToVersion:          toVersion,
 		},
 		Order: ord,
 	}, nil
@@ -956,6 +969,8 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(fromVersionKey, uint32Bytes(md.FromVersion)).
+			put(toVersionKey, uint32Bytes(md.ToVersion)).
 			err()
 	})
 }

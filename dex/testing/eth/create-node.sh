@@ -82,7 +82,6 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
 
 [Eth.Miner]
 Etherbase = "0x${CHAIN_ADDRESS}"
-GasPrice = 81000000000
 EOF
 fi
 

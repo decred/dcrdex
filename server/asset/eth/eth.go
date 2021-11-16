@@ -65,7 +65,7 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	coinId, err := DecodeCoinID(coinID)
+	coinId, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
@@ -106,6 +106,7 @@ type ethFetcher interface {
 type Backend struct {
 	// A connection-scoped Context is used to cancel active RPCs on
 	// connection shutdown.
+	ver        uint32
 	rpcCtx     context.Context
 	cancelRPCs context.CancelFunc
 	cfg        *config
@@ -208,11 +209,11 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 // TxData fetches the raw transaction data.
 func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
-	cnr, err := DecodeCoinID(coinID)
+	cnr, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("coin ID decoding error: %v", err)
 	}
-	c, is := cnr.(*TxCoinID)
+	c, is := cnr.(*dexeth.TxCoinID)
 	if !is {
 		return nil, fmt.Errorf("wrong type of coin ID, %v", cnr)
 	}
@@ -231,7 +232,7 @@ func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
 // cannot be ascertained from it. Multiplying the required gas by the gas price
 // will give us the actual fee needed, so returning gas here.
 func (eth *Backend) InitTxSize() uint32 {
-	return InitGas
+	return uint32(dexeth.InitGas(1, eth.ver))
 }
 
 // InitTxSizeBase is used in fee.go in a fee calculation. Currently we are
@@ -248,7 +249,7 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return ToGwei(bigGP)
+	return dexeth.ToGwei(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -307,7 +308,7 @@ func (eth *Backend) Synced() (bool, error) {
 	// Time in the header is in seconds.
 	nowInSecs := time.Now().Unix() / 1000
 	timeDiff := nowInSecs - int64(bh.Time)
-	return timeDiff < MaxBlockInterval, nil
+	return timeDiff < dexeth.MaxBlockInterval, nil
 }
 
 // Redemption returns a coin that represents a contract redemption. redeemCoinID
@@ -334,7 +335,7 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
-	coinId, err := DecodeCoinID(coinID)
+	coinId, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
@@ -343,8 +344,8 @@ func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 
 // ValidateContract ensures that the secret hash is the correct length.
 func (eth *Backend) ValidateContract(secretHash []byte) error {
-	if len(secretHash) != SecretHashSize {
-		return fmt.Errorf("secret hash is wrong size: want %d but got %d", SecretHashSize, len(secretHash))
+	if len(secretHash) != dexeth.SecretHashSize {
+		return fmt.Errorf("secret hash is wrong size: want %d but got %d", dexeth.SecretHashSize, len(secretHash))
 	}
 	return nil
 }
@@ -361,7 +362,7 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
-	return ToGwei(bigBal)
+	return dexeth.ToGwei(bigBal)
 }
 
 // run processes the queue and monitors the application context. The supplied
