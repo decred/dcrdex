@@ -38,18 +38,18 @@ type ETHSwapInitiation struct {
 
 // ETHSwapSwap is an auto generated low-level Go binding around an user-defined struct.
 type ETHSwapSwap struct {
+	Secret               [32]byte
+	Value                *big.Int
 	InitBlockNumber      *big.Int
 	RefundBlockTimestamp *big.Int
-	Secret               [32]byte
 	Initiator            common.Address
 	Participant          common.Address
-	Value                *big.Int
 	State                uint8
 }
 
 // ETHSwapMetaData contains all meta data concerning the ETHSwap contract.
 var ETHSwapMetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"components\":[{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"internalType\":\"structETHSwap.Initiation[]\",\"name\":\"initiations\",\"type\":\"tuple[]\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"swap\",\"outputs\":[{\"components\":[{\"internalType\":\"uint256\",\"name\":\"initBlockNumber\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"refundBlockTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"},{\"internalType\":\"enumETHSwap.State\",\"name\":\"state\",\"type\":\"uint8\"}],\"internalType\":\"structETHSwap.Swap\",\"name\":\"\",\"type\":\"tuple\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"swaps\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"initBlockNumber\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"refundBlockTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"},{\"internalType\":\"enumETHSwap.State\",\"name\":\"state\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"components\":[{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"internalType\":\"structETHSwap.Initiation[]\",\"name\":\"initiations\",\"type\":\"tuple[]\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"swap\",\"outputs\":[{\"components\":[{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"initBlockNumber\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"refundBlockTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"enumETHSwap.State\",\"name\":\"state\",\"type\":\"uint8\"}],\"internalType\":\"structETHSwap.Swap\",\"name\":\"\",\"type\":\"tuple\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"swaps\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"secret\",\"type\":\"bytes32\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"initBlockNumber\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"refundBlockTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"},{\"internalType\":\"enumETHSwap.State\",\"name\":\"state\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
 	Sigs: map[string]string{
 		"a8793f94": "initiate((uint256,bytes32,address,uint256)[])",
 		"b31597ad": "redeem(bytes32,bytes32)",
@@ -57,7 +57,7 @@ var ETHSwapMetaData = &bind.MetaData{
 		"76467cbd": "swap(bytes32)",
 		"eb84e7f2": "swaps(bytes32)",
 	},
-	Bin: "0x608060405234801561001057600080fd5b5061087b806100206000396000f3fe60806040526004361061004a5760003560e01c80637249fbb61461004f57806376467cbd14610071578063a8793f94146100a7578063b31597ad146100ba578063eb84e7f2146100da575b600080fd5b34801561005b57600080fd5b5061006f61006a36600461066e565b610154565b005b34801561007d57600080fd5b5061009161008c36600461066e565b610256565b60405161009e919061071f565b60405180910390f35b61006f6100b53660046105f9565b61032e565b3480156100c657600080fd5b5061006f6100d53660046106a0565b61045a565b3480156100e657600080fd5b506101416100f536600461066e565b60006020819052908152604090208054600182015460028301546003840154600485015460058601546006909601549495939492936001600160a01b0392831693929091169160ff1687565b60405161009e9796959493929190610784565b32331461016057600080fd5b80600160008281526020819052604090206006015460ff16600381111561018957610189610819565b1461019357600080fd5b6000818152602081905260409020600301546001600160a01b031633146101b957600080fd5b600081815260208190526040902060010154428111156101d857600080fd5b60008381526020819052604080822060068101805460ff191660031790556005015490513391908381818185875af1925050503d8060008114610237576040519150601f19603f3d011682016040523d82523d6000602084013e61023c565b606091505b509091505060018115151461025057600080fd5b50505050565b6102936040805160e081018252600080825260208201819052918101829052606081018290526080810182905260a081018290529060c082015290565b60008281526020818152604091829020825160e081018452815481526001820154928101929092526002810154928201929092526003808301546001600160a01b0390811660608401526004840154166080830152600583015460a0830152600683015491929160c084019160ff9091169081111561031457610314610819565b600381111561032557610325610819565b90525092915050565b32331461033a57600080fd5b6000805b8281101561044857368484838181106103595761035961082f565b90506080020190506000806000836020013581526020019081526020016000209050600082606001351161038c57600080fd5b813561039757600080fd5b6000600682015460ff1660038111156103b2576103b2610819565b146103bc57600080fd5b438155813560018201556003810180546001600160a01b031916331790556103ea60608301604084016105c9565b6004820180546001600160a01b0319166001600160a01b039290921691909117905560608201356005820181905560068201805460ff1916600117905561043190856107d0565b935050508080610440906107e8565b91505061033e565b5034811461045557600080fd5b505050565b32331461046657600080fd5b8082600160008381526020819052604090206006015460ff16600381111561049057610490610819565b1461049a57600080fd5b6000828152602081905260409020600401546001600160a01b031633146104c057600080fd5b816002826040516020016104d691815260200190565b60408051601f19818403018152908290526104f0916106e4565b602060405180830381855afa15801561050d573d6000803e3d6000fd5b5050506040513d601f19601f820116820180604052508101906105309190610687565b1461053a57600080fd5b60008381526020819052604080822060068101805460ff191660021790556005015490513391908381818185875af1925050503d8060008114610599576040519150601f19603f3d011682016040523d82523d6000602084013e61059e565b606091505b50909150506001811515146105b257600080fd5b505050600090815260208190526040902060020155565b6000602082840312156105db57600080fd5b81356001600160a01b03811681146105f257600080fd5b9392505050565b6000806020838503121561060c57600080fd5b823567ffffffffffffffff8082111561062457600080fd5b818501915085601f83011261063857600080fd5b81358181111561064757600080fd5b8660208260071b850101111561065c57600080fd5b60209290920196919550909350505050565b60006020828403121561068057600080fd5b5035919050565b60006020828403121561069957600080fd5b5051919050565b600080604083850312156106b357600080fd5b50508035926020909101359150565b600481106106e057634e487b7160e01b600052602160045260246000fd5b9052565b6000825160005b8181101561070557602081860181015185830152016106eb565b81811115610714576000828501525b509190910192915050565b600060e082019050825182526020830151602083015260408301516040830152606083015160018060a01b038082166060850152806080860151166080850152505060a083015160a083015260c083015161077d60c08401826106c2565b5092915050565b87815260208101879052604081018690526001600160a01b0385811660608301528416608082015260a0810183905260e081016107c460c08301846106c2565b98975050505050505050565b600082198211156107e3576107e3610803565b500190565b60006000198214156107fc576107fc610803565b5060010190565b634e487b7160e01b600052601160045260246000fd5b634e487b7160e01b600052602160045260246000fd5b634e487b7160e01b600052603260045260246000fdfea2646970667358221220c1198903915a40464ee6e40ae955ebebaab320ead3535316f09c049d302591e364736f6c63430008060033",
+	Bin: "0x608060405234801561001057600080fd5b50610897806100206000396000f3fe60806040526004361061004a5760003560e01c80637249fbb61461004f57806376467cbd14610071578063a8793f94146100a7578063b31597ad146100ba578063eb84e7f2146100da575b600080fd5b34801561005b57600080fd5b5061006f61006a3660046105e5565b610156565b005b34801561007d57600080fd5b5061009161008c3660046105e5565b610265565b60405161009e9190610636565b60405180910390f35b61006f6100b536600461069b565b610340565b3480156100c657600080fd5b5061006f6100d5366004610710565b61046c565b3480156100e657600080fd5b506101436100f53660046105e5565b60006020819052908152604090208054600182015460028301546003840154600485015460059095015493949293919290916001600160a01b0391821691811690600160a01b900460ff1687565b60405161009e9796959493929190610732565b32331461016257600080fd5b806001600082815260208190526040902060050154600160a01b900460ff166003811115610192576101926105fe565b1461019c57600080fd5b6000818152602081905260409020600401546001600160a01b031633146101c257600080fd5b600081815260208190526040902060030154428111156101e157600080fd5b60008381526020819052604080822060058101805460ff60a01b1916600360a01b1790556001015490513391908381818185875af1925050503d8060008114610246576040519150601f19603f3d011682016040523d82523d6000602084013e61024b565b606091505b509091505060018115151461025f57600080fd5b50505050565b6102a26040805160e081018252600080825260208201819052918101829052606081018290526080810182905260a081018290529060c082015290565b60008281526020818152604091829020825160e08101845281548152600182015492810192909252600281015492820192909252600380830154606083015260048301546001600160a01b039081166080840152600584015490811660a084015291929160c0840191600160a01b90910460ff1690811115610326576103266105fe565b6003811115610337576103376105fe565b90525092915050565b32331461034c57600080fd5b6000805b8281101561045a573684848381811061036b5761036b61077e565b90506080020190506000806000836020013581526020019081526020016000209050600082606001351161039e57600080fd5b81356103a957600080fd5b60006005820154600160a01b900460ff1660038111156103cb576103cb6105fe565b146103d557600080fd5b436002820155813560038201556004810180546001600160a01b031916331790556104066060830160408401610794565b6005820180546060850135600185018190556001600160a01b03939093166001600160a81b031990911617600160a01b17905561044390856107da565b935050508080610452906107f2565b915050610350565b5034811461046757600080fd5b505050565b32331461047857600080fd5b80826001600083815260208190526040902060050154600160a01b900460ff1660038111156104a9576104a96105fe565b146104b357600080fd5b6000828152602081905260409020600501546001600160a01b031633146104d957600080fd5b816002826040516020016104ef91815260200190565b60408051601f19818403018152908290526105099161080d565b602060405180830381855afa158015610526573d6000803e3d6000fd5b5050506040513d601f19601f820116820180604052508101906105499190610848565b1461055357600080fd5b60008381526020819052604080822060058101805460ff60a01b1916600160a11b1790556001015490513391908381818185875af1925050503d80600081146105b8576040519150601f19603f3d011682016040523d82523d6000602084013e6105bd565b606091505b50909150506001811515146105d157600080fd5b505050600090815260208190526040902055565b6000602082840312156105f757600080fd5b5035919050565b634e487b7160e01b600052602160045260246000fd5b6004811061063257634e487b7160e01b600052602160045260246000fd5b9052565b600060e08201905082518252602083015160208301526040830151604083015260608301516060830152608083015160018060a01b0380821660808501528060a08601511660a0850152505060c083015161069460c0840182610614565b5092915050565b600080602083850312156106ae57600080fd5b823567ffffffffffffffff808211156106c657600080fd5b818501915085601f8301126106da57600080fd5b8135818111156106e957600080fd5b8660208260071b85010111156106fe57600080fd5b60209290920196919550909350505050565b6000806040838503121561072357600080fd5b50508035926020909101359150565b8781526020810187905260408101869052606081018590526001600160a01b038481166080830152831660a082015260e0810161077260c0830184610614565b98975050505050505050565b634e487b7160e01b600052603260045260246000fd5b6000602082840312156107a657600080fd5b81356001600160a01b03811681146107bd57600080fd5b9392505050565b634e487b7160e01b600052601160045260246000fd5b600082198211156107ed576107ed6107c4565b500190565b6000600019821415610806576108066107c4565b5060010190565b6000825160005b8181101561082e5760208186018101518583015201610814565b8181111561083d576000828501525b509190910192915050565b60006020828403121561085a57600080fd5b505191905056fea26469706673582212200d98739d473ed5f8251b74fa659e09d13f281ac319798c2b817487463abed8e364736f6c634300080a0033",
 }
 
 // ETHSwapABI is the input ABI used to generate the binding from.
@@ -233,7 +233,7 @@ func (_ETHSwap *ETHSwapTransactorRaw) Transact(opts *bind.TransactOpts, method s
 
 // Swap is a free data retrieval call binding the contract method 0x76467cbd.
 //
-// Solidity: function swap(bytes32 secretHash) view returns((uint256,uint256,bytes32,address,address,uint256,uint8))
+// Solidity: function swap(bytes32 secretHash) view returns((bytes32,uint256,uint256,uint256,address,address,uint8))
 func (_ETHSwap *ETHSwapCaller) Swap(opts *bind.CallOpts, secretHash [32]byte) (ETHSwapSwap, error) {
 	var out []interface{}
 	err := _ETHSwap.contract.Call(opts, &out, "swap", secretHash)
@@ -250,52 +250,52 @@ func (_ETHSwap *ETHSwapCaller) Swap(opts *bind.CallOpts, secretHash [32]byte) (E
 
 // Swap is a free data retrieval call binding the contract method 0x76467cbd.
 //
-// Solidity: function swap(bytes32 secretHash) view returns((uint256,uint256,bytes32,address,address,uint256,uint8))
+// Solidity: function swap(bytes32 secretHash) view returns((bytes32,uint256,uint256,uint256,address,address,uint8))
 func (_ETHSwap *ETHSwapSession) Swap(secretHash [32]byte) (ETHSwapSwap, error) {
 	return _ETHSwap.Contract.Swap(&_ETHSwap.CallOpts, secretHash)
 }
 
 // Swap is a free data retrieval call binding the contract method 0x76467cbd.
 //
-// Solidity: function swap(bytes32 secretHash) view returns((uint256,uint256,bytes32,address,address,uint256,uint8))
+// Solidity: function swap(bytes32 secretHash) view returns((bytes32,uint256,uint256,uint256,address,address,uint8))
 func (_ETHSwap *ETHSwapCallerSession) Swap(secretHash [32]byte) (ETHSwapSwap, error) {
 	return _ETHSwap.Contract.Swap(&_ETHSwap.CallOpts, secretHash)
 }
 
 // Swaps is a free data retrieval call binding the contract method 0xeb84e7f2.
 //
-// Solidity: function swaps(bytes32 ) view returns(uint256 initBlockNumber, uint256 refundBlockTimestamp, bytes32 secret, address initiator, address participant, uint256 value, uint8 state)
+// Solidity: function swaps(bytes32 ) view returns(bytes32 secret, uint256 value, uint256 initBlockNumber, uint256 refundBlockTimestamp, address initiator, address participant, uint8 state)
 func (_ETHSwap *ETHSwapCaller) Swaps(opts *bind.CallOpts, arg0 [32]byte) (struct {
+	Secret               [32]byte
+	Value                *big.Int
 	InitBlockNumber      *big.Int
 	RefundBlockTimestamp *big.Int
-	Secret               [32]byte
 	Initiator            common.Address
 	Participant          common.Address
-	Value                *big.Int
 	State                uint8
 }, error) {
 	var out []interface{}
 	err := _ETHSwap.contract.Call(opts, &out, "swaps", arg0)
 
 	outstruct := new(struct {
+		Secret               [32]byte
+		Value                *big.Int
 		InitBlockNumber      *big.Int
 		RefundBlockTimestamp *big.Int
-		Secret               [32]byte
 		Initiator            common.Address
 		Participant          common.Address
-		Value                *big.Int
 		State                uint8
 	})
 	if err != nil {
 		return *outstruct, err
 	}
 
-	outstruct.InitBlockNumber = *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
-	outstruct.RefundBlockTimestamp = *abi.ConvertType(out[1], new(*big.Int)).(**big.Int)
-	outstruct.Secret = *abi.ConvertType(out[2], new([32]byte)).(*[32]byte)
-	outstruct.Initiator = *abi.ConvertType(out[3], new(common.Address)).(*common.Address)
-	outstruct.Participant = *abi.ConvertType(out[4], new(common.Address)).(*common.Address)
-	outstruct.Value = *abi.ConvertType(out[5], new(*big.Int)).(**big.Int)
+	outstruct.Secret = *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
+	outstruct.Value = *abi.ConvertType(out[1], new(*big.Int)).(**big.Int)
+	outstruct.InitBlockNumber = *abi.ConvertType(out[2], new(*big.Int)).(**big.Int)
+	outstruct.RefundBlockTimestamp = *abi.ConvertType(out[3], new(*big.Int)).(**big.Int)
+	outstruct.Initiator = *abi.ConvertType(out[4], new(common.Address)).(*common.Address)
+	outstruct.Participant = *abi.ConvertType(out[5], new(common.Address)).(*common.Address)
 	outstruct.State = *abi.ConvertType(out[6], new(uint8)).(*uint8)
 
 	return *outstruct, err
@@ -304,14 +304,14 @@ func (_ETHSwap *ETHSwapCaller) Swaps(opts *bind.CallOpts, arg0 [32]byte) (struct
 
 // Swaps is a free data retrieval call binding the contract method 0xeb84e7f2.
 //
-// Solidity: function swaps(bytes32 ) view returns(uint256 initBlockNumber, uint256 refundBlockTimestamp, bytes32 secret, address initiator, address participant, uint256 value, uint8 state)
+// Solidity: function swaps(bytes32 ) view returns(bytes32 secret, uint256 value, uint256 initBlockNumber, uint256 refundBlockTimestamp, address initiator, address participant, uint8 state)
 func (_ETHSwap *ETHSwapSession) Swaps(arg0 [32]byte) (struct {
+	Secret               [32]byte
+	Value                *big.Int
 	InitBlockNumber      *big.Int
 	RefundBlockTimestamp *big.Int
-	Secret               [32]byte
 	Initiator            common.Address
 	Participant          common.Address
-	Value                *big.Int
 	State                uint8
 }, error) {
 	return _ETHSwap.Contract.Swaps(&_ETHSwap.CallOpts, arg0)
@@ -319,14 +319,14 @@ func (_ETHSwap *ETHSwapSession) Swaps(arg0 [32]byte) (struct {
 
 // Swaps is a free data retrieval call binding the contract method 0xeb84e7f2.
 //
-// Solidity: function swaps(bytes32 ) view returns(uint256 initBlockNumber, uint256 refundBlockTimestamp, bytes32 secret, address initiator, address participant, uint256 value, uint8 state)
+// Solidity: function swaps(bytes32 ) view returns(bytes32 secret, uint256 value, uint256 initBlockNumber, uint256 refundBlockTimestamp, address initiator, address participant, uint8 state)
 func (_ETHSwap *ETHSwapCallerSession) Swaps(arg0 [32]byte) (struct {
+	Secret               [32]byte
+	Value                *big.Int
 	InitBlockNumber      *big.Int
 	RefundBlockTimestamp *big.Int
-	Secret               [32]byte
 	Initiator            common.Address
 	Participant          common.Address
-	Value                *big.Int
 	State                uint8
 }, error) {
 	return _ETHSwap.Contract.Swaps(&_ETHSwap.CallOpts, arg0)

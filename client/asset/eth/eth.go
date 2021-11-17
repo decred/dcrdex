@@ -50,7 +50,7 @@ const (
 	defaultGasFee      = 82  // gwei
 	defaultGasFeeLimit = 200 // gwei
 
-	RedeemGas = 63000 // gas
+	RedeemGas = 60000 // gas
 )
 
 var (

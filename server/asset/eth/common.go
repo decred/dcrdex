@@ -255,12 +255,12 @@ const (
 	GweiFactor = 1e9
 	// InitGas is the amount of gas needed to initialize a single
 	// ethereum swap.
-	InitGas = 157000
+	InitGas = 135000
 	// AdditionalInitGas is the amount of gas needed to initialize
 	// additional swaps in the same transaction.
-	AdditionalInitGas = 135000
+	AdditionalInitGas = 113000
 	// RedeemGas is the amount of gas it costs to redeem a swap.
-	RedeemGas = 63000
+	RedeemGas = 60000
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
