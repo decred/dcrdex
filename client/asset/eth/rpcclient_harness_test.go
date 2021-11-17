@@ -309,6 +309,14 @@ func TestBalance(t *testing.T) {
 	spew.Dump(bal)
 }
 
+func TestPendingBalance(t *testing.T) {
+	bal, err := ethClient.pendingBalance(ctx, &simnetAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spew.Dump(bal)
+}
+
 func TestUnlock(t *testing.T) {
 	err := ethClient.unlock(ctx, pw, simnetAcct)
 	if err != nil {

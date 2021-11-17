@@ -146,6 +146,7 @@ type ethFetcher interface {
 	accounts() []*accounts.Account
 	addPeer(ctx context.Context, peer string) error
 	balance(ctx context.Context, addr *common.Address) (*big.Int, error)
+	pendingBalance(ctx context.Context, addr *common.Address) (*big.Int, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
@@ -344,8 +345,6 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 
 // Balance returns the total available funds in the account. The eth node
 // returns balances in wei. Those are flored and stored as gwei, or 1e9 wei.
-//
-// TODO: Return Immature and Locked values.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	eth.lockedFundsMtx.Lock()
 	defer eth.lockedFundsMtx.Unlock()
@@ -368,6 +367,15 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 		return nil, err
 	}
 
+	pendingBal, err := eth.node.pendingBalance(eth.ctx, &eth.acct.Address)
+	if err != nil {
+		return nil, err
+	}
+	gweiPendingBal, err := srveth.ToGwei(pendingBal)
+	if err != nil {
+		return nil, err
+	}
+
 	var amountLocked uint64
 	for _, value := range eth.lockedFunds {
 		amountLocked += value
@@ -377,10 +385,15 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 			fmt.Errorf("amount locked: %v > available: %v", amountLocked, gweiBal)
 	}
 
+	immature := gweiPendingBal - gweiBal
+	if gweiBal > gweiPendingBal {
+		immature = 0
+	}
+
 	bal := &asset.Balance{
 		Available: gweiBal - amountLocked,
 		Locked:    amountLocked,
-		// Immature: , How to know?
+		Immature:  immature,
 	}
 	return bal, nil
 }
