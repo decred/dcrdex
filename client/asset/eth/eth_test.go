@@ -54,6 +54,8 @@ type testNode struct {
 	peersErr          error
 	bal               *big.Int
 	balErr            error
+	pendingBal        *big.Int
+	pendingBalErr     error
 	initGas           uint64
 	initGasErr        error
 	signDataErr       error
@@ -80,6 +82,17 @@ func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int,
 	balCopy := new(big.Int)
 	balCopy.Set(n.bal)
 	return balCopy, n.balErr
+}
+func (n *testNode) pendingBalance(ctx context.Context, acct *common.Address) (*big.Int, error) {
+	if n.pendingBalErr != nil {
+		return nil, n.pendingBalErr
+	}
+	if n.pendingBal == nil {
+		return n.balance(ctx, acct)
+	}
+	balCopy := new(big.Int)
+	balCopy.Set(n.pendingBal)
+	return balCopy, nil
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
@@ -316,27 +329,51 @@ func TestBalance(t *testing.T) {
 	overMaxWei := new(big.Int).Set(maxWei)
 	overMaxWei.Add(overMaxWei, gweiFactorBig)
 	tests := []struct {
-		name    string
-		bal     *big.Int
-		balErr  error
-		wantBal uint64
-		wantErr bool
+		name          string
+		bal           *big.Int
+		pendingBal    *big.Int
+		balErr        error
+		pendingBalErr error
+		wantBal       uint64
+		wantImmature  uint64
+		wantErr       bool
 	}{{
-		name:    "ok zero",
-		bal:     big.NewInt(0),
-		wantBal: 0,
+		name:         "ok zero",
+		bal:          big.NewInt(0),
+		pendingBal:   big.NewInt(0),
+		wantBal:      0,
+		wantImmature: 0,
 	}, {
-		name:    "ok rounded down",
-		bal:     big.NewInt(dexeth.GweiFactor - 1),
-		wantBal: 0,
+		name:         "ok rounded down",
+		bal:          big.NewInt(dexeth.GweiFactor - 1),
+		pendingBal:   big.NewInt(dexeth.GweiFactor - 1),
+		wantBal:      0,
+		wantImmature: 0,
 	}, {
-		name:    "ok one",
-		bal:     big.NewInt(dexeth.GweiFactor),
-		wantBal: 1,
+		name:         "ok one",
+		bal:          big.NewInt(dexeth.GweiFactor),
+		pendingBal:   big.NewInt(dexeth.GweiFactor),
+		wantBal:      1,
+		wantImmature: 0,
 	}, {
-		name:    "ok max int",
-		bal:     maxWei,
-		wantBal: maxInt,
+		name:         "ok pending > bal",
+		bal:          big.NewInt(dexeth.GweiFactor),
+		pendingBal:   big.NewInt(2 * dexeth.GweiFactor),
+		wantBal:      1,
+		wantImmature: 1,
+	}, {
+		// This should never happen, but better to show 0 than MaxI
+		name:         "ok pending < bal",
+		bal:          big.NewInt(2 * dexeth.GweiFactor),
+		pendingBal:   big.NewInt(1 * dexeth.GweiFactor),
+		wantBal:      2,
+		wantImmature: 0,
+	}, {
+		name:         "ok max int",
+		bal:          maxWei,
+		pendingBal:   maxWei,
+		wantBal:      maxInt,
+		wantImmature: 0,
 	}, {
 		name:    "over max int",
 		bal:     overMaxWei,
@@ -346,13 +383,20 @@ func TestBalance(t *testing.T) {
 		bal:     big.NewInt(0),
 		balErr:  errors.New(""),
 		wantErr: true,
+	}, {
+		name:          "node pending balance error",
+		bal:           big.NewInt(0),
+		pendingBalErr: errors.New(""),
+		wantErr:       true,
 	}}
 
 	for _, test := range tests {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{}
 		node.bal = test.bal
+		node.pendingBal = test.pendingBal
 		node.balErr = test.balErr
+		node.pendingBalErr = test.pendingBalErr
 		eth := &ExchangeWallet{
 			node: node,
 			ctx:  ctx,
@@ -372,6 +416,9 @@ func TestBalance(t *testing.T) {
 		}
 		if bal.Available != test.wantBal {
 			t.Fatalf("want available balance %v got %v for test %q", test.wantBal, bal.Available, test.name)
+		}
+		if bal.Immature != test.wantImmature {
+			t.Fatalf("want immature balance %v got %v for test %q", test.wantImmature, bal.Immature, test.name)
 		}
 	}
 }
