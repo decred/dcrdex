@@ -30,14 +30,17 @@ contract ETHSwap {
     // or null value.
     enum State { Empty, Filled, Redeemed, Refunded }
 
-    // Swap holds information related to one side of a single swap.
+    // Swap holds information related to one side of a single swap. The order of
+    // the struct fields is important to efficiently pack the struct into as few
+    // 256-bit slots as possible to reduce gas cost. In particular, the 160-bit
+    // address can pack with the 8-bit State.
     struct Swap {
+        bytes32 secret;
+        uint256 value;
         uint initBlockNumber;
         uint refundBlockTimestamp;
-        bytes32 secret;
         address initiator;
         address participant;
-        uint256 value;
         State state;
     }
 

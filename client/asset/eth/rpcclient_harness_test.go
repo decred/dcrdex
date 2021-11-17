@@ -10,7 +10,7 @@
 // NOTE: These test reuse a light node that lives in the dextest folders.
 // However, when recreating the test database for every test, the nonce used
 // for imported accounts is sometimes, randomly, off, which causes transactions
-// to not be mined and effectively makes the node unuseable (at least before
+// to not be mined and effectively makes the node unusable (at least before
 // restarting). It also seems to have caused getting balance of an account to
 // fail, and sometimes the redeem and refund functions to also fail. This could
 // be a problem in the future if a user restores from seed. Punting on this
