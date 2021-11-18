@@ -665,6 +665,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				extra = append(extra, msgMatch)
 				continue
 			}
+			mt.checkServerRevoke = false
 			if mt.Status != order.MatchStatus(msgMatch.Status) {
 				conflict := statusConflicts[oid]
 				if conflict == nil {
@@ -5282,6 +5283,19 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 	if connected {
 		v = 1
 		topic = TopicDEXConnected
+	} else {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			for _, match := range tracker.matches {
+				// Make sure that a taker will not prematurely send an
+				// initialization until it is confimed with the server
+				// that the match is not revoked.
+				if match.Side == order.Taker && match.Status == order.MakerSwapCast {
+					match.checkServerRevoke = true
+				}
+			}
+		}
+		dc.tradeMtx.RUnlock()
 	}
 	atomic.StoreUint32(&dc.connected, v)
 	if dc.broadcastingConnect() {
