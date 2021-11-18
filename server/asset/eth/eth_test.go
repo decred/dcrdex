@@ -180,6 +180,157 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestDecodeCoinID(t *testing.T) {
+	drv := &Driver{}
+	txid := "0x1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1"
+	txHashB, _ := hex.DecodeString("1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1")
+
+	type test struct {
+		name    string
+		input   []byte
+		wantErr bool
+		expRes  string
+	}
+
+	tests := []test{{
+		name:   "ok",
+		input:  txHashB,
+		expRes: txid,
+	}, {
+		name:    "too short",
+		input:   txHashB[:len(txHashB)/2],
+		wantErr: true,
+	}, {
+		name:    "too long",
+		input:   append(txHashB, txHashB...),
+		wantErr: true,
+	}}
+
+	for _, tt := range tests {
+		res, err := drv.DecodeCoinID(tt.input)
+		if err != nil {
+			if !tt.wantErr {
+				t.Fatalf("%s: error: %v", tt.name, err)
+			}
+			continue
+		}
+
+		if tt.wantErr {
+			t.Fatalf("%s: no error", tt.name)
+		}
+		if res != tt.expRes {
+			t.Fatalf("%s: wrong result. wanted %s, got %s", tt.name, tt.expRes, res)
+		}
+	}
+}
+
+// func TestCoinIDs(t *testing.T) {
+// 	// Decode and encode TxCoinID
+// 	var txID [32]byte
+// 	copy(txID[:], encode.RandomBytes(32))
+// 	originalTxCoin := TxCoinID{
+// 		TxID: txID,
+// 	}
+// 	encodedTxCoin := originalTxCoin.Encode()
+// 	decodedCoin, err := DecodeCoinID(encodedTxCoin)
+// 	if err != nil {
+// 		t.Fatalf("unexpected error decoding tx coin: %v", err)
+// 	}
+// 	decodedTxCoin, ok := decodedCoin.(*TxCoinID)
+// 	if !ok {
+// 		t.Fatalf("expected coin to be a TxCoin")
+// 	}
+// 	if !bytes.Equal(originalTxCoin.TxID[:], decodedTxCoin.TxID[:]) {
+// 		t.Fatalf("expected txIds to be equal before and after decoding")
+// 	}
+
+// 	// Decode tx coin id with incorrect length
+// 	txCoinID := make([]byte, 33)
+// 	binary.BigEndian.PutUint16(txCoinID[:2], uint16(CIDTxID))
+// 	copy(txCoinID[2:], encode.RandomBytes(30))
+// 	if _, err := DecodeCoinID(txCoinID); err == nil {
+// 		t.Fatalf("expected error decoding tx coin ID with incorrect length")
+// 	}
+
+// 	// Decode and encode SwapCoinID
+// 	var contractAddress [20]byte
+// 	var secretHash [32]byte
+// 	copy(contractAddress[:], encode.RandomBytes(20))
+// 	copy(secretHash[:], encode.RandomBytes(32))
+// 	originalSwapCoin := SwapCoinID{
+// 		ContractAddress: contractAddress,
+// 		SecretHash:      secretHash,
+// 	}
+// 	encodedSwapCoin := originalSwapCoin.Encode()
+// 	decodedCoin, err = DecodeCoinID(encodedSwapCoin)
+// 	if err != nil {
+// 		t.Fatalf("unexpected error decoding swap coin: %v", err)
+// 	}
+// 	decodedSwapCoin, ok := decodedCoin.(*SwapCoinID)
+// 	if !ok {
+// 		t.Fatalf("expected coin to be a SwapCoinID")
+// 	}
+// 	if !bytes.Equal(originalSwapCoin.ContractAddress[:], decodedSwapCoin.ContractAddress[:]) {
+// 		t.Fatalf("expected contract address to be equal before and after decoding")
+// 	}
+// 	if !bytes.Equal(originalSwapCoin.SecretHash[:], decodedSwapCoin.SecretHash[:]) {
+// 		t.Fatalf("expected secret hash to be equal before and after decoding")
+// 	}
+
+// 	// Decode swap coin id with incorrect length
+// 	swapCoinID := make([]byte, 53)
+// 	binary.BigEndian.PutUint16(swapCoinID[:2], uint16(CIDSwap))
+// 	copy(swapCoinID[2:], encode.RandomBytes(50))
+// 	if _, err := DecodeCoinID(swapCoinID); err == nil {
+// 		t.Fatalf("expected error decoding swap coin ID with incorrect length")
+// 	}
+
+// 	// Decode and encode AmountCoinID
+// 	var address [20]byte
+// 	var nonce [8]byte
+// 	copy(address[:], encode.RandomBytes(20))
+// 	copy(nonce[:], encode.RandomBytes(8))
+// 	originalAmountCoin := AmountCoinID{
+// 		Address: address,
+// 		Amount:  100,
+// 		Nonce:   nonce,
+// 	}
+// 	encodedAmountCoin := originalAmountCoin.Encode()
+// 	decodedCoin, err = DecodeCoinID(encodedAmountCoin)
+// 	if err != nil {
+// 		t.Fatalf("unexpected error decoding swap coin: %v", err)
+// 	}
+// 	decodedAmountCoin, ok := decodedCoin.(*AmountCoinID)
+// 	if !ok {
+// 		t.Fatalf("expected coin to be a AmounCoinID")
+// 	}
+// 	if !bytes.Equal(originalAmountCoin.Address[:], decodedAmountCoin.Address[:]) {
+// 		t.Fatalf("expected address to be equal before and after decoding")
+// 	}
+// 	if !bytes.Equal(originalAmountCoin.Nonce[:], decodedAmountCoin.Nonce[:]) {
+// 		t.Fatalf("expected nonce to be equal before and after decoding")
+// 	}
+// 	if originalAmountCoin.Amount != decodedAmountCoin.Amount {
+// 		t.Fatalf("expected amount to be equal before and after decoding")
+// 	}
+
+// 	// Decode amount coin id with incorrect length
+// 	amountCoinId := make([]byte, 37)
+// 	binary.BigEndian.PutUint16(amountCoinId[:2], uint16(CIDAmount))
+// 	copy(amountCoinId[2:], encode.RandomBytes(35))
+// 	if _, err := DecodeCoinID(amountCoinId); err == nil {
+// 		t.Fatalf("expected error decoding amount coin ID with incorrect length")
+// 	}
+
+// 	// Decode coin id with non existant flag
+// 	nonExistantCoinID := make([]byte, 37)
+// 	binary.BigEndian.PutUint16(nonExistantCoinID[:2], uint16(5))
+// 	copy(nonExistantCoinID, encode.RandomBytes(35))
+// 	if _, err := DecodeCoinID(nonExistantCoinID); err == nil {
+// 		t.Fatalf("expected error decoding coin id with non existant flag")
+// 	}
+// }
+
 func TestRun(t *testing.T) {
 	// TODO: Test all paths.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -551,7 +702,7 @@ func TestTxData(t *testing.T) {
 	addr := randomAddress()
 	data := encode.RandomBytes(5)
 	tx := tTx(gasPrice, value, addr, data)
-	goodCoinID := (&dexeth.TxCoinID{TxID: tx.Hash()}).Encode()
+	goodCoinID, _ := hex.DecodeString("09c3bed75b35c6cf0549b0636c9511161b18765c019ef371e2a9f01e4b4a1487")
 	node.tx = tx
 
 	// initial success
@@ -572,14 +723,14 @@ func TestTxData(t *testing.T) {
 	}
 
 	// Wrong type of coin ID
-	coinID = (&dexeth.SwapCoinID{}).Encode()
-	_, err = eth.TxData(coinID)
+	_, err = eth.TxData(goodCoinID[2:])
 	if err == nil {
 		t.Fatalf("no error for wrong coin type")
 	}
 
 	// No transaction
-	_, err = eth.TxData(coinID)
+	node.tx = nil
+	_, err = eth.TxData(goodCoinID)
 	if err == nil {
 		t.Fatalf("no error for missing tx")
 	}

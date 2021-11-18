@@ -65,11 +65,11 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	coinId, err := dexeth.DecodeCoinID(coinID)
+	txHash, err := decodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
-	return coinId.String(), nil
+	return txHash.String(), nil
 }
 
 // UnitInfo returns the dex.UnitInfo for the asset.
@@ -209,18 +209,17 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 // TxData fetches the raw transaction data.
 func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
-	cnr, err := dexeth.DecodeCoinID(coinID)
+	txHash, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("coin ID decoding error: %v", err)
 	}
-	c, is := cnr.(*dexeth.TxCoinID)
-	if !is {
-		return nil, fmt.Errorf("wrong type of coin ID, %v", cnr)
-	}
 
-	tx, _, err := eth.node.transaction(eth.rpcCtx, c.TxID)
+	tx, _, err := eth.node.transaction(eth.rpcCtx, txHash)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving transaction: %w", err)
+	}
+	if tx == nil { // Possible?
+		return nil, fmt.Errorf("no transaction %s", txHash)
 	}
 
 	return tx.MarshalBinary()
@@ -335,11 +334,11 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
-	coinId, err := dexeth.DecodeCoinID(coinID)
+	txHash, err := decodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
-	return coinId.String(), nil
+	return txHash.String(), nil
 }
 
 // ValidateContract ensures that the secret hash is the correct length.
@@ -504,4 +503,16 @@ out:
 	}
 	// Wait for the RPC client to shut down.
 	wg.Wait()
+}
+
+// decodeCoinID decodes the coin ID into a common.Hash. For eth, there are no
+// funding coin IDs, just an account address. Care should be taken not to use
+// decodeCoinID or (Driver).DecodeCoinID for account addresses.
+func decodeCoinID(coinID []byte) (common.Hash, error) {
+	if len(coinID) != common.HashLength {
+		return common.Hash{}, fmt.Errorf("wrong coin ID length. wanted %d, got %d", common.HashLength, len(coinID))
+	}
+	var h common.Hash
+	h.SetBytes(coinID)
+	return h, nil
 }
