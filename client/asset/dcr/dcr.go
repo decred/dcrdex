@@ -2399,9 +2399,10 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			}
 			return nil, fmt.Errorf("error reading asset info: %w", err)
 		}
-		if nfo.ScriptType == dexdcr.ScriptUnsupported {
-			// InputInfo does this for P2SH with non-standard redeem scripts.
-			// Don't return these since they cannot fund arbitrary txns.
+		if nfo.ScriptType == dexdcr.ScriptUnsupported || nfo.NonStandardScript {
+			// InputInfo sets NonStandardScript for P2SH with non-standard
+			// redeem scripts. Don't return these since they cannot fund
+			// arbitrary txns.
 			continue
 		}
 		utxos = append(utxos, &compositeUTXO{
