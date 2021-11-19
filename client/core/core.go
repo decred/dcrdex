@@ -5284,7 +5284,7 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 		v = 1
 		topic = TopicDEXConnected
 	} else {
-		dc.tradeMtx.RLock()
+		dc.tradeMtx.Lock()
 		for _, tracker := range dc.trades {
 			for _, match := range tracker.matches {
 				// Make sure that a taker will not prematurely send an
@@ -5295,7 +5295,7 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 				}
 			}
 		}
-		dc.tradeMtx.RUnlock()
+		dc.tradeMtx.Unlock()
 	}
 	atomic.StoreUint32(&dc.connected, v)
 	if dc.broadcastingConnect() {
