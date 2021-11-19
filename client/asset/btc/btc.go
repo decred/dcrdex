@@ -212,8 +212,8 @@ type RPCCloneConfig struct {
 	// NonSegwitSigner can be true if the transaction signature hash data is not
 	// the standard for non-segwit Bitcoin. If nil, txscript.
 	NonSegwitSigner TxInSigner
-	// FeeEstimator provides a way to get fees given an RawRequest-enabled
-	// client and a confirmation target.
+	// FeeEstimator provides a way to get a current fee rate estimate targeting
+	// a certain number of confirmations.
 	FeeEstimator func(uint64) (uint64, error)
 }
 

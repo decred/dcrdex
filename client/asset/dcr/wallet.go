@@ -93,8 +93,10 @@ type Wallet interface {
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	// GetBlockHeader returns block header info for the specified block hash.
 	GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*wire.BlockHeader, error)
-	// IsValidMainchain returns true if the block is no orphaned or invalidated.
-	IsValidMainchain(ctx context.Context, hash *chainhash.Hash) (bool, error)
+	// IsValidMainchain returns true if the block is no orphaned or invalidated,
+	// so if this is not the current best block, the next block's vote bits
+	// should be checked.
+	IsValidMainchain(ctx context.Context, blockHash *chainhash.Hash) (bool, error)
 	// GetBlock returns the *wire.MsgBlock.
 	GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 	// GetTransaction returns the details of a wallet tx, if the wallet contains a
@@ -112,9 +114,13 @@ type Wallet interface {
 	BlockFilter(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error)
 	// Unlocked returns true if the Wallet unlocked.
 	Unlocked(ctx context.Context) (bool, error)
-	// Lock locks the Wallet.
+	// Lock locks the Wallet. ExchangeWallet does not differentiate account
+	// locking vs wallet locking, but the underlying implementation may choose
+	// to lock only the account.
 	Lock(ctx context.Context) error
-	// Unlock unlocks the Wallet.
+	// Unlock unlocks the Wallet. ExchangeWallet does not differentiate account
+	// locking vs wallet locking, but the underlying implementation may choose
+	// to unlock only the account.
 	Unlock(ctx context.Context, passphrase []byte) error
 	// SyncStatus returns the wallet's sync status.
 	SyncStatus(ctx context.Context) (bool, float32, error)

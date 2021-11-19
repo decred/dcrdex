@@ -590,7 +590,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	estimator, is := dcr.wallet.(FeeRateEstimator)
+	feeEstimator, is := dcr.wallet.(FeeRateEstimator)
 	if !is {
 		return 0, fmt.Errorf("fee rate estimation unavailable")
 	}
@@ -598,7 +598,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	if confTarget < 2 {
 		confTarget = 2
 	}
-	estimatedFeeRate, err := estimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
+	estimatedFeeRate, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -1813,13 +1813,13 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid blockhash %s for contract %s: %w", tx.BlockHash, contractOutpoint.String(), err)
 		}
-		hdr, err := dcr.wallet.GetBlockHeader(dcr.ctx, blockHash)
+		header, err := dcr.wallet.GetBlockHeader(dcr.ctx, blockHash)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error fetching verbose block %s for contract %s: %w",
 				tx.BlockHash, contractOutpoint.String(), err)
 		}
-		h := hdr.BlockHash()
-		contractBlock = &block{height: int64(hdr.Height), hash: &h}
+		h := header.BlockHash()
+		contractBlock = &block{height: int64(header.Height), hash: &h}
 	}
 
 	resultChan := make(chan *findRedemptionResult, 1)
@@ -1959,7 +1959,7 @@ rangeBlocks:
 
 		lastScannedBlockHeight = blockHeight
 		scanPoint := fmt.Sprintf("block %d", blockHeight)
-		for _, tx := range blk.Transactions {
+		for _, tx := range append(blk.Transactions, blk.STransactions...) {
 			found, canceled := dcr.findRedemptionsInTx(scanPoint, tx, contractOutpoints)
 			totalFound += found
 			totalCanceled += canceled
@@ -2001,9 +2001,6 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *wire.MsgTx,
 	redeemTxHash := tx.TxHash()
 
 	extractSecret := func(vin int, contractHash []byte, contractOutputScriptVer uint16) ([]byte, error) {
-		if len(tx.TxIn) <= vin {
-			return nil, fmt.Errorf("not enough inputs")
-		}
 		sigScript := tx.TxIn[vin].SignatureScript
 		if len(sigScript) == 0 {
 			return nil, fmt.Errorf("no sigScript")
@@ -2538,7 +2535,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
-	msgTx, err := dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
+	msgTx, err := dcr.wallet.SignRawTransaction(dcr.ctx, baseTx.Copy())
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
@@ -2605,7 +2602,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 			// Each cycle, sign the transaction and see if there is a need to
 			// raise or lower the fees.
 			sigCycles++
-			msgTx, err = dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
+			msgTx, err = dcr.wallet.SignRawTransaction(dcr.ctx, baseTx.Copy())
 			if err != nil {
 				return nil, nil, "", 0, err
 			}
@@ -2786,11 +2783,11 @@ func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHei
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
-	prevTipHeader, isMainchain, err := dcr.getMainchainHeader(prevTip.hash)
+	prevTipHeader, isMainchain, err := dcr.blockHeader(prevTip.hash)
 	if err != nil {
 		// Redemption search cannot continue reliably without knowing if there
 		// was a reorg, cancel all find redemption requests in queue.
-		notifyFatalFindRedemptionError("getMainchainHeader error for prev tip hash %s: %w",
+		notifyFatalFindRedemptionError("blockHeader error for prev tip hash %s: %w",
 			prevTip.hash, err)
 		return
 	}
@@ -2802,7 +2799,7 @@ func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHei
 		// that is the immediate ancestor to the previous tip.
 		ancestorBlockHash := &prevTipHeader.PrevBlock
 		for {
-			aBlock, isMainchain, err := dcr.getMainchainHeader(ancestorBlockHash)
+			aBlock, isMainchain, err := dcr.blockHeader(ancestorBlockHash)
 			if err != nil {
 				notifyFatalFindRedemptionError("GetBlockHeaderVerbose error for block %s: %w", ancestorBlockHash, err)
 				return
@@ -2828,8 +2825,8 @@ func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHei
 	go dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
 }
 
-func (dcr *ExchangeWallet) getMainchainHeader(blockHash *chainhash.Hash) (*wire.BlockHeader, bool, error) {
-	hdr, err := dcr.wallet.GetBlockHeader(dcr.ctx, blockHash)
+func (dcr *ExchangeWallet) blockHeader(blockHash *chainhash.Hash) (*wire.BlockHeader, bool, error) {
+	header, err := dcr.wallet.GetBlockHeader(dcr.ctx, blockHash)
 	if err != nil {
 		return nil, false, fmt.Errorf("GetBlockHeader error: %w", err)
 	}
@@ -2838,7 +2835,7 @@ func (dcr *ExchangeWallet) getMainchainHeader(blockHash *chainhash.Hash) (*wire.
 	if err != nil {
 		return nil, false, fmt.Errorf("IsValidMainchain error: %w", err)
 	}
-	return hdr, mainchain, nil
+	return header, mainchain, nil
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
@@ -2854,7 +2851,7 @@ func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
 func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *chainhash.Hash) (*chainhash.Hash, int64, error) {
 	checkHash := blockHash
 	for {
-		checkBlock, isMainchain, err := dcr.getMainchainHeader(checkHash)
+		checkBlock, isMainchain, err := dcr.blockHeader(checkHash)
 		if err != nil {
 			return nil, 0, fmt.Errorf("getblockheader error for block %s: %w", checkHash, err)
 		}
