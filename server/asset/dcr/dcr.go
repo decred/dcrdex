@@ -507,7 +507,7 @@ type txOutData struct {
 	value        uint64
 	addresses    []string
 	sigsRequired int
-	scriptType   dexdcr.DCRScriptType
+	scriptType   dexdcr.ScriptType
 }
 
 // outputSummary gets transaction output data, including recipient addresses,
@@ -537,11 +537,7 @@ func (dcr *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *t
 	if err != nil {
 		return nil, -1, dex.UnsupportedScriptError
 	}
-	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, script, chainParams)
-	if err != nil {
-		return nil, -1, dex.UnsupportedScriptError
-	}
-
+	scriptType, addrs, numRequired := dexdcr.ExtractScriptData(out.ScriptPubKey.Version, script, chainParams)
 	txOut = &txOutData{
 		value:        toAtoms(out.Value),
 		addresses:    addrs,       // out.ScriptPubKey.Addresses
@@ -817,10 +813,7 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
 	if scriptType.IsP2SH() {
-		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
-		if err != nil {
-			return nil, fmt.Errorf("utxo error: %w", err)
-		}
+		scriptHash := dexdcr.ExtractScriptHash(scriptVersion, pkScript)
 		if !bytes.Equal(stdaddr.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 		}
@@ -934,19 +927,16 @@ func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
 	if scriptType.IsP2SH() {
-		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
-		if err != nil {
-			return nil, fmt.Errorf("output error: %w", err)
-		}
+		scriptHash := dexdcr.ExtractScriptHash(txOut.version, pkScript)
 		if !bytes.Equal(stdaddr.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for output %s:%d", txHash, vout)
 		}
 	}
 
 	scrAddrs := inputNfo.ScriptAddrs
-	addresses := make([]string, scrAddrs.NumPK+scrAddrs.NumPKH)
+	addresses := make([]string, len(scrAddrs.PubKeys)+len(scrAddrs.PkHashes))
 	for i, addr := range append(scrAddrs.PkHashes, scrAddrs.PubKeys...) {
-		addresses[i] = addr.String() // unconverted
+		addresses[i] = addr.String()
 	}
 
 	// Coinbase, vote, and revocation transactions must mature before spending.

@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -17,6 +16,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -106,12 +106,12 @@ const (
 	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + SwapContractSize // 208
 )
 
-// DCRScriptType is a bitmask with information about a pubkey script and
+// ScriptType is a bitmask with information about a pubkey script and
 // possibly its redeem script.
-type DCRScriptType uint8
+type ScriptType uint8
 
 const (
-	ScriptP2PKH DCRScriptType = 1 << iota
+	ScriptP2PKH ScriptType = 1 << iota
 	ScriptP2SH
 	ScriptStake
 	ScriptMultiSig
@@ -120,216 +120,62 @@ const (
 	ScriptUnsupported
 )
 
-// ParseScriptType creates a dcrScriptType bitmask for the script type. A script
-// type will be some combination of pay-to-pubkey-hash, pay-to-script-hash,
-// and stake. If a script type is P2SH, it may or may not be mutli-sig.
-func ParseScriptType(scriptVersion uint16, pkScript, redeemScript []byte) DCRScriptType {
-	if scriptVersion != 0 {
-		return ScriptUnsupported
-	}
-	var scriptType DCRScriptType
-	switch {
-	case IsPubKeyHashScript(pkScript):
-		scriptType |= ScriptP2PKH
-	case IsScriptHashScript(pkScript):
-		scriptType |= ScriptP2SH
-	case IsStakePubkeyHashScript(pkScript):
-		scriptType |= ScriptP2PKH | ScriptStake
-	case IsStakeScriptHashScript(pkScript):
-		scriptType |= ScriptP2SH | ScriptStake
-	case IsPubKeyHashAltScript(pkScript):
-		scriptType |= ScriptP2PKH
-		_, sigType := ExtractPubKeyHashAltDetails(pkScript)
-		switch sigType {
-		case dcrec.STEd25519:
-			scriptType |= ScriptSigEdwards
-		case dcrec.STSchnorrSecp256k1:
-			scriptType |= ScriptSigSchnorr
-		default:
-			return ScriptUnsupported
-		}
-	default:
-		return ScriptUnsupported
-	}
-	if scriptType.IsP2SH() && txscript.IsMultisigScript(redeemScript) {
-		scriptType |= ScriptMultiSig
-	}
-	return scriptType
+// ParseScriptType creates a ScriptType bitmask for a pkScript.
+func ParseScriptType(scriptVersion uint16, pkScript []byte) ScriptType {
+	st := stdscript.DetermineScriptType(scriptVersion, pkScript)
+	return convertScriptType(st)
 }
 
 // IsP2SH will return boolean true if the script is a P2SH script.
-func (s DCRScriptType) IsP2SH() bool {
+func (s ScriptType) IsP2SH() bool {
 	return s&ScriptP2SH != 0
 }
 
 // IsStake will return boolean true if the pubkey script it tagged with a stake
 // opcode.
-func (s DCRScriptType) IsStake() bool {
+func (s ScriptType) IsStake() bool {
 	return s&ScriptStake != 0
 }
 
 // IsP2PKH will return boolean true if the script is a P2PKH script.
-func (s DCRScriptType) IsP2PKH() bool {
+func (s ScriptType) IsP2PKH() bool {
 	return s&ScriptP2PKH != 0
 }
 
 // IsMultiSig is whether the pkscript references a multi-sig redeem script.
 // Since the DEX will know the redeem script, we can say whether it's multi-sig.
-func (s DCRScriptType) IsMultiSig() bool {
+func (s ScriptType) IsMultiSig() bool {
 	return s&ScriptMultiSig != 0
 }
 
-// IsPubKeyHashScript returns whether or not the passed script is a standard
-// pay-to-pubkey-hash script.
-func IsPubKeyHashScript(script []byte) bool {
-	return ExtractPubKeyHash(script) != nil
-}
-
-// IsScriptHashScript returns whether or not the passed script is a standard
-// pay-to-script-hash script.
-func IsScriptHashScript(script []byte) bool {
-	return ExtractScriptHash(script) != nil
-}
-
-// isStakePubkeyHashScript returns whether or not the passed script is a
-// stake-related P2PKH script. Script is assumed to be version 0.
-func IsStakePubkeyHashScript(script []byte) bool {
-	opcode := stakeOpcode(script)
-	if opcode == 0 {
-		return false
+func convertScriptType(st stdscript.ScriptType) ScriptType {
+	var scriptType ScriptType
+	switch st {
+	// P2PKH
+	case stdscript.STPubKeyHashEcdsaSecp256k1:
+		scriptType = ScriptP2PKH
+	case stdscript.STPubKeyHashEd25519:
+		scriptType = ScriptP2PKH | ScriptSigEdwards
+	case stdscript.STPubKeyHashSchnorrSecp256k1:
+		scriptType = ScriptP2PKH | ScriptSigSchnorr
+	case stdscript.STStakeSubmissionPubKeyHash, stdscript.STStakeChangePubKeyHash,
+		stdscript.STStakeGenPubKeyHash, stdscript.STStakeRevocationPubKeyHash,
+		stdscript.STTreasuryGenPubKeyHash:
+		scriptType = ScriptP2PKH | ScriptStake
+	// P2SH
+	case stdscript.STScriptHash:
+		scriptType = ScriptP2SH
+	case stdscript.STStakeChangeScriptHash, stdscript.STStakeGenScriptHash,
+		stdscript.STStakeRevocationScriptHash, stdscript.STStakeSubmissionScriptHash,
+		stdscript.STTreasuryGenScriptHash:
+		scriptType = ScriptP2SH | ScriptStake
+	// P2MS
+	case stdscript.STMultiSig:
+		scriptType = ScriptMultiSig
+	default: // STNonStandard, STNullData, STTreasuryAdd, etc
+		return ScriptUnsupported
 	}
-	return ExtractStakePubKeyHash(script, opcode) != nil
-}
-
-// IsStakePubkeyHashScript returns whether or not the passed script is a
-// stake-related P2SH script. Script is assumed to be version 0.
-func IsStakeScriptHashScript(script []byte) bool {
-	opcode := stakeOpcode(script)
-	if opcode == 0 {
-		return false
-	}
-	return ExtractStakeScriptHash(script, opcode) != nil
-}
-
-// IsPubKeyHashAltScript returns whether or not the passed script is a standard
-// pay-to-alt-pubkey-hash script.
-func IsPubKeyHashAltScript(script []byte) bool {
-	pk, _ := ExtractPubKeyHashAltDetails(script)
-	return pk != nil
-}
-
-// ExtractPubKeyHash extracts the pubkey hash from the passed script if it is a
-// /standard pay-to-pubkey-hash script.  It will return nil otherwise.
-func ExtractPubKeyHash(script []byte) []byte {
-	// A pay-to-pubkey-hash script is of the form:
-	//  OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-	if len(script) == 25 &&
-		script[0] == txscript.OP_DUP &&
-		script[1] == txscript.OP_HASH160 &&
-		script[2] == txscript.OP_DATA_20 &&
-		script[23] == txscript.OP_EQUALVERIFY &&
-		script[24] == txscript.OP_CHECKSIG {
-
-		return script[3:23]
-	}
-
-	return nil
-}
-
-// ExtractScriptHash extracts the script hash from the passed script if it is a
-// standard pay-to-script-hash script. It will return nil otherwise. See
-// ExtractStakeScriptHash for stake transaction p2sh outputs.
-//
-// NOTE: This function is only valid for version 0 opcodes.  Since the function
-// does not accept a script version, the results are undefined for other script
-// versions.
-func ExtractScriptHash(script []byte) []byte {
-	// A pay-to-script-hash script is of the form:
-	//  OP_HASH160 <20-byte scripthash> OP_EQUAL
-	if len(script) == 23 &&
-		script[0] == txscript.OP_HASH160 &&
-		script[1] == txscript.OP_DATA_20 &&
-		script[22] == txscript.OP_EQUAL {
-
-		return script[2:22]
-	}
-	return nil
-}
-
-// ExtractPubKeyHashAltDetails extracts the public key hash and signature type
-// from the passed script if it is a standard pay-to-alt-pubkey-hash script.  It
-// will return nil otherwise.
-func ExtractPubKeyHashAltDetails(script []byte) ([]byte, dcrec.SignatureType) {
-	// A pay-to-alt-pubkey-hash script is of the form:
-	//  DUP HASH160 <20-byte hash> EQUALVERIFY SIGTYPE CHECKSIG
-	//
-	// The only two currently supported alternative signature types are ed25519
-	// and schnorr + secp256k1 (with a compressed pubkey).
-	//
-	//  DUP HASH160 <20-byte hash> EQUALVERIFY <1-byte ed25519 sigtype> CHECKSIG
-	//  DUP HASH160 <20-byte hash> EQUALVERIFY <1-byte schnorr+secp sigtype> CHECKSIG
-	//
-	//  Notice that OP_0 is not specified since signature type 0 disabled.
-
-	if len(script) == 26 &&
-		script[0] == txscript.OP_DUP &&
-		script[1] == txscript.OP_HASH160 &&
-		script[2] == txscript.OP_DATA_20 &&
-		script[23] == txscript.OP_EQUALVERIFY &&
-		isStandardAltSignatureType(script[24]) &&
-		script[25] == txscript.OP_CHECKSIGALT {
-
-		return script[3:23], dcrec.SignatureType(asSmallInt(script[24]))
-	}
-
-	return nil, 0
-}
-
-// Check if the opcode is one of a small number of acceptable stake opcodes that
-// are prepended to P2PKH scripts. Return the opcode if it is, else OP_0.
-func stakeOpcode(script []byte) byte {
-	if len(script) == 0 {
-		return 0
-	}
-	opcode := script[0]
-	if opcode == txscript.OP_SSGEN || opcode == txscript.OP_SSRTX {
-		return opcode
-	}
-	return 0
-}
-
-// ExtractStakePubKeyHash extracts a pubkey hash from the passed public key
-// script if it is a standard pay-to-pubkey-hash script tagged with the provided
-// stake opcode.  It will return nil otherwise.
-func ExtractStakePubKeyHash(script []byte, stakeOpcode byte) []byte {
-	if len(script) == 26 &&
-		script[0] == stakeOpcode &&
-		script[1] == txscript.OP_DUP &&
-		script[2] == txscript.OP_HASH160 &&
-		script[3] == txscript.OP_DATA_20 &&
-		script[24] == txscript.OP_EQUALVERIFY &&
-		script[25] == txscript.OP_CHECKSIG {
-
-		return script[4:24]
-	}
-
-	return nil
-}
-
-// ExtractStakeScriptHash extracts a script hash from the passed public key
-// script if it is a standard pay-to-script-hash script tagged with the provided
-// stake opcode.  It will return nil otherwise.
-func ExtractStakeScriptHash(script []byte, stakeOpcode byte) []byte {
-	if len(script) == 24 &&
-		script[0] == stakeOpcode &&
-		script[1] == txscript.OP_HASH160 &&
-		script[2] == txscript.OP_DATA_20 &&
-		script[23] == txscript.OP_EQUAL {
-
-		return script[3:23]
-	}
-
-	return nil
+	return scriptType
 }
 
 // AddressScript returns the raw bytes of the address to be used when inserting
@@ -556,90 +402,51 @@ func IsDustVal(sz, amt, minRelayTxFee uint64) bool {
 	return amt/(3*totalSize) < minRelayTxFee
 }
 
-// isStandardAltSignatureType returns whether or not the provided opcode
-// represents a push of a standard alt signature type.
-func isStandardAltSignatureType(op byte) bool {
-	if !isSmallInt(op) {
-		return false
+// ExtractScriptHash extracts the script hash from a P2SH pkScript of a
+// particular script version.
+func ExtractScriptHash(version uint16, script []byte) []byte {
+	switch version {
+	case 0:
+		return ExtractScriptHashV0(script)
 	}
-
-	sigType := asSmallInt(op)
-	return sigType == dcrec.STEd25519 || sigType == dcrec.STSchnorrSecp256k1
+	return nil
 }
 
-// asSmallInt returns the passed opcode, which must be true according to
-// isSmallInt(), as an integer.
-func asSmallInt(op byte) int {
-	if op == txscript.OP_0 {
-		return 0
+// ExtractScriptHashV0 extracts the script hash from a P2SH pkScript. This is
+// valid only for version 0 scripts.
+func ExtractScriptHashV0(script []byte) []byte {
+	if h := stdscript.ExtractScriptHashV0(script); h != nil {
+		return h
 	}
-
-	return int(op - (txscript.OP_1 - 1))
-}
-
-// isSmallInt returns whether or not the opcode is considered a small integer,
-// which is an OP_0, or OP_1 through OP_16.
-//
-// NOTE: This function is only valid for version 0 opcodes.  Since the function
-// does not accept a script version, the results are undefined for other script
-// versions.
-func isSmallInt(op byte) bool {
-	return op == txscript.OP_0 || (op >= txscript.OP_1 && op <= txscript.OP_16)
-}
-
-// Grab the script hash based on the dcrScriptType.
-func ExtractScriptHashByType(scriptType DCRScriptType, pkScript []byte) ([]byte, error) {
-	var redeemScript []byte
-	// Stake related scripts will start with OP_SSGEN or OP_SSRTX.
-	if scriptType.IsStake() {
-		opcode := stakeOpcode(pkScript)
-		if opcode == 0 {
-			return nil, fmt.Errorf("unsupported stake opcode")
-		}
-		redeemScript = ExtractStakeScriptHash(pkScript, opcode)
-	} else {
-		redeemScript = ExtractScriptHash(pkScript)
-	}
-	if redeemScript == nil {
-		return nil, fmt.Errorf("failed to parse p2sh script")
-	}
-	return redeemScript, nil
+	return stdscript.ExtractStakeScriptHashV0(script)
 }
 
 // ExtractScriptData extracts script type, addresses, and required signature
-// count from a pkScript. Non-standard scripts are not necessarily an error;
-// non-nil errors are only returned if the script cannot be parsed. See also
-// InputInfo for additional signature script size data
-func ExtractScriptData(version uint16, script []byte, chainParams *chaincfg.Params) (DCRScriptType, []string, int, error) {
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(version, script, chainParams, false)
-	if err != nil {
-		return ScriptUnsupported, nil, 0, err
+// count from a pkScript. Non-standard scripts are not an error; non-nil errors
+// are only returned if the script cannot be parsed. See also InputInfo for
+// additional signature script size data
+func ExtractScriptData(version uint16, script []byte, chainParams *chaincfg.Params) (ScriptType, []string, int) {
+	class, addrs := stdscript.ExtractAddrs(version, script, chainParams)
+	if class == stdscript.STNonStandard {
+		return ScriptUnsupported, nil, 0
 	}
-	if class == txscript.NonStandardTy {
-		return ScriptUnsupported, nil, 0, nil
-	}
-
-	// Could switch on class from ExtractPkScriptAddrs, but use ParseScriptType
-	// for internal consistency.
-	scriptType := ParseScriptType(version, script, nil)
-
+	numRequired := stdscript.DetermineRequiredSigs(version, script)
+	scriptType := convertScriptType(class)
 	addresses := make([]string, len(addrs))
 	for i, addr := range addrs {
 		addresses[i] = addr.String()
 	}
 
-	return scriptType, addresses, numRequired, nil
+	return scriptType, addresses, int(numRequired)
 }
 
-// DCRScriptAddrs is information about the pubkeys or pubkey hashes present in
-// a scriptPubKey (and the redeem script, for p2sh). This information can be
-// used to estimate the spend script size, e.g. pubkeys in a redeem script don't
+// ScriptAddrs is information about the pubkeys or pubkey hashes present in a
+// scriptPubKey (and the redeem script, for p2sh). This information can be used
+// to estimate the spend script size, e.g. pubkeys in a redeem script don't
 // require pubkeys in the scriptSig, but pubkey hashes do.
-type DCRScriptAddrs struct {
+type ScriptAddrs struct {
 	PubKeys   []stdaddr.Address
-	NumPK     int
 	PkHashes  []stdaddr.Address
-	NumPKH    int
 	NRequired int
 }
 
@@ -649,17 +456,12 @@ type DCRScriptAddrs struct {
 // use on P2SH pkScripts. Rather, the corresponding redeem script should be
 // processed with ExtractScriptAddrs. The returned bool indicates if the script
 // is non-standard.
-func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, bool, error) {
+func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Params) (ScriptType, *ScriptAddrs) {
 	pubkeys := make([]stdaddr.Address, 0)
 	pkHashes := make([]stdaddr.Address, 0)
-	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(version, script, chainParams, false)
-	nonStandard := class == txscript.NonStandardTy
-	if err != nil {
-		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
-	}
-	if nonStandard {
-		return &DCRScriptAddrs{}, nonStandard, nil
+	class, addrs := stdscript.ExtractAddrs(version, script, chainParams)
+	if class == stdscript.STNonStandard {
+		return ScriptUnsupported, &ScriptAddrs{}
 	}
 	for _, addr := range addrs {
 		// If the address is an unhashed public key, is won't need a pubkey as
@@ -671,21 +473,26 @@ func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Par
 			pkHashes = append(pkHashes, addr)
 		}
 	}
-	return &DCRScriptAddrs{
+	numRequired := stdscript.DetermineRequiredSigs(version, script)
+	scriptType := convertScriptType(class)
+	return scriptType, &ScriptAddrs{
 		PubKeys:   pubkeys,
-		NumPK:     len(pubkeys),
 		PkHashes:  pkHashes,
-		NumPKH:    len(pkHashes),
-		NRequired: numRequired,
-	}, false, nil
+		NRequired: int(numRequired),
+	}
 }
 
 // SpendInfo is information about an input and it's previous outpoint.
 type SpendInfo struct {
 	SigScriptSize     uint32
-	ScriptAddrs       *DCRScriptAddrs
-	ScriptType        DCRScriptType
-	NonStandardScript bool
+	ScriptAddrs       *ScriptAddrs
+	ScriptType        ScriptType
+	NonStandardScript bool // refers to redeem script for P2SH ScriptType
+}
+
+// Size is the serialized size of the input.
+func (nfo *SpendInfo) Size() uint32 {
+	return TxInOverhead + uint32(wire.VarIntSerializeSize(uint64(nfo.SigScriptSize))) + nfo.SigScriptSize
 }
 
 // DataPrefixSize returns the size of the size opcodes that would precede the
@@ -701,83 +508,62 @@ func DataPrefixSize(data []byte) uint8 {
 	return uint8(prefixSize)
 }
 
-// Size is the serialized size of the input.
-func (nfo *SpendInfo) Size() uint32 {
-	return TxInOverhead + uint32(wire.VarIntSerializeSize(uint64(nfo.SigScriptSize))) + nfo.SigScriptSize
-}
-
 // InputInfo is some basic information about the input required to spend an
-// output. The pubkey script of the output is provided. If the pubkey script
-// parses as P2SH or P2WSH, the redeem script must be provided.
+// output. Only P2PKH and P2SH pkScripts are supported. If the pubkey script
+// parses as P2SH, the redeem script must be provided.
 func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*SpendInfo, error) {
-	scriptType := ParseScriptType(version, pkScript, redeemScript)
-	if scriptType == ScriptUnsupported {
+	scriptType, scriptAddrs := ExtractScriptAddrs(version, pkScript, chainParams)
+	switch {
+	case scriptType == ScriptUnsupported:
 		return nil, dex.UnsupportedScriptError
+	case scriptType.IsP2PKH():
+		return &SpendInfo{
+			SigScriptSize: P2PKHSigScriptSize,
+			ScriptAddrs:   scriptAddrs,
+			ScriptType:    scriptType,
+		}, nil
+	case scriptType.IsP2SH():
+	default:
+		return nil, fmt.Errorf("unsupported pkScript: %d", scriptType) // dex.UnsupportedScriptError too?
 	}
 
-	// Get information about the signatures and pubkeys needed to spend the utxo.
-	evalScript := pkScript
-	if scriptType.IsP2SH() {
-		if len(redeemScript) == 0 {
-			return nil, fmt.Errorf("no redeem script provided for P2SH pubkey script")
-		}
-		evalScript = redeemScript
+	// P2SH
+	if len(redeemScript) == 0 {
+		return nil, fmt.Errorf("no redeem script provided for P2SH pubkey script")
 	}
-	scriptAddrs, nonStandard, err := ExtractScriptAddrs(version, evalScript, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing utxo script addresses: %w", err)
-	}
-	if nonStandard {
+
+	var redeemScriptType ScriptType
+	redeemScriptType, scriptAddrs = ExtractScriptAddrs(version, redeemScript, chainParams)
+	if redeemScriptType == ScriptUnsupported {
 		return &SpendInfo{
 			// SigScriptSize cannot be determined, leave zero.
 			ScriptAddrs:       scriptAddrs,
-			ScriptType:        scriptType,
-			NonStandardScript: true,
+			ScriptType:        scriptType, // still P2SH
+			NonStandardScript: true,       // but non-standard redeem script (e.g. contract)
 		}, nil
 	}
 
-	// Get the size of the signature script.
-	sigScriptSize := P2PKHSigScriptSize
-	// If it's a P2SH, the size must be calculated based on other factors.
-	if scriptType.IsP2SH() {
-		// Start with the signatures.
-		sigScriptSize = 74 * scriptAddrs.NRequired // 73 max for sig, 1 for push code
-		// If there are pubkey-hash addresses, they'll need pubkeys.
-		if scriptAddrs.NumPKH > 0 {
-			sigScriptSize += scriptAddrs.NRequired * (pubkeyLength + 1)
-		}
-		// Then add the length of the script and another push opcode byte.
-		sigScriptSize += len(redeemScript) + int(DataPrefixSize(redeemScript)) // push data length op code might be >1 byte
-	} else if !scriptType.IsP2PKH() {
-		// Some defensive checks here.
-		if scriptType.IsMultiSig() {
-			// Should have been caught by ParseScriptType.
-			return nil, fmt.Errorf("bare multisig is unsupported")
-		}
-		// P2PK also should have been caught by ParseScriptType.
-		return nil, fmt.Errorf("unsupported pkScript: %d", scriptType)
+	// NOTE: scriptAddrs are now from the redeemScript, and we add the multisig
+	// bit to scriptType.
+	if redeemScriptType.IsMultiSig() {
+		scriptType |= ScriptMultiSig
 	}
+
+	// If it's a P2SH, with a standard redeem script, compute the sigScript size
+	// for the expected number of signatures, pubkeys, and the redeem script
+	// itself. Start with the signatures.
+	sigScriptSize := (1 + DERSigLength) * scriptAddrs.NRequired // 73 max for sig, 1 for push code
+	// If there are pubkey-hash addresses, they'll need pubkeys.
+	if len(scriptAddrs.PkHashes) > 0 {
+		sigScriptSize += scriptAddrs.NRequired * (pubkeyLength + 1)
+	}
+	// Then add the length of the script and the push opcode byte(s).
+	sigScriptSize += len(redeemScript) + int(DataPrefixSize(redeemScript)) // push data length op code might be >1 byte
 	return &SpendInfo{
 		SigScriptSize: uint32(sigScriptSize),
 		ScriptAddrs:   scriptAddrs,
 		ScriptType:    scriptType,
 	}, nil
-}
-
-// ExtractContractHash extracts the contract P2SH address from a pkScript. A
-// non-nil error is returned if the hexadecimal encoding of the pkScript is
-// invalid, or if the pkScript is not a P2SH script.
-func ExtractContractHash(scriptHex string) ([]byte, error) {
-	pkScript, err := hex.DecodeString(scriptHex)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %w",
-			scriptHex, err)
-	}
-	scriptHash := ExtractScriptHash(pkScript)
-	if scriptHash == nil {
-		return nil, fmt.Errorf("error extracting script hash")
-	}
-	return scriptHash, nil
 }
 
 // FindKeyPush attempts to extract the secret key from the signature script. The
