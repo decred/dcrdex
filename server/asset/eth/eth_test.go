@@ -686,3 +686,31 @@ func TestTxData(t *testing.T) {
 		t.Fatalf("TxData error: %v", err)
 	}
 }
+
+func TestValidateContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		secretHash []byte
+		wantErr    bool
+	}{{
+		name:       "ok",
+		secretHash: make([]byte, 32),
+	}, {
+		name:       "wrong size",
+		secretHash: make([]byte, 31),
+		wantErr:    true,
+	}}
+	for _, test := range tests {
+		eth := new(Backend)
+		err := eth.ValidateContract(test.secretHash)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+	}
+}

@@ -18,7 +18,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	swap "decred.org/dcrdex/dex/networks/eth"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -74,7 +74,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 
 // UnitInfo returns the dex.UnitInfo for the asset.
 func (d *Driver) UnitInfo() dex.UnitInfo {
-	return swap.UnitInfo
+	return dexeth.UnitInfo
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
@@ -94,7 +94,7 @@ type ethFetcher interface {
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
-	swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error)
+	swap(ctx context.Context, secretHash [32]byte) (*dexeth.ETHSwapSwap, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 }
 
@@ -345,10 +345,12 @@ func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 	return coinId.String(), nil
 }
 
-// ValidateContract ensures that the swap contract is constructed properly, and
-// contains valid sender and receiver addresses.
-func (eth *Backend) ValidateContract(contract []byte) error {
-	return notImplementedErr
+// ValidateContract ensures that the secret hash is the correct length.
+func (eth *Backend) ValidateContract(secretHash []byte) error {
+	if len(secretHash) != SecretHashSize {
+		return fmt.Errorf("secret hash is wrong size: want %d but got %d", SecretHashSize, len(secretHash))
+	}
+	return nil
 }
 
 // CheckAddress checks that the given address is parseable.
