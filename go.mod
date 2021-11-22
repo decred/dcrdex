@@ -2,6 +2,8 @@ module decred.org/dcrdex
 
 go 1.16
 
+replace decred.org/dcrwallet/v2 => github.com/chappjc/dcrwallet/v2 v2.0.0-20211122192754-fa87b84ca6df
+
 require (
 	decred.org/dcrwallet/v2 v2.0.0-20211027145433-305bed7bace0
 	github.com/btcsuite/btcd v0.22.0-beta.0.20211026140004-31791ba4dc6e
@@ -14,19 +16,19 @@ require (
 	github.com/btcsuite/btcwallet/walletdb v1.4.0
 	github.com/btcsuite/btcwallet/wtxmgr v1.3.0
 	github.com/davecgh/go-spew v1.1.1
-	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0-20211118191843-5bd1da85e135
-	github.com/decred/dcrd/blockchain/v4 v4.0.0-20211118191843-5bd1da85e135
-	github.com/decred/dcrd/certgen v1.1.2-0.20210914212651-723d86274b0d
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.4-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
+	github.com/decred/dcrd/blockchain/v4 v4.0.0-20211120053236-81ae286f2347
+	github.com/decred/dcrd/certgen v1.1.1
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
 	github.com/decred/dcrd/chaincfg/v3 v3.1.0
-	github.com/decred/dcrd/crypto/blake256 v1.0.1-0.20210914212651-723d86274b0d
-	github.com/decred/dcrd/dcrec v1.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/crypto/blake256 v1.0.0
+	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
 	github.com/decred/dcrd/dcrjson/v4 v4.0.0
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0
-	github.com/decred/dcrd/gcs/v3 v3.0.0-20211118191843-5bd1da85e135
-	github.com/decred/dcrd/hdkeychain/v3 v3.0.1-0.20210914212651-723d86274b0d
+	github.com/decred/dcrd/gcs/v3 v3.0.0
+	github.com/decred/dcrd/hdkeychain/v3 v3.0.1
 	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0
 	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20211118191843-5bd1da85e135
 	github.com/decred/dcrd/txscript/v4 v4.0.0
