@@ -59,6 +59,9 @@ const (
 	// which holds the ETH, an amount of ETH in gwei, and a random nonce to
 	// avoid duplicate coin IDs.
 	CIDAmount
+	// SecretHashSize is the byte-length of the hash of the secret key used
+	// in swaps.
+	SecretHashSize = 32
 )
 
 // CoinID is an interface that objects which represent different types of ETH

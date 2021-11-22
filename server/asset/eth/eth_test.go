@@ -688,25 +688,21 @@ func TestTxData(t *testing.T) {
 }
 
 func TestValidateContract(t *testing.T) {
-	contractAddr := new(common.Address)
-	copy(contractAddr[:], encode.RandomBytes(20))
 	tests := []struct {
-		name    string
-		txdata  []byte
-		wantErr bool
+		name       string
+		secretHash []byte
+		wantErr    bool
 	}{{
-		name:   "ok",
-		txdata: initCalldata,
+		name:       "ok",
+		secretHash: make([]byte, 32),
 	}, {
-		name:    "bad contract",
-		txdata:  initCalldata[1:],
-		wantErr: true,
+		name:       "wrong size",
+		secretHash: make([]byte, 31),
+		wantErr:    true,
 	}}
 	for _, test := range tests {
-		eth := &Backend{
-			contractAddr: *contractAddr,
-		}
-		err := eth.ValidateContract(test.txdata)
+		eth := new(Backend)
+		err := eth.ValidateContract(test.secretHash)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

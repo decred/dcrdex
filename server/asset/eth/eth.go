@@ -345,12 +345,10 @@ func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 	return coinId.String(), nil
 }
 
-// ValidateContract ensures that the swap contract is constructed properly, and
-// contains valid counterparty, secret hash, and locktime.
-func (eth *Backend) ValidateContract(txdata []byte) error {
-	_, err := dexeth.ParseInitiateData(txdata)
-	if err != nil {
-		return fmt.Errorf("unable to parse contract txdata: %w", err)
+// ValidateContract ensures that the secret hash is the correct length.
+func (eth *Backend) ValidateContract(secretHash []byte) error {
+	if len(secretHash) != SecretHashSize {
+		return fmt.Errorf("secret hash is wrong size: want %d but got %d", SecretHashSize, len(secretHash))
 	}
 	return nil
 }
