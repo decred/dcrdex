@@ -110,12 +110,6 @@ func (c *rpcclient) balance(ctx context.Context, addr *common.Address) (*big.Int
 	return c.ec.BalanceAt(ctx, *addr, nil)
 }
 
-// pendingBalance gets the current balance of an address, including the effects
-// of known unmined transactions.
-func (c *rpcclient) pendingBalance(ctx context.Context, addr *common.Address) (*big.Int, error) {
-	return c.ec.PendingBalanceAt(ctx, *addr)
-}
-
 // unlock uses a raw request to unlock an account indefinitely.
 func (c *rpcclient) unlock(ctx context.Context, pw string, acct *accounts.Account) error {
 	// Passing 0 as the last argument unlocks with not lock time.

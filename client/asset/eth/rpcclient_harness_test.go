@@ -35,7 +35,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -48,7 +47,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -308,15 +306,6 @@ func TestBalance(t *testing.T) {
 	}
 	spew.Dump(bal)
 }
-
-func TestPendingBalance(t *testing.T) {
-	bal, err := ethClient.pendingBalance(ctx, &simnetAddr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spew.Dump(bal)
-}
-
 func TestUnlock(t *testing.T) {
 	err := ethClient.unlock(ctx, pw, simnetAcct)
 	if err != nil {
@@ -425,11 +414,7 @@ func TestPeers(t *testing.T) {
 }
 
 func TestInitiateGas(t *testing.T) {
-	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
-	if err != nil {
-		t.Fatalf("unexpected error parsing abi: %v", err)
-	}
-	err = ethClient.unlock(ctx, pw, simnetAcct)
+	err := ethClient.unlock(ctx, pw, simnetAcct)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +432,7 @@ func TestInitiateGas(t *testing.T) {
 				Value:           big.NewInt(1),
 			})
 		}
-		data, err := parsedAbi.Pack("initiate", initiations)
+		data, err := dexeth.PackInitiateData(initiations)
 		if err != nil {
 			t.Fatalf("unexpected error packing abi: %v", err)
 		}
@@ -774,10 +759,6 @@ func TestRedeemGas(t *testing.T) {
 	}
 
 	// Test gas usage of redeem function
-	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
-	if err != nil {
-		t.Fatalf("unexpected error parsing abi: %v", err)
-	}
 	redemptions := make([]dexeth.ETHSwapRedemption, 0, numSecrets)
 	var previous uint64
 	for i := 0; i < numSecrets; i++ {
@@ -785,7 +766,7 @@ func TestRedeemGas(t *testing.T) {
 			Secret:     secrets[i],
 			SecretHash: secretHashes[i],
 		})
-		data, err := parsedAbi.Pack("redeem", redemptions)
+		data, err := dexeth.PackRedeemData(redemptions)
 		if err != nil {
 			t.Fatalf("unexpected error packing abi: %v", err)
 		}

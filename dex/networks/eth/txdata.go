@@ -9,7 +9,9 @@ package eth
 import (
 	"fmt"
 	"math/big"
+	"strings"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -18,6 +20,8 @@ const (
 	numInputArgs     = 1
 	redeemFuncName   = "redeem"
 	numRedeemArgs    = 1
+	refundFuncName   = "refund"
+	numRefundArgs    = 1
 )
 
 // ParseInitiateData accepts call data from a transaction that pays to a
@@ -91,4 +95,63 @@ func ParseRedeemData(calldata []byte) ([]ETHSwapRedemption, error) {
 	}
 
 	return toReturn, nil
+}
+
+// ParseRedeemData accepts call data from a transaction that pays to a
+// contract with extra data. It will error if the call data does not call
+// redeem with expected argument types. It returns the secret and secret hash
+// in that order.
+func ParseRefundData(calldata []byte) ([32]byte, error) {
+	var secretHash [32]byte
+
+	decoded, err := parseCallData(calldata, ETHSwapABI)
+	if err != nil {
+		return secretHash, fmt.Errorf("unable to parse call data: %v", err)
+	}
+	if decoded.name != refundFuncName {
+		return secretHash, fmt.Errorf("expected %v function but got %v", refundFuncName, decoded.name)
+	}
+	args := decoded.inputs
+	// Any difference in number of args and types than what we expect
+	// should be caught by parseCallData, but checking again anyway.
+	//
+	// TODO: If any of the checks prove redundant, remove them.
+	if len(args) != numRedeemArgs {
+		return secretHash, fmt.Errorf("expected %v redeem args but got %v", numRedeemArgs, len(args))
+	}
+	secretHash, ok := args[0].value.([32]byte)
+	if !ok {
+		return secretHash, fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value)
+	}
+
+	return secretHash, nil
+}
+
+// PackInitiateData converts a list of ETHSwapInitiation to call data for the
+// initiate function.
+func PackInitiateData(initiations []ETHSwapInitiation) ([]byte, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(ETHSwapABI))
+	if err != nil {
+		return nil, err
+	}
+	return parsedAbi.Pack(initiateFuncName, initiations)
+}
+
+// PackRedeemData converts a list of ETHSwapRedemption to call data for the
+// redeem function.
+func PackRedeemData(redemptions []ETHSwapRedemption) ([]byte, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(ETHSwapABI))
+	if err != nil {
+		return nil, err
+	}
+	return parsedAbi.Pack(redeemFuncName, redemptions)
+}
+
+// PackRedeemData converts a secret hash to call data for the refund function.
+func PackRefundData(secretHash [32]byte) ([]byte, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(ETHSwapABI))
+	if err != nil {
+		return nil, err
+	}
+	return parsedAbi.Pack(refundFuncName, secretHash)
 }
