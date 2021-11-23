@@ -51,12 +51,12 @@ const (
 	// Per-websocket-connection limits in requests per second. Rate should be a
 	// reasonable sustained rate, while burst should consider bulk reconnect
 	// operations. Consider which routes are authenticated when setting these.
-	wsRateStatus, wsBurstStatus     = 10, 500     // order_status and match_status (combined)
-	wsRateOrder, wsBurstOrder       = 5, 100      // market, limit, and cancel (combined)
-	wsRateInfo, wsBurstInfo         = 10, 200     // low-cost route limiter for: config, fee_rate, spots, candles (combined)
-	wsRateSubs, wsBurstSubs         = 2, 100      // subscriptions: orderbook and price feed (combined)
-	wsRateRegister, wsBurstRegister = 1 / 60.0, 1 // register, rate.Every(time.Minute) but const
-	wsRateConnect, wsBurstConnect   = 4, 100      // connect, account discovery requires bursts - (*Core).discoverAccount
+	wsRateStatus, wsBurstStatus     = 10, 500      // order_status and match_status (combined)
+	wsRateOrder, wsBurstOrder       = 5, 100       // market, limit, and cancel (combined)
+	wsRateInfo, wsBurstInfo         = 10, 200      // low-cost route limiter for: config, fee_rate, spots, candles (combined)
+	wsRateSubs, wsBurstSubs         = 1 / 2.0, 100 // subscriptions: orderbook and price feed (combined)
+	wsRateRegister, wsBurstRegister = 1 / 60.0, 1  // register, rate.Every(time.Minute) but const
+	wsRateConnect, wsBurstConnect   = 1 / 5.0, 100 // connect, account discovery requires bursts - (*Core).discoverAccount
 	// The cumulative rates below would need to be less than sum of above to
 	// actually trip unless it is also applied to unspecified routes.
 	wsRateTotal, wsBurstTotal = 40, 1000
