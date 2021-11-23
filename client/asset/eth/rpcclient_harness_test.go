@@ -827,6 +827,7 @@ func TestRedeem(t *testing.T) {
 		redeemer       *accounts.Account
 		initiations    []dexeth.ETHSwapInitiation
 		redemptions    []dexeth.ETHSwapRedemption
+		isRedeemable   []bool
 		finalStates    []srveth.SwapState
 		addAmt         bool
 	}{
@@ -845,6 +846,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[0],
 					SecretHash: secretHashes[0]},
 			},
+			isRedeemable: []bool{true},
 			finalStates: []srveth.SwapState{
 				srveth.SSRedeemed,
 			},
@@ -871,6 +873,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[2],
 					SecretHash: secretHashes[2]},
 			},
+			isRedeemable: []bool{true, true},
 			finalStates: []srveth.SwapState{
 				srveth.SSRedeemed, srveth.SSRedeemed,
 			},
@@ -891,6 +894,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[3],
 					SecretHash: secretHashes[3]},
 			},
+			isRedeemable: []bool{true},
 			finalStates: []srveth.SwapState{
 				srveth.SSRedeemed,
 			},
@@ -911,6 +915,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[4],
 					SecretHash: secretHashes[4]},
 			},
+			isRedeemable: []bool{false},
 			finalStates: []srveth.SwapState{
 				srveth.SSInitiated,
 			},
@@ -931,6 +936,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[6],
 					SecretHash: secretHashes[5]},
 			},
+			isRedeemable: []bool{false},
 			finalStates: []srveth.SwapState{
 				srveth.SSInitiated,
 			},
@@ -957,6 +963,7 @@ func TestRedeem(t *testing.T) {
 					Secret:     secrets[7],
 					SecretHash: secretHashes[7]},
 			},
+			isRedeemable: []bool{true, true},
 			finalStates: []srveth.SwapState{
 				srveth.SSInitiated, srveth.SSInitiated,
 			},
@@ -997,6 +1004,18 @@ func TestRedeem(t *testing.T) {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
 		txOpts = newTxOpts(ctx, &test.redeemer.Address, nil)
+
+		for i, redemption := range test.redemptions {
+			expected := test.isRedeemable[i]
+			isRedeemable, err := test.redeemerClient.isRedeemable(&test.redeemer.Address, redemption.SecretHash, redemption.Secret)
+			if err != nil {
+				t.Fatalf(`test "%v": error calling isRedeemable: %v`, test.name, err)
+			}
+			if isRedeemable != expected {
+				t.Fatalf(`test "%v": expected isRedeemable to be %v, but got %v`, test.name, expected, isRedeemable)
+			}
+		}
+
 		tx, err := test.redeemerClient.redeem(txOpts, simnetID, test.redemptions)
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)

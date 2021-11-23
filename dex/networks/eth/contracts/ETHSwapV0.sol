@@ -129,6 +129,18 @@ contract ETHSwap {
         bytes32 secretHash;
     }
 
+    // isRedeemable returns whether or not a swap identified by secretHash
+    // can be redeemed using secret.
+    function isRedeemable(bytes32 secretHash, bytes32 secret)
+        public
+        view
+        returns (bool)
+    {
+        return swaps[secretHash].state == State.Filled &&
+               swaps[secretHash].participant == msg.sender &&
+               sha256(abi.encodePacked(secret)) == secretHash;
+    }
+
     // redeem redeems a contract. It checks that the sender is not a contract,
     // and that the secret hash hashes to secretHash. msg.value is tranfered
     // from the contract to the sender.
