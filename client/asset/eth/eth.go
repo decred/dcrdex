@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"math/big"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,7 +29,6 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -146,7 +144,6 @@ type ethFetcher interface {
 	accounts() []*accounts.Account
 	addPeer(ctx context.Context, peer string) error
 	balance(ctx context.Context, addr *common.Address) (*big.Int, error)
-	pendingBalance(ctx context.Context, addr *common.Address) (*big.Int, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
@@ -352,6 +349,85 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return eth.balanceImpl()
 }
 
+// txEffectOnBalance calculates the effects of a transaction on the balance
+// of the sender. It only takes into account the transaction types expected
+// to be sent by this wallet, including withdrawals, initiations, redeems,
+// and refunds.
+func (eth *ExchangeWallet) txEffectOnBalance(tx *types.Transaction) (incoming *big.Int, outgoing *big.Int, err error) {
+	incoming, outgoing = new(big.Int), new(big.Int)
+
+	// Max possible gas fee
+	feeCap := tx.GasFeeCap()
+	gas := big.NewInt(int64(tx.Gas()))
+	outgoing.Mul(feeCap, gas)
+
+	// If the tx contains value, it is either an initiation or withdrawal.
+	// In either case we don't need to parse the tx data, so we can return
+	// here.
+	txValue := tx.Value()
+	if txValue.Cmp(new(big.Int)) > 0 {
+		outgoing.Add(outgoing, txValue)
+		return incoming, outgoing, nil
+	}
+
+	if redemptions, err := dexeth.ParseRedeemData(tx.Data()); err == nil {
+		for _, redemption := range redemptions {
+			swap, err := eth.node.swap(eth.ctx, eth.acct, redemption.SecretHash)
+			if err != nil {
+				return nil, nil, err
+			}
+			incoming.Add(incoming, swap.Value)
+		}
+		return incoming, outgoing, nil
+	}
+
+	if refundHash, err := dexeth.ParseRefundData(tx.Data()); err == nil {
+		swap, err := eth.node.swap(eth.ctx, eth.acct, refundHash)
+		if err != nil {
+			return nil, nil, err
+		}
+		incoming.Add(incoming, swap.Value)
+		return incoming, outgoing, nil
+	}
+
+	eth.log.Warnf("unexpected eth transaction type: %v", tx)
+
+	return incoming, outgoing, nil
+}
+
+// pendingBalances returns the incoming and outgoing funds as a result
+// of currently pending transactions. This is used instead of the eth
+// client's PendingBalanceAt function because pending incoming and outgoing
+// funds must be treated differently in the eth wallet's Balance method.
+func (eth *ExchangeWallet) pendingBalances() (incoming uint64, outgoing uint64, err error) {
+	pendingTxs, err := eth.node.pendingTransactions(eth.ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	for _, tx := range pendingTxs {
+		in, out, err := eth.txEffectOnBalance(tx)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		inGwei, err := srveth.ToGwei(in)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		outGwei, err := srveth.ToGwei(out)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		incoming += inGwei
+		outgoing += outGwei
+	}
+
+	return incoming, outgoing, nil
+}
+
 // balanceImpl returns the total available funds in the account.
 // This function expects eth.lockedFundsMtx to be held.
 func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
@@ -367,13 +443,9 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 		return nil, err
 	}
 
-	pendingBal, err := eth.node.pendingBalance(eth.ctx, &eth.acct.Address)
+	pendingIncoming, pendingOutgoing, err := eth.pendingBalances()
 	if err != nil {
-		return nil, err
-	}
-	gweiPendingBal, err := srveth.ToGwei(pendingBal)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Balance: failed to get pending balances: %v", err)
 	}
 
 	var amountLocked uint64
@@ -385,15 +457,10 @@ func (eth *ExchangeWallet) balanceImpl() (*asset.Balance, error) {
 			fmt.Errorf("amount locked: %v > available: %v", amountLocked, gweiBal)
 	}
 
-	immature := gweiPendingBal - gweiBal
-	if gweiBal > gweiPendingBal {
-		immature = 0
-	}
-
 	bal := &asset.Balance{
-		Available: gweiBal - amountLocked,
+		Available: gweiBal - amountLocked - pendingOutgoing,
 		Locked:    amountLocked,
-		Immature:  immature,
+		Immature:  pendingIncoming,
 	}
 	return bal, nil
 }
@@ -412,10 +479,6 @@ func (eth *ExchangeWallet) getInitGas(numSwaps int) (uint64, error) {
 
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
-	if err != nil {
-		return 0, err
-	}
 	initiations := make([]dexeth.ETHSwapInitiation, 0, numSwaps)
 	for i := 0; i < numSwaps; i++ {
 		initiations = append(initiations, dexeth.ETHSwapInitiation{
@@ -425,7 +488,7 @@ func (eth *ExchangeWallet) getInitGas(numSwaps int) (uint64, error) {
 			Value:           big.NewInt(1),
 		})
 	}
-	data, err := parsedAbi.Pack("initiate", initiations)
+	data, err := dexeth.PackInitiateData(initiations)
 	if err != nil {
 		return 0, err
 	}

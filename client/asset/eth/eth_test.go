@@ -8,6 +8,7 @@ package eth
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -19,8 +20,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	swap "decred.org/dcrdex/dex/networks/eth"
-	dexeth "decred.org/dcrdex/server/asset/eth"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	srveth "decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -36,6 +36,10 @@ import (
 var (
 	_       ethFetcher = (*testNode)(nil)
 	tLogger            = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
+
+	testAddressA = common.HexToAddress("dd93b447f7eBCA361805eBe056259853F3912E04")
+	testAddressB = common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
+	testAddressC = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 )
 
 type testNode struct {
@@ -54,12 +58,14 @@ type testNode struct {
 	peersErr          error
 	bal               *big.Int
 	balErr            error
-	pendingBal        *big.Int
-	pendingBalErr     error
+	pendingTxs        []*types.Transaction
+	pendingTxsErr     error
 	initGas           uint64
 	initGasErr        error
 	signDataErr       error
 	privKeyForSigning *ecdsa.PrivateKey
+	swapMap           map[[32]byte]dexeth.ETHSwapSwap
+	swapErr           error
 }
 
 func (n *testNode) connect(ctx context.Context, node *node.Node, addr *common.Address) error {
@@ -82,17 +88,6 @@ func (n *testNode) balance(ctx context.Context, acct *common.Address) (*big.Int,
 	balCopy := new(big.Int)
 	balCopy.Set(n.bal)
 	return balCopy, n.balErr
-}
-func (n *testNode) pendingBalance(ctx context.Context, acct *common.Address) (*big.Int, error) {
-	if n.pendingBalErr != nil {
-		return nil, n.pendingBalErr
-	}
-	if n.pendingBal == nil {
-		return n.balance(ctx, acct)
-	}
-	balCopy := new(big.Int)
-	balCopy.Set(n.pendingBal)
-	return balCopy, nil
 }
 func (n *testNode) sendTransaction(ctx context.Context, tx map[string]string) (common.Hash, error) {
 	return common.Hash{}, nil
@@ -119,19 +114,29 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 	return n.syncProg, n.syncProgErr
 }
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
+	if n.pendingTxsErr != nil {
+		return nil, n.pendingTxsErr
+	}
+	return n.pendingTxs, nil
+}
+func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, initiations []dexeth.ETHSwapInitiation) (*types.Transaction, error) {
 	return nil, nil
 }
-func (n *testNode) initiate(opts *bind.TransactOpts, netID int64, initiations []swap.ETHSwapInitiation) (*types.Transaction, error) {
-	return nil, nil
-}
-func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, redemptions []swap.ETHSwapRedemption) (*types.Transaction, error) {
+func (n *testNode) redeem(opts *bind.TransactOpts, netID int64, redemptions []dexeth.ETHSwapRedemption) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) refund(opts *bind.TransactOpts, netID int64, secretHash [32]byte) (*types.Transaction, error) {
 	return nil, nil
 }
-func (n *testNode) swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
-	return nil, nil
+func (n *testNode) swap(ctx context.Context, from *accounts.Account, secretHash [32]byte) (*dexeth.ETHSwapSwap, error) {
+	if n.swapErr != nil {
+		return nil, n.swapErr
+	}
+	swap, ok := n.swapMap[secretHash]
+	if !ok {
+		return nil, errors.New("swap not in map")
+	}
+	return &swap, nil
 }
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	return nil, nil
@@ -276,7 +281,7 @@ func TestSyncStatus(t *testing.T) {
 		wantRatio: 0.25,
 	}, {
 		name:    "ok header too old",
-		subSecs: dexeth.MaxBlockInterval,
+		subSecs: srveth.MaxBlockInterval,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
@@ -321,90 +326,201 @@ func TestSyncStatus(t *testing.T) {
 	}
 }
 
+func createSecretsAndHashes(numSecrets int) (secrets [][32]byte, secretHashes [][32]byte) {
+	secrets = make([][32]byte, 0, numSecrets)
+	secretHashes = make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
+	return secrets, secretHashes
+}
+
 func TestBalance(t *testing.T) {
+	// TODO: replace this with common functions once refactor PR is merged
+	gweiToWei := func(v uint64) *big.Int {
+		bigGweiFactor := big.NewInt(srveth.GweiFactor)
+		return big.NewInt(0).Mul(big.NewInt(int64(v)), bigGweiFactor)
+	}
+
+	newTx := func(gasFeeCapGwei uint64, gas uint64, valueGwei uint64, data []byte) *types.Transaction {
+		simnetChainID := big.NewInt(42)
+		return types.NewTx(&types.DynamicFeeTx{
+			ChainID:   simnetChainID,
+			GasFeeCap: gweiToWei(gasFeeCapGwei),
+			To:        &testAddressA,
+			Value:     gweiToWei(valueGwei),
+			Data:      data,
+			Gas:       gas,
+		})
+	}
+
+	newInitiateTx := func(gasFeeCapGwei uint64, gas uint64, valueGwei uint64, initiations []dexeth.ETHSwapInitiation) *types.Transaction {
+		data, err := dexeth.PackInitiateData(initiations)
+		if err != nil {
+			t.Fatalf("failed to pack initiate data: %v", err)
+		}
+		return newTx(gasFeeCapGwei, gas, valueGwei, data)
+	}
+
+	newRedeemTx := func(gasFeeCapGwei uint64, gas uint64, valueGwei uint64, redemptions []dexeth.ETHSwapRedemption) *types.Transaction {
+		data, err := dexeth.PackRedeemData(redemptions)
+		if err != nil {
+			t.Fatalf("failed to pack initiate data: %v", err)
+		}
+		return newTx(gasFeeCapGwei, gas, valueGwei, data)
+	}
+
+	newRefundTx := func(gasFeeCapGwei uint64, gas uint64, valueGwei uint64, secretHash [32]byte) *types.Transaction {
+		data, err := dexeth.PackRefundData(secretHash)
+		if err != nil {
+			t.Fatalf("failed to pack initiate data: %v", err)
+		}
+		return newTx(gasFeeCapGwei, gas, valueGwei, data)
+	}
+
 	maxInt := ^uint64(0)
 	maxWei := new(big.Int).SetUint64(maxInt)
-	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
+	gweiFactorBig := big.NewInt(srveth.GweiFactor)
 	maxWei.Mul(maxWei, gweiFactorBig)
 	overMaxWei := new(big.Int).Set(maxWei)
 	overMaxWei.Add(overMaxWei, gweiFactorBig)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := &testNode{}
+	node.swapMap = make(map[[32]byte]dexeth.ETHSwapSwap)
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+		acct: new(accounts.Account),
+	}
+
+	addSwapToSwapMap := func(secretHash [32]byte, value *big.Int) {
+		swap := dexeth.ETHSwapSwap{
+			InitBlockNumber:      big.NewInt(1),
+			RefundBlockTimestamp: big.NewInt(1),
+			Initiator:            testAddressA,
+			Participant:          testAddressB,
+			Value:                value,
+			State:                uint8(srveth.SSInitiated),
+		}
+		node.swapMap[secretHash] = swap
+	}
+
+	secrets, secretHashes := createSecretsAndHashes(2)
+	addSwapToSwapMap(secretHashes[0], gweiToWei(1e8))
+	addSwapToSwapMap(secretHashes[1], gweiToWei(2e8))
+
 	tests := []struct {
 		name          string
 		bal           *big.Int
-		pendingBal    *big.Int
+		pendingTxs    []*types.Transaction
+		pendingTxsErr error
 		balErr        error
-		pendingBalErr error
+		swapErr       error
 		wantBal       uint64
 		wantImmature  uint64
 		wantErr       bool
 	}{{
 		name:         "ok zero",
 		bal:          big.NewInt(0),
-		pendingBal:   big.NewInt(0),
+		pendingTxs:   []*types.Transaction{},
 		wantBal:      0,
 		wantImmature: 0,
 	}, {
 		name:         "ok rounded down",
-		bal:          big.NewInt(dexeth.GweiFactor - 1),
-		pendingBal:   big.NewInt(dexeth.GweiFactor - 1),
+		bal:          big.NewInt(srveth.GweiFactor - 1),
+		pendingTxs:   []*types.Transaction{},
 		wantBal:      0,
 		wantImmature: 0,
 	}, {
 		name:         "ok one",
-		bal:          big.NewInt(dexeth.GweiFactor),
-		pendingBal:   big.NewInt(dexeth.GweiFactor),
+		bal:          big.NewInt(srveth.GweiFactor),
+		pendingTxs:   []*types.Transaction{},
 		wantBal:      1,
 		wantImmature: 0,
 	}, {
-		name:         "ok pending > bal",
-		bal:          big.NewInt(dexeth.GweiFactor),
-		pendingBal:   big.NewInt(2 * dexeth.GweiFactor),
-		wantBal:      1,
-		wantImmature: 1,
-	}, {
-		// This should never happen, but better to show 0 than MaxI
-		name:         "ok pending < bal",
-		bal:          big.NewInt(2 * dexeth.GweiFactor),
-		pendingBal:   big.NewInt(1 * dexeth.GweiFactor),
-		wantBal:      2,
+		name: "ok pending initiation",
+		bal:  gweiToWei(4e8),
+		pendingTxs: []*types.Transaction{
+			newInitiateTx(300, 200000, 2e8, []dexeth.ETHSwapInitiation{
+				{RefundTimestamp: big.NewInt(1),
+					SecretHash:  [32]byte{},
+					Participant: testAddressC,
+					Value:       gweiToWei(1e8)},
+				{RefundTimestamp: big.NewInt(1),
+					SecretHash:  [32]byte{},
+					Participant: testAddressC,
+					Value:       gweiToWei(1e8)}})},
+		wantBal:      1.4e8,
 		wantImmature: 0,
+	}, {
+		name: "ok pending redeem",
+		bal:  gweiToWei(4e8),
+		pendingTxs: []*types.Transaction{
+			newRedeemTx(300, 200000, 0, []dexeth.ETHSwapRedemption{
+				{Secret: secrets[0],
+					SecretHash: secretHashes[0]},
+				{Secret: secrets[1],
+					SecretHash: secretHashes[1]}})},
+		wantBal:      3.4e8,
+		wantImmature: 3e8,
+	}, {
+		name: "ok pending withdrawal and refund",
+		bal:  gweiToWei(4e8),
+		pendingTxs: []*types.Transaction{
+			newRefundTx(300, 200000, 0, secretHashes[0]),
+			newTx(300, 21000, 1e8, []byte{}),
+		},
+		wantBal:      233700000,
+		wantImmature: 1e8,
+	}, {
+		name: "pending redeem with swap error",
+		bal:  gweiToWei(4e8),
+		pendingTxs: []*types.Transaction{
+			newRedeemTx(300, 200000, 0, []dexeth.ETHSwapRedemption{
+				{Secret: secrets[0],
+					SecretHash: secretHashes[0]},
+				{Secret: secrets[1],
+					SecretHash: secretHashes[1]}})},
+		swapErr: errors.New("swap error"),
+		wantErr: true,
 	}, {
 		name:         "ok max int",
 		bal:          maxWei,
-		pendingBal:   maxWei,
+		pendingTxs:   []*types.Transaction{},
 		wantBal:      maxInt,
 		wantImmature: 0,
 	}, {
-		name:    "over max int",
-		bal:     overMaxWei,
-		wantErr: true,
+		name:       "over max int",
+		bal:        overMaxWei,
+		pendingTxs: []*types.Transaction{},
+		wantErr:    true,
 	}, {
 		name:    "node balance error",
 		bal:     big.NewInt(0),
 		balErr:  errors.New(""),
 		wantErr: true,
 	}, {
-		name:          "node pending balance error",
+		name:          "node pending transactions error",
 		bal:           big.NewInt(0),
-		pendingBalErr: errors.New(""),
+		pendingTxsErr: errors.New(""),
 		wantErr:       true,
 	}}
 
 	for _, test := range tests {
-		ctx, cancel := context.WithCancel(context.Background())
-		node := &testNode{}
 		node.bal = test.bal
-		node.pendingBal = test.pendingBal
 		node.balErr = test.balErr
-		node.pendingBalErr = test.pendingBalErr
-		eth := &ExchangeWallet{
-			node: node,
-			ctx:  ctx,
-			log:  tLogger,
-			acct: new(accounts.Account),
-		}
+		node.pendingTxs = test.pendingTxs
+		node.pendingTxsErr = test.pendingTxsErr
+		node.swapErr = test.swapErr
+
 		bal, err := eth.Balance()
-		cancel()
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -442,8 +558,8 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	defer cancel()
 
 	node := &testNode{}
-	walletBalanceGwei := uint64(dexeth.GweiFactor)
-	node.bal = big.NewInt(int64(walletBalanceGwei) * dexeth.GweiFactor)
+	walletBalanceGwei := uint64(srveth.GweiFactor)
+	node.bal = big.NewInt(int64(walletBalanceGwei) * srveth.GweiFactor)
 	address := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
 	account := accounts.Account{
 		Address: common.HexToAddress(address),
@@ -630,7 +746,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
 	differentAddressCoin := coin{
-		id: dexeth.AmountCoinID{
+		id: srveth.AmountCoinID{
 			Address: differentAddress,
 			Amount:  100000,
 			Nonce:   nonce,
@@ -752,11 +868,11 @@ func TestGetInitGas(t *testing.T) {
 
 func TestPreSwap(t *testing.T) {
 	ethToGwei := func(eth uint64) uint64 {
-		return eth * dexeth.GweiFactor
+		return eth * srveth.GweiFactor
 	}
 
 	ethToWei := func(eth int64) *big.Int {
-		return big.NewInt(0).Mul(big.NewInt(eth*dexeth.GweiFactor), big.NewInt(dexeth.GweiFactor))
+		return big.NewInt(0).Mul(big.NewInt(eth*srveth.GweiFactor), big.NewInt(srveth.GweiFactor))
 	}
 
 	estimatedInitGas := uint64(180000)
@@ -958,11 +1074,11 @@ func TestPreRedeem(t *testing.T) {
 
 func TestMaxOrder(t *testing.T) {
 	ethToGwei := func(eth uint64) uint64 {
-		return eth * dexeth.GweiFactor
+		return eth * srveth.GweiFactor
 	}
 
 	ethToWei := func(eth int64) *big.Int {
-		return big.NewInt(0).Mul(big.NewInt(eth*dexeth.GweiFactor), big.NewInt(dexeth.GweiFactor))
+		return big.NewInt(0).Mul(big.NewInt(eth*srveth.GweiFactor), big.NewInt(srveth.GweiFactor))
 	}
 
 	estimatedInitGas := uint64(180000)
@@ -1223,7 +1339,7 @@ func TestSignMessage(t *testing.T) {
 	differentAddress := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	nonce := [8]byte{}
 	coinDifferentAddress := coin{
-		id: dexeth.AmountCoinID{
+		id: srveth.AmountCoinID{
 			Address: differentAddress,
 			Amount:  100,
 			Nonce:   nonce,
@@ -1235,7 +1351,7 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	coin := coin{
-		id: dexeth.AmountCoinID{
+		id: srveth.AmountCoinID{
 			Address: account.Address,
 			Amount:  100,
 			Nonce:   nonce,
