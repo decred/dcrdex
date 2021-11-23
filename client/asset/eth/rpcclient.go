@@ -293,3 +293,9 @@ func (c *rpcclient) getCodeAt(ctx context.Context, contractAddr *common.Address)
 
 	return c.ec.CodeAt(ctx, *contractAddr, big.NewInt(int64(bn)))
 }
+
+// isRedeemable checks if the swap identified by secretHash is redeemable using secret.
+func (c *rpcclient) isRedeemable(address *common.Address, secretHash [32]byte, secret [32]byte) (bool, error) {
+	callOpts := &bind.CallOpts{From: *address}
+	return c.es.IsRedeemable(callOpts, secretHash, secret)
+}
