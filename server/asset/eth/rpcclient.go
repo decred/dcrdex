@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
-	swap "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/swap"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"

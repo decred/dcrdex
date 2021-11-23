@@ -42,6 +42,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/swap"
 	"decred.org/dcrdex/internal/eth/reentryattack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -1294,7 +1295,7 @@ func testGetCodeAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get bytecode: %v", err)
 	}
-	c, err := hex.DecodeString(dexeth.ETHSwapRuntimeBin)
+	c, err := hex.DecodeString(swap.ETHSwapRuntimeBin)
 	if err != nil {
 		t.Fatalf("Error decoding")
 	}

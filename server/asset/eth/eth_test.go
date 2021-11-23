@@ -19,7 +19,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swap "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/swap"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -130,7 +130,7 @@ func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*bi
 	return n.acctBal, n.acctBalErr
 }
 
-func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.ETHSwapSwap {
+func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *swap.ETHSwapSwap {
 	return &swap.ETHSwapSwap{
 		InitBlockNumber:      big.NewInt(bn),
 		RefundBlockTimestamp: locktime,
@@ -386,7 +386,7 @@ func TestContract(t *testing.T) {
 		name           string
 		coinID         []byte
 		tx             *types.Transaction
-		swap           *dexeth.ETHSwapSwap
+		swap           *swap.ETHSwapSwap
 		swapErr, txErr error
 		wantErr        bool
 	}{{

@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/swap"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -43,17 +44,17 @@ type contractor interface {
 type contractorConstructor func(net dex.Network, addr common.Address, ec *ethclient.Client) (contractor, error)
 
 type contractV0 interface {
-	Initiate(opts *bind.TransactOpts, initiations []dexeth.ETHSwapInitiation) (*types.Transaction, error)
-	Redeem(opts *bind.TransactOpts, redemptions []dexeth.ETHSwapRedemption) (*types.Transaction, error)
-	Swap(opts *bind.CallOpts, secretHash [32]byte) (dexeth.ETHSwapSwap, error)
+	Initiate(opts *bind.TransactOpts, initiations []swap.ETHSwapInitiation) (*types.Transaction, error)
+	Redeem(opts *bind.TransactOpts, redemptions []swap.ETHSwapRedemption) (*types.Transaction, error)
+	Swap(opts *bind.CallOpts, secretHash [32]byte) (swap.ETHSwapSwap, error)
 	Refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error)
 	IsRedeemable(opts *bind.CallOpts, secretHash [32]byte, secret [32]byte) (bool, error)
 }
 
 // contractorV0 is the contractor for contract version 0.
-// Redeem and Refund methods of ETHSwap already have suitable return types.
+// Redeem and Refund methods of swap.ETHSwap already have suitable return types.
 type contractorV0 struct {
-	contractV0   // *dexeth.ETHSwap
+	contractV0   // *swap.ETHSwap
 	abi          abi.ABI
 	ec           *ethclient.Client
 	contractAddr common.Address
@@ -65,11 +66,11 @@ func newV0contractor(net dex.Network, acctAddr common.Address, ec *ethclient.Cli
 	if !exists || contractAddr == (common.Address{}) {
 		return nil, fmt.Errorf("no contract address for version 0, net %s", net)
 	}
-	c, err := dexeth.NewETHSwap(contractAddr, ec)
+	c, err := swap.NewETHSwap(contractAddr, ec)
 	if err != nil {
 		return nil, err
 	}
-	parsedABI, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
+	parsedABI, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func newV0contractor(net dex.Network, acctAddr common.Address, ec *ethclient.Cli
 }
 
 func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Contract) (*types.Transaction, error) {
-	inits := make([]dexeth.ETHSwapInitiation, 0, len(contracts))
+	inits := make([]swap.ETHSwapInitiation, 0, len(contracts))
 	secrets := make(map[[32]byte]bool, len(contracts))
 
 	for _, contract := range contracts {
@@ -105,7 +106,7 @@ func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 			return nil, fmt.Errorf("%q is not an address", contract.Address)
 		}
 
-		inits = append(inits, dexeth.ETHSwapInitiation{
+		inits = append(inits, swap.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(int64(contract.LockTime)),
 			SecretHash:      secretHash,
 			Participant:     common.HexToAddress(contract.Address),
@@ -116,7 +117,7 @@ func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 }
 
 func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption) (*types.Transaction, error) {
-	redemps := make([]dexeth.ETHSwapRedemption, 0, len(redemptions))
+	redemps := make([]swap.ETHSwapRedemption, 0, len(redemptions))
 	for _, r := range redemptions {
 		secretB, secretHashB := r.Secret, r.Spends.SecretHash
 		if len(secretB) != 32 || len(secretHashB) != 32 {
@@ -125,7 +126,7 @@ func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Re
 		var secret, secretHash [32]byte
 		copy(secret[:], secretB)
 		copy(secretHash[:], secretHashB)
-		redemps = append(redemps, dexeth.ETHSwapRedemption{
+		redemps = append(redemps, swap.ETHSwapRedemption{
 			Secret:     secret,
 			SecretHash: secretHash,
 		})
@@ -164,9 +165,9 @@ func (c *contractorV0) isRedeemable(secretHash, secret [32]byte) (bool, error) {
 }
 
 func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
-	redemps := make([]dexeth.ETHSwapRedemption, 0, len(secrets))
+	redemps := make([]swap.ETHSwapRedemption, 0, len(secrets))
 	for _, secret := range secrets {
-		redemps = append(redemps, dexeth.ETHSwapRedemption{
+		redemps = append(redemps, swap.ETHSwapRedemption{
 			Secret:     secret,
 			SecretHash: sha256.Sum256(secret[:]),
 		})
@@ -197,11 +198,11 @@ func (c *contractorV0) estimateRefundGas(ctx context.Context, secretHash [32]byt
 }
 
 func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, error) {
-	initiations := make([]dexeth.ETHSwapInitiation, 0, n)
+	initiations := make([]swap.ETHSwapInitiation, 0, n)
 	for j := 0; j < n; j++ {
 		var secretHash [32]byte
 		copy(secretHash[:], encode.RandomBytes(32))
-		initiations = append(initiations, dexeth.ETHSwapInitiation{
+		initiations = append(initiations, swap.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(1),
 			SecretHash:      secretHash,
 			Participant:     c.acctAddr,
