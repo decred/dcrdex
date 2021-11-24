@@ -1077,6 +1077,56 @@ func TestRedeem(t *testing.T) {
 		}
 	}
 }
+
+func TestRefundGas(t *testing.T) {
+	amt := big.NewInt(1e18)
+	txOpts := newTxOpts(ctx, &simnetAddr, amt)
+	var secret [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+	err := ethClient.unlock(ctx, pw, simnetAcct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initiations := []dexeth.ETHSwapInitiation{{
+		RefundTimestamp: big.NewInt(1),
+		SecretHash:      secretHash,
+		Participant:     participantAddr,
+		Value:           amt,
+	}}
+	_, err = ethClient.initiate(txOpts, simnetID, initiations)
+	if err != nil {
+		t.Fatalf("Unable to initiate swap: %v ", err)
+	}
+	if err := waitForMined(t, time.Second*8, true); err != nil {
+		t.Fatalf("unexpected error while waiting to mine: %v", err)
+	}
+	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
+	if err != nil {
+		t.Fatalf("unexpected error parsing abi: %v", err)
+	}
+
+	data, err := parsedAbi.Pack("refund", secretHash)
+	if err != nil {
+		t.Fatalf("unexpected error packing abi: %v", err)
+	}
+	msg := ethereum.CallMsg{
+		From: simnetAddr,
+		To:   &contractAddr,
+		Gas:  0,
+		Data: data,
+	}
+	gas, err := ethClient.estimateGas(ctx, msg)
+	if err != nil {
+		t.Fatalf("Error estimating gas for refund function: %v", err)
+	}
+	if gas > srveth.RefundGas || gas < srveth.RefundGas/100*95 {
+		t.Fatalf("expected refund gas to be near %d, but got %d",
+			srveth.RefundGas, gas)
+	}
+	fmt.Printf("Gas used for refund: %v \n", gas)
+}
+
 func TestRefund(t *testing.T) {
 	amt := big.NewInt(1e18)
 	locktime := time.Second * 12
