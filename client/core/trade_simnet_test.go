@@ -353,14 +353,15 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 			return err
 		}
 		finalStatus := order.MatchComplete
+		var disconnectClient bool
 		tracker.mtx.Lock()
 		for _, match := range tracker.matches {
 			side, status := match.Side, match.Status
 			client.log("trade %s paused at %s", token(match.MatchID[:]), status)
 			if side == order.Maker {
-				client.log("%s: disconnecting DEX before redeeming Taker's swap", side)
-				client.dc().connMaster.Disconnect()
-				finalStatus = order.MakerRedeemed // maker shouldn't get past this state
+				// Disconnecting the client will lock the
+				// tracker mutex, and so cannot be done with it already locked.
+				disconnectClient = true
 			} else {
 				client.log("%s: resuming trade negotiations to audit Maker's redeem", side)
 				client.noRedeemWait = true
@@ -370,6 +371,11 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 			match.swapErr = nil
 		}
 		tracker.mtx.Unlock()
+		if disconnectClient {
+			client.log("Maker: disconnecting DEX before redeeming Taker's swap")
+			client.dc().connMaster.Disconnect()
+			finalStatus = order.MakerRedeemed // maker shouldn't get past this state
+		}
 		// force next action since trade.tick() will not be called for disconnected dcs.
 		if _, err = client.core.tick(tracker); err != nil {
 			client.log("tick failure: %v", err)

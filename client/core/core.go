@@ -665,6 +665,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				extra = append(extra, msgMatch)
 				continue
 			}
+			mt.checkServerRevoke = false
 			if mt.Status != order.MatchStatus(msgMatch.Status) {
 				conflict := statusConflicts[oid]
 				if conflict == nil {
@@ -4642,14 +4643,19 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
 				continue
 			}
+			// Make sure that a taker will not prematurely send an
+			// initialization until it is confirmed with the server
+			// that the match is not revoked.
+			checkServerRevoke := dbMatch.Side == order.Taker && dbMatch.Status == order.MakerSwapCast
 			tracker.matches[dbMatch.MatchID] = &matchTracker{
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
 				// Ensure logging on the first check of counterparty contract
 				// confirms and own contract expiry.
-				counterConfirms: -1,
-				lastExpireDur:   365 * 24 * time.Hour,
+				counterConfirms:   -1,
+				lastExpireDur:     365 * 24 * time.Hour,
+				checkServerRevoke: checkServerRevoke,
 			}
 		}
 
@@ -5274,6 +5280,19 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 	if connected {
 		v = 1
 		topic = TopicDEXConnected
+	} else {
+		for _, tracker := range dc.trackedTrades() {
+			tracker.mtx.Lock()
+			for _, match := range tracker.matches {
+				// Make sure that a taker will not prematurely send an
+				// initialization until it is confirmed with the server
+				// that the match is not revoked.
+				if match.Side == order.Taker && match.Status == order.MakerSwapCast {
+					match.checkServerRevoke = true
+				}
+			}
+			tracker.mtx.Unlock()
+		}
 	}
 	atomic.StoreUint32(&dc.connected, v)
 	if dc.broadcastingConnect() {
