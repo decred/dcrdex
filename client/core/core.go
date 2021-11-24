@@ -4644,12 +4644,9 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				continue
 			}
 			// Make sure that a taker will not prematurely send an
-			// initialization until it is confimed with the server
+			// initialization until it is confirmed with the server
 			// that the match is not revoked.
-			var checkServerRevoke bool
-			if dbMatch.Side == order.Taker && dbMatch.Status == order.MakerSwapCast {
-				checkServerRevoke = true
-			}
+			checkServerRevoke := dbMatch.Side == order.Taker && dbMatch.Status == order.MakerSwapCast
 			tracker.matches[dbMatch.MatchID] = &matchTracker{
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
@@ -5284,18 +5281,18 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 		v = 1
 		topic = TopicDEXConnected
 	} else {
-		dc.tradeMtx.Lock()
-		for _, tracker := range dc.trades {
+		for _, tracker := range dc.trackedTrades() {
+			tracker.mtx.Lock()
 			for _, match := range tracker.matches {
 				// Make sure that a taker will not prematurely send an
-				// initialization until it is confimed with the server
+				// initialization until it is confirmed with the server
 				// that the match is not revoked.
 				if match.Side == order.Taker && match.Status == order.MakerSwapCast {
 					match.checkServerRevoke = true
 				}
 			}
+			tracker.mtx.Unlock()
 		}
-		dc.tradeMtx.Unlock()
 	}
 	atomic.StoreUint32(&dc.connected, v)
 	if dc.broadcastingConnect() {

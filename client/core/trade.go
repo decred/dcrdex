@@ -97,7 +97,7 @@ type matchTracker struct {
 	// will be logged on the first check or when 0.
 	lastExpireDur time.Duration
 	// checkServerRevoke is set to make sure that a taker will not prematurely
-	// send an initialization until it is confimed with the server that the
+	// send an initialization until it is confirmed with the server that the
 	// match is not revoked.
 	checkServerRevoke bool
 }
