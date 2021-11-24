@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	dexeth "decred.org/dcrdex/server/asset/eth"
+	srveth "decred.org/dcrdex/server/asset/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -471,7 +472,9 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, err := eth.FundOrder(&order)
 	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
-	expectedCoinValue := order.Value + expectedOrderFees
+	expctedRefundFees := srveth.RefundGas * order.DEXConfig.MaxFeeRate
+	expectedFees := expectedOrderFees + expctedRefundFees
+	expectedCoinValue := order.Value + expectedFees
 	checkFundOrderResult(coins1, redeemScripts1, err, fundOrderTest{
 		testName:    "more than enough",
 		coinValue:   expectedCoinValue,
@@ -480,7 +483,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth, walletBalanceGwei-expectedCoinValue, expectedCoinValue, "more than enough")
 
 	// Test fund order with 1 more than available funds
-	order.Value = walletBalanceGwei - expectedCoinValue - expectedOrderFees + 1
+	order.Value = walletBalanceGwei - expectedCoinValue - expectedFees + 1
 	coins, redeemScripts, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins, redeemScripts, err, fundOrderTest{
 		testName: "not enough",
@@ -493,7 +496,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	coins2, redeemScripts2, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins2, redeemScripts2, err, fundOrderTest{
 		testName:    "just enough",
-		coinValue:   order.Value + expectedOrderFees,
+		coinValue:   order.Value + expectedFees,
 		coinAddress: address,
 	})
 	checkBalance(eth, 0, walletBalanceGwei, "just enough")

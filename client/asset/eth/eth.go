@@ -554,8 +554,9 @@ func decodeCoinID(coinID []byte) (*coin, error) {
 // selected coins, but since there are no redeem scripts in Ethereum, nil is returned.
 // Equal number of coins and redeem scripts must be returned.
 func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-	maxFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
-	fundsNeeded := ord.Value + maxFees
+	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
+	refundFees := srveth.RefundGas * ord.DEXConfig.MaxFeeRate
+	fundsNeeded := ord.Value + maxSwapFees + refundFees
 
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
