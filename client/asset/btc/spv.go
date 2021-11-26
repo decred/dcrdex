@@ -263,7 +263,7 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 	return w.Rotator.Write(p)
 }
 
-type WalletCore struct {
+type SPVCore struct {
 	CS       NeutrinoService
 	AcctNum  uint32
 	AcctName string
@@ -275,7 +275,7 @@ type WalletCore struct {
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	*WalletCore
+	*SPVCore
 	chainParams *chaincfg.Params
 
 	wallet extendedWallet
@@ -291,7 +291,7 @@ type spvWallet struct {
 	tipChan    chan *block
 	syncTarget int32
 
-	runningWallet func() (*WalletCore, error)
+	runningWallet func() (*SPVCore, error)
 }
 
 var _ Wallet = (*spvWallet)(nil)
@@ -306,7 +306,7 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		log:         logger,
 		tipChan:     make(chan *block, 8),
 	}
-	w.runningWallet = func() (*WalletCore, error) {
+	w.runningWallet = func() (*SPVCore, error) {
 		netDir := filepath.Join(dbDir, chainParams.Name)
 		return w.startWallet(netDir, connectPeers)
 	}
@@ -316,7 +316,7 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 // LoadExternalSPVWallet can be used to create a Wallet from an a btcwallet- and
 // neutrino-based SPV wallet.
 func LoadExternalSPVWallet(cfg *WalletConfig, chainParams *chaincfg.Params, logger dex.Logger,
-	runningWallet func() (*WalletCore, error)) Wallet {
+	runningWallet func() (*SPVCore, error)) Wallet {
 
 	return &spvWallet{
 		chainParams:   chainParams,
@@ -1034,13 +1034,13 @@ func (w *spvWallet) calcMedianTime(blockHash *chainhash.Hash) (time.Time, error)
 }
 
 // connect will start the wallet and begin syncing.
-func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
-	walletCore, err := w.runningWallet()
+func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
+	w.SPVCore, err = w.runningWallet()
 	if err != nil {
 		return err
 	}
 
-	w.wallet = &walletExtender{walletCore.Wallet, w.chainParams}
+	w.wallet = &walletExtender{w.Wallet, w.chainParams}
 
 	txNotes := w.wallet.txNotifications()
 
@@ -1111,7 +1111,7 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 
 // startWallet initializes the *btcwallet.Wallet and its supporting players and
 // starts syncing.
-func (w *spvWallet) startWallet(netDir string, connectPeers []string) (*WalletCore, error) {
+func (w *spvWallet) startWallet(netDir string, connectPeers []string) (*SPVCore, error) {
 	if err := logNeutrino(netDir); err != nil {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
@@ -1219,7 +1219,7 @@ func (w *spvWallet) startWallet(netDir string, connectPeers []string) (*WalletCo
 		w.log.Info("SPV wallet closed")
 	}
 
-	return &WalletCore{
+	return &SPVCore{
 		CS:       chainService,
 		AcctNum:  defaultAcctNum,
 		AcctName: defaultAcctName,

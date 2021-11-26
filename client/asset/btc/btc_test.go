@@ -605,7 +605,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 		if err == nil {
 			neutrinoClient := &tNeutrinoClient{data}
 			wallet.node = &spvWallet{
-				WalletCore: &WalletCore{
+				SPVCore: &SPVCore{
 					CS: neutrinoClient,
 				},
 				chainParams: &chaincfg.MainNetParams,
