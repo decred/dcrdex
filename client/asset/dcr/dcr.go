@@ -1660,15 +1660,6 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	return txOut, confs, false, nil
 }
 
-// RefundAddress extracts and returns the refund address from a contract.
-func (dcr *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
-	sender, _, _, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
-	if err != nil {
-		return "", fmt.Errorf("error extracting refund address: %w", err)
-	}
-	return sender.String(), nil
-}
-
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
 func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
