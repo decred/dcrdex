@@ -715,10 +715,6 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) RefundAddress(contract dex.Bytes) (string, error) {
-	return "", nil
-}
-
 func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	return true, time.Now().Add(-time.Minute), nil
 }
