@@ -221,8 +221,6 @@ type Wallet interface {
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status.
 	SyncStatus() (synced bool, progress float32, err error)
-	// RefundAddress extracts and returns the refund address from a contract.
-	RefundAddress(contract dex.Bytes) (string, error)
 	// RegFeeConfirmations gets the confirmations for a registration fee
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.

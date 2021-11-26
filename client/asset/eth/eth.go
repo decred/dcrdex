@@ -858,11 +858,6 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	return progress == 1, progress, nil
 }
 
-// RefundAddress extracts and returns the refund address from a contract.
-func (eth *ExchangeWallet) RefundAddress(contract dex.Bytes) (string, error) {
-	return "", asset.ErrNotImplemented
-}
-
 func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
 	return 0, asset.ErrNotImplemented
 }
