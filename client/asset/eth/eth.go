@@ -586,7 +586,7 @@ func (r *swapReceipt) Expiration() time.Time {
 func (r *swapReceipt) Coin() asset.Coin {
 	return &coin{
 		value: r.value,
-		id:    r.txHash[:],
+		id:    r.txHash[:], // server's idea of ETH coin ID encoding
 	}
 }
 

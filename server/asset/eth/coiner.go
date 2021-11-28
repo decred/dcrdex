@@ -59,15 +59,10 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		return nil, fmt.Errorf("unknown swapCoin type: %d", sct)
 	}
 
-	cID, err := dexeth.DecodeCoinID(coinID)
+	txid, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	txCoinID, ok := cID.(*dexeth.TxCoinID)
-	if !ok {
-		return nil, errors.New("coin ID not a txid")
-	}
-	txid := txCoinID.TxID
 	tx, _, err := backend.node.transaction(backend.rpcCtx, txid)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
@@ -97,7 +92,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 
 	switch sct {
 	case sctInit:
-		initiations, err := dexeth.ParseInitiateData(txdata)
+		initiations, err := dexeth.ParseInitiateData(txdata) // TODO: make version aware with version independent return type
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
 		}
@@ -274,11 +269,8 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 
 // ID is the swap's coin ID.
 func (c *swapCoin) ID() []byte {
-	sc := &dexeth.SwapCoinID{
-		ContractAddress: c.contractAddr,
-		SecretHash:      c.secretHash,
-	}
-	return sc.Encode()
+	b, _ := hex.DecodeString(c.txid) // or store it as a field
+	return b
 }
 
 // TxID is the original init transaction txid.
@@ -288,11 +280,7 @@ func (c *swapCoin) TxID() string {
 
 // String is a human readable representation of the swap coin.
 func (c *swapCoin) String() string {
-	sc := &dexeth.SwapCoinID{
-		ContractAddress: c.contractAddr,
-		SecretHash:      c.secretHash,
-	}
-	return sc.String()
+	return c.txid
 }
 
 // Value is the amount paid to the swap, set in initialization. Always zero for
