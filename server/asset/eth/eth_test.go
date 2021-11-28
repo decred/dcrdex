@@ -443,12 +443,6 @@ func TestContract(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
-	tc := dexeth.TxCoinID{
-		TxID: txHash,
-	}
-	txCoinIDBytes := tc.Encode()
-	sc := dexeth.SwapCoinID{}
-	swapCoinIDBytes := sc.Encode()
 	locktime := big.NewInt(initLocktime)
 	tests := []struct {
 		name           string
@@ -463,19 +457,19 @@ func TestContract(t *testing.T) {
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
 		contract: initSecretHashA,
 		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
-		coinID:   txCoinIDBytes,
+		coinID:   txHash[:],
 	}, {
 		name:     "new coiner error, wrong tx type",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
 		contract: initSecretHashA,
 		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
-		coinID:   swapCoinIDBytes,
+		coinID:   txHash[1:],
 		wantErr:  true,
 	}, {
 		name:     "confirmations error, swap error",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
 		contract: initSecretHashA,
-		coinID:   txCoinIDBytes,
+		coinID:   txHash[:],
 		swapErr:  errors.New(""),
 		wantErr:  true,
 	}}
@@ -539,14 +533,11 @@ func TestRedemption(t *testing.T) {
 	receiverAddr, contractAddr := new(common.Address), new(common.Address)
 	copy(receiverAddr[:], encode.RandomBytes(20))
 	copy(contractAddr[:], encode.RandomBytes(20))
-	secretHash, txHash := [32]byte{}, [32]byte{}
+	var secretHash, txHash [32]byte
 	copy(secretHash[:], redeemSecretHashB)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
 	bigO := new(big.Int)
-	txCoinID := dexeth.TxCoinID{
-		TxID: txHash,
-	}
 	tests := []struct {
 		name               string
 		coinID, contractID []byte
@@ -559,26 +550,26 @@ func TestRedemption(t *testing.T) {
 		name:       "ok",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: secretHash[:],
-		coinID:     txCoinID.Encode(),
+		coinID:     txHash[:],
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: secretHash[:],
-		coinID:     new(dexeth.SwapCoinID).Encode(),
+		coinID:     txHash[1:],
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: secretHash[:],
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRefunded, receiverAddr),
-		coinID:     txCoinID.Encode(),
+		coinID:     txHash[:],
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: secretHash[:31],
-		coinID:     txCoinID.Encode(),
+		coinID:     txHash[:],
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}

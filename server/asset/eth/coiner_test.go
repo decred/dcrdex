@@ -40,11 +40,8 @@ func TestNewSwapCoin(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
-	txCoinIDBytes := (&dexeth.TxCoinID{
-		TxID: txHash,
-	}).Encode()
-	sc := dexeth.SwapCoinID{}
-	swapCoinIDBytes := sc.Encode()
+	txCoinIDBytes := txHash[:]
+	badCoinIDBytes := encode.RandomBytes(39)
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
 	wantGas, err := dexeth.ToGwei(big.NewInt(3e10))
@@ -112,7 +109,7 @@ func TestNewSwapCoin(t *testing.T) {
 		wantErr:  true,
 	}, {
 		name:     "unable to decode redeem data, must be redeem for redeem coin type",
-		tx:       tTx(gasPrice, big.NewInt(0), contractAddr, initCalldata),
+		tx:       tTx(gasPrice, new(big.Int), contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: redeemSecretHashB,
 		ct:       sctRedeem,
@@ -124,9 +121,9 @@ func TestNewSwapCoin(t *testing.T) {
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
-		name:     "wrong type of coinID",
+		name:     "invalid coinID",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:   swapCoinIDBytes,
+		coinID:   badCoinIDBytes,
 		contract: initSecretHashA,
 		ct:       sctInit,
 		wantErr:  true,
@@ -236,10 +233,6 @@ func TestConfirmations(t *testing.T) {
 	secretHash, txHash := [32]byte{}, [32]byte{}
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secretHash[:], redeemSecretHashB)
-	tc := dexeth.TxCoinID{
-		TxID: txHash,
-	}
-	txCoinIDBytes := tc.Encode()
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
 	locktime := big.NewInt(initLocktime)
@@ -352,7 +345,7 @@ func TestConfirmations(t *testing.T) {
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
 
-		sc, err := eth.newSwapCoin(txCoinIDBytes, secretHash[:], test.ct)
+		sc, err := eth.newSwapCoin(txHash[:], secretHash[:], test.ct)
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
