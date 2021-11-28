@@ -1090,12 +1090,8 @@ func TestRefundGas(t *testing.T) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	parsedAbi, err := abi.JSON(strings.NewReader(dexeth.ETHSwapABI))
-	if err != nil {
-		t.Fatalf("unexpected error parsing abi: %v", err)
-	}
 
-	data, err := parsedAbi.Pack("refund", secretHash)
+	data, err := dexeth.PackRefundData(secretHash)
 	if err != nil {
 		t.Fatalf("unexpected error packing abi: %v", err)
 	}
