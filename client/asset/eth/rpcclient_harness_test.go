@@ -1444,3 +1444,11 @@ func TestSignMessage(t *testing.T) {
 		t.Fatalf("failed to verify signature")
 	}
 }
+
+func TestSuggestGasTipCap(t *testing.T) {
+	suggestedTipCap, err := ethClient.suggestGasTipCap(ctx)
+	if err != nil {
+		t.Fatalf("failed to get suggested tip cap: %v", err)
+	}
+	fmt.Printf("Suggested gas tip cap: %v \n", suggestedTipCap)
+}
