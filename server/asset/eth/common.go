@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"decred.org/dcrdex/dex/encode"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -226,6 +227,16 @@ func decodeAmountCoinID(coinID []byte) (*AmountCoinID, error) {
 	}, nil
 }
 
+func CreateAmountCoinID(address common.Address, amount uint64) *AmountCoinID {
+	var nonce [8]byte
+	copy(nonce[:], encode.RandomBytes(8))
+	return &AmountCoinID{
+		Address: address,
+		Amount:  amount,
+		Nonce:   nonce,
+	}
+}
+
 // DecodeCoinID decodes the coin id byte slice into an object implementing the
 // CoinID interface.
 func DecodeCoinID(coinID []byte) (CoinID, error) {
@@ -269,15 +280,21 @@ const (
 )
 
 // ToGwei converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as a uint64.
-// Errors if the amount of gwei is too big to fit fully into a uint64. The
-// passed wei parameter value is changed and is no longer useable.
+// Errors if the amount of gwei is too big to fit fully into a uint64.
 func ToGwei(wei *big.Int) (uint64, error) {
 	gweiFactorBig := big.NewInt(GweiFactor)
-	wei.Div(wei, gweiFactorBig)
-	if !wei.IsUint64() {
+	gwei := big.NewInt(0).Div(wei, gweiFactorBig)
+	if !gwei.IsUint64() {
 		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
 	}
-	return wei.Uint64(), nil
+	return gwei.Uint64(), nil
+}
+
+// ToWei converts a uint64 in gwei (1e9 unit) to wei (1e18 unit) as a *big.Int.
+func ToWei(gwei uint64) *big.Int {
+	bigGwei := big.NewInt(0).SetUint64(gwei)
+	gweiFactorBig := big.NewInt(GweiFactor)
+	return new(big.Int).Mul(bigGwei, gweiFactorBig)
 }
 
 // String satisfies the Stringer interface.

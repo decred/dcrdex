@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"decred.org/dcrdex/dex"
 	swap "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -36,6 +37,19 @@ type rpcclient struct {
 	n  *node.Node
 	// es is a wrapper for contract calls.
 	es *swap.ETHSwap
+}
+
+func getNetworkID(network dex.Network) (int64, error) {
+	switch network {
+	case dex.Simnet:
+		return 42, nil
+	case dex.Testnet:
+		return 6284, nil // network ID for goerli testnet
+	case dex.Mainnet:
+		return 1, nil
+	default:
+		return 0, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
 }
 
 // connect connects to a node. It then wraps ethclient's client and
@@ -298,4 +312,10 @@ func (c *rpcclient) getCodeAt(ctx context.Context, contractAddr *common.Address)
 func (c *rpcclient) isRedeemable(address *common.Address, secretHash [32]byte, secret [32]byte) (bool, error) {
 	callOpts := &bind.CallOpts{From: *address}
 	return c.es.IsRedeemable(callOpts, secretHash, secret)
+}
+
+// suggestGasTipCap retrieves the currently suggested gas tip cap after 1559 to
+// allow a timely execution of a transaction.
+func (c *rpcclient) suggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return c.ec.SuggestGasTipCap(ctx)
 }
