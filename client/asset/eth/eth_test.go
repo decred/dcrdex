@@ -175,16 +175,22 @@ func (n *testNode) swap(ctx context.Context, secretHash [32]byte, contractVer ui
 	}
 	return swap, nil
 }
-func (n *testNode) signData(addr common.Address, data []byte) ([]byte, error) {
+
+func (n *testNode) signData(data []byte) (sig, pubKey []byte, err error) {
 	if n.signDataErr != nil {
-		return nil, n.signDataErr
+		return nil, nil, n.signDataErr
 	}
 
 	if n.privKeyForSigning == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	return crypto.Sign(crypto.Keccak256(data), n.privKeyForSigning)
+	sig, err = crypto.Sign(crypto.Keccak256(data), n.privKeyForSigning)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return sig, crypto.FromECDSAPub(&n.privKeyForSigning.PublicKey), nil
 }
 func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
 	return nil
@@ -2346,6 +2352,83 @@ func TestFindRedemption(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timed out on dupe test")
+	}
+}
+
+func TestRedemptionReserves(t *testing.T) {
+	node := newTestNode(nil)
+	node.bal = newBalance(1e9, 0, 0)
+	node.redeemable = true
+	node.swapVers = map[uint32]struct{}{0: {}}
+
+	var secretHash [32]byte
+	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
+	spentCoin := &coin{id: encode.RandomBytes(32)}
+
+	eth := &ExchangeWallet{
+		node: node,
+	}
+
+	var maxFeeRateV0 uint64 = 45
+	gasesV0 := dexeth.VersionedGases[0]
+
+	gasesV1 := &dex.Gases{Redeem: 1e6, RedeemAdd: 85e5}
+	dexeth.VersionedGases[1] = gasesV1
+	var maxFeeRateV1 uint64 = 50
+
+	v0Val, err := eth.ReserveN(3, maxFeeRateV0, 0)
+	if err != nil {
+		t.Fatalf("reservation error: %v", err)
+	}
+
+	lockPerV0 := gasesV0.Redeem * maxFeeRateV0
+	expLock := 3 * lockPerV0
+	if eth.redemptionReserve != expLock {
+		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.redemptionReserve)
+	}
+
+	if v0Val != expLock {
+		t.Fatalf("expected value %d, got %d", lockPerV0, v0Val)
+	}
+
+	v1Val, err := eth.ReserveN(2, maxFeeRateV1, 1)
+	if err != nil {
+		t.Fatalf("reservation error: %v", err)
+	}
+
+	lockPerV1 := gasesV1.Redeem * maxFeeRateV1
+	v1Lock := 2 * lockPerV1
+	if v1Val != v1Lock {
+		t.Fatalf("")
+	}
+
+	expLock += v1Lock
+	if eth.redemptionReserve != expLock {
+		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.redemptionReserve)
+	}
+
+	// Redeem two v0.
+	if _, _, _, err = eth.Redeem(&asset.RedeemForm{
+		Redemptions: []*asset.Redemption{{
+			Spends: &asset.AuditInfo{
+				Coin:     spentCoin,
+				Contract: dexeth.EncodeContractData(0, secretHash),
+			},
+			UnlockedReserves: lockPerV0,
+		}, {
+			Spends: &asset.AuditInfo{
+				Coin:     spentCoin,
+				Contract: dexeth.EncodeContractData(0, secretHash),
+			},
+			UnlockedReserves: lockPerV0,
+		}},
+	}); err != nil {
+		t.Fatalf("Redeem error: %v", err)
+	}
+
+	expLock -= lockPerV0 * 2
+	if eth.redemptionReserve != expLock {
+		t.Fatalf("wrong unreserved. wanted %d, got %d", expLock, eth.redemptionReserve)
 	}
 }
 

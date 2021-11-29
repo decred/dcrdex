@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -134,35 +135,37 @@ type trackedTrade struct {
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
 	// matchTrackers in the matches map.
-	mtx           sync.RWMutex
-	metaData      *db.OrderMetaData
-	dc            *dexConnection
-	db            db.DB
-	latencyQ      *wait.TickerQueue
-	wallets       *walletSet
-	preImg        order.Preimage
-	csum          dex.Bytes // the commitment checksum provided in the preimage request
-	mktID         string
-	coins         map[string]asset.Coin
-	coinsLocked   bool
-	lockTimeTaker time.Duration
-	lockTimeMaker time.Duration
-	change        asset.Coin
-	changeLocked  bool
-	cancel        *trackedCancel
-	matches       map[order.MatchID]*matchTracker
-	notify        func(Notification)
-	formatDetails func(Topic, ...interface{}) (string, string)
-	epochLen      uint64
-	fromAssetID   uint32
-	options       map[string]string
+	mtx                sync.RWMutex
+	metaData           *db.OrderMetaData
+	dc                 *dexConnection
+	db                 db.DB
+	latencyQ           *wait.TickerQueue
+	wallets            *walletSet
+	preImg             order.Preimage
+	csum               dex.Bytes // the commitment checksum provided in the preimage request
+	mktID              string
+	coins              map[string]asset.Coin
+	coinsLocked        bool
+	lockTimeTaker      time.Duration
+	lockTimeMaker      time.Duration
+	change             asset.Coin
+	changeLocked       bool
+	cancel             *trackedCancel
+	matches            map[order.MatchID]*matchTracker
+	notify             func(Notification)
+	formatDetails      func(Topic, ...interface{}) (string, string)
+	epochLen           uint64
+	fromAssetID        uint32
+	options            map[string]string
+	redemptionReserves uint64
+	redemptionLocked   uint64
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
 	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string),
-	options map[string]string) *trackedTrade {
+	options map[string]string, redemptionReserves uint64) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -171,26 +174,124 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 
 	ord := dbOrder.Order
 	t := &trackedTrade{
-		Order:         ord,
-		metaData:      dbOrder.MetaData,
-		dc:            dc,
-		db:            db,
-		latencyQ:      latencyQ,
-		wallets:       wallets,
-		preImg:        preImg,
-		mktID:         marketName(ord.Base(), ord.Quote()),
-		coins:         mapifyCoins(coins), // must not be nil even if empty
-		coinsLocked:   len(coins) > 0,
-		lockTimeTaker: lockTimeTaker,
-		lockTimeMaker: lockTimeMaker,
-		matches:       make(map[order.MatchID]*matchTracker),
-		notify:        notify,
-		epochLen:      epochLen,
-		fromAssetID:   fromID,
-		formatDetails: formatDetails,
-		options:       options,
+		Order:              ord,
+		metaData:           dbOrder.MetaData,
+		dc:                 dc,
+		db:                 db,
+		latencyQ:           latencyQ,
+		wallets:            wallets,
+		preImg:             preImg,
+		mktID:              marketName(ord.Base(), ord.Quote()),
+		coins:              mapifyCoins(coins), // must not be nil even if empty
+		coinsLocked:        len(coins) > 0,
+		lockTimeTaker:      lockTimeTaker,
+		lockTimeMaker:      lockTimeMaker,
+		matches:            make(map[order.MatchID]*matchTracker),
+		notify:             notify,
+		epochLen:           epochLen,
+		fromAssetID:        fromID,
+		formatDetails:      formatDetails,
+		options:            options,
+		redemptionReserves: redemptionReserves,
 	}
 	return t
+}
+
+// accountRedeemer is equivalent to calling
+// xcWallet.Wallet.(asset.AccountRedeemer) on the to-wallet.
+func (t *trackedTrade) accountRedeemer() (asset.AccountRedeemer, bool) {
+	ar, is := t.wallets.toWallet.Wallet.(asset.AccountRedeemer)
+	return ar, is
+}
+
+// lockRedemptionFraction locks the specified fraction of the available
+// redemption reserves. Subsequent calls are additive. If a call to
+// lockRedemptionFraction would put the locked reserves > available reserves,
+// nothing will be reserved, and an error message is logged.
+func (t *trackedTrade) lockRedemptionFraction(num, denom uint64) {
+	redeemer, is := t.accountRedeemer()
+	if !is {
+		return
+	}
+	newReserved := applyFraction(num, denom, t.redemptionReserves)
+	if t.redemptionLocked+newReserved > t.redemptionReserves {
+		t.dc.log.Errorf("attempting to mark as active more reserves than available for order %s:"+
+			"%d available, %d already reserved, %d requested", t.ID(), t.redemptionReserves, t.redemptionLocked, newReserved)
+		return
+	}
+
+	if err := redeemer.ReReserve(newReserved); err != nil {
+		t.dc.log.Errorf("error re-reserving %d %s for order %s: %v",
+			newReserved, t.wallets.toAsset.UnitInfo.AtomicUnit, t.ID(), err)
+		return
+	}
+	t.redemptionLocked += newReserved
+}
+
+// unlockRedemptionFraction unlocks the specified fractiOn of the redemption
+// reserves. t.mtx should be locked if this trackedTrade is in the dc.trades
+// map. If the requested unlock would put the locked reserves < 0, an error
+// message is logged and the remaining locked reserves will be unlocked instead.
+// If the remaining locked reserves after this unlock is determined to be
+// "dust", it will be unlocked too.
+func (t *trackedTrade) unlockRedemptionFraction(num, denom uint64) {
+	redeemer, is := t.accountRedeemer()
+	if !is {
+		return
+	}
+	unlock := applyFraction(num, denom, t.redemptionReserves)
+	if unlock > t.redemptionLocked {
+		t.dc.log.Errorf("attempting to unlock more than is reserved for order %s. unlocking reserved amount instead: "+
+			"%d reserved, unlocking %d", t.ID(), t.redemptionLocked, unlock)
+		unlock = t.redemptionLocked
+		t.redemptionLocked = 0
+	}
+
+	t.redemptionLocked -= unlock
+
+	// Can be dust. Clean it up.
+	var isDust bool
+	if t.isMarketBuy() {
+		isDust = t.redemptionLocked < applyFraction(1, uint64(2*len(t.matches)), t.redemptionReserves)
+	} else if t.metaData.Status > order.OrderStatusBooked && len(t.matches) > 0 {
+		// Order is executed, so no changes should be expected. If there were
+		// zero matches, the return is expected to be fraction 1 / 1, so no
+		// reason to add handling for that case.
+		// Figure out what the smallest expected unlock amount should be and
+		// divide it by 2. Any remainder less than that is dust.
+		smallestShare := ^uint64(0)
+		shrink := func(num, denom uint64) {
+			v := applyFraction(num, denom, t.redemptionReserves)
+			if v < smallestShare {
+				smallestShare = v
+			}
+		}
+		remain := t.Trade().Remaining()
+		qty := t.Trade().Quantity
+		if remain > 0 {
+			shrink(remain, qty)
+		}
+		for _, m := range t.matches {
+			shrink(m.Quantity, qty)
+		}
+		isDust = t.redemptionLocked < applyFraction(smallestShare, qty*2, t.redemptionReserves)
+	}
+	if isDust {
+		unlock += t.redemptionLocked
+		t.redemptionLocked = 0
+	}
+
+	if unlock > 0 {
+		redeemer.UnlockReserves(unlock)
+	}
+}
+
+func (t *trackedTrade) isMarketBuy() bool {
+	trade := t.Trade()
+	if trade == nil {
+		return false
+	}
+	return t.Type() == order.MarketOrderType && !trade.Sell
 }
 
 func (t *trackedTrade) epochIdx() uint64 {
@@ -371,6 +472,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 		t.notify(newOrderNote(TopicOrderBooked, "", "", db.Data, t.coreOrderInternal()))
 	} else {
 		t.returnCoins()
+		t.unlockRedemptionFraction(1, 1)
 		assets.count(t.wallets.fromAsset.ID)
 		t.dc.log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
@@ -385,8 +487,6 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 // from the DEX or a tip change.
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	trade := t.Trade()
-	isMarketBuy := t.Type() == order.MarketOrderType && !trade.Sell
-
 	// Validate matches and check if a cancel match is included.
 	// Non-cancel matches should be negotiated and are added to
 	// the newTrackers slice.
@@ -471,7 +571,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	var newFill uint64
 	for _, match := range newTrackers {
 		var qty uint64
-		if isMarketBuy {
+		if t.isMarketBuy() {
 			qty = calc.BaseToQuote(match.Rate, match.Quantity)
 		} else {
 			qty = match.Quantity
@@ -512,23 +612,20 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			match, t.ID(), match.FeeRateSwap, qty)
 	}
 
-	// Calculate and set the new filled value for the order.
-	var filled uint64
-	for _, mt := range t.matches {
-		if isMarketBuy {
-			filled += calc.BaseToQuote(mt.Rate, mt.Quantity)
-		} else {
-			filled += mt.Quantity
-		}
-	}
 	// If the order has been canceled, add that to filled and newFill.
+	preCancelFilled, canceled := t.recalcFilled()
+	filled := preCancelFilled + canceled
 	if cancelMatch != nil {
-		filled += cancelMatch.Quantity
 		newFill += cancelMatch.Quantity
 	}
 	// The filled amount includes all of the trackedTrade's matches, so the
 	// filled amount must be set, not just increased.
 	trade.SetFill(filled)
+
+	// Before we update any order statuses, check if this is a market sell order
+	// which is now executed, in which case we can return redemption reserves
+	// associated with any remainder.
+	completedMarketSell := trade.Sell && t.Type() == order.MarketOrderType && t.metaData.Status < order.OrderStatusExecuted
 
 	// Set the order as executed depending on type and fill.
 	if t.metaData.Status != order.OrderStatusCanceled && t.metaData.Status != order.OrderStatusRevoked {
@@ -537,6 +634,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		} else {
 			t.metaData.Status = order.OrderStatusExecuted
 		}
+	}
+
+	// If this is a market sell or a cancelled limit order, unlock redemption
+	// reserves.
+	if remain := trade.Quantity - preCancelFilled; remain > 0 && (completedMarketSell || cancelMatch != nil) {
+		t.unlockRedemptionFraction(remain, trade.Quantity)
 	}
 
 	// Send notifications.
@@ -570,6 +673,21 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		return fmt.Errorf("failed to update order in db: %w", err)
 	}
 	return nil
+}
+
+func (t *trackedTrade) recalcFilled() (matchFilled, canceled uint64) {
+	for _, mt := range t.matches {
+		if t.isMarketBuy() {
+			matchFilled += calc.BaseToQuote(mt.Rate, mt.Quantity)
+		} else {
+			matchFilled += mt.Quantity
+		}
+	}
+	if t.cancel != nil && t.cancel.matches.maker != nil {
+		canceled = t.cancel.matches.maker.Quantity
+	}
+	t.Trade().SetFill(matchFilled + canceled)
+	return
 }
 
 func (t *trackedTrade) metaOrder() *db.MetaOrder {
@@ -1286,11 +1404,17 @@ func (t *trackedTrade) revoke() {
 
 	// Return coins if there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
+
+	if t.isMarketBuy() { // Is this even possible?
+		t.unlockRedemptionFraction(1, 1)
+	} else {
+		t.unlockRedemptionFraction(t.Trade().Remaining(), t.Trade().Quantity)
+	}
 }
 
 // revokeMatch sets the status as revoked for the specified match. revokeMatch
 // must be called with the mtx write-locked.
-func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error {
+func (t *trackedTrade) revokeMatch(ctx context.Context, matchID order.MatchID, fromServer bool) error {
 	var revokedMatch *matchTracker
 	for _, match := range t.matches {
 		if match.MatchID == matchID {
@@ -1322,6 +1446,17 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 	// trade and there are no matches that MAY later require sending
 	// swaps.
 	t.maybeReturnCoins()
+
+	// Return unused redemption reserves.
+	if (revokedMatch.Side == order.Taker && (revokedMatch.Status < order.TakerSwapCast)) ||
+		(revokedMatch.Side == order.Maker && revokedMatch.Status < order.MakerSwapCast) {
+
+		if t.isMarketBuy() {
+			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+		} else {
+			t.unlockRedemptionFraction(revokedMatch.Quantity, t.Trade().Quantity)
+		}
+	}
 
 	t.dc.log.Warnf("Match %v revoked in status %v for order %v", matchID, revokedMatch.Status, t.ID())
 	return nil
@@ -1663,13 +1798,28 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
-	// Collect a asset.Redemption for each match into a slice of redemptions that
+	// Collect an asset.Redemption for each match into a slice of redemptions that
 	// will be grouped into a single transaction.
+	matchReserved := func(uint64) uint64 { return 0 }
+	if t.redemptionReserves > 0 {
+		if t.isMarketBuy() {
+			r := applyFraction(1, uint64(len(t.matches)), t.redemptionReserves)
+			matchReserved = func(uint64) uint64 {
+				return r
+			}
+		} else {
+			matchReserved = func(matchQty uint64) uint64 {
+				return applyFraction(matchQty, t.Trade().Quantity, t.redemptionReserves)
+			}
+		}
+	}
+
 	redemptions := make([]*asset.Redemption, 0, len(matches))
 	for _, match := range matches {
 		redemptions = append(redemptions, &asset.Redemption{
-			Spends: match.counterSwap,
-			Secret: match.MetaData.Proof.Secret,
+			Spends:           match.counterSwap,
+			Secret:           match.MetaData.Proof.Secret,
+			UnlockedReserves: matchReserved(match.Quantity),
 		})
 	}
 
@@ -1978,6 +2128,13 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 			}
 			continue
 		}
+
+		if t.isMarketBuy() {
+			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+		} else {
+			t.unlockRedemptionFraction(match.Quantity, t.Trade().Quantity)
+		}
+
 		// Refund successful, cancel any previously started attempt to find
 		// counter-party's redemption.
 		if match.cancelRedemptionSearch != nil {
@@ -2389,4 +2546,8 @@ func sellString(sell bool) string {
 		return "sell"
 	}
 	return "buy"
+}
+
+func applyFraction(num, denom, target uint64) uint64 {
+	return uint64(math.Round(float64(num) / float64(denom) * float64(target)))
 }

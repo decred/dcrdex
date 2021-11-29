@@ -23,12 +23,12 @@ import (
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/les"
@@ -365,23 +365,38 @@ func (n *nodeClient) swap(ctx context.Context, secretHash [32]byte, contractVer 
 }
 
 // signData uses the private key of the address to sign a piece of data.
-// The address must have been imported and unlocked to use this function.
-func (n *nodeClient) signData(addr common.Address, data []byte) ([]byte, error) {
-	// The mime type argument to SignData is not used in the keystore wallet in geth.
-	// It treats any data like plain text.
-	return n.creds.wallet.SignData(*n.creds.acct, accounts.MimetypeTextPlain, data)
+// The wallet must be unlocked to use this function.
+func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
+	sig, err = n.creds.ks.SignHash(*n.creds.acct, crypto.Keccak256(data))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(sig) != 65 {
+		return nil, nil, fmt.Errorf("unexpected signature length %d", len(sig))
+	}
+
+	pubKey, err = recoverPubkey(crypto.Keccak256(data), sig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
+	}
+
+	// Lop off the "recovery id", since we already recovered the pub key and
+	// it's not used for validation.
+	sig = sig[:64]
+
+	return
 }
 
 func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
 	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		return n.creds.wallet.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
+		return n.creds.wallet.SignTx(*n.creds.acct, tx, n.chainID)
 	}
 	return nil
 }
 
 // signTransaction signs a transaction.
-func (n *nodeClient) signTransaction(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-	return n.creds.ks.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
+func (n *nodeClient) signTransaction(tx *types.Transaction) (*types.Transaction, error) {
+	return n.creds.ks.SignTx(*n.creds.acct, tx, n.chainID)
 }
 
 // initiate initiates multiple swaps in the same transaction.

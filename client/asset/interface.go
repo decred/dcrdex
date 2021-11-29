@@ -244,6 +244,20 @@ type TokenMaster interface {
 	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
 }
 
+type AccountRedeemer interface {
+	// ReserveN is used when preparing funding for an order that redeems to an
+	// account-based asset. The wallet will set aside the appropriate amount of
+	// funds so that we can redeem. It is an error to request funds > spendable
+	// balance.
+	ReserveN(n, feeRate uint64, assetVer uint32) (uint64, error)
+	// ReReserve is used when reconstructing existing orders on startup. It is
+	// an error to request funds > spendable balance.
+	ReReserve(amt uint64) error
+	// UnlockReserves is used to return funds when an order is canceled or
+	// otherwise completed unfilled.
+	UnlockReserves(uint64)
+}
+
 // Balance is categorized information about a wallet's balance.
 type Balance struct {
 	// Available is the balance that is available for trading immediately.
@@ -349,6 +363,9 @@ type Redemption struct {
 	Spends *AuditInfo
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
+	// UnlockedReserves is the amount reserved for redemption for account-based
+	// assets.
+	UnlockedReserves uint64
 }
 
 // RedeemForm is a group of Redemptions. The struct will be

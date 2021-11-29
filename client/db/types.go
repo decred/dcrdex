@@ -265,6 +265,8 @@ type OrderMetaData struct {
 	ToVersion uint32
 	// Options are the options offered by the wallet and selected by the user.
 	Options map[string]string
+	// RedemptionReserve is the reserved redemption funds.
+	RedemptionReserves uint64
 }
 
 // MetaMatch is a match and its metadata.
