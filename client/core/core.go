@@ -4012,6 +4012,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
+			FromVersion: wallets.fromAsset.Version,
+			ToVersion:   wallets.toAsset.Version,
 		},
 		Order: ord,
 	}

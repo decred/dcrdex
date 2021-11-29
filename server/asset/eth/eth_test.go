@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -131,7 +130,7 @@ func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*bi
 	return n.acctBal, n.acctBalErr
 }
 
-func tSwap(bn int64, locktime, value *big.Int, state SwapState, participantAddr *common.Address) *swap.ETHSwapSwap {
+func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.ETHSwapSwap {
 	return &swap.ETHSwapSwap{
 		InitBlockNumber:      big.NewInt(bn),
 		RefundBlockTimestamp: locktime,
@@ -181,113 +180,6 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestCoinIDs(t *testing.T) {
-	// Decode and encode TxCoinID
-	var txID [32]byte
-	copy(txID[:], encode.RandomBytes(32))
-	originalTxCoin := TxCoinID{
-		TxID: txID,
-	}
-	encodedTxCoin := originalTxCoin.Encode()
-	decodedCoin, err := DecodeCoinID(encodedTxCoin)
-	if err != nil {
-		t.Fatalf("unexpected error decoding tx coin: %v", err)
-	}
-	decodedTxCoin, ok := decodedCoin.(*TxCoinID)
-	if !ok {
-		t.Fatalf("expected coin to be a TxCoin")
-	}
-	if !bytes.Equal(originalTxCoin.TxID[:], decodedTxCoin.TxID[:]) {
-		t.Fatalf("expected txIds to be equal before and after decoding")
-	}
-
-	// Decode tx coin id with incorrect length
-	txCoinID := make([]byte, 33)
-	binary.BigEndian.PutUint16(txCoinID[:2], uint16(CIDTxID))
-	copy(txCoinID[2:], encode.RandomBytes(30))
-	if _, err := DecodeCoinID(txCoinID); err == nil {
-		t.Fatalf("expected error decoding tx coin ID with incorrect length")
-	}
-
-	// Decode and encode SwapCoinID
-	var contractAddress [20]byte
-	var secretHash [32]byte
-	copy(contractAddress[:], encode.RandomBytes(20))
-	copy(secretHash[:], encode.RandomBytes(32))
-	originalSwapCoin := SwapCoinID{
-		ContractAddress: contractAddress,
-		SecretHash:      secretHash,
-	}
-	encodedSwapCoin := originalSwapCoin.Encode()
-	decodedCoin, err = DecodeCoinID(encodedSwapCoin)
-	if err != nil {
-		t.Fatalf("unexpected error decoding swap coin: %v", err)
-	}
-	decodedSwapCoin, ok := decodedCoin.(*SwapCoinID)
-	if !ok {
-		t.Fatalf("expected coin to be a SwapCoinID")
-	}
-	if !bytes.Equal(originalSwapCoin.ContractAddress[:], decodedSwapCoin.ContractAddress[:]) {
-		t.Fatalf("expected contract address to be equal before and after decoding")
-	}
-	if !bytes.Equal(originalSwapCoin.SecretHash[:], decodedSwapCoin.SecretHash[:]) {
-		t.Fatalf("expected secret hash to be equal before and after decoding")
-	}
-
-	// Decode swap coin id with incorrect length
-	swapCoinID := make([]byte, 53)
-	binary.BigEndian.PutUint16(swapCoinID[:2], uint16(CIDSwap))
-	copy(swapCoinID[2:], encode.RandomBytes(50))
-	if _, err := DecodeCoinID(swapCoinID); err == nil {
-		t.Fatalf("expected error decoding swap coin ID with incorrect length")
-	}
-
-	// Decode and encode AmountCoinID
-	var address [20]byte
-	var nonce [8]byte
-	copy(address[:], encode.RandomBytes(20))
-	copy(nonce[:], encode.RandomBytes(8))
-	originalAmountCoin := AmountCoinID{
-		Address: address,
-		Amount:  100,
-		Nonce:   nonce,
-	}
-	encodedAmountCoin := originalAmountCoin.Encode()
-	decodedCoin, err = DecodeCoinID(encodedAmountCoin)
-	if err != nil {
-		t.Fatalf("unexpected error decoding swap coin: %v", err)
-	}
-	decodedAmountCoin, ok := decodedCoin.(*AmountCoinID)
-	if !ok {
-		t.Fatalf("expected coin to be a AmounCoinID")
-	}
-	if !bytes.Equal(originalAmountCoin.Address[:], decodedAmountCoin.Address[:]) {
-		t.Fatalf("expected address to be equal before and after decoding")
-	}
-	if !bytes.Equal(originalAmountCoin.Nonce[:], decodedAmountCoin.Nonce[:]) {
-		t.Fatalf("expected nonce to be equal before and after decoding")
-	}
-	if originalAmountCoin.Amount != decodedAmountCoin.Amount {
-		t.Fatalf("expected amount to be equal before and after decoding")
-	}
-
-	// Decode amount coin id with incorrect length
-	amountCoinId := make([]byte, 37)
-	binary.BigEndian.PutUint16(amountCoinId[:2], uint16(CIDAmount))
-	copy(amountCoinId[2:], encode.RandomBytes(35))
-	if _, err := DecodeCoinID(amountCoinId); err == nil {
-		t.Fatalf("expected error decoding amount coin ID with incorrect length")
-	}
-
-	// Decode coin id with non existant flag
-	nonExistantCoinID := make([]byte, 37)
-	binary.BigEndian.PutUint16(nonExistantCoinID[:2], uint16(5))
-	copy(nonExistantCoinID, encode.RandomBytes(35))
-	if _, err := DecodeCoinID(nonExistantCoinID); err == nil {
-		t.Fatalf("expected error decoding coin id with non existant flag")
-	}
-}
-
 func TestRun(t *testing.T) {
 	// TODO: Test all paths.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -319,7 +211,7 @@ func TestRun(t *testing.T) {
 func TestFeeRate(t *testing.T) {
 	maxInt := ^uint64(0)
 	maxWei := new(big.Int).SetUint64(maxInt)
-	gweiFactorBig := big.NewInt(GweiFactor)
+	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
 	maxWei.Mul(maxWei, gweiFactorBig)
 	overMaxWei := new(big.Int).Set(maxWei)
 	overMaxWei.Add(overMaxWei, gweiFactorBig)
@@ -331,15 +223,15 @@ func TestFeeRate(t *testing.T) {
 		wantErr bool
 	}{{
 		name:    "ok zero",
-		gas:     big.NewInt(0),
+		gas:     new(big.Int),
 		wantFee: 0,
 	}, {
 		name:    "ok rounded down",
-		gas:     big.NewInt(GweiFactor - 1),
+		gas:     big.NewInt(dexeth.GweiFactor - 1),
 		wantFee: 0,
 	}, {
 		name:    "ok one",
-		gas:     big.NewInt(GweiFactor),
+		gas:     big.NewInt(dexeth.GweiFactor),
 		wantFee: 1,
 	}, {
 		name:    "ok max int",
@@ -351,7 +243,7 @@ func TestFeeRate(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "node suggest gas fee error",
-		gas:     big.NewInt(0),
+		gas:     new(big.Int),
 		gasErr:  errors.New(""),
 		wantErr: true,
 	}}
@@ -399,7 +291,7 @@ func TestSynced(t *testing.T) {
 		syncProg: new(ethereum.SyncProgress),
 	}, {
 		name:    "ok header too old",
-		subSecs: MaxBlockInterval,
+		subSecs: dexeth.MaxBlockInterval,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
@@ -483,11 +375,11 @@ func TestContract(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
-	tc := TxCoinID{
+	tc := dexeth.TxCoinID{
 		TxID: txHash,
 	}
 	txCoinIDBytes := tc.Encode()
-	sc := SwapCoinID{}
+	sc := dexeth.SwapCoinID{}
 	swapCoinIDBytes := sc.Encode()
 	locktime := big.NewInt(initLocktime)
 	tests := []struct {
@@ -500,12 +392,12 @@ func TestContract(t *testing.T) {
 	}{{
 		name:   "ok",
 		tx:     tTx(gasPrice, value, contractAddr, initCalldata),
-		swap:   tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:   tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
 		coinID: txCoinIDBytes,
 	}, {
 		name:    "new coiner error, wrong tx type",
 		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		swap:    tSwap(97, locktime, value, SSInitiated, &initParticipantAddr),
+		swap:    tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:  swapCoinIDBytes,
 		wantErr: true,
 	}, {
@@ -579,12 +471,12 @@ func TestRedemption(t *testing.T) {
 	copy(secretHash[:], secretHashSlice)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
-	bigO := big.NewInt(0)
-	ccID := &SwapCoinID{
+	bigO := new(big.Int)
+	ccID := &dexeth.SwapCoinID{
 		SecretHash:      secretHash,
 		ContractAddress: *contractAddr,
 	}
-	txCoinID := TxCoinID{
+	txCoinID := dexeth.TxCoinID{
 		TxID:  txHash,
 		Index: 1,
 	}
@@ -601,26 +493,26 @@ func TestRedemption(t *testing.T) {
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: ccID.Encode(),
 		coinID:     txCoinID.Encode(),
-		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
+		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: ccID.Encode(),
-		coinID:     new(SwapCoinID).Encode(),
+		coinID:     new(dexeth.SwapCoinID).Encode(),
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: ccID.Encode(),
-		swp:        tSwap(0, bigO, bigO, SSRefunded, receiverAddr),
+		swp:        tSwap(0, bigO, bigO, dexeth.SSRefunded, receiverAddr),
 		coinID:     txCoinID.Encode(),
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: new(SwapCoinID).Encode(),
+		contractID: new(dexeth.SwapCoinID).Encode(),
 		coinID:     txCoinID.Encode(),
-		swp:        tSwap(0, bigO, bigO, SSRedeemed, receiverAddr),
+		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}
 	for _, test := range tests {
@@ -659,7 +551,7 @@ func TestTxData(t *testing.T) {
 	addr := randomAddress()
 	data := encode.RandomBytes(5)
 	tx := tTx(gasPrice, value, addr, data)
-	goodCoinID := (&TxCoinID{TxID: tx.Hash()}).Encode()
+	goodCoinID := (&dexeth.TxCoinID{TxID: tx.Hash()}).Encode()
 	node.tx = tx
 
 	// initial success
@@ -680,7 +572,7 @@ func TestTxData(t *testing.T) {
 	}
 
 	// Wrong type of coin ID
-	coinID = (&SwapCoinID{}).Encode()
+	coinID = (&dexeth.SwapCoinID{}).Encode()
 	_, err = eth.TxData(coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong coin type")
@@ -734,7 +626,7 @@ func TestAccountBalance(t *testing.T) {
 
 	const gweiBal = 1e9
 	bigBal := big.NewInt(gweiBal)
-	node.acctBal = bigBal.Mul(bigBal, big.NewInt(GweiFactor))
+	node.acctBal = bigBal.Mul(bigBal, big.NewInt(dexeth.GweiFactor))
 
 	// Initial success
 	bal, err := eth.AccountBalance("")

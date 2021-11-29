@@ -297,7 +297,8 @@ type Swaps struct {
 	FeeRate uint64
 	// LockChange can be set to true if the change should be locked for
 	// subsequent matches.
-	LockChange bool
+	LockChange   bool
+	AssetVersion uint32
 }
 
 // Contract is a swap contract.

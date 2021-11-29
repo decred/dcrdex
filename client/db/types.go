@@ -259,6 +259,10 @@ type OrderMetaData struct {
 	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
 	// assigned to matches will be validated against this value.
 	MaxFeeRate uint64
+	// FromVersion is the version of the from asset.
+	FromVersion uint32
+	// ToVersion is the version of the to asset.
+	ToVersion uint32
 }
 
 // MetaMatch is a match and its metadata.
