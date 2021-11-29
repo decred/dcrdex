@@ -727,22 +727,22 @@ func (r *swapReceipt) Expiration() time.Time {
 func (r *swapReceipt) Coin() asset.Coin {
 	return &coin{
 		value: r.value,
-		id:    dex.Bytes(r.txHash[:]),
+		id:    r.txHash[:],
 	}
 }
 
 // Contract returns the swap's secret hash.
 func (r *swapReceipt) Contract() dex.Bytes {
-	return dex.Bytes(r.secretHash[:])
+	return r.secretHash[:]
 }
 
 // String returns a string representation of the swapReceipt.
 func (r *swapReceipt) String() string {
-	return fmt.Sprintf("tx hash: %x, secret hash: %x", r.txHash, r.secretHash)
+	return fmt.Sprintf("{ tx hash: %x, secret hash: %x }", r.txHash, r.secretHash)
 }
 
 // SignedRefund returns an empty byte array. ETH does not support a pre-signed
-// redeem script becuase the nonce needed in the transaction cannot be previously
+// redeem script because the nonce needed in the transaction cannot be previously
 // determined.
 func (*swapReceipt) SignedRefund() dex.Bytes {
 	return dex.Bytes{}
@@ -861,10 +861,8 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	eth.unlockFunds(swaps.Inputs)
 	var change asset.Coin
 	changeAmount := totalInputValue - totalUsedValue
-	if changeAmount > 0 {
+	if changeAmount > 0 && swaps.LockChange {
 		change = eth.createAmountCoin(changeAmount)
-	}
-	if swaps.LockChange && change != nil {
 		eth.lockFunds(asset.Coins{change})
 	}
 

@@ -1080,10 +1080,6 @@ func TestSwap(t *testing.T) {
 				t.Fatalf("%v: receipt coin value: %v != expected: %v",
 					testName, receipt.Coin().Value(), contract.Value)
 			}
-			if len(receipt.Contract()) != srveth.SecretHashSize {
-				t.Fatalf("%v: expected length of contract to be %v but got %v",
-					testName, srveth.SecretHashSize, len(receipt.Contract()))
-			}
 			if !bytes.Equal(receipt.Contract(), contract.SecretHash[:]) {
 				t.Fatalf("%v, contract: %x != secret hash in input: %x",
 					testName, receipt.Contract(), contract.SecretHash)
@@ -1170,8 +1166,11 @@ func TestSwap(t *testing.T) {
 			gasNeededForSwaps(len(swaps.Contracts))*swaps.FeeRate
 		if expectedChangeValue == 0 && changeCoin != nil {
 			t.Fatalf("%v: change coin should be nil if change is 0", testName)
-		} else if expectedChangeValue > 0 && changeCoin == nil {
-			t.Fatalf("%v: change coin should not be nil if there is expected change", testName)
+		} else if expectedChangeValue > 0 && changeCoin == nil && swaps.LockChange {
+			t.Fatalf("%v: change coin should not be nil if there is expected change and change is locked",
+				testName)
+		} else if !swaps.LockChange && changeCoin != nil {
+			t.Fatalf("%v: change should be nil if LockChange==False", testName)
 		} else if changeCoin != nil && changeCoin.Value() != expectedChangeValue {
 			t.Fatalf("%v: expected change value %v != change coin value: %v",
 				testName, expectedChangeValue, changeCoin.Value())
