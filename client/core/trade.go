@@ -670,7 +670,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 
 	var err error
 	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
-		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
+		match.MetaData.Proof.CounterContract, match.MetaData.Stamp, t.metaData.FromVersion)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
 			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
@@ -885,7 +885,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
 		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
-			match.MetaData.Proof.Script, match.MetaData.Stamp)
+			match.MetaData.Proof.Script, match.MetaData.Stamp, t.metaData.FromVersion)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
@@ -943,7 +943,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		}
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
-			match.MetaData.Proof.Script, match.MetaData.Stamp)
+			match.MetaData.Proof.Script, match.MetaData.Stamp, t.metaData.FromVersion)
 		if err != nil {
 			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
 		}
@@ -1064,7 +1064,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.Script, match.MetaData.Stamp)
+	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.Script, match.MetaData.Stamp, t.metaData.FromVersion)
 	if err != nil {
 		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
 			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)

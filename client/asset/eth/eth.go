@@ -751,8 +751,32 @@ func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) 
 	return nil, asset.ErrNotImplemented
 }
 
-func (*ExchangeWallet) SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, spent bool, err error) {
-	return 0, false, asset.ErrNotImplemented
+// SwapConfirmations gets the number of confirmations and the spend status
+// for the specified swap.
+func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, secretHashB dex.Bytes,
+	_ time.Time, assetVersion uint32) (confs uint32, spent bool, err error) {
+
+	hdr, err := eth.node.bestHeader(ctx)
+	if err != nil {
+		return 0, false, fmt.Errorf("error fetching best header: %w", err)
+	}
+
+	var secretHash [32]byte
+	copy(secretHash[:], secretHashB)
+
+	swapData, err := eth.node.swap(ctx, secretHash, assetVersion)
+	if err != nil {
+		return 0, false, fmt.Errorf("error finding swap state: %w", err)
+	}
+
+	if swapData.State == dexeth.SSNone {
+		return 0, false, asset.CoinNotFoundError
+	}
+
+	spent = swapData.State >= dexeth.SSRedeemed
+	confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
+
+	return
 }
 
 // Withdraw withdraws funds to the specified address. Value is gwei.

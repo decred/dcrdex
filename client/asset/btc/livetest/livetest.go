@@ -306,7 +306,7 @@ func Run(t *testing.T, cfg *Config) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
+		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart, 0)
 		if err != nil {
 			if n > 0 || !errors.Is(err, asset.CoinNotFoundError) {
 				t.Fatalf("error getting %d confs: %v", n, err)
@@ -337,7 +337,7 @@ func Run(t *testing.T, cfg *Config) {
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart, 0)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}

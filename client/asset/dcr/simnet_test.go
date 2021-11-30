@@ -272,7 +272,7 @@ func runTest(t *testing.T, splitTx bool) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
+		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart, 0)
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
@@ -309,7 +309,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart, 0)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}

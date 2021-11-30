@@ -2281,7 +2281,9 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // method may return asset.CoinNotFoundError. Compare dcr.externalTxOut.
 //
 // If the coin is located, but recognized as spent, no error is returned.
-func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error) {
+func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes,
+	matchTime time.Time, _ uint32) (confs uint32, spent bool, err error) {
+
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return 0, false, err
