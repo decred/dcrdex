@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -56,6 +57,7 @@ type testNode struct {
 	balErr            error
 	signDataErr       error
 	privKeyForSigning *ecdsa.PrivateKey
+	swapVers          map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
 	swapMap           map[[32]byte]*dexeth.SwapState
 	swapErr           error
 	initErr           error
@@ -132,7 +134,7 @@ func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, ma
 		Nonce: n.nonce,
 	}), nil
 }
-func (n *testNode) redeem(opts *bind.TransactOpts, redeptions []*asset.Redemption, contractVer uint32) (*types.Transaction, error) {
+func (n *testNode) redeem(opts *bind.TransactOpts, redemptions []*asset.Redemption, contractVer uint32) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) refund(opts *bind.TransactOpts, secretHash [32]byte, serverVer uint32) (*types.Transaction, error) {
@@ -145,6 +147,10 @@ func (n *testNode) swap(ctx context.Context, secretHash [32]byte, contractVer ui
 	swap, ok := n.swapMap[secretHash]
 	if !ok {
 		return nil, errors.New("swap not in map")
+	}
+	_, found := n.swapVers[contractVer]
+	if !found {
+		return nil, errors.New("unknown contract version")
 	}
 	return swap, nil
 }
@@ -937,7 +943,11 @@ func TestSwap(t *testing.T) {
 				t.Fatalf("%v: receipt coin value: %v != expected: %v",
 					testName, receipt.Coin().Value(), contract.Value)
 			}
-			if !bytes.Equal(receipt.Contract()[4:], contract.SecretHash[:]) {
+			contractData := receipt.Contract()
+			if swaps.AssetVersion != binary.BigEndian.Uint32(contractData[:4]) {
+				t.Fatal("wrong contract version")
+			}
+			if !bytes.Equal(contractData[4:], contract.SecretHash[:]) {
 				t.Fatalf("%v, contract: %x != secret hash in input: %x",
 					testName, receipt.Contract(), contract.SecretHash)
 			}
@@ -1419,6 +1429,9 @@ func TestSwapConfirmation(t *testing.T) {
 		swapMap: map[[32]byte]*dexeth.SwapState{
 			secretHash: state,
 		},
+		swapVers: map[uint32]struct{}{
+			0: {},
+		},
 	}
 
 	eth := &ExchangeWallet{
@@ -1430,8 +1443,10 @@ func TestSwapConfirmation(t *testing.T) {
 	state.State = dexeth.SSInitiated
 	hdr.Number = big.NewInt(6)
 
+	ver := uint32(0)
+
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
-		confs, spent, err := eth.SwapConfirmations(nil, nil, versionedBytes(0, secretHash[:]), time.Time{})
+		confs, spent, err := eth.SwapConfirmations(nil, nil, versionedBytes(ver, secretHash[:]), time.Time{})
 		if err != nil {
 			if expErr {
 				return
@@ -1447,6 +1462,11 @@ func TestSwapConfirmation(t *testing.T) {
 	}
 
 	checkResult(false, 2, false)
+
+	// unknown asset version
+	ver = 12
+	checkResult(true, 0, false)
+	ver = 0
 
 	// swap error
 	node.swapErr = fmt.Errorf("test error")

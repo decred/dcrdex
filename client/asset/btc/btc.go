@@ -2362,7 +2362,6 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
 func (btc *ExchangeWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (uint32, bool, error) {
-
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err
