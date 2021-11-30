@@ -164,6 +164,10 @@ func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val uint
 	return nil, nil
 }
 
+func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint32, error) {
+	return 0, nil
+}
+
 func TestLoadConfig(t *testing.T) {
 	tests := []struct {
 		name    string
