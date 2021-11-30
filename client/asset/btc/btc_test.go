@@ -2408,7 +2408,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	matchTime := swapBlock.Header.Timestamp
 
 	// Bad coin id
-	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime, 0)
+	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime)
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2420,7 +2420,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	}
 	node.txOutRes = txOutRes
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
-	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, 0)
+	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
@@ -2432,7 +2432,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	node.txOutRes = nil
 	node.getCFilterScripts[*blockHash] = nil
 	node.getTransactionErr = tErr
-	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, 0)
+	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
@@ -2446,7 +2446,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 
 	node.getCFilterScripts[*spendingBlockHash] = [][]byte{pkScript}
 	node.walletTxSpent = true
-	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, 0)
+	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
 	if err != nil {
 		t.Fatalf("error for spent swap: %v", err)
 	}

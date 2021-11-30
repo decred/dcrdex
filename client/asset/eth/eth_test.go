@@ -937,7 +937,7 @@ func TestSwap(t *testing.T) {
 				t.Fatalf("%v: receipt coin value: %v != expected: %v",
 					testName, receipt.Coin().Value(), contract.Value)
 			}
-			if !bytes.Equal(receipt.Contract(), contract.SecretHash[:]) {
+			if !bytes.Equal(receipt.Contract()[4:], contract.SecretHash[:]) {
 				t.Fatalf("%v, contract: %x != secret hash in input: %x",
 					testName, receipt.Contract(), contract.SecretHash)
 			}
@@ -1431,7 +1431,7 @@ func TestSwapConfirmation(t *testing.T) {
 	hdr.Number = big.NewInt(6)
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
-		confs, spent, err := eth.SwapConfirmations(nil, nil, secretHash[:], time.Time{}, 0)
+		confs, spent, err := eth.SwapConfirmations(nil, nil, versionedBytes(0, secretHash[:]), time.Time{})
 		if err != nil {
 			if expErr {
 				return
@@ -1460,7 +1460,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	// CoinNotFoundError
 	state.State = dexeth.SSNone
-	_, _, err := eth.SwapConfirmations(nil, nil, secretHash[:], time.Time{}, 0)
+	_, _, err := eth.SwapConfirmations(nil, nil, versionedBytes(0, secretHash[:]), time.Time{})
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("expected CoinNotFoundError, got %v", err)
 	}

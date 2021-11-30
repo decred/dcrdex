@@ -213,8 +213,7 @@ type Wallet interface {
 	// be accurate.
 	// The contract and matchTime are provided so that wallets may search for
 	// the coin using light filters.
-	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes,
-		matchTime time.Time, assetVersion uint32) (confs uint32, spent bool, err error)
+	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
 	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
