@@ -160,6 +160,7 @@ type ethFetcher interface {
 	signData(addr common.Address, data []byte) ([]byte, error)
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
+	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -767,9 +768,71 @@ func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
-// during a swap.
-func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
-	return nil, asset.ErrNotImplemented
+// during a swap. coinID is expected to be the transaction id, and must
+// be the same as the hash of txData. contract is expected to be
+// (contractVersion|secretHash) where the secretHash uniquely keys the swap.
+func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
+	tx := new(types.Transaction)
+	err := tx.UnmarshalBinary(txData)
+	if err != nil {
+		return nil, fmt.Errorf("AuditContract: failed to unmarshal transaction: %w", err)
+	}
+
+	txHash := tx.Hash()
+	if !bytes.Equal(coinID, txHash[:]) {
+		return nil, fmt.Errorf("AuditContract: coin id != txHash - coin id: %x, txHash: %x", coinID, tx.Hash())
+	}
+
+	initiations, err := dexeth.ParseInitiateData(tx.Data())
+	if err != nil {
+		return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
+	}
+
+	secretHash, _, err := decodeVersionedBytes(contract)
+	if err != nil {
+		return nil, fmt.Errorf("AuditContract: failed to decode versioned bytes: %w", err)
+	}
+
+	var initiation *dexeth.ETHSwapInitiation
+	for _, init := range initiations {
+		if bytes.Equal(init.SecretHash[:], secretHash) {
+			initiation = &init
+		}
+	}
+	if initiation == nil {
+		return nil, errors.New("AuditContract: tx does not initiate secret hash")
+	}
+
+	expiration := time.Unix(initiation.RefundTimestamp.Int64(), 0)
+	recipient := initiation.Participant.Hex()
+	gweiVal, err := dexeth.ToGwei(initiation.Value)
+	if err != nil {
+		return nil, fmt.Errorf("AuditContract: failed to convert value to gwei: %w", err)
+	}
+
+	coin := &coin{
+		id:    coinID,
+		value: gweiVal,
+	}
+
+	// The counter-party should have broadcasted the contract tx but rebroadcast
+	// just in case to ensure that the tx is sent to the network. Do not block
+	// because this is not required and does not affect the audit result.
+	if rebroadcast {
+		go func() {
+			if err := eth.node.sendSignedTransaction(eth.ctx, tx); err != nil {
+				eth.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+			}
+		}()
+	}
+
+	return &asset.AuditInfo{
+		Recipient:  recipient,
+		Expiration: expiration,
+		Coin:       coin,
+		Contract:   contract,
+		SecretHash: secretHash,
+	}, nil
 }
 
 // LocktimeExpired returns true if the specified contract's locktime has

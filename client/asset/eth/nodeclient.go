@@ -359,6 +359,11 @@ func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
 	return nil
 }
 
+// signTransaction signs a transaction.
+func (n *nodeClient) signTransaction(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
+	return n.creds.ks.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
+}
+
 // initiate initiates multiple swaps in the same transaction.
 func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := dexeth.InitGas(len(contracts), contractVer)
@@ -509,6 +514,11 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 	// CoinNotFoundError in TestAccount/testSendTransaction, but haven't
 	// reproduced.
 	return 0, asset.CoinNotFoundError
+}
+
+// sendSignedTransaction injects a signed transaction into the pending pool for execution.
+func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
 // newTxOpts is a constructor for a TransactOpts.
