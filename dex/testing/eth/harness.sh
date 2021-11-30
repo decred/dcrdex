@@ -17,7 +17,7 @@ ALPHA_ADDRESS="18d65fb8d60c1199bb1ad381be47aa692b482605"
 ALPHA_ADDRESS_JSON_FILE_NAME="UTC--2021-01-28T08-47-02.993754951Z--18d65fb8d60c1199bb1ad381be47aa692b482605"
 ALPHA_ADDRESS_JSON='{"address":"18d65fb8d60c1199bb1ad381be47aa692b482605","crypto":{"cipher":"aes-128-ctr","ciphertext":"927bc2432492fc4bbe9acfe0042f5cd2cef25aff251ac1fb2f420ee85e3b6ee4","cipherparams":{"iv":"89e7333535aed5284abd52f841d30c95"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"6fe29ea59d166989be533da62d79802a6b0cef26a9766fa363c7a4bb4c263b5f"},"mac":"c7e2b6c4538c373b2c4e0be7b343db618d39cc68fa872909059357ff36743ca0"},"id":"0e2b9cef-d659-4a26-8739-879129ed0b63","version":3}'
 ALPHA_NODE_KEY="71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
-# ALPHA_ENODE="897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f"
+ALPHA_ENODE="897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f"
 ALPHA_NODE_PORT="30304"
 
 # BETA_ADDRESS="4f8ef3892b65ed7fc356ff473a2ef2ae5ec27a06"
@@ -138,7 +138,66 @@ HARNESS_DIR=$(dirname "$0")
 cp "${HARNESS_DIR}/create-node.sh" "${NODES_ROOT}/harness-ctl/create-node"
 
 # Reorg script
-# TODO: Make this.
+cat > "${NODES_ROOT}/harness-ctl/reorg" <<EOF
+#!/usr/bin/env bash
+REORG_NODE="alpha"
+VALID_NODE="beta"
+REORG_DEPTH=2
+
+if [ "\$1" = "beta" ]; then
+  REORG_NODE="beta"
+  VALID_NODE="alpha"
+fi
+
+if [ "\$2" != "" ]; then
+  REORG_DEPTH=\$2
+fi
+
+echo "Before alpha, beta best blocks"
+./alpha attach --exec 'eth.getBlock(eth.blockNumber)'
+./beta attach --exec 'eth.getBlock(eth.blockNumber)'
+
+
+NODES=('alpha' 'beta')
+ENODES=($ALPHA_ENODE $BETA_ENODE)
+PORTS=($ALPHA_NODE_PORT $BETA_NODE_PORT)
+
+echo "Disconnecting nodes"
+for node in "\${NODES[@]}"
+do
+for i in {0..1}
+  do
+    "./\$node" "attach --exec admin.removePeer('enode://\${ENODES[i]}@127.0.0.1:\${PORTS[i]}')"
+  done
+done
+
+sleep 1
+
+# Uncomment to see the effect of reorgs on transactions.
+# "./alpha" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"abc\\")"
+# "./beta" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"abc\\")"
+
+"./mine-\$VALID_NODE" \$((REORG_DEPTH + 2))
+"./mine-\$REORG_NODE" \$REORG_DEPTH
+
+sleep 1
+
+echo "Connecting nodes"
+for node in "\${NODES[@]}"
+do
+for i in {0..1}
+  do
+    "./\$node" "attach --exec admin.addPeer('enode://\${ENODES[i]}@127.0.0.1:\${PORTS[i]}')"
+  done
+done
+
+sleep 1
+
+echo "After alpha, beta best blocks"
+./alpha attach --exec 'eth.getBlock(eth.blockNumber)'
+./beta attach --exec 'eth.getBlock(eth.blockNumber)'
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
@@ -198,6 +257,9 @@ echo "Connecting nodes"
 "${NODES_ROOT}/harness-ctl/gamma" "attach --exec admin.addPeer('enode://${DELTA_ENODE}@127.0.0.1:$DELTA_NODE_PORT')"
 
 echo "Mining some blocks"
+# NOTE: These first couple of blocks will cause a reorg on one node or the
+# other. The reason is unknown. It seems this initial mining and reorg is
+# necessary for nodes to start communicating.
 "${NODES_ROOT}/harness-ctl/mine-beta" "2"
 "${NODES_ROOT}/harness-ctl/mine-alpha" "2"
 

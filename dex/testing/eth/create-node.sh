@@ -34,19 +34,25 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   # The mining script may end up mining more or less blocks than specified.
   cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
 #!/usr/bin/env bash
-  NUM=1
+  NUM=2
   case \$1 in
-      ''|*[!0-9]*)  ;;
+      ''|*[!0-9]*|[0-1])  ;;
       *) NUM=\$1 ;;
   esac
   echo "Mining..."
   BEFORE=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
   "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.start()' > /dev/null
-  sleep \$(echo "\$NUM-0.5" | bc)
+  sleep \$(echo "\$NUM-1.8" | bc)
   "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'miner.stop()' > /dev/null
+  sleep 1
   AFTER=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
   DIFF=\$((AFTER-BEFORE))
-  echo "Mined \$DIFF blocks."
+  echo "Mined \$DIFF blocks on ${NAME}. Their headers:"
+  for i in \$(seq \$((BEFORE+1)) \$AFTER)
+  do
+    echo \$i
+    "${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.getHeaderByNumber('\$i').hash'
+  done
 EOF
   chmod +x "${NODES_ROOT}/harness-ctl/mine-${NAME}"
 
