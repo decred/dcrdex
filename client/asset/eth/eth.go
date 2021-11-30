@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -571,6 +572,7 @@ type swapReceipt struct {
 	// lookup, but we cache these values to avoid this.
 	expiration time.Time
 	value      uint64
+	ver        uint32
 }
 
 // Expiration returns the time after which the contract can be
@@ -589,7 +591,7 @@ func (r *swapReceipt) Coin() asset.Coin {
 
 // Contract returns the swap's secret hash.
 func (r *swapReceipt) Contract() dex.Bytes {
-	return r.secretHash[:]
+	return versionedBytes(r.ver, r.secretHash[:])
 }
 
 // String returns a string representation of the swapReceipt.
@@ -652,6 +654,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 				value:      swap.Value,
 				txHash:     txHash,
 				secretHash: swap.SecretHash,
+				ver:        swaps.AssetVersion,
 			})
 	}
 
@@ -751,8 +754,37 @@ func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) 
 	return nil, asset.ErrNotImplemented
 }
 
-func (*ExchangeWallet) SwapConfirmations(ctx context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (confs uint32, spent bool, err error) {
-	return 0, false, asset.ErrNotImplemented
+// SwapConfirmations gets the number of confirmations and the spend status
+// for the specified swap.
+func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
+	if len(contract) != 36 {
+		return 0, false, fmt.Errorf("wrong contract length. expected 36, got %d", len(contract))
+	}
+
+	// contract fully specifies this swap in terms of which contract version
+	// is used and the secret hash that keys the unique swap.
+	contractVer := binary.BigEndian.Uint32(contract[:4])
+	var secretHash [32]byte
+	copy(secretHash[:], contract[4:])
+
+	hdr, err := eth.node.bestHeader(ctx)
+	if err != nil {
+		return 0, false, fmt.Errorf("error fetching best header: %w", err)
+	}
+
+	swapData, err := eth.node.swap(ctx, secretHash, contractVer)
+	if err != nil {
+		return 0, false, fmt.Errorf("error finding swap state: %w", err)
+	}
+
+	if swapData.State == dexeth.SSNone {
+		return 0, false, asset.CoinNotFoundError
+	}
+
+	spent = swapData.State >= dexeth.SSRedeemed
+	confs = uint32(hdr.Number.Uint64() - swapData.BlockHeight + 1)
+
+	return
 }
 
 // Withdraw withdraws funds to the specified address. Value is gwei.
@@ -866,4 +898,11 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 // balance.
 type Balance struct {
 	Current, Pending, PendingIn, PendingOut *big.Int
+}
+
+func versionedBytes(ver uint32, h []byte) []byte {
+	b := make([]byte, len(h)+4)
+	binary.BigEndian.PutUint32(b[:4], ver)
+	copy(b[4:], h)
+	return b
 }
