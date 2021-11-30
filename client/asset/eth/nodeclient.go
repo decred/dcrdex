@@ -500,6 +500,32 @@ func (n *nodeClient) isRedeemable(secretHash [32]byte, secret [32]byte, contract
 	})
 }
 
+// transactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common.Hash) (uint32, error) {
+	// We'll check the local tx pool first, since from what I can tell, a light
+	// client always requests tx data from the network for anything else.
+	if tx := n.leth.ApiBackend.GetPoolTransaction(txHash); tx != nil {
+		return 0, nil
+	}
+	hdr, err := n.bestHeader(ctx)
+	if err != nil {
+		return 0, err
+	}
+	tx, _, blockHeight, _, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	if tx != nil {
+		return uint32(hdr.Number.Uint64() - blockHeight + 1), nil
+	}
+	// TODO: There may be a race between when the tx is removed from our local
+	// tx pool, and when our peers are ready to supply the info. I saw a
+	// CoinNotFoundError in TestAccount/testSendTransaction, but haven't
+	// reproduced.
+	return 0, asset.CoinNotFoundError
+}
+
 // newTxOpts is a constructor for a TransactOpts.
 func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, maxFeeRate, gasTipCap *big.Int) *bind.TransactOpts {
 	if gasTipCap.Cmp(maxFeeRate) > 0 {

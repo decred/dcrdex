@@ -369,11 +369,29 @@ func testSendTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Checking confirmations for a random hash should result in not found error.
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+	_, err = ethClient.transactionConfirmations(ctx, txHash)
+	if !errors.Is(err, asset.CoinNotFoundError) {
+		t.Fatalf("no CoinNotFoundError")
+	}
+
 	txOpts, _ := ethClient.txOpts(ctx, 1, dexeth.InitGas(1, 0), nil)
 
 	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	txHash = tx.Hash()
+
+	confs, err := ethClient.transactionConfirmations(ctx, txHash)
+	if err != nil {
+		t.Fatalf("transactionConfirmations error: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("%d confs reported for unmined transaction", confs)
 	}
 
 	bal, _ := ethClient.balance(ctx)
@@ -388,6 +406,14 @@ func testSendTransaction(t *testing.T) {
 	spew.Dump(tx)
 	if err := waitForMined(t, time.Second*10, false); err != nil {
 		t.Fatal(err)
+	}
+
+	confs, err = ethClient.transactionConfirmations(ctx, txHash)
+	if err != nil {
+		t.Fatalf("transactionConfirmations error after mining: %v", err)
+	}
+	if confs == 0 {
+		t.Fatalf("zero confs after mining")
 	}
 }
 

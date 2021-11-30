@@ -153,6 +153,7 @@ type ethFetcher interface {
 	unlock(ctx context.Context, pw string) error
 	signData(addr common.Address, data []byte) ([]byte, error)
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
+	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -838,8 +839,12 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	return progress == 1, progress, nil
 }
 
+// RegFeeConfirmations gets the number of confirmations for the specified
+// transaction.
 func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
-	return 0, asset.ErrNotImplemented
+	var txHash common.Hash
+	copy(txHash[:], coinID)
+	return eth.node.transactionConfirmations(ctx, txHash)
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function
