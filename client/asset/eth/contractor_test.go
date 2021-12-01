@@ -7,7 +7,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex/encode"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -18,16 +18,16 @@ type tContractV0 struct {
 	swapErr   error
 }
 
-func (c tContractV0) Initiate(opts *bind.TransactOpts, initiations []dexeth.ETHSwapInitiation) (*types.Transaction, error) {
+func (c tContractV0) Initiate(opts *bind.TransactOpts, initiations []swapv0.ETHSwapInitiation) (*types.Transaction, error) {
 	return nil, c.initErr
 }
 
-func (c tContractV0) Redeem(opts *bind.TransactOpts, redemptions []dexeth.ETHSwapRedemption) (*types.Transaction, error) {
+func (c tContractV0) Redeem(opts *bind.TransactOpts, redemptions []swapv0.ETHSwapRedemption) (*types.Transaction, error) {
 	return nil, c.redeemErr
 }
 
-func (c tContractV0) Swap(opts *bind.CallOpts, secretHash [32]byte) (dexeth.ETHSwapSwap, error) {
-	return dexeth.ETHSwapSwap{
+func (c tContractV0) Swap(opts *bind.CallOpts, secretHash [32]byte) (swapv0.ETHSwapSwap, error) {
+	return swapv0.ETHSwapSwap{
 		InitBlockNumber:      new(big.Int),
 		RefundBlockTimestamp: new(big.Int),
 		Value:                new(big.Int),
