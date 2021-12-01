@@ -721,6 +721,7 @@ func TestAvailableFund(t *testing.T) {
 			Amount:        float64(atomAmt) / 1e8,
 			Confirmations: confs,
 			ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+			Spendable:     true,
 		}
 		if lock {
 			node.lluCoins = append(node.lluCoins, utxo)
@@ -1045,10 +1046,11 @@ func TestFundingCoins(t *testing.T) {
 	vout := uint32(123)
 	coinID := toCoinID(tTxHash, vout)
 	p2pkhUnspent := walletjson.ListUnspentResult{
-		TxID:    tTxID,
-		Vout:    vout,
-		Address: tPKHAddr.String(),
-		Account: wallet.acct,
+		TxID:      tTxID,
+		Vout:      vout,
+		Address:   tPKHAddr.String(),
+		Account:   wallet.acct,
+		Spendable: true,
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
@@ -1174,6 +1176,7 @@ func TestFundEdges(t *testing.T) {
 		Amount:        float64(swapVal+fees-1) / 1e8, // one atom less than needed
 		Confirmations: 5,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+		Spendable:     true,
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
@@ -2043,6 +2046,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 		Amount:        float64(unspentVal) / 1e8,
 		Confirmations: 5,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+		Spendable:     true,
 	}}
 	//node.unspent = append(node.unspent, node.unspent[0])
 
@@ -2099,6 +2103,7 @@ func Test_sendMinusFees(t *testing.T) {
 		Amount:        float64(unspentVal) / 1e8,
 		Confirmations: 5,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+		Spendable:     true,
 	}}
 
 	addr, err := stdaddr.DecodeAddress(address, tChainParams)
@@ -2427,6 +2432,7 @@ func TestPreSwap(t *testing.T) {
 		Amount:        float64(swapVal+fees-1) / 1e8, // one atom less than needed
 		Confirmations: 5,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+		Spendable:     true,
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}

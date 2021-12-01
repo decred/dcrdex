@@ -938,7 +938,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 
 		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
 		for _, cu := range utxos {
-			if cu.confs >= minconf {
+			if cu.confs >= minconf && cu.rpc.Spendable {
 				okUTXOs = append(okUTXOs, cu)
 			}
 		}
@@ -2380,14 +2380,17 @@ type compositeUTXO struct {
 // The returned list is sorted by ascending value.
 func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) ([]*compositeUTXO, error) {
 	utxos := make([]*compositeUTXO, 0, len(unspents))
-	for _, txout := range unspents {
-		scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script for %s, script = %s: %w", txout.TxID, txout.ScriptPubKey, err)
+	for _, utxo := range unspents {
+		if !utxo.Spendable {
+			continue
 		}
-		redeemScript, err := hex.DecodeString(txout.RedeemScript)
+		scriptPK, err := hex.DecodeString(utxo.ScriptPubKey)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", txout.TxID, txout.RedeemScript, err)
+			return nil, fmt.Errorf("error decoding pubkey script for %s, script = %s: %w", utxo.TxID, utxo.ScriptPubKey, err)
+		}
+		redeemScript, err := hex.DecodeString(utxo.RedeemScript)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", utxo.TxID, utxo.RedeemScript, err)
 		}
 
 		// NOTE: listunspent does not indicate script version, so for the
@@ -2406,9 +2409,9 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			continue
 		}
 		utxos = append(utxos, &compositeUTXO{
-			rpc:   txout,
+			rpc:   utxo,
 			input: nfo,
-			confs: txout.Confirmations,
+			confs: utxo.Confirmations,
 		})
 	}
 	// Sort in ascending order by amount (smallest first).

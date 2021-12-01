@@ -302,7 +302,7 @@ func Test_nonstandardScript(t *testing.T) {
 	// redeem (contract) script.
 	scriptHash := ExtractScriptHash(scriptVersion, pkScript)
 	if scriptHash == nil {
-		t.Fatalf("ExtractScriptHashV0 failed")
+		t.Fatalf("ExtractScriptHash failed")
 	}
 	if !bytes.Equal(dcrutil.Hash160(contractScript), scriptHash) {
 		t.Fatalf(fmt.Sprintf("script hash check failed for output %s,%d", contractTx, vout))
