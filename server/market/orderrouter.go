@@ -366,7 +366,6 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	var commit order.Commitment
 	copy(commit[:], market.Commit)
 
-	// fundingAsset := assets.funding
 	coinIDs := make([]order.CoinID, 0, len(market.Trade.Coins))
 	for _, coin := range market.Trade.Coins {
 		coinID := order.CoinID(coin.ID)
@@ -416,13 +415,13 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 	receivingBalancer, isToAccount := assets.receiving.Backend.(asset.AccountBalancer)
 	if isToAccount {
 		if redeemSig == nil {
-			log.Errorf("user %s did not include a RedeemSig for received asset %s", user, assets.receiving.Symbol)
+			log.Info("user %s did not include a RedeemSig for received asset %s", user, assets.receiving.Symbol)
 			return msgjson.NewError(msgjson.OrderParameterError, "no redeem address verification included for asset %s", assets.receiving.Symbol)
 		}
 
 		acctAddr := trade.ToAccount()
 		if err := receivingBalancer.ValidateSignature(acctAddr, redeemSig.PubKey, sigMsg, redeemSig.Sig); err != nil {
-			log.Errorf("user %s failed redeem signature validation for order %s: %v",
+			log.Info("user %s failed redeem signature validation for order %s: %v",
 				user, oRecord.order.ID(), err)
 			return msgjson.NewError(msgjson.SignatureError, "redeem signature validation failed")
 		}
@@ -439,12 +438,12 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		// Validate that the coins are correct for an account-based-asset-funded
 		// order. There should be 1 coin, 1 sig, 1 pubkey, and no redeem script.
 		if len(coins) != 1 {
-			log.Errorf("user %s submitted an %s-funded order with %d coin IDs", user, assets.funding.Symbol, len(coins))
+			log.Info("user %s submitted an %s-funded order with %d coin IDs", user, assets.funding.Symbol, len(coins))
 			return msgjson.NewError(msgjson.OrderParameterError, "account-type asset funding requires exactly one coin ID")
 		}
 		acctProof := coins[0]
 		if len(acctProof.PubKeys) != 1 || len(acctProof.Sigs) != 1 || len(acctProof.Redeem) > 0 {
-			log.Errorf("user %s submitted an %s-funded order with %d pubkeys, %d sigs, redeem script length %d",
+			log.Info("user %s submitted an %s-funded order with %d pubkeys, %d sigs, redeem script length %d",
 				user, assets.funding.Symbol, len(acctProof.PubKeys), len(acctProof.Sigs), len(acctProof.Redeem))
 			return msgjson.NewError(msgjson.OrderParameterError, "account-type asset funding requires exactly one coin ID")
 		}
@@ -453,7 +452,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		pubKey := acctProof.PubKeys[0]
 		sig := acctProof.Sigs[0]
 		if err := fundingBalancer.ValidateSignature(acctAddr, pubKey, sigMsg, sig); err != nil {
-			log.Errorf("user %s failed signature validation for order %s: %v",
+			log.Info("user %s failed signature validation for order %s: %v",
 				user, oRecord.order.ID(), err)
 			return msgjson.NewError(msgjson.SignatureError, "signature validation failed")
 		}
@@ -649,7 +648,7 @@ func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Ord
 				fundingQty = calc.BaseToQuote(lo.Rate, trade.Quantity)
 				fundingLots = trade.Quantity / tunnel.LotSize()
 			} else { // market buy
-				fundingQty = calc.QuoteToBase(safeMidGap(tunnel), trade.Quantity)
+				fundingQty = trade.Quantity
 				fundingLots = fundingQty / tunnel.LotSize()
 			}
 		}

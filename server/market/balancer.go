@@ -18,7 +18,7 @@ type DEXBalancer struct {
 	matchNegotiator MatchNegotiator
 }
 
-// NewDEXBalancer is a constructor for a BackedBalancer. Provided assets will
+// NewDEXBalancer is a constructor for a DEXBalancer. Provided assets will
 // be filtered for those that are account-based. The matchNegotitator is
 // satisfied by the *Swapper.
 func NewDEXBalancer(tunnels map[string]MarketTunnel, assets map[uint32]*asset.BackedAsset, matchNegotiator MatchNegotiator) *DEXBalancer {
@@ -53,6 +53,10 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots ui
 		log.Errorf("asset ID %d not found in accountBalancer assets map", assetID)
 		return false
 	}
+
+	log.Tracef("balance check for %s - %s: new qty = %d, new lots = %d, new redeems = %d",
+		backedAsset.assetInfo.Symbol, acctAddr, qty, lots, redeems)
+
 	bal, err := backedAsset.balancer.AccountBalance(acctAddr)
 	if err != nil {
 		log.Error("error getting account balance for %q: %v", acctAddr, err)
@@ -76,6 +80,10 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots ui
 	assetInfo := backedAsset.assetInfo
 	redeemCosts := uint64(redeems) * assetInfo.RedeemSize * assetInfo.MaxFeeRate
 	reqFunds := calc.RequiredOrderFunds(qty, 0, lots, assetInfo) + redeemCosts
+
+	log.Tracef("balance check for %s - %s: total qty = %d, total lots = %d, "+
+		"total redeems = %d, redeemCosts = %d, required = %d, bal = %d",
+		backedAsset.assetInfo.Symbol, acctAddr, qty, lots, redeems, redeemCosts, reqFunds, bal)
 
 	return bal >= reqFunds
 }

@@ -164,6 +164,7 @@ func TestNewSwapCoin(t *testing.T) {
 			node:         node,
 			log:          tLogger,
 			contractAddr: *contractAddr,
+			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
 		sc, err := eth.newSwapCoin(test.coinID, test.ct)
 		if test.wantErr {
@@ -321,6 +322,7 @@ func TestConfirmations(t *testing.T) {
 			node:         node,
 			log:          tLogger,
 			contractAddr: *contractAddr,
+			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
 
 		sc, err := eth.newSwapCoin(txCoinIDBytes, test.ct)

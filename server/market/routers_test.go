@@ -653,14 +653,16 @@ func TestMain(m *testing.M) {
 	assetETH.Backend = oRig.eth
 	assetMATIC.Backend = oRig.polygon
 	tunnels := map[string]MarketTunnel{
-		"dcr_btc": oRig.market,
-		"eth_btc": oRig.market,
-		"dcr_eth": oRig.market,
+		"dcr_btc":   oRig.market,
+		"eth_btc":   oRig.market,
+		"dcr_eth":   oRig.market,
+		"eth_matic": oRig.market,
 	}
 	assets := map[uint32]*asset.BackedAsset{
-		0:  assetBTC,
-		42: assetDCR,
-		60: assetETH,
+		0:   assetBTC,
+		42:  assetDCR,
+		60:  assetETH,
+		966: assetMATIC,
 	}
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
 		AuthManager: oRig.auth,
@@ -753,10 +755,20 @@ func TestLimit(t *testing.T) {
 	oRig.auth.sent = make(chan *msgjson.Error, 1)
 	defer func() { oRig.auth.sent = nil }()
 
+	sendLimit := func() *msgjson.Error {
+		msg, _ := msgjson.NewRequest(reqID, msgjson.LimitRoute, limit)
+		err := oRig.router.handleLimit(user.acct, msg)
+		if err != nil {
+			return err
+		}
+		// wait for the async success (nil) / err (non-nil)
+		return <-oRig.auth.sent
+	}
+
 	var oRecord *orderRecord
-	ensureSuccess := func(tag string, err *msgjson.Error) {
+	ensureSuccess := func(tag string) {
 		t.Helper()
-		ensureErr(tag, err, -1)
+		ensureErr(tag, sendLimit(), -1)
 		select {
 		case <-oRig.market.added:
 		case <-time.After(time.Second):
@@ -768,20 +780,10 @@ func TestLimit(t *testing.T) {
 		}
 	}
 
-	sendLimit := func() *msgjson.Error {
-		msg, _ := msgjson.NewRequest(reqID, msgjson.LimitRoute, limit)
-		err := oRig.router.handleLimit(user.acct, msg)
-		if err != nil {
-			return err
-		}
-		// wait for the async success (nil) / err (non-nil)
-		return <-oRig.auth.sent
-	}
-
 	// First just send it through and ensure there are no errors.
 	oRig.market.added = make(chan struct{}, 1)
 	defer func() { oRig.market.added = nil }()
-	ensureSuccess("valid order", sendLimit())
+	ensureSuccess("valid order")
 
 	// Check TiF
 	epochOrder := oRecord.order.(*order.LimitOrder)
@@ -791,7 +793,7 @@ func TestLimit(t *testing.T) {
 
 	// Now check with immediate TiF.
 	limit.TiF = msgjson.ImmediateOrderNum
-	ensureSuccess("valid immediate order", sendLimit())
+	ensureSuccess("valid immediate order")
 	epochOrder = oRecord.order.(*order.LimitOrder)
 	if epochOrder.Force != order.ImmediateTiF {
 		t.Errorf("Got force %v, expected %v (immediate)", epochOrder.Force, order.ImmediateTiF)
@@ -815,7 +817,7 @@ func TestLimit(t *testing.T) {
 	// Zero confs is ok, because fees are > 90% of last known fee rate.
 	oRig.dcr.confsMinus2 = -2
 	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
-	ensureSuccess("valid zero-conf order", sendLimit())
+	ensureSuccess("valid zero-conf order")
 	// But any lower fees on the funding coin, and the order will fail.
 	oRig.dcr.feeRateMinus10--
 	ensureErr("low-fee zero-conf order", sendLimit(), msgjson.FundingError)
@@ -847,7 +849,7 @@ func TestLimit(t *testing.T) {
 		buyUTXO,
 	}
 	limit.Address = dcrAddr
-	ensureSuccess("buy order", sendLimit())
+	ensureSuccess("buy order")
 
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
@@ -910,7 +912,7 @@ func TestLimit(t *testing.T) {
 
 	// Now with enough funds
 	oRig.eth.bal = reqFunds
-	ensureSuccess("well-funded account-based backend", sendLimit())
+	ensureSuccess("well-funded account-based backend")
 
 	// Just enough for the order, but not enough because there are pending
 	// redeems in Swapper.
@@ -921,7 +923,7 @@ func TestLimit(t *testing.T) {
 
 	// Enough for redeem too.
 	oRig.eth.bal = reqFunds + redeemCost
-	ensureSuccess("well-funded account-based backend with redeems", sendLimit())
+	ensureSuccess("well-funded account-based backend with redeems")
 
 	// If we're buying, and the base asset is account-based, then it's the
 	// number of redeems we're concerned with.
@@ -931,10 +933,36 @@ func TestLimit(t *testing.T) {
 	oRig.eth.bal = lots*redeemCost - 1
 	ensureErr("not enough to redeem", sendLimit(), msgjson.FundingError)
 
+	// Now with enough
+	oRig.eth.bal = lots * redeemCost
+	ensureSuccess("redeem to account-based")
+
+	// With funding from account based quote asset. Fail first.
+	limit.Quote = assetMATIC.ID
+	reqFunds = calc.RequiredOrderFunds(qty, 0, lots, &assetMATIC.Asset)
+	oRig.polygon.bal = reqFunds - 1
+	ensureErr("not enough to order account-based quote", sendLimit(), msgjson.FundingError)
+
+	// Now with enough.
+	oRig.polygon.bal = reqFunds
+	ensureSuccess("spend to account-based quote")
+
+	// Switch directions.
+	limit.Side = msgjson.SellOrderNum
+	oRig.eth.bal = calc.RequiredOrderFunds(qty, 0, lots, &assetETH.Asset)
+
+	// Not enough to redeem.
+	redeemCost = assetMATIC.RedeemSize * assetETH.MaxFeeRate
+	oRig.polygon.bal = lots*redeemCost - 1
+	ensureErr("not enough to redeem account-based quote", sendLimit(), msgjson.FundingError)
+
+	oRig.polygon.bal = lots * redeemCost
+	ensureSuccess("enough to redeem account-based quote")
 }
 
 func TestMarketStartProcessStop(t *testing.T) {
-	qty := uint64(dcrLotSize) * 10
+	const sellLots = 10
+	qty := uint64(dcrLotSize) * sellLots
 	user := oRig.user
 	clientTime := nowMs()
 	pi := ordertest.RandomPreimage()
@@ -958,12 +986,8 @@ func TestMarketStartProcessStop(t *testing.T) {
 			Address: btcAddr,
 		},
 	}
+
 	reqID := uint64(5)
-
-	ensureErr := makeEnsureErr(t)
-
-	oRig.auth.sent = make(chan *msgjson.Error, 1)
-	defer func() { oRig.auth.sent = nil }()
 
 	sendMarket := func() *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.MarketRoute, mkt)
@@ -975,21 +999,30 @@ func TestMarketStartProcessStop(t *testing.T) {
 		return <-oRig.auth.sent
 	}
 
+	ensureErr := makeEnsureErr(t)
+
+	var oRecord *orderRecord
+	ensureSuccess := func(tag string) {
+		t.Helper()
+		ensureErr(tag, sendMarket(), -1)
+		select {
+		case <-oRig.market.added:
+		case <-time.After(time.Second):
+			t.Fatalf("valid zero-conf order not submitted to epoch")
+		}
+		oRecord = oRig.market.pop()
+		if oRecord == nil {
+			t.Fatalf("valid zero-conf order not submitted to epoch")
+		}
+	}
+
+	oRig.auth.sent = make(chan *msgjson.Error, 1)
+	defer func() { oRig.auth.sent = nil }()
+
 	// First just send it through and ensure there are no errors.
 	oRig.market.added = make(chan struct{}, 1)
 	defer func() { oRig.market.added = nil }()
-	ensureErr("valid order", sendMarket(), -1)
-
-	// Make sure the order was submitted to the market
-	select {
-	case <-oRig.market.added:
-	case <-time.After(time.Second):
-		t.Fatalf("no order submitted to epoch")
-	}
-	o := oRig.market.pop()
-	if o == nil {
-		t.Fatalf("no order submitted to epoch")
-	}
+	ensureSuccess("valid order")
 
 	// Test an invalid payload.
 	msg := new(msgjson.Message)
@@ -1009,16 +1042,8 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// Zero confs is ok, because fees are > 90% of last known fee rate.
 	oRig.dcr.confsMinus2 = -2
 	oRig.dcr.feeRateMinus10 = -1 // fee rate 9 >= 0.9 * 10.
-	ensureErr("valid zero-conf order", sendMarket(), -1)
-	select {
-	case <-oRig.market.added:
-	case <-time.After(time.Second):
-		t.Fatalf("valid zero-conf order not submitted to epoch")
-	}
-	o = oRig.market.pop()
-	if o == nil {
-		t.Fatalf("valid zero-conf order not submitted to epoch")
-	}
+	ensureSuccess("valid zero-conf order")
+
 	// But any lower fees on the funding coin, and the order will fail.
 	oRig.dcr.feeRateMinus10--
 	ensureErr("low-fee zero-conf order", sendMarket(), msgjson.FundingError)
@@ -1026,9 +1051,26 @@ func TestMarketStartProcessStop(t *testing.T) {
 	oRig.dcr.confsMinus2 = 0
 	oRig.dcr.feeRateMinus10 = 0
 
+	// Redeem to a quote asset.
+	mkt.Quote = assetETH.ID
+	mkt.RedeemSig = &msgjson.RedeemSig{}
+	redeemCost := assetETH.RedeemSize * assetETH.MaxFeeRate
+	oRig.eth.bal = sellLots*redeemCost - 1
+	ensureErr("can't redeem to acct-based quote", sendMarket(), msgjson.FundingError)
+
+	// No RedeemSig is an error
+	mkt.RedeemSig = nil
+	ensureErr("no redeem sig", sendMarket(), msgjson.OrderParameterError)
+	mkt.RedeemSig = &msgjson.RedeemSig{}
+
+	// Now with enough
+	oRig.eth.bal = sellLots * redeemCost
+	ensureSuccess("redeem to acct-based quote")
+
 	// Now switch it to a buy order, and ensure it passes
 	// Clear the sends cache first.
 	oRig.auth.sends = nil
+	mkt.Quote = assetBTC.ID
 	mkt.Side = msgjson.BuyOrderNum
 
 	midGap := oRig.market.MidGap()
@@ -1040,14 +1082,15 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 	// First check an order that doesn't satisfy the market buy buffer. For
 	// testing, the market buy buffer is set to 1.5.
-	// mkt.Quantity = matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.2))
-	//ensureErr("market buy buffer unsatisfied", sendMarket(), msgjson.FundingError)
-	mktBuyQty := matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.6))
+	mktBuyQty := matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.4))
 	mkt.Quantity = mktBuyQty
-	rpcErr = sendMarket()
-	if rpcErr != nil {
-		t.Fatalf("error for buy order: %s", rpcErr.Message)
-	}
+	ensureErr("insufficient market buy funding", sendMarket(), msgjson.FundingError)
+
+	mktBuyQty = matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.6))
+	mkt.Quantity = mktBuyQty
+	mkt.ServerTime = 0
+	oRig.auth.sends = nil
+	ensureSuccess("market buy")
 
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
@@ -1065,17 +1108,6 @@ func TestMarketStartProcessStop(t *testing.T) {
 			Quantity: mktBuyQty,
 			Address:  dcrAddr,
 		},
-	}
-
-	// Wait for the order to be submitted.
-	select {
-	case <-oRig.market.added:
-	case <-time.After(time.Second):
-		t.Fatalf("no order submitted to epoch")
-	}
-	oRecord := oRig.market.pop()
-	if oRecord == nil {
-		t.Fatalf("no buy order submitted to epoch")
 	}
 
 	// Check the utxo
@@ -1108,6 +1140,18 @@ func TestMarketStartProcessStop(t *testing.T) {
 	if epochOrder.ID() != mo.ID() {
 		t.Fatalf("failed to duplicate ID")
 	}
+
+	// Fund with an account-based asset.
+	mkt.Quote = assetETH.ID
+
+	// Not enough.
+	oRig.eth.bal = mktBuyQty / 2
+	ensureErr("insufficient account-based funding", sendMarket(), msgjson.FundingError)
+
+	// With enough.
+	oRig.eth.bal = calc.RequiredOrderFunds(mktBuyQty, 0, 1, &assetETH.Asset)
+	ensureSuccess("account-based funding")
+
 }
 
 func TestCancel(t *testing.T) {

@@ -374,7 +374,7 @@ ordersLoop:
 		log.Debugf("Checking %d base asset (%d) balances.", len(baseAcctStats), base)
 		for acctAddr, stats := range baseAcctStats {
 			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Base, stats.qty, stats.lots, stats.redeems) {
-				log.Errorf("%s base asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
+				log.Info("%s base asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
 				failedBaseAccts[acctAddr] = true
 			}
 		}
