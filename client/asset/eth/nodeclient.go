@@ -191,11 +191,6 @@ func (n *nodeClient) addressBalance(ctx context.Context, addr common.Address) (*
 
 // balance gets the current and pending balances.
 func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
-	pendingBal, err := n.balanceAt(ctx, n.creds.addr, rpc.PendingBlockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("pending balance error: %w", err)
-	}
-
 	bal, err := n.balanceAt(ctx, n.creds.addr, rpc.LatestBlockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("pending balance error: %w", err)
@@ -207,20 +202,32 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 	}
 
 	outgoing := new(big.Int)
+	incoming := new(big.Int)
+	zero := new(big.Int)
 	for _, tx := range pendingTxs {
 		// TODO: Check that the from address matches addr. types.Transaction
 		// does not expose the from address directly.
-		outgoing.Add(outgoing, tx.Value())
+		gas := new(big.Int).SetUint64(tx.Gas())
+		fees := new(big.Int).Mul(gas, tx.GasFeeCap())
+		outgoing.Add(outgoing, fees)
+		v := tx.Value()
+		if v.Cmp(zero) == 0 {
+			for ver, c := range n.contractors {
+				in, err := c.incomingValue(ctx, tx)
+				if err != nil {
+					n.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
+				}
+				if in > 0 {
+					incoming.Add(incoming, dexeth.GweiToWei(in))
+				}
+			}
+		} else {
+			outgoing.Add(outgoing, v)
+		}
 	}
-
-	// pending = current + incoming - outgoing
-	// => incoming = pending + outgoing - current
-	incoming := new(big.Int).Add(pendingBal, outgoing)
-	incoming.Sub(incoming, bal)
 
 	return &Balance{
 		Current:    bal,
-		Pending:    pendingBal,
 		PendingOut: outgoing,
 		PendingIn:  incoming,
 	}, nil
@@ -264,7 +271,11 @@ func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash)
 	if len(receipts) <= int(index) {
 		return nil, fmt.Errorf("no receipt at index %d in block %s for tx %s", index, blockHash, txHash)
 	}
-	return receipts[index], nil
+	receipt := receipts[index]
+	if receipt == nil {
+		return nil, fmt.Errorf("nil receipt at index %d in block %s for tx %s", index, blockHash, txHash)
+	}
+	return receipt, nil
 }
 
 // pendingTransactions returns pending transactions.

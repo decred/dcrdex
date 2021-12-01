@@ -902,7 +902,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 // Balance is the current balance, including information about the pending
 // balance.
 type Balance struct {
-	Current, Pending, PendingIn, PendingOut *big.Int
+	Current, PendingIn, PendingOut *big.Int
 }
 
 func versionedBytes(ver uint32, h []byte) []byte {

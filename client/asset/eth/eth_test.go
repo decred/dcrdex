@@ -64,10 +64,9 @@ type testNode struct {
 	nonce             uint64
 }
 
-func newBalance(current, pending, in, out uint64) *Balance {
+func newBalance(current, in, out uint64) *Balance {
 	return &Balance{
 		Current:    dexeth.GweiToWei(current),
-		Pending:    dexeth.GweiToWei(pending),
 		PendingIn:  dexeth.GweiToWei(in),
 		PendingOut: dexeth.GweiToWei(out),
 	}
@@ -354,7 +353,7 @@ func TestBalance(t *testing.T) {
 	// overMaxWei := new(big.Int).Set(maxWei)
 	// overMaxWei.Add(overMaxWei, gweiFactorBig)
 
-	tinyBal := newBalance(0, 0, 0, 0)
+	tinyBal := newBalance(0, 0, 0)
 	tinyBal.Current = big.NewInt(dexeth.GweiFactor - 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -377,7 +376,7 @@ func TestBalance(t *testing.T) {
 		wantLocked   uint64
 	}{{
 		name:         "ok zero",
-		bal:          newBalance(0, 0, 0, 0),
+		bal:          newBalance(0, 0, 0),
 		wantBal:      0,
 		wantImmature: 0,
 	}, {
@@ -386,21 +385,21 @@ func TestBalance(t *testing.T) {
 		wantBal: 0,
 	}, {
 		name:    "ok one",
-		bal:     newBalance(1, 0, 0, 0),
+		bal:     newBalance(1, 0, 0),
 		wantBal: 1,
 	}, {
 		name:       "ok pending out",
-		bal:        newBalance(4e8, (4-1.4)*1e8, 0, 1.4e8),
+		bal:        newBalance(4e8, 0, 1.4e8),
 		wantBal:    2.6e8,
 		wantLocked: 1.4e8,
 	}, {
 		name:         "ok pending in",
-		bal:          newBalance(1e8, 4e8, 3e8, 0),
+		bal:          newBalance(1e8, 3e8, 0),
 		wantBal:      1e8,
 		wantImmature: 3e8,
 	}, {
 		name:         "ok pending out and in",
-		bal:          newBalance(4e8, 5e8, 2e8, 1e8),
+		bal:          newBalance(4e8, 2e8, 1e8),
 		wantBal:      3e8,
 		wantLocked:   1e8,
 		wantImmature: 2e8,
@@ -475,7 +474,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		Address: common.HexToAddress(address),
 	}
 	node := newTestNode(&account)
-	node.bal = newBalance(walletBalanceGwei, 0, 0, 0)
+	node.bal = newBalance(walletBalanceGwei, 0, 0)
 	eth := &ExchangeWallet{
 		node:        node,
 		addr:        node.address(),
@@ -822,7 +821,7 @@ func TestPreSwap(t *testing.T) {
 			FeeSuggestion: test.feeSuggestion,
 		}
 		node := newTestNode(nil)
-		node.bal = newBalance(test.bal*1e9, 0, 0, 0)
+		node.bal = newBalance(test.bal*1e9, 0, 0)
 		node.balErr = test.balErr
 		eth := &ExchangeWallet{
 			node: node,
@@ -867,7 +866,7 @@ func TestPreSwap(t *testing.T) {
 
 func TestSwap(t *testing.T) {
 	node := &testNode{
-		bal: newBalance(0, 0, 0, 0),
+		bal: newBalance(0, 0, 0),
 	}
 	address := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
@@ -1219,7 +1218,7 @@ func TestMaxOrder(t *testing.T) {
 	for _, test := range tests {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := newTestNode(nil)
-		node.bal = newBalance(test.bal*1e9, 0, 0, 0)
+		node.bal = newBalance(test.bal*1e9, 0, 0)
 		node.balErr = test.balErr
 		eth := &ExchangeWallet{
 			node: node,
@@ -1428,7 +1427,7 @@ func TestSwapConfirmation(t *testing.T) {
 	hdr := &types.Header{}
 
 	node := &testNode{
-		bal:     newBalance(0, 0, 0, 0),
+		bal:     newBalance(0, 0, 0),
 		bestHdr: hdr,
 		swapMap: map[[32]byte]*dexeth.SwapState{
 			secretHash: state,

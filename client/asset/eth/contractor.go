@@ -39,6 +39,11 @@ type contractor interface {
 	estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error)
 	estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error)
 	isRedeemable(secretHash, secret [32]byte) (bool, error)
+	// incomingValue checks if the transaction redeems or refunds to the
+	// contract and sums the incoming value. It is not an error if the
+	// transaction does not pay to the contract, and the value returned in that
+	// case will always be zero.
+	incomingValue(context.Context, *types.Transaction) (uint64, error)
 }
 
 type contractorConstructor func(net dex.Network, addr common.Address, ec *ethclient.Client) (contractor, error)
@@ -221,6 +226,32 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		Gas:   0,
 		Data:  data,
 	})
+}
+
+func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction) (uint64, error) {
+	if *tx.To() != c.contractAddr {
+		return 0, nil
+	}
+	if redeems, err := dexeth.ParseRedeemData(tx.Data()); err == nil {
+		var redeemed uint64
+		for _, redeem := range redeems {
+			swap, err := c.swap(ctx, redeem.SecretHash)
+			if err != nil {
+				return 0, fmt.Errorf("redeem swap error: %w", err)
+			}
+			redeemed += swap.Value
+		}
+		return redeemed, nil
+	}
+	secretHash, err := dexeth.ParseRefundData(tx.Data())
+	if err != nil {
+		return 0, nil
+	}
+	swap, err := c.swap(ctx, secretHash)
+	if err != nil {
+		return 0, fmt.Errorf("refund swap error: %w", err)
+	}
+	return swap.Value, nil
 }
 
 var contractorConstructors = map[uint32]contractorConstructor{

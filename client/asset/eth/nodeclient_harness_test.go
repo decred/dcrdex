@@ -281,7 +281,7 @@ func TestContract(t *testing.T) {
 	t.Run("testSwap", testSwap)
 	t.Run("testInitiate", testInitiate)
 	t.Run("testRedeem", testRedeem)
-	t.Run("testRefund", testRefund)
+	// t.Run("testRefund", testRefund)
 }
 
 func testNodeInfo(t *testing.T) {
@@ -378,9 +378,9 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("no CoinNotFoundError")
 	}
 
-	txOpts, _ := ethClient.txOpts(ctx, 1, dexeth.InitGas(1, 0), nil)
+	txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil)
 
-	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
+	tx, err := ethClient.sendTransaction(ctx, txOpts, participantAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,12 +395,11 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("%d confs reported for unmined transaction", confs)
 	}
 
-	bal, _ := ethClient.balance(ctx)
-	if bal.PendingIn.Cmp(dexeth.GweiToWei(1)) != 0 { // We sent it to ourselves.
-		t.Fatalf("pending in not showing")
-	}
+	fees := new(big.Int).Mul(txOpts.GasFeeCap, new(big.Int).SetUint64(txOpts.GasLimit))
 
-	if bal.PendingOut.Cmp(dexeth.GweiToWei(1)) != 0 {
+	bal, _ := ethClient.balance(ctx)
+
+	if bal.PendingOut.Cmp(new(big.Int).Add(dexeth.GweiToWei(1), fees)) != 0 {
 		t.Fatalf("pending out not showing")
 	}
 
@@ -926,6 +925,15 @@ func testRedeem(t *testing.T) {
 		}
 		spew.Dump(tx)
 
+		bal, err := test.redeemerClient.balance(ctx)
+		if err != nil {
+			t.Fatalf("%s: redeemer pending in balance error: %v", test.name, err)
+		}
+
+		if test.addAmt && dexeth.WeiToGwei(bal.PendingIn) != uint64(numSwaps) {
+			t.Fatalf("%s: unexpected pending in balance %s", test.name, bal.PendingIn)
+		}
+
 		if err := waitForMined(t, time.Second*10, false); err != nil {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
@@ -941,7 +949,7 @@ func testRedeem(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := test.redeemerClient.balance(ctx)
+		bal, err = test.redeemerClient.balance(ctx)
 		if err != nil {
 			t.Fatalf("%s: redeemer balance error: %v", test.name, err)
 		}
@@ -1013,7 +1021,7 @@ func TestRefundGas(t *testing.T) {
 	fmt.Printf("Gas used for refund: %v \n", gas)
 }
 
-func testRefund(t *testing.T) {
+func TestRefund(t *testing.T) {
 	const amt = 1e9
 	locktime := time.Second * 12
 	tests := []struct {
@@ -1103,12 +1111,21 @@ func testRefund(t *testing.T) {
 		}
 
 		baseFee, _, _ := test.refunderClient.netFeeState(ctx)
-		txOpts, _ = test.refunderClient.txOpts(ctx, 0, dexeth.RedeemGas(1, 0), nil)
+		txOpts, _ = test.refunderClient.txOpts(ctx, 0, dexeth.RefundGas(0), nil)
 		tx, err := test.refunderClient.refund(txOpts, secretHash, 0)
 		if err != nil {
 			t.Fatalf("%s: refund error: %v", test.name, err)
 		}
 		spew.Dump(tx)
+
+		bal, err := test.refunderClient.balance(ctx)
+		if err != nil {
+			t.Fatalf("%s: balance error: %v", test.name, err)
+		}
+
+		if test.addAmt && dexeth.WeiToGwei(bal.PendingIn) != amt {
+			t.Fatalf("%s: unexpected pending in balance %s", test.name, bal.PendingIn)
+		}
 
 		if err := waitForMined(t, time.Second*10, false); err != nil {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
@@ -1125,7 +1142,7 @@ func testRefund(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err := test.refunderClient.balance(ctx)
+		bal, err = test.refunderClient.balance(ctx)
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
