@@ -97,6 +97,10 @@ type AccountBalancer interface {
 	AccountBalance(addr string) (uint64, error)
 	// ValidateSignature checks that the pubkey is correct for the address and
 	// that the signature shows ownership of the associated private key.
+	// IMPORTANT: As part of signature validation, the asset backend should
+	// validate the address against a STRICT standard. Case, prefixes, suffixes,
+	// etc. must be exactly the same order-to-order, since the address string
+	// is used as a key for various accounting operations throughout DEX.
 	ValidateSignature(addr string, pubkey, msg, sig []byte) error
 }
 
