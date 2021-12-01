@@ -259,7 +259,9 @@ type Receipt interface {
 	Expiration() time.Time
 	// Coin is the contract's coin.
 	Coin() Coin
-	// Contract is the contract script.
+	// Contract is the unique swap contract data. This may be a redeem script
+	// for UTXO assets, or other information that uniquely identifies the swap
+	// for account-based assets e.g. a contract version and secret hash for ETH.
 	Contract() dex.Bytes
 	// String provides a human-readable representation of the contract's Coin.
 	String() string
@@ -277,9 +279,13 @@ type AuditInfo struct {
 	Expiration time.Time
 	// Coin is the coin that contains the contract.
 	Coin Coin
-	// Contract is the contract script.
+	// Contract is the unique swap contract data. This may be a redeem script
+	// for UTXO assets, or other information that uniquely identifies the swap
+	// for account-based assets e.g. a contract version and secret hash for ETH.
 	Contract dex.Bytes
-	// SecretHash is the contract's secret hash.
+	// SecretHash is the contract's secret hash. This is likely to be encoded in
+	// the Contract field, which is often the redeem script or an asset-specific
+	// encoding of the unique swap data.
 	SecretHash dex.Bytes
 }
 
@@ -299,7 +305,9 @@ type Swaps struct {
 	// subsequent matches.
 	LockChange bool
 	// AssetVersion is the swap protocol version, which may indicate a specific
-	// contract or form of contract.
+	// contract or form of contract. NOTE: Depending on the asset, batch swaps
+	// may force each Contract to use the same version, but conceptually this
+	// should perhaps be in Contract with SecretHash.
 	AssetVersion uint32
 }
 
@@ -335,9 +343,6 @@ type RedeemForm struct {
 	// suggestion in any way, but obviously fees that are too low may result in
 	// the redemption getting stuck in mempool.
 	FeeSuggestion uint64
-	// AssetVersion is the swap protocol version, which may indicate a specific
-	// contract or form of contract.
-	AssetVersion uint32
 }
 
 // Order is order details needed for FundOrder.

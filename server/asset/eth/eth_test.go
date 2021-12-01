@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"math/big"
@@ -151,8 +152,9 @@ func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*bi
 	return n.acctBal, n.acctBalErr
 }
 
-func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *swapv0.ETHSwapSwap {
+func tSwap(bn int64, locktime, value *big.Int, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *swapv0.ETHSwapSwap {
 	return &swapv0.ETHSwapSwap{
+		Secret:               secret,
 		InitBlockNumber:      big.NewInt(bn),
 		RefundBlockTimestamp: locktime,
 		Participant:          *participantAddr,
@@ -444,6 +446,9 @@ func TestContract(t *testing.T) {
 	gasPrice := big.NewInt(3e10)
 	value := big.NewInt(5e18)
 	locktime := big.NewInt(initLocktime)
+	var secret, secretHash [32]byte
+	copy(secret[:], redeemSecretB)
+	copy(secretHash[:], redeemSecretHashB)
 	tests := []struct {
 		name           string
 		coinID         []byte
@@ -455,20 +460,20 @@ func TestContract(t *testing.T) {
 	}{{
 		name:     "ok",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
-		contract: initSecretHashA,
-		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
+		contract: dexeth.EncodeContractData(0, secretHash),
+		swap:     tSwap(97, locktime, value, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[:],
 	}, {
 		name:     "new coiner error, wrong tx type",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
-		contract: initSecretHashA,
-		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
+		contract: dexeth.EncodeContractData(0, secretHash),
+		swap:     tSwap(97, locktime, value, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[1:],
 		wantErr:  true,
 	}, {
 		name:     "confirmations error, swap error",
 		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
-		contract: initSecretHashA,
+		contract: dexeth.EncodeContractData(0, secretHash),
 		coinID:   txHash[:],
 		swapErr:  errors.New(""),
 		wantErr:  true,
@@ -485,7 +490,8 @@ func TestContract(t *testing.T) {
 			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
-		contract, err := eth.Contract(test.coinID, test.contract)
+		contractData := dexeth.EncodeContractData(0, secretHash) // matches initCalldata
+		contract, err := eth.Contract(test.coinID, contractData)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -533,7 +539,8 @@ func TestRedemption(t *testing.T) {
 	receiverAddr, contractAddr := new(common.Address), new(common.Address)
 	copy(receiverAddr[:], encode.RandomBytes(20))
 	copy(contractAddr[:], encode.RandomBytes(20))
-	var secretHash, txHash [32]byte
+	var secret, secretHash, txHash [32]byte
+	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
@@ -549,20 +556,20 @@ func TestRedemption(t *testing.T) {
 	}{{
 		name:       "ok",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: secretHash[:],
+		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[:],
-		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
+		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: secretHash[:],
+		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[1:],
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: secretHash[:],
-		swp:        tSwap(0, bigO, bigO, dexeth.SSRefunded, receiverAddr),
+		contractID: dexeth.EncodeContractData(0, secretHash),
+		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRefunded, receiverAddr),
 		coinID:     txHash[:],
 		wantErr:    true,
 	}, {
@@ -570,7 +577,7 @@ func TestRedemption(t *testing.T) {
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
 		contractID: secretHash[:31],
 		coinID:     txHash[:],
-		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
+		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}
 	for _, test := range tests {
@@ -653,19 +660,28 @@ func TestTxData(t *testing.T) {
 func TestValidateContract(t *testing.T) {
 	tests := []struct {
 		name       string
+		ver        uint32
 		secretHash []byte
 		wantErr    bool
 	}{{
 		name:       "ok",
-		secretHash: make([]byte, 32),
+		secretHash: make([]byte, dexeth.SecretHashSize),
 	}, {
 		name:       "wrong size",
-		secretHash: make([]byte, 31),
+		secretHash: make([]byte, dexeth.SecretHashSize-1),
+		wantErr:    true,
+	}, {
+		name:       "wrong version",
+		ver:        1,
+		secretHash: make([]byte, dexeth.SecretHashSize),
 		wantErr:    true,
 	}}
 	for _, test := range tests {
 		eth := new(Backend)
-		err := eth.ValidateContract(test.secretHash)
+		swapData := make([]byte, 4+len(test.secretHash))
+		binary.BigEndian.PutUint32(swapData[:4], test.ver)
+		copy(swapData[4:], test.secretHash)
+		err := eth.ValidateContract(swapData)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

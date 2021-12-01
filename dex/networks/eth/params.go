@@ -1,9 +1,14 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
+//go:build lgpl
+// +build lgpl
+
 package eth
 
 import (
+	"encoding/binary"
+	"errors"
 	"math"
 	"math/big"
 	"time"
@@ -63,6 +68,26 @@ var v0Gases = &Gases{
 	AdditionalRedeemGas: 32000,
 	// RefundGas is the amount of gas it costs to refund a swap.
 	RefundGas: 43000,
+}
+
+// EncodeContractData packs the contract version and the secret hash into a byte
+// slice for communicating a swap's identity.
+func EncodeContractData(contractVersion uint32, swapKey [SecretHashSize]byte) []byte {
+	b := make([]byte, SecretHashSize+4)
+	binary.BigEndian.PutUint32(b[:4], contractVersion)
+	copy(b[4:], swapKey[:])
+	return b
+}
+
+// DecodeContractData unpacks the contract version and secret hash.
+func DecodeContractData(data []byte) (contractVersion uint32, swapKey [SecretHashSize]byte, err error) {
+	if len(data) != SecretHashSize+4 {
+		err = errors.New("invalid swap data")
+		return
+	}
+	contractVersion = binary.BigEndian.Uint32(data[:4])
+	copy(swapKey[:], data[4:])
+	return
 }
 
 // InitGas calculates the gas required for a batch of n inits.

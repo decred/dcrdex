@@ -1,5 +1,5 @@
-//go:build live
-// +build live
+//go:build live && lgpl
+// +build live,lgpl
 
 // Run a test server with
 // go test -v -tags live -run Server -timeout 60m
@@ -305,37 +305,37 @@ var tExchanges = map[string]*core.Exchange{
 		},
 		Connected: true,
 		RegFees: map[string]*core.FeeAsset{
-			"dcr": &core.FeeAsset{
+			"dcr": {
 				ID:    42,
 				Confs: 1,
 				Amt:   1e8,
 			},
-			"btc": &core.FeeAsset{
+			"btc": {
 				ID:    0,
 				Confs: 2,
 				Amt:   1e5,
 			},
-			"eth": &core.FeeAsset{
+			"eth": {
 				ID:    60,
 				Confs: 5,
 				Amt:   1e7,
 			},
-			"bch": &core.FeeAsset{
+			"bch": {
 				ID:    145,
 				Confs: 2,
 				Amt:   1e10,
 			},
-			"ltc": &core.FeeAsset{
+			"ltc": {
 				ID:    2,
 				Confs: 5,
 				Amt:   1e10,
 			},
-			"doge": &core.FeeAsset{
+			"doge": {
 				ID:    3,
 				Confs: 10,
 				Amt:   1e12,
 			},
-			"kmd": &core.FeeAsset{ // Not-supported
+			"kmd": { // Not-supported
 				ID:    141,
 				Confs: 10,
 				Amt:   1e12,
@@ -354,12 +354,12 @@ var tExchanges = map[string]*core.Exchange{
 		},
 		Connected: true,
 		RegFees: map[string]*core.FeeAsset{
-			"dcr": &core.FeeAsset{
+			"dcr": {
 				ID:    42,
 				Confs: 1,
 				Amt:   1e8,
 			},
-			"btc": &core.FeeAsset{
+			"btc": {
 				ID:    0,
 				Confs: 2,
 				Amt:   1e6,
@@ -1412,7 +1412,7 @@ out:
 			c.noteFeed <- &core.SpotPriceNote{
 				Host:         dexAddr,
 				Notification: db.NewNotification(core.NoteTypeSpots, core.TopicSpotsUpdate, "", "", db.Data),
-				Spots: map[string]*msgjson.Spot{mktID: &msgjson.Spot{
+				Spots: map[string]*msgjson.Spot{mktID: {
 					Stamp:   encode.UnixMilliU(time.Now()),
 					BaseID:  baseID,
 					QuoteID: quoteID,

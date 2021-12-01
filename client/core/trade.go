@@ -1529,7 +1529,11 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		// to notify the server of the swap.
 		proof := &match.MetaData.Proof
 		contract, coinID := receipt.Contract(), []byte(coin.ID())
-		proof.Script = contract
+		// NOTE: receipt.Contract() uniquely identifies this swap. Only the
+		// asset backend can decode this information, which may be a redeem
+		// script with UTXO assets, or a secret hash + contract version for
+		// contracts on account-based assets.
+		proof.Script = contract // expected conflict: buck is renaming this
 		if match.Side == order.Taker {
 			proof.TakerSwap = coinID
 			match.Status = order.TakerSwapCast
@@ -1677,7 +1681,6 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
 		FeeSuggestion: feeSuggestion,
-		AssetVersion:  t.metaData.ToVersion,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.

@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -944,12 +943,16 @@ func TestSwap(t *testing.T) {
 					testName, receipt.Coin().Value(), contract.Value)
 			}
 			contractData := receipt.Contract()
-			if swaps.AssetVersion != binary.BigEndian.Uint32(contractData[:4]) {
+			ver, secretHash, err := dexeth.DecodeContractData(contractData)
+			if err != nil {
+				t.Fatalf("failed to decode contract data: %v", err)
+			}
+			if swaps.AssetVersion != ver {
 				t.Fatal("wrong contract version")
 			}
-			if !bytes.Equal(contractData[4:], contract.SecretHash[:]) {
+			if !bytes.Equal(contract.SecretHash, secretHash[:]) {
 				t.Fatalf("%v, contract: %x != secret hash in input: %x",
-					testName, receipt.Contract(), contract.SecretHash)
+					testName, receipt.Contract(), secretHash)
 			}
 
 			totalCoinValue += receipt.Coin().Value()
@@ -1135,9 +1138,13 @@ func TestPreRedeem(t *testing.T) {
 }
 
 func TestRedeem(t *testing.T) {
+	// Test with a non-zero contract version to ensure it makes it into the receipt
+	contractVer := uint32(1)
+	dexeth.VersionedGases[1] = dexeth.VersionedGases[0] // for dexeth.RedeemGas(..., 1)
+	defer delete(dexeth.VersionedGases, 1)
 	node := &testNode{
 		swapVers: map[uint32]struct{}{
-			0: {},
+			contractVer: {},
 		},
 		swapMap: make(map[[32]byte]*dexeth.SwapState),
 	}
@@ -1190,7 +1197,8 @@ func TestRedeem(t *testing.T) {
 				Redemptions: []*asset.Redemption{
 					{
 						Spends: &asset.AuditInfo{
-							SecretHash: secretHashes[0][:],
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
 								id: encode.RandomBytes(32),
 							},
@@ -1199,6 +1207,7 @@ func TestRedeem(t *testing.T) {
 					},
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1208,7 +1217,6 @@ func TestRedeem(t *testing.T) {
 					},
 				},
 				FeeSuggestion: 100,
-				AssetVersion:  0,
 			},
 		},
 		{
@@ -1219,6 +1227,7 @@ func TestRedeem(t *testing.T) {
 				Redemptions: []*asset.Redemption{
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1228,6 +1237,7 @@ func TestRedeem(t *testing.T) {
 					},
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1237,7 +1247,6 @@ func TestRedeem(t *testing.T) {
 					},
 				},
 				FeeSuggestion: 100,
-				AssetVersion:  0,
 			},
 		},
 		{
@@ -1249,6 +1258,7 @@ func TestRedeem(t *testing.T) {
 				Redemptions: []*asset.Redemption{
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1258,6 +1268,7 @@ func TestRedeem(t *testing.T) {
 					},
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1267,7 +1278,6 @@ func TestRedeem(t *testing.T) {
 					},
 				},
 				FeeSuggestion: 100,
-				AssetVersion:  0,
 			},
 		},
 		{
@@ -1279,6 +1289,7 @@ func TestRedeem(t *testing.T) {
 				Redemptions: []*asset.Redemption{
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1288,7 +1299,6 @@ func TestRedeem(t *testing.T) {
 					},
 				},
 				FeeSuggestion: 200,
-				AssetVersion:  0,
 			},
 		},
 		{
@@ -1299,6 +1309,7 @@ func TestRedeem(t *testing.T) {
 				Redemptions: []*asset.Redemption{
 					{
 						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[2]),
 							SecretHash: secretHashes[2][:],
 							Coin: &coin{
 								id: encode.RandomBytes(32),
@@ -1308,7 +1319,6 @@ func TestRedeem(t *testing.T) {
 					},
 				},
 				FeeSuggestion: 100,
-				AssetVersion:  0,
 			},
 		},
 		{
@@ -1318,7 +1328,6 @@ func TestRedeem(t *testing.T) {
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{},
 				FeeSuggestion: 100,
-				AssetVersion:  0,
 			},
 		},
 	}
@@ -1359,8 +1368,12 @@ func TestRedeem(t *testing.T) {
 					test.name, coinID, ins[i])
 			}
 
-			var secretHash [32]byte
-			copy(secretHash[:], redemption.Spends.SecretHash)
+			_, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+			if err != nil {
+				t.Fatalf("DecodeContractData: %v", err)
+			}
+			// secretHash should equal redemption.Spends.SecretHash, but it's
+			// not part of the Redeem code, just the test input consistency.
 			swap := node.swapMap[secretHash]
 			totalSwapValue += swap.Value
 		}
@@ -1684,7 +1697,7 @@ func TestSwapConfirmation(t *testing.T) {
 	ver := uint32(0)
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
-		confs, spent, err := eth.SwapConfirmations(nil, nil, versionedBytes(ver, secretHash[:]), time.Time{})
+		confs, spent, err := eth.SwapConfirmations(nil, nil, dexeth.EncodeContractData(ver, secretHash), time.Time{})
 		if err != nil {
 			if expErr {
 				return
@@ -1718,7 +1731,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	// CoinNotFoundError
 	state.State = dexeth.SSNone
-	_, _, err := eth.SwapConfirmations(nil, nil, versionedBytes(0, secretHash[:]), time.Time{})
+	_, _, err := eth.SwapConfirmations(nil, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("expected CoinNotFoundError, got %v", err)
 	}

@@ -257,14 +257,32 @@ func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	return c
 }
 
-// Contract is part of the asset.Backend interface.
-func (eth *Backend) Contract(coinID, contract []byte) (*asset.Contract, error) {
-	sc, err := eth.newSwapCoin(coinID, contract, sctInit)
+// ValidateContract ensures that contractData encodes both the expected contract
+// version targeted and the secret hash.
+func (eth *Backend) ValidateContract(contractData []byte) error {
+	ver, _, err := dexeth.DecodeContractData(contractData)
+	if err != nil { // ensures secretHash is proper length
+		return err
+	}
+	if ver != version {
+		return fmt.Errorf("incorrect contract version %d, wanted %d", ver, version)
+	}
+	return nil
+}
+
+// Contract is part of the asset.Backend interface. The contractData bytes
+// encodes both the contract version targeted and the secret hash.
+func (eth *Backend) Contract(coinID, contractData []byte) (*asset.Contract, error) {
+	// newSwapCoin validates the contractData, extracting version, secret hash,
+	// counterparty address, and locktime. The supported version is enforced.
+	sc, err := eth.newSwapCoin(coinID, contractData, sctInit)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
-	// Confirmations performs some extra swap status checks if the the tx
-	// is mined.
+
+	// Confirmations performs some extra swap status checks if the the tx is
+	// mined. For init coins, this uses the contract account's state (if it is
+	// mined) to verify the value, counterparty, and lock time.
 	_, err = sc.Confirmations(eth.rpcCtx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get confirmations: %v", err)
@@ -272,7 +290,7 @@ func (eth *Backend) Contract(coinID, contract []byte) (*asset.Contract, error) {
 	return &asset.Contract{
 		Coin:         sc,
 		SwapAddress:  sc.counterParty.String(),
-		ContractData: sc.secretHash[:],
+		ContractData: contractData,
 		LockTime:     encode.UnixTimeMilli(sc.locktime),
 	}, nil
 }
@@ -309,22 +327,21 @@ func (eth *Backend) Synced() (bool, error) {
 // should be the transaction that sent a redemption, while contractCoinID is the
 // swap contract this redemption redeems.
 func (eth *Backend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin, error) {
-	cnr, err := eth.newSwapCoin(redeemCoinID, contractData, sctRedeem)
+	// newSwapCoin uses the contract account's state to validate the
+	// contractData, extracting version, secret, and secret hash. The supported
+	// version is enforced.
+	rc, err := eth.newSwapCoin(redeemCoinID, contractData, sctRedeem)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
-	// Ensure that the redeem is for the same coin hash and contract as the
-	// contract coin.
-	if err = cnr.validateRedeem(contractData); err != nil {
-		return nil, fmt.Errorf("unable to validate redeem: %v", err)
-	}
+
 	// Confirmations performs some extra swap status checks if the the tx
-	// is mined.
-	_, err = cnr.Confirmations(eth.rpcCtx)
+	// is mined. For redeem coins, this is just a swap state check.
+	_, err = rc.Confirmations(eth.rpcCtx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get confirmations: %v", err)
 	}
-	return cnr, nil
+	return rc, nil
 }
 
 // ValidateCoinID attempts to decode the coinID.
@@ -334,14 +351,6 @@ func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 		return "", err
 	}
 	return txHash.String(), nil
-}
-
-// ValidateContract ensures that the secret hash is the correct length.
-func (eth *Backend) ValidateContract(secretHash []byte) error {
-	if len(secretHash) != dexeth.SecretHashSize {
-		return fmt.Errorf("secret hash is wrong size: want %d but got %d", dexeth.SecretHashSize, len(secretHash))
-	}
-	return nil
 }
 
 // CheckAddress checks that the given address is parseable.
