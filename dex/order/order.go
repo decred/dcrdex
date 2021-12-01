@@ -480,6 +480,8 @@ func (t *Trade) FromAccount() string {
 	if len(t.Coins) == 0 {
 		return "no coins?"
 	}
+	// The coin ID should be the UTF-8 encoded address string, not the address
+	// byte-array. t.Coins[0] = []byte(addrStr).
 	return string(t.Coins[0])
 }
 

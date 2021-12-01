@@ -62,6 +62,9 @@ type Backend interface {
 	CheckAddress(string) bool
 	// ValidateCoinID checks the coinID to ensure it can be decoded, returning a
 	// human-readable string if it is valid.
+	// Note: ValidateCoinID is NOT used for funding coin IDs for account-based
+	// assets. This rule is only enforced by code patterns right now, but we may
+	// consider adding separate methods in the future.
 	ValidateCoinID(coinID []byte) (string, error)
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
