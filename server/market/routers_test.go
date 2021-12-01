@@ -658,6 +658,10 @@ func TestMain(m *testing.M) {
 		"dcr_eth":   oRig.market,
 		"eth_matic": oRig.market,
 	}
+	pendingAccounters := make(map[string]PendingAccounter)
+	for name := range tunnels {
+		pendingAccounters[name] = oRig.market
+	}
 	assets := map[uint32]*asset.BackedAsset{
 		0:   assetBTC,
 		42:  assetDCR,
@@ -669,7 +673,7 @@ func TestMain(m *testing.M) {
 		Assets:      assets,
 		Markets:     tunnels,
 		FeeSource:   &tFeeSource{},
-		DEXBalancer: NewDEXBalancer(tunnels, assets, matchNegotiator),
+		DEXBalancer: NewDEXBalancer(pendingAccounters, assets, matchNegotiator),
 	})
 	rig = newTestRig()
 	src1 := rig.source1

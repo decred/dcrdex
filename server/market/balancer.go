@@ -9,19 +9,36 @@ import (
 	"decred.org/dcrdex/server/asset"
 )
 
+// PendingAccounter can view order-reserved funds for an account-based asset's
+// address. PendingAccounter is satisfied by *Market.
+type PendingAccounter interface {
+	// AccountPending retreives the total pending order-reserved quantity for
+	// the asset, as well as the number of possible pending redemptions
+	// (a.k.a. ordered lots).
+	AccountPending(acctAddr string, assetID uint32) (qty, lots uint64, redeems int)
+}
+
+// MatchNegotiator can view match-reserved funds for an account-based asset's
+// address. MatchNegotiator is satisfied by *Swapper.
+type MatchNegotiator interface {
+	// AccountStats returns the qty, swap count, and redeem count pending in
+	// active matches.
+	AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int)
+}
+
 // BackedBalancer is an asset manager that is capable of querying the entire DEX
 // for the balance required to fulfill new + existing orders and outstanding
 // redemptions.
 type DEXBalancer struct {
-	tunnels         map[string]MarketTunnel
+	tunnels         map[string]PendingAccounter
 	assets          map[uint32]*backedBalancer
 	matchNegotiator MatchNegotiator
 }
 
 // NewDEXBalancer is a constructor for a DEXBalancer. Provided assets will
-// be filtered for those that are account-based. The matchNegotitator is
+// be filtered for those that are account-based. The matchNegotiator is
 // satisfied by the *Swapper.
-func NewDEXBalancer(tunnels map[string]MarketTunnel, assets map[uint32]*asset.BackedAsset, matchNegotiator MatchNegotiator) *DEXBalancer {
+func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asset.BackedAsset, matchNegotiator MatchNegotiator) *DEXBalancer {
 	balancers := make(map[uint32]*backedBalancer)
 	for assetID, ba := range assets {
 		balancer, is := ba.Backend.(asset.AccountBalancer)
@@ -50,7 +67,7 @@ func NewDEXBalancer(tunnels map[string]MarketTunnel, assets map[uint32]*asset.Ba
 func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool {
 	backedAsset, found := b.assets[assetID]
 	if !found {
-		log.Errorf("asset ID %d not found in accountBalancer assets map", assetID)
+		log.Errorf("(*DEXBalancer).CheckBalance: asset ID %d not a configured backedBalancer", assetID)
 		return false
 	}
 
@@ -59,7 +76,7 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots ui
 
 	bal, err := backedAsset.balancer.AccountBalance(acctAddr)
 	if err != nil {
-		log.Error("error getting account balance for %q: %v", acctAddr, err)
+		log.Error("(*DEXBalancer).CheckBalance: error getting account balance for %q: %v", acctAddr, err)
 		return false
 	}
 
@@ -81,8 +98,8 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots ui
 	redeemCosts := uint64(redeems) * assetInfo.RedeemSize * assetInfo.MaxFeeRate
 	reqFunds := calc.RequiredOrderFunds(qty, 0, lots, assetInfo) + redeemCosts
 
-	log.Tracef("balance check for %s - %s: total qty = %d, total lots = %d, "+
-		"total redeems = %d, redeemCosts = %d, required = %d, bal = %d",
+	log.Tracef("(*DEXBalancer).CheckBalance: balance check for %s - %s: total qty = %d, "+
+		"total lots = %d, total redeems = %d, redeemCosts = %d, required = %d, bal = %d",
 		backedAsset.assetInfo.Symbol, acctAddr, qty, lots, redeems, redeemCosts, reqFunds, bal)
 
 	return bal >= reqFunds

@@ -97,7 +97,6 @@ type MarketTunnel interface {
 	// cancellation marked against the user, coins unlocked, and orderbook
 	// subscribers notified). See Unbook for details.
 	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
-	AccountPending(acctAddr string, assetID uint32) (qty, lots uint64, redeems int)
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -134,10 +133,6 @@ func newAssetSet(base, quote *asset.BackedAsset, sell bool) *assetSet {
 // FeeSource is a source of the last reported tx fee rate estimate for an asset.
 type FeeSource interface {
 	LastRate(assetID uint32) (feeRate uint64)
-}
-
-type MatchNegotiator interface {
-	AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int)
 }
 
 // OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These

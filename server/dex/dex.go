@@ -604,7 +604,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// they are all instantiated, so we are synchronous in our use of the
 	// marketTunnels map.
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
-	dexBalancer := market.NewDEXBalancer(marketTunnels, backedAssets, swapper)
+	pendingAccounters := make(map[string]market.PendingAccounter, len(cfg.Markets))
+	dexBalancer := market.NewDEXBalancer(pendingAccounters, backedAssets, swapper)
 
 	// Markets
 	usersWithOrders := make(map[account.AccountID]struct{})
@@ -635,6 +636,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 		markets[mktInf.Name] = mkt
 		marketTunnels[mktInf.Name] = mkt
+		pendingAccounters[mktInf.Name] = mkt
 		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
 		err = dataAPI.AddMarketSource(mkt)
 		if err != nil {

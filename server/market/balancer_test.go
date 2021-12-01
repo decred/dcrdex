@@ -20,7 +20,7 @@ func TestBalancer(t *testing.T) {
 	backend := &tAccountBackend{}
 
 	balancer := &DEXBalancer{
-		tunnels: map[string]MarketTunnel{
+		tunnels: map[string]PendingAccounter{
 			"abc_xyz": tunnel,
 		},
 		assets: map[uint32]*backedBalancer{

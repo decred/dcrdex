@@ -138,6 +138,14 @@ func (c *rpcclient) accountBalance(ctx context.Context, addr common.Address) (*b
 		return nil, err
 	}
 
+	// We need to subtract and pending outgoing value, but ignore any pending
+	// incoming value since that can't be spent until mined. So we can't using
+	// PendingBalanceAt or BalanceAt by themselves.
+	// We'll iterate tx pool transactions and subtract any value and fees being
+	// sent from this account. The rpc.Client doesn't expose the
+	// txpool_contentFrom => (*TxPool).ContentFrom RPC method, for whatever
+	// reason, so we'll have to use CallContext and copy the mimic the
+	// internal RPCTransaction type.
 	var txs map[string]map[string]*RPCTransaction
 	err = c.c.CallContext(ctx, &txs, "txpool_contentFrom", addr)
 	if err != nil {
@@ -153,6 +161,8 @@ func (c *rpcclient) accountBalance(ctx context.Context, addr common.Address) (*b
 				outgoing.Add(outgoing, new(big.Int).Mul(gas, tx.GasPrice.ToInt()))
 			} else if tx.GasFeeCap != nil {
 				outgoing.Add(outgoing, new(big.Int).Mul(gas, tx.GasFeeCap.ToInt()))
+			} else {
+				return nil, fmt.Errorf("cannot find fees for tx %s", tx.Hash)
 			}
 		}
 	}
@@ -165,11 +175,12 @@ type RPCTransaction struct {
 	Gas       hexutil.Uint64 `json:"gas"`
 	GasPrice  *hexutil.Big   `json:"gasPrice"`
 	GasFeeCap *hexutil.Big   `json:"maxFeePerGas,omitempty"`
+	Hash      common.Hash    `json:"hash"`
 	// BlockHash        *common.Hash      `json:"blockHash"`
 	// BlockNumber      *hexutil.Big      `json:"blockNumber"`
 	// From             common.Address    `json:"from"`
 	// GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	// Hash             common.Hash       `json:"hash"`
+
 	// Input            hexutil.Bytes     `json:"input"`
 	// Nonce            hexutil.Uint64    `json:"nonce"`
 	// To               *common.Address   `json:"to"`
