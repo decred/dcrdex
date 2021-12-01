@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -131,6 +130,12 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
 	return CreateWallet(params)
+}
+
+// Balance is the current balance, including information about the pending
+// balance.
+type Balance struct {
+	Current, PendingIn, PendingOut *big.Int
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
@@ -564,7 +569,7 @@ func (eth *ExchangeWallet) unlockFunds(coins asset.Coins) error {
 // swapReceipt implements the asset.Receipt interface for ETH.
 type swapReceipt struct {
 	txHash     common.Hash
-	secretHash []byte
+	secretHash [dexeth.SecretHashSize]byte
 	// expiration and value can be determined with a blockchain
 	// lookup, but we cache these values to avoid this.
 	expiration time.Time
@@ -586,9 +591,10 @@ func (r *swapReceipt) Coin() asset.Coin {
 	}
 }
 
-// Contract returns the swap's secret hash.
+// Contract returns the swap's identifying data, which the concatenation of the
+// contract version and the secret hash.
 func (r *swapReceipt) Contract() dex.Bytes {
-	return versionedBytes(r.ver, r.secretHash[:])
+	return dexeth.EncodeContractData(r.ver, r.secretHash)
 }
 
 // String returns a string representation of the swapReceipt.
@@ -645,12 +651,14 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	txHash := tx.Hash()
 	for _, swap := range swaps.Contracts {
+		var secretHash [dexeth.SecretHashSize]byte
+		copy(secretHash[:], swap.SecretHash)
 		receipts = append(receipts,
 			&swapReceipt{
 				expiration: encode.UnixTimeMilli(int64(swap.LockTime)),
 				value:      swap.Value,
 				txHash:     txHash,
-				secretHash: swap.SecretHash,
+				secretHash: secretHash,
 				ver:        swaps.AssetVersion,
 			})
 	}
@@ -667,7 +675,10 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
-// redemption.
+// redemption. All redemptions must be for the same contract version because the
+// current API requires a single transaction reported (asset.Coin output), but
+// conceptually a batch of redeems could be processed for any number of
+// different contract addresses with multiple transactions.
 func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
@@ -677,13 +688,32 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
 	}
 
+	var contractVersion uint32 // require a consistent version since this is a single transaction
 	inputs := make([]dex.Bytes, 0, len(form.Redemptions))
 	var redeemedValue uint64
-	for _, redemption := range form.Redemptions {
-		var secretHash, secret [32]byte
-		copy(secretHash[:], redemption.Spends.SecretHash)
+	for i, redemption := range form.Redemptions {
+		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
+		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
+		// redeem script in this Contract field is redundant with the SecretHash
+		// field as ExtractSwapDetails can be applied to extract the hash.
+		ver, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+		if err != nil {
+			return fail(fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err))
+		}
+		if i == 0 {
+			contractVersion = ver
+		} else if contractVersion != ver {
+			return fail(fmt.Errorf("Redeem: inconsistent contract versions in RedeemForm.Redemptions: "+
+				"%d != %d", contractVersion, ver))
+		}
+
+		// Use the contract's free public view function to validate the secret
+		// against the secret hash, and ensure the swap is otherwise redeemable
+		// before broadcasting our secrets, which is especially important if we
+		// are maker (the swap initiator).
+		var secret [32]byte
 		copy(secret[:], redemption.Secret)
-		redeemable, err := eth.node.isRedeemable(secretHash, secret, form.AssetVersion)
+		redeemable, err := eth.node.isRedeemable(secretHash, secret, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
 		}
@@ -692,19 +722,20 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 				secretHash, secret))
 		}
 
-		swapData, err := eth.node.swap(eth.ctx, secretHash, form.AssetVersion)
+		swapData, err := eth.node.swap(eth.ctx, secretHash, ver)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
 		}
 		redeemedValue += swapData.Value
 		inputs = append(inputs, redemption.Spends.Coin.ID())
 	}
-	outputCoin := eth.createAmountCoin(redeemedValue)
-	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), form.AssetVersion) * form.FeeSuggestion
+
+	outputCoin := eth.createFundingCoin(redeemedValue)
+	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * form.FeeSuggestion
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees. Also unlock coins.
-	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, form.AssetVersion)
+	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -744,7 +775,7 @@ func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
 func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
-	contractVer, secretHash, err := decodeVersionedSecretHash(contract)
+	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -809,7 +840,7 @@ func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) 
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
-	contractVer, secretHash, err := decodeVersionedSecretHash(contract)
+	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return 0, false, err
 	}
@@ -943,28 +974,4 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
 		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
 	go eth.tipChange(nil)
-}
-
-// Balance is the current balance, including information about the pending
-// balance.
-type Balance struct {
-	Current, PendingIn, PendingOut *big.Int
-}
-
-func versionedBytes(ver uint32, h []byte) []byte {
-	b := make([]byte, len(h)+4)
-	binary.BigEndian.PutUint32(b[:4], ver)
-	copy(b[4:], h)
-	return b
-}
-
-// decodeVersionedSecretHash unpacks the contract version and secret hash.
-func decodeVersionedSecretHash(data []byte) (contractVersion uint32, swapKey [dexeth.SecretHashSize]byte, err error) {
-	if len(data) != dexeth.SecretHashSize+4 {
-		err = errors.New("invalid swap data")
-		return
-	}
-	contractVersion = binary.BigEndian.Uint32(data[:4])
-	copy(swapKey[:], data[4:])
-	return
 }

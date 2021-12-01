@@ -7,7 +7,6 @@
 package eth
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -63,7 +62,7 @@ type swapCoin struct {
 // an error is returned then if something is different than expected. As such,
 // the swapCoin expects Confirmations to be called with confirmations
 // available at least once before the swap be trusted for swap initializations.
-func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoinType) (*swapCoin, error) {
+func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swapCoinType) (*swapCoin, error) {
 	switch sct {
 	case sctInit, sctRedeem:
 	default:
@@ -83,23 +82,30 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 	}
 
 	txdata := tx.Data()
-	// Transactions that call contract functions must have extra data to do
-	// so.
+	// Transactions that call contract functions must have extra data.
 	if len(txdata) == 0 {
 		return nil, errors.New("tx calling contract function has no extra data")
 	}
 
-	var (
-		counterParty       = new(common.Address)
-		secret, secretHash [32]byte
-		locktime           int64
-	)
-
-	if len(contract) != 32 {
-		return nil, fmt.Errorf("expected contract to have length 32 but got %v", len(contract))
+	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+	if err != nil {
+		return nil, err
+	}
+	if contractVer != version {
+		return nil, fmt.Errorf("contract version %d not supported, only %d", contractVer, version)
+	}
+	contractAddr := tx.To()
+	if *contractAddr != backend.contractAddr {
+		return nil, fmt.Errorf("contract address is not supported: %v", contractAddr)
 	}
 
-	copy(secretHash[:], contract)
+	// Parse the call data for the counter-party address and lock time for an
+	// init txn, and the secret key for a redeem txn.
+	var (
+		counterParty = new(common.Address)
+		secret       [32]byte
+		locktime     int64
+	)
 
 	switch sct {
 	case sctInit:
@@ -109,15 +115,17 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		}
 		var initiation *swapv0.ETHSwapInitiation
 		for _, init := range initiations {
+			// contractData points us to the init of interest.
 			if init.SecretHash == secretHash {
 				initiation = &init
+				break
 			}
 		}
 		if initiation == nil {
-			return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", txHash, secretHash)
+			return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x",
+				txHash, secretHash)
 		}
 		counterParty = &initiation.Participant
-		secretHash = initiation.SecretHash
 		locktime = initiation.RefundTimestamp.Int64()
 	case sctRedeem:
 		redemptions, err := dexeth.ParseRedeemData(txdata)
@@ -126,20 +134,17 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		}
 		var redemption *swapv0.ETHSwapRedemption
 		for _, redeem := range redemptions {
+			// contractData points us to the redeem of interest.
 			if redeem.SecretHash == secretHash {
 				redemption = &redeem
+				break
 			}
 		}
 		if redemption == nil {
-			return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x", txHash, secretHash)
+			return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x",
+				txHash, secretHash)
 		}
 		secret = redemption.Secret
-		secretHash = redemption.SecretHash
-	}
-
-	contractAddr := tx.To()
-	if *contractAddr != backend.contractAddr {
-		return nil, errors.New("contract address is not supported")
 	}
 
 	// Gas price is not stored in the swap, and is used to determine if the
@@ -164,30 +169,17 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 
 	return &swapCoin{
 		backend:      backend,
-		contractAddr: *contractAddr,
-		secret:       secret,
+		contractAddr: *contractAddr, // non-zero for init
+		secret:       secret,        // non-zero for redeem
 		secretHash:   secretHash,
 		value:        value,
 		gasPrice:     gasPrice,
 		txHash:       txHash,
 		txid:         txHash.Hex(), // == String(), with 0x prefix
 		counterParty: *counterParty,
-		locktime:     locktime,
+		locktime:     locktime, // non-zero for init
 		sct:          sct,
 	}, nil
-}
-
-// validateRedeem ensures that a redeem swap coin redeems a certain contract by
-// comparing the contract and secret hash.
-func (c *swapCoin) validateRedeem(contractID []byte) error {
-	if c.sct != sctRedeem {
-		return errors.New("can only validate redeem")
-	}
-	if !bytes.Equal(c.secretHash[:], contractID) {
-		return fmt.Errorf("redeem secret hash %x does not match contract %x",
-			c.secretHash, contractID)
-	}
-	return nil
 }
 
 // Confirmations returns the number of confirmations for a Coin's

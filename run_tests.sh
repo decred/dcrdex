@@ -42,7 +42,7 @@ done
 
 cd "$dir"
 dumptags=(-c -o /dev/null -tags)
-go test "${dumptags[@]}" live ./client/webserver
+go test "${dumptags[@]}" live,lgpl ./client/webserver
 go test "${dumptags[@]}" harness ./client/asset/dcr
 go test "${dumptags[@]}" harness ./client/asset/btc/livetest
 go test "${dumptags[@]}" harness ./client/asset/ltc
