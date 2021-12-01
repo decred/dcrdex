@@ -9,7 +9,7 @@ import (
 	"math/big"
 	"testing"
 
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -21,7 +21,7 @@ func mustParseHex(s string) []byte {
 	return b
 }
 
-func initiationsAreEqual(a, b swap.ETHSwapInitiation) bool {
+func initiationsAreEqual(a, b swapv0.ETHSwapInitiation) bool {
 	return a.RefundTimestamp.Cmp(b.RefundTimestamp) == 0 &&
 		a.SecretHash == b.SecretHash &&
 		a.Participant == b.Participant &&
@@ -37,14 +37,14 @@ func TestParseInitiateData(t *testing.T) {
 
 	locktime := int64(1632112916)
 
-	initiations := []swap.ETHSwapInitiation{
-		swap.ETHSwapInitiation{
+	initiations := []swapv0.ETHSwapInitiation{
+		swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(locktime),
 			SecretHash:      secretHashA,
 			Participant:     participantAddr,
 			Value:           big.NewInt(1),
 		},
-		swap.ETHSwapInitiation{
+		swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(locktime),
 			SecretHash:      secretHashB,
 			Participant:     participantAddr,
@@ -122,7 +122,7 @@ func TestParseInitiateData(t *testing.T) {
 	}
 }
 
-func redemptionsAreEqual(a, b swap.ETHSwapRedemption) bool {
+func redemptionsAreEqual(a, b swapv0.ETHSwapRedemption) bool {
 	return a.SecretHash == b.SecretHash &&
 		a.Secret == b.Secret
 }
@@ -134,12 +134,12 @@ func TestParseRedeemData(t *testing.T) {
 	copy(secretHashB[:], mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546"))
 	copy(secretB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
 
-	redemptions := []swap.ETHSwapRedemption{
-		swap.ETHSwapRedemption{
+	redemptions := []swapv0.ETHSwapRedemption{
+		swapv0.ETHSwapRedemption{
 			Secret:     secretA,
 			SecretHash: secretHashA,
 		},
-		swap.ETHSwapRedemption{
+		swapv0.ETHSwapRedemption{
 			Secret:     secretB,
 			SecretHash: secretHashB,
 		},

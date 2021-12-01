@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -30,7 +30,7 @@ type rpcclient struct {
 	// c is a direct client for raw calls.
 	c *rpc.Client
 	// es is a wrapper for contract calls.
-	es *swap.ETHSwap
+	es *swapv0.ETHSwap
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
@@ -41,7 +41,7 @@ func (c *rpcclient) connect(ctx context.Context, IPC string, contractAddr *commo
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
 	c.ec = ethclient.NewClient(client)
-	c.es, err = swap.NewETHSwap(*contractAddr, c.ec)
+	c.es, err = swapv0.NewETHSwap(*contractAddr, c.ec)
 	if err != nil {
 		return fmt.Errorf("unable to find swap contract: %v", err)
 	}
@@ -103,7 +103,7 @@ func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
+func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error) {
 	callOpts := &bind.CallOpts{
 		Pending: true,
 		Context: ctx,

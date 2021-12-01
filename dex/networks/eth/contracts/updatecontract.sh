@@ -12,8 +12,9 @@ then
   exit 1
 fi
 
-ETH_SWAP_VERSION=$1
-SOLIDITY_FILE=./contracts/ETHSwapV${ETH_SWAP_VERSION}.sol
+VERSION=$1
+PKG_NAME=v${VERSION}
+SOLIDITY_FILE=./ETHSwapV${VERSION}.sol
 if [ ! -f ${SOLIDITY_FILE} ]
 then
     echo "${SOLIDITY_FILE} does not exist" >&2
@@ -25,21 +26,21 @@ mkdir temp
 solc --bin-runtime --optimize ${SOLIDITY_FILE} -o ./temp/
 BYTECODE=$(<./temp/ETHSwap.bin-runtime)
 
-cat > "./swap/BinRuntimeV${ETH_SWAP_VERSION}.go" <<EOF
+cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
 // Code generated - DO NOT EDIT.
 // This file is a generated binding and any manual changes will be lost.
 
-package swap
+package ${PKG_NAME}
 
 const ETHSwapRuntimeBin = "${BYTECODE}"
 EOF
 
-abigen --sol ${SOLIDITY_FILE} --pkg swap --out ./swap/contract.go
+abigen --sol ${SOLIDITY_FILE} --pkg ${PKG_NAME} --out ./${PKG_NAME}/contract.go
 
 solc --bin --optimize ${SOLIDITY_FILE} -o ./temp
 BYTECODE=$(<./temp/ETHSwap.bin)
-sed -i.tmp "s/ETH_SWAP_V${ETH_SWAP_VERSION}=.*/ETH_SWAP_V${ETH_SWAP_VERSION}=\"${BYTECODE}\"/" ../../testing/eth/harness.sh
+sed -i.tmp "s/ETH_SWAP_V${VERSION}=.*/ETH_SWAP_V${VERSION}=\"${BYTECODE}\"/" ../../../testing/eth/harness.sh
 # mac needs a temp file specified above.
-rm ../../testing/eth/harness.sh.tmp
+rm ../../../testing/eth/harness.sh.tmp
 
 rm -fr temp

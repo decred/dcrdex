@@ -19,7 +19,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -75,7 +75,7 @@ type testNode struct {
 	sugGasPriceErr error
 	peerInfo       []*p2p.PeerInfo
 	peersErr       error
-	swp            *swap.ETHSwapSwap
+	swp            *swapv0.ETHSwapSwap
 	swpErr         error
 	tx             *types.Transaction
 	txIsMempool    bool
@@ -118,7 +118,7 @@ func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return n.sugGasPrice, n.sugGasPriceErr
 }
 
-func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error) {
+func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error) {
 	return n.swp, n.swpErr
 }
 
@@ -130,8 +130,8 @@ func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*bi
 	return n.acctBal, n.acctBalErr
 }
 
-func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *swap.ETHSwapSwap {
-	return &swap.ETHSwapSwap{
+func tSwap(bn int64, locktime, value *big.Int, state dexeth.SwapStep, participantAddr *common.Address) *swapv0.ETHSwapSwap {
+	return &swapv0.ETHSwapSwap{
 		InitBlockNumber:      big.NewInt(bn),
 		RefundBlockTimestamp: locktime,
 		Participant:          *participantAddr,
@@ -386,7 +386,7 @@ func TestContract(t *testing.T) {
 		name           string
 		coinID         []byte
 		tx             *types.Transaction
-		swap           *swap.ETHSwapSwap
+		swap           *swapv0.ETHSwapSwap
 		swapErr, txErr error
 		wantErr        bool
 	}{{
@@ -483,7 +483,7 @@ func TestRedemption(t *testing.T) {
 	tests := []struct {
 		name               string
 		coinID, contractID []byte
-		swp                *swap.ETHSwapSwap
+		swp                *swapv0.ETHSwapSwap
 		tx                 *types.Transaction
 		txIsMempool        bool
 		swpErr, txErr      error

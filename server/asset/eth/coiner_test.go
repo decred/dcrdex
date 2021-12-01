@@ -13,7 +13,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -220,7 +220,7 @@ func TestConfirmations(t *testing.T) {
 	oneGweiMore.Add(oneGweiMore, value)
 	tests := []struct {
 		name           string
-		swap           *swap.ETHSwapSwap
+		swap           *swapv0.ETHSwapSwap
 		bn             uint64
 		value          *big.Int
 		ct             swapCoinType

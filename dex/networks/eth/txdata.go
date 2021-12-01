@@ -11,7 +11,7 @@ import (
 	"math/big"
 	"strings"
 
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -29,8 +29,8 @@ const (
 // contract with extra data. It will error if the call data does not call
 // initiate with expected argument types. It returns the array of initiations
 // with which initiate was called.
-func ParseInitiateData(calldata []byte) ([]swap.ETHSwapInitiation, error) {
-	decoded, err := parseCallData(calldata, swap.ETHSwapABI)
+func ParseInitiateData(calldata []byte) ([]swapv0.ETHSwapInitiation, error) {
+	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -52,12 +52,12 @@ func ParseInitiateData(calldata []byte) ([]swap.ETHSwapInitiation, error) {
 		Value           *big.Int       `json:"value"`
 	})
 	if !ok {
-		return nil, fmt.Errorf("expected first arg of type []swap.ETHSwapInitiation but got %T", args[0].value)
+		return nil, fmt.Errorf("expected first arg of type []swapv0.ETHSwapInitiation but got %T", args[0].value)
 	}
 
-	toReturn := make([]swap.ETHSwapInitiation, 0, len(initiations))
+	toReturn := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
 	for _, init := range initiations {
-		toReturn = append(toReturn, swap.ETHSwapInitiation(init))
+		toReturn = append(toReturn, swapv0.ETHSwapInitiation(init))
 	}
 
 	return toReturn, nil
@@ -67,8 +67,8 @@ func ParseInitiateData(calldata []byte) ([]swap.ETHSwapInitiation, error) {
 // contract with extra data. It will error if the call data does not call
 // redeem with expected argument types. It returns the secret and secret hash
 // in that order.
-func ParseRedeemData(calldata []byte) ([]swap.ETHSwapRedemption, error) {
-	decoded, err := parseCallData(calldata, swap.ETHSwapABI)
+func ParseRedeemData(calldata []byte) ([]swapv0.ETHSwapRedemption, error) {
+	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -88,11 +88,11 @@ func ParseRedeemData(calldata []byte) ([]swap.ETHSwapRedemption, error) {
 		SecretHash [32]byte `json:"secretHash"`
 	})
 	if !ok {
-		return nil, fmt.Errorf("expected first arg of type []swap.ETHSwapRedemption but got %T", args[0].value)
+		return nil, fmt.Errorf("expected first arg of type []swapv0.ETHSwapRedemption but got %T", args[0].value)
 	}
-	toReturn := make([]swap.ETHSwapRedemption, 0, len(redemptions))
+	toReturn := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
 	for _, redemption := range redemptions {
-		toReturn = append(toReturn, swap.ETHSwapRedemption(redemption))
+		toReturn = append(toReturn, swapv0.ETHSwapRedemption(redemption))
 	}
 
 	return toReturn, nil
@@ -105,7 +105,7 @@ func ParseRedeemData(calldata []byte) ([]swap.ETHSwapRedemption, error) {
 func ParseRefundData(calldata []byte) ([32]byte, error) {
 	var secretHash [32]byte
 
-	decoded, err := parseCallData(calldata, swap.ETHSwapABI)
+	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
 	if err != nil {
 		return secretHash, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -128,20 +128,20 @@ func ParseRefundData(calldata []byte) ([32]byte, error) {
 	return secretHash, nil
 }
 
-// PackInitiateData converts a list of swap.ETHSwapInitiation to call data for the
+// PackInitiateData converts a list of swapv0.ETHSwapInitiation to call data for the
 // initiate function.
-func PackInitiateData(initiations []swap.ETHSwapInitiation) ([]byte, error) {
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+func PackInitiateData(initiations []swapv0.ETHSwapInitiation) ([]byte, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
 	if err != nil {
 		return nil, err
 	}
 	return parsedAbi.Pack(initiateFuncName, initiations)
 }
 
-// PackRedeemData converts a list of swap.ETHSwapRedemption to call data for the
+// PackRedeemData converts a list of swapv0.ETHSwapRedemption to call data for the
 // redeem function.
-func PackRedeemData(redemptions []swap.ETHSwapRedemption) ([]byte, error) {
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+func PackRedeemData(redemptions []swapv0.ETHSwapRedemption) ([]byte, error) {
+	parsedAbi, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func PackRedeemData(redemptions []swap.ETHSwapRedemption) ([]byte, error) {
 
 // PackRedeemData converts a secret hash to call data for the refund function.
 func PackRefundData(secretHash [32]byte) ([]byte, error) {
-	parsedAbi, err := abi.JSON(strings.NewReader(swap.ETHSwapABI))
+	parsedAbi, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
 	if err != nil {
 		return nil, err
 	}

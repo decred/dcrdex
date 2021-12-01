@@ -19,7 +19,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"decred.org/dcrdex/dex/networks/eth/swap"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -95,7 +95,7 @@ type ethFetcher interface {
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
-	swap(ctx context.Context, secretHash [32]byte) (*swap.ETHSwapSwap, error)
+	swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 	accountBalance(ctx context.Context, addr common.Address) (*big.Int, error)
 }

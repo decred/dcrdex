@@ -7,6 +7,6 @@
 //go:build lgpl
 // +build lgpl
 
-// Package swap contains pre-generated code that should not be directly edited.
-// See the parent eth package for details on how to generate.
-package swap
+// Package v0 contains pre-generated code that should not be directly edited.
+// See the parent package for details on how to generate.
+package v0
