@@ -63,9 +63,10 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 	return NewBackend(configPath, logger, network)
 }
 
-// DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
+// DecodeCoinID creates a human-readable representation of a coin ID for
+// Ethereum. This must be a transaction hash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	txHash, err := decodeCoinID(coinID)
+	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
@@ -210,7 +211,7 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 // TxData fetches the raw transaction data.
 func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
-	txHash, err := decodeCoinID(coinID)
+	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("coin ID decoding error: %v", err)
 	}
@@ -328,7 +329,7 @@ func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin,
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
-	txHash, err := decodeCoinID(coinID)
+	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
@@ -497,16 +498,4 @@ out:
 	}
 	// Wait for the RPC client to shut down.
 	wg.Wait()
-}
-
-// decodeCoinID decodes the coin ID into a common.Hash. For eth, there are no
-// funding coin IDs, just an account address. Care should be taken not to use
-// decodeCoinID or (Driver).DecodeCoinID for account addresses.
-func decodeCoinID(coinID []byte) (common.Hash, error) {
-	if len(coinID) != common.HashLength {
-		return common.Hash{}, fmt.Errorf("wrong coin ID length. wanted %d, got %d", common.HashLength, len(coinID))
-	}
-	var h common.Hash
-	h.SetBytes(coinID)
-	return h, nil
 }
