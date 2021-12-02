@@ -180,6 +180,50 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestDecodeCoinID(t *testing.T) {
+	drv := &Driver{}
+	txid := "0x1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1"
+	txHashB := mustDecodeHex("1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1")
+
+	type test struct {
+		name    string
+		input   []byte
+		wantErr bool
+		expRes  string
+	}
+
+	tests := []test{{
+		name:   "ok",
+		input:  txHashB,
+		expRes: txid,
+	}, {
+		name:    "too short",
+		input:   txHashB[:len(txHashB)/2],
+		wantErr: true,
+	}, {
+		name:    "too long",
+		input:   append(txHashB, txHashB...),
+		wantErr: true,
+	}}
+
+	for _, tt := range tests {
+		res, err := drv.DecodeCoinID(tt.input)
+		if err != nil {
+			if !tt.wantErr {
+				t.Fatalf("%s: error: %v", tt.name, err)
+			}
+			continue
+		}
+
+		if tt.wantErr {
+			t.Fatalf("%s: no error", tt.name)
+		}
+		if res != tt.expRes {
+			t.Fatalf("%s: wrong result. wanted %s, got %s", tt.name, tt.expRes, res)
+		}
+	}
+}
+
 func TestRun(t *testing.T) {
 	// TODO: Test all paths.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -551,7 +595,7 @@ func TestTxData(t *testing.T) {
 	addr := randomAddress()
 	data := encode.RandomBytes(5)
 	tx := tTx(gasPrice, value, addr, data)
-	goodCoinID := (&dexeth.TxCoinID{TxID: tx.Hash()}).Encode()
+	goodCoinID, _ := hex.DecodeString("09c3bed75b35c6cf0549b0636c9511161b18765c019ef371e2a9f01e4b4a1487")
 	node.tx = tx
 
 	// initial success
@@ -572,14 +616,14 @@ func TestTxData(t *testing.T) {
 	}
 
 	// Wrong type of coin ID
-	coinID = (&dexeth.SwapCoinID{}).Encode()
-	_, err = eth.TxData(coinID)
+	_, err = eth.TxData(goodCoinID[2:])
 	if err == nil {
 		t.Fatalf("no error for wrong coin type")
 	}
 
 	// No transaction
-	_, err = eth.TxData(coinID)
+	node.tx = nil
+	_, err = eth.TxData(goodCoinID)
 	if err == nil {
 		t.Fatalf("no error for missing tx")
 	}
@@ -651,4 +695,12 @@ func TestAccountBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AccountBalance error: %v", err)
 	}
+}
+
+func mustDecodeHex(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic("mustDecodeHex: " + err.Error())
+	}
+	return b
 }
