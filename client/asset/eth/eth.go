@@ -406,7 +406,7 @@ type coin struct {
 }
 
 // ID is the ETH coins ID. For functions related to funding an order,
-// the ID must contain an encoded AmountCoinID, but when returned from
+// the ID must contain an encoded fundingCoinID, but when returned from
 // Swap, it will contain the transaction hash used to initiate the swap.
 func (c *coin) ID() dex.Bytes {
 	return c.id
@@ -424,33 +424,28 @@ func (c *coin) Value() uint64 {
 
 var _ asset.Coin = (*coin)(nil)
 
-// decodeAmountCoinID decodes a coin id into a coin object. This function ensures
-// that the id contains an encoded AmountCoinID whose address is the same as
+// decodeFundingCoinID decodes a coin id into a coin object. This function ensures
+// that the id contains an encoded fundingCoinID whose address is the same as
 // the one managed by this wallet.
-func (eth *ExchangeWallet) decodeAmountCoinID(id []byte) (*coin, error) {
-	coinID, err := dexeth.DecodeCoinID(id)
+func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*coin, error) {
+	fundingCoinID, err := decodeFundingCoinID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	amountCoinID, ok := coinID.(*dexeth.AmountCoinID)
-	if !ok {
-		return nil, errors.New("coin id must be amount coin id")
-	}
-
-	if amountCoinID.Address != eth.addr {
+	if fundingCoinID.Address != eth.addr {
 		return nil, fmt.Errorf("coin address %x != wallet address %x",
-			amountCoinID.Address, eth.addr)
+			fundingCoinID.Address, eth.addr)
 	}
 
 	return &coin{
-		id:    amountCoinID.Encode(),
-		value: amountCoinID.Amount,
+		id:    fundingCoinID.Encode(),
+		value: fundingCoinID.Amount,
 	}, nil
 }
 
-func (eth *ExchangeWallet) createAmountCoin(amount uint64) *coin {
-	id := dexeth.CreateAmountCoinID(eth.addr, amount)
+func (eth *ExchangeWallet) createFundingCoin(amount uint64) *coin {
+	id := createFundingCoinID(eth.addr, amount)
 	return &coin{
 		id:    id.Encode(),
 		value: amount,
@@ -467,7 +462,7 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
 	refundFees := dexeth.RefundGas(0) * ord.DEXConfig.MaxFeeRate
 	fundsNeeded := ord.Value + maxSwapFees + refundFees
-	coins := asset.Coins{eth.createAmountCoin(fundsNeeded)}
+	coins := asset.Coins{eth.createFundingCoin(fundsNeeded)}
 	eth.lockedFundsMtx.Lock()
 	err := eth.lockFunds(coins)
 	eth.lockedFundsMtx.Unlock()
@@ -491,7 +486,7 @@ func (eth *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	coins := make([]asset.Coin, 0, len(ids))
 	for _, id := range ids {
-		coin, err := eth.decodeAmountCoinID(id)
+		coin, err := eth.decodeFundingCoinID(id)
 		if err != nil {
 			return nil, fmt.Errorf("FundingCoins: unable to decode amount coin id: %w", err)
 		}
@@ -663,7 +658,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	var change asset.Coin
 	changeAmount := totalInputValue - totalSpend
 	if changeAmount > 0 && swaps.LockChange {
-		change = eth.createAmountCoin(changeAmount)
+		change = eth.createFundingCoin(changeAmount)
 		eth.lockFunds(asset.Coins{change})
 	}
 
@@ -680,7 +675,7 @@ func (*ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
 func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	_, err = eth.decodeAmountCoinID(coin.ID())
+	_, err = eth.decodeFundingCoinID(coin.ID())
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error decoding coin: %w", err)
 	}

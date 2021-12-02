@@ -519,7 +519,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		if len(redeemScripts) != 1 {
 			t.Fatalf("%v: expected 1 redeem script but got %v", test.testName, len(redeemScripts))
 		}
-		_, err = eth.decodeAmountCoinID(coins[0].ID())
+		_, err = eth.decodeFundingCoinID(coins[0].ID())
 		if err != nil {
 			t.Fatalf("%v: unexpected error: %v", test.testName, err)
 		}
@@ -655,7 +655,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
 	differentAddressCoin := coin{
-		id: (&dexeth.AmountCoinID{
+		id: (&fundingCoinID{
 			Address: differentAddress,
 			Amount:  100000,
 			Nonce:   nonce,
@@ -883,8 +883,8 @@ func TestSwap(t *testing.T) {
 	coinIDsForAmounts := func(coinAmounts []uint64) []dex.Bytes {
 		coinIDs := make([]dex.Bytes, 0, len(coinAmounts))
 		for _, amt := range coinAmounts {
-			amountCoinID := dexeth.CreateAmountCoinID(eth.addr, amt)
-			coinIDs = append(coinIDs, amountCoinID.Encode())
+			fundingCoinID := createFundingCoinID(eth.addr, amt)
+			coinIDs = append(coinIDs, fundingCoinID.Encode())
 		}
 		return coinIDs
 	}
@@ -892,7 +892,7 @@ func TestSwap(t *testing.T) {
 	coinIDsToCoins := func(coinIDs []dex.Bytes) []asset.Coin {
 		coins := make([]asset.Coin, 0, len(coinIDs))
 		for _, id := range coinIDs {
-			coin, _ := eth.decodeAmountCoinID(id)
+			coin, _ := eth.decodeFundingCoinID(id)
 			coins = append(coins, coin)
 		}
 		return coins
@@ -1377,7 +1377,7 @@ func TestSignMessage(t *testing.T) {
 	differentAddress := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	nonce := [8]byte{}
 	coinDifferentAddress := coin{
-		id: (&dexeth.AmountCoinID{
+		id: (&fundingCoinID{
 			Address: differentAddress,
 			Amount:  100,
 			Nonce:   nonce,
@@ -1389,7 +1389,7 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	coin := coin{
-		id: (&dexeth.AmountCoinID{
+		id: (&fundingCoinID{
 			Address: account.Address,
 			Amount:  100,
 			Nonce:   nonce,
