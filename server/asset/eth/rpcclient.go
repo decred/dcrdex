@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -32,8 +31,6 @@ var (
 type rpcclient struct {
 	// ec wraps a *rpc.Client with some useful calls.
 	ec *ethclient.Client
-	// c is a direct client for raw calls.
-	c *rpc.Client
 	// es is a wrapper for contract calls.
 	es *swapv0.ETHSwap
 }
@@ -50,7 +47,6 @@ func (c *rpcclient) connect(ctx context.Context, IPC string, contractAddr *commo
 	if err != nil {
 		return fmt.Errorf("unable to find swap contract: %v", err)
 	}
-	c.c = client
 	return nil
 }
 
@@ -59,16 +55,6 @@ func (c *rpcclient) shutdown() {
 	if c.ec != nil {
 		c.ec.Close()
 	}
-}
-
-// bestBlockHash gets the best blocks hash at the time of calling. Due to the
-// speed of Ethereum blocks, this changes often.
-func (c *rpcclient) bestBlockHash(ctx context.Context) (common.Hash, error) {
-	header, err := c.bestHeader(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return header.Hash(), nil
 }
 
 // bestHeader gets the best header at the time of calling.
@@ -80,9 +66,9 @@ func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return c.ec.HeaderByNumber(ctx, big.NewInt(int64(bn)))
 }
 
-// block gets the block identified by hash.
-func (c *rpcclient) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	return c.ec.BlockByHash(ctx, hash)
+// headerByHeight gets the best header at height.
+func (c *rpcclient) headerByHeight(ctx context.Context, height uint64) (*types.Header, error) {
+	return c.ec.HeaderByNumber(ctx, big.NewInt(int64(height)))
 }
 
 // suggestGasPrice retrieves the currently suggested gas price to allow a timely
@@ -99,12 +85,6 @@ func (c *rpcclient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, e
 // blockNumber gets the chain length at the time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 	return c.ec.BlockNumber(ctx)
-}
-
-// peers returns connected peers.
-func (c *rpcclient) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
-	var peers []*p2p.PeerInfo
-	return peers, c.c.CallContext(ctx, &peers, "admin_peers")
 }
 
 // swap gets a swap keyed by secretHash in the contract.

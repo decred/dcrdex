@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -44,11 +43,7 @@ const (
 	simnetContractAddr  = ""
 )
 
-var (
-	zeroHash                       = common.Hash{}
-	notImplementedErr              = errors.New("not implemented")
-	_                 asset.Driver = (*Driver)(nil)
-)
+var _ asset.Driver = (*Driver)(nil)
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -86,10 +81,9 @@ func (d *Driver) UnitInfo() dex.UnitInfo {
 // contract setup, and so contract addresses may need to be an argument in some
 // of these methods.
 type ethFetcher interface {
-	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
-	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	blockNumber(ctx context.Context) (uint64, error)
+	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
 	connect(ctx context.Context, ipc string, contractAddr *common.Address) error
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
@@ -110,13 +104,8 @@ type Backend struct {
 	cancelRPCs context.CancelFunc
 	cfg        *config
 	node       ethFetcher
-	// The backend provides block notification channels through the BlockChannel
-	// method. signalMtx locks the blockChans array.
-	signalMtx  sync.RWMutex
-	blockChans map[chan *asset.BlockUpdate]struct{}
-	// The block cache stores just enough info about the blocks to prevent future
-	// calls to Block.
-	blockCache *blockCache
+	// The hash cache stores just enough info to detect reorgs.
+	hashCache *hashCache
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
 	log dex.Logger
@@ -154,9 +143,8 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 		rpcCtx:       ctx,
 		cancelRPCs:   cancel,
 		cfg:          cfg,
-		blockCache:   newBlockCache(logger),
+		hashCache:    newHashCache(logger),
 		log:          logger,
-		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		contractAddr: contractAddr,
 		initTxSize:   uint32(dexeth.InitGas(1, version)),
 	}
@@ -184,20 +172,9 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	eth.node = &c
 
-	// Prime the cache with the best block.
-	bestHash, err := eth.node.bestBlockHash(ctx)
-	if err != nil {
-		eth.shutdown()
-		return nil, fmt.Errorf("error getting best block hash from geth: %w", err)
-	}
-	block, err := eth.node.block(ctx, bestHash)
-	if err != nil {
-		eth.shutdown()
-		return nil, fmt.Errorf("error getting best block from geth: %w", err)
-	}
-	_, err = eth.blockCache.add(block)
-	if err != nil {
-		eth.log.Errorf("error adding new best block to cache: %v", err)
+	// Prime the cache with the best block hash.
+	if err := eth.hashCache.prime(ctx, &c); err != nil {
+		eth.log.Errorf("error priming the best block hash: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -250,11 +227,7 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the eth package. Part of the asset.Backend interface.
 func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
-	c := make(chan *asset.BlockUpdate, size)
-	eth.signalMtx.Lock()
-	defer eth.signalMtx.Unlock()
-	eth.blockChans[c] = struct{}{}
-	return c
+	return eth.hashCache.blockChannel(size)
 }
 
 // ValidateContract ensures that contractData encodes both the expected contract
@@ -368,143 +341,30 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 	return dexeth.ToGwei(bigBal)
 }
 
-// run processes the queue and monitors the application context. The supplied
-// running channel will be closed upon setting the context which is used by the
-// rpcclient.
+// run processes the queue and monitors the application context.
 func (eth *Backend) run(ctx context.Context) {
-	var wg sync.WaitGroup
-	wg.Add(1)
+	done := ctx.Done()
+	wait := make(chan struct{})
 	// Shut down the RPC client on ctx.Done().
 	go func() {
-		<-ctx.Done()
+		<-done
 		eth.cancelRPCs()
 		eth.shutdown()
-		wg.Done()
+		close(wait)
 	}()
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
-	addBlock := func(block *types.Block, reorg bool) {
-		_, err := eth.blockCache.add(block)
-		if err != nil {
-			eth.log.Errorf("error adding new best block to cache: %v", err)
-		}
-		eth.signalMtx.Lock()
-		eth.log.Tracef("Notifying %d eth asset consumers of new block at height %d",
-			len(eth.blockChans), block.NumberU64())
-		for c := range eth.blockChans {
-			select {
-			case c <- &asset.BlockUpdate{
-				Err:   nil,
-				Reorg: reorg,
-			}:
-			default:
-				// Commented to try sends on future blocks.
-				// close(c)
-				// delete(eth.blockChans, c)
-				//
-				// TODO: Allow the receiver (e.g. Swapper.Run) to inform done
-				// status so the channels can be retired cleanly rather than
-				// trying them forever.
-			}
-		}
-		eth.signalMtx.Unlock()
-	}
-
-	sendErr := func(err error) {
-		eth.log.Error(err)
-		eth.signalMtx.Lock()
-		for c := range eth.blockChans {
-			select {
-			case c <- &asset.BlockUpdate{
-				Err: err,
-			}:
-			default:
-				eth.log.Errorf("failed to send sending block update on blocking channel")
-				// close(c)
-				// delete(eth.blockChans, c)
-			}
-		}
-		eth.signalMtx.Unlock()
-	}
-
-	sendErrFmt := func(s string, a ...interface{}) {
-		sendErr(fmt.Errorf(s, a...))
-	}
 
 out:
 	for {
 		select {
 		case <-blockPoll.C:
-			tip := eth.blockCache.tip()
-			bestHash, err := eth.node.bestBlockHash(ctx)
-			if err != nil {
-				sendErr(asset.NewConnectionError("error retrieving best block: %w", err))
-				continue
-			}
-			if bestHash == tip.hash {
-				continue
-			}
-
-			block, err := eth.node.block(ctx, bestHash)
-			if err != nil {
-				sendErrFmt("error retrieving block %x: %w", bestHash, err)
-				continue
-			}
-			// If this doesn't build on the best known block, look for a reorg.
-			prevHash := block.ParentHash()
-			// If it builds on the best block or the cache is empty, it's good to add.
-			if prevHash == tip.hash || tip.height == 0 {
-				eth.log.Debugf("New block %x (%d)", bestHash, block.NumberU64())
-				addBlock(block, false)
-				continue
-			}
-
-			// It is either a reorg, or the previous block is not the cached
-			// best block. Crawl blocks backwards until finding a mainchain
-			// block, flagging blocks from the cache as orphans along the way.
-			//
-			// TODO: Fix this. The exact ethereum behavior here is yet unknown.
-			iHash := tip.hash
-			reorgHeight := uint64(0)
-			for {
-				if iHash == zeroHash {
-					break
-				}
-				iBlock, err := eth.node.block(ctx, iHash)
-				if err != nil {
-					sendErrFmt("error retrieving block %s: %w", iHash, err)
-					break
-				}
-				// TODO: It is yet unknown how to tell if we are
-				// on the main chain. Blocks do not contain confirmation
-				// information.
-				// if iBlock.Confirmations > -1 {
-				// 	// This is a mainchain block, nothing to do.
-				// 	break
-				// }
-				if iBlock.NumberU64() == 0 {
-					break
-				}
-				reorgHeight = iBlock.NumberU64()
-				iHash = iBlock.ParentHash()
-			}
-
-			var reorg bool
-			if reorgHeight > 0 {
-				reorg = true
-				eth.log.Infof("Tip change from %s (%d) to %s (%d) detected (reorg or just fast blocks).",
-					tip.hash, tip.height, bestHash, block.NumberU64())
-				eth.blockCache.reorg(reorgHeight)
-			}
-
-			// Now add the new block.
-			addBlock(block, reorg)
-
-		case <-ctx.Done():
+			eth.hashCache.poll(ctx)
+		case <-done:
 			break out
 		}
 	}
 	// Wait for the RPC client to shut down.
-	wg.Wait()
+	<-wait
 }

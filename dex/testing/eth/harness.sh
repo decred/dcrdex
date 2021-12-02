@@ -174,8 +174,8 @@ done
 sleep 1
 
 # Uncomment to see the effect of reorgs on transactions.
-# "./alpha" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"abc\\")"
-# "./beta" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"abc\\")"
+# "./alpha" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"${PASSWORD}\\")"
+# "./beta" "attach --exec personal.sendTransaction({from:eth.accounts[0],to:eth.accounts[1],value:1,gasPrice:82000000000},\\"${PASSWORD}\\")"
 
 "./mine-\$VALID_NODE" \$((REORG_DEPTH + 2))
 "./mine-\$REORG_NODE" \$REORG_DEPTH

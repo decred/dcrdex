@@ -89,12 +89,10 @@ func mustParseHex(s string) []byte {
 
 type testNode struct {
 	connectErr     error
-	bestBlkHash    common.Hash
-	bestBlkHashErr error
-	blk            *types.Block
-	blkErr         error
 	bestHdr        *types.Header
 	bestHdrErr     error
+	hdrByHeight    *types.Header
+	hdrByHeightErr error
 	blkNum         uint64
 	blkNumErr      error
 	syncProg       *ethereum.SyncProgress
@@ -116,16 +114,12 @@ func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common
 
 func (n *testNode) shutdown() {}
 
-func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
-	return n.bestBlkHash, n.bestBlkHashErr
-}
-
 func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.bestHdr, n.bestHdrErr
 }
 
-func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	return n.blk, n.blkErr
+func (n *testNode) headerByHeight(ctx context.Context, height uint64) (*types.Header, error) {
+	return n.hdrByHeight, n.hdrByHeightErr
 }
 
 func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
@@ -248,31 +242,27 @@ func TestDecodeCoinID(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	// TODO: Test all paths.
 	ctx, cancel := context.WithCancel(context.Background())
-	header1 := &types.Header{Number: big.NewInt(1)}
-	block1 := types.NewBlockWithHeader(header1)
-	blockHash1 := block1.Hash()
-	node := &testNode{
-		bestBlkHash: blockHash1,
-		blk:         block1,
-	}
-
 	backend := unconnectedETH(tLogger, new(config))
 	ch := backend.BlockChannel(1)
+	node := &testNode{
+		bestHdr: &types.Header{Number: big.NewInt(0)},
+	}
 	backend.node = node
+	backend.hashCache.prime(ctx, node)
+	*node = testNode{
+		bestHdr: &types.Header{
+			Number: big.NewInt(1),
+		},
+	}
 	go func() {
 		<-ch
 		cancel()
 	}()
 	backend.run(ctx)
-	backend.blockCache.mtx.Lock()
-	best := backend.blockCache.best
-	backend.blockCache.mtx.Unlock()
-	if best.hash != blockHash1 {
-		t.Fatalf("want header hash %x but got %x", blockHash1, best.hash)
-	}
-	cancel()
+	// This timing out indicates failure. run should call a block update
+	// after the pollInterval and we have the listening function cancel the
+	// context above.
 }
 
 func TestFeeRate(t *testing.T) {
