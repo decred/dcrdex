@@ -358,7 +358,7 @@ func (dcr *Backend) Synced() (bool, error) {
 }
 
 // Redemption is an input that redeems a swap contract.
-func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (dcr *Backend) Redemption(redemptionID, contractID, _ []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding redemption coin ID %x: %w", txHash, err)

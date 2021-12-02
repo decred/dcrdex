@@ -9,7 +9,6 @@ package eth
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,6 +27,17 @@ const (
 	sctRedeem
 )
 
+func (sct swapCoinType) String() string {
+	switch sct {
+	case sctInit:
+		return "init"
+	case sctRedeem:
+		return "redeem"
+	default:
+		return "invalid type"
+	}
+}
+
 var _ asset.Coin = (*swapCoin)(nil)
 
 type swapCoin struct {
@@ -36,6 +46,7 @@ type swapCoin struct {
 	secret, secretHash         [32]byte
 	value                      uint64
 	gasPrice                   uint64
+	txHash                     common.Hash
 	txid                       string
 	locktime                   int64
 	sct                        swapCoinType
@@ -59,11 +70,11 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		return nil, fmt.Errorf("unknown swapCoin type: %d", sct)
 	}
 
-	txid, err := dexeth.DecodeCoinID(coinID)
+	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	tx, _, err := backend.node.transaction(backend.rpcCtx, txid)
+	tx, _, err := backend.node.transaction(backend.rpcCtx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, asset.CoinNotFoundError
@@ -103,7 +114,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 			}
 		}
 		if initiation == nil {
-			return nil, fmt.Errorf("tx %x does not contain initiation with secret hash %x", txid, secretHash)
+			return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", txHash, secretHash)
 		}
 		counterParty = &initiation.Participant
 		secretHash = initiation.SecretHash
@@ -120,7 +131,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 			}
 		}
 		if redemption == nil {
-			return nil, fmt.Errorf("tx %x does not contain redemption with secret hash %x", txid, secretHash)
+			return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x", txHash, secretHash)
 		}
 		secret = redemption.Secret
 		secretHash = redemption.SecretHash
@@ -158,7 +169,8 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		secretHash:   secretHash,
 		value:        value,
 		gasPrice:     gasPrice,
-		txid:         hex.EncodeToString(txid[:]),
+		txHash:       txHash,
+		txid:         txHash.Hex(), // == String(), with 0x prefix
 		counterParty: *counterParty,
 		locktime:     locktime,
 		sct:          sct,
@@ -185,7 +197,7 @@ func (c *swapCoin) validateRedeem(contractID []byte) error {
 // confirming a swap. Even though we check the initial transaction's data, if
 // that transaction were in mempool at the time, it could be swapped out with
 // any other values if a user sent another transaction with a higher gas fee
-// and the same account and nonce, effectivly voiding the transaction we
+// and the same account and nonce, effectively voiding the transaction we
 // expected to be mined.
 func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 	swap, err := c.backend.node.swap(c.backend.rpcCtx, c.secretHash)
@@ -224,7 +236,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 		// Uninitiated state is zero confs. It could still be in mempool.
 		// It is important to only trust confirmations according to the
 		// swap contract. Until there are confirmations we cannot be sure
-		// that initiation happened successfuly.
+		// that initiation happened successfully.
 		if dexeth.SwapStep(swap.State) == dexeth.SSNone {
 			// Assume the tx still has a chance of being mined.
 			return 0, nil
@@ -234,7 +246,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 
 		// The swap initiation transaction has some number of
 		// confirmations, and we are sure the secret hash belongs to
-		// this swap. Assert that the value, reciever, and locktime are
+		// this swap. Assert that the value, receiver, and locktime are
 		// as expected.
 		value, err := dexeth.ToGwei(new(big.Int).Set(swap.Value))
 		if err != nil {
@@ -269,8 +281,7 @@ func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
 
 // ID is the swap's coin ID.
 func (c *swapCoin) ID() []byte {
-	b, _ := hex.DecodeString(c.txid) // or store it as a field
-	return b
+	return c.txHash.Bytes() // c.txHash[:]
 }
 
 // TxID is the original init transaction txid.
@@ -280,7 +291,7 @@ func (c *swapCoin) TxID() string {
 
 // String is a human readable representation of the swap coin.
 func (c *swapCoin) String() string {
-	return c.txid
+	return fmt.Sprintf("%v (%s)", c.txid, c.sct)
 }
 
 // Value is the amount paid to the swap, set in initialization. Always zero for

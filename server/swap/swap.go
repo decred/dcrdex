@@ -554,7 +554,7 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 
 		if redeemCoin := ssd.RedeemCoinIn; len(redeemCoin) > 0 {
 			assetID := ssd.RedeemAsset
-			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, cpSwapCoin)
+			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, cpSwapCoin, ssd.ContractScript)
 			if err != nil {
 				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %w", redeemCoin, assetID, err)
 			}
@@ -1534,7 +1534,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Make sure that the expected output is being spent.
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	counterParty.status.mtx.RLock()
-	cpContract := counterParty.status.swap.RedeemScript
+	cpContract := counterParty.status.swap.ContractData
 	cpSwapCoin := counterParty.status.swap.ID()
 	cpSwapStr := counterParty.status.swap.String()
 	counterParty.status.mtx.RUnlock()
@@ -1549,7 +1549,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
 		return wait.DontTryAgain
 	}
-	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
+	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin, cpContract)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {

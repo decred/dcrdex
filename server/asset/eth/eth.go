@@ -272,7 +272,7 @@ func (eth *Backend) Contract(coinID, contract []byte) (*asset.Contract, error) {
 	return &asset.Contract{
 		Coin:         sc,
 		SwapAddress:  sc.counterParty.String(),
-		RedeemScript: sc.secretHash[:],
+		ContractData: sc.secretHash[:],
 		LockTime:     encode.UnixTimeMilli(sc.locktime),
 	}, nil
 }
@@ -308,14 +308,14 @@ func (eth *Backend) Synced() (bool, error) {
 // Redemption returns a coin that represents a contract redemption. redeemCoinID
 // should be the transaction that sent a redemption, while contractCoinID is the
 // swap contract this redemption redeems.
-func (eth *Backend) Redemption(redeemCoinID, contractCoinID []byte) (asset.Coin, error) {
-	cnr, err := eth.newSwapCoin(redeemCoinID, contractCoinID, sctRedeem)
+func (eth *Backend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin, error) {
+	cnr, err := eth.newSwapCoin(redeemCoinID, contractData, sctRedeem)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 	// Ensure that the redeem is for the same coin hash and contract as the
 	// contract coin.
-	if err = cnr.validateRedeem(contractCoinID); err != nil {
+	if err = cnr.validateRedeem(contractData); err != nil {
 		return nil, fmt.Errorf("unable to validate redeem: %v", err)
 	}
 	// Confirmations performs some extra swap status checks if the the tx

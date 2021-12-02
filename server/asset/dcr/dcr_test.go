@@ -1181,7 +1181,7 @@ func TestRedemption(t *testing.T) {
 	// A valid mempool redemption.
 	verboseTx := testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
-	redemption, err := dcr.Redemption(redemptionID, spentID)
+	redemption, err := dcr.Redemption(redemptionID, spentID, nil)
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
@@ -1197,7 +1197,7 @@ func TestRedemption(t *testing.T) {
 	testChainMtx.Lock()
 	delete(testChain.txRaws, *txHash)
 	testChainMtx.Unlock()
-	_, err = dcr.Redemption(redemptionID, spentID)
+	_, err = dcr.Redemption(redemptionID, spentID, nil)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
 	}
@@ -1207,7 +1207,7 @@ func TestRedemption(t *testing.T) {
 	verboseTx.Vin = append(verboseTx.Vin, chainjson.Vin{
 		Txid: randomHash().String(),
 	})
-	_, err = dcr.Redemption(redemptionID, spentID)
+	_, err = dcr.Redemption(redemptionID, spentID, nil)
 	if err == nil {
 		t.Fatalf("No error for wrong previous outpoint")
 	}
@@ -1218,7 +1218,7 @@ func TestRedemption(t *testing.T) {
 	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
 	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
-	redemption, err = dcr.Redemption(redemptionID, spentID)
+	redemption, err = dcr.Redemption(redemptionID, spentID, nil)
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}
