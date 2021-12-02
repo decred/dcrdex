@@ -59,7 +59,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoin
 		return nil, fmt.Errorf("unknown swapCoin type: %d", sct)
 	}
 
-	txid, err := decodeCoinID(coinID)
+	txid, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
