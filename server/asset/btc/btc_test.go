@@ -1120,7 +1120,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	// A valid mempool redemption.
 	verboseTx = testAddTxVerbose(msg.tx, txHash, nil, 0)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
-	redemption, err := btc.Redemption(redemptionID, spentID)
+	redemption, err := btc.Redemption(redemptionID, spentID, nil)
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
@@ -1136,7 +1136,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	testChainMtx.Lock()
 	delete(testChain.txRaws, *txHash)
 	testChainMtx.Unlock()
-	_, err = btc.Redemption(redemptionID, spentID)
+	_, err = btc.Redemption(redemptionID, spentID, nil)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
 	}
@@ -1146,7 +1146,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	verboseTx.Vin = append(verboseTx.Vin, btcjson.Vin{
 		Txid: randomHash().String(),
 	})
-	_, err = btc.Redemption(redemptionID, spentID)
+	_, err = btc.Redemption(redemptionID, spentID, nil)
 	if err == nil {
 		t.Fatalf("No error for wrong previous outpoint")
 	}
@@ -1157,7 +1157,7 @@ func testRedemption(t *testing.T, segwit bool) {
 	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight))
 	verboseTx.Vin = append(verboseTx.Vin, vin)
 	testAddBlockVerbose(blockHash, nil, 1, blockHeight)
-	redemption, err = btc.Redemption(redemptionID, spentID)
+	redemption, err = btc.Redemption(redemptionID, spentID, nil)
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}

@@ -396,7 +396,7 @@ func auditContract(op *Output) (*asset.Contract, error) {
 	return &asset.Contract{
 		Coin:         op,
 		SwapAddress:  receiver.String(),
-		RedeemScript: op.redeemScript,
+		ContractData: op.redeemScript,
 		LockTime:     time.Unix(int64(lockTime), 0),
 		TxData:       op.tx.raw,
 	}, nil

@@ -385,7 +385,7 @@ func (a *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error
 
 	return contract, nil
 }
-func (a *TBackend) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, error) {
+func (a *TBackend) Redemption(redemptionID, cpSwapCoinID, contractData []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	if a.redemptionErr != nil {

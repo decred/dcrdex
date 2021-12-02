@@ -6,8 +6,8 @@
 package eth
 
 import (
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -36,8 +36,9 @@ func randomAddress() *common.Address {
 
 func TestNewSwapCoin(t *testing.T) {
 	contractAddr, randomAddr := randomAddress(), randomAddress()
-	secret, secretHash, txHash := [32]byte{}, [32]byte{}, [32]byte{}
+	var secret, secretHash, txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
+	txid := fmt.Sprintf("%#x", txHash[:]) // 0xababab...
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
 	txCoinIDBytes := txHash[:]
@@ -221,8 +222,8 @@ func TestNewSwapCoin(t *testing.T) {
 			sc.gasPrice != wantGas ||
 			sc.locktime != lt ||
 			sc.sct != sct ||
-			sc.txid != hex.EncodeToString(txHash[:]) {
-			t.Fatalf("returns do not match expected for test %q", test.name)
+			sc.txid != txid {
+			t.Fatalf("returns do not match expected for test %q / %v", test.name, sc)
 		}
 	}
 }

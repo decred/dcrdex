@@ -586,7 +586,7 @@ func TestRedemption(t *testing.T) {
 			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
-		_, err := eth.Redemption(test.coinID, test.contractID)
+		_, err := eth.Redemption(test.coinID, nil, test.contractID)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

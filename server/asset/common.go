@@ -39,16 +39,17 @@ type Backend interface {
 	// of the asset.
 	dex.Connector
 	// Contract returns a Contract only for outputs that would be spendable on
-	// the blockchain immediately. The redeem script is required in order to
-	// calculate sigScript length and verify pubkeys.
-	Contract(coinID []byte, redeemScript []byte) (*Contract, error)
+	// the blockchain immediately. Contract data (e.g. the redeem script for
+	// UTXO assets) is required in order to calculate sigScript length and
+	// verify pubkeys.
+	Contract(coinID []byte, contractData []byte) (*Contract, error)
 	// TxData fetches the raw transaction data for the specified coin.
 	TxData(coinID []byte) ([]byte, error)
 	// ValidateSecret checks that the secret satisfies the contract.
-	ValidateSecret(secret, contract []byte) bool
+	ValidateSecret(secret, contractData []byte) bool
 	// Redemption returns a Coin for redemptionID, a transaction input, that
 	// spends contract ID, an output containing the swap contract.
-	Redemption(redemptionID, contractID []byte) (Coin, error)
+	Redemption(redemptionID, contractID, contractData []byte) (Coin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -144,8 +145,10 @@ type Contract struct {
 	Coin
 	// SwapAddress is the receiving address of the swap contract.
 	SwapAddress string
-	// RedeemScript is the contract redeem script.
-	RedeemScript []byte
+	// ContractData is essential data about this swap. For example, the redeem
+	// script for UTXO contracts, or a secret hash that keys swaps for account-
+	// based contracts.
+	ContractData []byte
 	// LockTime is the refund locktime.
 	LockTime time.Time
 	// TxData is raw transaction data. This data is provided for some assets

@@ -397,7 +397,7 @@ func (b *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error
 	}
 	return &asset.Contract{Coin: c}, nil
 }
-func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (b *TBackend) Redemption(redemptionID, contractID, contractData []byte) (asset.Coin, error) {
 	return b.utxo(redemptionID)
 }
 func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
