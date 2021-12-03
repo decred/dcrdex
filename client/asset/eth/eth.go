@@ -686,6 +686,9 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	for _, redemption := range form.Redemptions {
 		var secretHash [32]byte
 		copy(secretHash[:], redemption.Spends.SecretHash)
+		if secretHash != sha256.Sum256(redemption.Secret) {
+			return fail(fmt.Errorf("Redeem: secretHash %x != sha256(%x)", secretHash, redemption.Secret))
+		}
 		swapData, err := eth.node.swap(eth.ctx, secretHash, form.AssetVersion)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)

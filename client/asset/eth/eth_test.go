@@ -114,21 +114,7 @@ func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, ma
 	if n.initErr != nil {
 		return nil, n.initErr
 	}
-	// baseTx := &types.DynamicFeeTx{
-	// 	Nonce:     n.nonce,
-	// 	GasFeeCap: maxFeeRate,
-	// 	GasTipCap: MinGasTipCap,
-	// 	Gas:       dexeth.InitGas(len(contracts)),
-	// 	Value:     opts.Value,
-	// 	Data:      []byte{},
-	// }
 	tx = types.NewTx(&types.DynamicFeeTx{})
-	// n.nonce++
-	// n.lastInitiation = initTx{
-	// 	initiations: initiations,
-	// 	hash:        tx.Hash(),
-	// 	opts:        opts,
-	// }
 	n.nonce++
 	return types.NewTx(&types.DynamicFeeTx{
 		Nonce: n.nonce,
@@ -139,22 +125,7 @@ func (n *testNode) redeem(ctx context.Context, redemptions []*asset.Redemption, 
 	if n.redeemErr != nil {
 		return nil, n.redeemErr
 	}
-	/*baseTx := &types.DynamicFeeTx{
-		Nonce:     n.nonce,
-		GasFeeCap: opts.GasFeeCap,
-		GasTipCap: opts.GasTipCap,
-		Gas:       opts.GasLimit,
-		Value:     opts.Value,
-		Data:      []byte{},
-	}*/
-	//tx := types.NewTx(baseTx)
 	n.nonce++
-	// n.lastRedemption = redeemTx{
-	//	redemptions: redemptions,
-	//	hash:        tx.Hash(),
-	//	opts:        opts,
-	//	tx: tx,
-	// }
 	return types.NewTx(&types.DynamicFeeTx{
 		Nonce: n.nonce,
 	}), nil
@@ -1273,10 +1244,29 @@ func TestRedeem(t *testing.T) {
 			},
 		},
 		{
+			name:        "hash of secret != secretHash",
+			expectError: true,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
 			name:        "empty redemptions slice error",
 			expectError: true,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{},
+				Redemptions:   []*asset.Redemption{},
 				FeeSuggestion: 100,
 				AssetVersion:  0,
 			},
