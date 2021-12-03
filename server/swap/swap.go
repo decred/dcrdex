@@ -1464,8 +1464,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	stepInfo.match.Status = stepInfo.nextStep
 	stepInfo.match.mtx.Unlock()
 
-	fmt.Println("-setting new status", stepInfo.nextStep)
-
 	// Only unlock match map after the statuses and txn times are stored,
 	// ensuring that checkInaction will not revoke the match as we respond and
 	// request counterparty audit.

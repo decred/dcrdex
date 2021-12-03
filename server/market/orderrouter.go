@@ -260,7 +260,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	lotSize := tunnel.LotSize()
-	rpcErr = r.checkPrefixTrade(assets, lotSize, &limit.Prefix, &limit.Trade, limit.Rate, true)
+	rpcErr = r.checkPrefixTrade(assets, lotSize, &limit.Prefix, &limit.Trade, true)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -349,7 +349,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	// Passing sell as the checkLot parameter causes the lot size check to be
 	// ignored for market buy orders.
 	lotSize := tunnel.LotSize()
-	rpcErr = r.checkPrefixTrade(assets, lotSize, &market.Prefix, &market.Trade, 0, sell)
+	rpcErr = r.checkPrefixTrade(assets, lotSize, &market.Prefix, &market.Trade, sell)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -554,13 +554,13 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		if sell {
 			reqVal = calc.RequiredOrderFunds(trade.Quantity, uint64(spendSize), lots, &fundingAsset.Asset)
 		} else {
-			// This is a market buy order, so the quantity gets special handling.
-			// 1. The quantity is in units of the quote asset.
-			// 2. The quantity has to satisfy the market buy buffer.
-			if rate > 0 {
+			if rate > 0 { // limit buy
 				quoteQty := calc.BaseToQuote(rate, trade.Quantity)
 				reqVal = calc.RequiredOrderFunds(quoteQty, uint64(spendSize), lots, &assets.quote.Asset)
 			} else {
+				// This is a market buy order, so the quantity gets special handling.
+				// 1. The quantity is in units of the quote asset.
+				// 2. The quantity has to satisfy the market buy buffer.
 				midGap := tunnel.MidGap()
 				if midGap == 0 {
 					midGap = tunnel.RateStep()
@@ -584,7 +584,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		return false, nil
 	}
 
-	log.Tracef("Searching for %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
+	log.Tracef("Searching for %s coins %v for new order", fundingAsset.Symbol, coinStrs)
 	r.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(fundingTxWait),
 		TryFunc: func() bool {
@@ -598,7 +598,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			}
 
 			// Send the order to the epoch queue where it will be time stamped.
-			log.Tracef("Found and validated %s coins %v for new limit order", fundingAsset.Symbol, coinStrs)
+			log.Tracef("Found and validated %s coins %v for new order", fundingAsset.Symbol, coinStrs)
 			if msgErr := r.submitOrderToMarket(tunnel, oRecord); msgErr != nil {
 				r.respondError(oRecord.msgID, user, msgErr)
 			}
@@ -895,7 +895,7 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 // checkPrefixTrade validates the information in the prefix and trade portions
 // of an order.
 func (r *OrderRouter) checkPrefixTrade(assets *assetSet, lotSize uint64, prefix *msgjson.Prefix,
-	trade *msgjson.Trade, rate uint64, checkLot bool) *msgjson.Error {
+	trade *msgjson.Trade, checkLot bool) *msgjson.Error {
 	// Check that the client's timestamp is still valid.
 	rpcErr := checkTimes(prefix)
 	if rpcErr != nil {
