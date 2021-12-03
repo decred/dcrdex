@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -1552,7 +1553,7 @@ func TestAuditContract(t *testing.T) {
 	tests := []struct {
 		name           string
 		contract       dex.Bytes
-		initiations    []dexeth.ETHSwapInitiation
+		initiations    []swapv0.ETHSwapInitiation
 		differentHash  bool
 		badTxData      bool
 		badTxBinary    bool
@@ -1563,14 +1564,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "ok",
 			contract: versionedBytes(0, secretHashes[1][:]),
-			initiations: []dexeth.ETHSwapInitiation{
-				dexeth.ETHSwapInitiation{
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
 					SecretHash:      secretHashes[0],
 					Participant:     testAddressA,
 					Value:           big.NewInt(1),
 				},
-				dexeth.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(laterThanNow),
 					SecretHash:      secretHashes[1],
 					Participant:     testAddressB,
@@ -1583,8 +1584,8 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "coin id different than tx hash",
 			contract: versionedBytes(0, secretHashes[0][:]),
-			initiations: []dexeth.ETHSwapInitiation{
-				dexeth.ETHSwapInitiation{
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
 					SecretHash:      secretHashes[0],
 					Participant:     testAddressA,
@@ -1602,14 +1603,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "contract not part of transaction",
 			contract: versionedBytes(0, secretHashes[2][:]),
-			initiations: []dexeth.ETHSwapInitiation{
-				dexeth.ETHSwapInitiation{
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
 					SecretHash:      secretHashes[0],
 					Participant:     testAddressA,
 					Value:           big.NewInt(1),
 				},
-				dexeth.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(laterThanNow),
 					SecretHash:      secretHashes[1],
 					Participant:     testAddressB,
@@ -1627,14 +1628,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "cannot unmarshal tx binary",
 			contract: versionedBytes(0, secretHashes[1][:]),
-			initiations: []dexeth.ETHSwapInitiation{
-				dexeth.ETHSwapInitiation{
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
 					SecretHash:      secretHashes[0],
 					Participant:     testAddressA,
 					Value:           big.NewInt(1),
 				},
-				dexeth.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(laterThanNow),
 					SecretHash:      secretHashes[1],
 					Participant:     testAddressB,
@@ -1647,14 +1648,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "value over max gwei",
 			contract: versionedBytes(0, secretHashes[1][:]),
-			initiations: []dexeth.ETHSwapInitiation{
-				dexeth.ETHSwapInitiation{
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
 					SecretHash:      secretHashes[0],
 					Participant:     testAddressA,
 					Value:           big.NewInt(1),
 				},
-				dexeth.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(laterThanNow),
 					SecretHash:      secretHashes[1],
 					Participant:     testAddressB,

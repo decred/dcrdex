@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -793,7 +794,7 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		return nil, fmt.Errorf("AuditContract: failed to decode versioned bytes: %w", err)
 	}
 
-	var initiation *dexeth.ETHSwapInitiation
+	var initiation *swapv0.ETHSwapInitiation
 	for _, init := range initiations {
 		if bytes.Equal(init.SecretHash[:], secretHash) {
 			initiation = &init
