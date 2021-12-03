@@ -797,6 +797,7 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	for _, init := range initiations {
 		if bytes.Equal(init.SecretHash[:], secretHash) {
 			initiation = &init
+			break
 		}
 	}
 	if initiation == nil {
