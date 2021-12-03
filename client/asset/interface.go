@@ -335,6 +335,9 @@ type RedeemForm struct {
 	// suggestion in any way, but obviously fees that are too low may result in
 	// the redemption getting stuck in mempool.
 	FeeSuggestion uint64
+	// AssetVersion is the swap protocol version, which may indicate a specific
+	// contract or form of contract.
+	AssetVersion uint32
 }
 
 // Order is order details needed for FundOrder.

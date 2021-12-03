@@ -836,9 +836,6 @@ func testRedeem(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		numSwaps := len(test.swaps)
-		txOpts, _ := ethClient.txOpts(ctx, uint64(numSwaps), dexeth.InitGas(numSwaps, 0), nil)
-
 		for i := range test.swaps {
 			swap, err := ethClient.swap(ctx, bytesToArray(test.swaps[i].SecretHash), 0)
 			if err != nil {
@@ -876,8 +873,6 @@ func testRedeem(t *testing.T) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 		baseFee, _, _ := test.redeemerClient.netFeeState(ctx)
-		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, dexeth.RedeemGas(numSwaps, 0), nil)
-
 		for i, redemption := range test.redemptions {
 			expected := test.isRedeemable[i]
 			isRedeemable, err := test.redeemerClient.isRedeemable(bytesToArray(redemption.Spends.SecretHash), bytesToArray(redemption.Secret), 0)
@@ -889,7 +884,7 @@ func testRedeem(t *testing.T) {
 			}
 		}
 
-		tx, err := test.redeemerClient.redeem(txOpts, test.redemptions, 0)
+		tx, err := test.redeemerClient.redeem(ctx, test.redemptions, maxFeeRate, 0)
 		if err != nil {
 			t.Fatalf("%s: redeem error: %v", test.name, err)
 		}
@@ -1063,8 +1058,7 @@ func testRefund(t *testing.T) {
 			if err := waitForMined(t, time.Second*8, false); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
-			txOpts, _ := participantEthClient.txOpts(ctx, 0, dexeth.RedeemGas(1, 0), nil)
-			_, err := participantEthClient.redeem(txOpts, []*asset.Redemption{newRedeem(secret, secretHash)}, 0)
+			_, err := participantEthClient.redeem(ctx, []*asset.Redemption{newRedeem(secret, secretHash)}, maxFeeRate, 0)
 			if err != nil {
 				t.Fatalf("%s: redeem error: %v", test.name, err)
 			}

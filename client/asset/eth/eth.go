@@ -145,7 +145,7 @@ type ethFetcher interface {
 	initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	shutdown()
 	syncProgress() ethereum.SyncProgress
-	redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption, contractVer uint32) (*types.Transaction, error)
+	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (*types.Transaction, error)
 	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
 	lock() error
@@ -672,8 +672,38 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
-func (*ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
-	return nil, nil, 0, asset.ErrNotImplemented
+func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
+		return nil, nil, 0, err
+	}
+
+	if len(form.Redemptions) == 0 {
+		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
+	}
+
+	inputs := make([]dex.Bytes, 0, len(form.Redemptions))
+	var redeemedValue uint64
+	for _, redemption := range form.Redemptions {
+		var secretHash [32]byte
+		copy(secretHash[:], redemption.Spends.SecretHash)
+		swapData, err := eth.node.swap(eth.ctx, secretHash, form.AssetVersion)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
+		}
+		redeemedValue += swapData.Value
+		inputs = append(inputs, redemption.Spends.Coin.ID())
+	}
+	outputCoin := eth.createAmountCoin(redeemedValue)
+	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), form.AssetVersion) * form.FeeSuggestion
+
+	// TODO: make sure the amount we locked for redemption is enough to cover the gas
+	// fees.
+	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, form.AssetVersion)
+	if err != nil {
+		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
+	}
+
+	return inputs, outputCoin, fundsRequired, nil
 }
 
 // SignMessage signs the message with the private key associated with the
