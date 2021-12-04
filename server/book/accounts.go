@@ -34,7 +34,7 @@ func (a AccountTracking) quote() bool {
 // methods do nothing, so there's no harm in using a newAccountTracker(0) rather
 // than checking whether assets are actually account-based everywhere.
 // The accountTracker is not thread-safe. In use, synchronization is provided by
-// the *OrderPQ's mutex.
+// the *Books's mutex.
 type accountTracker struct {
 	tracking    AccountTracking
 	base, quote map[string]map[order.OrderID]*order.LimitOrder
@@ -45,10 +45,10 @@ func newAccountTracker(tracking AccountTracking) *accountTracker {
 	// not need tracking.
 	var base, quote map[string]map[order.OrderID]*order.LimitOrder
 	if tracking.base() {
-		base = make(map[string]map[order.OrderID]*order.LimitOrder)
+		base = make(map[string]map[order.OrderID]*order.LimitOrder, initBookHalfCapacity)
 	}
 	if tracking.quote() {
-		quote = make(map[string]map[order.OrderID]*order.LimitOrder)
+		quote = make(map[string]map[order.OrderID]*order.LimitOrder, initBookHalfCapacity)
 	}
 	return &accountTracker{
 		tracking: tracking,

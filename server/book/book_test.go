@@ -32,10 +32,6 @@ func startLogger() {
 }
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
-	addr := "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui"
-	if sell {
-		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
-	}
 	return &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  acct0,
@@ -46,10 +42,10 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
 		T: order.Trade{
-			Coins:    []order.CoinID{},
+			Coins:    []order.CoinID{[]byte(newFakeAddr())},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
-			Address:  addr,
+			Address:  newFakeAddr(),
 		},
 		Rate:  rate,
 		Force: force,
@@ -91,7 +87,7 @@ var (
 func newBook(t *testing.T) *Book {
 	resetMakers()
 
-	b := New(LotSize, 0)
+	b := New(LotSize, AccountTrackingBase|AccountTrackingQuote)
 
 	for _, o := range bookBuyOrders {
 		if ok := b.Insert(o); !ok {
@@ -263,5 +259,70 @@ func TestBook(t *testing.T) {
 	}
 	if b.BuyCount() != 0 {
 		t.Errorf("buy side was not empty after Clear")
+	}
+}
+
+func TestAccountTracking(t *testing.T) {
+	firstSell := bookSellOrders[len(bookSellOrders)-1]
+	allOrders := append(bookBuyOrders, bookSellOrders...)
+
+	// Max oriented queue
+	b := newBook(t)
+	for _, lo := range allOrders {
+		b.Insert(lo)
+	}
+
+	if len(b.acctTracker.base) == 0 {
+		t.Fatalf("base asset not tracked")
+	}
+
+	if len(b.acctTracker.quote) == 0 {
+		t.Fatalf("quote asset not tracked")
+	}
+
+	// Check each order and make sure it's where we expect.
+	for _, ord := range allOrders {
+		// they are all buy orders
+		baseAccount := ord.BaseAccount()
+		ords, found := b.acctTracker.base[baseAccount]
+		if !found {
+			t.Fatalf("base order account not found")
+		}
+		_, found = ords[ord.ID()]
+		if !found {
+			t.Fatalf("base order not found")
+		}
+
+		quoteAccount := ord.QuoteAccount()
+		ords, found = b.acctTracker.quote[quoteAccount]
+		if !found {
+			t.Fatalf("quote order account not found")
+		}
+		_, found = ords[ord.ID()]
+		if !found {
+			t.Fatalf("quote order not found")
+		}
+	}
+
+	// Check that our first seller has two orders.
+	if len(b.acctTracker.base[firstSell.BaseAccount()]) != 2 {
+		t.Fatalf("didn't track two base orders for first user")
+	}
+
+	if len(b.acctTracker.quote[firstSell.QuoteAccount()]) != 2 {
+		t.Fatalf("didn't track two quote orders for first user")
+	}
+
+	// Remove them all.
+	for _, lo := range allOrders {
+		b.Remove(lo.ID())
+	}
+
+	if len(b.acctTracker.base) != 0 {
+		t.Fatalf("base asset not cleared")
+	}
+
+	if len(b.acctTracker.quote) != 0 {
+		t.Fatalf("quote asset not cleared")
 	}
 }

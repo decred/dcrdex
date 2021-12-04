@@ -25,13 +25,12 @@ type orderHeap []*orderEntry
 // price rate. A max-oriented queue with highest rates on top is constructed via
 // NewMaxOrderPQ, while a min-oriented queue is constructed via NewMinOrderPQ.
 type OrderPQ struct {
-	mtx         sync.RWMutex
-	oh          orderHeap
-	capacity    uint32
-	lessFn      func(bi, bj *order.LimitOrder) bool
-	orders      map[order.OrderID]*orderEntry
-	userOrders  map[account.AccountID]map[order.OrderID]*order.LimitOrder
-	acctTracker *accountTracker
+	mtx        sync.RWMutex
+	oh         orderHeap
+	capacity   uint32
+	lessFn     func(bi, bj *order.LimitOrder) bool
+	orders     map[order.OrderID]*orderEntry
+	userOrders map[account.AccountID]map[order.OrderID]*order.LimitOrder
 }
 
 // Copy makes a deep copy of the OrderPQ. The orders are the same; each
@@ -56,7 +55,6 @@ func (pq *OrderPQ) realloc(newCap uint32) {
 	pq.orders = newPQ.orders
 	pq.oh = newPQ.oh
 	pq.userOrders = newPQ.userOrders
-	pq.acctTracker = newPQ.acctTracker
 }
 
 // Cap returns the current capacity of the OrderPQ.
@@ -78,8 +76,6 @@ func (pq *OrderPQ) push(oe *orderEntry) {
 	} else {
 		pq.userOrders[lo.AccountID] = map[order.OrderID]*order.LimitOrder{oid: lo}
 	}
-	// Track accounts.
-	pq.acctTracker.add(oe.order)
 }
 
 // copy makes a deep copy of the OrderPQ. The orders are the same; each
@@ -90,8 +86,7 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 		panic(fmt.Sprintf("len %d > newCap %d", len(pq.oh), int(newCap)))
 	}
 	// Initialize the new OrderPQ.
-	// TODO: Pre-allocate the accountTracker somehow.
-	newPQ := newOrderPQ(newCap, pq.lessFn, pq.acctTracker.tracking)
+	newPQ := newOrderPQ(newCap, pq.lessFn)
 	newPQ.userOrders = make(map[account.AccountID]map[order.OrderID]*order.LimitOrder, len(pq.userOrders))
 	for aid, uos := range pq.userOrders {
 		newPQ.userOrders[aid] = make(map[order.OrderID]*order.LimitOrder, len(uos)) // actual *LimitOrders copied in push
@@ -124,22 +119,6 @@ func (pq *OrderPQ) UnfilledForUser(user account.AccountID) []*order.LimitOrder {
 	}
 	pq.mtx.RUnlock()
 	return orders
-}
-
-// IterateBaseAccount calls the provided function for every tracked order with
-// a base asset corresponding to the specified account address.
-func (pq *OrderPQ) IterateBaseAccount(acctAddr string, f func(*order.LimitOrder)) {
-	pq.mtx.RLock()
-	pq.acctTracker.iterateBaseAccount(acctAddr, f)
-	pq.mtx.RUnlock()
-}
-
-// IterateQuoteAccount calls the provided function for every tracked order with
-// a quote asset corresponding to the specified account address.
-func (pq *OrderPQ) IterateQuoteAccount(acctAddr string, f func(*order.LimitOrder)) {
-	pq.mtx.RLock()
-	pq.acctTracker.iterateQuoteAccount(acctAddr, f)
-	pq.mtx.RUnlock()
 }
 
 // Orders copies all orders, sorted with the lessFn. The OrderPQ is unmodified.
@@ -194,25 +173,24 @@ func (pq *OrderPQ) ExtractN(count int) []*order.LimitOrder {
 // NewMinOrderPQ is the constructor for OrderPQ that initializes an empty heap
 // with the given capacity, and sets the default LessFn for a min heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
-func NewMinOrderPQ(capacity uint32, acctTracking AccountTracking) *OrderPQ {
-	return newOrderPQ(capacity, LessByPriceThenTime, acctTracking)
+func NewMinOrderPQ(capacity uint32) *OrderPQ {
+	return newOrderPQ(capacity, LessByPriceThenTime)
 }
 
 // NewMaxOrderPQ is the constructor for OrderPQ that initializes an empty heap
 // with the given capacity, and sets the default LessFn for a max heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
-func NewMaxOrderPQ(capacity uint32, acctTracking AccountTracking) *OrderPQ {
-	return newOrderPQ(capacity, GreaterByPriceThenTime, acctTracking)
+func NewMaxOrderPQ(capacity uint32) *OrderPQ {
+	return newOrderPQ(capacity, GreaterByPriceThenTime)
 }
 
-func newOrderPQ(cap uint32, lessFn func(bi, bj *order.LimitOrder) bool, acctTracking AccountTracking) *OrderPQ {
+func newOrderPQ(cap uint32, lessFn func(bi, bj *order.LimitOrder) bool) *OrderPQ {
 	return &OrderPQ{
-		oh:          make(orderHeap, 0, cap),
-		capacity:    cap,
-		lessFn:      lessFn,
-		orders:      make(map[order.OrderID]*orderEntry, cap),
-		userOrders:  make(map[account.AccountID]map[order.OrderID]*order.LimitOrder),
-		acctTracker: newAccountTracker(acctTracking),
+		oh:         make(orderHeap, 0, cap),
+		capacity:   cap,
+		lessFn:     lessFn,
+		orders:     make(map[order.OrderID]*orderEntry, cap),
+		userOrders: make(map[account.AccountID]map[order.OrderID]*order.LimitOrder),
 	}
 }
 
@@ -309,7 +287,6 @@ func (pq *OrderPQ) Pop() interface{} {
 	} else {
 		fmt.Printf("(*OrderPQ).Pop: no userOrders for %v found when popping order %v!", user, oid)
 	}
-	pq.acctTracker.remove(lo)
 
 	// If the heap has shrunk well below capacity, realloc smaller.
 	if pq.capacity > deallocThresh {
@@ -415,7 +392,6 @@ func (pq *OrderPQ) Reset(orders []*order.LimitOrder) {
 	pq.oh = make([]*orderEntry, 0, len(orders))
 	pq.orders = make(map[order.OrderID]*orderEntry, len(pq.oh))
 	pq.userOrders = make(map[account.AccountID]map[order.OrderID]*order.LimitOrder)
-	pq.acctTracker = newAccountTracker(pq.acctTracker.tracking)
 	for i, lo := range orders {
 		entry := &orderEntry{
 			order:   lo,
@@ -493,7 +469,6 @@ func (pq *OrderPQ) RemoveUserOrders(user account.AccountID) (removed []*order.Li
 	removed = make([]*order.LimitOrder, 0, len(uos))
 	for oid, lo := range uos {
 		pq.removeOrder(pq.orders[oid])
-		pq.acctTracker.remove(lo)
 		removed = append(removed, lo)
 	}
 	return
