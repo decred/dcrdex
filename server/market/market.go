@@ -74,7 +74,12 @@ type FeeFetcher interface {
 	MaxFeeRate() uint64
 }
 
+// Balancer provides a method to check that an account on an account-based
+// asset has sufficient balance.
 type Balancer interface {
+	// CheckBalance checks that the address's account has sufficient balance to
+	// trade the outgoing number of lots (totaling qty) and incoming number of
+	// redeems.
 	CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool
 }
 

@@ -183,8 +183,7 @@ type SwapperAsset struct {
 type Swapper struct {
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins     map[uint32]*SwapperAsset
-	acctBased map[uint32]bool
+	coins map[uint32]*SwapperAsset
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
@@ -252,11 +251,9 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		}
 	}
 
-	acctBased := make(map[uint32]bool, len(cfg.Assets))
 	acctMatches := make(map[uint32]map[string]map[order.MatchID]*matchTracker)
 	for _, a := range cfg.Assets {
 		if _, ok := a.Backend.(asset.AccountBalancer); ok {
-			acctBased[a.ID] = true
 			acctMatches[a.ID] = make(map[string]map[order.MatchID]*matchTracker)
 		}
 	}
@@ -264,7 +261,6 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
 		coins:         cfg.Assets,
-		acctBased:     acctBased,
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
 		swapDone:      cfg.SwapDone,
@@ -327,12 +323,12 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 		acctMatches[mt.ID()] = mt
 	}
 
-	if s.acctBased[mt.Maker.Base()] {
+	if s.acctMatches[mt.Maker.Base()] != nil {
 		acctMatches := s.acctMatches[mt.Maker.Base()]
 		addAcctMatch(acctMatches, mt.Maker.BaseAccount(), mt)
 		addAcctMatch(acctMatches, mt.Taker.Trade().BaseAccount(), mt)
 	}
-	if s.acctBased[mt.Maker.Quote()] {
+	if s.acctMatches[mt.Maker.Quote()] != nil {
 		acctMatches := s.acctMatches[mt.Maker.Quote()]
 		addAcctMatch(acctMatches, mt.Maker.QuoteAccount(), mt)
 		addAcctMatch(acctMatches, mt.Taker.Trade().QuoteAccount(), mt)
@@ -373,12 +369,12 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 		}
 	}
 
-	if s.acctBased[mt.Maker.Base()] {
+	if s.acctMatches[mt.Maker.Base()] != nil {
 		acctMatches := s.acctMatches[mt.Maker.Base()]
 		deleteAcctMatch(acctMatches, mt.Maker.BaseAccount(), mt)
 		deleteAcctMatch(acctMatches, mt.Taker.Trade().BaseAccount(), mt)
 	}
-	if s.acctBased[mt.Maker.Quote()] {
+	if s.acctMatches[mt.Maker.Quote()] != nil {
 		acctMatches := s.acctMatches[mt.Maker.Quote()]
 		deleteAcctMatch(acctMatches, mt.Maker.QuoteAccount(), mt)
 		deleteAcctMatch(acctMatches, mt.Taker.Trade().QuoteAccount(), mt)

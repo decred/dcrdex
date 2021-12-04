@@ -21,8 +21,11 @@ type PendingAccounter interface {
 // MatchNegotiator can view match-reserved funds for an account-based asset's
 // address. MatchNegotiator is satisfied by *Swapper.
 type MatchNegotiator interface {
-	// AccountStats returns the qty, swap count, and redeem count pending in
-	// active matches.
+	// AccountStats collects stats about pending matches for account's address
+	// on an account-based asset. qty is the total pending outgoing quantity,
+	// swaps is the number matches with oustanding swaps funded by the account,
+	// and redeem is the number of matches with outstanding redemptions that pay
+	// to the account.
 	AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int)
 }
 
@@ -95,6 +98,9 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots ui
 	redeems += newRedeems
 
 	assetInfo := backedAsset.assetInfo
+	// The fee rate assigned to redemptions is at the discretion of the user.
+	// MaxFeeRate is used as a conservatively high estimate. This is then a
+	// server policy that clients must satisfy.
 	redeemCosts := uint64(redeems) * assetInfo.RedeemSize * assetInfo.MaxFeeRate
 	reqFunds := calc.RequiredOrderFunds(qty, 0, lots, assetInfo) + redeemCosts
 
