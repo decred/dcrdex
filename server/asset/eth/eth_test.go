@@ -110,10 +110,6 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 	return n.syncProg, n.syncProgErr
 }
 
-func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
-	return n.peerInfo, n.peersErr
-}
-
 func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return n.sugGasPrice, n.sugGasPriceErr
 }

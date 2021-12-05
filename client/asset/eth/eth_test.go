@@ -94,10 +94,10 @@ func (n *testNode) balance(ctx context.Context) (*Balance, error) {
 func (n *testNode) syncStatus(ctx context.Context) (bool, float32, error) {
 	return false, 0, nil
 }
-func (n *testNode) unlock(ctx context.Context, pw string) error {
+func (n *testNode) unlock(pw string) error {
 	return nil
 }
-func (n *testNode) lock(ctx context.Context) error {
+func (n *testNode) lock() error {
 	return nil
 }
 func (n *testNode) locked() bool {

@@ -196,7 +196,7 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 		return nil, fmt.Errorf("pending balance error: %w", err)
 	}
 
-	pendingTxs, err := n.pendingTransactions(ctx)
+	pendingTxs, err := n.pendingTransactions()
 	if err != nil {
 		return nil, fmt.Errorf("error getting pending txs: %w", err)
 	}
@@ -204,24 +204,43 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 	outgoing := new(big.Int)
 	incoming := new(big.Int)
 	zero := new(big.Int)
-	for _, tx := range pendingTxs {
-		// TODO: Check that the from address matches addr. types.Transaction
-		// does not expose the from address directly.
+
+	addFees := func(tx *types.Transaction) {
 		gas := new(big.Int).SetUint64(tx.Gas())
-		fees := new(big.Int).Mul(gas, tx.GasFeeCap())
-		outgoing.Add(outgoing, fees)
+		if gasPrice := tx.GasPrice(); gasPrice != nil && gasPrice.Cmp(zero) > 0 {
+			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasPrice))
+		} else if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
+			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
+		} else {
+			n.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
+		}
+	}
+
+	ethSigner := types.LatestSigner(n.leth.ApiBackend.ChainConfig()) // "latest" good for pending
+
+	for _, tx := range pendingTxs {
+		from, _ := ethSigner.Sender(tx) // zero Address on error
+		if from != n.creds.addr {
+			continue
+		}
+		addFees(tx)
 		v := tx.Value()
 		if v.Cmp(zero) == 0 {
+			// If zero value, attempt to find redemptions or refunds that pay
+			// to us.
 			for ver, c := range n.contractors {
 				in, err := c.incomingValue(ctx, tx)
 				if err != nil {
 					n.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
+					continue
 				}
 				if in > 0 {
 					incoming.Add(incoming, dexeth.GweiToWei(in))
 				}
 			}
 		} else {
+			// If non-zero outgoing value, this is a swap or a send of some
+			// type.
 			outgoing.Add(outgoing, v)
 		}
 	}
@@ -234,12 +253,12 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 }
 
 // unlock the account indefinitely.
-func (n *nodeClient) unlock(ctx context.Context, pw string) error {
+func (n *nodeClient) unlock(pw string) error {
 	return n.creds.ks.TimedUnlock(*n.creds.acct, pw, 0)
 }
 
 // lock the account indefinitely.
-func (n *nodeClient) lock(ctx context.Context) error {
+func (n *nodeClient) lock() error {
 	return n.creds.ks.Lock(n.creds.addr)
 }
 
@@ -279,12 +298,12 @@ func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash)
 }
 
 // pendingTransactions returns pending transactions.
-func (n *nodeClient) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
+func (n *nodeClient) pendingTransactions() ([]*types.Transaction, error) {
 	return n.leth.ApiBackend.GetPoolTransactions()
 }
 
 // addPeer adds a peer.
-func (n *nodeClient) addPeer(ctx context.Context, peerURL string) error {
+func (n *nodeClient) addPeer(peerURL string) error {
 	peer, err := enode.Parse(enode.ValidSchemes, peerURL)
 	if err != nil {
 		return err
@@ -294,13 +313,15 @@ func (n *nodeClient) addPeer(ctx context.Context, peerURL string) error {
 }
 
 // nodeInfo retrieves useful information about a node.
-func (n *nodeClient) nodeInfo(ctx context.Context) *p2p.NodeInfo {
+// Not used in production. TODO: remove?
+func (n *nodeClient) nodeInfo() *p2p.NodeInfo {
 	return n.p2pSrv.NodeInfo()
 }
 
 // listWallets list all of the wallet's wallets? and accounts along with details
 // such as locked status.
-func (n *nodeClient) listWallets(ctx context.Context) []accounts.Wallet {
+// Not used in production. TODO: remove?
+func (n *nodeClient) listWallets() []accounts.Wallet {
 	return n.creds.ks.Wallets()
 }
 
@@ -340,7 +361,8 @@ func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 }
 
 // peers returns connected peers.
-func (n *nodeClient) peers(ctx context.Context) []*p2p.Peer {
+// Not used in production. TODO: remove?
+func (n *nodeClient) peers() []*p2p.Peer {
 	return n.p2pSrv.Peers()
 }
 
@@ -352,36 +374,17 @@ func (n *nodeClient) swap(ctx context.Context, secretHash [32]byte, contractVer 
 	})
 }
 
-// wallet returns a wallet that owns acct from an ethereum wallet.
-func (n *nodeClient) wallet(acct accounts.Account) (accounts.Wallet, error) {
-	wallet, err := n.node.AccountManager().Find(acct)
-	if err != nil {
-		return nil, fmt.Errorf("error finding wallet for account %s: %w", acct.Address, err)
-	}
-	return wallet, nil
-}
-
 // signData uses the private key of the address to sign a piece of data.
 // The address must have been imported and unlocked to use this function.
 func (n *nodeClient) signData(addr common.Address, data []byte) ([]byte, error) {
-	account := accounts.Account{Address: addr}
-	wallet, err := n.wallet(account)
-	if err != nil {
-		return nil, err
-	}
-
 	// The mime type argument to SignData is not used in the keystore wallet in geth.
 	// It treats any data like plain text.
-	return wallet.SignData(account, accounts.MimetypeTextPlain, data)
+	return n.creds.wallet.SignData(*n.creds.acct, accounts.MimetypeTextPlain, data)
 }
 
 func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
-	wallet, err := n.wallet(accounts.Account{Address: txOpts.From})
-	if err != nil {
-		return err
-	}
 	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		return wallet.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
+		return n.creds.wallet.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
 	}
 	return nil
 }

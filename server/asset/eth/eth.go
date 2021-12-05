@@ -24,7 +24,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
 )
 
 func init() {
@@ -89,12 +88,11 @@ type ethFetcher interface {
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
+	blockNumber(ctx context.Context) (uint64, error)
 	connect(ctx context.Context, ipc string, contractAddr *common.Address) error
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
-	blockNumber(ctx context.Context) (uint64, error)
-	peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 	accountBalance(ctx context.Context, addr common.Address) (*big.Int, error)

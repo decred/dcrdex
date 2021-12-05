@@ -115,7 +115,7 @@ out:
 		case <-timesUp:
 			return errors.New("timed out")
 		case <-time.After(time.Second):
-			txs, err := ethClient.pendingTransactions(ctx)
+			txs, err := ethClient.pendingTransactions()
 			if err != nil {
 				return err
 			}
@@ -285,12 +285,12 @@ func TestContract(t *testing.T) {
 }
 
 func testNodeInfo(t *testing.T) {
-	ni := ethClient.nodeInfo(ctx)
+	ni := ethClient.nodeInfo()
 	spew.Dump(ni)
 }
 
 func testAddPeer(t *testing.T) {
-	if err := ethClient.addPeer(ctx, alphaNode); err != nil {
+	if err := ethClient.addPeer(alphaNode); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -343,21 +343,21 @@ func testBalance(t *testing.T) {
 }
 
 func testUnlock(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func testLock(t *testing.T) {
-	err := ethClient.lock(ctx)
+	err := ethClient.lock()
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func testListWallets(t *testing.T) {
-	wallets := ethClient.listWallets(ctx)
+	wallets := ethClient.listWallets()
 	if len(wallets) == 0 {
 		t.Fatalf("no wallets")
 	}
@@ -365,7 +365,7 @@ func testListWallets(t *testing.T) {
 }
 
 func testSendTransaction(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func testSendTransaction(t *testing.T) {
 }
 
 func testTransactionReceipt(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func testTransactionReceipt(t *testing.T) {
 }
 
 func testPendingTransactions(t *testing.T) {
-	txs, err := ethClient.pendingTransactions(ctx)
+	txs, err := ethClient.pendingTransactions()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,12 +464,12 @@ func testSyncProgress(t *testing.T) {
 }
 
 func testPeers(t *testing.T) {
-	peers := ethClient.peers(ctx)
+	peers := ethClient.peers()
 	spew.Dump(peers)
 }
 
 func TestInitiateGas(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestInitiateGas(t *testing.T) {
 }
 
 func testInitiate(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,7 +676,7 @@ func testInitiate(t *testing.T) {
 }
 
 func TestRedeemGas(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,11 +760,11 @@ func testRedeem(t *testing.T) {
 		secretHashes = append(secretHashes, secretHash)
 	}
 
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = participantEthClient.unlock(ctx, pw)
+	err = participantEthClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,7 +982,7 @@ func testRedeem(t *testing.T) {
 }
 
 func TestRefundGas(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1060,11 +1060,11 @@ func TestRefund(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		err := ethClient.unlock(ctx, pw)
+		err := ethClient.unlock(pw)
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = participantEthClient.unlock(ctx, pw)
+		err = participantEthClient.unlock(pw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1170,7 +1170,7 @@ func TestRefund(t *testing.T) {
 }
 
 func TestReplayAttack(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1349,7 +1349,7 @@ func testGetCodeAt(t *testing.T) {
 
 func testSignMessage(t *testing.T) {
 	msg := []byte("test message")
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatalf("error unlocking account: %v", err)
 	}
