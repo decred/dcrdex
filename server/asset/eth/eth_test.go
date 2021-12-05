@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
 )
 
 var (
@@ -73,8 +72,6 @@ type testNode struct {
 	syncProgErr    error
 	sugGasPrice    *big.Int
 	sugGasPriceErr error
-	peerInfo       []*p2p.PeerInfo
-	peersErr       error
 	swp            *swapv0.ETHSwapSwap
 	swpErr         error
 	tx             *types.Transaction

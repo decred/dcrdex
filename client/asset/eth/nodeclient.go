@@ -155,17 +155,6 @@ func (n *nodeClient) block(ctx context.Context, hash common.Hash) (*types.Block,
 	return n.leth.ApiBackend.BlockByHash(ctx, hash)
 }
 
-// accounts returns all accounts from the internal node.
-func (n *nodeClient) accounts() []*accounts.Account {
-	var accts []*accounts.Account
-	for _, wallet := range n.node.AccountManager().Wallets() {
-		for _, acct := range wallet.Accounts() {
-			accts = append(accts, &acct)
-		}
-	}
-	return accts
-}
-
 func (n *nodeClient) stateAt(ctx context.Context, bn rpc.BlockNumber) (*state.StateDB, error) {
 	state, _, err := n.leth.ApiBackend.StateAndHeaderByNumberOrHash(ctx, rpc.BlockNumberOrHashWithNumber(bn))
 	if err != nil {
@@ -312,19 +301,6 @@ func (n *nodeClient) addPeer(peerURL string) error {
 	return nil
 }
 
-// nodeInfo retrieves useful information about a node.
-// Not used in production. TODO: remove?
-func (n *nodeClient) nodeInfo() *p2p.NodeInfo {
-	return n.p2pSrv.NodeInfo()
-}
-
-// listWallets list all of the wallet's wallets? and accounts along with details
-// such as locked status.
-// Not used in production. TODO: remove?
-func (n *nodeClient) listWallets() []accounts.Wallet {
-	return n.creds.ks.Wallets()
-}
-
 // sendTransaction sends a tx.
 func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts,
 	to common.Address, data []byte) (*types.Transaction, error) {
@@ -358,12 +334,6 @@ func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactO
 // syncProgress return the current sync progress. Returns no error and nil when not syncing.
 func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 	return n.leth.ApiBackend.SyncProgress()
-}
-
-// peers returns connected peers.
-// Not used in production. TODO: remove?
-func (n *nodeClient) peers() []*p2p.Peer {
-	return n.p2pSrv.Peers()
 }
 
 // swap gets a swap keyed by secretHash in the contract.

@@ -247,7 +247,6 @@ func syncClient(cl *nodeClient) error {
 
 func TestBasicRetrieval(t *testing.T) {
 	syncClient(ethClient)
-	t.Run("testNodeInfo", testNodeInfo)
 	t.Run("testBestBlockHash", testBestBlockHash)
 	t.Run("testBestHeader", testBestHeader)
 	t.Run("testBlock", testBlock)
@@ -257,16 +256,13 @@ func TestBasicRetrieval(t *testing.T) {
 func TestPeering(t *testing.T) {
 	t.Run("testAddPeer", testAddPeer)
 	t.Run("testSyncProgress", testSyncProgress)
-	t.Run("testPeers", testPeers)
 	t.Run("testGetCodeAt", testGetCodeAt)
 }
 
 func TestAccount(t *testing.T) {
-	t.Run("testAccounts", testAccounts)
 	t.Run("testBalance", testBalance)
 	t.Run("testUnlock", testUnlock)
 	t.Run("testLock", testLock)
-	t.Run("testListWallets", testListWallets)
 	t.Run("testSendTransaction", testSendTransaction)
 	t.Run("testTransactionReceipt", testTransactionReceipt)
 	t.Run("testSignMessage", testSignMessage)
@@ -282,11 +278,6 @@ func TestContract(t *testing.T) {
 	t.Run("testInitiate", testInitiate)
 	t.Run("testRedeem", testRedeem)
 	// t.Run("testRefund", testRefund)
-}
-
-func testNodeInfo(t *testing.T) {
-	ni := ethClient.nodeInfo()
-	spew.Dump(ni)
 }
 
 func testAddPeer(t *testing.T) {
@@ -323,14 +314,6 @@ func testBlock(t *testing.T) {
 	spew.Dump(b)
 }
 
-func testAccounts(t *testing.T) {
-	accts := ethClient.accounts()
-	if len(accts) == 0 {
-		t.Errorf("Found no accounts")
-	}
-	spew.Dump(accts)
-}
-
 func testBalance(t *testing.T) {
 	bal, err := ethClient.balance(ctx)
 	if err != nil {
@@ -354,14 +337,6 @@ func testLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func testListWallets(t *testing.T) {
-	wallets := ethClient.listWallets()
-	if len(wallets) == 0 {
-		t.Fatalf("no wallets")
-	}
-	spew.Dump(wallets)
 }
 
 func testSendTransaction(t *testing.T) {
@@ -461,11 +436,6 @@ func testSwap(t *testing.T) {
 
 func testSyncProgress(t *testing.T) {
 	spew.Dump(ethClient.syncProgress())
-}
-
-func testPeers(t *testing.T) {
-	peers := ethClient.peers()
-	spew.Dump(peers)
 }
 
 func TestInitiateGas(t *testing.T) {
