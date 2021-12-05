@@ -74,6 +74,15 @@ type FeeFetcher interface {
 	MaxFeeRate() uint64
 }
 
+// Balancer provides a method to check that an account on an account-based
+// asset has sufficient balance.
+type Balancer interface {
+	// CheckBalance checks that the address's account has sufficient balance to
+	// trade the outgoing number of lots (totaling qty) and incoming number of
+	// redeems.
+	CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool
+}
+
 // Config is the Market configuration.
 type Config struct {
 	MarketInfo      *dex.MarketInfo
@@ -85,6 +94,7 @@ type Config struct {
 	FeeFetcherQuote FeeFetcher
 	CoinLockerQuote coinlock.CoinLocker
 	DataCollector   DataCollector
+	Balancer        Balancer
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -178,20 +188,39 @@ func NewMarket(cfg *Config) (*Market, error) {
 		return nil, err
 	}
 
+	log.Infof("Allowing %d lots on the book per user.", mktInfo.BookedLotLimit)
+
 	// Load existing book orders from the DB.
 	base, quote := mktInfo.Base, mktInfo.Quote
+
 	bookOrders, err := storage.BookOrders(base, quote)
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("Allowing %d lots on the book per user.", mktInfo.BookedLotLimit)
-
 	log.Infof("Loaded %d stored book orders.", len(bookOrders))
+
+	baseIsAcctBased := cfg.CoinLockerBase == nil
+	quoteIsAcctBased := cfg.CoinLockerQuote == nil
+
 	// Put the book orders in a map so orders that no longer have funding coins
 	// can be removed easily.
 	bookOrdersByID := make(map[order.OrderID]*order.LimitOrder, len(bookOrders))
-	for _, ord := range bookOrders {
-		bookOrdersByID[ord.ID()] = ord
+	for _, lo := range bookOrders {
+		// Limit order amount requirements are simple unlike market buys.
+		if lo.Quantity%mktInfo.LotSize != 0 || lo.FillAmt%mktInfo.LotSize != 0 {
+			// To change market configuration, the operator should suspended the
+			// market with persist=false, but that may not have happened, or
+			// maybe a revoke failed.
+			log.Errorf("Not rebooking order %v with amount (%v/%v) incompatible with current lot size (%v)",
+				lo.ID(), lo.FillAmt, lo.Quantity, mktInfo.LotSize)
+			// Revoke the order, but do not count this against the user.
+			if _, _, err = storage.RevokeOrderUncounted(lo); err != nil {
+				log.Errorf("Failed to revoke order %v: %v", lo, err)
+				// But still not added back on the book.
+			}
+			continue
+		}
+		bookOrdersByID[lo.ID()] = lo
 	}
 
 	// "execute" any epoch orders in DB that may be left over from unclean
@@ -214,8 +243,40 @@ func NewMarket(cfg *Config) (*Market, error) {
 		}
 	}
 
-	baseCoins := make(map[order.OrderID][]order.CoinID)
-	quoteCoins := make(map[order.OrderID][]order.CoinID)
+	// Set up tracking. Which of these are actually used depend on whether the
+	// assets are account- or utxo-based.
+	// utxo-based
+	var baseCoins, quoteCoins map[order.OrderID][]order.CoinID
+	var missingCoinFails map[order.OrderID]struct{}
+	// account-based
+	var quoteAcctStats, baseAcctStats accountCounter
+	var failedBaseAccts, failedQuoteAccts map[string]bool
+	var failedAcctOrders map[order.OrderID]struct{}
+	var acctTracking book.AccountTracking
+
+	if baseIsAcctBased {
+		acctTracking |= book.AccountTrackingBase
+		baseAcctStats = make(accountCounter)
+		failedBaseAccts = make(map[string]bool)
+		failedAcctOrders = make(map[order.OrderID]struct{})
+	} else {
+		baseCoins = make(map[order.OrderID][]order.CoinID)
+		missingCoinFails = make(map[order.OrderID]struct{})
+	}
+
+	if quoteIsAcctBased {
+		acctTracking |= book.AccountTrackingQuote
+		quoteAcctStats = make(accountCounter)
+		failedQuoteAccts = make(map[string]bool)
+		if failedAcctOrders == nil {
+			failedAcctOrders = make(map[order.OrderID]struct{})
+		}
+	} else {
+		quoteCoins = make(map[order.OrderID][]order.CoinID)
+		if missingCoinFails == nil {
+			missingCoinFails = make(map[order.OrderID]struct{})
+		}
+	}
 
 ordersLoop:
 	for id, lo := range bookOrdersByID {
@@ -269,37 +330,92 @@ ordersLoop:
 			continue ordersLoop
 		}
 
-		// All coins are unspent. Lock them.
-		if lo.Sell {
+		if baseIsAcctBased {
+			var addr string
+			var qty, lots uint64
+			var redeems int
+			if lo.Sell {
+				// address is zeroth coin
+				if len(lo.Coins) != 1 {
+					log.Errorf("rejecting account-based-base-asset order %s that has no coins ¯\\_(ツ)_/¯", lo.ID())
+					continue ordersLoop
+				}
+				addr = string(lo.Coins[0])
+				qty = lo.Quantity
+				lots = qty / mktInfo.LotSize
+			} else {
+				addr = lo.Address
+				redeems = int((lo.Quantity - lo.FillAmt) / mktInfo.LotSize)
+			}
+			baseAcctStats.add(addr, qty, lots, redeems)
+		} else if lo.Sell {
 			baseCoins[id] = lo.Coins
-		} else {
+		}
+
+		if quoteIsAcctBased {
+			var addr string
+			var qty, lots uint64
+			var redeems int
+			if lo.Sell {
+				addr = lo.Address
+				redeems = int((lo.Quantity - lo.FillAmt) / mktInfo.LotSize)
+			} else {
+				// address is zeroth coin
+				if len(lo.Coins) != 1 {
+					log.Errorf("rejecting account-based-base-asset order %s that has no coins ¯\\_(ツ)_/¯", lo.ID())
+					continue ordersLoop
+				}
+				addr = string(lo.Coins[0])
+				qty = lo.Quantity
+				lots = qty / mktInfo.LotSize
+			}
+			quoteAcctStats.add(addr, qty, lots, redeems)
+		} else if !lo.Sell {
 			quoteCoins[id] = lo.Coins
 		}
 	}
 
-	log.Debugf("Locking %d base asset (%d) coins.", len(baseCoins), base)
-	if log.Level() <= dex.LevelTrace {
-		for oid, coins := range baseCoins {
-			log.Tracef(" - order %v: %v", oid, coins)
+	if baseIsAcctBased {
+		log.Debugf("Checking %d base asset (%d) balances.", len(baseAcctStats), base)
+		for acctAddr, stats := range baseAcctStats {
+			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Base, stats.qty, stats.lots, stats.redeems) {
+				log.Info("%s base asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
+				failedBaseAccts[acctAddr] = true
+			}
+		}
+	} else {
+		log.Debugf("Locking %d base asset (%d) coins.", len(baseCoins), base)
+		if log.Level() <= dex.LevelTrace {
+			for oid, coins := range baseCoins {
+				log.Tracef(" - order %v: %v", oid, coins)
+			}
+		}
+		for oid := range cfg.CoinLockerBase.LockCoins(baseCoins) {
+			missingCoinFails[oid] = struct{}{}
 		}
 	}
 
-	log.Debugf("Locking %d quote asset (%d) coins.", len(quoteCoins), quote)
-	if log.Level() <= dex.LevelTrace {
-		for oid, coins := range quoteCoins {
-			log.Tracef(" - order %v: %v", oid, coins)
+	if quoteIsAcctBased {
+		log.Debugf("Checking %d quote asset (%d) balances.", len(quoteAcctStats), quote)
+		for acctAddr, stats := range quoteAcctStats { // quoteAcctStats is nil for utxo-based quote assets
+			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Quote, stats.qty, stats.lots, stats.redeems) {
+				log.Errorf("%s quote asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
+				failedQuoteAccts[acctAddr] = true
+			}
+		}
+	} else {
+		log.Debugf("Locking %d quote asset (%d) coins.", len(quoteCoins), quote)
+		if log.Level() <= dex.LevelTrace {
+			for oid, coins := range quoteCoins {
+				log.Tracef(" - order %v: %v", oid, coins)
+			}
+		}
+		for oid := range cfg.CoinLockerQuote.LockCoins(quoteCoins) {
+			missingCoinFails[oid] = struct{}{}
 		}
 	}
 
-	// Lock the coins, catching and removing orders where coins were already
-	// locked by another market.
-	failedOrderCoins := cfg.CoinLockerBase.LockCoins(baseCoins)
-	// Merge base and quote asset coins.
-	for id, coins := range cfg.CoinLockerQuote.LockCoins(quoteCoins) {
-		failedOrderCoins[id] = coins
-	}
-
-	for oid := range failedOrderCoins {
+	for oid := range missingCoinFails {
 		log.Warnf("Revoking book order %v with already locked coins.", oid)
 		bad := bookOrdersByID[oid]
 		delete(bookOrdersByID, oid)
@@ -310,27 +426,34 @@ ordersLoop:
 		}
 	}
 
-	Book := book.New(mktInfo.LotSize)
+	Book := book.New(mktInfo.LotSize, acctTracking)
 	for _, lo := range bookOrdersByID {
-		// Limit order amount requirements are simple unlike market buys.
-		if lo.Quantity%mktInfo.LotSize != 0 || lo.FillAmt%mktInfo.LotSize != 0 {
-			// To change market configuration, the operator should suspended the
-			// market with persist=false, but that may not have happened, or
-			// maybe a revoke failed.
-			log.Errorf("Not rebooking order %v with amount (%v/%v) incompatible with current lot size (%v)",
-				lo.FillAmt, lo.Quantity, mktInfo.LotSize)
-			// Revoke the order, but do not count this against the user.
-			if _, _, err = storage.RevokeOrderUncounted(lo); err != nil {
-				log.Errorf("Failed to revoke order %v: %v", lo, err)
-				// But still not added back on the book.
-			}
+		// Catch account-based asset low-balance rejections here.
+		if baseIsAcctBased && failedBaseAccts[lo.BaseAccount()] {
+			failedAcctOrders[lo.ID()] = struct{}{}
+			log.Warnf("Skipping insert of order %s into %s book because base asset "+
+				"account failed the balance check", lo.ID(), mktInfo.Name)
 			continue
 		}
-
+		if quoteIsAcctBased && failedQuoteAccts[lo.QuoteAccount()] {
+			failedAcctOrders[lo.ID()] = struct{}{}
+			log.Warnf("Skipping insert of order %s into %s book because quote asset "+
+				"account failed the balance check", lo.ID(), mktInfo.Name)
+			continue
+		}
 		if ok := Book.Insert(lo); !ok {
 			// This can only happen if one of the loaded orders has an
-			// incompatible lot size for the current market config.
+			// incompatible lot size for the current market config, which was
+			// already checked above.
 			log.Errorf("Failed to insert order %v into %v book.", mktInfo.Name, lo)
+		}
+	}
+
+	// Revoke the low-balance rejections in the database.
+	for oid := range failedAcctOrders {
+		// Already logged in the Book.Insert loop.
+		if _, _, err = storage.RevokeOrderUncounted(bookOrdersByID[oid]); err != nil {
+			log.Errorf("Failed to revoke order with insufficient account balance %v: %v", bookOrdersByID[oid], err)
 		}
 	}
 
@@ -838,13 +961,13 @@ func (m *Market) rates() (bestBuyRate, mid, bestSellRate uint64) {
 // not assume that a CoinID for one asset cannot be made to match another
 // asset's CoinID.
 func (m *Market) CoinLocked(asset uint32, coin coinlock.CoinID) bool {
-	switch asset {
-	case m.marketInfo.Base:
+	switch {
+	case asset == m.marketInfo.Base && m.coinLockerBase != nil:
 		return m.coinLockerBase.CoinLocked(coin)
-	case m.marketInfo.Quote:
+	case asset == m.marketInfo.Quote && m.coinLockerQuote != nil:
 		return m.coinLockerQuote.CoinLocked(coin)
 	default:
-		panic(fmt.Sprintf("invalid asset %d for market %s", asset, m.marketInfo.Name))
+		panic(fmt.Sprintf("invalid utxo-based asset %d for market %s", asset, m.marketInfo.Name))
 	}
 }
 
@@ -1037,6 +1160,94 @@ func (m *Market) CheckUnfilled(assetID uint32, user account.AccountID) (unbooked
 	return m.checkUnfilledOrders(assetID, unfilled)
 }
 
+// AccountPending sums the orders quantities that pay to or from the specified
+// account address.
+func (m *Market) AccountPending(acctAddr string, assetID uint32) (qty, lots uint64, redeems int) {
+	base, quote := m.marketInfo.Base, m.marketInfo.Quote
+	if (assetID != base && assetID != quote) ||
+		(assetID == m.marketInfo.Base && m.coinLockerBase != nil) ||
+		(assetID == m.marketInfo.Quote && m.coinLockerQuote != nil) {
+
+		return
+	}
+
+	midGap := m.MidGap()
+	if midGap == 0 {
+		midGap = m.RateStep()
+	}
+
+	lotSize := m.marketInfo.LotSize
+	switch assetID {
+	case base:
+		m.iterateBaseAccount(acctAddr, func(trade *order.Trade, rate uint64) {
+			r := trade.Remaining()
+			if trade.Sell {
+				qty += r
+				lots += r / lotSize
+			} else {
+				if rate == 0 { // market buy
+					redeems += int(calc.QuoteToBase(midGap, r) / lotSize)
+				} else {
+					redeems += int(r / lotSize)
+				}
+			}
+		})
+	case quote:
+		m.iterateQuoteAccount(acctAddr, func(trade *order.Trade, rate uint64) {
+			r := trade.Remaining()
+			if trade.Sell {
+				redeems += int(r / lotSize)
+			} else {
+				if rate == 0 { // market buy
+					qty += r
+					lots += calc.QuoteToBase(midGap, r) / lotSize
+				} else {
+					qty += calc.BaseToQuote(midGap, r)
+					lots += r / lotSize
+				}
+			}
+		})
+	}
+	return
+}
+
+func (m *Market) iterateBaseAccount(acctAddr string, f func(*order.Trade, uint64)) {
+	m.epochMtx.RLock()
+	for _, epOrd := range m.epochOrders {
+		if epOrd.Type() == order.CancelOrderType || epOrd.Trade().BaseAccount() != acctAddr {
+			continue
+		}
+		var rate uint64
+		if lo, is := epOrd.(*order.LimitOrder); is {
+			rate = lo.Rate
+		}
+		f(epOrd.Trade(), rate)
+
+	}
+	m.epochMtx.RUnlock()
+	m.book.IterateBaseAccount(acctAddr, func(lo *order.LimitOrder) {
+		f(lo.Trade(), lo.Rate)
+	})
+}
+
+func (m *Market) iterateQuoteAccount(acctAddr string, f func(*order.Trade, uint64)) {
+	m.epochMtx.RLock()
+	for _, epOrd := range m.epochOrders {
+		if epOrd.Type() == order.CancelOrderType || epOrd.Trade().QuoteAccount() != acctAddr {
+			continue
+		}
+		var rate uint64
+		if lo, is := epOrd.(*order.LimitOrder); is {
+			rate = lo.Rate
+		}
+		f(epOrd.Trade(), rate)
+	}
+	m.epochMtx.RUnlock()
+	m.book.IterateQuoteAccount(acctAddr, func(lo *order.LimitOrder) {
+		f(lo.Trade(), lo.Rate)
+	})
+}
+
 // Book retrieves the market's current order book and the current epoch index.
 // If the Market is not yet running or the start epoch has not yet begun, the
 // epoch index will be zero.
@@ -1074,12 +1285,17 @@ func (m *Market) PurgeBook() {
 		// the market is still accepting new orders and processing epochs.
 
 		// Unlock base asset coins locked by sell orders.
-		for i := range sellsRemoved {
-			m.coinLockerBase.UnlockOrderCoins(sellsRemoved[i])
+		if m.coinLockerBase != nil {
+			for i := range sellsRemoved {
+				m.coinLockerBase.UnlockOrderCoins(sellsRemoved[i])
+			}
 		}
+
 		// Unlock quote asset coins locked by buy orders.
-		for i := range buysRemoved {
-			m.coinLockerQuote.UnlockOrderCoins(buysRemoved[i])
+		if m.coinLockerQuote != nil {
+			for i := range buysRemoved {
+				m.coinLockerQuote.UnlockOrderCoins(buysRemoved[i])
+			}
 		}
 	}
 }
@@ -1382,6 +1598,10 @@ func (m *Market) coinsLocked(o order.Order) []order.CoinID {
 		locker = m.coinLockerBase
 	}
 
+	if locker == nil { // Not utxo-based
+		return nil
+	}
+
 	// Check if this order is known by the locker.
 	lockedCoins := locker.OrderCoinsLocked(o.ID())
 	if len(lockedCoins) > 0 {
@@ -1403,8 +1623,11 @@ func (m *Market) lockOrderCoins(o order.Order) {
 	}
 
 	if o.Trade().Sell {
-		m.coinLockerBase.LockOrdersCoins([]order.Order{o})
-	} else {
+		if m.coinLockerBase != nil {
+			m.coinLockerBase.LockOrdersCoins([]order.Order{o})
+		}
+
+	} else if m.coinLockerQuote != nil {
 		m.coinLockerQuote.LockOrdersCoins([]order.Order{o})
 	}
 }
@@ -1415,8 +1638,10 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 	}
 
 	if o.Trade().Sell {
-		m.coinLockerBase.UnlockOrderCoins(o.ID())
-	} else {
+		if m.coinLockerBase != nil {
+			m.coinLockerBase.UnlockOrderCoins(o.ID())
+		}
+	} else if m.coinLockerQuote != nil {
 		m.coinLockerQuote.UnlockOrderCoins(o.ID())
 	}
 }
@@ -1953,14 +2178,18 @@ func (m *Market) UnbookUserOrders(user account.AccountID) {
 		sellIDs = append(sellIDs, lo.ID())
 		m.unbookedOrder(lo)
 	}
-	m.coinLockerBase.UnlockOrdersCoins(sellIDs)
+	if m.coinLockerBase != nil {
+		m.coinLockerBase.UnlockOrdersCoins(sellIDs)
+	}
 
 	buyIDs := make([]order.OrderID, 0, len(removedBuys))
 	for _, lo := range removedBuys {
 		buyIDs = append(buyIDs, lo.ID())
 		m.unbookedOrder(lo)
 	}
-	m.coinLockerQuote.UnlockOrdersCoins(buyIDs)
+	if m.coinLockerQuote != nil {
+		m.coinLockerQuote.UnlockOrdersCoins(buyIDs)
+	}
 }
 
 // Unbook allows the DEX manager to remove a booked order. This does: (1) remove
@@ -2423,4 +2652,22 @@ func (m *Market) ScaleFeeRate(assetID uint32, feeRate uint64) uint64 {
 	}
 	// It started non-zero, so don't allow it to go to zero.
 	return uint64(math.Max(1.0, math.Round(float64(feeRate)*feeScale)))
+}
+
+type accountStats struct {
+	qty, lots uint64
+	redeems   int
+}
+
+type accountCounter map[string]*accountStats
+
+func (a accountCounter) add(addr string, qty, lots uint64, redeems int) {
+	stats, found := a[addr]
+	if !found {
+		stats = new(accountStats)
+		a[addr] = stats
+	}
+	stats.qty += qty
+	stats.lots += lots
+	stats.redeems += redeems
 }

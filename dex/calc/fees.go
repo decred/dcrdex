@@ -14,12 +14,16 @@ import (
 // number of lots in the order. For the quote asset, maxSwaps is not swapVal /
 // lotSize, so it must be a separate parameter. The chained swap txns will be
 // the standard size as they will spend a previous swap's change output.
+// For account-based assets, inputsSize will be zero, and nfo.SwapSize =
+// nfo.SwapSizeBase.
 func RequiredOrderFunds(swapVal, inputsSize, maxSwaps uint64, nfo *dex.Asset) uint64 {
 	return RequiredOrderFundsAlt(swapVal, inputsSize, maxSwaps, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
 }
 
 // RequiredOrderFundsAlt is the same as RequiredOrderFunds, but built-in type
 // parameters.
+// For account-based assets, inputsSize will be zero, and swapSize =
+// swapSizeBase.
 func RequiredOrderFundsAlt(swapVal, inputsSize, maxSwaps, swapSizeBase, swapSize, feeRate uint64) uint64 {
 	baseBytes := maxSwaps * swapSize
 	// SwapSize already includes one input, replace the size of the first swap

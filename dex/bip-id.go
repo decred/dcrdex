@@ -479,6 +479,7 @@ var bipIDs = map[uint32]string{
 	890:      "xsel",
 	900:      "lmo",
 	916:      "meta",
+	966:      "matic",
 	970:      "twins",
 	996:      "okp",
 	997:      "sum",

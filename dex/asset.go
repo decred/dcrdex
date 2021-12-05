@@ -118,7 +118,8 @@ type Asset struct {
 	Version      uint32   `json:"version"`
 	MaxFeeRate   uint64   `json:"maxFeeRate"`
 	SwapSize     uint64   `json:"swapSize"`
-	SwapSizeBase uint64   `json:"swapSizeBase"`
+	SwapSizeBase uint64   `json:"swapSizeBase"`         // = SwapSize for account-based assets
+	RedeemSize   uint64   `json:"redeemSize,omitempty"` // Account-based assets only
 	SwapConf     uint32   `json:"swapConf"`
 	UnitInfo     UnitInfo `json:"unitInfo"`
 }

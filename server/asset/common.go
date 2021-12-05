@@ -62,6 +62,9 @@ type Backend interface {
 	CheckAddress(string) bool
 	// ValidateCoinID checks the coinID to ensure it can be decoded, returning a
 	// human-readable string if it is valid.
+	// Note: ValidateCoinID is NOT used for funding coin IDs for account-based
+	// assets. This rule is only enforced by code patterns right now, but we may
+	// consider adding separate methods in the future.
 	ValidateCoinID(coinID []byte) (string, error)
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
@@ -92,6 +95,13 @@ type OutputTracker interface {
 type AccountBalancer interface {
 	// AccountBalance retrieves the current account balance.
 	AccountBalance(addr string) (uint64, error)
+	// ValidateSignature checks that the pubkey is correct for the address and
+	// that the signature shows ownership of the associated private key.
+	// IMPORTANT: As part of signature validation, the asset backend should
+	// validate the address against a STRICT standard. Case, prefixes, suffixes,
+	// etc. must be exactly the same order-to-order, since the address string
+	// is used as a key for various accounting operations throughout DEX.
+	ValidateSignature(addr string, pubkey, msg, sig []byte) error
 }
 
 // Coin represents a transaction input or output.

@@ -107,7 +107,6 @@ type ethFetcher interface {
 type Backend struct {
 	// A connection-scoped Context is used to cancel active RPCs on
 	// connection shutdown.
-	ver        uint32
 	rpcCtx     context.Context
 	cancelRPCs context.CancelFunc
 	cfg        *config
@@ -128,6 +127,8 @@ type Backend struct {
 	// case of updating where two contracts may be valid for some time,
 	// possibly disallowing initialization for the deprecated one only.
 	contractAddr common.Address
+	// initTxSize is the gas used for an initiation transaction with one swap.
+	initTxSize uint32
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -158,6 +159,7 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 		log:          logger,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		contractAddr: contractAddr,
+		initTxSize:   uint32(dexeth.InitGas(1, version)),
 	}
 }
 
@@ -226,21 +228,14 @@ func (eth *Backend) TxData(coinID []byte) ([]byte, error) {
 	return tx.MarshalBinary()
 }
 
-// InitTxSize is not size for eth. In ethereum the size of a non-standard
-// transaction does not say anything about the processing power the ethereum
-// virtual machine will use in order to process it, and therefor gas needed
-// cannot be ascertained from it. Multiplying the required gas by the gas price
-// will give us the actual fee needed, so returning gas here.
+// InitTxSize is an upper limit on the gas used for an initiation.
 func (eth *Backend) InitTxSize() uint32 {
-	return uint32(dexeth.InitGas(1, eth.ver))
+	return eth.initTxSize
 }
 
-// InitTxSizeBase is used in fee.go in a fee calculation. Currently we are
-// unable to batch eth contract calls like UTXO coins so all contracts will
-// need to be per transaction. Setting this to zero produces the expected
-// result in fee calculations.
+// InitTxSizeBase is the same as InitTxSize for ETH.
 func (eth *Backend) InitTxSizeBase() uint32 {
-	return 0
+	return eth.initTxSize
 }
 
 // FeeRate returns the current optimal fee rate in gwei / gas.

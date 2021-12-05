@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -22,7 +23,11 @@ import (
 )
 
 // Check that rpcclient satisfies the ethFetcher interface.
-var _ ethFetcher = (*rpcclient)(nil)
+var (
+	_ ethFetcher = (*rpcclient)(nil)
+
+	bigZero = new(big.Int)
+)
 
 type rpcclient struct {
 	// ec wraps a *rpc.Client with some useful calls.
@@ -124,9 +129,66 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 // accountBalance gets the account balance, including the effects of known
 // unmined transactions.
 func (c *rpcclient) accountBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
-	bigBal, err := c.ec.PendingBalanceAt(ctx, addr)
+	tip, err := c.blockNumber(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("blockNumber error: %v", err)
+	}
+	currentBal, err := c.ec.BalanceAt(ctx, addr, big.NewInt(int64(tip)))
 	if err != nil {
 		return nil, err
 	}
-	return bigBal, nil
+
+	// We need to subtract and pending outgoing value, but ignore any pending
+	// incoming value since that can't be spent until mined. So we can't using
+	// PendingBalanceAt or BalanceAt by themselves.
+	// We'll iterate tx pool transactions and subtract any value and fees being
+	// sent from this account. The rpc.Client doesn't expose the
+	// txpool_contentFrom => (*TxPool).ContentFrom RPC method, for whatever
+	// reason, so we'll have to use CallContext and copy the mimic the
+	// internal RPCTransaction type.
+	var txs map[string]map[string]*RPCTransaction
+	err = c.c.CallContext(ctx, &txs, "txpool_contentFrom", addr)
+	if err != nil {
+		return nil, fmt.Errorf("contentFrom error: %w", err)
+	}
+
+	outgoing := new(big.Int)
+	for _, group := range txs { // 2 groups, pending and queued
+		for _, tx := range group {
+			outgoing.Add(outgoing, tx.Value.ToInt())
+			gas := new(big.Int).SetUint64(uint64(tx.Gas))
+			if tx.GasPrice != nil && tx.GasPrice.ToInt().Cmp(bigZero) > 0 {
+				outgoing.Add(outgoing, new(big.Int).Mul(gas, tx.GasPrice.ToInt()))
+			} else if tx.GasFeeCap != nil {
+				outgoing.Add(outgoing, new(big.Int).Mul(gas, tx.GasFeeCap.ToInt()))
+			} else {
+				return nil, fmt.Errorf("cannot find fees for tx %s", tx.Hash)
+			}
+		}
+	}
+
+	return currentBal.Sub(currentBal, outgoing), nil
+}
+
+type RPCTransaction struct {
+	Value     *hexutil.Big   `json:"value"`
+	Gas       hexutil.Uint64 `json:"gas"`
+	GasPrice  *hexutil.Big   `json:"gasPrice"`
+	GasFeeCap *hexutil.Big   `json:"maxFeePerGas,omitempty"`
+	Hash      common.Hash    `json:"hash"`
+	// BlockHash        *common.Hash      `json:"blockHash"`
+	// BlockNumber      *hexutil.Big      `json:"blockNumber"`
+	// From             common.Address    `json:"from"`
+	// GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+
+	// Input            hexutil.Bytes     `json:"input"`
+	// Nonce            hexutil.Uint64    `json:"nonce"`
+	// To               *common.Address   `json:"to"`
+	// TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
+	// Type             hexutil.Uint64    `json:"type"`
+	// Accesses         *types.AccessList `json:"accessList,omitempty"`
+	// ChainID          *hexutil.Big      `json:"chainId,omitempty"`
+	// V                *hexutil.Big      `json:"v"`
+	// R                *hexutil.Big      `json:"r"`
+	// S                *hexutil.Big      `json:"s"`
 }

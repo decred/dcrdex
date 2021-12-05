@@ -56,15 +56,15 @@ func genBigList(listSize int) {
 
 	bigList = make([]*Order, 0, listSize)
 	for i := 0; i < listSize; i++ {
-		order := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
-		order.Address = newFakeAddr()
+		lo := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
+		lo.Address = newFakeAddr()
 		// duplicate some prices
 		if (i+1)%(listSize/dupRate) == 0 {
-			order.Rate = bigList[i/2].Rate
-			order.Quantity = bigList[i/2].Quantity + 1
+			lo.Rate = bigList[i/2].Rate
+			lo.Quantity = bigList[i/2].Quantity + 1
 		}
-		_ = order.ID() // compute and cache the OrderID
-		bigList = append(bigList, order)
+		_ = lo.ID() // compute and cache the OrderID
+		bigList = append(bigList, lo)
 	}
 }
 
@@ -80,6 +80,10 @@ func TestMain(m *testing.M) {
 	} else {
 		genBigList(longListLen)
 	}
+	// The first and last of the sells are the same user.
+	firstSell, lastSell := bookSellOrders[0], bookSellOrders[len(bookSellOrders)-1]
+	firstSell.Coins[0] = lastSell.Coins[0]
+	firstSell.Address = lastSell.Address
 	os.Exit(m.Run())
 }
 

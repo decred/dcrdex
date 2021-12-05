@@ -190,7 +190,7 @@ const (
 func newBook(t *testing.T) *book.Book {
 	resetMakers()
 
-	b := book.New(LotSize)
+	b := book.New(LotSize, 0)
 
 	for _, o := range bookBuyOrders {
 		if ok := b.Insert(o); !ok {
@@ -1012,7 +1012,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		{
 			name: "market sell against empty book",
 			args: args{
-				book:  book.New(LotSize),
+				book:  book.New(LotSize, 0),
 				queue: []*matcher.OrderRevealed{takers[0]},
 			},
 			doesMatch:        false,

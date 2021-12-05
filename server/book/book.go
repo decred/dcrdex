@@ -23,18 +23,22 @@ const (
 // allow constant time access to the best orders, and log time insertion and
 // removal of orders.
 type Book struct {
-	mtx     sync.RWMutex
-	lotSize uint64
-	buys    *OrderPQ
-	sells   *OrderPQ
+	mtx          sync.RWMutex
+	lotSize      uint64
+	buys         *OrderPQ
+	sells        *OrderPQ
+	acctTracking AccountTracking
+	acctTracker  *accountTracker
 }
 
-// New creates a new order book with the given lot size.
-func New(lotSize uint64) *Book {
+// New creates a new order book with the given lot size and account-tracking.
+func New(lotSize uint64, acctTracking AccountTracking) *Book {
 	return &Book{
-		lotSize: lotSize,
-		buys:    NewMaxOrderPQ(initBookHalfCapacity),
-		sells:   NewMinOrderPQ(initBookHalfCapacity),
+		lotSize:      lotSize,
+		buys:         NewMaxOrderPQ(initBookHalfCapacity),
+		sells:        NewMinOrderPQ(initBookHalfCapacity),
+		acctTracking: acctTracking,
+		acctTracker:  newAccountTracker(acctTracking),
 	}
 }
 
@@ -44,6 +48,7 @@ func (b *Book) Clear() {
 	b.buys, b.sells = nil, nil
 	b.buys = NewMaxOrderPQ(initBookHalfCapacity)
 	b.sells = NewMinOrderPQ(initBookHalfCapacity)
+	b.acctTracker = newAccountTracker(b.acctTracking)
 	b.mtx.Unlock()
 }
 
@@ -95,9 +100,17 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	if o.Sell {
-		return b.sells.Insert(o)
+		if b.sells.Insert(o) {
+			b.acctTracker.add(o)
+			return true
+		}
+		return false
 	}
-	return b.buys.Insert(o)
+	if b.buys.Insert(o) {
+		b.acctTracker.add(o)
+		return true
+	}
+	return false
 }
 
 // Remove attempts to remove the order with the given OrderID from the book.
@@ -105,9 +118,11 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	if removed, ok := b.sells.RemoveOrderID(oid); ok {
+		b.acctTracker.remove(removed)
 		return removed, true
 	}
 	if removed, ok := b.buys.RemoveOrderID(oid); ok {
+		b.acctTracker.remove(removed)
 		return removed, true
 	}
 	return nil, false
@@ -116,7 +131,15 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 // RemoveUserOrders removes all orders from the book that belong to a user. The
 // removed buy and sell orders are returned.
 func (b *Book) RemoveUserOrders(user account.AccountID) (removedBuys, removedSells []*order.LimitOrder) {
-	return b.buys.RemoveUserOrders(user), b.sells.RemoveUserOrders(user)
+	removedBuys = b.buys.RemoveUserOrders(user)
+	for _, lo := range removedBuys {
+		b.acctTracker.remove(lo)
+	}
+	removedSells = b.sells.RemoveUserOrders(user)
+	for _, lo := range removedSells {
+		b.acctTracker.remove(lo)
+	}
+	return
 }
 
 // HaveOrder checks if an order is in either the buy or sell side of the book.
@@ -182,4 +205,20 @@ func (b *Book) UnfilledUserSells(user account.AccountID) []*order.LimitOrder {
 	b.mtx.RLock()
 	defer b.mtx.RUnlock()
 	return b.sells.UnfilledForUser(user)
+}
+
+// IterateBaseAccount calls the provided function for every tracked order with
+// a base asset corresponding to the specified account address.
+func (b *Book) IterateBaseAccount(acctAddr string, f func(lo *order.LimitOrder)) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	b.acctTracker.iterateBaseAccount(acctAddr, f)
+}
+
+// IterateQuoteAccount calls the provided function for every tracked order with
+// a quote asset corresponding to the specified account address.
+func (b *Book) IterateQuoteAccount(acctAddr string, f func(lo *order.LimitOrder)) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	b.acctTracker.iterateQuoteAccount(acctAddr, f)
 }
