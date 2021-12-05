@@ -576,7 +576,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			buyBuffer := tunnel.MarketBuyBuffer()
 			lotWithBuffer := uint64(float64(lotSize) * buyBuffer)
 			minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
-			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
+			reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.funding.Asset)
 
 			if market.Quantity < minReq {
 				errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", market.Quantity, minReq, midGap)
