@@ -2998,3 +2998,36 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 		}
 	}
 }
+
+func TestPrettyBTC(t *testing.T) {
+	type test struct {
+		v   uint64
+		exp string
+	}
+
+	tests := []*test{{
+		v:   1,
+		exp: "0.00000001",
+	}, {
+		v:   1e8,
+		exp: "1",
+	}, {
+		v:   100000001,
+		exp: "1.00000001",
+	}, {
+		v:   0,
+		exp: "0",
+	}, {
+		v:   123000,
+		exp: "0.00123",
+	}, {
+		v:   100123000,
+		exp: "1.00123",
+	}}
+
+	for _, tt := range tests {
+		if prettyBTC(tt.v) != tt.exp {
+			t.Fatalf("prettyBTC(%d) = %s != %q", tt.v, prettyBTC(tt.v), tt.exp)
+		}
+	}
+}

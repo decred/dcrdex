@@ -1015,7 +1015,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	customCfg := new(swapOptions)
 	err = config.Unmapify(req.SelectedOptions, customCfg)
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing selected swap options")
+		return nil, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
 	// Parse the configured split transaction.
@@ -1079,8 +1079,8 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		}
 
 		extraFees := maxBumpEst.RealisticWorstCase - noBumpEst.RealisticWorstCase
-		desc := fmt.Sprintf("Bump fees up to %.1fx (up to ~%s %s more) for faster settlement when %s traffic is high.",
-			maxBump, prettyBTC(extraFees), btc.symbol, btc.symbol)
+		desc := fmt.Sprintf("Bump fees up to %.1fx (up to ~%s %s more) for faster settlement when %s network traffic is high.",
+			maxBump, prettyBTC(extraFees), btc.symbol, btc.walletInfo.Name)
 
 		opts = append(opts, &asset.OrderOption{
 			ConfigOption: asset.ConfigOption{
@@ -1256,7 +1256,7 @@ func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 	customCfg := new(redeemOptions)
 	err := config.Unmapify(req.SelectedOptions, customCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing selected options")
+		return nil, fmt.Errorf("error parsing selected options: %w", err)
 	}
 
 	var opts []*asset.OrderOption
@@ -1325,7 +1325,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
 	}
 	if ord.FeeSuggestion > btc.feeRateLimit {
-		return nil, nil, fmt.Errorf("suggested fee > configured limit")
+		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, btc.feeRateLimit)
 	}
 	// Check wallets fee rate limit against server's max fee rate
 	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
@@ -1339,7 +1339,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	customCfg := new(swapOptions)
 	err := config.Unmapify(ord.Options, customCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error parsing swap options")
+		return nil, nil, fmt.Errorf("error parsing swap options: %w", err)
 	}
 
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
@@ -1841,7 +1841,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	feeRate, err := calcBumpedRate(swaps.FeeRate, customCfg.FeeBump)
 	if err != nil {
-		btc.log.Errorf("ignoring invalid fee bump factor, %v: %v", customCfg.FeeBump, err)
+		btc.log.Errorf("ignoring invalid fee bump factor, %s: %v", float64PtrStr(customCfg.FeeBump), err)
 	}
 
 	// Sign, add change, but don't send the transaction yet until
@@ -1980,7 +1980,7 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		if fee > totalIn {
 			return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
 		}
-		btc.log.Warnf("Ignoring fee bump (%v) resulting in fees > redemption", customCfg.FeeBump)
+		btc.log.Warnf("Ignoring fee bump (%s) resulting in fees > redemption", float64PtrStr(customCfg.FeeBump))
 	}
 
 	// Send the funds back to the exchange wallet.
@@ -3410,8 +3410,11 @@ func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*fi
 // with trailing zeros and decimal points removed.
 func prettyBTC(v uint64) string {
 	s := strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64)
+	s = strings.TrimRightFunc(s, func(r rune) bool {
+		return r == '0'
+	})
 	return strings.TrimRightFunc(s, func(r rune) bool {
-		return r == '0' || r == '.'
+		return r == '.'
 	})
 }
 
@@ -3430,4 +3433,11 @@ func calcBumpedRate(baseRate uint64, bump *float64) (uint64, error) {
 		return baseRate, fmt.Errorf("fee bump %f is lower than 1", userBump)
 	}
 	return uint64(math.Round(float64(baseRate) * userBump)), nil
+}
+
+func float64PtrStr(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', 8, 64)
 }

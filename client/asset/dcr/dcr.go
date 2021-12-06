@@ -784,7 +784,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	customCfg := new(swapOptions)
 	err = config.Unmapify(req.SelectedOptions, customCfg)
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing selected swap options")
+		return nil, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
 	// Parse the configured split transaction.
@@ -945,7 +945,7 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 	customCfg := new(redeemOptions)
 	err := config.Unmapify(req.SelectedOptions, customCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing selected options")
+		return nil, fmt.Errorf("error parsing selected options: %w", err)
 	}
 
 	var opts []*asset.OrderOption
@@ -1025,7 +1025,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
 	}
 	if ord.FeeSuggestion > dcr.feeRateLimit {
-		return nil, nil, fmt.Errorf("suggested fee > configured limit")
+		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, dcr.feeRateLimit)
 	}
 	// Check wallet's fee rate limit against server's max fee rate
 	if dcr.feeRateLimit < ord.DEXConfig.MaxFeeRate {
@@ -1529,7 +1529,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	feeRate, err := calcBumpedRate(swaps.FeeRate, customCfg.FeeBump)
 	if err != nil {
-		dcr.log.Errorf("ignoring invalid fee bump factor, %v: %v", customCfg.FeeBump, err)
+		dcr.log.Errorf("ignoring invalid fee bump factor, %s: %v", float64PtrStr(customCfg.FeeBump), err)
 	}
 
 	// Add change, sign, and send the transaction.
@@ -1653,7 +1653,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		if fee > totalIn {
 			return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
 		}
-		dcr.log.Warnf("Ignoring fee bump (%v) resulting in fees > redemption", customCfg.FeeBump)
+		dcr.log.Warnf("Ignoring fee bump (%v) resulting in fees > redemption", float64PtrStr(customCfg.FeeBump))
 	}
 
 	// Send the funds back to the exchange wallet.
@@ -3313,4 +3313,11 @@ func calcBumpedRate(baseRate uint64, bump *float64) (uint64, error) {
 		return baseRate, fmt.Errorf("fee bump %f is lower than 1", userBump)
 	}
 	return uint64(math.Round(float64(baseRate) * userBump)), nil
+}
+
+func float64PtrStr(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', 8, 64)
 }
