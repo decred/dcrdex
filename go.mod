@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.16
 
 require (
-	decred.org/dcrwallet/v2 v2.0.0-20211206162600-85aed8e31998
+	decred.org/dcrwallet/v2 v2.0.0-20211206163037-9537363becbb
 	github.com/btcsuite/btcd v0.22.0-beta.0.20211026140004-31791ba4dc6e
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
 	github.com/btcsuite/btcutil v1.0.3-0.20210527170813-e2ba6805a890 // note: hoists btcd's own require of btcutil
@@ -43,7 +43,7 @@ require (
 	github.com/lib/pq v1.10.3
 	github.com/lightninglabs/neutrino v0.13.0
 	go.etcd.io/bbolt v1.3.5
-	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
+	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 	golang.org/x/text v0.3.6
