@@ -118,11 +118,13 @@ func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 			Value:           new(big.Int).Mul(bigVal, dexeth.BigGweiFactor),
 		})
 	}
+
 	return c.contractV0.Initiate(txOpts, inits)
 }
 
 func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption) (*types.Transaction, error) {
 	redemps := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
+	secretHashes := make(map[[32]byte]bool, len(redemptions))
 	for _, r := range redemptions {
 		secretB, secretHashB := r.Secret, r.Spends.SecretHash
 		if len(secretB) != 32 || len(secretHashB) != 32 {
@@ -131,6 +133,11 @@ func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Re
 		var secret, secretHash [32]byte
 		copy(secret[:], secretB)
 		copy(secretHash[:], secretHashB)
+		if secretHashes[secretHash] {
+			return nil, fmt.Errorf("duplicate secret hash %x", secretHash[:])
+		}
+		secretHashes[secretHash] = true
+
 		redemps = append(redemps, swapv0.ETHSwapRedemption{
 			Secret:     secret,
 			SecretHash: secretHash,
