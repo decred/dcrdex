@@ -81,70 +81,87 @@ func testAddresses() *tAddrs {
 	}
 }
 
-func TestParseScriptType(t *testing.T) {
+// Test ScriptType methods and pkScript identification via ParseScriptType.
+// TestInputInfo verifies combined P2SH pkScript + redeemscript identification.
+// This test also verifies ExtractScriptHashV0.
+func TestScriptType(t *testing.T) {
 	addrs := testAddresses()
 
-	var scriptType DCRScriptType
-	parse := func(addr stdaddr.Address, redeem []byte, stakeOpcode byte) ([]byte, DCRScriptType) {
+	var scriptType ScriptType
+	parse := func(addr stdaddr.Address, stakeOpcode byte) ([]byte, ScriptType) {
 		t.Helper()
 		_, pkScript := addr.PaymentScript()
 		if stakeOpcode != 0 {
 			pkScript = append([]byte{stakeOpcode}, pkScript...)
 		}
-		scriptType = ParseScriptType(0, pkScript, redeem)
+		scriptType = ParseScriptType(0, pkScript)
 		return pkScript, scriptType
 	}
 
 	check := func(name string, res bool, exp bool) {
+		t.Helper()
 		if res != exp {
 			t.Fatalf("%s check failed. wanted %t, got %t", name, exp, res)
 		}
 	}
 
-	parse(addrs.pkh, nil, 0)
+	parse(addrs.pkh, 0)
 	check("p2pkh-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("p2pkh-IsP2SH", scriptType.IsP2SH(), false)
 	check("p2pkh-IsStake", scriptType.IsStake(), false)
 	check("p2pkh-IsMultiSig", scriptType.IsMultiSig(), false)
 
-	parse(addrs.pkh, nil, txscript.OP_SSGEN)
+	parse(addrs.pkh, txscript.OP_SSGEN)
 	check("stakePKH-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("stakePKH-IsP2SH", scriptType.IsP2SH(), false)
 	check("stakePKH-IsStake", scriptType.IsStake(), true)
 	check("stakePKH-IsMultiSig", scriptType.IsMultiSig(), false)
 
-	parse(addrs.edwards, nil, 0)
+	parse(addrs.edwards, 0)
 	check("edwards-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("edwards-IsP2SH", scriptType.IsP2SH(), false)
 	check("edwards-IsStake", scriptType.IsStake(), false)
 	check("edwards-IsMultiSig", scriptType.IsMultiSig(), false)
 
-	parse(addrs.schnorrPK, nil, 0)
+	parse(addrs.schnorrPK, 0)
 	check("schnorrPK-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("schnorrPK-IsP2SH", scriptType.IsP2SH(), false)
 	check("schnorrPK-IsStake", scriptType.IsStake(), false)
 	check("schnorrPK-IsMultiSig", scriptType.IsMultiSig(), false)
 
-	pkScript, scriptType := parse(addrs.sh, addrs.multiSig, 0)
+	pkScript, scriptType := parse(addrs.sh, 0)
 	check("p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("p2sh-IsP2SH", scriptType.IsP2SH(), true)
 	check("p2pkh-IsStake", scriptType.IsStake(), false)
-	check("p2sh-IsMultiSig", scriptType.IsMultiSig(), true)
 
-	_, err := ExtractScriptHashByType(scriptType, pkScript)
-	if err != nil {
-		t.Fatalf("error extracting non-stake script hash: %v", err)
+	scriptHash := ExtractScriptHashV0(pkScript)
+	if scriptHash == nil {
+		t.Fatalf("error extracting non-stake script hash")
 	}
 
-	pkScript, scriptType = parse(addrs.sh, addrs.multiSig, txscript.OP_SSGEN)
+	// Identification of a pkScript combined with a multisig redeemscript is
+	// verified in TestInputInfo; here we just test the IsMultiSig method.
+	scriptType |= ScriptMultiSig
+	check("p2sh-IsMultiSig", scriptType.IsMultiSig(), true)
+	// retest other Is methods now that we've set the multisig bit
+	check("p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
+	check("p2sh-IsP2SH", scriptType.IsP2SH(), true)
+	check("p2pkh-IsStake", scriptType.IsStake(), false)
+
+	pkScript, scriptType = parse(addrs.sh, txscript.OP_SSGEN)
 	check("stake-p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("stake-p2sh-IsP2SH", scriptType.IsP2SH(), true)
 	check("stake-p2pkh-IsStake", scriptType.IsStake(), true)
-	check("stake-p2sh-IsMultiSig", scriptType.IsMultiSig(), true)
 
-	_, err = ExtractScriptHashByType(scriptType, pkScript)
-	if err != nil {
-		t.Fatalf("error extracting stake script hash: %v", err)
+	scriptType |= ScriptMultiSig
+	check("stake-p2sh-IsMultiSig", scriptType.IsMultiSig(), true)
+	check("stake-p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
+	check("stake-p2sh-IsP2SH", scriptType.IsP2SH(), true)
+	check("stake-p2pkh-IsStake", scriptType.IsStake(), true)
+
+	scriptHash = ExtractScriptHashV0(pkScript)
+	if scriptHash == nil {
+		t.Fatalf("error extracting stake script hash")
 	}
 }
 
@@ -257,7 +274,8 @@ func TestIsDust(t *testing.T) {
 	}
 }
 
-// Test both InputInfo and ExtractScriptHashByType with a non-standard script.
+// Test InputInfo, ParseScriptType, ExtractScriptData, ExtractScriptAddrs, and
+// ExtractScriptHash with a non-standard script.
 func Test_nonstandardScript(t *testing.T) {
 	// The tx hash of a DCR testnet swap contract.
 	contractTx, err := chainhash.NewHashFromStr("4a14a2d79c1374d286ebd68d2c104343bcf8be44ed54045b5963fbf73667cecc")
@@ -268,43 +286,48 @@ func Test_nonstandardScript(t *testing.T) {
 
 	// The contract output's P2SH pkScript and the corresponding redeem script
 	// (the actual contract).
+	scriptVersion := uint16(0)
 	pkScript, _ := hex.DecodeString("a9146d4bc656b3287a0e6b0d38802db6400f7053111787") // verboseTx.Vout[vout].ScriptPubKey.Hex from getrawtransaction(verbose)
 	contractScript, _ := hex.DecodeString("6382012088c020c6de3217594af525fb" +
 		"57eaf1f2aae04c305ddc67d465edd325151685fc5a5e428876a914479eddda81" +
 		"b6ed289515f2dbcc95f05ce80dff466704fe03865eb17576a91498a67ed502ad" +
 		"b04173d88fb1ef92d0317711c3816888ac")
 
-	scriptType := ParseScriptType(0, pkScript, contractScript)
+	scriptType := ParseScriptType(scriptVersion, pkScript)
 	if !scriptType.IsP2SH() {
 		t.Fatalf("script was not P2SH, got %v (see script.go)", scriptType)
 	}
 
 	// Double check that the pkScript's script hash matches the hash of the
 	// redeem (contract) script.
-	scriptHash, err := ExtractScriptHashByType(scriptType, pkScript)
-	if err != nil {
-		t.Fatalf(fmt.Sprintf("ExtractScriptHashByType error: %v", err))
+	scriptHash := ExtractScriptHash(scriptVersion, pkScript)
+	if scriptHash == nil {
+		t.Fatalf("ExtractScriptHash failed")
 	}
 	if !bytes.Equal(dcrutil.Hash160(contractScript), scriptHash) {
 		t.Fatalf(fmt.Sprintf("script hash check failed for output %s,%d", contractTx, vout))
 	}
 
-	// ExtractScriptAddrs should not error for non-standard scripts, but should
-	// detect them as such.
+	// ExtractScriptAddrs should detect non-standard scripts.
 	chainParams := chaincfg.TestNet3Params()
-	_, nonStd, err := ExtractScriptAddrs(0, contractScript, chainParams)
-	if err != nil {
-		t.Fatalf("ExtractScriptAddrs failed: %v", err)
+	scriptType, _ = ExtractScriptAddrs(scriptVersion, contractScript, chainParams)
+	if scriptType != ScriptUnsupported {
+		t.Errorf("expected non-standard script")
 	}
-	if !nonStd {
+	// ... as should ExtractScriptData
+	scriptType, _, _ = ExtractScriptData(scriptVersion, contractScript, chainParams)
+	if scriptType != ScriptUnsupported {
 		t.Errorf("expected non-standard script")
 	}
 
 	// InputInfo currently calls ExtractScriptAddrs at the time of writing, but
 	// InputInfo should error regardless.
-	spendInfo, err := InputInfo(0, pkScript, contractScript, chainParams)
+	spendInfo, err := InputInfo(scriptVersion, pkScript, contractScript, chainParams)
 	if err != nil {
 		t.Fatalf("InputInfo failed: %v", err)
+	}
+	if spendInfo.ScriptType != ScriptP2SH {
+		t.Errorf("ScriptType should still be P2SH")
 	}
 	if !spendInfo.NonStandardScript {
 		t.Errorf("contract script should be non-standard")
@@ -334,18 +357,15 @@ func TestExtractScriptAddrs(t *testing.T) {
 		if s == nil {
 			_, s = tt.addr.PaymentScript()
 		}
-		scriptAddrs, nonStd, err := ExtractScriptAddrs(0, s, tParams)
-		if err != nil {
-			t.Fatalf("error extracting script addresses: %v", err)
+		scriptType, scriptAddrs := ExtractScriptAddrs(0, s, tParams)
+		if (scriptType == ScriptUnsupported) != tt.nonStd {
+			t.Fatalf("expected nonStd=%v, got %v", tt.nonStd, scriptType)
 		}
-		if nonStd != tt.nonStd {
-			t.Fatalf("expected nonStd=%v, got %v", tt.nonStd, nonStd)
+		if len(scriptAddrs.PubKeys) != tt.pk {
+			t.Fatalf("wrong number of hash addresses. wanted %d, got %d", tt.pk, len(scriptAddrs.PubKeys))
 		}
-		if scriptAddrs.NumPK != tt.pk {
-			t.Fatalf("wrong number of hash addresses. wanted %d, got %d", tt.pk, scriptAddrs.NumPK)
-		}
-		if scriptAddrs.NumPKH != tt.pkh {
-			t.Fatalf("wrong number of pubkey-hash addresses. wanted %d, got %d", tt.pkh, scriptAddrs.NumPKH)
+		if len(scriptAddrs.PkHashes) != tt.pkh {
+			t.Fatalf("wrong number of pubkey-hash addresses. wanted %d, got %d", tt.pkh, len(scriptAddrs.PkHashes))
 		}
 		if scriptAddrs.NRequired != tt.sigs {
 			t.Fatalf("wrong number of required signatures. wanted %d, got %d", tt.sigs, scriptAddrs.NRequired)
@@ -405,7 +425,7 @@ func TestInputInfo(t *testing.T) {
 	var spendInfo *SpendInfo
 	var err error
 
-	check := func(name string, sigScriptSize uint32, scriptType DCRScriptType) {
+	check := func(name string, sigScriptSize uint32, scriptType ScriptType) {
 		if spendInfo.SigScriptSize != sigScriptSize {
 			t.Fatalf("%s: wrong SigScriptSize, wanted %d, got %d", name, sigScriptSize, spendInfo.SigScriptSize)
 		}
@@ -416,6 +436,7 @@ func TestInputInfo(t *testing.T) {
 
 	var script []byte
 	payToAddr := func(addr stdaddr.Address, redeem []byte) {
+		t.Helper()
 		_, script = addr.PaymentScript()
 		spendInfo, err = InputInfo(0, script, redeem, tParams)
 		if err != nil {
@@ -428,6 +449,12 @@ func TestInputInfo(t *testing.T) {
 
 	payToAddr(addrs.sh, addrs.multiSig)
 	check("p2sh", 74+uint32(len(addrs.multiSig))+1, ScriptP2SH|ScriptMultiSig)
+
+	payToAddr(addrs.sh, []byte{1, 2, 3})
+	check("p2sh with non-standard redeemscript", 0 /* unknown sigscript size */, ScriptP2SH)
+	if !spendInfo.NonStandardScript {
+		t.Fatalf("non-standard redeemscript was not reported as such")
+	}
 
 	// bad version
 	_, script = addrs.pkh.PaymentScript()
@@ -494,41 +521,6 @@ func TestFindKeyPush(t *testing.T) {
 	_, err = FindKeyPush(0, sigScript, contractHash, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
-	}
-}
-
-func TestExtractContractHash(t *testing.T) {
-	addrs := testAddresses()
-	// non-hex
-	_, err := ExtractContractHash("zz")
-	if err == nil {
-		t.Fatalf("no error for non-hex contract")
-	}
-	// invalid script
-	_, err = ExtractContractHash(hex.EncodeToString(invalidScript))
-	if err == nil {
-		t.Fatalf("no error for non-hex contract")
-	}
-	// multi-sig
-	_, err = ExtractContractHash(hex.EncodeToString(addrs.multiSig))
-	if err == nil {
-		t.Fatalf("no error for non-hex contract")
-	}
-	// wrong script types
-	_, p2pkh := addrs.pkh.PaymentScript()
-	_, err = ExtractContractHash(hex.EncodeToString(p2pkh))
-	if err == nil {
-		t.Fatalf("no error for non-hex contract")
-	}
-	// ok
-	_, p2sh := addrs.sh.PaymentScript()
-	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh))
-	if err != nil {
-		t.Fatalf("error extracting contract hash: %v", err)
-	}
-	realHash := addrs.sh.Hash160()[:]
-	if !bytes.Equal(checkHash, realHash) {
-		t.Fatalf("hash mismatch. wanted %x, got %x", realHash, checkHash)
 	}
 }
 

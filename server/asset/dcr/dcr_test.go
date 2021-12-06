@@ -32,6 +32,7 @@ import (
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -292,8 +293,8 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 	vouts := make([]chainjson.Vout, 0, len(msgTx.TxOut))
 	for i, vout := range msgTx.TxOut {
 		disbuf, _ := txscript.DisasmString(vout.PkScript)
-		sc, addrs, reqSigs, _ := txscript.ExtractPkScriptAddrs(
-			vout.Version, vout.PkScript, chainParams, false)
+		sc, addrs := stdscript.ExtractAddrs(vout.Version, vout.PkScript, chainParams)
+		reqSigs := stdscript.DetermineRequiredSigs(vout.Version, vout.PkScript)
 
 		addrStrs := make([]string, len(addrs))
 		for i, addr := range addrs {
@@ -1412,11 +1413,8 @@ func TestAuxiliary(t *testing.T) {
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	msg.tx.TxOut[0].Value = 8e8 // for consistency with fake TxRawResult added below
 
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].Version, msg.tx.TxOut[0].PkScript, chainParams)
-	if err != nil {
-		t.Fatalf("ExtractScriptAddrs error: %v", err)
-	}
-	if nonStandard {
+	scriptClass, scriptAddrs := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].Version, msg.tx.TxOut[0].PkScript, chainParams)
+	if scriptClass == dexdcr.ScriptUnsupported {
 		t.Errorf("vote output 0 was non-standard")
 	}
 	addr := scriptAddrs.PkHashes[0].String()
@@ -1463,11 +1461,8 @@ func TestAuxiliary(t *testing.T) {
 
 	// make a p2sh
 	msgP2SH := testMsgTxP2SHMofN(1, 2)
-	_, nonStandard, err = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].Version, msgP2SH.tx.TxOut[0].PkScript, chainParams)
-	if err != nil {
-		t.Fatalf("ExtractScriptAddrs error: %v", err)
-	}
-	if nonStandard {
+	scriptClass, _ = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].Version, msgP2SH.tx.TxOut[0].PkScript, chainParams)
+	if scriptClass == dexdcr.ScriptUnsupported {
 		t.Errorf("output 0 was non-standard")
 	}
 	msgHash = msgP2SH.tx.TxHash()

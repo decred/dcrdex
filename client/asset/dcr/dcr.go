@@ -37,6 +37,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -937,7 +938,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 
 		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
 		for _, cu := range utxos {
-			if cu.confs >= minconf {
+			if cu.confs >= minconf && cu.rpc.Spendable {
 				okUTXOs = append(okUTXOs, cu)
 			}
 		}
@@ -1521,18 +1522,12 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	// Validate contract output.
 	// Script must be P2SH, with 1 address and 1 required signature.
 	contractTxOut := contractTx.TxOut[vout]
-	scriptClass, addrs, sigsReq, err := txscript.ExtractPkScriptAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams, false)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", contractTxOut.PkScript, err)
-	}
-	if scriptClass != txscript.ScriptHashTy {
+	scriptClass, addrs := stdscript.ExtractAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams)
+	if scriptClass != stdscript.STScriptHash {
 		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
 	}
 	if len(addrs) != 1 {
 		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
-	}
-	if sigsReq != 1 {
-		return nil, fmt.Errorf("unexpected number of signatures for P2SH script: %d", sigsReq)
 	}
 	// Compare the contract hash to the P2SH address.
 	contractHash := dcrutil.Hash160(contract)
@@ -1780,8 +1775,9 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 	if int(vout) > len(msgTx.TxOut)-1 {
 		return nil, nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 	}
-	contractP2shScript := msgTx.TxOut[vout].PkScript
-	if !dexdcr.IsScriptHashScript(contractP2shScript) {
+	contractScript := msgTx.TxOut[vout].PkScript
+	contractScriptVer := msgTx.TxOut[vout].Version
+	if !stdscript.IsScriptHashScript(contractScriptVer, contractScript) {
 		return nil, nil, fmt.Errorf("coin %s not a valid contract", contractOutpoint.String())
 	}
 	var contractBlock *block
@@ -1801,8 +1797,8 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 	resultChan := make(chan *findRedemptionResult, 1)
 	dcr.findRedemptionQueue[contractOutpoint] = &findRedemptionReq{
 		ctx:                     ctx,
-		contractP2SHScript:      contractP2shScript,
-		contractOutputScriptVer: msgTx.TxOut[vout].Version,
+		contractP2SHScript:      contractScript,
+		contractOutputScriptVer: contractScriptVer,
 		resultChan:              resultChan,
 	}
 	return resultChan, contractBlock, nil
@@ -2010,7 +2006,8 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.T
 			}
 			found++
 
-			redeemTxHash, secret, err := extractSecret(i, dexdcr.ExtractScriptHash(req.contractP2SHScript), req.contractOutputScriptVer)
+			scriptHash := dexdcr.ExtractScriptHash(req.contractOutputScriptVer, req.contractP2SHScript)
+			redeemTxHash, secret, err := extractSecret(i, scriptHash, req.contractOutputScriptVer)
 			if err != nil {
 				dcr.log.Errorf("Error parsing contract secret for %s from tx input %s:%d in %s: %v",
 					contractOutpoint.String(), tx.Txid, i, scanPoint, err)
@@ -2383,14 +2380,17 @@ type compositeUTXO struct {
 // The returned list is sorted by ascending value.
 func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) ([]*compositeUTXO, error) {
 	utxos := make([]*compositeUTXO, 0, len(unspents))
-	for _, txout := range unspents {
-		scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding pubkey script for %s, script = %s: %w", txout.TxID, txout.ScriptPubKey, err)
+	for _, utxo := range unspents {
+		if !utxo.Spendable {
+			continue
 		}
-		redeemScript, err := hex.DecodeString(txout.RedeemScript)
+		scriptPK, err := hex.DecodeString(utxo.ScriptPubKey)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", txout.TxID, txout.RedeemScript, err)
+			return nil, fmt.Errorf("error decoding pubkey script for %s, script = %s: %w", utxo.TxID, utxo.ScriptPubKey, err)
+		}
+		redeemScript, err := hex.DecodeString(utxo.RedeemScript)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %w", utxo.TxID, utxo.RedeemScript, err)
 		}
 
 		// NOTE: listunspent does not indicate script version, so for the
@@ -2402,10 +2402,16 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			}
 			return nil, fmt.Errorf("error reading asset info: %w", err)
 		}
+		if nfo.ScriptType == dexdcr.ScriptUnsupported || nfo.NonStandardScript {
+			// InputInfo sets NonStandardScript for P2SH with non-standard
+			// redeem scripts. Don't return these since they cannot fund
+			// arbitrary txns.
+			continue
+		}
 		utxos = append(utxos, &compositeUTXO{
-			rpc:   txout,
+			rpc:   utxo,
 			input: nfo,
-			confs: txout.Confirmations,
+			confs: utxo.Confirmations,
 		})
 	}
 	// Sort in ascending order by amount (smallest first).
