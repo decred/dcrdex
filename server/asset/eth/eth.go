@@ -104,6 +104,10 @@ type Backend struct {
 	cancelRPCs context.CancelFunc
 	cfg        *config
 	node       ethFetcher
+	// The backend provides block notification channels through the BlockChannel
+	// method. signalMtx locks the blockChans array.
+	signalMtx  sync.RWMutex
+	blockChans map[chan *asset.BlockUpdate]struct{}
 	// The hash cache stores just enough info to detect reorgs.
 	hashCache *hashCache
 	// A logger will be provided by the DEX. All logging should use the provided
@@ -143,8 +147,8 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 		rpcCtx:       ctx,
 		cancelRPCs:   cancel,
 		cfg:          cfg,
-		hashCache:    newHashCache(logger),
 		log:          logger,
+		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		contractAddr: contractAddr,
 		initTxSize:   uint32(dexeth.InitGas(1, version)),
 	}
@@ -173,9 +177,21 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	eth.node = &c
 
 	// Prime the cache with the best block hash.
-	if err := eth.hashCache.prime(ctx, &c); err != nil {
-		eth.log.Errorf("error priming the best block hash: %v", err)
+	hdr, err := c.bestHeader(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting best block header from geth: %w", err)
 	}
+	hc := &hashCache{
+		log:        eth.log.SubLogger("hashcache"),
+		node:       &c,
+		signalMtx:  &eth.signalMtx,
+		blockChans: eth.blockChans,
+		best: hashN{
+			height: hdr.Number.Uint64(),
+			hash:   hdr.Hash(),
+		},
+	}
+	eth.hashCache = hc
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -227,7 +243,11 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the eth package. Part of the asset.Backend interface.
 func (eth *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
-	return eth.hashCache.blockChannel(size)
+	c := make(chan *asset.BlockUpdate, size)
+	eth.signalMtx.Lock()
+	defer eth.signalMtx.Unlock()
+	eth.blockChans[c] = struct{}{}
+	return c
 }
 
 // ValidateContract ensures that contractData encodes both the expected contract

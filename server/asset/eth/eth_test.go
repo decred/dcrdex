@@ -244,25 +244,32 @@ func TestDecodeCoinID(t *testing.T) {
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	backend := unconnectedETH(tLogger, new(config))
+	backend.node = &testNode{
+		bestHdr: &types.Header{Number: big.NewInt(1)},
+	}
+	backend.hashCache = &hashCache{
+		log:        tLogger,
+		signalMtx:  &backend.signalMtx,
+		blockChans: backend.blockChans,
+		node:       backend.node,
+	}
 	ch := backend.BlockChannel(1)
-	node := &testNode{
-		bestHdr: &types.Header{Number: big.NewInt(0)},
-	}
-	backend.node = node
-	backend.hashCache.prime(ctx, node)
-	*node = testNode{
-		bestHdr: &types.Header{
-			Number: big.NewInt(1),
-		},
-	}
 	go func() {
-		<-ch
-		cancel()
+		select {
+		case <-ch:
+			cancel()
+		case <-time.After(blockPollInterval * 2):
+		}
 	}()
 	backend.run(ctx)
-	// This timing out indicates failure. run should call a block update
-	// after the pollInterval and we have the listening function cancel the
-	// context above.
+	// Ok if ctx was canceled above. Linters complain about calling t.Fatal
+	// in the goroutine above.
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		t.Fatal("test timeout")
+	}
 }
 
 func TestFeeRate(t *testing.T) {

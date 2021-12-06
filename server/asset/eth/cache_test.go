@@ -8,46 +8,13 @@ package eth
 import (
 	"errors"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum/core/types"
 )
-
-func TestPrime(t *testing.T) {
-	tests := []struct {
-		name       string
-		bestHdr    *types.Header
-		bestHdrErr error
-		wantErr    bool
-	}{{
-		name:    "ok",
-		bestHdr: &types.Header{Number: big.NewInt(0)},
-	}, {
-		name:       "best header error",
-		bestHdrErr: errors.New(""),
-		wantErr:    true,
-	}}
-
-	for _, test := range tests {
-		hc := newHashCache(tLogger)
-		node := &testNode{
-			bestHdr:    test.bestHdr,
-			bestHdrErr: test.bestHdrErr,
-		}
-		err := hc.prime(nil, node)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-	}
-}
 
 func TestPoll(t *testing.T) {
 	blkHdr := &types.Header{Number: big.NewInt(0)}
@@ -97,26 +64,27 @@ func TestPoll(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		hc := newHashCache(tLogger)
 		node := &testNode{
-			bestHdr:        new(types.Header),
+			bestHdr:        test.bestHdr,
+			bestHdrErr:     test.bestHdrErr,
 			hdrByHeight:    test.hdrByHeight,
 			hdrByHeightErr: test.hdrByHeightErr,
 		}
-		*node.bestHdr = *blkHdr
-		err := hc.prime(nil, node)
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		hc := &hashCache{
+			log:        tLogger,
+			signalMtx:  new(sync.RWMutex),
+			blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+			node:       node,
+			best: hashN{
+				hash: blkHdr.Hash(),
+			},
 		}
-		if test.bestHdr != nil {
-			*node.bestHdr = *test.bestHdr
-		}
-		node.bestHdrErr = test.bestHdrErr
 		chSize := 1
 		if test.preventSend {
 			chSize = 0
 		}
-		ch := hc.blockChannel(chSize)
+		ch := make(chan *asset.BlockUpdate, chSize)
+		hc.blockChans[ch] = struct{}{}
 		bu := new(asset.BlockUpdate)
 		wait := make(chan struct{})
 		go func() {

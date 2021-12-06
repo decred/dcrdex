@@ -33,6 +33,8 @@ type rpcclient struct {
 	ec *ethclient.Client
 	// es is a wrapper for contract calls.
 	es *swapv0.ETHSwap
+	// c is a direct client for raw calls.
+	c *rpc.Client
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
@@ -47,6 +49,7 @@ func (c *rpcclient) connect(ctx context.Context, IPC string, contractAddr *commo
 	if err != nil {
 		return fmt.Errorf("unable to find swap contract: %v", err)
 	}
+	c.c = client
 	return nil
 }
 

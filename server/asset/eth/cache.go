@@ -26,7 +26,7 @@ type hashN struct {
 // otherwise.
 type hashCache struct {
 	// signalMtx locks the blockChans array.
-	signalMtx  sync.RWMutex
+	signalMtx  *sync.RWMutex
 	blockChans map[chan *asset.BlockUpdate]struct{}
 
 	mtx  sync.RWMutex
@@ -34,39 +34,6 @@ type hashCache struct {
 
 	log  dex.Logger
 	node ethFetcher
-}
-
-// Constructor for a hashCache. Prime before use.
-func newHashCache(logger dex.Logger) *hashCache {
-	return &hashCache{
-		log:        logger,
-		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
-	}
-}
-
-// blockChannel returns a new block channel that will be sent block updates
-// when a new block is added to the chain and noticed.
-func (hc *hashCache) blockChannel(size int) <-chan *asset.BlockUpdate {
-	c := make(chan *asset.BlockUpdate, size)
-	hc.signalMtx.Lock()
-	defer hc.signalMtx.Unlock()
-	hc.blockChans[c] = struct{}{}
-	return c
-}
-
-// prime should be run once before use. Sets the best hash and node. Not
-// concurrent safe.
-func (hc *hashCache) prime(ctx context.Context, node ethFetcher) error {
-	hdr, err := node.bestHeader(ctx)
-	if err != nil {
-		return fmt.Errorf("error getting best block header from geth: %w", err)
-	}
-	hc.best = hashN{
-		height: hdr.Number.Uint64(),
-		hash:   hdr.Hash(),
-	}
-	hc.node = node
-	return nil
 }
 
 // poll pulls the best hash from an eth node and compares that to a stored
