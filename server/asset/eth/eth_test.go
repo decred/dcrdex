@@ -39,16 +39,44 @@ var (
 		"31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c5610000000000000" +
 		"00000000000345853e21b1d475582e71cc269124ed5e2dd342200000000000000000000" +
 		"00000000000000000000000000000000000000000001")
-	redeemCalldata = mustParseHex("f4fd17f90000000000000000000000000000000000000" +
+	/* initCallData parses to:
+	[ETHSwapInitiation {
+			RefundTimestamp: 1632112916
+			SecretHash: 8b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650ae3e1460a0f9d1a1
+			Value: 1
+			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
+		},
+	ETHSwapInitiation {
+			RefundTimestamp: 1632112916
+			SecretHash: ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561
+			Value: 1
+			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
+		}]
+	*/
+	initSecretHashA     = mustParseHex("8b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650ae3e1460a0f9d1a1")
+	initSecretHashB     = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
+	initParticipantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	redeemCalldata      = mustParseHex("f4fd17f90000000000000000000000000000000000000" +
 		"000000000000000000000000020000000000000000000000000000000000000000000000000" +
 		"00000000000000022c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965f" +
 		"d3e7399d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d654687eac0" +
 		"9638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4" +
 		"d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
-	initParticipantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
-	initLocktime        = int64(1632112916)
-	secretHashSlice     = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
-	secretSlice         = mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
+	/*
+		redeemCallData parses to:
+		[ETHSwapRedemption {
+			SecretHash: 99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546
+			Secret: 2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73
+		}
+		ETHSwapRedemption {
+			SecretHash: ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561
+			Secret: 87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a
+		}]
+	*/
+	redeemSecretHashA = mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546")
+	redeemSecretHashB = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
+	redeemSecretB     = mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
+	initLocktime      = int64(1632112916)
 )
 
 func mustParseHex(s string) []byte {
@@ -432,27 +460,31 @@ func TestContract(t *testing.T) {
 	tests := []struct {
 		name           string
 		coinID         []byte
+		contract       []byte
 		tx             *types.Transaction
 		swap           *swapv0.ETHSwapSwap
 		swapErr, txErr error
 		wantErr        bool
 	}{{
-		name:   "ok",
-		tx:     tTx(gasPrice, value, contractAddr, initCalldata),
-		swap:   tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
-		coinID: txCoinIDBytes,
+		name:     "ok",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		contract: initSecretHashA,
+		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
+		coinID:   txCoinIDBytes,
 	}, {
-		name:    "new coiner error, wrong tx type",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		swap:    tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
-		coinID:  swapCoinIDBytes,
-		wantErr: true,
+		name:     "new coiner error, wrong tx type",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		contract: initSecretHashA,
+		swap:     tSwap(97, locktime, value, dexeth.SSInitiated, &initParticipantAddr),
+		coinID:   swapCoinIDBytes,
+		wantErr:  true,
 	}, {
-		name:    "confirmations error, swap error",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		swapErr: errors.New(""),
-		wantErr: true,
+		name:     "confirmations error, swap error",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		contract: initSecretHashA,
+		coinID:   txCoinIDBytes,
+		swapErr:  errors.New(""),
+		wantErr:  true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
@@ -466,7 +498,7 @@ func TestContract(t *testing.T) {
 			log:          tLogger,
 			contractAddr: *contractAddr,
 		}
-		contract, err := eth.Contract(test.coinID, nil)
+		contract, err := eth.Contract(test.coinID, test.contract)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -515,17 +547,12 @@ func TestRedemption(t *testing.T) {
 	copy(receiverAddr[:], encode.RandomBytes(20))
 	copy(contractAddr[:], encode.RandomBytes(20))
 	secretHash, txHash := [32]byte{}, [32]byte{}
-	copy(secretHash[:], secretHashSlice)
+	copy(secretHash[:], redeemSecretHashB)
 	copy(txHash[:], encode.RandomBytes(32))
 	gasPrice := big.NewInt(3e10)
 	bigO := new(big.Int)
-	ccID := &dexeth.SwapCoinID{
-		SecretHash:      secretHash,
-		ContractAddress: *contractAddr,
-	}
 	txCoinID := dexeth.TxCoinID{
-		TxID:  txHash,
-		Index: 1,
+		TxID: txHash,
 	}
 	tests := []struct {
 		name               string
@@ -538,26 +565,26 @@ func TestRedemption(t *testing.T) {
 	}{{
 		name:       "ok",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: ccID.Encode(),
+		contractID: secretHash[:],
 		coinID:     txCoinID.Encode(),
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: ccID.Encode(),
+		contractID: secretHash[:],
 		coinID:     new(dexeth.SwapCoinID).Encode(),
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: ccID.Encode(),
+		contractID: secretHash[:],
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRefunded, receiverAddr),
 		coinID:     txCoinID.Encode(),
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
 		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
-		contractID: new(dexeth.SwapCoinID).Encode(),
+		contractID: secretHash[:31],
 		coinID:     txCoinID.Encode(),
 		swp:        tSwap(0, bigO, bigO, dexeth.SSRedeemed, receiverAddr),
 		wantErr:    true,

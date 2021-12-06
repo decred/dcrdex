@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -37,15 +38,10 @@ func TestNewSwapCoin(t *testing.T) {
 	contractAddr, randomAddr := randomAddress(), randomAddress()
 	secret, secretHash, txHash := [32]byte{}, [32]byte{}, [32]byte{}
 	copy(txHash[:], encode.RandomBytes(32))
-	copy(secret[:], secretSlice)
-	copy(secretHash[:], secretHashSlice)
+	copy(secret[:], redeemSecretB)
+	copy(secretHash[:], redeemSecretHashB)
 	txCoinIDBytes := (&dexeth.TxCoinID{
-		TxID:  txHash,
-		Index: 1,
-	}).Encode()
-	txCoinIDIndex2Bytes := (&dexeth.TxCoinID{
-		TxID:  txHash,
-		Index: 2,
+		TxID: txHash,
 	}).Encode()
 	sc := dexeth.SwapCoinID{}
 	swapCoinIDBytes := sc.Encode()
@@ -62,98 +58,129 @@ func TestNewSwapCoin(t *testing.T) {
 	tests := []struct {
 		name          string
 		coinID        []byte
+		contract      []byte
 		tx            *types.Transaction
 		ct            swapCoinType
 		swpErr, txErr error
 		wantErr       bool
 	}{{
-		name:   "ok init",
-		tx:     tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID: txCoinIDBytes,
-		ct:     sctInit,
+		name:     "ok init",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
 	}, {
-		name:   "ok redeem",
-		tx:     tTx(gasPrice, new(big.Int), contractAddr, redeemCalldata),
-		coinID: txCoinIDBytes,
-		ct:     sctRedeem,
+		name:     "ok redeem",
+		tx:       tTx(gasPrice, new(big.Int), contractAddr, redeemCalldata),
+		coinID:   txCoinIDBytes,
+		contract: redeemSecretHashB,
+		ct:       sctRedeem,
 	}, {
-		name:    "unknown coin type",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      swapCoinType(^uint8(0)),
-		wantErr: true,
+		name:     "contract incorrect length",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA[:31],
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "tx has no data",
-		tx:      tTx(gasPrice, value, contractAddr, nil),
-		coinID:  txCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "unknown coin type",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       swapCoinType(^uint8(0)),
+		wantErr:  true,
 	}, {
-		name:    "non zero value with redeem",
-		tx:      tTx(gasPrice, value, contractAddr, redeemCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctRedeem,
-		wantErr: true,
+		name:     "tx has no data",
+		tx:       tTx(gasPrice, value, contractAddr, nil),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "unable to decode init data, must be init for init coin type",
-		tx:      tTx(gasPrice, value, contractAddr, redeemCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "non zero value with redeem",
+		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		coinID:   txCoinIDBytes,
+		contract: redeemSecretHashB,
+		ct:       sctRedeem,
+		wantErr:  true,
 	}, {
-		name:    "unable to decode redeem data, must be redeem for redeem coin type",
-		tx:      tTx(gasPrice, new(big.Int), contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctRedeem,
-		wantErr: true,
+		name:     "unable to decode init data, must be init for init coin type",
+		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "unable to decode CoinID",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		ct:      sctInit,
-		wantErr: true,
+		name:     "unable to decode redeem data, must be redeem for redeem coin type",
+		tx:       tTx(gasPrice, big.NewInt(0), contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: redeemSecretHashB,
+		ct:       sctRedeem,
+		wantErr:  true,
 	}, {
-		name:    "wrong type of coinID",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  swapCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "unable to decode CoinID",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		ct:       sctInit,
+		contract: initSecretHashA,
+		wantErr:  true,
 	}, {
-		name:    "transaction error",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		txErr:   errors.New(""),
-		ct:      sctInit,
-		wantErr: true,
+		name:     "wrong type of coinID",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   swapCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "wrong contract",
-		tx:      tTx(gasPrice, value, randomAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "transaction error",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		txErr:    errors.New(""),
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "value too big",
-		tx:      tTx(gasPrice, overMaxWei(), contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "transaction not found error",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		txErr:    ethereum.NotFound,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "gas too big",
-		tx:      tTx(overMaxWei(), value, contractAddr, initCalldata),
-		coinID:  txCoinIDBytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "wrong contract",
+		tx:       tTx(gasPrice, value, randomAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "tx coin id for swap - index of bounds",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  txCoinIDIndex2Bytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "value too big",
+		tx:       tTx(gasPrice, overMaxWei(), contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
 	}, {
-		name:    "tx coin id for redeem - index of bounds",
-		tx:      tTx(gasPrice, value, contractAddr, initCalldata),
-		coinID:  txCoinIDIndex2Bytes,
-		ct:      sctInit,
-		wantErr: true,
+		name:     "gas too big",
+		tx:       tTx(overMaxWei(), value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: initSecretHashA,
+		ct:       sctInit,
+		wantErr:  true,
+	}, {
+		name:     "tx coin id for swap - contract not in tx",
+		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		coinID:   txCoinIDBytes,
+		contract: encode.RandomBytes(32),
+		ct:       sctInit,
+		wantErr:  true,
+	}, {
+		name:     "tx coin id for redeem - contract not in tx",
+		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		coinID:   txCoinIDBytes,
+		contract: encode.RandomBytes(32),
+		ct:       sctRedeem,
+		wantErr:  true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
@@ -166,7 +193,7 @@ func TestNewSwapCoin(t *testing.T) {
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
-		sc, err := eth.newSwapCoin(test.coinID, test.ct)
+		sc, err := eth.newSwapCoin(test.coinID, test.contract, test.ct)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -208,7 +235,7 @@ func TestConfirmations(t *testing.T) {
 	copy(contractAddr[:], encode.RandomBytes(20))
 	secretHash, txHash := [32]byte{}, [32]byte{}
 	copy(txHash[:], encode.RandomBytes(32))
-	copy(secretHash[:], secretHashSlice)
+	copy(secretHash[:], redeemSecretHashB)
 	tc := dexeth.TxCoinID{
 		TxID: txHash,
 	}
@@ -325,7 +352,7 @@ func TestConfirmations(t *testing.T) {
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
 
-		sc, err := eth.newSwapCoin(txCoinIDBytes, test.ct)
+		sc, err := eth.newSwapCoin(txCoinIDBytes, secretHash[:], test.ct)
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
@@ -353,14 +380,10 @@ func TestConfirmations(t *testing.T) {
 }
 
 func TestValidateRedeem(t *testing.T) {
-	contractAddr, nullAddr := new(common.Address), new(common.Address)
+	contractAddr := new(common.Address)
 	copy(contractAddr[:], encode.RandomBytes(20))
-	secretHash, nullHash := [32]byte{}, [32]byte{}
+	secretHash := [32]byte{}
 	copy(secretHash[:], encode.RandomBytes(20))
-	scID := dexeth.SwapCoinID{
-		ContractAddress: *contractAddr,
-		SecretHash:      secretHash,
-	}
 	scRedeem := &swapCoin{
 		contractAddr: *contractAddr,
 		secretHash:   secretHash,
@@ -375,47 +398,16 @@ func TestValidateRedeem(t *testing.T) {
 	}{{
 		name:       "ok",
 		sc:         scRedeem,
-		contractID: scID.Encode(),
-	}, {
-		name: "sc not a redeem",
-		sc: &swapCoin{
-			contractAddr: *contractAddr,
-			secretHash:   secretHash,
-			sct:          sctInit,
-		},
-		contractID: scID.Encode(),
-		wantErr:    true,
+		contractID: secretHash[:],
 	}, {
 		name:    "cannot decode contract ID",
 		sc:      scRedeem,
 		wantErr: true,
 	}, {
-		name:       "contract ID is not a swap",
+		name:       "mismatched contract ID secret hash",
 		sc:         scRedeem,
-		contractID: new(dexeth.TxCoinID).Encode(),
+		contractID: encode.RandomBytes(32),
 		wantErr:    true,
-	}, {
-		name: "mismatched contract ID contract address",
-		sc:   scRedeem,
-		contractID: func() []byte {
-			badAddr := dexeth.SwapCoinID{
-				ContractAddress: *nullAddr,
-				SecretHash:      secretHash,
-			}
-			return badAddr.Encode()
-		}(),
-		wantErr: true,
-	}, {
-		name: "mismatched contract ID secret hash",
-		sc:   scRedeem,
-		contractID: func() []byte {
-			badHash := dexeth.SwapCoinID{
-				ContractAddress: *contractAddr,
-				SecretHash:      nullHash,
-			}
-			return badHash.Encode()
-		}(),
-		wantErr: true,
 	}}
 	for _, test := range tests {
 		err := test.sc.validateRedeem(test.contractID)

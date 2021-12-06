@@ -7,6 +7,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"math/big"
 
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -50,7 +52,7 @@ type swapCoin struct {
 // an error is returned then if something is different than expected. As such,
 // the swapCoin expects Confirmations to be called with confirmations
 // available at least once before the swap be trusted for swap initializations.
-func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin, error) {
+func (backend *Backend) newSwapCoin(coinID []byte, contract []byte, sct swapCoinType) (*swapCoin, error) {
 	switch sct {
 	case sctInit, sctRedeem:
 	default:
@@ -87,17 +89,27 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 		locktime           int64
 	)
 
+	if len(contract) != 32 {
+		return nil, fmt.Errorf("expected contract to have length 32 but got %v", len(contract))
+	}
+
+	copy(secretHash[:], contract)
+
 	switch sct {
 	case sctInit:
 		initiations, err := dexeth.ParseInitiateData(txdata)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
 		}
-		if txCoinID.Index >= uint32(len(initiations)) {
-			return nil, fmt.Errorf("tx %v does not have initiation with index %d",
-				txCoinID.TxID, txCoinID.Index)
+		var initiation *swapv0.ETHSwapInitiation
+		for _, init := range initiations {
+			if init.SecretHash == secretHash {
+				initiation = &init
+			}
 		}
-		initiation := initiations[txCoinID.Index]
+		if initiation == nil {
+			return nil, fmt.Errorf("tx %x does not contain initiation with secret hash %x", txid, secretHash)
+		}
 		counterParty = &initiation.Participant
 		secretHash = initiation.SecretHash
 		locktime = initiation.RefundTimestamp.Int64()
@@ -106,12 +118,17 @@ func (backend *Backend) newSwapCoin(coinID []byte, sct swapCoinType) (*swapCoin,
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
 		}
-		if txCoinID.Index >= uint32(len(redemptions)) {
-			return nil, fmt.Errorf("tx %v does not have redemption with index %d",
-				txCoinID.TxID, txCoinID.Index)
+		var redemption *swapv0.ETHSwapRedemption
+		for _, redeem := range redemptions {
+			if redeem.SecretHash == secretHash {
+				redemption = &redeem
+			}
 		}
-		secret = redemptions[txCoinID.Index].Secret
-		secretHash = redemptions[txCoinID.Index].SecretHash
+		if redemption == nil {
+			return nil, fmt.Errorf("tx %x does not contain redemption with secret hash %x", txid, secretHash)
+		}
+		secret = redemption.Secret
+		secretHash = redemption.SecretHash
 	}
 
 	contractAddr := tx.To()
@@ -159,21 +176,9 @@ func (c *swapCoin) validateRedeem(contractID []byte) error {
 	if c.sct != sctRedeem {
 		return errors.New("can only validate redeem")
 	}
-	cID, err := dexeth.DecodeCoinID(contractID)
-	if err != nil {
-		return err
-	}
-	scID, ok := cID.(*dexeth.SwapCoinID)
-	if !ok {
-		return errors.New("contract ID not a swap")
-	}
-	if c.secretHash != scID.SecretHash {
+	if !bytes.Equal(c.secretHash[:], contractID) {
 		return fmt.Errorf("redeem secret hash %x does not match contract %x",
-			c.secretHash, scID.SecretHash)
-	}
-	if c.contractAddr != scID.ContractAddress {
-		return fmt.Errorf("redeem contract address %q does not match contract address %q",
-			c.contractAddr, scID.ContractAddress)
+			c.secretHash, contractID)
 	}
 	return nil
 }
