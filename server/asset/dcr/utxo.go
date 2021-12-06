@@ -16,6 +16,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 )
 
 const ErrReorgDetected = dex.ErrorKind("reorg detected")
@@ -176,7 +177,7 @@ type Output struct {
 	// P2SH pkScript.
 	addresses []string
 	// A bitmask for script type information.
-	scriptType    dexdcr.DCRScriptType
+	scriptType    dexdcr.ScriptType
 	scriptVersion uint16
 	// If the pkScript, or redeemScript in the case of a P2SH pkScript, is
 	// non-standard according to txscript.
@@ -255,11 +256,8 @@ func (output *Output) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if output.scriptType.IsP2SH() {
 		evalScript = output.redeemScript
 	}
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(output.scriptVersion, evalScript, chainParams)
-	if err != nil {
-		return err
-	}
-	if nonStandard {
+	scriptType, scriptAddrs := dexdcr.ExtractScriptAddrs(output.scriptVersion, evalScript, chainParams)
+	if scriptType == dexdcr.ScriptUnsupported {
 		return fmt.Errorf("non-standard script")
 	}
 	// Ensure that at least 1 signature is required to spend this output.
@@ -381,7 +379,10 @@ func auditContract(op *Output) (*asset.Contract, error) {
 		return nil, fmt.Errorf("invalid script version %d", op.scriptVersion)
 	}
 	output := tx.outs[int(op.vout)]
-	scriptHash := dexdcr.ExtractScriptHash(output.pkScript)
+	if output.version != 0 {
+		return nil, fmt.Errorf("unsupported script version %d", output.version)
+	}
+	scriptHash := stdscript.ExtractScriptHashV0(output.pkScript)
 	if scriptHash == nil {
 		return nil, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, op.vout)
 	}
