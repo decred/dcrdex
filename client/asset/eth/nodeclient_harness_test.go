@@ -277,7 +277,7 @@ func TestContract(t *testing.T) {
 	t.Run("testSwap", testSwap)
 	t.Run("testInitiate", testInitiate)
 	t.Run("testRedeem", testRedeem)
-	// t.Run("testRefund", testRefund)
+	t.Run("testRefund", testRefund)
 }
 
 func testAddPeer(t *testing.T) {
@@ -991,7 +991,7 @@ func TestRefundGas(t *testing.T) {
 	fmt.Printf("Gas used for refund: %v \n", gas)
 }
 
-func TestRefund(t *testing.T) {
+func testRefund(t *testing.T) {
 	const amt = 1e9
 	locktime := time.Second * 12
 	tests := []struct {
