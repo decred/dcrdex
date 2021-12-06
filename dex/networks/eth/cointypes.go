@@ -48,8 +48,8 @@ type CoinID interface {
 }
 
 const (
-	// coin type id (2) + tx id (32) + index (4) = 38
-	txCoinIDSize = 38
+	// coin type id (2) + tx id (32) = 34
+	txCoinIDSize = 34
 	// coin type id (2) + address (20) + secret has (32) = 54
 	swapCoinIDSize = 54
 	// coin type id (2) + address (20) + amount (8) + nonce (8) = 38
@@ -62,13 +62,12 @@ const (
 // function. This type of ID is useful to identify coins that
 // were sent in transactions that have not yet been mined.
 type TxCoinID struct {
-	TxID  common.Hash
-	Index uint32
+	TxID common.Hash
 }
 
 // String creates a human readable string.
 func (c *TxCoinID) String() string {
-	return fmt.Sprintf("tx: %x, index: %d", c.TxID, c.Index)
+	return fmt.Sprintf("tx: %x", c.TxID)
 }
 
 // Encode creates a byte slice that can be decoded with DecodeCoinID.
@@ -76,7 +75,6 @@ func (c *TxCoinID) Encode() []byte {
 	b := make([]byte, txCoinIDSize)
 	binary.BigEndian.PutUint16(b[:2], uint16(CIDTxID))
 	copy(b[2:], c.TxID[:])
-	binary.BigEndian.PutUint32(b[34:], c.Index)
 	return b
 }
 
@@ -98,11 +96,8 @@ func decodeTxCoinID(coinID []byte) (*TxCoinID, error) {
 	var txID [32]byte
 	copy(txID[:], coinID[2:])
 
-	index := binary.BigEndian.Uint32(coinID[34:])
-
 	return &TxCoinID{
-		TxID:  txID,
-		Index: index,
+		TxID: txID,
 	}, nil
 }
 
