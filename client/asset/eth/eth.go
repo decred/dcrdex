@@ -148,9 +148,9 @@ type ethFetcher interface {
 	redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption, contractVer uint32) (*types.Transaction, error)
 	refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (*types.Transaction, error)
 	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
-	lock(ctx context.Context) error
+	lock() error
 	locked() bool
-	unlock(ctx context.Context, pw string) error
+	unlock(pw string) error
 	signData(addr common.Address, data []byte) ([]byte, error)
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
@@ -734,12 +734,12 @@ func (eth *ExchangeWallet) Address() (string, error) {
 
 // Unlock unlocks the exchange wallet.
 func (eth *ExchangeWallet) Unlock(pw []byte) error {
-	return eth.node.unlock(eth.ctx, string(pw))
+	return eth.node.unlock(string(pw))
 }
 
 // Lock locks the exchange wallet.
 func (eth *ExchangeWallet) Lock() error {
-	return eth.node.lock(eth.ctx)
+	return eth.node.lock()
 }
 
 // Locked will be true if the wallet is currently locked.
@@ -902,7 +902,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 // Balance is the current balance, including information about the pending
 // balance.
 type Balance struct {
-	Current, Pending, PendingIn, PendingOut *big.Int
+	Current, PendingIn, PendingOut *big.Int
 }
 
 func versionedBytes(ver uint32, h []byte) []byte {

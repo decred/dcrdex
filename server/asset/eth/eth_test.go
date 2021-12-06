@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
 )
 
 var (
@@ -101,8 +100,6 @@ type testNode struct {
 	syncProgErr    error
 	sugGasPrice    *big.Int
 	sugGasPriceErr error
-	peerInfo       []*p2p.PeerInfo
-	peersErr       error
 	swp            *swapv0.ETHSwapSwap
 	swpErr         error
 	tx             *types.Transaction
@@ -136,10 +133,6 @@ func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
 
 func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
 	return n.syncProg, n.syncProgErr
-}
-
-func (n *testNode) peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
-	return n.peerInfo, n.peersErr
 }
 
 func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
