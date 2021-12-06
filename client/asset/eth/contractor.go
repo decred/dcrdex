@@ -157,8 +157,6 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 		return nil, err
 	}
 
-	fmt.Println("--swap", state.Value, dexeth.WeiToGwei(state.Value))
-
 	return &dexeth.SwapState{
 		BlockHeight: state.InitBlockNumber.Uint64(),
 		LockTime:    time.Unix(state.RefundBlockTimestamp.Int64(), 0),
