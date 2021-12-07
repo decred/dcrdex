@@ -389,7 +389,7 @@ func auditContract(op *Output) (*asset.Contract, error) {
 	if !bytes.Equal(stdaddr.Hash160(op.redeemScript), scriptHash) {
 		return nil, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, op.vout)
 	}
-	_, receiver, lockTime, _, err := dexdcr.ExtractSwapDetails(op.redeemScript, chainParams)
+	_, receiver, lockTime, secretHash, err := dexdcr.ExtractSwapDetails(op.redeemScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, op.vout, err)
 	}
@@ -397,6 +397,7 @@ func auditContract(op *Output) (*asset.Contract, error) {
 		Coin:         op,
 		SwapAddress:  receiver.String(),
 		ContractData: op.redeemScript,
+		SecretHash:   secretHash,
 		LockTime:     time.Unix(int64(lockTime), 0),
 		TxData:       op.tx.raw,
 	}, nil
