@@ -145,6 +145,7 @@ type ethFetcher interface {
 	initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	shutdown()
 	syncProgress() ethereum.SyncProgress
+	isRedeemable(secretHash, secret [32]byte, contractVer uint32) (bool, error)
 	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (*types.Transaction, error)
 	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
@@ -684,11 +685,18 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	inputs := make([]dex.Bytes, 0, len(form.Redemptions))
 	var redeemedValue uint64
 	for _, redemption := range form.Redemptions {
-		var secretHash [32]byte
+		var secretHash, secret [32]byte
 		copy(secretHash[:], redemption.Spends.SecretHash)
-		if secretHash != sha256.Sum256(redemption.Secret) {
-			return fail(fmt.Errorf("Redeem: secretHash %x != sha256(%x)", secretHash, redemption.Secret))
+		copy(secret[:], redemption.Secret)
+		redeemable, err := eth.node.isRedeemable(secretHash, secret, form.AssetVersion)
+		if err != nil {
+			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
 		}
+		if !redeemable {
+			return fail(fmt.Errorf("Redeem: secretHash %x not redeemable with secret %x",
+				secretHash, secret))
+		}
+
 		swapData, err := eth.node.swap(eth.ctx, secretHash, form.AssetVersion)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
@@ -700,7 +708,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), form.AssetVersion) * form.FeeSuggestion
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
-	// fees.
+	// fees. Also unlock coins.
 	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, form.AssetVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))

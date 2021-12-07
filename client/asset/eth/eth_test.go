@@ -63,6 +63,8 @@ type testNode struct {
 	initErr           error
 	redeemErr         error
 	nonce             uint64
+	redeemable        bool
+	isRedeemableErr   error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -120,7 +122,9 @@ func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, ma
 		Nonce: n.nonce,
 	}), nil
 }
-
+func (n *testNode) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	return n.redeemable, n.isRedeemableErr
+}
 func (n *testNode) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error) {
 	if n.redeemErr != nil {
 		return nil, n.redeemErr
@@ -1171,14 +1175,17 @@ func TestRedeem(t *testing.T) {
 	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
 
 	tests := []struct {
-		name        string
-		form        asset.RedeemForm
-		redeemErr   error
-		expectError bool
+		name            string
+		form            asset.RedeemForm
+		redeemErr       error
+		isRedeemable    bool
+		isRedeemableErr error
+		expectError     bool
 	}{
 		{
-			name:        "ok",
-			expectError: false,
+			name:         "ok",
+			expectError:  false,
+			isRedeemable: true,
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1205,9 +1212,69 @@ func TestRedeem(t *testing.T) {
 			},
 		},
 		{
-			name:        "redeem error",
-			redeemErr:   errors.New(""),
-			expectError: true,
+			name:         "not redeemable",
+			expectError:  true,
+			isRedeemable: false,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:            "isRedeemable error",
+			expectError:     true,
+			isRedeemable:    true,
+			isRedeemableErr: errors.New(""),
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:         "redeem error",
+			redeemErr:    errors.New(""),
+			isRedeemable: true,
+			expectError:  true,
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1225,8 +1292,9 @@ func TestRedeem(t *testing.T) {
 			},
 		},
 		{
-			name:        "swap not found in contract",
-			expectError: true,
+			name:         "swap not found in contract",
+			isRedeemable: true,
+			expectError:  true,
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1244,27 +1312,9 @@ func TestRedeem(t *testing.T) {
 			},
 		},
 		{
-			name:        "hash of secret != secretHash",
-			expectError: true,
-			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: encode.RandomBytes(32),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-				},
-				FeeSuggestion: 100,
-				AssetVersion:  0,
-			},
-		},
-		{
-			name:        "empty redemptions slice error",
-			expectError: true,
+			name:         "empty redemptions slice error",
+			isRedeemable: true,
+			expectError:  true,
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{},
 				FeeSuggestion: 100,
@@ -1275,6 +1325,8 @@ func TestRedeem(t *testing.T) {
 
 	for _, test := range tests {
 		node.redeemErr = test.redeemErr
+		node.redeemable = test.isRedeemable
+		node.isRedeemableErr = test.isRedeemableErr
 
 		ins, out, fees, err := eth.Redeem(&test.form)
 		if test.expectError {
