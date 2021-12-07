@@ -1957,7 +1957,7 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {
 			contractID := coinIDString(t.wallets.toAsset.ID, audit.CoinID)
-			t.dc.log.Error("Failed to audit contract coin %v (%s) for match %s: %v",
+			t.dc.log.Errorf("Failed to audit contract coin %v (%s) for match %s: %v",
 				contractID, t.wallets.toAsset.Symbol, match, err)
 			// Don't revoke in case server sends a revised audit request before
 			// the match is revoked.
