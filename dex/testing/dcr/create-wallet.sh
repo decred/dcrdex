@@ -13,6 +13,8 @@ HTTPPROF_PORT=$6
 WALLET_DIR="${NODES_ROOT}/${NAME}"
 mkdir -p ${WALLET_DIR}
 
+DCRWALLET=${DCRWALLET:-dcrwallet-1.6}
+
 export SHELL=$(which bash)
 
 # Connect to alpha or beta node
@@ -63,7 +65,7 @@ EOF
 # wallet ctl script
 cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
 #!/usr/bin/env bash
-dcrctl -C "${WALLET_DIR}/${NAME}-ctl.conf" --wallet \$*
+${DCRCTL} -C "${WALLET_DIR}/${NAME}-ctl.conf" --wallet \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
@@ -81,8 +83,8 @@ tmux send-keys -t $TMUX_WIN_ID "set +o history" C-m
 tmux send-keys -t $TMUX_WIN_ID "cd ${WALLET_DIR}" C-m
 
 echo "Creating simnet ${NAME} wallet"
-tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C ${NAME}.conf --create < wallet.answers; tmux wait-for -S ${NAME}" C-m
+tmux send-keys -t $TMUX_WIN_ID "${DCRWALLET} -C ${NAME}.conf --create < wallet.answers; tmux wait-for -S ${NAME}" C-m
 tmux wait-for ${NAME}
 
 echo "Starting simnet ${NAME} wallet"
-tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C ${NAME}.conf" C-m
+tmux send-keys -t $TMUX_WIN_ID "${DCRWALLET} -C ${NAME}.conf" C-m
