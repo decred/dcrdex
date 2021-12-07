@@ -1,4 +1,6 @@
+//go:build !btclive
 // +build !btclive
+
 //
 // These tests will not be run if the btclive build tag is set. In that case,
 // the live_test.go tests will run.

@@ -1,3 +1,4 @@
+//go:build !pgonline
 // +build !pgonline
 
 // This code is available on the terms of the project LICENSE.md file,

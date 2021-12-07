@@ -1,4 +1,6 @@
+//go:build btclive
 // +build btclive
+
 //
 // Since at least one live test runs for an hour, you should run live tests
 // individually using the -run flag. All of these tests will only run with the

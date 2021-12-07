@@ -867,7 +867,7 @@ func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 	if !bytes.Equal(hashed, scriptHash) {
 		return nil, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)
 	}
-	_, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
+	_, receiver, lockTime, secretHash, err := dexbtc.ExtractSwapDetails(contract.redeemScript, contract.btc.segwit, contract.btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing swap contract for %s:%d: %w", tx.hash, contract.vout, err)
 	}
@@ -875,6 +875,7 @@ func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 		Coin:         contract,
 		SwapAddress:  receiver.String(),
 		RedeemScript: contract.redeemScript,
+		SecretHash:   secretHash,
 		LockTime:     time.Unix(int64(lockTime), 0),
 		TxData:       contract.tx.raw,
 	}, nil
