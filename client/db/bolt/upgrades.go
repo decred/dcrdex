@@ -400,7 +400,7 @@ func reloadMatchProofs(tx *bbolt.Tx, skipCancels bool, matchesBucket []byte) err
 			return nil
 		}
 		// No Script, and MatchComplete status means this is a cancel match.
-		if skipCancels && len(proof.Script) == 0 {
+		if skipCancels && len(proof.ContractData) == 0 {
 			statusB := mBkt.Get(statusKey)
 			if len(statusB) != 1 {
 				return fmt.Errorf("no match status")

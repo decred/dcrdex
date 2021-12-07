@@ -184,7 +184,7 @@ type Wallet interface {
 	// NOTE: This could potentially be a long and expensive operation if
 	// performed long after the swap is broadcast; might be better executed from
 	// a goroutine.
-	FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
+	FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retrieved from the unspent coin info

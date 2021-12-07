@@ -2059,7 +2059,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	})
 
 	// Check find redemption result.
-	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, nil)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -2069,7 +2069,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 
 	// gettransaction error
 	node.getTransactionErr = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -2080,7 +2080,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	delete(node.getCFilterScripts, *redeemBlockHash)
 	timedCtx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
 	defer cancel()
-	_, k, err := wallet.FindRedemption(timedCtx, coinID)
+	_, k, err := wallet.FindRedemption(timedCtx, coinID, nil)
 	if timedCtx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
@@ -2094,7 +2094,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
 	cancelCtx()
-	_, _, err = wallet.FindRedemption(deadCtx, coinID)
+	_, _, err = wallet.FindRedemption(deadCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
@@ -2105,7 +2105,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	redeemVin.SignatureScript = randBytes(100)
 
 	node.blockchainMtx.Unlock()
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
@@ -2115,7 +2115,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	node.blockchainMtx.Unlock()
 
 	// Sanity check to make sure it passes again.
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}

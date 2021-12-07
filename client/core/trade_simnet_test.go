@@ -1154,7 +1154,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	var furthestLockTime time.Time
 
 	hasRefundableSwap := func(match *matchTracker) bool {
-		sentSwap := match.MetaData.Proof.Script != nil
+		sentSwap := match.MetaData.Proof.ContractData != nil
 		noRedeems := match.Status < order.MakerRedeemed
 		return sentSwap && noRedeems
 	}

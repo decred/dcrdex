@@ -1825,7 +1825,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// Add the redemption to mempool and check if wallet.FindRedemption finds it.
 	node.blockchain.addRawTx(makeRawTx(-1, redeemTxid, inputs, []dex.Bytes{otherScript}))
-	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, nil)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -1835,7 +1835,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// Move the redemption to a new block and check if wallet.FindRedemption finds it.
 	_, redeemBlock := node.blockchain.addRawTx(makeRawTx(contractHeight+2, redeemTxid, inputs, []dex.Bytes{otherScript}))
-	_, checkSecret, err = wallet.FindRedemption(tCtx, coinID)
+	_, checkSecret, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -1845,7 +1845,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// gettransaction error
 	node.walletTxErr = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -1853,7 +1853,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// getcfilterv2 error
 	node.rawErr[methodGetCFilterV2] = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for getcfilterv2 rpc error")
 	}
@@ -1863,7 +1863,7 @@ func TestFindRedemption(t *testing.T) {
 	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
 	ctx, cancel := context.WithTimeout(tCtx, 2*time.Second)
 	defer cancel() // ctx should auto-cancel after 2 seconds, but this is apparently good practice to prevent leak
-	_, k, err := wallet.FindRedemption(ctx, coinID)
+	_, k, err := wallet.FindRedemption(ctx, coinID, nil)
 	if ctx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
@@ -1873,14 +1873,14 @@ func TestFindRedemption(t *testing.T) {
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
 	cancelCtx()
-	_, _, err = wallet.FindRedemption(deadCtx, coinID)
+	_, _, err = wallet.FindRedemption(deadCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
 
 	// Expect FindRedemption to error because of bad input sig.
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
@@ -1888,14 +1888,14 @@ func TestFindRedemption(t *testing.T) {
 
 	// Wrong script type for output
 	node.walletTx.Hex, _ = makeTxHex(inputs, []dex.Bytes{otherScript, otherScript})
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong script type")
 	}
 	node.walletTx.Hex = txHex
 
 	// Sanity check to make sure it passes again.
-	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}

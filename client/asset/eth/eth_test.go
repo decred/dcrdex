@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2064,6 +2065,146 @@ func TestLocktimeExpired(t *testing.T) {
 	// bad contract
 	contract = append(contract, 0)
 	ensureResult("bad contract", true, false)
+}
+
+func TestFindRedemption(t *testing.T) {
+	var secret [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	secretHash := sha256.Sum256(secret[:])
+
+	contract := dexeth.EncodeContractData(0, secretHash)
+	state := &dexeth.SwapState{
+		Secret: secret,
+		State:  dexeth.SSInitiated,
+	}
+
+	node := &testNode{
+		swapMap: map[[32]byte]*dexeth.SwapState{
+			secretHash: state,
+		},
+		swapVers: map[uint32]struct{}{0: {}},
+	}
+
+	eth := &ExchangeWallet{
+		ctx:                context.Background(),
+		node:               node,
+		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		log:                tLogger,
+	}
+
+	baseCtx := context.Background()
+
+	runTest := func(tag string, wantErr bool, initStep dexeth.SwapStep) {
+		// Check at the beginning. The queue should always be empty.
+		eth.findRedemptionMtx.RLock()
+		reqsPending := len(eth.findRedemptionReqs) > 0
+		eth.findRedemptionMtx.RUnlock()
+		if reqsPending {
+			t.Fatalf("%s: requests pending at beginning of test", tag)
+		}
+
+		state.State = initStep
+		var err error
+		ctx, cancel := context.WithTimeout(baseCtx, time.Second)
+		defer cancel()
+		_, secretB, err := eth.FindRedemption(ctx, nil, contract)
+		if err != nil {
+			if wantErr {
+				return
+			}
+			t.Fatalf("%s: %v", tag, err)
+		} else if wantErr {
+			t.Fatalf("%s: didn't see expected error", tag)
+		}
+		if !bytes.Equal(secretB, secret[:]) {
+			t.Fatalf("%s: wrong secret. %x != %x", tag, []byte(secretB), secret)
+		}
+	}
+
+	runWithUpdate := func(tag string, wantErr bool, initStep dexeth.SwapStep, updateFunc func()) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			timeout := time.After(time.Second)
+			for {
+				select {
+				case <-time.After(time.Millisecond):
+					eth.findRedemptionMtx.RLock()
+					pending := eth.findRedemptionReqs[secretHash] != nil
+					eth.findRedemptionMtx.RUnlock()
+					if !pending {
+						continue
+					}
+					updateFunc()
+					eth.checkFindRedemptions()
+				case <-timeout:
+					return
+				}
+			}
+		}()
+		runTest(tag, wantErr, initStep)
+		wg.Wait()
+	}
+
+	// Already redeemed.
+	runTest("already redeemed", false, dexeth.SSRedeemed)
+
+	// Redeemed after queuing
+	runWithUpdate("redeemed after queuing", false, dexeth.SSInitiated, func() {
+		state.State = dexeth.SSRedeemed
+	})
+
+	// Already refunded
+	runTest("already refunded", true, dexeth.SSRefunded)
+
+	// Refunded after queuing
+	runWithUpdate("refunded after queuing", true, dexeth.SSInitiated, func() {
+		state.State = dexeth.SSRefunded
+	})
+
+	// swap error
+	node.swapErr = errors.New("test error")
+	runTest("swap error", true, 0)
+	node.swapErr = nil
+
+	// swap error after queuing
+	runWithUpdate("swap error after queuing", true, dexeth.SSInitiated, func() {
+		node.swapErr = errors.New("test error")
+	})
+	node.swapErr = nil
+
+	// cancelled context error
+	var cancel context.CancelFunc
+	baseCtx, cancel = context.WithCancel(context.Background())
+	cancel()
+	runTest("context cancellation", true, dexeth.SSInitiated)
+	baseCtx = context.Background()
+
+	// bad contract
+	goodContract := contract
+	contract = append(contract, 0)
+	runTest("bad contract", true, dexeth.SSInitiated)
+	contract = goodContract
+
+	// dupe
+	eth.findRedemptionMtx.Lock()
+	eth.findRedemptionReqs[secretHash] = &findRedemptionRequest{}
+	eth.findRedemptionMtx.Unlock()
+	res := make(chan error, 1)
+	go func() {
+		_, _, err := eth.FindRedemption(baseCtx, nil, contract)
+		res <- err
+	}()
+
+	select {
+	case err := <-res:
+		if err == nil {
+			t.Fatalf("no error for dupe")
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out on dupe test")
+	}
 }
 
 func ethToGwei(v uint64) uint64 {

@@ -353,7 +353,7 @@ type MatchAuth struct {
 // MatchProof is information related to the progression of the swap negotiation
 // process.
 type MatchProof struct {
-	Script          []byte
+	ContractData    []byte
 	CounterContract []byte
 	CounterTxData   []byte
 	SecretHash      []byte
@@ -387,7 +387,7 @@ func (p *MatchProof) Encode() []byte {
 	}
 
 	return versionedBytes(MatchProofVer).
-		AddData(p.Script).
+		AddData(p.ContractData).
 		AddData(p.CounterContract).
 		AddData(p.SecretHash).
 		AddData(p.Secret).
@@ -447,7 +447,7 @@ func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
 			matchProofPushes, len(pushes))
 	}
 	return &MatchProof{
-		Script:          pushes[0],
+		ContractData:    pushes[0],
 		CounterContract: pushes[1],
 		CounterTxData:   pushes[21],
 		SecretHash:      pushes[2],

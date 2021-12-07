@@ -719,7 +719,7 @@ func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
 	return true, time.Now().Add(-time.Minute), nil
 }
 
-func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
@@ -4274,7 +4274,7 @@ func TestRefunds(t *testing.T) {
 	// We're the maker, so the init transaction should be broadcast.
 	checkStatus("maker swapped", match, order.MakerSwapCast)
 	proof := &match.MetaData.Proof
-	if !bytes.Equal(proof.Script, contract) {
+	if !bytes.Equal(proof.ContractData, contract) {
 		t.Fatalf("invalid contract recorded for Maker swap")
 	}
 
@@ -4362,7 +4362,7 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
 	tracker.mtx.RLock()
-	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
+	if !bytes.Equal(match.MetaData.Proof.ContractData, counterScript) {
 		t.Fatalf("invalid contract recorded for Taker swap")
 	}
 	tracker.mtx.RUnlock()
@@ -5895,7 +5895,7 @@ func TestReconfigureWallet(t *testing.T) {
 		MetaMatch: db.MetaMatch{
 			MetaData: &db.MatchMetaData{
 				Proof: db.MatchProof{
-					Script: dex.Bytes{0},
+					ContractData: dex.Bytes{0},
 				},
 			},
 			UserMatch: &order.UserMatch{
@@ -6312,7 +6312,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			proof.MakerSwap = tCoinID
 			proof.SecretHash = secretHash[:]
 			if isMaker {
-				proof.Script = tBytes
+				proof.ContractData = tBytes
 				proof.Secret = secret
 			} else {
 				proof.CounterContract = tBytes
@@ -6323,7 +6323,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			if isMaker {
 				proof.CounterContract = tBytes
 			} else {
-				proof.Script = tBytes
+				proof.ContractData = tBytes
 			}
 		}
 		if status >= order.MakerRedeemed {
