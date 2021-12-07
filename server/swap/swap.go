@@ -1402,9 +1402,15 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, contract.Value()))
 		return wait.DontTryAgain
 	}
+	if !actor.isMaker && !bytes.Equal(contract.SecretHash, counterParty.status.swap.SecretHash) {
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("incorrect secret hash. expected %x. got %x",
+				contract.SecretHash, counterParty.status.swap.SecretHash))
+		return wait.DontTryAgain
+	}
 
 	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeTaker))
-	if stepInfo.actor.isMaker {
+	if actor.isMaker {
 		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
 	if contract.LockTime.Before(reqLockTime) {

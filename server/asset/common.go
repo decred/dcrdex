@@ -149,6 +149,9 @@ type Contract struct {
 	// script for UTXO contracts, or a secret hash that keys swaps for account-
 	// based contracts.
 	ContractData []byte
+	// SecretHash is the secret key hash used for this swap. This should be used
+	// to validate a counterparty contract on another chain.
+	SecretHash []byte
 	// LockTime is the refund locktime.
 	LockTime time.Time
 	// TxData is raw transaction data. This data is provided for some assets
