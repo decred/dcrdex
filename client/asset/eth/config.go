@@ -15,7 +15,6 @@ import (
 
 // Config holds the parameters needed to initialize an ETH wallet.
 type Config struct {
-	AppDir         string  `ini:"appdir"`
 	NodeListenAddr string  `ini:"nodelistenaddr"`
 	GasFee         float64 `ini:"gasfee"`
 }
