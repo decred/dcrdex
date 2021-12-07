@@ -743,8 +743,23 @@ func (*ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (*ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
-	return false, time.Time{}, asset.ErrNotImplemented
+func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+	contractVer, secretHash, err := decodeVersionedSecretHash(contract)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+
+	header, err := eth.node.bestHeader(eth.ctx)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	blockTime := time.Unix(int64(header.Time), 0)
+
+	swap, err := eth.node.swap(eth.ctx, secretHash, contractVer)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return swap.LockTime.Before(blockTime), swap.LockTime, nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -794,15 +809,10 @@ func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) 
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
-	if len(contract) != 36 {
-		return 0, false, fmt.Errorf("wrong contract length. expected 36, got %d", len(contract))
+	contractVer, secretHash, err := decodeVersionedSecretHash(contract)
+	if err != nil {
+		return 0, false, err
 	}
-
-	// contract fully specifies this swap in terms of which contract version
-	// is used and the secret hash that keys the unique swap.
-	contractVer := binary.BigEndian.Uint32(contract[:4])
-	var secretHash [32]byte
-	copy(secretHash[:], contract[4:])
 
 	hdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
@@ -946,4 +956,15 @@ func versionedBytes(ver uint32, h []byte) []byte {
 	binary.BigEndian.PutUint32(b[:4], ver)
 	copy(b[4:], h)
 	return b
+}
+
+// decodeVersionedSecretHash unpacks the contract version and secret hash.
+func decodeVersionedSecretHash(data []byte) (contractVersion uint32, swapKey [dexeth.SecretHashSize]byte, err error) {
+	if len(data) != dexeth.SecretHashSize+4 {
+		err = errors.New("invalid swap data")
+		return
+	}
+	contractVersion = binary.BigEndian.Uint32(data[:4])
+	copy(swapKey[:], data[4:])
+	return
 }

@@ -1727,7 +1727,70 @@ func TestSwapConfirmation(t *testing.T) {
 	state.BlockHeight = 6
 	state.State = dexeth.SSRedeemed
 	checkResult(false, 1, true)
+}
 
+func TestLocktimeExpired(t *testing.T) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+
+	state := &dexeth.SwapState{
+		LockTime: time.Now(),
+	}
+
+	header := &types.Header{
+		Time: uint64(time.Now().Add(time.Second).Unix()),
+	}
+
+	node := &testNode{
+		swapMap:  map[[32]byte]*dexeth.SwapState{secretHash: state},
+		swapVers: map[uint32]struct{}{0: {}},
+		bestHdr:  header,
+	}
+
+	eth := &ExchangeWallet{node: node}
+
+	contract := make([]byte, 36)
+	copy(contract[4:], secretHash[:])
+
+	ensureResult := func(tag string, expErr, expExpired bool) {
+		expired, _, err := eth.LocktimeExpired(contract)
+		switch {
+		case err != nil:
+			if !expErr {
+				t.Fatalf("%s: LocktimeExpired error existing expired swap: %v", tag, err)
+			}
+		case expErr:
+			t.Fatalf("%s: expected error, got none", tag)
+		case expExpired != expired:
+			t.Fatalf("%s: expired wrong. %t != %t", tag, expired, expExpired)
+		}
+	}
+
+	// locktime expired
+	ensureResult("locktime expired", false, true)
+
+	// header error
+	node.bestHdrErr = errors.New("test error")
+	ensureResult("header error", true, false)
+	node.bestHdrErr = nil
+
+	// missing swap
+	delete(node.swapMap, secretHash)
+	ensureResult("missing swap", true, false)
+	node.swapMap[secretHash] = state
+
+	// lock time not expired
+	state.LockTime = time.Now().Add(time.Minute)
+	ensureResult("lock time not expired", false, false)
+
+	// wrong contract version
+	contract[3] = 1
+	ensureResult("wrong contract version", true, false)
+	contract[3] = 0
+
+	// bad contract
+	contract = append(contract, 0)
+	ensureResult("bad contract", true, false)
 }
 
 func ethToGwei(v uint64) uint64 {
