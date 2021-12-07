@@ -29,6 +29,10 @@ TRADING_WALLET2_PORT="19582"
 # wait for process termination.
 WAIT="; tmux wait-for -S donedcr"
 
+DCRD=${DCRD:-dcrd-1.6}
+DCRCTL=${DCRCTL:-dcrctl-1.6}
+export DCRCTL
+
 NODES_ROOT=~/dextest/dcr
 export NODES_ROOT
 
@@ -83,9 +87,9 @@ NUM=1
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
-    dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf regentemplate
+    ${DCRCTL} -C ${NODES_ROOT}/alpha/alpha-ctl.conf regentemplate
     sleep 0.05
-    dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
+    ${DCRCTL} -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
     if [ $i != $NUM ]; then
       sleep ${MINE_SLEEP}
     fi
@@ -102,9 +106,9 @@ NUM=1
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
-    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf regentemplate
+    ${DCRCTL} -C ${NODES_ROOT}/beta/beta-ctl.conf regentemplate
     sleep 0.05
-    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
+    ${DCRCTL} -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
     if [ $i != $NUM ]; then
       sleep ${MINE_SLEEP}
     fi
@@ -186,7 +190,7 @@ tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 
 echo "Starting simnet alpha node (txindex for server)"
-tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
+tmux send-keys -t $SESSION:1 "${DCRD} --appdata=${NODES_ROOT}/alpha \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
 --miningaddr=${ALPHA_MINING_ADDR} --rpclisten=:${ALPHA_RPC_PORT} \
 --txindex --listen=:${ALPHA_NODE_PORT} \
@@ -199,7 +203,7 @@ tmux send-keys -t $SESSION:2 "set +o history" C-m
 tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 
 echo "Starting simnet beta node (no txindex for a typical client)"
-tmux send-keys -t $SESSION:2 "dcrd --appdata=${NODES_ROOT}/beta \
+tmux send-keys -t $SESSION:2 "${DCRD} --appdata=${NODES_ROOT}/beta \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
 --listen=:${BETA_NODE_PORT} --rpclisten=:${BETA_RPC_PORT} \
 --miningaddr=${BETA_MINING_ADDR} \
