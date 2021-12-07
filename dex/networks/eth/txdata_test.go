@@ -146,7 +146,7 @@ func TestParseRedeemData(t *testing.T) {
 	}
 	calldata, err := PackRedeemData(redemptions)
 	if err != nil {
-		t.Fatalf("unale to pack abi: %v", err)
+		t.Fatalf("unable to pack abi: %v", err)
 	}
 	redeemCallData := mustParseHex("f4fd17f9000000000000000000000000000000000" +
 		"000000000000000000000000000002000000000000000000000000000000000000" +

@@ -1677,6 +1677,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
 		FeeSuggestion: feeSuggestion,
+		AssetVersion:  t.metaData.ToVersion,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.

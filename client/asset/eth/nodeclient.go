@@ -361,7 +361,7 @@ func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
 
 // initiate initiates multiple swaps in the same transaction.
 func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.InitGas(len(contracts), 0)
+	gas := dexeth.InitGas(len(contracts), contractVer)
 	var val uint64
 	for _, c := range contracts {
 		val += c.Value
@@ -401,12 +401,13 @@ func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte,
 	})
 }
 
-// redeem redeems a swap contract. The redeemer will be the account at txOpts.From.
-// Any on-chain failure, such as this secret not matching the hash, will not cause
-// this to error.
-func (n *nodeClient) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption, contractVer uint32) (tx *types.Transaction, err error) {
+// redeem redeems a swap contract. Any on-chain failure, such as this secret not
+// matching the hash, will not cause this to error.
+func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	gas := dexeth.RedeemGas(len(redemptions), contractVer)
+	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 	return tx, n.withcontractor(contractVer, func(c contractor) error {
 		tx, err = c.redeem(txOpts, redemptions)

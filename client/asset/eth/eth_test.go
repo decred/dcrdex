@@ -61,7 +61,10 @@ type testNode struct {
 	swapMap           map[[32]byte]*dexeth.SwapState
 	swapErr           error
 	initErr           error
+	redeemErr         error
 	nonce             uint64
+	redeemable        bool
+	isRedeemableErr   error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -113,30 +116,25 @@ func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, ma
 	if n.initErr != nil {
 		return nil, n.initErr
 	}
-	// baseTx := &types.DynamicFeeTx{
-	// 	Nonce:     n.nonce,
-	// 	GasFeeCap: maxFeeRate,
-	// 	GasTipCap: MinGasTipCap,
-	// 	Gas:       dexeth.InitGas(len(contracts)),
-	// 	Value:     opts.Value,
-	// 	Data:      []byte{},
-	// }
 	tx = types.NewTx(&types.DynamicFeeTx{})
-	// n.nonce++
-	// n.lastInitiation = initTx{
-	// 	initiations: initiations,
-	// 	hash:        tx.Hash(),
-	// 	opts:        opts,
-	// }
 	n.nonce++
 	return types.NewTx(&types.DynamicFeeTx{
 		Nonce: n.nonce,
 	}), nil
 }
-func (n *testNode) redeem(opts *bind.TransactOpts, redemptions []*asset.Redemption, contractVer uint32) (*types.Transaction, error) {
-	return nil, nil
+func (n *testNode) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	return n.redeemable, n.isRedeemableErr
 }
-func (n *testNode) refund(opts *bind.TransactOpts, secretHash [32]byte, serverVer uint32) (*types.Transaction, error) {
+func (n *testNode) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error) {
+	if n.redeemErr != nil {
+		return nil, n.redeemErr
+	}
+	n.nonce++
+	return types.NewTx(&types.DynamicFeeTx{
+		Nonce: n.nonce,
+	}), nil
+}
+func (n *testNode) refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (*types.Transaction, error) {
 	return nil, nil
 }
 func (n *testNode) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error) {
@@ -153,7 +151,6 @@ func (n *testNode) swap(ctx context.Context, secretHash [32]byte, contractVer ui
 	}
 	return swap, nil
 }
-
 func (n *testNode) signData(addr common.Address, data []byte) ([]byte, error) {
 	if n.signDataErr != nil {
 		return nil, n.signDataErr
@@ -1134,6 +1131,244 @@ func TestPreRedeem(t *testing.T) {
 
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
+	}
+}
+
+func TestRedeem(t *testing.T) {
+	node := &testNode{
+		swapVers: map[uint32]struct{}{
+			0: {},
+		},
+		swapMap: make(map[[32]byte]*dexeth.SwapState),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+		log:  tLogger,
+	}
+	addSwapToSwapMap := func(secretHash [32]byte, value uint64, step dexeth.SwapStep) {
+		swap := dexeth.SwapState{
+			BlockHeight: 1,
+			LockTime:    time.Now(),
+			Initiator:   common.HexToAddress("0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"),
+			Participant: common.HexToAddress("B6De8BB5ed28E6bE6d671975cad20C03931bE981"),
+			Value:       value,
+			State:       step,
+		}
+		node.swapMap[secretHash] = &swap
+	}
+
+	numSecrets := 3
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
+
+	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated)
+	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
+
+	tests := []struct {
+		name            string
+		form            asset.RedeemForm
+		redeemErr       error
+		isRedeemable    bool
+		isRedeemableErr error
+		expectError     bool
+	}{
+		{
+			name:         "ok",
+			expectError:  false,
+			isRedeemable: true,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:         "not redeemable",
+			expectError:  true,
+			isRedeemable: false,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:            "isRedeemable error",
+			expectError:     true,
+			isRedeemable:    true,
+			isRedeemableErr: errors.New(""),
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:         "redeem error",
+			redeemErr:    errors.New(""),
+			isRedeemable: true,
+			expectError:  true,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[0][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+				},
+				FeeSuggestion: 200,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:         "swap not found in contract",
+			isRedeemable: true,
+			expectError:  true,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							SecretHash: secretHashes[2][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[2][:],
+					},
+				},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+		{
+			name:         "empty redemptions slice error",
+			isRedeemable: true,
+			expectError:  true,
+			form: asset.RedeemForm{
+				Redemptions:   []*asset.Redemption{},
+				FeeSuggestion: 100,
+				AssetVersion:  0,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		node.redeemErr = test.redeemErr
+		node.redeemable = test.isRedeemable
+		node.isRedeemableErr = test.isRedeemableErr
+
+		ins, out, fees, err := eth.Redeem(&test.form)
+		if test.expectError {
+			if err == nil {
+				t.Fatalf("%v: expected error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%v: unexpected error: %v", test.name, err)
+		}
+
+		if len(ins) != len(test.form.Redemptions) {
+			t.Fatalf("%v: expected %d inputs but got %d",
+				test.name, len(test.form.Redemptions), len(ins))
+		}
+
+		// Check fees returned from Redeem are as expected
+		expectedGas := dexeth.RedeemGas(len(test.form.Redemptions), 0)
+		expectedFees := expectedGas * test.form.FeeSuggestion
+		if fees != expectedFees {
+			t.Fatalf("%v: expected fees %d, but got %d", test.name, expectedFees, fees)
+		}
+
+		var totalSwapValue uint64
+		for i, redemption := range test.form.Redemptions {
+			coinID := redemption.Spends.Coin.ID()
+			if !bytes.Equal(coinID, ins[i]) {
+				t.Fatalf("%v: expected input %x to equal coin id %x",
+					test.name, coinID, ins[i])
+			}
+
+			var secretHash [32]byte
+			copy(secretHash[:], redemption.Spends.SecretHash)
+			swap := node.swapMap[secretHash]
+			totalSwapValue += swap.Value
+		}
+
+		if out.Value() != totalSwapValue {
+			t.Fatalf("expected coin value to be %d but got %d",
+				totalSwapValue, out.Value())
+		}
 	}
 }
 

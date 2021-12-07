@@ -740,15 +740,16 @@ func testRedeem(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		sleep          time.Duration
-		redeemerClient *nodeClient
-		redeemer       *accounts.Account
-		swaps          []*asset.Contract
-		redemptions    []*asset.Redemption
-		isRedeemable   []bool
-		finalStates    []dexeth.SwapStep
-		addAmt         bool
+		name            string
+		sleep           time.Duration
+		redeemerClient  *nodeClient
+		redeemer        *accounts.Account
+		swaps           []*asset.Contract
+		redemptions     []*asset.Redemption
+		isRedeemable    []bool
+		finalStates     []dexeth.SwapStep
+		addAmt          bool
+		expectRedeemErr bool
 	}{
 		{
 			name:           "ok before locktime",
@@ -814,10 +815,11 @@ func testRedeem(t *testing.T) {
 			addAmt:         false,
 		},
 		{
-			name:           "duplicate secret hashes",
-			sleep:          time.Second * 8,
-			redeemerClient: participantEthClient,
-			redeemer:       participantAcct,
+			name:            "duplicate secret hashes",
+			expectRedeemErr: true,
+			sleep:           time.Second * 8,
+			redeemerClient:  participantEthClient,
+			redeemer:        participantAcct,
 			swaps: []*asset.Contract{
 				newContract(lockTime, secretHashes[7], 1),
 				newContract(lockTime, secretHashes[8], 1),
@@ -836,9 +838,6 @@ func testRedeem(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		numSwaps := len(test.swaps)
-		txOpts, _ := ethClient.txOpts(ctx, uint64(numSwaps), dexeth.InitGas(numSwaps, 0), nil)
-
 		for i := range test.swaps {
 			swap, err := ethClient.swap(ctx, bytesToArray(test.swaps[i].SecretHash), 0)
 			if err != nil {
@@ -876,8 +875,6 @@ func testRedeem(t *testing.T) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 		baseFee, _, _ := test.redeemerClient.netFeeState(ctx)
-		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, dexeth.RedeemGas(numSwaps, 0), nil)
-
 		for i, redemption := range test.redemptions {
 			expected := test.isRedeemable[i]
 			isRedeemable, err := test.redeemerClient.isRedeemable(bytesToArray(redemption.Spends.SecretHash), bytesToArray(redemption.Secret), 0)
@@ -889,7 +886,13 @@ func testRedeem(t *testing.T) {
 			}
 		}
 
-		tx, err := test.redeemerClient.redeem(txOpts, test.redemptions, 0)
+		tx, err := test.redeemerClient.redeem(ctx, test.redemptions, maxFeeRate, 0)
+		if test.expectRedeemErr {
+			if err == nil {
+				t.Fatalf("%s: expected error but did not get", test.name)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatalf("%s: redeem error: %v", test.name, err)
 		}
@@ -900,7 +903,7 @@ func testRedeem(t *testing.T) {
 			t.Fatalf("%s: redeemer pending in balance error: %v", test.name, err)
 		}
 
-		if test.addAmt && dexeth.WeiToGwei(bal.PendingIn) != uint64(numSwaps) {
+		if test.addAmt && dexeth.WeiToGwei(bal.PendingIn) != uint64(len(test.swaps)) {
 			t.Fatalf("%s: unexpected pending in balance %s", test.name, bal.PendingIn)
 		}
 
@@ -1063,8 +1066,7 @@ func testRefund(t *testing.T) {
 			if err := waitForMined(t, time.Second*8, false); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
-			txOpts, _ := participantEthClient.txOpts(ctx, 0, dexeth.RedeemGas(1, 0), nil)
-			_, err := participantEthClient.redeem(txOpts, []*asset.Redemption{newRedeem(secret, secretHash)}, 0)
+			_, err := participantEthClient.redeem(ctx, []*asset.Redemption{newRedeem(secret, secretHash)}, maxFeeRate, 0)
 			if err != nil {
 				t.Fatalf("%s: redeem error: %v", test.name, err)
 			}
