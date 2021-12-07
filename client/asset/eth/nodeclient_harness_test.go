@@ -217,12 +217,12 @@ func TestMain(m *testing.M) {
 
 func setupWallet(walletDir, seed, listenAddress string) error {
 	settings := map[string]string{
-		"appdir":         walletDir,
 		"nodelistenaddr": listenAddress,
 	}
 	seedB, _ := hex.DecodeString(seed)
 	walletPass, _ := hex.DecodeString(pw)
 	createWalletParams := asset.CreateWalletParams{
+		Type:     walletTypeGeth,
 		Seed:     seedB,
 		Pass:     walletPass,
 		Settings: settings,

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1740,6 +1741,51 @@ func TestSwapConfirmation(t *testing.T) {
 	state.BlockHeight = 6
 	state.State = dexeth.SSRedeemed
 	checkResult(false, 1, true)
+}
+
+func TestDriverExists(t *testing.T) {
+	drv := &Driver{}
+	tmpDir, _ := os.MkdirTemp("", "")
+	defer os.RemoveAll(tmpDir)
+
+	settings := map[string]string{}
+
+	// no wallet
+	exists, err := drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	if err != nil {
+		t.Fatalf("Exists error for no geth wallet: %v", err)
+	}
+	if exists {
+		t.Fatalf("Uninitiated wallet exists")
+	}
+
+	// Create the wallet.
+	err = CreateWallet(&asset.CreateWalletParams{
+		Type:     walletTypeGeth,
+		Seed:     encode.RandomBytes(32),
+		Pass:     encode.RandomBytes(32),
+		Settings: settings,
+		DataDir:  tmpDir,
+		Net:      dex.Simnet,
+		Logger:   tLogger,
+	})
+	if err != nil {
+		t.Fatalf("CreateWallet error: %v", err)
+	}
+
+	// exists
+	exists, err = drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	if err != nil {
+		t.Fatalf("Exists error for existent geth wallet: %v", err)
+	}
+	if !exists {
+		t.Fatalf("Initiated wallet doesn't exist")
+	}
+
+	// Wrong wallet type
+	if _, err := drv.Exists("not-geth", tmpDir, settings, dex.Simnet); err == nil {
+		t.Fatalf("no error for unknown wallet type")
+	}
 }
 
 func TestLocktimeExpired(t *testing.T) {

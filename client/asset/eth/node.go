@@ -140,7 +140,12 @@ func SetSimnetGenesis(sng string) {
 
 // prepareNode sets up a geth node, but does not start it.
 func prepareNode(cfg *nodeConfig) (*node.Node, error) {
-	stackConf := &node.Config{DataDir: cfg.appDir}
+	stackConf := &node.Config{
+		DataDir: cfg.appDir,
+		// KeyStoreDir is set the same as the geth default, but we rely on this
+		// location for Exists, so protect against future geth changes.
+		KeyStoreDir: filepath.Join(cfg.appDir, "keystore"),
+	}
 
 	stackConf.Logger = &ethLogger{dl: cfg.logger}
 

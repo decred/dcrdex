@@ -28,6 +28,7 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -44,6 +45,8 @@ const (
 	defaultGasFee       = 82  // gwei
 	defaultGasFeeLimit  = 200 // gwei
 	defaultSendGasLimit = 21_000
+
+	walletTypeGeth = "geth"
 )
 
 var (
@@ -61,12 +64,6 @@ var (
 				"wallet.  Units: gwei / gas",
 			DefaultValue: defaultGasFeeLimit,
 		},
-		{
-			Key:          "appdir",
-			DisplayName:  "DCR Dex Ethereum directory location.",
-			Description:  "Location of the ethereum client data. This SHOULD NOT be a directory used by other ethereum applications. The default is recommended.",
-			DefaultValue: defaultAppDir,
-		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -74,7 +71,7 @@ var (
 		UnitInfo: dexeth.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{
-				Type:              "geth",
+				Type:              walletTypeGeth,
 				Tab:               "Internal",
 				Description:       "Use the built-in DEX wallet with snap sync",
 				ConfigOpts:        configOpts,
@@ -125,7 +122,12 @@ func (d *Driver) Info() *asset.WalletInfo {
 
 // Exists checks the existence of the wallet.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	return false, errors.New("unimplemented")
+	if walletType != walletTypeGeth {
+		return false, fmt.Errorf("wallet type %q unrecognized", walletType)
+	}
+	keyStoreDir := filepath.Join(getWalletDir(dataDir, net), "keystore")
+	ks := keystore.NewKeyStore(keyStoreDir, keystore.LightScryptN, keystore.LightScryptP)
+	return len(ks.Wallets()) > 0, nil
 }
 
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
@@ -195,6 +197,9 @@ func (*ExchangeWallet) Info() *asset.WalletInfo {
 // CreateWallet creates a new internal ETH wallet and stores the private key
 // derived from the wallet seed.
 func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
+	if createWalletParams.Type != walletTypeGeth {
+		return fmt.Errorf("wallet type %q unrecognized", createWalletParams.Type)
+	}
 	walletDir := getWalletDir(createWalletParams.DataDir, createWalletParams.Net)
 	node, err := prepareNode(&nodeConfig{
 		net:    createWalletParams.Net,
