@@ -79,7 +79,7 @@ func (hc *hashCache) poll(ctx context.Context) {
 		case fastBlocks:
 			str += " Fast blocks."
 		}
-		hc.log.Info(str)
+		hc.log.Debug(str)
 		hc.best.hash = hash
 		hc.best.height = height
 	}
