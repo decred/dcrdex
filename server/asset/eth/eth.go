@@ -181,7 +181,7 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block header from geth: %w", err)
 	}
-	hc := &hashCache{
+	eth.hashCache = &hashCache{
 		log:        eth.log.SubLogger("hashcache"),
 		node:       &c,
 		signalMtx:  &eth.signalMtx,
@@ -191,7 +191,6 @@ func (eth *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			hash:   hdr.Hash(),
 		},
 	}
-	eth.hashCache = hc
 
 	var wg sync.WaitGroup
 	wg.Add(1)

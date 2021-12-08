@@ -27,7 +27,7 @@ func TestPoll(t *testing.T) {
 		name:    "ok nothing to do",
 		bestHdr: blkHdr,
 	}, {
-		name: "ok sequencial",
+		name: "ok sequential",
 		bestHdr: &types.Header{
 			Number:     big.NewInt(1),
 			ParentHash: blkHdr.Hash(),

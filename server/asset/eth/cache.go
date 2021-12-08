@@ -84,7 +84,7 @@ func (hc *hashCache) poll(ctx context.Context) {
 		hc.best.height = height
 	}
 	if bhdr.ParentHash == hc.best.hash {
-		// Sequencial hash, report a block update.
+		// Sequential hash, report a block update.
 		update(false, false)
 		send(false, nil)
 		return
