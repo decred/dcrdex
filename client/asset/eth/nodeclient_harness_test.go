@@ -221,11 +221,10 @@ func setupWallet(walletDir, seed, listenAddress string) error {
 		"nodelistenaddr": listenAddress,
 	}
 	seedB, _ := hex.DecodeString(seed)
-	walletPass, _ := hex.DecodeString(pw)
 	createWalletParams := asset.CreateWalletParams{
 		Type:     walletTypeGeth,
 		Seed:     seedB,
-		Pass:     walletPass,
+		Pass:     []byte(pw),
 		Settings: settings,
 		DataDir:  walletDir,
 		Net:      dex.Simnet,

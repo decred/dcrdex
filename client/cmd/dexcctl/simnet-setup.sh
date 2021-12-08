@@ -37,7 +37,7 @@ fi
 
 if [ $ETH_ON -eq 0 ]; then
 	echo configuring Eth wallet
-	./dexcctl -p abc -p "" --simnet newwallet 60 geth "" '{"appDir":"~/dextest/eth/testnode"}'
+	./dexcctl -p abc -p "" --simnet newwallet 60 geth
 fi
 
 echo registering with DEX
