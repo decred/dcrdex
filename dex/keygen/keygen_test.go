@@ -16,17 +16,17 @@ func TestGenDeepChild(t *testing.T) {
 		t.Fatalf("error getting HD keychain root: %v", err)
 	}
 
-	expectedChild, err := root.Child(1)
+	expectedChild, err := root.ChildBIP32Std(1)
 	if err != nil {
 		t.Fatalf("error deriving child: %v", err)
 	}
 
-	expectedChild, err = expectedChild.Child(2)
+	expectedChild, err = expectedChild.ChildBIP32Std(2)
 	if err != nil {
 		t.Fatalf("error deriving child: %v", err)
 	}
 
-	expectedChild, err = expectedChild.Child(3)
+	expectedChild, err = expectedChild.ChildBIP32Std(3)
 	if err != nil {
 		t.Fatalf("error deriving child: %v", err)
 	}

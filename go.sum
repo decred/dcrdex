@@ -185,8 +185,9 @@ github.com/decred/dcrd/dcrutil/v4 v4.0.0/go.mod h1:QQpX5WVH3/ixVtiW15xZMe+neugXX
 github.com/decred/dcrd/gcs/v3 v3.0.0-20210916172859-ca03de05ecd0/go.mod h1:cfMmjV1ArvX+nemwwq1texW5pD0wrUt5TEw4IYuTmMM=
 github.com/decred/dcrd/gcs/v3 v3.0.0 h1:MjWevhoAzKENUgpaJAbZkJlKDN4HIz2nR/i3laZAT5c=
 github.com/decred/dcrd/gcs/v3 v3.0.0/go.mod h1:/OVb/rYrAz4TCtxcPneYfBs0+YI1pGIp8RA6RUNqOp4=
-github.com/decred/dcrd/hdkeychain/v3 v3.0.1 h1:wvfHa3VY8YW1sB2TzXipCehO6N0u1H6rSsNAYtEE9VY=
 github.com/decred/dcrd/hdkeychain/v3 v3.0.1/go.mod h1:rDCdqwGkcTfEyRheG1g8Wc38appT2C9+D1XTlLy21lo=
+github.com/decred/dcrd/hdkeychain/v3 v3.1.0 h1:NlUjzPMzexbk1PyJu6vrQaiilep5WsEPB0KdhLYrEcE=
+github.com/decred/dcrd/hdkeychain/v3 v3.1.0/go.mod h1:rDCdqwGkcTfEyRheG1g8Wc38appT2C9+D1XTlLy21lo=
 github.com/decred/dcrd/lru v1.0.0/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
 github.com/decred/dcrd/lru v1.1.0 h1:QwT6v8LFKOL3xQ3qtucgRk4pdiawrxIfCbUXWpm+JL4=
 github.com/decred/dcrd/lru v1.1.0/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
