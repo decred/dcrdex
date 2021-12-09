@@ -16,13 +16,10 @@ import (
 func TestFundingCoinID(t *testing.T) {
 	// Decode and encode fundingCoinID
 	var address [20]byte
-	var nonce [8]byte
 	copy(address[:], encode.RandomBytes(20))
-	copy(nonce[:], encode.RandomBytes(8))
 	originalFundingCoin := fundingCoinID{
 		Address: address,
 		Amount:  100,
-		Nonce:   nonce,
 	}
 	encodedFundingCoin := originalFundingCoin.Encode()
 	decodedFundingCoin, err := decodeFundingCoinID(encodedFundingCoin)
@@ -31,9 +28,6 @@ func TestFundingCoinID(t *testing.T) {
 	}
 	if !bytes.Equal(originalFundingCoin.Address[:], decodedFundingCoin.Address[:]) {
 		t.Fatalf("expected address to be equal before and after decoding")
-	}
-	if !bytes.Equal(originalFundingCoin.Nonce[:], decodedFundingCoin.Nonce[:]) {
-		t.Fatalf("expected nonce to be equal before and after decoding")
 	}
 	if originalFundingCoin.Amount != decodedFundingCoin.Amount {
 		t.Fatalf("expected amount to be equal before and after decoding")
