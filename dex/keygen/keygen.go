@@ -28,7 +28,7 @@ func GenDeepChild(seed []byte, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 		err := hdkeychain.ErrInvalidChild
 		for err == hdkeychain.ErrInvalidChild {
 			var kid *hdkeychain.ExtendedKey
-			kid, err = parent.Child(childIdx)
+			kid, err = parent.ChildBIP32Std(childIdx)
 			if err == nil {
 				return kid, nil
 			}
