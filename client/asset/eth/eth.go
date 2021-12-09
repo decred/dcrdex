@@ -789,14 +789,14 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
 	}
 
-	secretHash, _, err := decodeVersionedBytes(contract)
+	_, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("AuditContract: failed to decode versioned bytes: %w", err)
 	}
 
 	var initiation *swapv0.ETHSwapInitiation
 	for _, init := range initiations {
-		if bytes.Equal(init.SecretHash[:], secretHash) {
+		if init.SecretHash == secretHash {
 			initiation = &init
 			break
 		}
@@ -833,7 +833,7 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		Expiration: expiration,
 		Coin:       coin,
 		Contract:   contract,
-		SecretHash: secretHash,
+		SecretHash: secretHash[:],
 	}, nil
 }
 

@@ -395,7 +395,7 @@ func testSendTransaction(t *testing.T) {
 }
 
 func testSendSignedTransaction(t *testing.T) {
-	err := ethClient.unlock(ctx, pw)
+	err := ethClient.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}

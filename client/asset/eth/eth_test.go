@@ -1563,7 +1563,7 @@ func TestAuditContract(t *testing.T) {
 	}{
 		{
 			name:     "ok",
-			contract: versionedBytes(0, secretHashes[1][:]),
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
 			initiations: []swapv0.ETHSwapInitiation{
 				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
@@ -1583,7 +1583,7 @@ func TestAuditContract(t *testing.T) {
 		},
 		{
 			name:     "coin id different than tx hash",
-			contract: versionedBytes(0, secretHashes[0][:]),
+			contract: dexeth.EncodeContractData(0, secretHashes[0]),
 			initiations: []swapv0.ETHSwapInitiation{
 				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
@@ -1602,7 +1602,7 @@ func TestAuditContract(t *testing.T) {
 		},
 		{
 			name:     "contract not part of transaction",
-			contract: versionedBytes(0, secretHashes[2][:]),
+			contract: dexeth.EncodeContractData(0, secretHashes[2]),
 			initiations: []swapv0.ETHSwapInitiation{
 				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
@@ -1621,13 +1621,13 @@ func TestAuditContract(t *testing.T) {
 		},
 		{
 			name:      "cannot parse tx data",
-			contract:  versionedBytes(0, secretHashes[2][:]),
+			contract:  dexeth.EncodeContractData(0, secretHashes[2]),
 			badTxData: true,
 			wantErr:   true,
 		},
 		{
 			name:     "cannot unmarshal tx binary",
-			contract: versionedBytes(0, secretHashes[1][:]),
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
 			initiations: []swapv0.ETHSwapInitiation{
 				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
@@ -1647,7 +1647,7 @@ func TestAuditContract(t *testing.T) {
 		},
 		{
 			name:     "value over max gwei",
-			contract: versionedBytes(0, secretHashes[1][:]),
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
 			initiations: []swapv0.ETHSwapInitiation{
 				swapv0.ETHSwapInitiation{
 					RefundTimestamp: big.NewInt(now),
@@ -1713,11 +1713,11 @@ func TestAuditContract(t *testing.T) {
 			t.Fatalf(`"%v": expected contract %x != actual %x`, test.name, test.contract, auditInfo.Contract)
 		}
 
-		expectedSecretHash, _, err := decodeVersionedBytes(test.contract)
+		_, expectedSecretHash, err := dexeth.DecodeContractData(test.contract)
 		if err != nil {
 			t.Fatalf(`"%v": failed to decode versioned bytes: %v`, test.name, err)
 		}
-		if !bytes.Equal(expectedSecretHash, auditInfo.SecretHash) {
+		if !bytes.Equal(expectedSecretHash[:], auditInfo.SecretHash) {
 			t.Fatalf(`"%v": expected secret hash %x != actual %x`, test.name, expectedSecretHash, auditInfo.SecretHash)
 		}
 	}
