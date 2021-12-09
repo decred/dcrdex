@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -161,6 +162,19 @@ func (n *testNode) signData(addr common.Address, data []byte) ([]byte, error) {
 	}
 
 	return crypto.Sign(crypto.Keccak256(data), n.privKeyForSigning)
+}
+func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+	return nil
+}
+
+func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *types.Transaction {
+	return types.NewTx(&types.DynamicFeeTx{
+		GasFeeCap: dexeth.GweiToWei(gasFeeCap),
+		GasTipCap: dexeth.GweiToWei(gasTipCap),
+		To:        to,
+		Value:     dexeth.GweiToWei(value),
+		Data:      data,
+	})
 }
 
 func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error) {
@@ -1506,6 +1520,206 @@ func TestMaxOrder(t *testing.T) {
 		}
 		if maxOrder.Locked != test.wantLocked {
 			t.Fatalf("want locked %v got %v for test %q", test.wantLocked, maxOrder.Locked, test.name)
+		}
+	}
+}
+
+func overMaxWei() *big.Int {
+	maxInt := ^uint64(0)
+	maxWei := new(big.Int).SetUint64(maxInt)
+	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
+	maxWei.Mul(maxWei, gweiFactorBig)
+	overMaxWei := new(big.Int).Set(maxWei)
+	return overMaxWei.Add(overMaxWei, gweiFactorBig)
+}
+
+func TestAuditContract(t *testing.T) {
+	node := &testNode{}
+	eth := &ExchangeWallet{
+		node: node,
+		log:  tLogger,
+	}
+
+	numSecretHashes := 3
+	secretHashes := make([][32]byte, 0, numSecretHashes)
+	for i := 0; i < numSecretHashes; i++ {
+		var secretHash [32]byte
+		copy(secretHash[:], encode.RandomBytes(32))
+		secretHashes = append(secretHashes, secretHash)
+	}
+
+	now := time.Now().Unix() / 1000
+	laterThanNow := now + 1000
+
+	tests := []struct {
+		name           string
+		contract       dex.Bytes
+		initiations    []swapv0.ETHSwapInitiation
+		differentHash  bool
+		badTxData      bool
+		badTxBinary    bool
+		wantErr        bool
+		wantRecipient  string
+		wantExpiration time.Time
+	}{
+		{
+			name:     "ok",
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     testAddressA,
+					Value:           big.NewInt(1),
+				},
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(laterThanNow),
+					SecretHash:      secretHashes[1],
+					Participant:     testAddressB,
+					Value:           big.NewInt(1),
+				},
+			},
+			wantRecipient:  testAddressB.Hex(),
+			wantExpiration: time.Unix(laterThanNow, 0),
+		},
+		{
+			name:     "coin id different than tx hash",
+			contract: dexeth.EncodeContractData(0, secretHashes[0]),
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     testAddressA,
+					Value:           big.NewInt(1),
+				},
+			},
+			differentHash: true,
+			wantErr:       true,
+		},
+		{
+			name:     "contract is invalid versioned bytes",
+			contract: []byte{},
+			wantErr:  true,
+		},
+		{
+			name:     "contract not part of transaction",
+			contract: dexeth.EncodeContractData(0, secretHashes[2]),
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     testAddressA,
+					Value:           big.NewInt(1),
+				},
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(laterThanNow),
+					SecretHash:      secretHashes[1],
+					Participant:     testAddressB,
+					Value:           big.NewInt(1),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "cannot parse tx data",
+			contract:  dexeth.EncodeContractData(0, secretHashes[2]),
+			badTxData: true,
+			wantErr:   true,
+		},
+		{
+			name:     "cannot unmarshal tx binary",
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     testAddressA,
+					Value:           big.NewInt(1),
+				},
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(laterThanNow),
+					SecretHash:      secretHashes[1],
+					Participant:     testAddressB,
+					Value:           big.NewInt(1),
+				},
+			},
+			badTxBinary: true,
+			wantErr:     true,
+		},
+		{
+			name:     "value over max gwei",
+			contract: dexeth.EncodeContractData(0, secretHashes[1]),
+			initiations: []swapv0.ETHSwapInitiation{
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(now),
+					SecretHash:      secretHashes[0],
+					Participant:     testAddressA,
+					Value:           big.NewInt(1),
+				},
+				swapv0.ETHSwapInitiation{
+					RefundTimestamp: big.NewInt(laterThanNow),
+					SecretHash:      secretHashes[1],
+					Participant:     testAddressB,
+					Value:           overMaxWei(),
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		txData, err := dexeth.PackInitiateData(test.initiations)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if test.badTxData {
+			txData = []byte{0}
+		}
+
+		tx := tTx(2, 300, uint64(len(test.initiations)), &testAddressC, txData)
+		txBinary, err := tx.MarshalBinary()
+		if err != nil {
+			t.Fatalf(`"%v": failed to marshal binary: %v`, test.name, err)
+		}
+		if test.badTxBinary {
+			txBinary = []byte{0}
+		}
+
+		txHash := tx.Hash()
+		if test.differentHash {
+			copy(txHash[:], encode.RandomBytes(32))
+		}
+
+		auditInfo, err := eth.AuditContract(txHash[:], test.contract, txBinary, true)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf(`"%v": expected error but did not get`, test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf(`"%v": unexpected error: %v`, test.name, err)
+		}
+
+		if test.wantRecipient != auditInfo.Recipient {
+			t.Fatalf(`"%v": expected recipient %v != actual %v`, test.name, test.wantRecipient, auditInfo.Recipient)
+		}
+		if test.wantExpiration.Unix() != auditInfo.Expiration.Unix() {
+			t.Fatalf(`"%v": expected expiration %v != actual %v`, test.name, test.wantExpiration, auditInfo.Expiration)
+		}
+		if !bytes.Equal(txHash[:], auditInfo.Coin.ID()) {
+			t.Fatalf(`"%v": tx hash %x != coin id %x`, test.name, txHash, auditInfo.Coin.ID())
+		}
+		if !bytes.Equal(test.contract, auditInfo.Contract) {
+			t.Fatalf(`"%v": expected contract %x != actual %x`, test.name, test.contract, auditInfo.Contract)
+		}
+
+		_, expectedSecretHash, err := dexeth.DecodeContractData(test.contract)
+		if err != nil {
+			t.Fatalf(`"%v": failed to decode versioned bytes: %v`, test.name, err)
+		}
+		if !bytes.Equal(expectedSecretHash[:], auditInfo.SecretHash) {
+			t.Fatalf(`"%v": expected secret hash %x != actual %x`, test.name, expectedSecretHash, auditInfo.SecretHash)
 		}
 	}
 }

@@ -47,6 +47,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
@@ -264,6 +265,7 @@ func TestAccount(t *testing.T) {
 	t.Run("testUnlock", testUnlock)
 	t.Run("testLock", testLock)
 	t.Run("testSendTransaction", testSendTransaction)
+	t.Run("testSendSignedTransaction", testSendSignedTransaction)
 	t.Run("testTransactionReceipt", testTransactionReceipt)
 	t.Run("testSignMessage", testSignMessage)
 }
@@ -375,6 +377,76 @@ func testSendTransaction(t *testing.T) {
 	bal, _ := ethClient.balance(ctx)
 
 	if bal.PendingOut.Cmp(new(big.Int).Add(dexeth.GweiToWei(1), fees)) != 0 {
+		t.Fatalf("pending out not showing")
+	}
+
+	spew.Dump(tx)
+	if err := waitForMined(t, time.Second*10, false); err != nil {
+		t.Fatal(err)
+	}
+
+	confs, err = ethClient.transactionConfirmations(ctx, txHash)
+	if err != nil {
+		t.Fatalf("transactionConfirmations error after mining: %v", err)
+	}
+	if confs == 0 {
+		t.Fatalf("zero confs after mining")
+	}
+}
+
+func testSendSignedTransaction(t *testing.T) {
+	err := ethClient.unlock(pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Checking confirmations for a random hash should result in not found error.
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+	_, err = ethClient.transactionConfirmations(ctx, txHash)
+	if !errors.Is(err, asset.CoinNotFoundError) {
+		t.Fatalf("no CoinNotFoundError")
+	}
+
+	ethClient.nonceSendMtx.Lock()
+	defer ethClient.nonceSendMtx.Unlock()
+	nonce, err := ethClient.leth.ApiBackend.GetPoolNonce(ctx, ethClient.creds.addr)
+	if err != nil {
+		t.Fatalf("error getting nonce: %v", err)
+	}
+	tx := types.NewTx(&types.DynamicFeeTx{
+		To:        &simnetAddr,
+		ChainID:   ethClient.chainID,
+		Nonce:     nonce,
+		Gas:       21000,
+		GasFeeCap: dexeth.GweiToWei(300),
+		GasTipCap: dexeth.GweiToWei(2),
+		Value:     dexeth.GweiToWei(1),
+		Data:      []byte{},
+	})
+	tx, err = ethClient.signTransaction(simnetAddr, tx)
+
+	err = ethClient.sendSignedTransaction(ctx, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txHash = tx.Hash()
+
+	confs, err := ethClient.transactionConfirmations(ctx, txHash)
+	if err != nil {
+		t.Fatalf("transactionConfirmations error: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("%d confs reported for unmined transaction", confs)
+	}
+
+	bal, _ := ethClient.balance(ctx)
+	if bal.PendingIn.Cmp(dexeth.GweiToWei(1)) != 0 { // We sent it to ourselves.
+		t.Fatalf("pending in not showing")
+	}
+
+	if bal.PendingOut.Cmp(dexeth.GweiToWei(1)) != 0 {
 		t.Fatalf("pending out not showing")
 	}
 
