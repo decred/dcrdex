@@ -24,7 +24,6 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -789,17 +788,16 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		return nil, fmt.Errorf("AuditContract: coin id != txHash - coin id: %x, txHash: %x", coinID, tx.Hash())
 	}
 
-	initiations, err := dexeth.ParseInitiateData(tx.Data())
+	version, secretHash, err := dexeth.DecodeContractData(contract)
+	if err != nil {
+		return nil, fmt.Errorf("AuditContract: failed to decode contract data: %w", err)
+	}
+
+	initiations, err := dexeth.ParseInitiateData(tx.Data(), version)
 	if err != nil {
 		return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
 	}
-
-	_, secretHash, err := dexeth.DecodeContractData(contract)
-	if err != nil {
-		return nil, fmt.Errorf("AuditContract: failed to decode versioned bytes: %w", err)
-	}
-
-	var initiation *swapv0.ETHSwapInitiation
+	var initiation *dexeth.Initiation
 	for _, init := range initiations {
 		if init.SecretHash == secretHash {
 			initiation = &init
@@ -810,16 +808,9 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		return nil, errors.New("AuditContract: tx does not initiate secret hash")
 	}
 
-	expiration := time.Unix(initiation.RefundTimestamp.Int64(), 0)
-	recipient := initiation.Participant.Hex()
-	gweiVal, err := dexeth.ToGwei(initiation.Value)
-	if err != nil {
-		return nil, fmt.Errorf("AuditContract: failed to convert value to gwei: %w", err)
-	}
-
 	coin := &coin{
 		id:    coinID,
-		value: gweiVal,
+		value: initiation.Value,
 	}
 
 	// The counter-party should have broadcasted the contract tx but rebroadcast
@@ -834,8 +825,8 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	}
 
 	return &asset.AuditInfo{
-		Recipient:  recipient,
-		Expiration: expiration,
+		Recipient:  initiation.Participant.Hex(),
+		Expiration: initiation.LockTime,
 		Coin:       coin,
 		Contract:   contract,
 		SecretHash: secretHash[:],

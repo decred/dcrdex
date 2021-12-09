@@ -13,7 +13,6 @@ import (
 	"math/big"
 
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -109,11 +108,11 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 
 	switch sct {
 	case sctInit:
-		initiations, err := dexeth.ParseInitiateData(txdata) // TODO: make version aware with version independent return type
+		initiations, err := dexeth.ParseInitiateData(txdata, contractVer)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
 		}
-		var initiation *swapv0.ETHSwapInitiation
+		var initiation *dexeth.Initiation
 		for _, init := range initiations {
 			// contractData points us to the init of interest.
 			if init.SecretHash == secretHash {
@@ -126,13 +125,13 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 				txHash, secretHash)
 		}
 		counterParty = &initiation.Participant
-		locktime = initiation.RefundTimestamp.Int64()
+		locktime = initiation.LockTime.Unix()
 	case sctRedeem:
-		redemptions, err := dexeth.ParseRedeemData(txdata)
+		redemptions, err := dexeth.ParseRedeemData(txdata, contractVer)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
 		}
-		var redemption *swapv0.ETHSwapRedemption
+		var redemption *dexeth.Redemption
 		for _, redeem := range redemptions {
 			// contractData points us to the redeem of interest.
 			if redeem.SecretHash == secretHash {

@@ -239,7 +239,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 	if *tx.To() != c.contractAddr {
 		return 0, nil
 	}
-	if redeems, err := dexeth.ParseRedeemData(tx.Data()); err == nil {
+	if redeems, err := dexeth.ParseRedeemData(tx.Data(), 0); err == nil {
 		var redeemed uint64
 		for _, redeem := range redeems {
 			swap, err := c.swap(ctx, redeem.SecretHash)
@@ -250,7 +250,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 		}
 		return redeemed, nil
 	}
-	secretHash, err := dexeth.ParseRefundData(tx.Data())
+	secretHash, err := dexeth.ParseRefundData(tx.Data(), 0)
 	if err != nil {
 		return 0, nil
 	}
