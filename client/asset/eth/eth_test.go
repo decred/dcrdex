@@ -465,6 +465,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		ctx:         ctx,
 		log:         tLogger,
 		lockedFunds: make(map[string]uint64),
+		gasFeeLimit: 200,
 	}
 
 	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
@@ -527,7 +528,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, err := eth.FundOrder(&order)
 	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
-	expctedRefundFees := dexeth.RefundGas(0) * order.DEXConfig.MaxFeeRate
+	expctedRefundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
 	expectedFees := expectedOrderFees + expctedRefundFees
 	expectedCoinValue := order.Value + expectedFees
 	checkFundOrderResult(coins1, redeemScripts1, err, fundOrderTest{
@@ -583,6 +584,15 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		t.Fatalf("balance error should cause error but did not")
 	}
 	node.balErr = nil
+
+	// Test eth wallet gas fee limit > server MaxFeeRate causes error
+	tmpGasFeeLimit := eth.gasFeeLimit
+	eth.gasFeeLimit = order.DEXConfig.MaxFeeRate - 1
+	_, _, err = eth.FundOrder(&order)
+	if err == nil {
+		t.Fatalf("eth wallet gas fee limit > server MaxFeeRate should cause error")
+	}
+	eth.gasFeeLimit = tmpGasFeeLimit
 
 	eth2 := &ExchangeWallet{
 		node:        node,
@@ -1923,6 +1933,59 @@ func TestSwapConfirmation(t *testing.T) {
 	state.BlockHeight = 6
 	state.State = dexeth.SSRedeemed
 	checkResult(false, 1, true)
+}
+
+func TestDriverOpen(t *testing.T) {
+	drv := &Driver{}
+	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
+	tmpDir, _ := os.MkdirTemp("", "")
+	defer os.RemoveAll(tmpDir)
+
+	err := CreateWallet(&asset.CreateWalletParams{
+		Type:     walletTypeGeth,
+		Seed:     encode.RandomBytes(32),
+		Pass:     encode.RandomBytes(32),
+		Settings: make(map[string]string),
+		DataDir:  tmpDir,
+		Net:      dex.Testnet,
+		Logger:   logger,
+	})
+	if err != nil {
+		t.Fatalf("CreateWallet error: %v", err)
+	}
+
+	// Make sure default gas fee limit is used when nothing is set
+	cfg := &asset.WalletConfig{
+		Type:     walletTypeGeth,
+		Settings: make(map[string]string),
+		DataDir:  tmpDir,
+	}
+	wallet, err := drv.Open(cfg, logger, dex.Testnet)
+	if err != nil {
+		t.Fatalf("driver open error: %v", err)
+	}
+	eth, ok := wallet.(*ExchangeWallet)
+	if !ok {
+		t.Fatalf("failed to cast wallet as ExchangeWallet")
+	}
+	if eth.gasFeeLimit != defaultGasFeeLimit {
+		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit)
+	}
+	eth.shutdown()
+
+	// Make sure gas fee limit is properly parsed from settings
+	cfg.Settings["gasfeelimit"] = "150"
+	wallet, err = drv.Open(cfg, logger, dex.Testnet)
+	if err != nil {
+		t.Fatalf("driver open error: %v", err)
+	}
+	eth, ok = wallet.(*ExchangeWallet)
+	if !ok {
+		t.Fatalf("failed to cast wallet as ExchangeWallet")
+	}
+	if eth.gasFeeLimit != 150 {
+		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit)
+	}
 }
 
 func TestDriverExists(t *testing.T) {

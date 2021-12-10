@@ -21,6 +21,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
@@ -54,7 +55,6 @@ var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
 	configOpts  = []*asset.ConfigOption{
-		// TODO: Use this limit.
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -91,6 +91,21 @@ var (
 
 	findRedemptionCoinID = []byte("FindRedemption Coin")
 )
+
+// WalletConfig are wallet-level configuration settings.
+type WalletConfig struct {
+	GasFeeLimit uint64 `ini:"gasfeelimit"`
+}
+
+// parseWalletConfig parses the settings map into a *WalletConfig.
+func parseWalletConfig(settings map[string]string) (cfg *WalletConfig, err error) {
+	cfg = new(WalletConfig)
+	err = config.Unmapify(settings, &cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing wallet config: %w", err)
+	}
+	return cfg, nil
+}
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -181,6 +196,8 @@ type ExchangeWallet struct {
 	log       dex.Logger
 	tipChange func(error)
 
+	gasFeeLimit uint64
+
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
 
@@ -245,12 +262,23 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		return nil, err
 	}
 
+	cfg, err := parseWalletConfig(assetCFG.Settings)
+	if err != nil {
+		return nil, err
+	}
+
+	gasFeeLimit := cfg.GasFeeLimit
+	if gasFeeLimit == 0 {
+		gasFeeLimit = defaultGasFeeLimit
+	}
+
 	return &ExchangeWallet{
 		log:                logger,
 		net:                net,
 		node:               cl,
 		addr:               cl.address(),
 		tipChange:          assetCFG.TipChange,
+		gasFeeLimit:        gasFeeLimit,
 		lockedFunds:        make(map[string]uint64),
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 	}, nil
@@ -473,8 +501,15 @@ func (eth *ExchangeWallet) createFundingCoin(amount uint64) *coin {
 // selected coins, but since there are no redeem scripts in Ethereum, nil is returned.
 // Equal number of coins and redeem scripts must be returned.
 func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+	if eth.gasFeeLimit < ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf(
+			"%v: server's max fee rate %v higher than configured fee rate limit %v",
+			ord.DEXConfig.Symbol,
+			ord.DEXConfig.MaxFeeRate,
+			eth.gasFeeLimit)
+	}
 	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
-	refundFees := dexeth.RefundGas(0) * ord.DEXConfig.MaxFeeRate
+	refundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
 	fundsNeeded := ord.Value + maxSwapFees + refundFees
 	coins := asset.Coins{eth.createFundingCoin(fundsNeeded)}
 	eth.lockedFundsMtx.Lock()
