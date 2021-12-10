@@ -49,10 +49,12 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 const (
@@ -270,7 +272,6 @@ func syncClient(cl *nodeClient) error {
 }
 
 func TestBasicRetrieval(t *testing.T) {
-	syncClient(ethClient)
 	t.Run("testBestBlockHash", testBestBlockHash)
 	t.Run("testBestHeader", testBestHeader)
 	t.Run("testBlock", testBlock)
@@ -293,11 +294,7 @@ func TestAccount(t *testing.T) {
 	t.Run("testSignMessage", testSignMessage)
 }
 
-// TestContract tests methods that interact with the contract. TestContract
-// tests have balance checks that include a buffer equating to 1 gwei / gas on
-// the tx fees. In theory, we should be able to get within 1 gwei absolute. On
-// fresh harness, we can never hit that target. After a few blocks, we usually
-// can. That's weird.
+// TestContract tests methods that interact with the contract.
 func TestContract(t *testing.T) {
 	t.Run("testSwap", testSwap)
 	t.Run("testInitiate", testInitiate)
@@ -477,11 +474,14 @@ func testSendSignedTransaction(t *testing.T) {
 	}
 
 	bal, _ := ethClient.balance(ctx)
-	if bal.PendingIn.Cmp(dexeth.GweiToWei(1)) != 0 { // We sent it to ourselves.
-		t.Fatalf("pending in not showing")
-	}
 
-	if bal.PendingOut.Cmp(dexeth.GweiToWei(1)) != 0 {
+	// Removed pending issue #1342 resolution.
+	//if bal.PendingIn.Cmp(dexeth.GweiToWei(1)) != 0 { // We sent it to ourselves.
+	//	t.Fatalf("pending in not showing")
+	//}
+
+	fee := uint64(21000 * 300) // gwei
+	if bal.PendingOut.Cmp(dexeth.GweiToWei(1+fee)) != 0 {
 		t.Fatalf("pending out not showing")
 	}
 
@@ -578,6 +578,18 @@ func TestInitiateGas(t *testing.T) {
 		fmt.Printf("Gas used for batch initiating %v swaps: %v. %v more than previous \n", i, gas, gas-previousGas)
 		previousGas = gas
 	}
+}
+
+func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int, err error) {
+	hdr, err := n.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
+	if err != nil {
+		return nil, err
+	}
+	base := misc.CalcBaseFee(n.leth.ApiBackend.ChainConfig(), hdr)
+
+	tip := new(big.Int).Set(minGasTipCap)
+
+	return base.Add(base, tip), nil
 }
 
 func testInitiate(t *testing.T) {
@@ -684,11 +696,6 @@ func testInitiate(t *testing.T) {
 			originalStates[testSwap.SecretHash.String()] = dexeth.SwapStep(swap.State)
 		}
 
-		baseFee, _, err := ethClient.netFeeState(ctx)
-		if err != nil {
-			t.Fatalf("%s: netFeeState error: %v", test.name, err)
-		}
-
 		tx, err := ethClient.initiate(ctx, test.swaps, maxFeeRate, 0)
 		if err != nil {
 			if test.swapErr {
@@ -718,8 +725,12 @@ func testInitiate(t *testing.T) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 
+		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+		if err != nil {
+			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
+		}
 		bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		txFee := new(big.Int).Mul(bigGasUsed, baseFee) // DRAFT NOTE: Why don't I need to add the tip?
+		txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
 		wantBal := new(big.Int).Sub(originalBal.Current, txFee)
 		if test.success {
 			for _, swap := range test.swaps {
@@ -728,9 +739,9 @@ func testInitiate(t *testing.T) {
 		}
 
 		diff := new(big.Int).Abs(new(big.Int).Sub(wantBal, bal.Current))
-		if dexeth.WeiToGwei(diff) > receipt.GasUsed { // See TestContract notes
+		if diff.Cmp(new(big.Int)) != 0 {
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %d",
-				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal.Current), dexeth.WeiToGwei(diff))
+				test.name, wantBal, bal.Current, diff)
 		}
 
 		for _, testSwap := range test.swaps {
@@ -981,7 +992,6 @@ func testRedeem(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
-		baseFee, _, _ := test.redeemerClient.netFeeState(ctx)
 		for i, redemption := range test.redemptions {
 			expected := test.isRedeemable[i]
 			isRedeemable, err := test.redeemerClient.isRedeemable(bytesToArray(redemption.Spends.SecretHash), bytesToArray(redemption.Secret), 0)
@@ -1034,17 +1044,21 @@ func testRedeem(t *testing.T) {
 			t.Fatalf("%s: redeemer balance error: %v", test.name, err)
 		}
 
+		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+		if err != nil {
+			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
+		}
 		bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		txFee := new(big.Int).Mul(bigGasUsed, baseFee)
+		txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
 		wantBal := new(big.Int).Sub(originalBal.Current, txFee)
 		if test.addAmt {
 			wantBal.Add(wantBal, dexeth.GweiToWei(uint64(len(test.redemptions))))
 		}
 
 		diff := new(big.Int).Abs(new(big.Int).Sub(wantBal, bal.Current))
-		if dexeth.WeiToGwei(diff) > receipt.GasUsed { // See TestContract notes
+		if diff.Cmp(new(big.Int)) != 0 {
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %d",
-				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal.Current), dexeth.WeiToGwei(diff))
+				test.name, wantBal, bal.Current, diff)
 		}
 
 		for i, redemption := range test.redemptions {
@@ -1201,8 +1215,7 @@ func testRefund(t *testing.T) {
 				test.name, test.isRefundable, isRefundable)
 		}
 
-		baseFee, _, _ := test.refunderClient.netFeeState(ctx)
-		tx, err := test.refunderClient.refund(ctx, secretHash, 200, 0)
+		tx, err := test.refunderClient.refund(ctx, secretHash, maxFeeRate, 0)
 		if err != nil {
 			t.Fatalf("%s: refund error: %v", test.name, err)
 		}
@@ -1236,16 +1249,21 @@ func testRefund(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
-		txFee := new(big.Int).Mul(big.NewInt(int64(receipt.GasUsed)), baseFee)
+		gasPrice, err := feesAtBlk(ctx, test.refunderClient, receipt.BlockNumber.Int64()-1)
+		if err != nil {
+			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
+		}
+		bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+		txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
 		wantBal := new(big.Int).Sub(originalBal.Current, txFee)
 		if test.addAmt {
 			wantBal.Add(wantBal, dexeth.GweiToWei(amt))
 		}
 
 		diff := new(big.Int).Abs(new(big.Int).Sub(wantBal, bal.Current))
-		if dexeth.WeiToGwei(diff) > receipt.GasUsed { // See TestContract notes
+		if diff.Cmp(new(big.Int)) != 0 {
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %d",
-				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal.Current), dexeth.WeiToGwei(diff))
+				test.name, wantBal, bal.Current, diff)
 		}
 
 		swap, err = test.refunderClient.swap(ctx, secretHash, 0)
@@ -1986,11 +2004,6 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	baseFee, _, err := ethClient.netFeeState(ctx)
-	if err != nil {
-		t.Fatalf("netFeeState error: %v", err)
-	}
-
 	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
@@ -2090,8 +2103,12 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txFee := new(big.Int).Mul(big.NewInt(int64(receipt.GasUsed)), baseFee)
-
+	gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+	if err != nil {
+		t.Fatalf("feesAtBlk error: %v", err)
+	}
+	bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+	txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
 	wantBal := new(big.Int).Sub(originalAcctBal.Current, txFee)
 
 	acctBal, err := ethClient.balance(ctx)

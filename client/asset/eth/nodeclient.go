@@ -226,6 +226,8 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 
 	for _, tx := range pendingTxs {
 		from, _ := ethSigner.Sender(tx) // zero Address on error
+		// Intentionally ignoring receives from addresses that do not
+		// belong to us.
 		if from != n.creds.addr {
 			continue
 		}
@@ -285,9 +287,12 @@ func (n *nodeClient) sendToAddr(ctx context.Context, addr common.Address, amt ui
 
 // transactionReceipt retrieves the transaction's receipt.
 func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-	_, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
+	tx, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
-		return nil, nil
+		return nil, err
+	}
+	if tx == nil {
+		return nil, fmt.Errorf("transaction %v not found", txHash)
 	}
 	receipts, err := n.leth.ApiBackend.GetReceipts(ctx, blockHash)
 	if err != nil {
@@ -540,7 +545,7 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 	// tx pool, and when our peers are ready to supply the info. I saw a
 	// CoinNotFoundError in TestAccount/testSendTransaction, but haven't
 	// reproduced.
-	return 0, asset.CoinNotFoundError
+	return 0, fmt.Errorf("cannot find %v: %w", txHash, asset.CoinNotFoundError)
 }
 
 // sendSignedTransaction injects a signed transaction into the pending pool for execution.
