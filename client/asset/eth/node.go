@@ -9,7 +9,6 @@ package eth
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -271,7 +270,7 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 	ks := backends[0].(*keystore.KeyStore)
 	accounts := ks.Accounts()
 	if len(accounts) == 0 {
-		_, err = ks.ImportECDSA(ecdsaPrivateKey, hex.EncodeToString(password))
+		_, err = ks.ImportECDSA(ecdsaPrivateKey, string(password))
 		return err
 	} else if len(accounts) == 1 {
 		address := crypto.PubkeyToAddress(ecdsaPrivateKey.PublicKey)

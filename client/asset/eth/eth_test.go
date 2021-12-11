@@ -185,34 +185,6 @@ func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint3
 	return 0, nil
 }
 
-func TestLoadConfig(t *testing.T) {
-	tests := []struct {
-		name    string
-		network dex.Network
-		wantErr bool
-	}{{
-		name:    "ok",
-		network: dex.Simnet,
-	}, {
-		name:    "mainnet not allowed",
-		network: dex.Mainnet,
-		wantErr: true,
-	}}
-
-	for _, test := range tests {
-		_, err := loadConfig(nil, test.network)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
-	}
-}
-
 func TestCheckForNewBlocks(t *testing.T) {
 	header0 := &types.Header{Number: new(big.Int)}
 	block0 := types.NewBlockWithHeader(header0)

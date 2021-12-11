@@ -44,7 +44,7 @@ var (
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
 			dex.Mainnet: common.Address{},
-			dex.Simnet:  common.Address{},
+			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 			dex.Testnet: common.Address{},
 		},
 	}

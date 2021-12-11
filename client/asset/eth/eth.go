@@ -91,10 +91,6 @@ var (
 	minGasTipCap = dexeth.GweiToWei(2)
 )
 
-// Check that Driver implements asset.Driver.
-var _ asset.Driver = (*Driver)(nil)
-var _ asset.Creator = (*Driver)(nil)
-
 // Driver implements asset.Driver.
 type Driver struct{}
 
