@@ -2095,7 +2095,7 @@ func TestFindRedemption(t *testing.T) {
 	baseCtx := context.Background()
 
 	runTest := func(tag string, wantErr bool, initStep dexeth.SwapStep) {
-		// Check at the beginning. The queue should always be empty.
+		// The queue should always be empty.
 		eth.findRedemptionMtx.RLock()
 		reqsPending := len(eth.findRedemptionReqs) > 0
 		eth.findRedemptionMtx.RUnlock()
@@ -2154,6 +2154,12 @@ func TestFindRedemption(t *testing.T) {
 	runWithUpdate("redeemed after queuing", false, dexeth.SSInitiated, func() {
 		state.State = dexeth.SSRedeemed
 	})
+
+	// Doesn't exist
+	runTest("already refunded", true, dexeth.SSNone)
+
+	// Unknown swap state
+	runTest("already refunded", true, dexeth.SwapStep(^uint8(0)))
 
 	// Already refunded
 	runTest("already refunded", true, dexeth.SSRefunded)

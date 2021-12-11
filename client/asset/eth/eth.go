@@ -971,15 +971,17 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 		return nil, err
 	}
 
-	if swap.State == dexeth.SSRefunded {
+	switch swap.State {
+	case dexeth.SSInitiated:
+		return nil, nil // no redeem yet, but keep checking
+	case dexeth.SSRedeemed:
+		return swap.Secret[:], nil
+	case dexeth.SSNone:
+		return nil, fmt.Errorf("swap %x does not exist", secretHash)
+	case dexeth.SSRefunded:
 		return nil, fmt.Errorf("swap %x is already refunded", secretHash)
 	}
-
-	if swap.State == dexeth.SSRedeemed {
-		return swap.Secret[:], nil
-	}
-
-	return nil, nil
+	return nil, fmt.Errorf("unrecognized swap state %v", swap.State)
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
