@@ -116,7 +116,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 		for _, init := range initiations {
 			// contractData points us to the init of interest.
 			if init.SecretHash == secretHash {
-				initiation = &init
+				initiation = init
 				break
 			}
 		}
@@ -135,7 +135,7 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 		for _, redeem := range redemptions {
 			// contractData points us to the redeem of interest.
 			if redeem.SecretHash == secretHash {
-				redemption = &redeem
+				redemption = redeem
 				break
 			}
 		}

@@ -800,7 +800,7 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	var initiation *dexeth.Initiation
 	for _, init := range initiations {
 		if init.SecretHash == secretHash {
-			initiation = &init
+			initiation = init
 			break
 		}
 	}

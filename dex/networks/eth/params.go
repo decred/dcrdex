@@ -189,7 +189,7 @@ type Initiation struct {
 	LockTime    time.Time
 	SecretHash  [32]byte
 	Participant common.Address
-	Value       uint64
+	Value       uint64 // gwei
 }
 
 // Redemption is the data used to redeem a swap.

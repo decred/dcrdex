@@ -20,7 +20,7 @@ func mustParseHex(s string) []byte {
 	return b
 }
 
-func initiationsAreEqual(a, b Initiation) bool {
+func initiationsAreEqual(a, b *Initiation) bool {
 	return a.LockTime == b.LockTime &&
 		a.SecretHash == b.SecretHash &&
 		a.Participant == b.Participant &&
@@ -36,14 +36,14 @@ func TestParseInitiateDataV0(t *testing.T) {
 
 	locktime := int64(1632112916)
 
-	initiations := []Initiation{
-		Initiation{
+	initiations := []*Initiation{
+		&Initiation{
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashA,
 			Participant: participantAddr,
 			Value:       1,
 		},
-		Initiation{
+		&Initiation{
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashB,
 			Participant: participantAddr,
@@ -121,7 +121,7 @@ func TestParseInitiateDataV0(t *testing.T) {
 	}
 }
 
-func redemptionsAreEqual(a, b Redemption) bool {
+func redemptionsAreEqual(a, b *Redemption) bool {
 	return a.SecretHash == b.SecretHash &&
 		a.Secret == b.Secret
 }
@@ -133,12 +133,12 @@ func TestParseRedeemDataV0(t *testing.T) {
 	copy(secretHashB[:], mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546"))
 	copy(secretB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
 
-	redemptions := []Redemption{
-		Redemption{
+	redemptions := []*Redemption{
+		&Redemption{
 			Secret:     secretA,
 			SecretHash: secretHashA,
 		},
-		Redemption{
+		&Redemption{
 			Secret:     secretB,
 			SecretHash: secretHashB,
 		},

@@ -1553,7 +1553,7 @@ func TestAuditContract(t *testing.T) {
 	tests := []struct {
 		name           string
 		contract       dex.Bytes
-		initiations    []dexeth.Initiation
+		initiations    []*dexeth.Initiation
 		differentHash  bool
 		badTxData      bool
 		badTxBinary    bool
@@ -1564,14 +1564,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "ok",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
-			initiations: []dexeth.Initiation{
-				dexeth.Initiation{
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
@@ -1584,8 +1584,8 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "coin id different than tx hash",
 			contract: dexeth.EncodeContractData(0, secretHashes[0]),
-			initiations: []dexeth.Initiation{
-				dexeth.Initiation{
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
@@ -1603,14 +1603,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "contract not part of transaction",
 			contract: dexeth.EncodeContractData(0, secretHashes[2]),
-			initiations: []dexeth.Initiation{
-				dexeth.Initiation{
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
@@ -1628,14 +1628,14 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "cannot unmarshal tx binary",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
-			initiations: []dexeth.Initiation{
-				dexeth.Initiation{
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				dexeth.Initiation{
+				&dexeth.Initiation{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
