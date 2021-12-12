@@ -126,7 +126,7 @@ func (t *txDataHandlerV0) parseInitiateData(calldata []byte) (map[[SecretHashSiz
 		_ = swapv0.ETHSwapInitiation(initiations[0])
 	}
 
-	toReturn := make(map[[SecretHashSize]byte]*Initiation)
+	toReturn := make(map[[SecretHashSize]byte]*Initiation, len(initiations))
 	for _, init := range initiations {
 		gweiValue, err := ToGwei(init.Value)
 		if err != nil {
@@ -175,7 +175,7 @@ func (t *txDataHandlerV0) parseRedeemData(calldata []byte) (map[[SecretHashSize]
 		_ = swapv0.ETHSwapRedemption(redemptions[0])
 	}
 
-	toReturn := make(map[[SecretHashSize]byte]*Redemption)
+	toReturn := make(map[[SecretHashSize]byte]*Redemption, len(redemptions))
 	for _, redemption := range redemptions {
 		toReturn[redemption.SecretHash] = &Redemption{
 			SecretHash: redemption.SecretHash,
