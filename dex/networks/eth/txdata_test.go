@@ -6,11 +6,42 @@ package eth
 import (
 	"bytes"
 	"encoding/hex"
+	"math/big"
 	"testing"
 	"time"
 
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func packInitiateDataV0(initiations []*Initiation) ([]byte, error) {
+	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
+	for _, init := range initiations {
+		bigVal := new(big.Int).SetUint64(init.Value)
+		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
+			SecretHash:      init.SecretHash,
+			Participant:     init.Participant,
+			Value:           new(big.Int).Mul(bigVal, BigGweiFactor),
+		})
+	}
+	return (*ABIs[0]).Pack("initiate", abiInitiations)
+}
+
+func packRedeemDataV0(redemptions []*Redemption) ([]byte, error) {
+	abiRedemptions := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
+	for _, redeem := range redemptions {
+		abiRedemptions = append(abiRedemptions, swapv0.ETHSwapRedemption{
+			Secret:     redeem.Secret,
+			SecretHash: redeem.SecretHash,
+		})
+	}
+	return (*ABIs[0]).Pack("redeem", abiRedemptions)
+}
+
+func packRefundDataV0(secretHash [32]byte) ([]byte, error) {
+	return (*ABIs[0]).Pack("refund", secretHash)
+}
 
 func mustParseHex(s string) []byte {
 	b, err := hex.DecodeString(s)
@@ -50,7 +81,7 @@ func TestParseInitiateDataV0(t *testing.T) {
 			Value:       1,
 		},
 	}
-	calldata, err := PackInitiateData(initiations, 0)
+	calldata, err := packInitiateDataV0(initiations)
 	if err != nil {
 		t.Fatalf("unale to pack abi: %v", err)
 	}
@@ -112,10 +143,10 @@ func TestParseInitiateDataV0(t *testing.T) {
 			t.Fatalf("expected %d initiations but got %d", len(initiations), len(parsedInitiations))
 		}
 
-		for i := range initiations {
-			if !initiationsAreEqual(parsedInitiations[i], initiations[i]) {
+		for _, init := range initiations {
+			if !initiationsAreEqual(parsedInitiations[init.SecretHash], init) {
 				t.Fatalf("expected initiations to be equal. original: %v, parsed: %v",
-					initiations[i], parsedInitiations[i])
+					init, parsedInitiations[init.SecretHash])
 			}
 		}
 	}
@@ -143,7 +174,7 @@ func TestParseRedeemDataV0(t *testing.T) {
 			SecretHash: secretHashB,
 		},
 	}
-	calldata, err := PackRedeemData(redemptions, 0)
+	calldata, err := packRedeemDataV0(redemptions)
 	if err != nil {
 		t.Fatalf("unable to pack abi: %v", err)
 	}
@@ -205,10 +236,10 @@ func TestParseRedeemDataV0(t *testing.T) {
 			t.Fatalf("expected %d redemptions but got %d", len(redemptions), len(parsedRedemptions))
 		}
 
-		for i := range redemptions {
-			if !redemptionsAreEqual(redemptions[i], parsedRedemptions[i]) {
+		for _, redemption := range redemptions {
+			if !redemptionsAreEqual(redemption, parsedRedemptions[redemption.SecretHash]) {
 				t.Fatalf("expected redemptions to be equal. original: %v, parsed: %v",
-					redemptions[i], parsedRedemptions[i])
+					redemption, parsedRedemptions[redemption.SecretHash])
 			}
 		}
 	}
@@ -218,7 +249,7 @@ func TestParseRefundDataV0(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561"))
 
-	calldata, err := PackRefundData(secretHash, 0)
+	calldata, err := packRefundDataV0(secretHash)
 	if err != nil {
 		t.Fatalf("unale to pack abi: %v", err)
 	}

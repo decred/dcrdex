@@ -112,15 +112,8 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
 		}
-		var initiation *dexeth.Initiation
-		for _, init := range initiations {
-			// contractData points us to the init of interest.
-			if init.SecretHash == secretHash {
-				initiation = init
-				break
-			}
-		}
-		if initiation == nil {
+		initiation, ok := initiations[secretHash]
+		if !ok {
 			return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x",
 				txHash, secretHash)
 		}
@@ -131,15 +124,8 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
 		}
-		var redemption *dexeth.Redemption
-		for _, redeem := range redemptions {
-			// contractData points us to the redeem of interest.
-			if redeem.SecretHash == secretHash {
-				redemption = redeem
-				break
-			}
-		}
-		if redemption == nil {
+		redemption, ok := redemptions[secretHash]
+		if !ok {
 			return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x",
 				txHash, secretHash)
 		}

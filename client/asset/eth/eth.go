@@ -797,14 +797,9 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	if err != nil {
 		return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
 	}
-	var initiation *dexeth.Initiation
-	for _, init := range initiations {
-		if init.SecretHash == secretHash {
-			initiation = init
-			break
-		}
-	}
-	if initiation == nil {
+
+	initiation, ok := initiations[secretHash]
+	if !ok {
 		return nil, errors.New("AuditContract: tx does not initiate secret hash")
 	}
 

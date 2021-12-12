@@ -21,7 +21,7 @@ import (
 // specific version of the swap contract. It returns the the list of initiations
 // done in the call and errors if the call data does not call initiate initiate
 // with expected argument types.
-func ParseInitiateData(calldata []byte, contractVersion uint32) ([]*Initiation, error) {
+func ParseInitiateData(calldata []byte, contractVersion uint32) (map[[SecretHashSize]byte]*Initiation, error) {
 	txDataHandler, ok := txDataHandlers[contractVersion]
 	if !ok {
 		return nil, fmt.Errorf("contract version %v does not exist", contractVersion)
@@ -34,7 +34,7 @@ func ParseInitiateData(calldata []byte, contractVersion uint32) ([]*Initiation, 
 // specific version of the swap contract. It returns the the list of redemptions
 // done in the call and errors if the call data does not call redeem with expected
 // argument types.
-func ParseRedeemData(calldata []byte, contractVersion uint32) ([]*Redemption, error) {
+func ParseRedeemData(calldata []byte, contractVersion uint32) (map[[SecretHashSize]byte]*Redemption, error) {
 	txDataHandler, ok := txDataHandlers[contractVersion]
 	if !ok {
 		return nil, fmt.Errorf("contract version %v does not exist", contractVersion)
@@ -55,46 +55,24 @@ func ParseRefundData(calldata []byte, contractVersion uint32) ([32]byte, error) 
 	return txDataHandler.parseRefundData(calldata)
 }
 
-// PackInitiateData converts a list of Initiation to the call data for the
-// initiate function for the contract specified by contractVersion.
-func PackInitiateData(initiations []*Initiation, contractVersion uint32) ([]byte, error) {
-	txDataHandler, ok := txDataHandlers[contractVersion]
-	if !ok {
-		return nil, fmt.Errorf("contract version %v does not exist", contractVersion)
+// ABIs maps each swap contract's version to that version's parsed ABI.
+var ABIs = initAbis()
+
+func initAbis() map[uint32]*abi.ABI {
+	v0ABI, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse abi: %v", err))
 	}
 
-	return txDataHandler.packInitiateData(initiations)
-}
-
-// PackRedeemData converts a list of Redemption to the call data for the redeem
-// function for the contract specified by contractVersion.
-func PackRedeemData(redemptions []*Redemption, contractVersion uint32) ([]byte, error) {
-	txDataHandler, ok := txDataHandlers[contractVersion]
-	if !ok {
-		return nil, fmt.Errorf("contract version %v does not exist", contractVersion)
+	return map[uint32]*abi.ABI{
+		0: &v0ABI,
 	}
-
-	return txDataHandler.packRedeemData(redemptions)
-}
-
-// PackRefundData converts a secret hash to the call data for the refund function
-// for the contract specified by contractVersion.
-func PackRefundData(secretHash [32]byte, contractVersion uint32) ([]byte, error) {
-	txDataHandler, ok := txDataHandlers[contractVersion]
-	if !ok {
-		return nil, fmt.Errorf("contract version %v does not exist", contractVersion)
-	}
-
-	return txDataHandler.packRefundData(secretHash)
 }
 
 type txDataHandler interface {
-	parseInitiateData([]byte) ([]*Initiation, error)
-	parseRedeemData([]byte) ([]*Redemption, error)
+	parseInitiateData([]byte) (map[[SecretHashSize]byte]*Initiation, error)
+	parseRedeemData([]byte) (map[[SecretHashSize]byte]*Redemption, error)
 	parseRefundData([]byte) ([32]byte, error)
-	packInitiateData([]*Initiation) ([]byte, error)
-	packRedeemData([]*Redemption) ([]byte, error)
-	packRefundData([32]byte) ([]byte, error)
 }
 
 var txDataHandlers = map[uint32]txDataHandler{
@@ -105,25 +83,18 @@ type txDataHandlerV0 struct {
 	initiateFuncName string
 	redeemFuncName   string
 	refundFuncName   string
-	parsedAbi        abi.ABI
 }
 
 func newTxDataV0() *txDataHandlerV0 {
-	parsedAbi, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse abi: %v", err))
-	}
-
 	return &txDataHandlerV0{
 		initiateFuncName: "initiate",
 		redeemFuncName:   "redeem",
 		refundFuncName:   "refund",
-		parsedAbi:        parsedAbi,
 	}
 }
 
-func (t *txDataHandlerV0) parseInitiateData(calldata []byte) ([]*Initiation, error) {
-	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
+func (t *txDataHandlerV0) parseInitiateData(calldata []byte) (map[[SecretHashSize]byte]*Initiation, error) {
+	decoded, err := parseCallData(calldata, ABIs[0])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -135,7 +106,7 @@ func (t *txDataHandlerV0) parseInitiateData(calldata []byte) ([]*Initiation, err
 	// should be caught by parseCallData, but checking again anyway.
 	//
 	// TODO: If any of the checks prove redundant, remove them.
-	numArgs := 1
+	const numArgs = 1
 	if len(args) != numArgs {
 		return nil, fmt.Errorf("expected %v input args but got %v", numArgs, len(args))
 	}
@@ -155,26 +126,26 @@ func (t *txDataHandlerV0) parseInitiateData(calldata []byte) ([]*Initiation, err
 		_ = swapv0.ETHSwapInitiation(initiations[0])
 	}
 
-	toReturn := make([]*Initiation, 0, len(initiations))
+	toReturn := make(map[[SecretHashSize]byte]*Initiation)
 	for _, init := range initiations {
 		gweiValue, err := ToGwei(init.Value)
 		if err != nil {
 			return nil, fmt.Errorf("cannot convert wei to gwei: %w", err)
 		}
 
-		toReturn = append(toReturn, &Initiation{
+		toReturn[init.SecretHash] = &Initiation{
 			LockTime:    time.Unix(init.RefundTimestamp.Int64(), 0),
 			SecretHash:  init.SecretHash,
 			Participant: init.Participant,
 			Value:       gweiValue,
-		})
+		}
 	}
 
 	return toReturn, nil
 }
 
-func (t *txDataHandlerV0) parseRedeemData(calldata []byte) ([]*Redemption, error) {
-	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
+func (t *txDataHandlerV0) parseRedeemData(calldata []byte) (map[[SecretHashSize]byte]*Redemption, error) {
+	decoded, err := parseCallData(calldata, ABIs[0])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -186,7 +157,7 @@ func (t *txDataHandlerV0) parseRedeemData(calldata []byte) ([]*Redemption, error
 	// should be caught by parseCallData, but checking again anyway.
 	//
 	// TODO: If any of the checks prove redundant, remove them.
-	numArgs := 1
+	const numArgs = 1
 	if len(args) != numArgs {
 		return nil, fmt.Errorf("expected %v redeem args but got %v", numArgs, len(args))
 	}
@@ -204,12 +175,12 @@ func (t *txDataHandlerV0) parseRedeemData(calldata []byte) ([]*Redemption, error
 		_ = swapv0.ETHSwapRedemption(redemptions[0])
 	}
 
-	toReturn := make([]*Redemption, 0, len(redemptions))
+	toReturn := make(map[[SecretHashSize]byte]*Redemption)
 	for _, redemption := range redemptions {
-		toReturn = append(toReturn, &Redemption{
+		toReturn[redemption.SecretHash] = &Redemption{
 			SecretHash: redemption.SecretHash,
 			Secret:     redemption.Secret,
-		})
+		}
 	}
 
 	return toReturn, nil
@@ -218,7 +189,7 @@ func (t *txDataHandlerV0) parseRedeemData(calldata []byte) ([]*Redemption, error
 func (t *txDataHandlerV0) parseRefundData(calldata []byte) ([32]byte, error) {
 	var secretHash [32]byte
 
-	decoded, err := parseCallData(calldata, swapv0.ETHSwapABI)
+	decoded, err := parseCallData(calldata, ABIs[0])
 	if err != nil {
 		return secretHash, fmt.Errorf("unable to parse call data: %v", err)
 	}
@@ -230,7 +201,7 @@ func (t *txDataHandlerV0) parseRefundData(calldata []byte) ([32]byte, error) {
 	// should be caught by parseCallData, but checking again anyway.
 	//
 	// TODO: If any of the checks prove redundant, remove them.
-	numArgs := 1
+	const numArgs = 1
 	if len(args) != numArgs {
 		return secretHash, fmt.Errorf("expected %v redeem args but got %v", numArgs, len(args))
 	}
@@ -240,34 +211,4 @@ func (t *txDataHandlerV0) parseRefundData(calldata []byte) ([32]byte, error) {
 	}
 
 	return secretHash, nil
-}
-
-// packInitiateData converts a list of Initiate to call data for the initiate function.
-func (t *txDataHandlerV0) packInitiateData(initiations []*Initiation) ([]byte, error) {
-	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
-	for _, init := range initiations {
-		bigVal := new(big.Int).SetUint64(init.Value)
-		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
-			SecretHash:      init.SecretHash,
-			Participant:     init.Participant,
-			Value:           new(big.Int).Mul(bigVal, BigGweiFactor),
-		})
-	}
-	return t.parsedAbi.Pack(t.initiateFuncName, abiInitiations)
-}
-
-func (t *txDataHandlerV0) packRedeemData(redemptions []*Redemption) ([]byte, error) {
-	abiRedemptions := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
-	for _, redeem := range redemptions {
-		abiRedemptions = append(abiRedemptions, swapv0.ETHSwapRedemption{
-			Secret:     redeem.Secret,
-			SecretHash: redeem.SecretHash,
-		})
-	}
-	return t.parsedAbi.Pack(t.redeemFuncName, abiRedemptions)
-}
-
-func (t *txDataHandlerV0) packRefundData(secretHash [32]byte) ([]byte, error) {
-	return t.parsedAbi.Pack(t.refundFuncName, secretHash)
 }

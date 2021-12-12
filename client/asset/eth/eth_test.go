@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -1532,6 +1533,20 @@ func overMaxWei() *big.Int {
 	return overMaxWei.Add(overMaxWei, gweiFactorBig)
 }
 
+func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
+	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
+	for _, init := range initiations {
+		bigVal := new(big.Int).SetUint64(init.Value)
+		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
+			SecretHash:      init.SecretHash,
+			Participant:     init.Participant,
+			Value:           new(big.Int).Mul(bigVal, dexeth.BigGweiFactor),
+		})
+	}
+	return (*dexeth.ABIs[0]).Pack("initiate", abiInitiations)
+}
+
 func TestAuditContract(t *testing.T) {
 	node := &testNode{}
 	eth := &ExchangeWallet{
@@ -1648,7 +1663,7 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		txData, err := dexeth.PackInitiateData(test.initiations, 0)
+		txData, err := packInitiateDataV0(test.initiations)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
