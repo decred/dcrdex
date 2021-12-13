@@ -17,8 +17,9 @@
 //go:build lgpl
 // +build lgpl
 
-// This file lifted verbatim from go-ethereum/signer/fourbyte at v1.10.6 commit
-// 576681f29b895dd39e559b7ba17fcd89b42e4833.
+// This file lifted from go-ethereum/signer/fourbyte at v1.10.6 commit
+// 576681f29b895dd39e559b7ba17fcd89b42e4833 and modified to make parseCalldata take
+// an abi instead of a string.
 package eth
 
 import (
@@ -133,7 +134,11 @@ func TestCalldataDecoding(t *testing.T) {
 		// contains a bool with illegal values
 		"a5643bf20000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000001100000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000464617665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003",
 	} {
-		_, err := parseCallData(common.Hex2Bytes(hexdata), jsondata)
+		abi, err := abi.JSON(strings.NewReader(jsondata))
+		if err != nil {
+			t.Errorf("test %d: failed to parse abi: %v", i, err)
+		}
+		_, err = parseCallData(common.Hex2Bytes(hexdata), &abi)
 		if err == nil {
 			t.Errorf("test %d: expected decoding to fail: %s", i, hexdata)
 		}
@@ -156,7 +161,11 @@ func TestCalldataDecoding(t *testing.T) {
 			"000000000000000000000000000000000000000000000000000000000000dead" +
 			"000000000000000000000000000000000000000000000000000000000000beef",
 	} {
-		_, err := parseCallData(common.Hex2Bytes(hexdata), jsondata)
+		abi, err := abi.JSON(strings.NewReader(jsondata))
+		if err != nil {
+			t.Errorf("test %d: failed to parse abi: %v", i, err)
+		}
+		_, err = parseCallData(common.Hex2Bytes(hexdata), &abi)
 		if err != nil {
 			t.Errorf("test %d: unexpected failure on input %s:\n %v (%d bytes) ", i, hexdata, err, len(common.Hex2Bytes(hexdata)))
 		}

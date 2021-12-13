@@ -1505,6 +1505,20 @@ func overMaxWei() *big.Int {
 	return overMaxWei.Add(overMaxWei, gweiFactorBig)
 }
 
+func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
+	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
+	for _, init := range initiations {
+		bigVal := new(big.Int).SetUint64(init.Value)
+		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
+			SecretHash:      init.SecretHash,
+			Participant:     init.Participant,
+			Value:           new(big.Int).Mul(bigVal, dexeth.BigGweiFactor),
+		})
+	}
+	return (*dexeth.ABIs[0]).Pack("initiate", abiInitiations)
+}
+
 func TestAuditContract(t *testing.T) {
 	node := &testNode{}
 	eth := &ExchangeWallet{
@@ -1520,13 +1534,13 @@ func TestAuditContract(t *testing.T) {
 		secretHashes = append(secretHashes, secretHash)
 	}
 
-	now := time.Now().Unix() / 1000
-	laterThanNow := now + 1000
+	now := time.Now()
+	laterThanNow := now.Add(time.Hour)
 
 	tests := []struct {
 		name           string
 		contract       dex.Bytes
-		initiations    []swapv0.ETHSwapInitiation
+		initiations    []*dexeth.Initiation
 		differentHash  bool
 		badTxData      bool
 		badTxBinary    bool
@@ -1537,32 +1551,32 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "ok",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
-			initiations: []swapv0.ETHSwapInitiation{
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(now),
-					SecretHash:      secretHashes[0],
-					Participant:     testAddressA,
-					Value:           big.NewInt(1),
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
+					LockTime:    now,
+					SecretHash:  secretHashes[0],
+					Participant: testAddressA,
+					Value:       1,
 				},
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(laterThanNow),
-					SecretHash:      secretHashes[1],
-					Participant:     testAddressB,
-					Value:           big.NewInt(1),
+				&dexeth.Initiation{
+					LockTime:    laterThanNow,
+					SecretHash:  secretHashes[1],
+					Participant: testAddressB,
+					Value:       1,
 				},
 			},
 			wantRecipient:  testAddressB.Hex(),
-			wantExpiration: time.Unix(laterThanNow, 0),
+			wantExpiration: laterThanNow,
 		},
 		{
 			name:     "coin id different than tx hash",
 			contract: dexeth.EncodeContractData(0, secretHashes[0]),
-			initiations: []swapv0.ETHSwapInitiation{
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(now),
-					SecretHash:      secretHashes[0],
-					Participant:     testAddressA,
-					Value:           big.NewInt(1),
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
+					LockTime:    now,
+					SecretHash:  secretHashes[0],
+					Participant: testAddressA,
+					Value:       1,
 				},
 			},
 			differentHash: true,
@@ -1576,18 +1590,18 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "contract not part of transaction",
 			contract: dexeth.EncodeContractData(0, secretHashes[2]),
-			initiations: []swapv0.ETHSwapInitiation{
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(now),
-					SecretHash:      secretHashes[0],
-					Participant:     testAddressA,
-					Value:           big.NewInt(1),
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
+					LockTime:    now,
+					SecretHash:  secretHashes[0],
+					Participant: testAddressA,
+					Value:       1,
 				},
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(laterThanNow),
-					SecretHash:      secretHashes[1],
-					Participant:     testAddressB,
-					Value:           big.NewInt(1),
+				&dexeth.Initiation{
+					LockTime:    laterThanNow,
+					SecretHash:  secretHashes[1],
+					Participant: testAddressB,
+					Value:       1,
 				},
 			},
 			wantErr: true,
@@ -1601,46 +1615,27 @@ func TestAuditContract(t *testing.T) {
 		{
 			name:     "cannot unmarshal tx binary",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
-			initiations: []swapv0.ETHSwapInitiation{
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(now),
-					SecretHash:      secretHashes[0],
-					Participant:     testAddressA,
-					Value:           big.NewInt(1),
+			initiations: []*dexeth.Initiation{
+				&dexeth.Initiation{
+					LockTime:    now,
+					SecretHash:  secretHashes[0],
+					Participant: testAddressA,
+					Value:       1,
 				},
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(laterThanNow),
-					SecretHash:      secretHashes[1],
-					Participant:     testAddressB,
-					Value:           big.NewInt(1),
+				&dexeth.Initiation{
+					LockTime:    laterThanNow,
+					SecretHash:  secretHashes[1],
+					Participant: testAddressB,
+					Value:       1,
 				},
 			},
 			badTxBinary: true,
 			wantErr:     true,
 		},
-		{
-			name:     "value over max gwei",
-			contract: dexeth.EncodeContractData(0, secretHashes[1]),
-			initiations: []swapv0.ETHSwapInitiation{
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(now),
-					SecretHash:      secretHashes[0],
-					Participant:     testAddressA,
-					Value:           big.NewInt(1),
-				},
-				swapv0.ETHSwapInitiation{
-					RefundTimestamp: big.NewInt(laterThanNow),
-					SecretHash:      secretHashes[1],
-					Participant:     testAddressB,
-					Value:           overMaxWei(),
-				},
-			},
-			wantErr: true,
-		},
 	}
 
 	for _, test := range tests {
-		txData, err := dexeth.PackInitiateData(test.initiations)
+		txData, err := packInitiateDataV0(test.initiations)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

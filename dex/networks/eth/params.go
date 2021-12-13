@@ -183,3 +183,17 @@ type SwapState struct {
 	Value       uint64
 	State       SwapStep
 }
+
+// Initiation is the data used to initiate a swap.
+type Initiation struct {
+	LockTime    time.Time
+	SecretHash  [32]byte
+	Participant common.Address
+	Value       uint64 // gwei
+}
+
+// Redemption is the data used to redeem a swap.
+type Redemption struct {
+	Secret     [32]byte
+	SecretHash [32]byte
+}

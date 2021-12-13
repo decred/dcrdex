@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -60,7 +59,7 @@ type contractV0 interface {
 // Redeem and Refund methods of swapv0.ETHSwap already have suitable return types.
 type contractorV0 struct {
 	contractV0   // *swapv0.ETHSwap
-	abi          abi.ABI
+	abi          *abi.ABI
 	ec           *ethclient.Client
 	contractAddr common.Address
 	acctAddr     common.Address
@@ -75,13 +74,9 @@ func newV0contractor(net dex.Network, acctAddr common.Address, ec *ethclient.Cli
 	if err != nil {
 		return nil, err
 	}
-	parsedABI, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
-	if err != nil {
-		return nil, err
-	}
 	return &contractorV0{
 		contractV0:   c,
-		abi:          parsedABI,
+		abi:          dexeth.ABIs[0],
 		ec:           ec,
 		contractAddr: contractAddr,
 		acctAddr:     acctAddr,
@@ -239,7 +234,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 	if *tx.To() != c.contractAddr {
 		return 0, nil
 	}
-	if redeems, err := dexeth.ParseRedeemData(tx.Data()); err == nil {
+	if redeems, err := dexeth.ParseRedeemData(tx.Data(), 0); err == nil {
 		var redeemed uint64
 		for _, redeem := range redeems {
 			swap, err := c.swap(ctx, redeem.SecretHash)
@@ -250,7 +245,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 		}
 		return redeemed, nil
 	}
-	secretHash, err := dexeth.ParseRefundData(tx.Data())
+	secretHash, err := dexeth.ParseRefundData(tx.Data(), 0)
 	if err != nil {
 		return 0, nil
 	}

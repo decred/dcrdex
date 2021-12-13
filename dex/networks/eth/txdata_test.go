@@ -8,10 +8,40 @@ import (
 	"encoding/hex"
 	"math/big"
 	"testing"
+	"time"
 
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func packInitiateDataV0(initiations []*Initiation) ([]byte, error) {
+	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
+	for _, init := range initiations {
+		bigVal := new(big.Int).SetUint64(init.Value)
+		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
+			SecretHash:      init.SecretHash,
+			Participant:     init.Participant,
+			Value:           new(big.Int).Mul(bigVal, BigGweiFactor),
+		})
+	}
+	return (*ABIs[0]).Pack("initiate", abiInitiations)
+}
+
+func packRedeemDataV0(redemptions []*Redemption) ([]byte, error) {
+	abiRedemptions := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
+	for _, redeem := range redemptions {
+		abiRedemptions = append(abiRedemptions, swapv0.ETHSwapRedemption{
+			Secret:     redeem.Secret,
+			SecretHash: redeem.SecretHash,
+		})
+	}
+	return (*ABIs[0]).Pack("redeem", abiRedemptions)
+}
+
+func packRefundDataV0(secretHash [32]byte) ([]byte, error) {
+	return (*ABIs[0]).Pack("refund", secretHash)
+}
 
 func mustParseHex(s string) []byte {
 	b, err := hex.DecodeString(s)
@@ -21,14 +51,14 @@ func mustParseHex(s string) []byte {
 	return b
 }
 
-func initiationsAreEqual(a, b swapv0.ETHSwapInitiation) bool {
-	return a.RefundTimestamp.Cmp(b.RefundTimestamp) == 0 &&
+func initiationsAreEqual(a, b *Initiation) bool {
+	return a.LockTime == b.LockTime &&
 		a.SecretHash == b.SecretHash &&
 		a.Participant == b.Participant &&
-		a.Value.Cmp(b.Value) == 0
+		a.Value == b.Value
 }
 
-func TestParseInitiateData(t *testing.T) {
+func TestParseInitiateDataV0(t *testing.T) {
 	participantAddr := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
 	var secretHashA [32]byte
 	var secretHashB [32]byte
@@ -37,36 +67,36 @@ func TestParseInitiateData(t *testing.T) {
 
 	locktime := int64(1632112916)
 
-	initiations := []swapv0.ETHSwapInitiation{
-		swapv0.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(locktime),
-			SecretHash:      secretHashA,
-			Participant:     participantAddr,
-			Value:           big.NewInt(1),
+	initiations := []*Initiation{
+		&Initiation{
+			LockTime:    time.Unix(locktime, 0),
+			SecretHash:  secretHashA,
+			Participant: participantAddr,
+			Value:       1,
 		},
-		swapv0.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(locktime),
-			SecretHash:      secretHashB,
-			Participant:     participantAddr,
-			Value:           big.NewInt(1),
+		&Initiation{
+			LockTime:    time.Unix(locktime, 0),
+			SecretHash:  secretHashB,
+			Participant: participantAddr,
+			Value:       1,
 		},
 	}
-	calldata, err := PackInitiateData(initiations)
+	calldata, err := packInitiateDataV0(initiations)
 	if err != nil {
 		t.Fatalf("unale to pack abi: %v", err)
 	}
-	initiateCalldata := mustParseHex("a8793f94000000000000000000000" +
-		"0000000000000000000000000000000000000000020000000000000000" +
-		"0000000000000000000000000000000000000000000000002000000000" +
-		"000000000000000000000000000000000000000000000006148111499d" +
-		"971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6" +
-		"546000000000000000000000000345853e21b1d475582e71cc269124ed" +
-		"5e2dd34220000000000000000000000000000000000000000000000000" +
-		"0000000000000010000000000000000000000000000000000000000000" +
-		"0000000000000614811142c0a304c9321402dc11cbb5898b9f2af3029c" +
-		"e1c76ec6702c4cd5bb965fd3e73000000000000000000000000345853e" +
-		"21b1d475582e71cc269124ed5e2dd34220000000000000000000000000" +
-		"000000000000000000000000000000000000001")
+	initiateCalldata := mustParseHex("a8793f940000000000000000000000" +
+		"00000000000000000000000000000000000000002000000000000000000" +
+		"00000000000000000000000000000000000000000000002000000000000" +
+		"000000000000000000000000000000000000000000006148111499d9719" +
+		"75c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d654600" +
+		"0000000000000000000000345853e21b1d475582e71cc269124ed5e2dd3" +
+		"42200000000000000000000000000000000000000000000000000000000" +
+		"3b9aca00000000000000000000000000000000000000000000000000000" +
+		"00000614811142c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec67" +
+		"02c4cd5bb965fd3e73000000000000000000000000345853e21b1d47558" +
+		"2e71cc269124ed5e2dd3422000000000000000000000000000000000000" +
+		"000000000000000000003b9aca00")
 
 	if !bytes.Equal(calldata, initiateCalldata) {
 		t.Fatalf("packed calldata is different than expected")
@@ -98,7 +128,7 @@ func TestParseInitiateData(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedInitiations, err := ParseInitiateData(test.calldata)
+		parsedInitiations, err := ParseInitiateData(test.calldata, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -113,38 +143,38 @@ func TestParseInitiateData(t *testing.T) {
 			t.Fatalf("expected %d initiations but got %d", len(initiations), len(parsedInitiations))
 		}
 
-		for i := range initiations {
-			if !initiationsAreEqual(parsedInitiations[i], initiations[i]) {
+		for _, init := range initiations {
+			if !initiationsAreEqual(parsedInitiations[init.SecretHash], init) {
 				t.Fatalf("expected initiations to be equal. original: %v, parsed: %v",
-					initiations[i], parsedInitiations[i])
+					init, parsedInitiations[init.SecretHash])
 			}
 		}
 	}
 }
 
-func redemptionsAreEqual(a, b swapv0.ETHSwapRedemption) bool {
+func redemptionsAreEqual(a, b *Redemption) bool {
 	return a.SecretHash == b.SecretHash &&
 		a.Secret == b.Secret
 }
 
-func TestParseRedeemData(t *testing.T) {
+func TestParseRedeemDataV0(t *testing.T) {
 	secretHashA, secretA, secretHashB, secretB := [32]byte{}, [32]byte{}, [32]byte{}, [32]byte{}
 	copy(secretHashA[:], mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561"))
 	copy(secretA[:], mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a"))
 	copy(secretHashB[:], mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546"))
 	copy(secretB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
 
-	redemptions := []swapv0.ETHSwapRedemption{
-		swapv0.ETHSwapRedemption{
+	redemptions := []*Redemption{
+		&Redemption{
 			Secret:     secretA,
 			SecretHash: secretHashA,
 		},
-		swapv0.ETHSwapRedemption{
+		&Redemption{
 			Secret:     secretB,
 			SecretHash: secretHashB,
 		},
 	}
-	calldata, err := PackRedeemData(redemptions)
+	calldata, err := packRedeemDataV0(redemptions)
 	if err != nil {
 		t.Fatalf("unable to pack abi: %v", err)
 	}
@@ -191,7 +221,7 @@ func TestParseRedeemData(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedRedemptions, err := ParseRedeemData(test.calldata)
+		parsedRedemptions, err := ParseRedeemData(test.calldata, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -206,20 +236,20 @@ func TestParseRedeemData(t *testing.T) {
 			t.Fatalf("expected %d redemptions but got %d", len(redemptions), len(parsedRedemptions))
 		}
 
-		for i := range redemptions {
-			if !redemptionsAreEqual(redemptions[i], parsedRedemptions[i]) {
+		for _, redemption := range redemptions {
+			if !redemptionsAreEqual(redemption, parsedRedemptions[redemption.SecretHash]) {
 				t.Fatalf("expected redemptions to be equal. original: %v, parsed: %v",
-					redemptions[i], parsedRedemptions[i])
+					redemption, parsedRedemptions[redemption.SecretHash])
 			}
 		}
 	}
 }
 
-func TestParseRefundData(t *testing.T) {
+func TestParseRefundDataV0(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561"))
 
-	calldata, err := PackRefundData(secretHash)
+	calldata, err := packRefundDataV0(secretHash)
 	if err != nil {
 		t.Fatalf("unale to pack abi: %v", err)
 	}
@@ -256,7 +286,7 @@ func TestParseRefundData(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedSecretHash, err := ParseRefundData(test.calldata)
+		parsedSecretHash, err := ParseRefundData(test.calldata, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
