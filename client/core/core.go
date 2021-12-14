@@ -1966,8 +1966,11 @@ func (c *Core) CloseWallet(assetID uint32) error {
 // ConnectWallet connects to the wallet without unlocking.
 func (c *Core) ConnectWallet(assetID uint32) error {
 	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return err
+	}
 	c.notify(newWalletStateNote(wallet.state()))
-	return err
+	return nil
 }
 
 // WalletSettings fetches the current wallet configuration details from the
