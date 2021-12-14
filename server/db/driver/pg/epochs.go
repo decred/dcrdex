@@ -126,5 +126,5 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*candles.Cache) e
 		}
 	}
 
-	return err
+	return rows.Err()
 }
