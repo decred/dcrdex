@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -89,12 +90,10 @@ func mustParseHex(s string) []byte {
 
 type testNode struct {
 	connectErr     error
-	bestBlkHash    common.Hash
-	bestBlkHashErr error
-	blk            *types.Block
-	blkErr         error
 	bestHdr        *types.Header
 	bestHdrErr     error
+	hdrByHeight    *types.Header
+	hdrByHeightErr error
 	blkNum         uint64
 	blkNumErr      error
 	syncProg       *ethereum.SyncProgress
@@ -116,16 +115,12 @@ func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common
 
 func (n *testNode) shutdown() {}
 
-func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
-	return n.bestBlkHash, n.bestBlkHashErr
-}
-
 func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.bestHdr, n.bestHdrErr
 }
 
-func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	return n.blk, n.blkErr
+func (n *testNode) headerByHeight(ctx context.Context, height uint64) (*types.Header, error) {
+	return n.hdrByHeight, n.hdrByHeightErr
 }
 
 func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
@@ -206,7 +201,7 @@ func TestLoad(t *testing.T) {
 func TestDecodeCoinID(t *testing.T) {
 	drv := &Driver{}
 	txid := "0x1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1"
-	txHashB := mustDecodeHex("1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1")
+	txHashB := mustParseHex("1b86600b740d58ecc06eda8eba1c941c7ba3d285c78be89b56678da146ed53d1")
 
 	type test struct {
 		name    string
@@ -248,31 +243,28 @@ func TestDecodeCoinID(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	// TODO: Test all paths.
 	ctx, cancel := context.WithCancel(context.Background())
-	header1 := &types.Header{Number: big.NewInt(1)}
-	block1 := types.NewBlockWithHeader(header1)
-	blockHash1 := block1.Hash()
-	node := &testNode{
-		bestBlkHash: blockHash1,
-		blk:         block1,
-	}
-
 	backend := unconnectedETH(tLogger, new(config))
+	backend.node = &testNode{
+		bestHdr: &types.Header{Number: big.NewInt(1)},
+	}
 	ch := backend.BlockChannel(1)
-	backend.node = node
 	go func() {
-		<-ch
-		cancel()
+		select {
+		case <-ch:
+			cancel()
+		case <-time.After(blockPollInterval * 2):
+		}
 	}()
 	backend.run(ctx)
-	backend.blockCache.mtx.Lock()
-	best := backend.blockCache.best
-	backend.blockCache.mtx.Unlock()
-	if best.hash != blockHash1 {
-		t.Fatalf("want header hash %x but got %x", blockHash1, best.hash)
+	// Ok if ctx was canceled above. Linters complain about calling t.Fatal
+	// in the goroutine above.
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		t.Fatal("test timeout")
 	}
-	cancel()
 }
 
 func TestFeeRate(t *testing.T) {
@@ -727,10 +719,97 @@ func TestAccountBalance(t *testing.T) {
 	}
 }
 
-func mustDecodeHex(s string) []byte {
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		panic("mustDecodeHex: " + err.Error())
+func TestPoll(t *testing.T) {
+	blkHdr := &types.Header{Number: big.NewInt(0)}
+	tests := []struct {
+		name                       string
+		bestHdr, hdrByHeight       *types.Header
+		bestHdrErr, hdrByHeightErr error
+		wantErr, preventSend       bool
+	}{{
+		name:    "ok nothing to do",
+		bestHdr: blkHdr,
+	}, {
+		name: "ok sequential",
+		bestHdr: &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: blkHdr.Hash(),
+		},
+	}, {
+		name: "ok fast blocks",
+		bestHdr: &types.Header{
+			Number: big.NewInt(1),
+		},
+		hdrByHeight: blkHdr,
+	}, {
+		name: "ok reorg",
+		bestHdr: &types.Header{
+			Number: big.NewInt(1),
+		},
+	}, {
+		name: "ok but cannot send",
+		bestHdr: &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: blkHdr.Hash(),
+		},
+		preventSend: true,
+	}, {
+		name:       "best header error",
+		bestHdrErr: errors.New(""),
+		wantErr:    true,
+	}, {
+		name: "header by height error",
+		bestHdr: &types.Header{
+			Number: big.NewInt(1),
+		},
+		hdrByHeightErr: errors.New(""),
+		wantErr:        true,
+	}}
+
+	for _, test := range tests {
+		node := &testNode{
+			bestHdr:        test.bestHdr,
+			bestHdrErr:     test.bestHdrErr,
+			hdrByHeight:    test.hdrByHeight,
+			hdrByHeightErr: test.hdrByHeightErr,
+		}
+		eth := &Backend{
+			log:        tLogger,
+			blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+			node:       node,
+			bestHash: hashN{
+				hash: blkHdr.Hash(),
+			},
+		}
+		chSize := 1
+		if test.preventSend {
+			chSize = 0
+		}
+		ch := make(chan *asset.BlockUpdate, chSize)
+		eth.blockChans[ch] = struct{}{}
+		bu := new(asset.BlockUpdate)
+		wait := make(chan struct{})
+		go func() {
+			if test.preventSend {
+				close(wait)
+				return
+			}
+			select {
+			case bu = <-ch:
+			case <-time.After(time.Second * 2):
+			}
+			close(wait)
+		}()
+		eth.poll(nil)
+		<-wait
+		if test.wantErr {
+			if bu.Err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if bu.Err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, bu.Err)
+		}
 	}
-	return b
 }

@@ -70,13 +70,6 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func TestBestBlockHash(t *testing.T) {
-	_, err := ethClient.bestBlockHash(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestBestHeader(t *testing.T) {
 	_, err := ethClient.bestHeader(ctx)
 	if err != nil {
@@ -84,12 +77,8 @@ func TestBestHeader(t *testing.T) {
 	}
 }
 
-func TestBlock(t *testing.T) {
-	h, err := ethClient.bestBlockHash(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ethClient.block(ctx, h)
+func TestHeaderByHeight(t *testing.T) {
+	_, err := ethClient.headerByHeight(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,13 +86,6 @@ func TestBlock(t *testing.T) {
 
 func TestBlockNumber(t *testing.T) {
 	_, err := ethClient.blockNumber(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestPeers(t *testing.T) {
-	_, err := ethClient.peers(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

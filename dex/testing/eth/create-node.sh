@@ -47,7 +47,7 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   sleep 1
   AFTER=\$("${NODES_ROOT}/harness-ctl/${NAME}" attach --exec 'eth.blockNumber')
   DIFF=\$((AFTER-BEFORE))
-  echo "Mined \$DIFF blocks on ${NAME}. Their headers:"
+  echo "Mined \$DIFF blocks on ${NAME}. Their hashes:"
   for i in \$(seq \$((BEFORE+1)) \$AFTER)
   do
     echo \$i
