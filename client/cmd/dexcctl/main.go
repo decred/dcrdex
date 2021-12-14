@@ -27,7 +27,7 @@ const (
 )
 
 // The product release version.
-var version = semver{major: 0, minor: 2, patch: 4}
+var version = semver{major: 0, minor: 2, patch: 5}
 
 // semver holds dexcctl's semver values.
 type semver struct {
