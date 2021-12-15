@@ -88,6 +88,8 @@ var (
 	}
 
 	minGasTipCap = dexeth.GweiToWei(2)
+
+	findRedemptionCoinID = []byte("FindRedemption Coin")
 )
 
 // Driver implements asset.Driver.
@@ -184,6 +186,9 @@ type ExchangeWallet struct {
 
 	lockedFunds    map[string]uint64 // gwei
 	lockedFundsMtx sync.RWMutex
+
+	findRedemptionMtx  sync.RWMutex
+	findRedemptionReqs map[[32]byte]*findRedemptionRequest
 }
 
 // Info returns basic information about the wallet and asset.
@@ -241,12 +246,13 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	}
 
 	return &ExchangeWallet{
-		log:         logger,
-		net:         net,
-		node:        cl,
-		addr:        cl.address(),
-		tipChange:   assetCFG.TipChange,
-		lockedFunds: make(map[string]uint64),
+		log:                logger,
+		net:                net,
+		node:               cl,
+		addr:               cl.address(),
+		tipChange:          assetCFG.TipChange,
+		lockedFunds:        make(map[string]uint64),
+		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 	}, nil
 }
 
@@ -845,14 +851,116 @@ func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 	return swap.LockTime.Before(blockTime), swap.LockTime, nil
 }
 
-// FindRedemption watches for the input that spends the specified contract
-// coin, and returns the spending input and the contract's secret key when it
-// finds a spender.
-//
-// This method blocks until the redemption is found, an error occurs or the
-// provided context is canceled.
-func (*ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
-	return nil, nil, asset.ErrNotImplemented
+// findRedemptionResult is used internally for queued findRedemptionRequests.
+type findRedemptionResult struct {
+	err    error
+	secret []byte
+}
+
+// findRedemptionRequest is a request that is waiting on a redemption result.
+type findRedemptionRequest struct {
+	contractVer uint32
+	res         chan *findRedemptionResult
+}
+
+// sendFindRedemptionResult sends the result or logs a message if it cannot be
+// sent.
+func (eth *ExchangeWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte, secret []byte, err error) {
+	select {
+	case req.res <- &findRedemptionResult{secret: secret, err: err}:
+	default:
+		eth.log.Info("findRedemptionResult channel blocking for request %s", secretHash)
+	}
+}
+
+// findRedemptionRequests creates a copy of the findRedemptionReqs map.
+func (eth *ExchangeWallet) findRedemptionRequests() map[[32]byte]*findRedemptionRequest {
+	eth.findRedemptionMtx.RLock()
+	defer eth.findRedemptionMtx.RUnlock()
+	reqs := make(map[[32]byte]*findRedemptionRequest, len(eth.findRedemptionReqs))
+	for secretHash, req := range eth.findRedemptionReqs {
+		reqs[secretHash] = req
+	}
+	return reqs
+}
+
+// FindRedemption checks the contract for a redemption. If the swap is initiated
+// but un-redeemed and un-refunded, FindRedemption will block until a redemption
+// is seen.
+func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// See if it's ready right away.
+	secret, err = eth.findSecret(ctx, secretHash, contractVer)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(secret) > 0 {
+		return findRedemptionCoinID, secret, nil
+	}
+
+	// Not ready. Queue the request.
+	req := &findRedemptionRequest{
+		contractVer: contractVer,
+		res:         make(chan *findRedemptionResult, 1),
+	}
+
+	eth.findRedemptionMtx.Lock()
+
+	if eth.findRedemptionReqs[secretHash] != nil {
+		eth.findRedemptionMtx.Unlock()
+		return nil, nil, fmt.Errorf("duplicate find redemption request for %x", secretHash)
+	}
+
+	eth.findRedemptionReqs[secretHash] = req
+
+	eth.findRedemptionMtx.Unlock()
+
+	var res *findRedemptionResult
+	select {
+	case res = <-req.res:
+	case <-ctx.Done():
+	}
+
+	eth.findRedemptionMtx.Lock()
+	delete(eth.findRedemptionReqs, secretHash)
+	eth.findRedemptionMtx.Unlock()
+
+	if res == nil {
+		return nil, nil, fmt.Errorf("context cancelled for find redemption request %x", secretHash)
+	}
+
+	if res.err != nil {
+		return nil, nil, res.err
+	}
+
+	return findRedemptionCoinID, res.secret[:], nil
+}
+
+func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, contractVer uint32) ([]byte, error) {
+	// Add a reasonable timeout here.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	swap, err := eth.node.swap(ctx, secretHash, contractVer)
+	if err != nil {
+		return nil, err
+	}
+
+	switch swap.State {
+	case dexeth.SSInitiated:
+		return nil, nil // no redeem yet, but keep checking
+	case dexeth.SSRedeemed:
+		return swap.Secret[:], nil
+	case dexeth.SSNone:
+		return nil, fmt.Errorf("swap %x does not exist", secretHash)
+	case dexeth.SSRefunded:
+		return nil, fmt.Errorf("swap %x is already refunded", secretHash)
+	}
+	return nil, fmt.Errorf("unrecognized swap state %v", swap.State)
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -1026,4 +1134,17 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
 		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
 	go eth.tipChange(nil)
+	go eth.checkFindRedemptions()
+}
+
+// checkFindRedemptions checks queued findRedemptionRequests.
+func (eth *ExchangeWallet) checkFindRedemptions() {
+	for secretHash, req := range eth.findRedemptionRequests() {
+		secret, err := eth.findSecret(eth.ctx, secretHash, req.contractVer)
+		if err != nil {
+			eth.sendFindRedemptionResult(req, secretHash, nil, err)
+		} else if len(secret) > 0 {
+			eth.sendFindRedemptionResult(req, secretHash, secret, nil)
+		}
+	}
 }

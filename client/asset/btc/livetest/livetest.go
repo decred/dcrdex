@@ -385,7 +385,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing FindRedemption")
 
-	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -397,7 +397,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(expConfs, true)
-	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}

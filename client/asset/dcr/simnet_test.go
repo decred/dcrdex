@@ -345,7 +345,7 @@ func runTest(t *testing.T, splitTx bool) {
 	waitNetwork()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -363,7 +363,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
-	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
