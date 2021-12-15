@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,7 +27,6 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -167,7 +165,8 @@ type ethFetcher interface {
 	syncProgress() ethereum.SyncProgress
 	isRedeemable(secretHash, secret [32]byte, contractVer uint32) (bool, error)
 	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (*types.Transaction, error)
+	isRefundable(secretHash [32]byte, contractVer uint32) (bool, error)
+	refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
 	lock() error
 	locked() bool
@@ -189,20 +188,19 @@ type ExchangeWallet struct {
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
 
-	ctx       context.Context // the asset subsystem starts with Connect(ctx)
-	net       dex.Network
-	node      ethFetcher
-	addr      common.Address
-	log       dex.Logger
-	tipChange func(error)
-
+	ctx         context.Context // the asset subsystem starts with Connect(ctx)
+	net         dex.Network
+	node        ethFetcher
+	addr        common.Address
+	log         dex.Logger
+	tipChange   func(error)
 	gasFeeLimit uint64
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
 
-	lockedFunds    map[string]uint64 // gwei
-	lockedFundsMtx sync.RWMutex
+	locked    uint64
+	lockedMtx sync.RWMutex
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
@@ -279,7 +277,6 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		addr:               cl.address(),
 		tipChange:          assetCFG.TipChange,
 		gasFeeLimit:        gasFeeLimit,
-		lockedFunds:        make(map[string]uint64),
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 	}, nil
 }
@@ -343,26 +340,21 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 // Balance returns the total available funds in the account. The eth node
 // returns balances in wei. Those are flored and stored as gwei, or 1e9 wei.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
-	eth.lockedFundsMtx.Lock()
-	defer eth.lockedFundsMtx.Unlock()
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
 
 	return eth.balance()
 }
 
 // balance returns the total available funds in the account.
-// This function expects eth.lockedFundsMtx to be held.
+// This function expects eth.lockedMtx to be held.
 func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 	bal, err := eth.node.balance(eth.ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var amountLocked uint64
-	for _, value := range eth.lockedFunds {
-		amountLocked += value
-	}
-
-	locked := amountLocked + dexeth.WeiToGwei(bal.PendingOut)
+	locked := eth.locked + dexeth.WeiToGwei(bal.PendingOut)
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked,
 		Locked:    locked,
@@ -512,9 +504,7 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	refundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
 	fundsNeeded := ord.Value + maxSwapFees + refundFees
 	coins := asset.Coins{eth.createFundingCoin(fundsNeeded)}
-	eth.lockedFundsMtx.Lock()
-	err := eth.lockFunds(coins)
-	eth.lockedFundsMtx.Unlock()
+	err := eth.lockFunds(fundsNeeded)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -524,27 +514,33 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
-func (eth *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
-	eth.lockedFundsMtx.Lock()
-	defer eth.lockedFundsMtx.Unlock()
-	return eth.unlockFunds(unspents)
+func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
+	var amt uint64
+	for i := range coins {
+		coin, err := eth.decodeFundingCoinID(coins[i].ID())
+		if err != nil {
+			return fmt.Errorf("ReturnCoins: unable to decode funding coin id: %w", err)
+		}
+		amt += coin.Value()
+	}
+	return eth.unlockFunds(amt)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
 func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	coins := make([]asset.Coin, 0, len(ids))
+	var totalValue uint64
 	for _, id := range ids {
 		coin, err := eth.decodeFundingCoinID(id)
 		if err != nil {
-			return nil, fmt.Errorf("FundingCoins: unable to decode amount coin id: %w", err)
+			return nil, fmt.Errorf("FundingCoins: unable to decode funding coin id: %w", err)
 		}
 		coins = append(coins, coin)
+		totalValue += coin.Value()
 	}
 
-	eth.lockedFundsMtx.Lock()
-	err := eth.lockFunds(coins)
-	eth.lockedFundsMtx.Unlock()
+	err := eth.lockFunds(totalValue)
 	if err != nil {
 		return nil, err
 	}
@@ -552,60 +548,36 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return coins, nil
 }
 
-// lockFunds adds coins to the map of locked funds.
-//
-// lockedFundsMtx MUST be held when calling this function.
-func (eth *ExchangeWallet) lockFunds(coins asset.Coins) error {
-	currentlyLocking := make(map[string]bool)
-	var amountToLock uint64
-	for _, coin := range coins {
-		hexID := hex.EncodeToString(coin.ID())
-		if _, ok := eth.lockedFunds[hexID]; ok {
-			return fmt.Errorf("cannot lock funds that are already locked: %v", hexID)
-		}
-		if _, ok := currentlyLocking[hexID]; ok {
-			return fmt.Errorf("attempting to lock duplicate coins: %v", hexID)
-		}
-		currentlyLocking[hexID] = true
-		amountToLock += coin.Value()
-	}
+// lockFunds locks funds held by the wallet.
+func (eth *ExchangeWallet) lockFunds(amt uint64) error {
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
 
 	balance, err := eth.balance()
 	if err != nil {
 		return err
 	}
 
-	if balance.Available < amountToLock {
-		return fmt.Errorf("currently available %v < locking %v",
-			balance.Available, amountToLock)
+	if balance.Available < amt {
+		return fmt.Errorf("attempting to lock more than is currently available. %d > %d",
+			amt, balance.Available)
 	}
 
-	for _, coin := range coins {
-		eth.lockedFunds[hex.EncodeToString(coin.ID())] = coin.Value()
-	}
+	eth.locked += amt
 	return nil
 }
 
-// unlockFunds removes coins from the map of locked funds.
-//
-// lockedFundsMtx MUST be held when calling this function.
-func (eth *ExchangeWallet) unlockFunds(coins asset.Coins) error {
-	currentlyUnlocking := make(map[string]bool)
-	for _, coin := range coins {
-		hexID := hex.EncodeToString(coin.ID())
-		if _, ok := eth.lockedFunds[hexID]; !ok {
-			return fmt.Errorf("cannot unlock coin ID that is not locked: %v", coin.ID())
-		}
-		if _, ok := currentlyUnlocking[hexID]; ok {
-			return fmt.Errorf("attempting to unlock duplicate coins: %v", hexID)
-		}
-		currentlyUnlocking[hexID] = true
+// unlockFunds unlocks funds held by the wallet.
+func (eth *ExchangeWallet) unlockFunds(amt uint64) error {
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
+
+	if eth.locked < amt {
+		return fmt.Errorf("attempting to unlock more than is currently locked. %d > %d",
+			amt, eth.locked)
 	}
 
-	for _, coin := range coins {
-		delete(eth.lockedFunds, hex.EncodeToString(coin.ID()))
-	}
-
+	eth.locked -= amt
 	return nil
 }
 
@@ -664,14 +636,8 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
 
-	eth.lockedFundsMtx.Lock()
-	defer eth.lockedFundsMtx.Unlock()
-
 	var totalInputValue uint64
 	for _, input := range swaps.Inputs {
-		if _, ok := eth.lockedFunds[input.ID().String()]; !ok {
-			return fail(fmt.Errorf("Swap: attempting to use coin that was not locked"))
-		}
 		totalInputValue += input.Value()
 	}
 
@@ -706,12 +672,12 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			})
 	}
 
-	eth.unlockFunds(swaps.Inputs)
 	var change asset.Coin
-	changeAmount := totalInputValue - totalSpend
-	if changeAmount > 0 && swaps.LockChange {
-		change = eth.createFundingCoin(changeAmount)
-		eth.lockFunds(asset.Coins{change})
+	if swaps.LockChange {
+		eth.unlockFunds(totalSpend)
+		change = eth.createFundingCoin(totalInputValue - totalSpend)
+	} else {
+		eth.unlockFunds(totalInputValue)
 	}
 
 	return receipts, change, fees, nil
@@ -1000,8 +966,29 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (*ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
-	return nil, asset.ErrNotImplemented
+func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+	version, secretHash, err := dexeth.DecodeContractData(contract)
+	if err != nil {
+		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
+	}
+
+	refundable, err := eth.node.isRefundable(secretHash, version)
+	if err != nil {
+		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
+	}
+	if !refundable {
+		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
+	}
+
+	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
+	if err != nil {
+		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
+	}
+
+	eth.unlockFunds(eth.gasFeeLimit * dexeth.RefundGas(version))
+
+	txHash := tx.Hash()
+	return txHash[:], nil
 }
 
 // Address returns an address for the exchange wallet.

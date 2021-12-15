@@ -1069,15 +1069,16 @@ func testRefund(t *testing.T) {
 	const amt = 1e9
 	locktime := time.Second * 12
 	tests := []struct {
-		name           string
-		sleep          time.Duration
-		refunder       *accounts.Account
-		refunderClient *nodeClient
-		finalState     dexeth.SwapStep
-		addAmt, redeem bool
+		name                         string
+		sleep                        time.Duration
+		refunder                     *accounts.Account
+		refunderClient               *nodeClient
+		finalState                   dexeth.SwapStep
+		addAmt, redeem, isRefundable bool
 	}{{
 		name:           "ok",
 		sleep:          time.Second * 16,
+		isRefundable:   true,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		addAmt:         true,
@@ -1085,18 +1086,21 @@ func testRefund(t *testing.T) {
 	}, {
 		name:           "before locktime",
 		sleep:          time.Second * 8,
+		isRefundable:   false,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		finalState:     dexeth.SSInitiated,
 	}, {
 		name:           "wrong refunder",
 		sleep:          time.Second * 16,
+		isRefundable:   false,
 		refunderClient: participantEthClient,
 		refunder:       participantAcct,
 		finalState:     dexeth.SSInitiated,
 	}, {
 		name:           "already redeemed",
 		sleep:          time.Second * 16,
+		isRefundable:   false,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		redeem:         true,
@@ -1126,7 +1130,6 @@ func testRefund(t *testing.T) {
 		}
 
 		inLocktime := uint64(time.Now().Add(locktime).Unix())
-		txOpts, _ := ethClient.txOpts(ctx, amt, dexeth.InitGas(1, 0), nil)
 
 		_, err = ethClient.initiate(ctx, []*asset.Contract{newContract(inLocktime, secretHash, amt)}, maxFeeRate, 0)
 		if err != nil {
@@ -1153,9 +1156,17 @@ func testRefund(t *testing.T) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 
+		isRefundable, err := test.refunderClient.isRefundable(secretHash, 0)
+		if err != nil {
+			t.Fatalf("%s: isRefundable error %v", test.name, err)
+		}
+		if isRefundable != test.isRefundable {
+			t.Fatalf("%s: expected isRefundable=%v, but got %v",
+				test.name, test.isRefundable, isRefundable)
+		}
+
 		baseFee, _, _ := test.refunderClient.netFeeState(ctx)
-		txOpts, _ = test.refunderClient.txOpts(ctx, 0, dexeth.RefundGas(0), nil)
-		tx, err := test.refunderClient.refund(txOpts, secretHash, 0)
+		tx, err := test.refunderClient.refund(ctx, secretHash, 200, 0)
 		if err != nil {
 			t.Fatalf("%s: refund error: %v", test.name, err)
 		}

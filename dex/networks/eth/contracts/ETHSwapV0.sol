@@ -56,13 +56,13 @@ contract ETHSwap {
     // isRefundable checks that a swap can be refunded. The requirements are
     // the initiator is msg.sender, the state is Filled, and the block
     // timestamp be after the swap's stored refundBlockTimestamp.
-    modifier isRefundable(bytes32 secretHash) {
-        require(swaps[secretHash].state == State.Filled);
-        require(swaps[secretHash].initiator == msg.sender);
-        uint refundBlockTimestamp = swaps[secretHash].refundBlockTimestamp;
-        require(block.timestamp >= refundBlockTimestamp);
-        _;
+    function isRefundable(bytes32 secretHash) public view returns (bool) {
+        Swap storage swapToCheck = swaps[secretHash];
+        return swapToCheck.state == State.Filled &&
+               swapToCheck.initiator == msg.sender &&
+               block.timestamp >= swapToCheck.refundBlockTimestamp;
     }
+
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors. There is some
     // conversation in the eth community about removing tx.origin, which would
@@ -182,7 +182,6 @@ contract ETHSwap {
         require(ok == true);
     }
 
-
     // refund refunds a contract. It checks that the sender is not a contract,
     // and that the refund time has passed. msg.value is tranfered from the
     // contract to the sender.
@@ -199,10 +198,11 @@ contract ETHSwap {
     function refund(bytes32 secretHash)
         public
         senderIsOrigin()
-        isRefundable(secretHash)
     {
-        swaps[secretHash].state = State.Refunded;
-        (bool ok, ) = payable(msg.sender).call{value: swaps[secretHash].value}("");
+        require(isRefundable(secretHash));
+        Swap storage swapToRefund = swaps[secretHash];
+        swapToRefund.state = State.Refunded;
+        (bool ok, ) = payable(msg.sender).call{value: swapToRefund.value}("");
         require(ok == true);
     }
 }
