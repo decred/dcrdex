@@ -902,12 +902,9 @@ func (eth *ExchangeWallet) findRedemptionRequests() map[[32]byte]*findRedemption
 	return reqs
 }
 
-// FindRedemption watches for the input that spends the specified contract
-// coin, and returns the spending input and the contract's secret key when it
-// finds a spender.
-//
-// This method blocks until the redemption is found, an error occurs or the
-// provided context is canceled.
+// FindRedemption checks the contract for a redemption. If the swap is initiated
+// but un-redeemed and un-refunded, FindRedemption will block until a redemption
+// is seen.
 func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
