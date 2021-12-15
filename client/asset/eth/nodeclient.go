@@ -423,9 +423,11 @@ func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption
 // refund refunds a swap contract. The refunder will be the account at txOpts.From.
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
-func (n *nodeClient) refund(txOpts *bind.TransactOpts, secretHash [32]byte, contractVer uint32) (tx *types.Transaction, err error) {
+func (n *nodeClient) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	gas := dexeth.RefundGas(contractVer)
+	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 	return tx, n.withcontractor(contractVer, func(c contractor) error {
 		tx, err = c.refund(txOpts, secretHash)
@@ -486,6 +488,14 @@ func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate 
 func (n *nodeClient) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
 	return redeemable, n.withcontractor(contractVer, func(c contractor) error {
 		redeemable, err = c.isRedeemable(secretHash, secret)
+		return err
+	})
+}
+
+// isRefundable checks if the swap identified by secretHash is refundable.
+func (n *nodeClient) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
+	return refundable, n.withcontractor(contractVer, func(c contractor) error {
+		refundable, err = c.isRefundable(secretHash)
 		return err
 	})
 }

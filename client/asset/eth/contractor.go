@@ -43,6 +43,7 @@ type contractor interface {
 	// transaction does not pay to the contract, and the value returned in that
 	// case will always be zero.
 	incomingValue(context.Context, *types.Transaction) (uint64, error)
+	isRefundable(secretHash [32]byte) (bool, error)
 }
 
 type contractorConstructor func(net dex.Network, addr common.Address, ec *ethclient.Client) (contractor, error)
@@ -53,6 +54,7 @@ type contractV0 interface {
 	Swap(opts *bind.CallOpts, secretHash [32]byte) (swapv0.ETHSwapSwap, error)
 	Refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error)
 	IsRedeemable(opts *bind.CallOpts, secretHash [32]byte, secret [32]byte) (bool, error)
+	IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (bool, error)
 }
 
 // contractorV0 is the contractor for contract version 0.
@@ -169,6 +171,10 @@ func (c *contractorV0) refund(txOpts *bind.TransactOpts, secretHash [32]byte) (*
 
 func (c *contractorV0) isRedeemable(secretHash, secret [32]byte) (bool, error) {
 	return c.contractV0.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, secretHash, secret)
+}
+
+func (c *contractorV0) isRefundable(secretHash [32]byte) (bool, error) {
+	return c.contractV0.IsRefundable(&bind.CallOpts{From: c.acctAddr}, secretHash)
 }
 
 func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {

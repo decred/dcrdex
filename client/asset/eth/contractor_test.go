@@ -49,6 +49,10 @@ func (c *tContractV0) IsRedeemable(opts *bind.CallOpts, secretHash [32]byte, sec
 	return false, nil
 }
 
+func (c tContractV0) IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (bool, error) {
+	return false, nil
+}
+
 func TestInitV0(t *testing.T) {
 	abiContract := &tContractV0{}
 	c := contractorV0{contractV0: abiContract}
