@@ -31,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 )
 
 var (
@@ -1680,13 +1679,13 @@ func TestAuditContract(t *testing.T) {
 			name:     "ok",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
 			initiations: []*dexeth.Initiation{
-				&dexeth.Initiation{
+				{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				&dexeth.Initiation{
+				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
@@ -1700,7 +1699,7 @@ func TestAuditContract(t *testing.T) {
 			name:     "coin id different than tx hash",
 			contract: dexeth.EncodeContractData(0, secretHashes[0]),
 			initiations: []*dexeth.Initiation{
-				&dexeth.Initiation{
+				{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
@@ -1719,13 +1718,13 @@ func TestAuditContract(t *testing.T) {
 			name:     "contract not part of transaction",
 			contract: dexeth.EncodeContractData(0, secretHashes[2]),
 			initiations: []*dexeth.Initiation{
-				&dexeth.Initiation{
+				{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				&dexeth.Initiation{
+				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
@@ -1744,13 +1743,13 @@ func TestAuditContract(t *testing.T) {
 			name:     "cannot unmarshal tx binary",
 			contract: dexeth.EncodeContractData(0, secretHashes[1]),
 			initiations: []*dexeth.Initiation{
-				&dexeth.Initiation{
+				{
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
 					Value:       1,
 				},
-				&dexeth.Initiation{
+				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
@@ -1970,7 +1969,7 @@ func TestSignMessage(t *testing.T) {
 	if len(sigs) != 1 {
 		t.Fatalf("expected 1 signature but got %v", len(sigs))
 	}
-	if !secp256k1.VerifySignature(pubKeys[0], crypto.Keccak256(msg), sigs[0][:len(sigs[0])-1]) {
+	if !crypto.VerifySignature(pubKeys[0], crypto.Keccak256(msg), sigs[0][:len(sigs[0])-1]) {
 		t.Fatalf("failed to verify signature")
 	}
 }

@@ -1411,9 +1411,9 @@ func testSignMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error signing text: %v", err)
 	}
-	pubKey, err := secp256k1.RecoverPubkey(crypto.Keccak256(msg), signature)
+	pubKey, err := recoverPubkey(crypto.Keccak256(msg), signature)
 	if err != nil {
-		t.Fatalf("RecoverPubkey: %v", err)
+		t.Fatalf("recoverPubkey: %v", err)
 	}
 	x, y := elliptic.Unmarshal(secp256k1.S256(), pubKey)
 	recoveredAddress := crypto.PubkeyToAddress(ecdsa.PublicKey{
@@ -1424,7 +1424,7 @@ func testSignMessage(t *testing.T) {
 	if !bytes.Equal(recoveredAddress.Bytes(), simnetAcct.Address.Bytes()) {
 		t.Fatalf("recovered address: %v != simnet account address: %v", recoveredAddress, simnetAcct.Address)
 	}
-	if !secp256k1.VerifySignature(pubKey, crypto.Keccak256(msg), signature[:len(signature)-1]) {
+	if !crypto.VerifySignature(pubKey, crypto.Keccak256(msg), signature[:len(signature)-1]) {
 		t.Fatalf("failed to verify signature")
 	}
 }
