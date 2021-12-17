@@ -35,10 +35,14 @@ do
 		fi
 	fi
 
-	# build and run tests
-	if [ "$m" != '.' ]; then go build; fi
+	# run tests
 	env GORACE="halt_on_error=1" go test --tags lgpl -race -short -count 1 ./...
 done
+
+# -race in go tests above requires cgo, but disable it for the compile tests below
+export CGO_ENABLED=0
+go build ./...
+go build -tags lgpl ./...
 
 cd "$dir"
 dumptags=(-c -o /dev/null -tags)
