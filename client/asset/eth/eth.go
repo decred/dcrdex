@@ -1116,11 +1116,6 @@ func (*ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	return bytes.Equal(h[:], secretHash)
 }
 
-// Confirmations gets the number of confirmations for the specified coin ID.
-func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	return 0, false, asset.ErrNotImplemented
-}
-
 // SyncStatus is information about the blockchain sync status.
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
