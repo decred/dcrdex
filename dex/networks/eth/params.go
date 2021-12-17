@@ -8,15 +8,18 @@ package eth
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 )
 
 const (
@@ -56,6 +59,22 @@ var v0Gases = &dex.Gases{
 	Redeem:    63000,
 	RedeemAdd: 32000,
 	Refund:    43000,
+}
+
+// LoadGenesisFile loads a Genesis config from a json file.
+func LoadGenesisFile(genesisFile string) (*core.Genesis, error) {
+	fid, err := os.Open(genesisFile)
+	if err != nil {
+		return nil, err
+	}
+	defer fid.Close()
+
+	var genesis core.Genesis
+	err = json.NewDecoder(fid).Decode(&genesis)
+	if err != nil {
+		return nil, fmt.Errorf("unable to unmarshal simnet genesis: %v", err)
+	}
+	return &genesis, nil
 }
 
 // EncodeContractData packs the contract version and the secret hash into a byte
