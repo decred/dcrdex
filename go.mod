@@ -15,10 +15,10 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.3.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
-	github.com/decred/dcrd/blockchain/v4 v4.0.0-20211120053236-81ae286f2347
+	github.com/decred/dcrd/blockchain/v4 v4.0.0
 	github.com/decred/dcrd/certgen v1.1.1
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
-	github.com/decred/dcrd/chaincfg/v3 v3.1.0
+	github.com/decred/dcrd/chaincfg/v3 v3.1.1
 	github.com/decred/dcrd/crypto/blake256 v1.0.0
 	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2
@@ -28,7 +28,7 @@ require (
 	github.com/decred/dcrd/gcs/v3 v3.0.0
 	github.com/decred/dcrd/hdkeychain/v3 v3.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0
-	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20211118191843-5bd1da85e135
+	github.com/decred/dcrd/rpcclient/v7 v7.0.0
 	github.com/decred/dcrd/txscript/v4 v4.0.0
 	github.com/decred/dcrd/wire v1.5.0
 	github.com/decred/go-socks v1.1.0
