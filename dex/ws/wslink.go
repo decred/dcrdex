@@ -25,7 +25,7 @@ const (
 	// outBufferSize is the size of the WSLink's buffered channel for outgoing
 	// messages.
 	outBufferSize    = 128
-	defaultReadLimit = 4096
+	defaultReadLimit = 8192
 	writeWait        = 5 * time.Second
 	// ErrPeerDisconnected will be returned if Send or Request is called on a
 	// disconnected link.

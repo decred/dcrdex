@@ -11,7 +11,7 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
-const readLimitAuthorized = 65536
+const readLimitAuthorized = 262144
 
 // criticalRoutes are not subject to the rate limiter on websocket connections.
 var criticalRoutes = map[string]bool{
