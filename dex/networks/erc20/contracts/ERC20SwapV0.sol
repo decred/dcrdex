@@ -2,15 +2,9 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.6;
 
-interface ERC20 {
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-}
-
-
 contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
-	bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
+    bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
 
     // State is a type that hold's a contract's state. Empty is the uninitiated
     // or null value.
@@ -102,9 +96,10 @@ contract ERC20Swap {
 
             initVal += initiation.value;
         }
-
-        ERC20 tokenContract = ERC20(token);
-        tokenContract.transferFrom(msg.sender, address(this), initVal);
+		bool success;
+		bytes memory data;
+        (success, data) = token.call(abi.encodeWithSelector(TRANSFER_FROM_SELECTOR, msg.sender, address(this), initVal));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer from failed');
     }
 
     // Redemption is used to specify the information needed to redeem a swap.
@@ -164,9 +159,10 @@ contract ERC20Swap {
             swapToRedeem.secret = redemption.secret;
             amountToRedeem += swapToRedeem.value;
         }
-
-        ERC20 tokenContract = ERC20(token);
-        tokenContract.transfer(msg.sender, amountToRedeem);
+		bool success;
+		bytes memory data;
+        (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, amountToRedeem));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 
 
@@ -203,7 +199,9 @@ contract ERC20Swap {
         Swap storage swapToRefund = swaps[secretHash];
         swapToRefund.state = State.Refunded;
 
-        ERC20 tokenContract = ERC20(swapToRefund.token);
-        tokenContract.transfer(msg.sender, swapToRefund.value);
+		bool success;
+		bytes memory data;
+        (success, data) = swapToRefund.token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, swapToRefund.value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 }
