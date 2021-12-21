@@ -1031,10 +1031,26 @@ func (eth *ExchangeWallet) Locked() bool {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-//
-// NOTE: PayFee is not intended to be used with Ethereum at this time.
-func (*ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
-	return nil, asset.ErrNotImplemented
+func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin, error) {
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
+
+	bal, err := eth.balance()
+	if err != nil {
+		return nil, err
+	}
+	avail := bal.Available
+	maxFee := defaultSendGasLimit * eth.gasFeeLimit
+	need := regFee + maxFee
+	if avail < need {
+		return nil, fmt.Errorf("not enough funds to pay fee: have %d gwei need %d gwei", avail, need)
+	}
+	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(address), regFee)
+	if err != nil {
+		return nil, err
+	}
+	txHash := tx.Hash()
+	return &coin{id: txHash[:], value: tx.Value().Uint64()}, nil
 }
 
 // SwapConfirmations gets the number of confirmations and the spend status
