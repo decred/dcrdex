@@ -44,7 +44,7 @@ contract ETHSwap {
         State state;
     }
 
-    // Swaps is a map of swap secret hashes to swaps. It can be read by anyone
+    // swaps is a map of swap secret hashes to swaps. It can be read by anyone
     // for free.
     mapping(bytes32 => Swap) public swaps;
 
@@ -68,7 +68,7 @@ contract ETHSwap {
     // conversation in the eth community about removing tx.origin, which would
     // make this check impossible.
     modifier senderIsOrigin() {
-        require(tx.origin == msg.sender);
+        require(tx.origin == msg.sender, "sender != origin");
         _;
     }
 
@@ -107,9 +107,9 @@ contract ETHSwap {
             Initiation calldata initiation = initiations[i];
             Swap storage swapToUpdate = swaps[initiation.secretHash];
 
-            require(initiation.value > 0);
-            require(initiation.refundTimestamp > 0);
-            require(swapToUpdate.state == State.Empty);
+            require(initiation.value > 0, "0 val");
+            require(initiation.refundTimestamp > 0, "0 refundTimestamp");
+            require(swapToUpdate.state == State.Empty, "dup swap");
 
             swapToUpdate.initBlockNumber = block.number;
             swapToUpdate.refundBlockTimestamp = initiation.refundTimestamp;
@@ -121,7 +121,7 @@ contract ETHSwap {
             initVal += initiation.value;
         }
 
-        require(initVal == msg.value);
+        require(initVal == msg.value, "bad val");
     }
 
     struct Redemption {
@@ -169,9 +169,10 @@ contract ETHSwap {
             Redemption calldata redemption = redemptions[i];
             Swap storage swapToRedeem = swaps[redemption.secretHash];
 
-            require(swapToRedeem.state == State.Filled);
-            require(swapToRedeem.participant == msg.sender);
-            require(sha256(abi.encodePacked(redemption.secret)) == redemption.secretHash);
+            require(swapToRedeem.state == State.Filled, "bad state");
+            require(swapToRedeem.participant == msg.sender, "bad participant");
+            require(sha256(abi.encodePacked(redemption.secret)) == redemption.secretHash,
+                "bad secret");
 
             swapToRedeem.state = State.Redeemed;
             swapToRedeem.secret = redemption.secret;
@@ -179,7 +180,7 @@ contract ETHSwap {
         }
 
         (bool ok, ) = payable(msg.sender).call{value: amountToRedeem}("");
-        require(ok == true);
+        require(ok == true, "transfer failed");
     }
 
     // refund refunds a contract. It checks that the sender is not a contract,
@@ -199,10 +200,10 @@ contract ETHSwap {
         public
         senderIsOrigin()
     {
-        require(isRefundable(secretHash));
+        require(isRefundable(secretHash), "not refundable");
         Swap storage swapToRefund = swaps[secretHash];
         swapToRefund.state = State.Refunded;
         (bool ok, ) = payable(msg.sender).call{value: swapToRefund.value}("");
-        require(ok == true);
+        require(ok == true, "transfer failed");
     }
 }
