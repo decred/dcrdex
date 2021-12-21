@@ -26,7 +26,7 @@ import (
 var (
 	homeDir          = os.Getenv("HOME")
 	ipc              = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
-	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	alphaAddress     = "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	gammaAddress     = "41293c2032bac60aa747374e966f79f575d42379"
 	ethClient        = new(rpcclient)

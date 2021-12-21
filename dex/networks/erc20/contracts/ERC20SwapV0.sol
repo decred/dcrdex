@@ -2,6 +2,31 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.6;
 
+
+// ETHSwap creates a contract to be deployed on an ethereum network. After
+// deployed, it keeps a map of swaps that facilitates atomic swapping of
+// ERC20 tokens with other crypto currencies that support time locks.
+//
+// It accomplishes this by holding tokens acquired during a swap initiation
+// until conditions are met. Prior to initiating a swap, the initiator must
+// approve the ERC20Swap contract to be able to spend the initiator's tokens.
+// When calling initiate, the necessary tokens for swaps are transferred to
+// the swap contract. At this point the funds belong to the contract, and
+// cannot be accessed by anyone else, not even the contract's deployer. The
+// initiator sets a secret hash, a blocktime the funds will be accessible should
+// they not be redeemed, and a participant who can redeem before or after the
+// locktime. The participant can redeem at any time after the initiation
+// transaction is mined if they have the secret that hashes to the secret hash.
+// Otherwise, the initiator can refund funds any time after the locktime.
+//
+// This contract has no limits on gas used for any transactions.
+//
+// This contract cannot be used by other contracts or by a third party mediating
+// the swap or multisig wallets.
+//
+// This code should be verifiable as resulting in a certain on-chain contract
+// by compiling with the correct version of solidity and comparing the
+// resulting byte code to the data in the original transaction.
 contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
@@ -25,9 +50,9 @@ contract ERC20Swap {
         State state;
     }
 
-    // Swaps is a map of swap secret hashes to swaps. It can be read by anyone
+    // swaps is a map of swap secret hashes to swaps. It can be read by anyone
     // for free.
-    mapping(bytes32 => Swap) swaps;
+    mapping(bytes32 => Swap) public swaps;
 
     // constructor is empty. This contract has no connection to the original
     // sender after deployed. It can only be interacted with by users
@@ -39,7 +64,7 @@ contract ERC20Swap {
     // conversation in the eth community about removing tx.origin, which would
     // make this check impossible.
     modifier senderIsOrigin() {
-        require(tx.origin == msg.sender);
+        require(tx.origin == msg.sender, "sender != origin");
         _;
     }
 
@@ -82,9 +107,9 @@ contract ERC20Swap {
             Initiation calldata initiation = initiations[i];
             Swap storage swapToUpdate = swaps[initiation.secretHash];
 
-            require(initiation.value > 0);
-            require(initiation.refundTimestamp > 0);
-            require(swapToUpdate.state == State.Empty);
+            require(initiation.value > 0, "0 val");
+            require(initiation.refundTimestamp > 0, "0 refundTimestamp");
+            require(swapToUpdate.state == State.Empty, "dup secret hash");
 
             swapToUpdate.initBlockNumber = block.number;
             swapToUpdate.refundBlockTimestamp = initiation.refundTimestamp;
@@ -148,12 +173,13 @@ contract ERC20Swap {
             if (i == 0) {
                 token = swapToRedeem.token;
             } else {
-                require(token == swapToRedeem.token);
+                require(token == swapToRedeem.token, "multiple tokens");
             }
 
-            require(swapToRedeem.state == State.Filled);
-            require(swapToRedeem.participant == msg.sender);
-            require(sha256(abi.encodePacked(redemption.secret)) == redemption.secretHash);
+            require(swapToRedeem.state == State.Filled, "bad state");
+            require(swapToRedeem.participant == msg.sender, "bad participant");
+            require(sha256(abi.encodePacked(redemption.secret)) == redemption.secretHash,
+                "bad secret");
 
             swapToRedeem.state = State.Redeemed;
             swapToRedeem.secret = redemption.secret;
@@ -195,7 +221,7 @@ contract ERC20Swap {
         public
         senderIsOrigin()
     {
-        require(isRefundable(secretHash));
+        require(isRefundable(secretHash), "not refundable");
         Swap storage swapToRefund = swaps[secretHash];
         swapToRefund.state = State.Refunded;
 
