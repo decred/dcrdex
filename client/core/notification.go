@@ -29,11 +29,12 @@ const (
 	NoteTypeDEXAuth      = "dex_auth"
 )
 
-// notify sends a notification to all subscribers. If the notification is of
-// sufficient severity, it is stored in the database.
-func (c *Core) notify(n Notification) {
-	if n.Severity() >= db.Success {
-		c.db.SaveNotification(n.DBNote())
+func (c *Core) logNote(n Notification) {
+	// Do not log certain spammy note types that have no value in logs.
+	switch n.Type() {
+	case NoteTypeSpots: // expand this case as needed
+		return
+	default:
 	}
 
 	logFun := c.log.Warnf // default in case the Severity level is unknown to notify
@@ -49,7 +50,18 @@ func (c *Core) notify(n Notification) {
 	case db.ErrorLevel:
 		logFun = c.log.Errorf
 	}
+
 	logFun("notify: %v", n)
+}
+
+// notify sends a notification to all subscribers. If the notification is of
+// sufficient severity, it is stored in the database.
+func (c *Core) notify(n Notification) {
+	if n.Severity() >= db.Success {
+		c.db.SaveNotification(n.DBNote())
+	}
+
+	c.logNote(n)
 
 	c.noteMtx.RLock()
 	for _, ch := range c.noteChans {
