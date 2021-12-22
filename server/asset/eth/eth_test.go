@@ -813,3 +813,79 @@ func TestPoll(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSignature(t *testing.T) {
+	// "ok" values used are the same as tests in client/assets/eth.
+	pkBytes := mustParseHex("04b911d1f39f7792e165767e35aa134083e2f70ac7de6945d7641a3015d09a54561b71112b8d60f63831f0e62c23c6921ec627820afedf8236155b9e9bd82b6523")
+	msg := []byte("msg")
+	sigBytes := mustParseHex("ffd26911d3fdaf11ac44801744f2df015a16539b6e688aff4cabc092b747466e7bc8036a03d1479a1570dd11bf042120301c34a65b237267720ef8a9e56f2eb101")
+	max32Bytes := mustParseHex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	addr := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
+	eth := new(Backend)
+
+	tests := []struct {
+		name                   string
+		wantErr                bool
+		pkBytes, sigBytes, msg []byte
+		addr                   string
+	}{{
+		name:     "ok",
+		pkBytes:  pkBytes,
+		msg:      msg,
+		addr:     addr,
+		sigBytes: sigBytes,
+	}, {
+		name:    "sig wrong size",
+		pkBytes: pkBytes,
+		msg:     msg,
+		addr:    addr,
+		wantErr: true,
+	}, {
+		name:     "pubkey doesn't match address",
+		pkBytes:  pkBytes,
+		msg:      msg,
+		addr:     addr[:21] + "a",
+		sigBytes: sigBytes,
+		wantErr:  true,
+	}, {
+		name:     "bad pubkey",
+		pkBytes:  pkBytes[1:],
+		msg:      msg,
+		sigBytes: sigBytes,
+		addr:     addr,
+		wantErr:  true,
+	}, {
+		name:     "r too big",
+		pkBytes:  pkBytes,
+		msg:      msg,
+		sigBytes: append(append([]byte{}, max32Bytes...), sigBytes[32:]...),
+		addr:     addr,
+		wantErr:  true,
+	}, {
+		name:     "s too big",
+		pkBytes:  pkBytes,
+		msg:      msg,
+		sigBytes: append(append(append([]byte{}, sigBytes[:32]...), max32Bytes...), byte(1)),
+		addr:     addr,
+		wantErr:  true,
+	}, {
+		name:     "cannot verify signature, bad msg",
+		pkBytes:  pkBytes,
+		sigBytes: sigBytes,
+		addr:     addr,
+		wantErr:  true,
+	}}
+
+	for _, test := range tests {
+		err := eth.ValidateSignature(test.addr, test.pkBytes, test.msg, test.sigBytes)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+	}
+}
