@@ -5,6 +5,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -249,6 +250,16 @@ func (w *xcWallet) Disconnect() {
 	w.mtx.Lock()
 	w.hookedUp = false
 	w.mtx.Unlock()
+}
+
+// Rescan will initiate a rescan of the wallet if the asset.Wallet
+// implementation is a Rescanner.
+func (w *xcWallet) Rescan(ctx context.Context) error {
+	rescanner, ok := w.Wallet.(asset.Rescanner)
+	if !ok {
+		return errors.New("wallet does not support rescanning")
+	}
+	return rescanner.Rescan(ctx)
 }
 
 // SwapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout

@@ -46,6 +46,7 @@ const (
 	suspendedAcctErr
 	existenceCheckErr
 	createWalletErr
+	activeOrdersErr
 )
 
 // Error is an error message and an error code.

@@ -174,7 +174,7 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 }
 
 var (
-	// loggingInited will be set when the log rotator has been initilized.
+	// loggingInited will be set when the log rotator has been initialized.
 	loggingInited uint32
 )
 
@@ -299,6 +299,10 @@ type spvWallet struct {
 	tipChan            chan *block
 	syncTarget         int32
 	lastPrenatalHeight int32
+
+	// rescanStarting is set while reloading the wallet and dropping
+	// transactions from the wallet db.
+	rescanStarting uint32 // atomic
 }
 
 var _ Wallet = (*spvWallet)(nil)
@@ -531,10 +535,10 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	var blk *block
 	// Wallet address manager sync height.
 	if chainBlk.Timestamp.After(w.birthday) {
-		// After birthday, wallet address manager should be syncing. Although
-		// block time stamps are not necessarily monotonically increasing, this
-		// is a reasonable condition at which the wallet's sync height should be
-		// consulted instead of the chain service's height.
+		// After the wallet's birthday, the wallet address manager should begin
+		// syncing. Although block time stamps are not necessarily monotonically
+		// increasing, this is a reasonable condition at which the wallet's sync
+		// height should be consulted instead of the chain service's height.
 		walletBlock := w.wallet.syncedTo()
 		if walletBlock.Height == 0 {
 			// The wallet is about to start its sync, so just return the last
@@ -1093,6 +1097,7 @@ func (w *spvWallet) startWallet() error {
 		return errors.New("wallet not found")
 	}
 
+	w.log.Debug("Starting native BTC wallet...")
 	btcw, err := w.loader.OpenExistingWallet([]byte(wallet.InsecurePubPassphrase), false)
 	if err != nil {
 		return fmt.Errorf("couldn't load wallet: %w", err)
@@ -1100,7 +1105,7 @@ func (w *spvWallet) startWallet() error {
 
 	bailOnWallet := func() {
 		if err := w.loader.UnloadWallet(); err != nil {
-			w.log.Errorf("Error unloading wallet after loadChainClient error: %v", err)
+			w.log.Errorf("Error unloading wallet: %v", err)
 		}
 	}
 
@@ -1113,7 +1118,7 @@ func (w *spvWallet) startWallet() error {
 
 	bailOnWalletAndDB := func() {
 		if err := w.neutrinoDB.Close(); err != nil {
-			w.log.Errorf("Error closing neutrino database after loadChainClient error: %v", err)
+			w.log.Errorf("Error closing neutrino database: %v", err)
 		}
 		bailOnWallet()
 	}
@@ -1134,6 +1139,7 @@ func (w *spvWallet) startWallet() error {
 			w.connectPeers = []string{"localhost:20575"}
 		}
 	}
+	w.log.Debug("Starting neutrino chain service...")
 	chainService, err := neutrino.NewChainService(neutrino.Config{
 		DataDir:       w.netDir,
 		Database:      w.neutrinoDB,
@@ -1154,7 +1160,7 @@ func (w *spvWallet) startWallet() error {
 
 	bailOnEverything := func() {
 		if err := chainService.Stop(); err != nil {
-			w.log.Errorf("Error closing neutrino chain service after loadChainClient error: %v", err)
+			w.log.Errorf("Error closing neutrino chain service: %v", err)
 		}
 		bailOnWalletAndDB()
 	}
@@ -1166,14 +1172,71 @@ func (w *spvWallet) startWallet() error {
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
 		bailOnEverything()
-		if err != nil {
-			w.log.Errorf("error unloading wallet after chain client start error: %v", err)
-		}
 		return fmt.Errorf("couldn't start Neutrino client: %v", err)
 	}
 
+	w.log.Info("Synchronizing wallet with network...")
 	btcw.SynchronizeRPC(w.chainClient)
 
+	return nil
+}
+
+// rescanWalletAsync initiates a full wallet recovery (used address discovery
+// and transaction scanning) by stopping the btcwallet, dropping the transaction
+// history from the wallet db, resetting the synced-to height of the wallet
+// manager, restarting the wallet and its chain client, and finally commanding
+// the wallet to resynchronize, which starts asynchronous wallet recovery.
+// Progress of the rescan should be monitored with syncStatus. During the rescan
+// wallet balances and known transactions may not be reported accurately or
+// located. The neutrinoService is not stopped, so most spvWallet methods will
+// continue to work without error, but methods using the btcWallet will likely
+// return incorrect results or errors.
+func (w *spvWallet) rescanWalletAsync() error {
+	if !atomic.CompareAndSwapUint32(&w.rescanStarting, 0, 1) {
+		return errors.New("rescan already in progress")
+	}
+	defer atomic.StoreUint32(&w.rescanStarting, 0)
+
+	// Stop the wallet, but do not use w.loader.UnloadWallet because it also
+	// closes the database.
+	btcw, ok := w.loader.LoadedWallet()
+	if !ok {
+		return errors.New("wallet not loaded")
+	}
+	wdb := btcw.Database()
+
+	w.log.Info("Stopping wallet and chain client...")
+	btcw.Stop() // stops Wallet and chainClient (not chainService)
+	btcw.WaitForShutdown()
+	w.chainClient.WaitForShutdown()
+
+	// Force a full rescan with active address discovery on wallet restart by
+	// dropping the complete transaction history. See the
+	// btcwallet/cmd/dropwtxmgr app for more information.
+	w.log.Info("Dropping transaction history to perform full rescan...")
+	err := wallet.DropTransactionHistory(wdb, false)
+	if err != nil {
+		w.log.Errorf("Failed to drop wallet transaction history: %v", err)
+		// Continue to attempt restarting the wallet anyway.
+	}
+
+	err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket([]byte("waddrmgr")) // it'll be fine
+		return btcw.Manager.SetSyncedTo(ns, nil)       // never synced, forcing recover from birthday
+	})
+	if err != nil {
+		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
+	}
+
+	w.log.Info("Starting wallet...")
+	btcw.Start()
+
+	if err = w.chainClient.Start(); err != nil {
+		return fmt.Errorf("couldn't start Neutrino client: %v", err)
+	}
+
+	w.log.Info("Synchronizing wallet with network...")
+	btcw.SynchronizeRPC(w.chainClient)
 	return nil
 }
 

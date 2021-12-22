@@ -62,8 +62,8 @@ var (
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
-	// ever syncTickerPeriod. var instead of const for testing purposes.
-	syncTickerPeriod = 10 * time.Second
+	// every syncTickerPeriod. var instead of const for testing purposes.
+	syncTickerPeriod = 3 * time.Second
 	// serverAPIVers are the DEX server API versions this client is capable
 	// of communicating with.
 	//
@@ -1497,33 +1497,10 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 			w.connector.Wait()
 			cancel()
 		}()
-		// The syncer loop.
+		c.wg.Add(1)
 		go func() {
-			ticker := time.NewTicker(syncTickerPeriod)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					synced, progress, err := w.SyncStatus()
-					if err != nil {
-						c.log.Errorf("Unable to get wallet/node sync status for %s: %v", unbip(w.AssetID), err)
-						continue // keep trying since the loop will break if connection really drops
-					}
-					w.mtx.Lock()
-					w.synced = synced
-					w.syncProgress = progress
-					w.mtx.Unlock()
-					c.notify(newWalletStateNote(w.state()))
-					if synced {
-						c.updateWalletBalance(w)
-						c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
-						return
-					}
-
-				case <-innerCtx.Done():
-					return
-				}
-			}
+			defer c.wg.Done()
+			c.monitorWalletSync(innerCtx, w)
 		}()
 	}
 
@@ -1921,6 +1898,88 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 		return nil
 	}
 	return wallet.state()
+}
+
+// walletCheckAndNotify sets the xcWallet's synced and syncProgress fields from
+// the wallet's SyncStatus result, emits a WalletStateNote, and returns the
+// synced value. When synced is true, this also updates the wallet's balance,
+// stores the balance in the DB, and emits a BalanceNote.
+func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
+	synced, progress, err := w.SyncStatus()
+	if err != nil {
+		c.log.Errorf("Unable to get wallet/node sync status for %s: %v",
+			unbip(w.AssetID), err)
+		return false
+	}
+	w.mtx.Lock()
+	w.synced = synced
+	w.syncProgress = progress
+	w.mtx.Unlock()
+	c.notify(newWalletStateNote(w.state()))
+	if synced {
+		c.updateWalletBalance(w)
+		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
+	}
+	return synced
+}
+
+// monitorWalletSync repeatedly calls walletCheckAndNotify on a ticker until it
+// is synced. This should be run as a goroutine.
+func (c *Core) monitorWalletSync(ctx context.Context, wallet *xcWallet) {
+	ticker := time.NewTicker(syncTickerPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if c.walletCheckAndNotify(wallet) {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// RescanWallet will issue a Rescan command to the wallet if supported by the
+// wallet implementation. It is up to the underlying wallet backend if and how
+// to implement this functionality. It may be asynchronous. Core will emit
+// wallet state notifications until the rescan is complete. If force is false,
+// this will check for active orders involving this asset before initiating a
+// rescan. WARNING: It is ill-advised to initiate a wallet rescan with active
+// orders unless as a last ditch effort to get the wallet to recognize a
+// transaction needed to complete a swap.
+func (c *Core) RescanWallet(assetID uint32, force bool) error {
+	if !force {
+		for _, dc := range c.dexConnections() {
+			if dc.hasActiveAssetOrders(assetID) {
+				return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+			}
+		}
+	}
+
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w",
+			assetID, unbip(assetID), err)
+	}
+
+	// Begin potentially asynchronous wallet rescan operation.
+	if err = wallet.Rescan(c.ctx); err != nil {
+		return err
+	}
+
+	if c.walletCheckAndNotify(wallet) {
+		return nil // sync done, Rescan may have by synchronous or a no-op
+	}
+
+	// Synchronization still running. Launch a status update goroutine.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.monitorWalletSync(c.ctx, wallet)
+	}()
+
+	return nil
 }
 
 // OpenWallet opens (unlocks) the wallet for use.
