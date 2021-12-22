@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -20,9 +21,12 @@ import (
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func init() {
@@ -135,6 +139,9 @@ type Backend struct {
 
 // Check that Backend satisfies the Backend interface.
 var _ asset.Backend = (*Backend)(nil)
+
+// Check that Backend satisfies the AccountBalancer interface.
+var _ asset.AccountBalancer = (*Backend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
@@ -362,6 +369,45 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
 	return dexeth.ToGwei(bigBal)
+}
+
+// ValidateSignature checks that the pubkey is correct for the address and
+// that the signature shows ownership of the associated private key.
+func (eth *Backend) ValidateSignature(addr string, pubkey, msg, sig []byte) error {
+	if len(sig) != 65 {
+		return fmt.Errorf("expected sig length of sixty five bytes but got %d", len(sig))
+	}
+	ethPK, err := crypto.UnmarshalPubkey(pubkey)
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal pubkey: %v", err)
+	}
+	// Ensure the pubkey matches the funding coin's account address.
+	// Internally, this will take the last twenty bytes of crypto.Keccak256
+	// of all but the first byte of the pubkey bytes and wrap it as a
+	// common.Address.
+	pubkeyAddr := crypto.PubkeyToAddress(*ethPK)
+	if addr != pubkeyAddr.String() {
+		return errors.New("pubkey does not correspond to address")
+	}
+	r := new(secp256k1.ModNScalar)
+	if overflow := r.SetByteSlice(sig[0:32]); overflow {
+		return errors.New("invalid signature: r >= group order")
+	}
+	s := new(secp256k1.ModNScalar)
+	if overflow := s.SetByteSlice(sig[32:64]); overflow {
+		return errors.New("invalid signature: s >= group order")
+	}
+	ecdsaSig := ecdsa.NewSignature(r, s)
+
+	pk, err := secp256k1.ParsePubKey(pubkey)
+	if err != nil {
+		return err
+	}
+	// Verify the signature.
+	if !ecdsaSig.Verify(crypto.Keccak256(msg), pk) {
+		return errors.New("cannot verify signature")
+	}
+	return nil
 }
 
 // poll pulls the best hash from an eth node and compares that to a stored
