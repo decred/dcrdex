@@ -2,9 +2,11 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.6;
 
-// ETHSwap creates a contract to be deployed on an ethereum network. After
-// deployed, it keeps a map of swaps that facilitates atomic swapping of
-// ERC20 tokens with other crypto currencies that support time locks. 
+// ETHSwap creates a contract to be deployed on an ethereum network. In
+// order to save on gas fees, a separate ERC20Swap contract is deployed
+// for each ERC20 token. After deployed, it keeps a map of swaps that
+// facilitates atomic swapping of ERC20 tokens with other crypto currencies
+// that support time locks. 
 //
 // It accomplishes this by holding tokens acquired during a swap initiation
 // until conditions are met. Prior to initiating a swap, the initiator must
@@ -17,10 +19,6 @@ pragma solidity = 0.8.6;
 // locktime. The participant can redeem at any time after the initiation
 // transaction is mined if they have the secret that hashes to the secret hash.
 // Otherwise, the initiator can refund funds any time after the locktime.
-// 
-// In order to save on gas fees, a separate ERC20Swap contract is deployed
-// for each ERC20 token. The TOKEN_ADDRESS constant must be updated for
-// each contract deployment.
 //
 // This contract has no limits on gas used for any transactions.
 //
@@ -54,9 +52,6 @@ contract ERC20Swap {
     // for free.
     mapping(bytes32 => Swap) public swaps;
 
-    // constructor is empty. This contract has no connection to the original
-    // sender after deployed. It can only be interacted with by users
-    // initiating, redeeming, and refunding swaps.
     constructor(address token) {
         TOKEN_ADDRESS = token;
     }
@@ -76,7 +71,6 @@ contract ERC20Swap {
     }
 
     // Initiation is used to specify the information needed to initiatite a swap.
-    // The ERC20 token address is provided separately to the initiate function.
     struct Initiation {
         uint refundTimestamp;
         bytes32 secretHash;
