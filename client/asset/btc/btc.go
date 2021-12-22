@@ -520,6 +520,23 @@ type ExchangeWallet struct {
 	findRedemptionQueue map[outPoint]*findRedemptionReq
 }
 
+// ExchangeWalletSPV embeds an ExchangeWallet, and also provides the Rescan
+// method to implement asset.Rescanner.
+type ExchangeWalletSPV struct {
+	*ExchangeWallet
+}
+
+// Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
+// command if the backend is an SPV wallet.
+func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
+	// This will panic if not an spvWallet, which would indicate that
+	// openSPVWallet was not used to construct this instance.
+	w := btc.node.(*spvWallet)
+	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
+	// Caller should start calling SyncStatus on a ticker.
+	return w.rescanWalletAsync()
+}
+
 type block struct {
 	height int64
 	hash   chainhash.Hash
@@ -711,8 +728,10 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeW
 	return w, nil
 }
 
+var _ asset.Wallet = (*ExchangeWallet)(nil)
+
 // openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
+func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 	walletCfg := new(WalletConfig)
 	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)
 	if err != nil {
@@ -731,10 +750,11 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
 
-	return btc, nil
+	return &ExchangeWalletSPV{btc}, nil
 }
 
-var _ asset.Wallet = (*ExchangeWallet)(nil)
+var _ asset.Wallet = (*ExchangeWalletSPV)(nil)
+var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
 
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {
