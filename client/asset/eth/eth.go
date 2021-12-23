@@ -1050,7 +1050,7 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 		return nil, err
 	}
 	txHash := tx.Hash()
-	return &coin{id: txHash[:], value: tx.Value().Uint64()}, nil
+	return &coin{id: txHash[:], value: dexeth.WeiToGwei(tx.Value())}, nil
 }
 
 // SwapConfirmations gets the number of confirmations and the spend status
