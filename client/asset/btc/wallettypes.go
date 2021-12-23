@@ -99,6 +99,7 @@ type RPCOutpoint struct {
 type GetWalletInfoResult struct {
 	WalletName            string  `json:"walletname"`
 	WalletVersion         uint32  `json:"walletversion"`
+	Format                string  `json:"format"`
 	Balance               float64 `json:"balance"`
 	UnconfirmedBalance    float64 `json:"unconfirmed_balance"`
 	ImmatureBalance       float64 `json:"immature_balance"`
@@ -123,6 +124,7 @@ type GetWalletInfoResult struct {
 	// 	Duration uint32  `json:"duration"`
 	// 	Progress float32 `json:"progress"`
 	// } `json:"scanning"`
+	Descriptors bool `json:"descriptors"` // Descriptor wallets that do not support dumpprivkey
 }
 
 // GetAddressInfoResult models the data from the getaddressinfo command.
